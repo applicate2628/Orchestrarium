@@ -1994,6 +1994,39 @@ def test_kimi_mcp_argument_parser_preserves_public_controls() -> None:
     assert owner._kimi_mcp_credential_needles(selection) == ()
 
 
+def test_kimi_mcp_argument_values_default_private_except_public_controls() -> None:
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(
+        mcp_servers=(
+            owner.KimiMcpServerV1(
+                name="fixture",
+                command="fixture",
+                args=(
+                    "--auth", "opaque-secret",
+                    "--custom-setting=inline-private",
+                    "positional-private",
+                    "--header-list", "Authorization: Bearer list-secret",
+                    "--environment-variables", "CUSTOM=env-list-secret",
+                    "--port", "8080",
+                    "--mode", "public-mode",
+                    "--endpoint", "https://example.invalid/mcp",
+                ),
+            ),
+        )
+    )
+
+    needles = set(owner._kimi_mcp_credential_needles(selection))
+
+    assert {
+        b"opaque-secret",
+        b"inline-private",
+        b"positional-private",
+        b"list-secret",
+        b"env-list-secret",
+    } <= needles
+    assert {b"8080", b"public-mode", b"example.invalid"}.isdisjoint(needles)
+
+
 @pytest.mark.parametrize(
     "canary",
     (

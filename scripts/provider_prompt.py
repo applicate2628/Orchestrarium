@@ -268,6 +268,9 @@ def _kimi_mcp_credential_needles(
     needles: dict[bytes, None] = {}
     public_env_names = {"path", "lang", "timeout"}
     public_header_names = {"accept-language", "x-region", "x-timeout"}
+    public_argument_options = {
+        ("endpoint",), ("flag",), ("mode",), ("port",),
+    }
 
     def add(value: str) -> None:
         if not value:
@@ -326,54 +329,6 @@ def _kimi_mcp_credential_needles(
         body = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", body)
         return tuple(re.findall(r"[a-z0-9]+", body.casefold()))
 
-    def is_credential_option(option: str | None) -> bool:
-        if option is None:
-            return False
-        words = option_words(option)
-        compact = "".join(words)
-        if compact.endswith(
-            (
-                "token",
-                "secret",
-                "password",
-                "passwd",
-                "credential",
-                "credentials",
-                "authorization",
-                "cookie",
-            )
-        ):
-            return True
-        if any(
-            word
-            in {
-                "token",
-                "secret",
-                "password",
-                "passwd",
-                "credential",
-                "credentials",
-                "authorization",
-                "cookie",
-            }
-            for word in words
-        ):
-            return True
-        if "key" in words and any(
-            word in {"api", "private", "client", "access", "auth", "signing", "encryption"}
-            for word in words
-        ):
-            return True
-        return compact in {
-            "apikey",
-            "privatekey",
-            "clientkey",
-            "accesskey",
-            "authkey",
-            "signingkey",
-            "encryptionkey",
-        }
-
     def is_option_argument(argument: str) -> bool:
         option, _value = split_option(argument)
         if option is None:
@@ -428,29 +383,40 @@ def _kimi_mcp_credential_needles(
 
     for server in selection.mcp_servers:
         arguments = server.args
+        positional_only = False
         index = 0
         while index < len(arguments):
             argument = arguments[index]
+            if positional_only:
+                add_argument_credential(argument)
+                index += 1
+                continue
+            if argument == "--":
+                positional_only = True
+                index += 1
+                continue
+
             option, inline_value = split_option(argument)
+            if option is not None and option.startswith("/") and "/" in option[1:]:
+                option, inline_value = None, None
             words = option_words(option) if option else ()
+
             carrier = None
             if (
                 words == ("h",)
                 or (
-                    words
-                    and words[-1] in {"header", "headers"}
+                    any(word in {"header", "headers"} for word in words)
                     and "file" not in words
                 )
             ):
                 carrier = add_header_argument
-            elif words in {
-                ("e",),
-                ("env",),
-                ("environment",),
-                ("env", "var"),
-                ("environment", "variable"),
-                ("set", "env"),
-            }:
+            elif (
+                words == ("e",)
+                or (
+                    any(word in {"env", "environment"} for word in words)
+                    and "file" not in words
+                )
+            ):
                 carrier = add_env_argument
 
             if carrier is not None:
@@ -462,22 +428,27 @@ def _kimi_mcp_credential_needles(
                 index += 1
                 continue
 
-            if is_credential_option(option):
+            if words in public_argument_options:
                 if inline_value is not None:
-                    add_argument_credential(inline_value)
+                    if words == ("endpoint",):
+                        add_url_credentials(inline_value)
                 elif index + 1 < len(arguments) and not is_option_argument(arguments[index + 1]):
-                    add_argument_credential(arguments[index + 1])
+                    if words == ("endpoint",):
+                        add_url_credentials(arguments[index + 1])
                     index += 1
-            elif inline_value is not None and "://" in inline_value:
-                add_url_credentials(inline_value)
+                index += 1
+                continue
+
+            if inline_value is not None:
+                add_argument_credential(inline_value)
             elif option is None:
                 name, separator, value = argument.partition("=")
                 if separator and re.fullmatch(
                     r"[A-Za-z_][A-Za-z0-9_]*", name, re.ASCII
                 ):
                     add_env_value(name, value)
-                elif "://" in argument:
-                    add_url_credentials(argument)
+                else:
+                    add_argument_credential(argument)
             index += 1
 
         # Preserve the existing public controls; all other names default private.
