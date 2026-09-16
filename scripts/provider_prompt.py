@@ -72,6 +72,8 @@ KIMI_AGENT_TERMINAL_INSTRUCTION = (
 KIMI_GATE_LIKE = re.compile(r"^[ \t]*GATE[ \t]*:")
 KIMI_ACP_PROTOCOL_VERSION = 1
 KIMI_ACP_LINE_MAX_BYTES = 1024 * 1024
+# This and CAPTURE_MAX_BYTES_HARD bound the linear terminal credential scan.
+KIMI_CREDENTIAL_NEEDLE_MAX_COUNT = 256
 KIMI_ACP_CONTROL_UPDATES = frozenset(
     {
         "available_commands_update",
@@ -280,6 +282,10 @@ def _kimi_mcp_credential_needles(
         except UnicodeEncodeError as exc:
             raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE") from exc
         if b"\x00" in encoded:
+            raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE")
+        if encoded in needles:
+            return
+        if len(needles) >= KIMI_CREDENTIAL_NEEDLE_MAX_COUNT:
             raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE")
         needles[encoded] = None
 

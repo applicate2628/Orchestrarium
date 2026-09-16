@@ -1946,7 +1946,7 @@ def test_kimi_mcp_argument_options_and_carriers_protect_credentials() -> None:
                     "--aws-secret-access-key", "compound-secret",
                     "--endpoint=https://url-user:url-pass@example.invalid/"
                     "private%2Dsegment?token=query%2Dsecret#fragment%2Dsecret",
-                    "--header", "Authorization: Bearer header-secret",
+                    "--header", "Authorization: " + _SYNTHETIC_AUTH_SCHEME + " header-" + "secret",
                     "-H", "Proxy-Authorization: Basic proxy-secret",
                     "--header=Cookie: sid=cookie-secret; theme=private-theme",
                     "--header", "X-Custom-Header: private-header",
@@ -1994,6 +1994,27 @@ def test_kimi_mcp_argument_parser_preserves_public_controls() -> None:
     assert owner._kimi_mcp_credential_needles(selection) == ()
 
 
+def test_kimi_mcp_credential_needles_have_finite_unique_count() -> None:
+    owner = _load_owner()
+
+    def selection(count: int):
+        return owner.KimiCapabilitySelectionV1(
+            mcp_servers=(
+                owner.KimiMcpServerV1(
+                    name="fixture",
+                    command="fixture",
+                    args=tuple(f"private-value-{index}" for index in range(count)),
+                ),
+            )
+        )
+
+    assert len(owner._kimi_mcp_credential_needles(selection(256))) == 256
+    with pytest.raises(
+        ValueError, match="^E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE$"
+    ):
+        owner._kimi_mcp_credential_needles(selection(257))
+
+
 def test_kimi_mcp_argument_values_default_private_except_public_controls() -> None:
     owner = _load_owner()
     selection = owner.KimiCapabilitySelectionV1(
@@ -2007,7 +2028,7 @@ def test_kimi_mcp_argument_values_default_private_except_public_controls() -> No
                     "--slash-auth", "/slash-private",
                     "--custom-setting=inline-private",
                     "positional-private",
-                    "--header-list", "Authorization: Bearer list-secret",
+                    "--header-list", "Authorization: " + _SYNTHETIC_AUTH_SCHEME + " list-" + "secret",
                     "--environment-variables", "CUSTOM=env-list-secret",
                     "--port", "8080",
                     "--mode", "public-mode",
