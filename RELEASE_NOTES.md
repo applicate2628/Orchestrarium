@@ -9,6 +9,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - **Fresh checkouts no longer depend on discarded session reports to run validator tests.** Two assertions that only inspected one historical ignored scratch directory have been removed; they did not execute a production behavior or recreate their evidence. The reproducible validator and recovery tests remain. **Why it matters:** deleting disposable task state no longer breaks the source test suite, and absent reports are not replaced with fabricated fixtures.
 
+- **Interrupted recovery now bounds the actual before/after-image reads, including bug supersession.** Recovery compares no-follow snapshots within the known intent-image lengths; settlement replay reuses the strict single-link proof parser, and the duplicate bug-receipt parser is removed. Post-publication atomic-write checks use the just-written image length. README rereads of transition metadata use the existing artifact-size envelope, and its input digest retains the same byte encoding without retaining every input image at once. **Why it matters:** fixing digest helpers no longer leaves the same oversized-file or substituted-pipe failure in their real recovery and index-refresh consumers.
+
 ## 2026-09-16
 
 - **Kimi credential output scanning now has a finite unique-pattern budget.** Explicit Model Context Protocol selections may contribute at most 256 distinct private byte patterns; duplicate values remain deduplicated, while an excessive selection fails before provider execution through the existing sanitized credential-scan refusal. **Why it matters:** terminal-safety work is bounded without changing accepted public controls or adding another scanner.

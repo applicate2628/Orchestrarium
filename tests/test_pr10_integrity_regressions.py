@@ -946,3 +946,308 @@ else:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "FIFO-REFUSED"
+
+
+@pytest.mark.parametrize(
+    "boundary,artifact",
+    [("T2", "status"), ("T2", "closure"), ("T2", "bug-receipt"),
+     ("T3", "status"), ("T3", "closure"), ("T4", "successor"),
+     ("T6", "settlement")],
+)
+@pytest.mark.parametrize("oversize", (False, True))
+def test_transition_recovery_reads_intent_images_with_bounds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    boundary: str, artifact: str, oversize: bool,
+) -> None:
+    fixtures = load_module(LEGACY_TRANSFER_TESTS, f"pr10_recovery_{boundary}_{artifact}")
+    fixture = fixtures.transition_fixture(tmp_path)
+    lifecycle = fixture["lifecycle"]
+    with pytest.raises(lifecycle.LifecycleError):
+        fixtures.run_transition(fixture, inject=boundary)
+    intent_path = tmp_path / ".scratch" / "work-items-lifecycle-transitions" / f"{fixture['operationId']}.json"
+    intent = lifecycle._load_transition_intent(tmp_path, intent_path)
+    location = tmp_path / intent["activePath" if boundary == "T2" else "archivePath"]
+    if artifact == "settlement":
+        target = location / "lifecycle-transition-receipt.json"
+        original = target.read_bytes()
+        limit = len(original)
+        failure_id = "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
+    else:
+        specifications = {
+            "status": (location / "status.md", "statusBefore", "statusAfter"),
+            "closure": (location / "closure.md", "closureBefore", "closureAfter"),
+            "bug-receipt": (location / "bug-disposition-receipt.json", "bugReceiptBefore", "bugReceiptAfter"),
+            "successor": (tmp_path / intent["successorPath"], None, "successorData"),
+        }
+        target, before_key, after_key = specifications[artifact]
+        if artifact == "bug-receipt":
+            target = location / lifecycle.BUG_DISPOSITIONS_RECEIPT
+        original = lifecycle._unb64(intent[after_key])
+        assert original is not None
+        before = lifecycle._unb64(intent[before_key]) if before_key else None
+        limit = max(len(original), len(before or b""))
+        failure_id = f"WI-LIFECYCLE-TRANSITION-{'ROLLBACK' if boundary == 'T2' else 'ROLLFORWARD'}-INDETERMINATE"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"x" * (limit + 1) if oversize else original)
+    read_bytes = Path.read_bytes
+    capture = lifecycle._capture_file_snapshot
+    admitted_limits: list[int | None] = []
+
+    def prohibit_whole_file(path):
+        assert path != target, "recovery bypassed bounded image capture"
+        return read_bytes(path)
+
+    def tracked_capture(path, **kwargs):
+        if path == target:
+            admitted_limits.append(kwargs.get("maximum_bytes"))
+        return capture(path, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", prohibit_whole_file)
+    monkeypatch.setattr(lifecycle, "_capture_file_snapshot", tracked_capture)
+    if oversize:
+        with pytest.raises(lifecycle.LifecycleError) as caught:
+            lifecycle._recover_transition(tmp_path, intent_path)
+        assert caught.value.failure_id == failure_id
+        assert intent_path.exists()
+    else:
+        result = lifecycle._recover_transition(tmp_path, intent_path)
+        assert result is None if boundary == "T2" else result["status"] == "settled"
+        assert not intent_path.exists()
+    assert admitted_limits and admitted_limits[0] is not None and admitted_limits[0] <= limit
+    assert all(value is not None for value in admitted_limits)
+
+
+def _bug_supersession_read_fixture(root: Path):
+    import base64
+
+    fixtures = load_module(MUTATE.parent.parent / "tests" / "test_mutate_work_item.py", "pr10_bug_read_fixture")
+    lifecycle = fixtures.load_module()
+    slug = "2026-09-10-pr10-source-bug"
+    operation = "pr10-bug-read-bounds"
+    argv, source, binding_file, successor = fixtures._supersede_current_bug_cli_fixture(
+        lifecycle, root, slug, operation
+    )
+    binding = binding_file.read_bytes()
+    consumer = root / "work-items" / "active" / "consumer" / "status.md"
+    before = (fixtures.quick_status("Track the source bug.") + f"\nRelated: bug:{slug}\n").encode()
+    after = before.replace(f"bug:{slug}".encode(), b"external-bug-registry#bug:accepted-successor")
+    consumer.parent.mkdir(parents=True, exist_ok=True)
+    consumer.write_bytes(before)
+    inventory = fixtures.successor_link_inventory_bytes(
+        slug, source.read_bytes(), binding, operation,
+        [{"path": consumer.relative_to(root).as_posix(),
+          "beforeSha256": hashlib.sha256(before).hexdigest(),
+          "afterSha256": hashlib.sha256(after).hexdigest(),
+          "afterBytesBase64": base64.b64encode(after).decode("ascii")}],
+    )
+    lifecycle.refresh_readme(root)
+    request = {
+        "root": root, "slug": slug, "operation_id": operation,
+        "successor_record": successor, "successor_binding_data": binding,
+        "incoming_links_inventory_data": inventory,
+        "terminal_instant": argv[argv.index("--terminal-instant") + 1],
+        "expected_bug_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "expected_readme_sha256": hashlib.sha256((root / "work-items" / "README.md").read_bytes()).hexdigest(),
+    }
+    receipt = root / "work-items" / "bugs" / "archive" / "2026-09" / f"{slug}.supersession-receipt.json"
+    return lifecycle, request, receipt, consumer
+
+
+@pytest.mark.parametrize("tamper", ("oversize", "hardlink", "huge-integer", "duplicate-key"))
+def test_bug_supersession_verifier_reuses_strict_proof_admission(
+    tmp_path: Path, tamper: str
+) -> None:
+    lifecycle, request, receipt, _ = _bug_supersession_read_fixture(tmp_path)
+    settled = lifecycle.supersede_current_bug(**request)
+    assert lifecycle._verify_bug_supersession_settlement(tmp_path, receipt) == settled
+    raw = receipt.read_bytes()
+    if tamper == "oversize":
+        receipt.write_bytes(raw + b" " * lifecycle.LEDGER_LOCATION_PROOF_BYTE_CAP)
+    elif tamper == "hardlink":
+        try:
+            os.link(receipt, tmp_path / "foreign-receipt.json")
+        except OSError as exc:
+            pytest.skip(f"hardlink unavailable: {exc}")
+    elif tamper == "huge-integer":
+        receipt.write_bytes(b'{"unused":' + b"1" * 10000 + b"," + raw.lstrip()[1:])
+    else:
+        receipt.write_bytes(b'{"status":"unsettled",' + raw.lstrip()[1:])
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._verify_bug_supersession_settlement(tmp_path, receipt)
+    assert caught.value.failure_id == "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "boundary,artifact",
+    [("B2", "source"), ("B2", "link"), ("B2", "receipt"),
+     ("B4", "archive"), ("B4", "link"), ("B5", "receipt")],
+)
+@pytest.mark.parametrize("oversize", (False, True))
+def test_bug_supersession_recovery_reads_intent_images_with_bounds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    boundary: str, artifact: str, oversize: bool,
+) -> None:
+    lifecycle, request, receipt, consumer = _bug_supersession_read_fixture(tmp_path)
+    with pytest.raises(lifecycle.LifecycleError):
+        lifecycle.supersede_current_bug(**request, inject_failure_at=boundary)
+    intent_path = tmp_path / ".scratch" / "work-items-lifecycle-transitions" / f"{request['operation_id']}.json"
+    intent = lifecycle._load_transition_intent(tmp_path, intent_path)
+    if artifact == "link":
+        row = lifecycle._bug_supersession_intent_links(tmp_path, intent)[0]
+        target, before, after = consumer, row["before"], row["after"]
+    else:
+        target = receipt if artifact == "receipt" else tmp_path / intent["sourcePath" if artifact == "source" else "archivePath"]
+        prefix = "receipt" if artifact == "receipt" else "source"
+        before = lifecycle._unb64(intent[f"{prefix}Before"])
+        after = lifecycle._unb64(intent[f"{prefix}After"])
+    assert after is not None
+    limit = max(len(before or b""), len(after))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"x" * (limit + 1) if oversize else after)
+    read_bytes = Path.read_bytes
+    capture = lifecycle._capture_file_snapshot
+    admitted_limits: list[int | None] = []
+
+    def prohibit_whole_file(path):
+        assert path != target, "bug recovery bypassed bounded image capture"
+        return read_bytes(path)
+
+    def tracked_capture(path, **kwargs):
+        if path == target:
+            admitted_limits.append(kwargs.get("maximum_bytes"))
+        return capture(path, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", prohibit_whole_file)
+    monkeypatch.setattr(lifecycle, "_capture_file_snapshot", tracked_capture)
+    if oversize:
+        with pytest.raises(lifecycle.LifecycleError) as caught:
+            lifecycle._recover_transition(tmp_path, intent_path)
+        suffix = "ROLLBACK" if boundary == "B2" else "ROLLFORWARD"
+        assert caught.value.failure_id == f"WI-BUG-SUPERSESSION-{suffix}-INDETERMINATE"
+        assert intent_path.exists()
+    else:
+        result = lifecycle._recover_transition(tmp_path, intent_path)
+        assert result is None if boundary == "B2" else result["status"] == "settled"
+        assert not intent_path.exists()
+    assert admitted_limits and admitted_limits[0] is not None and admitted_limits[0] <= limit
+    assert all(value is not None for value in admitted_limits)
+
+
+@pytest.mark.parametrize("size", (0, 65537))
+@pytest.mark.parametrize("replace_after_publish", (False, True))
+def test_atomic_write_verifies_through_the_known_bounded_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, size: int, replace_after_publish: bool
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_atomic_image_bound")
+    target = tmp_path / "artifact.md"
+    data = b"x" * size
+    original_replace = os.replace
+
+    def replacing(source, destination):
+        original_replace(source, destination)
+        if replace_after_publish:
+            Path(destination).write_bytes(data + b"!")
+
+    monkeypatch.setattr(os, "replace", replacing)
+    monkeypatch.setattr(Path, "read_bytes", lambda _: pytest.fail("atomic verification used a whole-file read"))
+    if replace_after_publish:
+        with pytest.raises(lifecycle.LifecycleError) as caught:
+            lifecycle._atomic_write(target, data)
+        assert caught.value.failure_id == "WI-ATOMIC-BYTE-CHECK"
+    else:
+        lifecycle._atomic_write(target, data)
+        with target.open("rb") as stream:
+            assert stream.read() == data
+
+
+@pytest.mark.skipif(os.name != "posix" or not hasattr(os, "mkfifo"), reason="requires POSIX named pipes")
+@pytest.mark.parametrize("kind", ("work-item", "bug"))
+def test_transition_recovery_refuses_named_pipe_without_blocking(tmp_path: Path, kind: str) -> None:
+    program = """
+import importlib.util
+import os
+import sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("recovery_fixture", sys.argv[1])
+fixtures = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = fixtures
+spec.loader.exec_module(fixtures)
+root = Path(sys.argv[2])
+if sys.argv[3] == "work-item":
+    legacy = fixtures.load_module(fixtures.LEGACY_TRANSFER_TESTS, "fifo_legacy_fixture")
+    fixture = legacy.transition_fixture(root)
+    lifecycle = fixture["lifecycle"]
+    target = fixture["item"] / "status.md"
+    operation = fixture["operationId"]
+    def interrupt():
+        legacy.run_transition(fixture, inject="T2")
+    failure_id = "WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE"
+else:
+    lifecycle, request, receipt, consumer = fixtures._bug_supersession_read_fixture(root)
+    target = root / "work-items" / "bugs" / (request["slug"] + ".md")
+    operation = request["operation_id"]
+    def interrupt():
+        lifecycle.supersede_current_bug(**request, inject_failure_at="B2")
+    failure_id = "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE"
+try:
+    interrupt()
+except lifecycle.LifecycleError:
+    pass
+else:
+    raise AssertionError("fixture did not interrupt")
+intent_path = root / ".scratch" / "work-items-lifecycle-transitions" / (operation + ".json")
+assert intent_path.is_file() and target.is_file()
+target.unlink()
+os.mkfifo(target)
+try:
+    lifecycle._recover_transition(root, intent_path)
+except lifecycle.LifecycleError as exc:
+    assert exc.failure_id == failure_id, exc.failure_id
+    assert intent_path.is_file()
+    print("RECOVERY-FIFO-REFUSED")
+else:
+    raise AssertionError("recovery accepted a named pipe")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(Path(__file__).resolve()), str(tmp_path), kind],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "RECOVERY-FIFO-REFUSED"
+
+
+@pytest.mark.parametrize("artifact", ("status", "closure", "successor", "readme"))
+def test_readme_reopened_transition_artifacts_are_bounded(tmp_path: Path, artifact: str) -> None:
+    fixtures = load_module(LEGACY_TRANSFER_TESTS, "pr10_readme_reopened")
+    fixture = fixtures.transition_fixture(tmp_path)
+    payload = fixtures.run_transition(fixture)
+    lifecycle = fixture["lifecycle"]
+    archive = tmp_path / payload["archivePath"]
+    targets = {
+        "status": archive / "status.md",
+        "closure": archive / "closure.md",
+        "successor": tmp_path / "work-items" / "backlog" / (fixture["successorSlug"] + ".md"),
+        "readme": tmp_path / "work-items" / "README.md",
+    }
+    target = targets[artifact]
+    target.write_bytes(b"x" * (lifecycle.LEDGER_LOCATION_PROOF_BYTE_CAP + 1))
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle.render_readme_bytes(tmp_path)
+    assert caught.value.failure_id == "WI-README-STALE"
+
+
+def test_readme_input_digest_keeps_its_existing_byte_encoding(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    lifecycle = load_module(MUTATE, "pr10_readme_digest_encoding")
+    files = [(tmp_path / "b.md", b"second"), (tmp_path / "a.md", b"first\x00\xff")]
+    expected = hashlib.sha256()
+    for path, data in sorted(files):
+        path.write_bytes(data)
+        logical = path.name.encode("utf-8")
+        expected.update(len(logical).to_bytes(8, "big"))
+        expected.update(logical)
+        expected.update(len(data).to_bytes(8, "big"))
+        expected.update(data)
+    entries = [SimpleNamespace(source_paths=[files[0][0], files[1][0], files[0][0]])]
+    assert lifecycle._input_digest(entries, tmp_path) == expected.hexdigest()

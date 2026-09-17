@@ -2233,7 +2233,9 @@ def _atomic_write(path: Path, data: bytes) -> None:
             os.fsync(handle.fileno())
         os.replace(temp_path, path)
         temp_path = None
-        if path.read_bytes() != data:
+        if _capture_file_snapshot(
+            path, failure_id="WI-ATOMIC-BYTE-CHECK", maximum_bytes=len(data)
+        ).data != data:
             raise LifecycleError("WI-ATOMIC-BYTE-CHECK", f"byte check failed: {path}")
     finally:
         if temp_path is not None:
@@ -2342,7 +2344,11 @@ def _status_entry(root: Path, item: Path) -> ReadmeEntry:
     status_path = item / "status.md"
     if not status_path.is_file():
         raise LifecycleError("WI-CATEGORY-STATUS-MISSING", f"missing status.md: {item}")
-    text = status_path.read_text(encoding="utf-8")
+    text = _capture_file_snapshot(
+        status_path,
+        failure_id="WI-README-STALE",
+        maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+    ).data.decode("utf-8")
     fields = _parse_fields(text)
     status = fields.get("status", "")
     if status in CATEGORIES["work-item"].terminal_statuses:
@@ -2541,8 +2547,16 @@ def _archived_work_item_entry(item: Path) -> ReadmeEntry:
             f"archived work-item lacks closure.md: {item}",
         )
     status = item / "status.md"
-    closure_data = closure.read_bytes()
-    status_data = status.read_bytes() if status.is_file() else b""
+    closure_data = _capture_file_snapshot(
+        closure,
+        failure_id="WI-README-STALE",
+        maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+    ).data
+    status_data = _capture_file_snapshot(
+        status,
+        failure_id="WI-README-STALE",
+        maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+    ).data if status.is_file() else b""
     closure_markers = _schema_marker_occurrences(closure_data, "closure.md")
     status_markers = _schema_marker_occurrences(status_data, "status.md")
     fields = _parse_fields(closure_data.decode("utf-8"))
@@ -2602,7 +2616,11 @@ def collect_readme_entries(root: Path) -> list[ReadmeEntry]:
     backlog = work_items / "backlog"
     if backlog.is_dir():
         for path in sorted(backlog.glob("*.md")):
-            fields = _parse_fields(path.read_text(encoding="utf-8"))
+            fields = _parse_fields(_capture_file_snapshot(
+                path,
+                failure_id="WI-README-STALE",
+                maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+            ).data.decode("utf-8"))
             status = fields.get("status")
             if status and status != "candidate":
                 failure = (
@@ -2634,7 +2652,11 @@ def collect_readme_entries(root: Path) -> list[ReadmeEntry]:
     roadmaps = work_items / "roadmaps"
     if roadmaps.is_dir():
         for path in sorted(roadmaps.glob("*.md")):
-            text = path.read_text(encoding="utf-8")
+            text = _capture_file_snapshot(
+                path,
+                failure_id="WI-README-STALE",
+                maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+            ).data.decode("utf-8")
             fields = _parse_fields(text)
             if fields.get("format") != "roadmap-v1":
                 continue
@@ -2677,13 +2699,18 @@ def collect_readme_entries(root: Path) -> list[ReadmeEntry]:
 
 
 def _input_digest(entries: Iterable[ReadmeEntry], work_items: Path) -> str:
-    inputs: dict[str, bytes] = {}
+    inputs: dict[str, Path] = {}
     for entry in entries:
         for path in entry.source_paths:
             logical_path = _relative_link(work_items, path)
-            inputs[logical_path] = path.read_bytes()
+            inputs[logical_path] = path
     digest = hashlib.sha256()
-    for logical_path, data in sorted(inputs.items()):
+    for logical_path, path in sorted(inputs.items()):
+        data = _capture_file_snapshot(
+            path,
+            failure_id="WI-README-STALE",
+            maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+        ).data
         encoded = logical_path.encode("utf-8")
         digest.update(len(encoded).to_bytes(8, "big"))
         digest.update(encoded)
@@ -2698,8 +2725,12 @@ def _canonical_timestamp(entries: Iterable[ReadmeEntry]) -> str:
         for path in entry.source_paths:
             if path.name == LEGACY_RETIREMENT_FILE:
                 try:
-                    value = json.loads(path.read_text(encoding="utf-8")).get("terminalAt")
-                except (OSError, UnicodeError, json.JSONDecodeError, AttributeError) as exc:
+                    value = json.loads(_capture_file_snapshot(
+                        path,
+                        failure_id="WI-README-STALE",
+                        maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+                    ).data.decode("utf-8")).get("terminalAt")
+                except (OSError, ValueError, RecursionError, AttributeError) as exc:
                     raise LifecycleError(
                         "WI-LEGACY-RETIREMENT-INVALID",
                         f"cannot read terminal instant: {path}",
@@ -2708,7 +2739,11 @@ def _canonical_timestamp(entries: Iterable[ReadmeEntry]) -> str:
                     _strict_utc(value)
                     instants.append(value)
                 continue
-            fields = _parse_fields(path.read_text(encoding="utf-8"))
+            fields = _parse_fields(_capture_file_snapshot(
+                path,
+                failure_id="WI-README-STALE",
+                maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+            ).data.decode("utf-8"))
             for key in ("updated", "closed", "terminal-at"):
                 value = fields.get(key)
                 if value and UTC_INSTANT_RE.fullmatch(value):
@@ -2728,7 +2763,11 @@ def _default_static_guide() -> str:
 def _static_guide(readme: Path, *, allow_marker_bootstrap: bool = False) -> str:
     if not readme.exists():
         return _default_static_guide()
-    text = readme.read_text(encoding="utf-8")
+    text = _capture_file_snapshot(
+        readme,
+        failure_id="WI-README-STALE",
+        maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+    ).data.decode("utf-8")
     begin_count = text.count(README_BEGIN)
     end_count = text.count(README_END)
     if allow_marker_bootstrap and begin_count == 0 and end_count == 0:
@@ -2801,7 +2840,11 @@ def refresh_readme(root: Path, *, allow_marker_bootstrap: bool = False) -> str:
     readme = work_items / "README.md"
     _atomic_write(readme, expected)
     observed = render_readme_bytes(root)
-    if observed != expected or readme.read_bytes() != expected:
+    if observed != expected or _capture_file_snapshot(
+        readme,
+        failure_id="WI-README-STALE",
+        maximum_bytes=len(expected),
+    ).data != expected:
         raise LifecycleError("WI-README-STALE", "README byte verification failed")
     return hashlib.sha256(expected).hexdigest()
 
@@ -6538,11 +6581,8 @@ def supersede_current_bug(
         ],
     }
     _verify_captured_file(successor_snapshot, "WI-BUG-SUCCESSOR-BINDING")
-    if source.read_bytes() != source_snapshot.data or readme.read_bytes() != readme_snapshot.data:
-        raise LifecycleError(
-            "WI-BUG-DISPOSITIONS-DRIFT",
-            "bug supersession preimages changed before intent creation",
-        )
+    _verify_captured_file(source_snapshot, "WI-BUG-DISPOSITIONS-DRIFT")
+    _verify_captured_file(readme_snapshot, "WI-BUG-DISPOSITIONS-DRIFT")
     _atomic_write(intent_path, _migration_receipt_bytes(intent))
     _transition_fsync_directory(intent_path.parent)
     if inject_failure_at == "B0":
@@ -6550,7 +6590,11 @@ def supersede_current_bug(
             "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE", "injected B0"
         )
     for row in links:
-        if row["path"].read_bytes() != row["before"]:
+        if _read_lifecycle_image(
+            row["path"],
+            row["before"],
+            failure_id="WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
+        ) != row["before"]:
             raise LifecycleError(
                 "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
                 f"bug supersession link drifted: {row['pathRelative']}",
@@ -6560,11 +6604,7 @@ def supersede_current_bug(
         raise LifecycleError(
             "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE", "injected B1"
         )
-    if source.read_bytes() != source_snapshot.data:
-        raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
-            "bug supersession source drifted before terminalization",
-        )
+    _verify_captured_file(source_snapshot, "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE")
     _atomic_write(source, source_after)
     if inject_failure_at == "B2":
         raise LifecycleError(
@@ -6647,17 +6687,6 @@ def _intent_path(root: Path, relative: str) -> Path:
     )
 
 
-def _bug_supersession_receipt_pairs(pairs: list[tuple[str, object]]) -> dict:
-    value: dict[str, object] = {}
-    for key, item in pairs:
-        if key in value:
-            raise LifecycleError(
-                "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
-                f"bug supersession receipt repeats JSON key: {key}",
-            )
-        value[key] = item
-    return value
-
 
 def _verify_bug_supersession_settlement(
     root: Path,
@@ -6669,19 +6698,11 @@ def _verify_bug_supersession_settlement(
         receipt_path,
         failure_id="WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
     )
-    try:
-        receipt_bytes = receipt_path.read_bytes()
-        payload = json.loads(
-            receipt_bytes.decode("utf-8"),
-            object_pairs_hook=_bug_supersession_receipt_pairs,
-        )
-    except LifecycleError:
-        raise
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise LifecycleError(
-            "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
-            "bug supersession receipt is unreadable",
-        ) from exc
+    payload, receipt_bytes = _ledger_location_proof_object(
+        receipt_path,
+        failure_id="WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+        unreadable="bug supersession receipt is unreadable",
+    )
     if (
         not isinstance(payload, dict)
         or set(payload) != BUG_SUPERSESSION_RECEIPT_FIELDS
@@ -6742,6 +6763,7 @@ def _verify_bug_supersession_settlement(
         archived = _capture_file_snapshot(
             expected_archive,
             failure_id="WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+            maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
         )
     except LifecycleError as exc:
         raise LifecycleError(
@@ -6786,7 +6808,10 @@ def _verify_bug_supersession_settlement(
             )
         link_paths.append(row["path"])
         path = _intent_path(root, row["path"])
-        if not path.is_file() or _sha256_bytes(path.read_bytes()) != row["afterSha256"]:
+        if _ledger_location_regular_sha256(
+            path,
+            failure_id="WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+        ) != row["afterSha256"]:
             raise LifecycleError(
                 "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
                 f"bug supersession settled link differs: {row['path']}",
@@ -6795,8 +6820,10 @@ def _verify_bug_supersession_settlement(
     if (
         link_paths != sorted(link_paths)
         or len(link_paths) != len(set(link_paths))
-        or not readme.is_file()
-        or _sha256_bytes(readme.read_bytes()) != payload["readmeSha256"]
+        or _ledger_location_regular_sha256(
+            readme,
+            failure_id="WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+        ) != payload["readmeSha256"]
         or (expected_bytes is not None and receipt_bytes != expected_bytes)
     ):
         raise LifecycleError(
@@ -6849,23 +6876,41 @@ def _recover_bug_supersession_transition(
             "bug supersession intent image is absent",
         )
     links = _bug_supersession_intent_links(root, intent)
-    source_exists = source.is_file()
+    failure_id = "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE"
+    current_source = _read_lifecycle_image(
+        source,
+        source_before,
+        source_after,
+        failure_id=failure_id,
+    )
+    source_exists = current_source is not None
     archive_exists = archive.is_file()
     if source_exists:
-        if archive_exists or source.read_bytes() not in {source_before, source_after}:
+        if archive_exists or current_source not in {source_before, source_after}:
             raise LifecycleError(
                 "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
                 "bug supersession rollback identity differs",
             )
         for row in links:
-            if not row["path"].is_file() or row["path"].read_bytes() not in {
+            if _read_lifecycle_image(
+                row["path"],
+                row["before"],
+                row["after"],
+                failure_id=failure_id,
+            ) not in {
                 row["before"], row["after"]
             }:
                 raise LifecycleError(
                     "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
                     f"bug supersession rollback link differs: {row['pathRelative']}",
                 )
-        current_receipt = receipt.read_bytes() if receipt.is_file() else None
+        current_receipt = _read_lifecycle_image(
+            receipt,
+            receipt_before,
+            receipt_after,
+            failure_id=failure_id,
+            require_single_link=True,
+        )
         if current_receipt not in {receipt_before, receipt_after}:
             raise LifecycleError(
                 "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
@@ -6880,23 +6925,30 @@ def _recover_bug_supersession_transition(
             _atomic_write(receipt, receipt_before)
         intent_path.unlink()
         return None
+    failure_id = "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE"
     if not archive_exists:
         raise LifecycleError(
             "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
             "bug supersession commit identity is absent",
         )
-    if archive.read_bytes() != source_after:
+    if _read_lifecycle_image(archive, source_after, failure_id=failure_id) != source_after:
         raise LifecycleError(
             "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
             "bug supersession archive image differs",
         )
     for row in links:
-        if not row["path"].is_file() or row["path"].read_bytes() != row["after"]:
+        if _read_lifecycle_image(row["path"], row["after"], failure_id=failure_id) != row["after"]:
             raise LifecycleError(
                 "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
                 f"bug supersession roll-forward link differs: {row['pathRelative']}",
             )
-    current_receipt = receipt.read_bytes() if receipt.is_file() else None
+    current_receipt = _read_lifecycle_image(
+        receipt,
+        receipt_before,
+        receipt_after,
+        failure_id=failure_id,
+        require_single_link=True,
+    )
     if current_receipt not in {receipt_before, receipt_after}:
         raise LifecycleError(
             "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
@@ -7048,6 +7100,31 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
     elif payload["migrationReceiptPath"] is not None:
         _intent_path(root, payload["migrationReceiptPath"])
     return payload
+
+
+def _read_lifecycle_image(
+    path: Path,
+    *known_images: bytes | None,
+    failure_id: str,
+    require_single_link: bool = False,
+) -> bytes | None:
+    """Capture an optional file within its known intent-image length envelope."""
+    _lifecycle_reject_unreduced_reparse(
+        path, failure_id=failure_id, message="lifecycle image crosses a link or reparse point"
+    )
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise LifecycleError(failure_id, "lifecycle image cannot be inspected") from exc
+    maximum_bytes = max(
+        (len(image) for image in known_images if image is not None), default=0
+    )
+    return _capture_file_snapshot(
+        path, failure_id=failure_id, maximum_bytes=maximum_bytes,
+        require_single_link=require_single_link,
+    ).data
 
 
 def _ledger_location_proof_object(
@@ -8047,6 +8124,8 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
             intent,
             inject_failure_at=inject_failure_at,
         )
+    rollback_failure_id = "WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE"
+    forward_failure_id = "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
     active = _intent_path(root, intent["activePath"])
     archive = _intent_path(root, intent["archivePath"])
     successor = _intent_path(root, intent["successorPath"])
@@ -8056,6 +8135,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
     closure_after = _unb64(intent["closureAfter"]) or b""
     bug_receipt_before = _unb64(intent["bugReceiptBefore"])
     bug_receipt_after = _unb64(intent["bugReceiptAfter"]) or b""
+    successor_data = _unb64(intent["successorData"]) or b""
     plans = _transition_bug_plans(root, intent)
     if active.is_dir():
         status = _require_lifecycle_mutation_path(
@@ -8070,19 +8150,40 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
             root, active / BUG_DISPOSITIONS_RECEIPT,
             failure_id="WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE",
         )
-        current_status = status.read_bytes() if status.exists() else None
-        current_closure = closure.read_bytes() if closure.exists() else None
+        current_status = _read_lifecycle_image(
+            status,
+            status_before,
+            status_after,
+            failure_id=rollback_failure_id,
+        )
+        current_closure = _read_lifecycle_image(
+            closure,
+            closure_before,
+            closure_after,
+            failure_id=rollback_failure_id,
+        )
         if current_status not in {status_before, status_after} or current_closure not in {closure_before, closure_after}:
             raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", "active before-image cannot be proven")
         for plan in plans:
             current = plan.source if plan.source.exists() else plan.target
-            if current is None or not current.exists() or current.read_bytes() not in {plan.before, plan.after}:
+            if current is None or _read_lifecycle_image(
+                current,
+                plan.before,
+                plan.after,
+                failure_id=rollback_failure_id,
+            ) not in {plan.before, plan.after}:
                 raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", f"bug before-image differs: {plan.bug_id}")
             if plan.target is not None and plan.target.exists() and not plan.source.exists():
                 plan.source.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(plan.target, plan.source)
             _atomic_write(plan.source, plan.before)
-        current_bug_receipt = bug_receipt.read_bytes() if bug_receipt.exists() else None
+        current_bug_receipt = _read_lifecycle_image(
+            bug_receipt,
+            bug_receipt_before,
+            bug_receipt_after,
+            failure_id=rollback_failure_id,
+            require_single_link=True,
+        )
         if current_bug_receipt not in {bug_receipt_before, bug_receipt_after}:
             raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", "bug receipt before-image differs")
         _atomic_write(status, status_before)
@@ -8101,7 +8202,11 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         else:
             _atomic_write(bug_receipt, bug_receipt_before)
         if successor.exists():
-            if successor.read_bytes() != (_unb64(intent["successorData"]) or b""):
+            if _read_lifecycle_image(
+                successor,
+                successor_data,
+                failure_id=rollback_failure_id,
+            ) != successor_data:
                 raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", "unexpected successor bytes")
             successor.unlink()
         _require_lifecycle_mutation_path(
@@ -8111,11 +8216,22 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         return None
     if not archive.is_dir():
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "intent has neither active nor archive identity")
-    if (archive / "status.md").read_bytes() != status_after or (archive / "closure.md").read_bytes() != closure_after:
+    if _read_lifecycle_image(
+        archive / "status.md",
+        status_after,
+        failure_id=forward_failure_id,
+    ) != status_after or _read_lifecycle_image(
+        archive / "closure.md",
+        closure_after,
+        failure_id=forward_failure_id,
+    ) != closure_after:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "archive identity differs")
-    successor_data = _unb64(intent["successorData"]) or b""
     if successor.exists():
-        if successor.read_bytes() != successor_data:
+        if _read_lifecycle_image(
+            successor,
+            successor_data,
+            failure_id=forward_failure_id,
+        ) != successor_data:
             raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "successor bytes differ")
     else:
         _atomic_write(successor, successor_data)
@@ -8126,7 +8242,12 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         root, archived_bug_receipt,
         failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
     )
-    if not archived_bug_receipt.is_file() or archived_bug_receipt.read_bytes() != bug_receipt_after:
+    if _read_lifecycle_image(
+        archived_bug_receipt,
+        bug_receipt_after,
+        failure_id=forward_failure_id,
+        require_single_link=True,
+    ) != bug_receipt_after:
         raise LifecycleError(
             "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
             "pre-archive bug receipt is missing or changed",
@@ -8142,7 +8263,13 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
     settlement = _settlement_payload(root, intent, readme_sha)
     receipt_path = archive / "lifecycle-transition-receipt.json"
     receipt_bytes = _migration_receipt_bytes(settlement)
-    if receipt_path.exists() and receipt_path.read_bytes() != receipt_bytes:
+    current_receipt = _read_lifecycle_image(
+        receipt_path,
+        receipt_bytes,
+        failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+        require_single_link=True,
+    )
+    if current_receipt not in {None, receipt_bytes}:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt differs")
     receipt_path = _require_lifecycle_mutation_path(
         root, receipt_path,
