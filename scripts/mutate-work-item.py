@@ -7080,7 +7080,7 @@ def _ledger_location_proof_object(
         )
     except LifecycleError:
         raise
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         raise LifecycleError(failure_id, unreadable) from exc
     if not isinstance(payload, dict):
         raise LifecycleError(
@@ -7102,21 +7102,73 @@ def _ledger_location_lexically_exists(path: Path) -> bool:
     return True
 
 
-def _ledger_location_regular_sha256(path: Path, *, failure_id: str) -> str:
+def _ledger_location_regular_sha256(
+    path: Path, *, failure_id: str, maximum_bytes: int | None = None
+) -> str:
+    maximum_bytes = (
+        LEDGER_LOCATION_PROOF_BYTE_CAP if maximum_bytes is None else maximum_bytes
+    )
+    if type(maximum_bytes) is not int or maximum_bytes < 0:
+        raise LifecycleError(failure_id, "ledger location byte limit is invalid")
     _lifecycle_reject_unreduced_reparse(
         path,
         failure_id=failure_id,
         message="ledger location path crosses a link or reparse point",
     )
+    parent_chain = _capture_path_parent_chain(path, failure_id)
+    descriptor = -1
     try:
-        info = path.lstat()
-        if not stat.S_ISREG(info.st_mode):
-            raise LifecycleError(failure_id, "ledger location path is not a regular file")
-        return _sha256_bytes(path.read_bytes())
-    except LifecycleError:
-        raise
+        observed = path.lstat()
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or observed.st_size > maximum_bytes
+            or _lifecycle_path_has_reparse(path)
+        ):
+            raise OSError("ledger location is not a bounded regular file")
+        descriptor = _open_readonly_nofollow(path)
+        with os.fdopen(descriptor, "rb", closefd=True) as stream:
+            descriptor = -1  # The stream now owns the descriptor, including failure exits.
+            before = os.fstat(stream.fileno())
+            before_key = _lifecycle_file_snapshot_key(before)
+            if before_key[:5] != _lifecycle_file_snapshot_key(observed)[:5]:
+                raise OSError("ledger location descriptor differs from its pathname")
+            digests = []
+            # Match snapshot capture's content check without retaining either image.
+            for pass_index in range(2):
+                if pass_index:
+                    stream.seek(0)
+                digest = hashlib.sha256()
+                total = 0
+                while True:
+                    chunk = stream.read(min(64 * 1024, maximum_bytes - total + 1))
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > maximum_bytes:
+                        raise OSError("ledger location exceeds its byte limit")
+                    digest.update(chunk)
+                if (
+                    total != before.st_size
+                    or _lifecycle_file_snapshot_key(os.fstat(stream.fileno()))
+                    != before_key
+                ):
+                    raise OSError("ledger location changed while hashing")
+                digests.append(digest.hexdigest())
+        current = path.lstat()
+        if (
+            digests[0] != digests[1]
+            or _lifecycle_file_snapshot_key(observed)
+            != _lifecycle_file_snapshot_key(current)
+            or _lifecycle_path_has_reparse(path)
+        ):
+            raise OSError("ledger location identity or content changed")
     except OSError as exc:
-        raise LifecycleError(failure_id, "ledger location path is unreadable") from exc
+        raise LifecycleError(failure_id, "ledger location digest cannot be captured") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    _verify_captured_parent_chain(parent_chain, failure_id)
+    return digests[0]
 
 
 def _migration_receipt_bindings_at(
@@ -7431,6 +7483,7 @@ def _validate_stable_ledger_settlement(
         "ledgerSha256": _ledger_location_regular_sha256(
             archive / "agent-runs.jsonl",
             failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+            maximum_bytes=_validator_module().MAX_TRANSFER_LEDGER_BYTES,
         ),
         "statusSha256": _ledger_location_regular_sha256(
             archive / "status.md",
@@ -7602,6 +7655,7 @@ def resolve_work_item_ledger_location(
         ledger_sha256 = _ledger_location_regular_sha256(
             active / "agent-runs.jsonl",
             failure_id="WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE",
+            maximum_bytes=_validator_module().MAX_TRANSFER_LEDGER_BYTES,
         )
         if intent is not None and intent.get("expectedLedgerSha256") != ledger_sha256:
             raise LifecycleError(
@@ -7677,6 +7731,7 @@ def resolve_work_item_ledger_location(
     ledger_sha256 = _ledger_location_regular_sha256(
         archive / "agent-runs.jsonl",
         failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
+        maximum_bytes=_validator_module().MAX_TRANSFER_LEDGER_BYTES,
     )
     status_after = _unb64(intent.get("statusAfter"))
     closure_after = _unb64(intent.get("closureAfter"))
@@ -7729,6 +7784,7 @@ def _transition_bug_plans(root: Path, intent: dict) -> tuple[BugDispositionPlan,
 
 
 def _settlement_payload(root: Path, intent: dict, readme_sha256: str) -> dict:
+    failure_id = "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
     archive = _intent_path(root, intent["archivePath"])
     successor = _intent_path(root, intent["successorPath"])
     bug_receipt = archive / BUG_DISPOSITIONS_RECEIPT
@@ -7754,11 +7810,24 @@ def _settlement_payload(root: Path, intent: dict, readme_sha256: str) -> dict:
         "terminalInstant": intent["terminalInstant"],
         "archivePath": intent["archivePath"],
         "successorPath": intent["successorPath"],
-        "successorSha256": _sha256_bytes(successor.read_bytes()),
-        "ledgerSha256": _sha256_bytes((archive / "agent-runs.jsonl").read_bytes()),
-        "statusSha256": _sha256_bytes((archive / "status.md").read_bytes()),
-        "closureSha256": _sha256_bytes((archive / "closure.md").read_bytes()),
-        "bugDispositionReceiptSha256": _sha256_bytes(bug_receipt.read_bytes()),
+        "successorSha256": _ledger_location_regular_sha256(successor, failure_id=failure_id),
+        "ledgerSha256": _ledger_location_regular_sha256(
+            archive / "agent-runs.jsonl",
+            failure_id=failure_id,
+            maximum_bytes=_validator_module().MAX_TRANSFER_LEDGER_BYTES,
+        ),
+        "statusSha256": _ledger_location_regular_sha256(
+            archive / "status.md",
+            failure_id=failure_id,
+        ),
+        "closureSha256": _ledger_location_regular_sha256(
+            archive / "closure.md",
+            failure_id=failure_id,
+        ),
+        "bugDispositionReceiptSha256": _ledger_location_regular_sha256(
+            bug_receipt,
+            failure_id=failure_id,
+        ),
         "readmeSha256": readme_sha256,
         "requestClosureSha256": intent["closureInputSha256"],
         "requestSuccessorSlug": intent["successorSlug"],
@@ -7789,7 +7858,7 @@ def _settlement_payload(root: Path, intent: dict, readme_sha256: str) -> dict:
         ]
     else:
         payload["migrationReceiptSha256"] = (
-            _sha256_bytes(migration_receipt.read_bytes())
+            _ledger_location_regular_sha256(migration_receipt, failure_id=failure_id)
             if migration_receipt is not None
             else None
         )
@@ -7808,7 +7877,7 @@ def _safe_refresh_readme(root: Path) -> str:
     _require_lifecycle_mutation_path(root, readme, failure_id="WI-README-STALE")
     digest = refresh_readme(root)
     readme = _require_lifecycle_mutation_path(root, readme, failure_id="WI-README-STALE")
-    if not readme.is_file() or _lifecycle_path_has_reparse(readme) or _sha256_bytes(readme.read_bytes()) != digest:
+    if _ledger_location_regular_sha256(readme, failure_id="WI-README-STALE") != digest:
         raise LifecycleError("WI-README-STALE", "README identity or digest changed")
     return digest
 
@@ -7861,13 +7930,13 @@ def _precompute_transition_readme_sha256(
 
 
 def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) -> dict:
+    failure_id = "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
     receipt = _require_lifecycle_mutation_path(
         root, receipt, failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
     )
-    try:
-        payload = json.loads(receipt.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt is unreadable") from exc
+    payload, _ = _ledger_location_proof_object(
+        receipt, failure_id=failure_id, unreadable="settled receipt is unreadable"
+    )
     valid_owner = False
     if isinstance(payload, dict):
         schema_version = payload.get("schemaVersion")
@@ -7898,12 +7967,25 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) 
         failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
     )
     physical = {
-        "successorSha256": _sha256_bytes(successor.read_bytes()),
-        "ledgerSha256": _sha256_bytes((archive / "agent-runs.jsonl").read_bytes()),
-        "statusSha256": _sha256_bytes((archive / "status.md").read_bytes()),
-        "closureSha256": _sha256_bytes((archive / "closure.md").read_bytes()),
-        "bugDispositionReceiptSha256": _sha256_bytes(bug_receipt_path.read_bytes()),
-        "readmeSha256": _sha256_bytes(readme_path.read_bytes()),
+        "successorSha256": _ledger_location_regular_sha256(successor, failure_id=failure_id),
+        "ledgerSha256": _ledger_location_regular_sha256(
+            archive / "agent-runs.jsonl",
+            failure_id=failure_id,
+            maximum_bytes=_validator_module().MAX_TRANSFER_LEDGER_BYTES,
+        ),
+        "statusSha256": _ledger_location_regular_sha256(
+            archive / "status.md",
+            failure_id=failure_id,
+        ),
+        "closureSha256": _ledger_location_regular_sha256(
+            archive / "closure.md",
+            failure_id=failure_id,
+        ),
+        "bugDispositionReceiptSha256": _ledger_location_regular_sha256(
+            bug_receipt_path,
+            failure_id=failure_id,
+        ),
+        "readmeSha256": _ledger_location_regular_sha256(readme_path, failure_id=failure_id),
     }
     migration_receipts = _migration_receipt_bindings_at(
         root,
@@ -8157,11 +8239,18 @@ def archive_with_successor(
             return recovered
     active = _active_migration_item(root, slug)
     ledger = active / "agent-runs.jsonl"
-    if _sha256_bytes(ledger.read_bytes()) != expected_ledger_sha256:
+    if _ledger_location_regular_sha256(
+        ledger,
+        failure_id="WI-LEDGER-MIGRATION-LEDGER-DRIFT",
+        maximum_bytes=_validator_module().MAX_TRANSFER_LEDGER_BYTES,
+    ) != expected_ledger_sha256:
         raise LifecycleError("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "transition ledger digest changed")
     readme = work_items / "README.md"
     readme = _require_lifecycle_mutation_path(root, readme, failure_id="WI-README-STALE")
-    if not readme.is_file() or _sha256_bytes(readme.read_bytes()) != expected_readme_sha256:
+    if _ledger_location_regular_sha256(
+        readme,
+        failure_id="WI-README-STALE",
+    ) != expected_readme_sha256:
         raise LifecycleError("WI-README-STALE", "transition README digest changed")
     archive = _require_lifecycle_mutation_path(
         root, archive, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
@@ -9686,9 +9775,11 @@ def _verify_captured_parent_chain(
 def _open_readonly_nofollow(path: Path) -> int:
     if os.name != "nt":
         nofollow = getattr(os, "O_NOFOLLOW", 0)
-        if not nofollow:
-            raise OSError(errno.ENOTSUP, "no-follow file open is unavailable")
-        return os.open(path, os.O_RDONLY | nofollow)
+        nonblock = getattr(os, "O_NONBLOCK", 0)
+        if not nofollow or not nonblock:
+            raise OSError(errno.ENOTSUP, "nonblocking no-follow open is unavailable")
+        # A regular pathname may become a FIFO before open; inspect without blocking.
+        return os.open(path, os.O_RDONLY | nofollow | nonblock)
 
     import ctypes
     import ctypes.wintypes
@@ -9735,6 +9826,7 @@ def _capture_file_snapshot(
     require_single_link: bool = False,
 ) -> CapturedFileSnapshot:
     parent_chain = _capture_path_parent_chain(path, failure_id)
+    descriptor = -1
     try:
         observed = path.lstat()
         if (
@@ -9751,6 +9843,7 @@ def _capture_file_snapshot(
             raise OSError("snapshot is not a bounded owned regular file")
         descriptor = _open_readonly_nofollow(path)
         with os.fdopen(descriptor, "rb", closefd=True) as stream:
+            descriptor = -1
             before = os.fstat(stream.fileno())
             if (
                 not stat.S_ISREG(before.st_mode)
@@ -9773,6 +9866,9 @@ def _capture_file_snapshot(
         raise LifecycleError(
             failure_id, "file snapshot identity cannot be captured"
         ) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     identity = _lifecycle_file_identity(before)
     before_key = _lifecycle_file_snapshot_key(before)
     if (
@@ -9801,10 +9897,12 @@ def _capture_file_snapshot(
 
 def _verify_captured_file(snapshot: CapturedFileSnapshot, failure_id: str) -> None:
     _verify_captured_parent_chain(snapshot.parent_chain, failure_id)
+    descriptor = -1
     try:
         observed = snapshot.path.lstat()
         descriptor = _open_readonly_nofollow(snapshot.path)
         with os.fdopen(descriptor, "rb", closefd=True) as stream:
+            descriptor = -1
             before = os.fstat(stream.fileno())
             if _lifecycle_file_snapshot_key(before)[:5] != (
                 _lifecycle_file_snapshot_key(observed)[:5]
@@ -9820,6 +9918,9 @@ def _verify_captured_file(snapshot: CapturedFileSnapshot, failure_id: str) -> No
         raise LifecycleError(
             failure_id, "captured file path is no longer available"
         ) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     before_key = _lifecycle_file_snapshot_key(before)
     if (
         _lifecycle_path_has_reparse(snapshot.path)

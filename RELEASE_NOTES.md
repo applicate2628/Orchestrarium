@@ -2,6 +2,11 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-17
+
+- **Lifecycle artifact hashing is bounded and bound to the inspected file.** Recovery, settlement production and verification, and transition admission use one fixed-chunk digest owner with cumulative limits, parent/descriptor identity checks, and a second content pass. Nonblocking no-follow opens prevent a substituted named pipe from stalling before type validation. Ledgers retain the validator-owned envelope rather than inheriting the smaller proof-file limit. **Why it matters:** oversized or changing artifacts produce the caller's typed lifecycle failure instead of a whole-file allocation or a digest of a substituted pathname.
+- **Settlement verification uses the existing strict proof loader, and snapshot failures release owned descriptors.** Duplicate keys, oversized receipts, and hardlinked authority files cannot bypass proof admission; malformed numeric or deeply nested input reports a typed failure. Snapshot capture and revalidation also close the file when stream construction fails. **Why it matters:** interrupted recovery retains explicit refusal and resource-ownership guarantees without a second parser, new dependencies, or persisted-format changes.
+
 ## 2026-09-16
 
 - **Kimi credential output scanning now has a finite unique-pattern budget.** Explicit Model Context Protocol selections may contribute at most 256 distinct private byte patterns; duplicate values remain deduplicated, while an excessive selection fails before provider execution through the existing sanitized credential-scan refusal. **Why it matters:** terminal-safety work is bounded without changing accepted public controls or adding another scanner.

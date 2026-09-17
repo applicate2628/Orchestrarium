@@ -639,3 +639,310 @@ def test_single_link_requirement_is_scoped_to_authority_files(tmp_path: Path) ->
             failure_id="WI-SNAPSHOT-AUTHORITY",
             require_single_link=True,
         )
+
+
+@pytest.mark.parametrize("size", (0, 1, 65536, 131089))
+def test_lifecycle_artifact_digest_uses_fixed_size_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, size: int
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_artifact_streaming")
+    artifact = tmp_path / "status.md"
+    data = (b"bounded-artifact\n" * (size // 16 + 1))[:size]
+    artifact.write_bytes(data)
+    original_fdopen = os.fdopen
+    requested_sizes: list[int] = []
+    monkeypatch.setattr(lifecycle, "LEDGER_LOCATION_PROOF_BYTE_CAP", size)
+
+    class TrackingReader:
+        def __init__(self, *args, **kwargs):
+            self.stream = original_fdopen(*args, **kwargs)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def read(self, size=-1):
+            requested_sizes.append(size)
+            assert 0 < size <= 65536, "digest read must be bounded to 64 KiB"
+            return self.stream.read(size)
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+    monkeypatch.setattr(os, "fdopen", TrackingReader)
+    monkeypatch.setattr(
+        Path, "read_bytes",
+        lambda _path: pytest.fail("digest materialized a whole artifact"),
+    )
+    assert lifecycle._ledger_location_regular_sha256(
+        artifact, failure_id="WI-TEST-ARTIFACT"
+    ) == hashlib.sha256(data).hexdigest()
+    assert requested_sizes
+
+
+def test_lifecycle_artifact_digest_rejects_oversize_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_artifact_limit")
+    artifact = tmp_path / "closure.md"
+    artifact.write_bytes(b"over-limit")
+    monkeypatch.setattr(lifecycle, "LEDGER_LOCATION_PROOF_BYTE_CAP", 4)
+    monkeypatch.setattr(
+        lifecycle, "_open_readonly_nofollow",
+        lambda *_: pytest.fail("oversized artifact was opened"),
+    )
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._ledger_location_regular_sha256(
+            artifact, failure_id="WI-TEST-ARTIFACT"
+        )
+    assert caught.value.failure_id == "WI-TEST-ARTIFACT"
+
+
+def test_lifecycle_artifact_digest_rejects_same_size_path_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_artifact_identity")
+    artifact = tmp_path / "status.md"
+    replacement = tmp_path / "replacement.md"
+    artifact.write_bytes(b"original")
+    replacement.write_bytes(b"replaced")
+    original_lstat = Path.lstat
+    replaced = False
+
+    def swap_after_inspection(path, *args, **kwargs):
+        nonlocal replaced
+        info = original_lstat(path, *args, **kwargs)
+        if path == artifact and not replaced:
+            replaced = True
+            os.replace(replacement, artifact)
+        return info
+
+    original_reject = lifecycle._lifecycle_reject_unreduced_reparse
+
+    def checked_path(*args, **kwargs):
+        original_reject(*args, **kwargs)
+        monkeypatch.setattr(Path, "lstat", swap_after_inspection)
+
+    monkeypatch.setattr(lifecycle, "_lifecycle_reject_unreduced_reparse", checked_path)
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._ledger_location_regular_sha256(
+            artifact, failure_id="WI-TEST-ARTIFACT"
+        )
+    assert caught.value.failure_id == "WI-TEST-ARTIFACT"
+    assert replaced
+    assert artifact.read_bytes() == b"replaced"
+
+
+@pytest.mark.parametrize("tamper", ("duplicate-key", "oversize", "hardlink", "deep-json", "huge-integer"))
+def test_settlement_receipt_uses_bounded_unique_owned_proof(
+    tmp_path: Path, tamper: str
+) -> None:
+    fixtures = load_module(LEGACY_TRANSFER_TESTS, f"pr10_settlement_proof_{tamper}")
+    fixture = fixtures.transition_fixture(tmp_path)
+    fixtures.run_transition(fixture)
+    lifecycle = fixture["lifecycle"]
+    receipt = (
+        tmp_path / "work-items" / "archive" / "2026-08"
+        / fixture["slug"] / "lifecycle-transition-receipt.json"
+    )
+    original = receipt.read_bytes()
+    if tamper == "duplicate-key":
+        receipt.write_bytes(b'{"status":"unsettled",' + original.lstrip()[1:])
+    elif tamper == "deep-json":
+        nested = b"[" * (sys.getrecursionlimit() + 100) + b"0" + b"]" * (sys.getrecursionlimit() + 100)
+        receipt.write_bytes(b'{"unused":' + nested + b"," + original.lstrip()[1:])
+    elif tamper == "huge-integer":
+        receipt.write_bytes(b'{"unused":' + b"1" * 10000 + b"," + original.lstrip()[1:])
+    elif tamper == "oversize":
+        receipt.write_bytes(original + b" " * lifecycle.LEDGER_LOCATION_PROOF_BYTE_CAP)
+    else:
+        try:
+            os.link(receipt, tmp_path / "foreign-receipt.json")
+        except OSError as exc:
+            pytest.skip(f"hardlink unavailable: {exc}")
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._verify_settlement(tmp_path, receipt)
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
+
+
+@pytest.mark.parametrize("operation", ("capture", "verify"))
+def test_snapshot_fdopen_failure_closes_owned_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    lifecycle = load_module(MUTATE, f"pr10_snapshot_fdopen_{operation}")
+    artifact = tmp_path / "receipt.json"
+    artifact.write_bytes(b"{}")
+    snapshot = lifecycle._capture_file_snapshot(artifact, failure_id="WI-TEST-SNAPSHOT")
+    original_open = lifecycle._open_readonly_nofollow
+    descriptors: list[int] = []
+
+    def tracked_open(path):
+        descriptor = original_open(path)
+        descriptors.append(descriptor)
+        return descriptor
+
+    def fail_fdopen(*args, **kwargs):
+        raise OSError("injected stream construction failure")
+
+    monkeypatch.setattr(lifecycle, "_open_readonly_nofollow", tracked_open)
+    monkeypatch.setattr(os, "fdopen", fail_fdopen)
+    closed: list[bool] = []
+    try:
+        with pytest.raises(lifecycle.LifecycleError) as caught:
+            if operation == "capture":
+                lifecycle._capture_file_snapshot(artifact, failure_id="WI-TEST-SNAPSHOT")
+            else:
+                lifecycle._verify_captured_file(snapshot, "WI-TEST-SNAPSHOT")
+        assert caught.value.failure_id == "WI-TEST-SNAPSHOT"
+    finally:
+        for descriptor in descriptors:
+            try:
+                os.fstat(descriptor)
+            except OSError:
+                closed.append(True)
+            else:
+                os.close(descriptor)  # Keep even the failing regression leak-free.
+                closed.append(False)
+    assert closed == [True], "snapshot leaked the descriptor before stream ownership"
+
+
+@pytest.mark.parametrize("fault", ("fdopen", "read", "growth", "rewrite", "replace", "parent"))
+def test_lifecycle_artifact_digest_failure_is_typed_and_closes_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    lifecycle = load_module(MUTATE, f"pr10_digest_failure_{fault}")
+    artifact = tmp_path / "owned" / "status.md"
+    artifact.parent.mkdir()
+    artifact.write_bytes(b"original")
+    metadata = artifact.stat()
+    original_fdopen = os.fdopen
+    descriptors: list[int] = []
+    injected = False
+    mutation_completed = False
+
+    class FaultReader:
+        def __init__(self, descriptor, *args, **kwargs):
+            descriptors.append(descriptor)
+            if fault == "fdopen":
+                raise OSError("injected stream construction failure")
+            self.stream = original_fdopen(descriptor, *args, **kwargs)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def read(self, size):
+            nonlocal injected, mutation_completed
+            if fault == "read":
+                raise OSError("injected read failure")
+            data = self.stream.read(size)
+            if not injected and fault in {"growth", "rewrite"}:
+                injected = True
+                if fault == "growth":
+                    with artifact.open("ab") as writer:
+                        writer.write(b"!")
+                elif fault == "rewrite":
+                    artifact.write_bytes(b"rewritte")
+                    os.utime(artifact, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+                mutation_completed = True
+            return data
+
+        def __exit__(self, *args):
+            nonlocal injected, mutation_completed
+            result = self.stream.__exit__(*args)
+            # Exercise revalidation after close: some Windows filesystems refuse
+            # replacement while the descriptor is open, before our guard can run.
+            if fault in {"replace", "parent"}:
+                injected = True
+                if fault == "replace":
+                    replacement = artifact.with_name("replacement.md")
+                    replacement.write_bytes(b"original")
+                    os.replace(replacement, artifact)
+                else:
+                    moved = tmp_path / "moved"
+                    artifact.parent.rename(moved)
+                    artifact.parent.mkdir()
+                    os.replace(moved / artifact.name, artifact)
+                mutation_completed = True
+            return result
+
+    monkeypatch.setattr(os, "fdopen", FaultReader)
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._ledger_location_regular_sha256(
+            artifact, failure_id="WI-TEST-ARTIFACT", maximum_bytes=8
+        )
+    assert caught.value.failure_id == "WI-TEST-ARTIFACT"
+    assert len(descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(descriptors[0])
+    if fault not in {"fdopen", "read"}:
+        assert injected and mutation_completed
+
+
+def test_settlement_ledger_digest_uses_validator_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixtures = load_module(LEGACY_TRANSFER_TESTS, "pr10_settlement_ledger_limit")
+    fixture = fixtures.transition_fixture(tmp_path)
+    payload = fixtures.run_transition(fixture)
+    lifecycle = fixture["lifecycle"]
+    archive = tmp_path / payload["archivePath"]
+    ledger = archive / "agent-runs.jsonl"
+    cap = 32 * 1024
+    data = ledger.read_bytes() + b"\n" * cap
+    ledger.write_bytes(data)
+    payload["ledgerSha256"] = hashlib.sha256(data).hexdigest()
+    receipt = archive / "lifecycle-transition-receipt.json"
+    receipt.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(lifecycle, "LEDGER_LOCATION_PROOF_BYTE_CAP", cap)
+    assert lifecycle._verify_settlement(tmp_path, receipt) == payload
+    validator = lifecycle._validator_module()
+    monkeypatch.setattr(validator, "MAX_TRANSFER_LEDGER_BYTES", cap)
+    monkeypatch.setattr(lifecycle, "_validator_module", lambda: validator)
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._verify_settlement(tmp_path, receipt)
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
+
+
+@pytest.mark.skipif(os.name != "posix" or not hasattr(os, "mkfifo"), reason="requires POSIX named pipes")
+def test_lifecycle_artifact_digest_refuses_fifo_replacement(tmp_path: Path) -> None:
+    # Isolate the potentially blocking open so a regression cannot hang the suite.
+    program = """
+import importlib.util
+import os
+import sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("fifo_digest_owner", sys.argv[1])
+lifecycle = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = lifecycle
+spec.loader.exec_module(lifecycle)
+artifact = Path(sys.argv[2])
+artifact.write_bytes(b"regular")
+original_open = lifecycle._open_readonly_nofollow
+
+def replace_before_open(path):
+    path.unlink()
+    os.mkfifo(path)
+    return original_open(path)
+
+lifecycle._open_readonly_nofollow = replace_before_open
+try:
+    lifecycle._ledger_location_regular_sha256(artifact, failure_id="WI-TEST-ARTIFACT")
+except lifecycle.LifecycleError as exc:
+    assert exc.failure_id == "WI-TEST-ARTIFACT"
+    print("FIFO-REFUSED")
+else:
+    raise AssertionError("digest accepted a substituted named pipe")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(MUTATE), str(tmp_path / "status.md")],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "FIFO-REFUSED"
