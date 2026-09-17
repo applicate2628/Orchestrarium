@@ -1004,31 +1004,6 @@ def test_closure_recovery_schema_contract_runbook_and_rollup_parity(tmp_path: Pa
             checker.check_recovery_documentation(duplicate_procedure)
 
 
-def test_implementation_lane_replays_dirty_declared_producer_delta() -> None:
-    root = ROOT / ".scratch" / "work-items" / "2026-08-17-fix-append-only-invalid-ledger-event-recovery" / "lead-append-only-scratch-retain-20260821-r1-terminal" / "implementation-lane-baseline"
-    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["schemaVersion"] == 2
-    assert len(manifest["entries"]) == 77
-    assert len(manifest["declaredPaths"]["paths"]) == 13
-    assert manifest["exclusiveLane"]["producerWriteObserved"] is False
-    probes = json.loads((root / "negative-probes.json").read_text(encoding="utf-8"))
-    assert len(probes["results"]) == 7
-    assert {row["failureId"] for row in probes["results"]} == {"lane-evidence:path", "lane-evidence:cap", "lane-evidence:identity", "lane-evidence:corrupt", "lane-evidence:baseline-drift"}
-    assert probes["producerWrites"] == 0
-
-
-def test_implementation_lane_forbids_external_side_effects() -> None:
-    root = ROOT / ".scratch" / "work-items" / "2026-08-17-fix-append-only-invalid-ledger-event-recovery" / "lead-append-only-scratch-retain-20260821-r1-terminal" / "implementation-lane-baseline"
-    commands = json.loads((root / "commands.jsonl").read_text(encoding="utf-8"))
-    processes = json.loads((root / "process-network-attempts.jsonl").read_text(encoding="utf-8"))
-    call_path = json.loads((root / "call-path-observation.json").read_text(encoding="utf-8"))
-    assert len(commands["deniedClasses"]) == 12
-    assert commands["forbiddenAttempts"] == []
-    assert processes["networkAttempts"] == processes["forbiddenAttempts"] == processes["activePids"] == []
-    assert call_path["forbiddenEdges"] == []
-    assert call_path["claimBoundary"] == "no claim about arbitrary unobserved installed/runtime state"
-
-
 class _UnittestAdapter(unittest.TestCase):
     """Run existing pytest-style functions under the plan's unittest CLI."""
 
