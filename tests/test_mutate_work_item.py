@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import importlib.util
 import io
@@ -42,6 +43,17 @@ def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        check=False,
+    )
+
+
+def run_cli_separate_streams(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         check=False,
     )
 
@@ -236,6 +248,510 @@ def write_bug_dispositions(
 
 def write_empty_bug_dispositions(root: Path, item_slug: str, instant: str) -> Path:
     return write_bug_dispositions(root, item_slug, instant, [])
+
+
+def seed_retained_scratch_manifest(
+    module,
+    root: Path,
+    slug: str,
+    instant: str,
+    *,
+    leaf_name: str = "historical-evidence",
+    regular_file: bool = False,
+):
+    seed_active(module, root, slug)
+    item = root / "work-items" / "active" / slug
+    retained = root / ".scratch" / "work-items" / slug / "run-001" / leaf_name
+    if regular_file:
+        write(retained, f"preserve {leaf_name} historical evidence\n")
+    else:
+        write(retained / "proof.txt", "preserve this historical evidence\n")
+    pointer = item / "historical-evidence.md"
+    write(pointer, f"{leaf_name}\n")
+    retained_before = module._payload_digest(retained)[1]
+    pointer_before = pointer.read_bytes()
+    manifest = {
+        "schemaVersion": 3,
+        "workItem": slug,
+        "closedAt": instant,
+        "bugs": [],
+        "evidenceRetention": [
+            {
+                "path": retained.relative_to(root).as_posix(),
+                "disposition": "retain",
+                "treeSha256": retained_before,
+                "canonicalPointer": pointer.relative_to(item).as_posix(),
+                "canonicalPointerSha256": hashlib.sha256(pointer_before).hexdigest(),
+            }
+        ],
+    }
+    (item / "bug-dispositions.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return item, retained, pointer, retained_before, pointer_before, manifest
+
+
+def test_close_retains_declared_unmatched_scratch_evidence_root(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-scratch-root"
+    instant = "2026-08-11T10:00:00Z"
+    item, retained, pointer, retained_before, pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant
+    )
+
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+
+    assert module._payload_digest(retained)[1] == retained_before
+    assert archived == root / "work-items" / "archive" / "2026-08" / slug
+    archived_pointer = archived / pointer.name
+    assert archived_pointer.read_bytes() == pointer_before
+    receipt = json.loads((archived / "bug-dispositions-receipt.json").read_text(encoding="utf-8"))
+    assert receipt["evidenceRetention"] == manifest["evidenceRetention"]
+
+    shutil.rmtree(retained.parent)
+    assert module.close_item(root, slug, closure(instant).encode(), instant) == archived
+
+
+def test_close_retains_declared_unmatched_regular_file_scratch_evidence(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-scratch-file"
+    instant = "2026-08-11T10:00:30Z"
+    _item, retained, pointer, retained_before, pointer_before, manifest = seed_retained_scratch_manifest(
+        module,
+        root,
+        slug,
+        instant,
+        leaf_name="receiving_probe.py",
+        regular_file=True,
+    )
+
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+
+    assert retained.is_file()
+    assert module._payload_digest(retained)[1] == retained_before
+    assert (archived / pointer.name).read_bytes() == pointer_before
+    receipt = json.loads((archived / "bug-dispositions-receipt.json").read_text(encoding="utf-8"))
+    assert receipt["evidenceRetention"] == manifest["evidenceRetention"]
+    retained.unlink()
+    assert module.close_item(root, slug, closure(instant).encode(), instant) == archived
+
+
+def test_close_retention_receipt_accepts_relative_repository_root(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-relative-root"
+    instant = "2026-08-11T10:00:45Z"
+    item, retained, _pointer, retained_before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant
+    )
+    closure_path = root / "closure.md"
+    closure_path.write_text(closure(instant), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "close",
+            "--root",
+            ".",
+            "--slug",
+            slug,
+            "--closure-file",
+            str(closure_path),
+            "--terminal-instant",
+            instant,
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    archived = root / "work-items" / "archive" / "2026-08" / slug
+    assert result.stdout.strip() == str(archived.resolve())
+    assert module._payload_digest(retained)[1] == retained_before
+    receipt = json.loads((archived / "bug-dispositions-receipt.json").read_text(encoding="utf-8"))
+    assert receipt["evidenceRetention"] == manifest["evidenceRetention"]
+    assert not item.exists()
+
+
+def test_close_retention_receipt_preserves_unsorted_manifest_row_order(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-unsorted-order"
+    instant = "2026-08-11T10:01:15Z"
+    item, retained, _pointer, retained_before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant, leaf_name="zeta-capture"
+    )
+    file_leaf = root / ".scratch" / "work-items" / slug / "run-002" / "alpha_probe.py"
+    write(file_leaf, "preserve alpha_probe.py historical evidence\n")
+    file_pointer = item / "alpha-probe.md"
+    write(file_pointer, "alpha_probe.py\n")
+    manifest["evidenceRetention"].append(
+        {
+            "path": file_leaf.relative_to(root).as_posix(),
+            "disposition": "retain",
+            "treeSha256": module._payload_digest(file_leaf)[1],
+            "canonicalPointer": file_pointer.relative_to(item).as_posix(),
+            "canonicalPointerSha256": hashlib.sha256(file_pointer.read_bytes()).hexdigest(),
+        }
+    )
+    (item / "bug-dispositions.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    closure_path = root / "closure.md"
+    closure_path.write_text(closure(instant), encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "close",
+            "--root",
+            ".",
+            "--slug",
+            slug,
+            "--closure-file",
+            str(closure_path),
+            "--terminal-instant",
+            instant,
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    archived = root / "work-items" / "archive" / "2026-08" / slug
+    receipt = json.loads((archived / "bug-dispositions-receipt.json").read_text(encoding="utf-8"))
+    assert receipt["evidenceRetention"] == manifest["evidenceRetention"]
+    assert module._payload_digest(retained)[1] == retained_before
+    assert file_leaf.read_text(encoding="utf-8") == "preserve alpha_probe.py historical evidence\n"
+    file_leaf.unlink()
+    shutil.rmtree(retained)
+    assert module.close_item(root, slug, closure_path.read_bytes(), instant) == archived
+
+
+def test_retained_scratch_hash_drift_and_close_rollback_preserve_active_state(tmp_path: Path) -> None:
+    module = load_module()
+    instant = "2026-08-11T10:01:00Z"
+
+    drift_root = tmp_path / "drift"
+    drift_slug = "retained-scratch-drift"
+    drift_item, retained, _pointer, retained_before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, drift_root, drift_slug, instant
+    )
+    manifest["evidenceRetention"][0]["treeSha256"] = "0" * 64
+    (drift_item / "bug-dispositions.json").write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+    try:
+        module.close_item(drift_root, drift_slug, closure(instant).encode(), instant)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-BUG-DISPOSITIONS-DRIFT"
+    else:
+        raise AssertionError("retained scratch hash drift was accepted")
+    assert module._payload_digest(retained)[1] == retained_before
+    assert drift_item.is_dir()
+
+    rollback_root = tmp_path / "rollback"
+    rollback_slug = "retained-scratch-rollback"
+    item, retained, pointer, retained_before, pointer_before, _manifest = seed_retained_scratch_manifest(
+        module, rollback_root, rollback_slug, instant
+    )
+    try:
+        module.close_item(
+            rollback_root,
+            rollback_slug,
+            closure(instant).encode(),
+            instant,
+            inject_readme_failure=True,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+    else:
+        raise AssertionError("injected close failure did not roll back")
+    assert item.is_dir()
+    assert pointer.read_bytes() == pointer_before
+    assert module._payload_digest(retained)[1] == retained_before
+    assert not (rollback_root / "work-items" / "archive" / "2026-08" / rollback_slug).exists()
+
+
+def test_retained_scratch_pointer_parent_link_is_rejected_before_archive(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-pointer-parent-link"
+    instant = "2026-08-11T10:02:00Z"
+    item, retained, _pointer, retained_before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant
+    )
+    external = tmp_path / "external-pointer"
+    write(external / "proof.md", "historical-evidence\n")
+    linked_parent = item / "linked-parent"
+    try:
+        os.symlink(external, linked_parent, target_is_directory=True)
+    except OSError as exc:
+        raise AssertionError("parent-link retention regression requires symlink support") from exc
+    external_pointer = external / "proof.md"
+    manifest["evidenceRetention"][0]["canonicalPointer"] = "linked-parent/proof.md"
+    manifest["evidenceRetention"][0]["canonicalPointerSha256"] = hashlib.sha256(
+        external_pointer.read_bytes()
+    ).hexdigest()
+    (item / "bug-dispositions.json").write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+
+    try:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-BUG-DISPOSITIONS-INVALID"
+    else:
+        raise AssertionError("canonical pointer escaped through a linked parent")
+
+    assert item.is_dir()
+    assert module._payload_digest(retained)[1] == retained_before
+    assert external_pointer.read_text(encoding="utf-8") == "historical-evidence\n"
+    assert not (root / "work-items" / "archive" / "2026-08" / slug).exists()
+
+
+def test_retained_payload_digest_optional_limits_keep_legacy_golden_bytes(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    payload = tmp_path / "payload"
+    (payload / "proof.txt").parent.mkdir(parents=True, exist_ok=True)
+    (payload / "proof.txt").write_bytes(b"proof\n")
+    (payload / "nested").mkdir()
+    (payload / "nested" / "data.bin").write_bytes(b"xy")
+
+    assert module._payload_digest(payload) == (
+        "sha256-tree-entries-v1",
+        "81dfbcb39577424a703e807dd5712bdb0d3decf231edd85327e3438a48ffba5f",
+    )
+    legacy_file = tmp_path / "legacy-file.txt"
+    legacy_file.write_bytes(b"legacy file\n")
+    assert module._payload_digest(legacy_file) == (
+        "sha256-file-bytes-v1",
+        "2ed93b04807efb14d2186e20bb6f8c45264a32d08bd97df62316cccd6ded4894",
+    )
+    assert module._payload_digest(
+        payload,
+        limits=module.PayloadDigestLimits(
+            max_files=8, max_entries=8, max_bytes=1024
+        ),
+    ) == module._payload_digest(payload)
+
+    cases = (
+        (module.PayloadDigestLimits(max_files=8, max_entries=1, max_bytes=1024), "entry"),
+        (module.PayloadDigestLimits(max_files=1, max_entries=8, max_bytes=1024), "file"),
+        (module.PayloadDigestLimits(max_files=8, max_entries=8, max_bytes=1), "byte"),
+    )
+    for limits, label in cases:
+        try:
+            module._payload_digest(payload, limits=limits)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-MIGRATION-PAYLOAD", label
+        else:
+            raise AssertionError(f"{label} payload limit was accepted")
+
+
+def test_retained_payload_digest_limit_stops_scandir_before_preloading(tmp_path: Path) -> None:
+    module = load_module()
+    payload = tmp_path / "payload"
+    for name in ("one.txt", "two.txt", "three.txt"):
+        write(payload / name, name + "\n")
+
+    original_scandir = module.os.scandir
+    consumed: list[str] = []
+    closed: list[bool] = []
+
+    class TrackingScandir:
+        def __init__(self, path) -> None:
+            self._context = original_scandir(path)
+            self._iterator = self._context.__enter__()
+            self._track = Path(path) == payload
+            self._closed = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            entry = next(self._iterator)
+            if self._track:
+                consumed.append(entry.name)
+            return entry
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            self._closed = True
+            if self._track:
+                closed.append(self._closed)
+            self._context.__exit__(exc_type, exc, traceback)
+
+    with patch.object(module.os, "scandir", side_effect=TrackingScandir):
+        try:
+            module._payload_digest(
+                payload,
+                limits=module.PayloadDigestLimits(
+                    max_files=8, max_entries=1, max_bytes=1024
+                ),
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-MIGRATION-PAYLOAD"
+        else:
+            raise AssertionError("bounded payload walk accepted three entries")
+
+    assert len(consumed) == 2
+    assert closed == [True]
+
+
+def test_retained_evidence_limits_use_cleanup_owner_ceilings(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-ceiling"
+    instant = "2026-08-11T10:02:30Z"
+    item, retained, _pointer, _before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant
+    )
+    write(retained / "second-proof.txt", "second retained proof\n")
+    manifest["evidenceRetention"][0]["treeSha256"] = module._payload_digest(retained)[1]
+
+    classifier = module._scratch_classifier_module()
+    with (
+        patch.object(module, "_scratch_classifier_module", return_value=classifier),
+        patch.object(classifier, "MAX_OWNED_TREE_FILES", 1),
+    ):
+        try:
+            module._prepare_evidence_retention(root, item, manifest)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-SCRATCH-UNSAFE-ENTRY"
+        else:
+            raise AssertionError("retained evidence exceeded the cleanup owner file ceiling")
+
+
+def test_retained_evidence_pointer_requires_literal_root_or_manifest_path(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    instant = "2026-08-11T10:02:45Z"
+    cases = (
+        ("plain", "historical-evidence", "historical-evidence\n", True),
+        ("quoted", "historical-evidence", '"historical-evidence"\n', True),
+        (
+            "manifest-path-with-spaces",
+            "historical evidence",
+            ".scratch/work-items/retained-manifest-path-with-spaces/run-001/historical evidence\n",
+            True,
+        ),
+        ("catalog", "log", "catalog\n", False),
+        ("unrelated-label", "evidence", "unrelated-evidence-label\n", False),
+        ("wrong-path", "log", "wrong/path/log\n", False),
+    )
+    for suffix, leaf_name, pointer_text, accepted in cases:
+        root = tmp_path / suffix
+        slug = f"retained-{suffix}"
+        item, _retained, pointer, _before, _pointer_before, manifest = seed_retained_scratch_manifest(
+            module, root, slug, instant, leaf_name=leaf_name
+        )
+        pointer.write_text(pointer_text, encoding="utf-8")
+        manifest["evidenceRetention"][0]["canonicalPointerSha256"] = hashlib.sha256(
+            pointer.read_bytes()
+        ).hexdigest()
+
+        if accepted:
+            plans = module._prepare_evidence_retention(root, item, manifest)
+            assert len(plans) == 1, suffix
+            continue
+        try:
+            module._prepare_evidence_retention(root, item, manifest)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-DISPOSITIONS-DRIFT", suffix
+        else:
+            raise AssertionError(f"false pointer reference was admitted: {suffix}")
+
+
+def test_retained_evidence_pointer_snapshot_limit_fails_before_hashing(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-pointer-limit"
+    instant = "2026-08-11T10:03:00Z"
+    item, _retained, _pointer, _before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant
+    )
+    capture = module._capture_file_snapshot
+
+    def capture_with_tiny_limit(path: Path, *, failure_id: str, maximum_bytes: int = 4 * 1024 * 1024):
+        return capture(path, failure_id=failure_id, maximum_bytes=1)
+
+    with patch.object(module, "_capture_file_snapshot", side_effect=capture_with_tiny_limit):
+        try:
+            module._prepare_evidence_retention(root, item, manifest)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-DISPOSITIONS-INVALID"
+        else:
+            raise AssertionError("oversized canonical pointer was admitted")
+
+
+def successor_binding_bytes(
+    source_slug: str,
+    successor_bytes: bytes,
+    operation_id: str,
+    *,
+    accepted_by: str = "receiving-owner",
+) -> bytes:
+    return (
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "operationId": operation_id,
+                "sourceReference": f"bug:{source_slug}",
+                "registryReference": "external-bug-registry",
+                "recordReference": "bug:accepted-successor",
+                "recordSha256": hashlib.sha256(successor_bytes).hexdigest(),
+                "acceptedBy": accepted_by,
+                "acceptedAt": "2026-09-10T08:00:00Z",
+                "acceptanceEvidence": "Receiving owner accepted the current successor.",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def successor_link_inventory_bytes(
+    source_slug: str,
+    source_bytes: bytes,
+    binding_bytes: bytes,
+    operation_id: str,
+    links: list[dict] | None = None,
+) -> bytes:
+    return (
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "owner": "mutate-work-item:current-bug-supersession-v1",
+                "operationId": operation_id,
+                "sourceReference": f"bug:{source_slug}",
+                "sourceBugSha256": hashlib.sha256(source_bytes).hexdigest(),
+                "successorBindingSha256": hashlib.sha256(binding_bytes).hexdigest(),
+                "links": [] if links is None else links,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def tree_file_bytes(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
 
 
 def test_close_requires_exact_bug_disposition_manifest(tmp_path: Path) -> None:
@@ -765,6 +1281,777 @@ def test_close_replay_accepts_historical_archive_without_bug_manifest(
     assert not (archived / "bug-dispositions-receipt.json").exists()
 
 
+def test_supersede_current_bug_requires_exact_accepted_successor_binding_without_local_mutation(
+    tmp_path: Path,
+) -> None:
+    operation_id = "supersede-current-bug-binding"
+    for case in ("missing", "malformed", "unaccepted", "wrong-operation", "hash-drifted"):
+        module = load_module()
+        root = tmp_path / case
+        slug = f"2026-09-10-{case}-source"
+        source = seed_context_bug(root, "source-owner", slug)
+        successor = root / "receiving-registry" / "accepted-successor.md"
+        successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+        successor.parent.mkdir(parents=True)
+        successor.write_bytes(successor_bytes)
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+        binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+        if case == "missing":
+            supplied_binding = None
+        elif case == "malformed":
+            supplied_binding = b"{"
+        elif case == "unaccepted":
+            supplied_binding = successor_binding_bytes(
+                slug, successor_bytes, operation_id, accepted_by=""
+            )
+        elif case == "wrong-operation":
+            supplied_binding = successor_binding_bytes(
+                slug, successor_bytes, operation_id + "-other"
+            )
+        else:
+            supplied_binding = binding
+            successor.write_bytes(successor_bytes + b"drift\n")
+        inventory = successor_link_inventory_bytes(
+            slug, source.read_bytes(), binding, operation_id
+        )
+        before = tree_file_bytes(root / "work-items")
+        successor_before = successor.read_bytes()
+
+        try:
+            module.supersede_current_bug(
+                root,
+                slug,
+                successor,
+                supplied_binding,
+                "2026-09-10T08:01:00Z",
+                inventory,
+                hashlib.sha256(source.read_bytes()).hexdigest(),
+                hashlib.sha256(
+                    (root / "work-items" / "README.md").read_bytes()
+                ).hexdigest(),
+                operation_id,
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-SUCCESSOR-BINDING", case
+        else:
+            raise AssertionError(f"{case} successor binding was accepted")
+
+        assert tree_file_bytes(root / "work-items") == before, case
+        assert source.is_file(), case
+        assert successor.read_bytes() == successor_before, case
+
+
+def test_supersede_current_bug_rechecks_same_length_successor_bytes_before_intent(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "same-length-successor"
+    slug = "2026-09-10-same-length-successor"
+    operation_id = "supersede-same-length-successor"
+    source = seed_context_bug(root, "source-owner", slug)
+    source_before = source.read_bytes()
+    successor = root / "receiving-registry" / "accepted-successor.md"
+    accepted_bytes = b"id: accepted-successor\nstatus: accepted\n"
+    updated_bytes = b"id: accepted-successor\nstatus: reviewed\n"
+    assert len(accepted_bytes) == len(updated_bytes)
+    successor.parent.mkdir(parents=True)
+    successor.write_bytes(accepted_bytes)
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    readme = root / "work-items" / "README.md"
+    binding = successor_binding_bytes(slug, accepted_bytes, operation_id)
+    inventory = successor_link_inventory_bytes(
+        slug, source_before, binding, operation_id
+    )
+    original_verify = module._verify_captured_file
+    injected = False
+
+    def update_before_final_verify(snapshot, failure_id):
+        nonlocal injected
+        if not injected and snapshot.path == successor:
+            successor.write_bytes(updated_bytes)
+            injected = True
+        return original_verify(snapshot, failure_id)
+
+    module._verify_captured_file = update_before_final_verify
+    try:
+        try:
+            module.supersede_current_bug(
+                root,
+                slug,
+                successor,
+                binding,
+                "2026-09-10T08:02:00Z",
+                inventory,
+                hashlib.sha256(source_before).hexdigest(),
+                hashlib.sha256(readme.read_bytes()).hexdigest(),
+                operation_id,
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-SUCCESSOR-BINDING"
+        else:
+            raise AssertionError("same-length successor drift was accepted")
+    finally:
+        module._verify_captured_file = original_verify
+
+    assert injected is True
+    assert source.read_bytes() == source_before
+    assert successor.read_bytes() == updated_bytes
+    assert not list((root / "work-items" / "bugs" / "archive").glob("*/*.md"))
+    assert not (
+        root
+        / ".scratch"
+        / "work-items-lifecycle-transitions"
+        / f"{operation_id}.json"
+    ).exists()
+
+
+def _supersede_current_bug_cli_fixture(
+    module,
+    root: Path,
+    slug: str,
+    operation_id: str,
+) -> tuple[list[str], Path, Path, Path]:
+    source = seed_context_bug(root, "source-owner", slug)
+    successor = root / "receiving-registry" / "accepted-successor.md"
+    successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+    successor.parent.mkdir(parents=True)
+    successor.write_bytes(successor_bytes)
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    readme = root / "work-items" / "README.md"
+    binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+    binding_file = root / "input" / "successor-binding.json"
+    inventory_file = root / "input" / "incoming-links.json"
+    binding_file.parent.mkdir(parents=True)
+    binding_file.write_bytes(binding)
+    inventory_file.write_bytes(
+        successor_link_inventory_bytes(
+            slug, source.read_bytes(), binding, operation_id
+        )
+    )
+    return (
+        [
+            "supersede-current-bug",
+            "--root",
+            str(root),
+            "--slug",
+            slug,
+            "--successor-record",
+            str(successor),
+            "--successor-binding-file",
+            str(binding_file),
+            "--terminal-instant",
+            "2026-09-10T08:05:00Z",
+            "--incoming-links-inventory",
+            str(inventory_file),
+            "--expected-bug-sha256",
+            hashlib.sha256(source.read_bytes()).hexdigest(),
+            "--expected-readme-sha256",
+            hashlib.sha256(readme.read_bytes()).hexdigest(),
+            "--operation-id",
+            operation_id,
+            "--apply",
+        ],
+        source,
+        binding_file,
+        successor,
+    )
+
+
+def test_supersede_current_bug_cli_projects_failure_output_without_caller_content(
+    tmp_path: Path,
+) -> None:
+    cases = (
+        (
+            "duplicate-token-key",
+            "SYNTHETIC_TOKEN_LIKE_sk_FAKE_6f3d9a0c",
+            "duplicate",
+            "WI-BUG-SUCCESSOR-BINDING: current bug supersession rejected\n",
+        ),
+        (
+            "duplicate-log-key",
+            "SYNTHETIC_RAW_LOG_2026-09-10T08_30_00Z_ERROR_5b72c1e4",
+            "duplicate",
+            "WI-BUG-SUCCESSOR-BINDING: current bug supersession rejected\n",
+        ),
+        (
+            "missing-path",
+            "SYNTHETIC_MACHINE_LOCAL_PATH_91e7c4ab",
+            "missing",
+            "WI-IO: required current bug supersession input could not be read\n",
+        ),
+        (
+            "malformed-control",
+            "SYNTHETIC_MALFORMED_CONTROL_2dc848ae",
+            "malformed",
+            "WI-BUG-SUCCESSOR-BINDING: current bug supersession rejected\n",
+        ),
+    )
+    for case, sentinel, mode, expected_stdout in cases:
+        module = load_module()
+        root = tmp_path / case
+        slug = f"2026-09-10-{case}-failure-output"
+        operation_id = f"failure-output-{case}"
+        argv, source, binding_file, successor = _supersede_current_bug_cli_fixture(
+            module, root, slug, operation_id
+        )
+        if mode == "duplicate":
+            valid = binding_file.read_bytes()
+            binding_file.write_bytes(
+                (f'{{"{sentinel}":"first","{sentinel}":"second",').encode()
+                + valid[1:]
+            )
+        elif mode == "missing":
+            missing = root / "missing-input" / sentinel / "successor-binding.json"
+            argv[argv.index(str(binding_file))] = str(missing)
+        else:
+            binding_file.write_bytes(b"{" + sentinel.encode("ascii"))
+        before = tree_file_bytes(root)
+
+        result = run_cli_separate_streams(*argv)
+
+        assert result.returncode == 1, case
+        assert result.stdout == expected_stdout, case
+        assert result.stderr == "", case
+        assert sentinel not in result.stdout, case
+        assert sentinel not in result.stderr, case
+        assert tree_file_bytes(root) == before, case
+        assert source.is_file(), case
+        assert successor.is_file(), case
+        assert not list((root / "work-items" / "bugs").glob("archive/*/*.md")), case
+        assert not list(root.rglob("*.supersession-receipt.json")), case
+        assert not (
+            root
+            / ".scratch"
+            / "work-items-lifecycle-transitions"
+            / f"{operation_id}.json"
+        ).exists(), case
+
+
+def test_supersede_current_bug_main_projects_unexpected_exception_and_preserves_controls(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "unexpected"
+    argv, _source, _binding_file, _successor = _supersede_current_bug_cli_fixture(
+        module,
+        root,
+        "2026-09-10-unexpected-failure-output",
+        "failure-output-unexpected",
+    )
+    marker = "SYNTHETIC_UNEXPECTED_RUNTIME_MARKER_7c91e2"
+    output = io.StringIO()
+    error = io.StringIO()
+    with patch.object(
+        module,
+        "supersede_current_bug",
+        side_effect=RuntimeError(marker),
+    ), redirect_stdout(output), redirect_stderr(error):
+        assert module.main(argv) == 1
+    assert output.getvalue() == (
+        "WI-BUG-SUPERSESSION-UNEXPECTED: "
+        "current bug supersession failed unexpectedly\n"
+    )
+    assert error.getvalue() == ""
+    assert marker not in output.getvalue()
+    assert "Traceback" not in output.getvalue()
+
+    for interruption in (
+        KeyboardInterrupt("synthetic keyboard interruption"),
+        asyncio.CancelledError("synthetic cancellation"),
+    ):
+        output = io.StringIO()
+        error = io.StringIO()
+        with patch.object(
+            module,
+            "supersede_current_bug",
+            side_effect=interruption,
+        ), redirect_stdout(output), redirect_stderr(error):
+            with unittest.TestCase().assertRaises(type(interruption)) as caught:
+                module.main(argv)
+        assert caught.exception is interruption
+        assert output.getvalue() == ""
+        assert error.getvalue() == ""
+
+    detailed = "other command retains its detailed diagnostic"
+    output = io.StringIO()
+    error = io.StringIO()
+    with patch.object(
+        module,
+        "refresh_readme",
+        side_effect=module.LifecycleError("WI-README-STALE", detailed),
+    ), redirect_stdout(output), redirect_stderr(error):
+        assert module.main(["refresh", "--root", str(root)]) == 1
+    assert output.getvalue() == f"WI-README-STALE: {detailed}\n"
+    assert error.getvalue() == ""
+
+
+def test_supersede_current_bug_rejects_unreadable_live_reference_consumers_without_mutation(
+    tmp_path: Path,
+) -> None:
+    for failure_kind in ("unicode", "oserror"):
+        for inventory_kind in ("zero", "partial"):
+            module = load_module()
+            case = f"{failure_kind}-{inventory_kind}"
+            root = tmp_path / case
+            slug = f"2026-09-10-unreadable-{case}"
+            operation_id = f"supersede-unreadable-{case}"
+            source = seed_context_bug(root, "source-owner", slug)
+            source_before = source.read_bytes()
+            active = root / "work-items" / "active"
+            write(active / "unreadable-consumer" / "status.md", quick_status())
+            unreadable = active / "unreadable-consumer" / "notes.md"
+            unreadable.parent.mkdir(parents=True, exist_ok=True)
+            unreadable.write_bytes(
+                f"Related: bug:{slug}\n".encode("utf-8")
+                + (b"\xff" if failure_kind == "unicode" else b"")
+            )
+            valid = active / "valid-consumer" / "notes.md"
+            valid_before = f"Related: bug:{slug}\n".encode("utf-8")
+            valid_after = (
+                "Related: external-bug-registry#bug:accepted-successor\n"
+            ).encode("utf-8")
+            if inventory_kind == "partial":
+                write(active / "valid-consumer" / "status.md", quick_status())
+                valid.parent.mkdir(parents=True, exist_ok=True)
+                valid.write_bytes(valid_before)
+            successor = root / "receiving-registry" / "accepted-successor.md"
+            successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+            successor.parent.mkdir(parents=True)
+            successor.write_bytes(successor_bytes)
+            module.refresh_readme(root, allow_marker_bootstrap=True)
+            readme = root / "work-items" / "README.md"
+            binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+            links = (
+                [
+                    {
+                        "path": valid.relative_to(root).as_posix(),
+                        "beforeSha256": hashlib.sha256(valid_before).hexdigest(),
+                        "afterSha256": hashlib.sha256(valid_after).hexdigest(),
+                        "afterBytesBase64": base64.b64encode(valid_after).decode("ascii"),
+                    }
+                ]
+                if inventory_kind == "partial"
+                else []
+            )
+            inventory = successor_link_inventory_bytes(
+                slug, source_before, binding, operation_id, links
+            )
+            work_items_before = tree_file_bytes(root / "work-items")
+            successor_before = successor.read_bytes()
+            original_read_bytes = Path.read_bytes
+
+            def injected_read_bytes(path: Path) -> bytes:
+                if failure_kind == "oserror" and path == unreadable:
+                    raise OSError("injected unreadable live reference consumer")
+                return original_read_bytes(path)
+
+            try:
+                with patch.object(Path, "read_bytes", injected_read_bytes):
+                    module.supersede_current_bug(
+                        root,
+                        slug,
+                        successor,
+                        binding,
+                        "2026-09-10T08:01:30Z",
+                        inventory,
+                        hashlib.sha256(source_before).hexdigest(),
+                        hashlib.sha256(readme.read_bytes()).hexdigest(),
+                        operation_id,
+                    )
+            except module.LifecycleError as exc:
+                assert exc.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY", case
+            else:
+                raise AssertionError(f"{case} unreadable live consumer was omitted")
+
+            assert tree_file_bytes(root / "work-items") == work_items_before, case
+            assert successor.read_bytes() == successor_before, case
+            assert not (
+                root
+                / ".scratch"
+                / "work-items-lifecycle-transitions"
+                / f"{operation_id}.json"
+            ).exists(), case
+
+
+def test_supersede_current_bug_excludes_unreadable_archived_consumers_from_strict_inventory(
+    tmp_path: Path,
+) -> None:
+    for failure_kind in ("unicode", "oserror"):
+        module = load_module()
+        root = tmp_path / failure_kind
+        slug = f"2026-09-10-archived-control-{failure_kind}"
+        operation_id = f"supersede-archived-control-{failure_kind}"
+        source = seed_context_bug(root, "source-owner", slug)
+        source_before = source.read_bytes()
+        historical = (
+            root
+            / "work-items"
+            / "archive"
+            / "2026-08"
+            / "unrelated-history"
+        )
+        write(historical / "status.md", marked_status())
+        write(
+            historical / "closure.md",
+            marked_closure("2026-08-01T00:00:00Z"),
+        )
+        archived_consumer = historical / "notes.bin"
+        archived_consumer.write_bytes(
+            f"Historical: bug:{slug}\n".encode("utf-8")
+            + (b"\xff" if failure_kind == "unicode" else b"")
+        )
+        archived_consumer_before = archived_consumer.read_bytes()
+        successor = root / "receiving-registry" / "accepted-successor.md"
+        successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+        successor.parent.mkdir(parents=True)
+        successor.write_bytes(successor_bytes)
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+        readme = root / "work-items" / "README.md"
+        binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+        inventory = successor_link_inventory_bytes(
+            slug, source_before, binding, operation_id
+        )
+        original_read_bytes = Path.read_bytes
+
+        def injected_read_bytes(path: Path) -> bytes:
+            if failure_kind == "oserror" and path == archived_consumer:
+                raise OSError("injected unreadable archived consumer")
+            return original_read_bytes(path)
+
+        with patch.object(Path, "read_bytes", injected_read_bytes):
+            settled = module.supersede_current_bug(
+                root,
+                slug,
+                successor,
+                binding,
+                "2026-09-10T08:01:45Z",
+                inventory,
+                hashlib.sha256(source_before).hexdigest(),
+                hashlib.sha256(readme.read_bytes()).hexdigest(),
+                operation_id,
+            )
+
+        archive = (
+            root
+            / "work-items"
+            / "bugs"
+            / "archive"
+            / "2026-09"
+            / f"{slug}.md"
+        )
+        assert settled["status"] == "settled", failure_kind
+        assert not source.exists() and archive.is_file(), failure_kind
+        assert archived_consumer.read_bytes() == archived_consumer_before, failure_kind
+        assert successor.read_bytes() == successor_bytes, failure_kind
+        assert not (
+            root
+            / ".scratch"
+            / "work-items-lifecycle-transitions"
+            / f"{operation_id}.json"
+        ).exists(), failure_kind
+
+
+def test_supersede_current_bug_archives_links_and_readme_in_one_recoverable_intent(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-09-10-source-bug"
+    operation_id = "supersede-current-bug-success"
+    terminal_instant = "2026-09-10T08:02:00Z"
+    source = seed_context_bug(root, "source-owner", slug)
+    source_before = source.read_bytes()
+    consumer = root / "work-items" / "active" / "consumer" / "status.md"
+    old_href = f"../../bugs/{slug}.md"
+    successor_reference = "external-bug-registry#bug:accepted-successor"
+    consumer_before = (
+        quick_status("Track the source bug.")
+        + f"\nRelated: bug:{slug}\n[physical]({old_href})\n"
+    ).encode("utf-8")
+    consumer_after = consumer_before.replace(
+        f"bug:{slug}".encode("utf-8"), successor_reference.encode("utf-8")
+    ).replace(old_href.encode("utf-8"), successor_reference.encode("utf-8"))
+    consumer.parent.mkdir(parents=True)
+    consumer.write_bytes(consumer_before)
+    successor = root / "receiving-registry" / "accepted-successor.md"
+    successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+    successor.parent.mkdir(parents=True)
+    successor.write_bytes(successor_bytes)
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    readme = root / "work-items" / "README.md"
+    readme_before_sha256 = hashlib.sha256(readme.read_bytes()).hexdigest()
+    binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+    inventory = successor_link_inventory_bytes(
+        slug,
+        source_before,
+        binding,
+        operation_id,
+        [
+            {
+                "path": consumer.relative_to(root).as_posix(),
+                "beforeSha256": hashlib.sha256(consumer_before).hexdigest(),
+                "afterSha256": hashlib.sha256(consumer_after).hexdigest(),
+                "afterBytesBase64": base64.b64encode(consumer_after).decode("ascii"),
+            }
+        ],
+    )
+    binding_file = root / "successor-binding.json"
+    inventory_file = root / "incoming-links.json"
+    binding_file.write_bytes(binding)
+    inventory_file.write_bytes(inventory)
+    successor_before = successor.read_bytes()
+
+    result = run_cli(
+        "supersede-current-bug",
+        "--root",
+        str(root),
+        "--slug",
+        slug,
+        "--successor-record",
+        str(successor),
+        "--successor-binding-file",
+        str(binding_file),
+        "--terminal-instant",
+        terminal_instant,
+        "--incoming-links-inventory",
+        str(inventory_file),
+        "--expected-bug-sha256",
+        hashlib.sha256(source_before).hexdigest(),
+        "--expected-readme-sha256",
+        readme_before_sha256,
+        "--operation-id",
+        operation_id,
+        "--apply",
+    )
+    assert result.returncode == 0, result.stdout
+    assert "WI-BUG-SUPERSESSION-COMMITTED" in result.stdout
+
+    archive = (
+        root
+        / "work-items"
+        / "bugs"
+        / "archive"
+        / "2026-09"
+        / f"{slug}.md"
+    )
+    receipt_path = archive.with_name(f"{slug}.supersession-receipt.json")
+    assert not source.exists()
+    assert archive.is_file()
+    assert consumer.read_bytes() == consumer_after
+    assert successor.read_bytes() == successor_before
+    fields = module._parse_fields(archive.read_text(encoding="utf-8"))
+    assert fields["status"] == "superseded"
+    assert fields["terminal-at"] == terminal_instant
+    assert fields["resolution"] == f"Superseded by {successor_reference}."
+    assert fields["evidence"] == "Receiving owner accepted the current successor."
+    assert fields["successor"] == successor_reference
+    assert str(successor) not in archive.read_text(encoding="utf-8")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert set(receipt) == {
+        "schemaVersion",
+        "owner",
+        "kind",
+        "status",
+        "operationId",
+        "terminalInstant",
+        "sourceReference",
+        "sourcePath",
+        "archivePath",
+        "archivedBugSha256",
+        "successorBindingSha256",
+        "successorRegistryReference",
+        "successorRecordReference",
+        "successorRecordSha256",
+        "acceptedBy",
+        "acceptedAt",
+        "acceptanceEvidence",
+        "incomingLinksInventorySha256",
+        "links",
+        "readmeSha256",
+        "requestExpectedBugSha256",
+        "requestExpectedReadmeSha256",
+    }
+    assert receipt["owner"] == "mutate-work-item:current-bug-supersession-v1"
+    assert receipt["kind"] == "current-bug-supersession-v1"
+    assert receipt["status"] == "settled"
+    assert receipt["sourceReference"] == f"bug:{slug}"
+    assert receipt["successorRegistryReference"] == "external-bug-registry"
+    assert receipt["successorRecordReference"] == "bug:accepted-successor"
+    assert receipt["links"] == [
+        {
+            "path": consumer.relative_to(root).as_posix(),
+            "beforeSha256": hashlib.sha256(consumer_before).hexdigest(),
+            "afterSha256": hashlib.sha256(consumer_after).hexdigest(),
+        }
+    ]
+    assert receipt["readmeSha256"] == hashlib.sha256(readme.read_bytes()).hexdigest()
+    assert not (
+        root / ".scratch" / "work-items-lifecycle-transitions" / f"{operation_id}.json"
+    ).exists()
+
+
+def test_supersede_current_bug_replay_is_exact_and_mismatch_fails(
+    tmp_path: Path,
+) -> None:
+    def prepare(root: Path, suffix: str) -> tuple[object, dict, bytes, bytes]:
+        module = load_module()
+        slug = f"2026-09-10-recovery-{suffix}"
+        operation_id = f"supersede-recovery-{suffix}"
+        terminal_instant = "2026-09-10T08:03:00Z"
+        source = seed_context_bug(root, "source-owner", slug)
+        source_before = source.read_bytes()
+        consumer = root / "work-items" / "active" / f"consumer-{suffix}" / "status.md"
+        successor_reference = "external-bug-registry#bug:accepted-successor"
+        consumer_before = (
+            quick_status("Track one source bug.") + f"\nRelated: bug:{slug}\n"
+        ).encode("utf-8")
+        consumer_after = consumer_before.replace(
+            f"bug:{slug}".encode(), successor_reference.encode()
+        )
+        consumer.parent.mkdir(parents=True)
+        consumer.write_bytes(consumer_before)
+        successor = root / "receiving-registry" / "accepted-successor.md"
+        successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+        successor.parent.mkdir(parents=True)
+        successor.write_bytes(successor_bytes)
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+        readme = root / "work-items" / "README.md"
+        binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+        inventory = successor_link_inventory_bytes(
+            slug,
+            source_before,
+            binding,
+            operation_id,
+            [
+                {
+                    "path": consumer.relative_to(root).as_posix(),
+                    "beforeSha256": hashlib.sha256(consumer_before).hexdigest(),
+                    "afterSha256": hashlib.sha256(consumer_after).hexdigest(),
+                    "afterBytesBase64": base64.b64encode(consumer_after).decode("ascii"),
+                }
+            ],
+        )
+        request = {
+            "root": root,
+            "slug": slug,
+            "successor_record": successor,
+            "successor_binding_data": binding,
+            "terminal_instant": terminal_instant,
+            "incoming_links_inventory_data": inventory,
+            "expected_bug_sha256": hashlib.sha256(source_before).hexdigest(),
+            "expected_readme_sha256": hashlib.sha256(readme.read_bytes()).hexdigest(),
+            "operation_id": operation_id,
+        }
+        return module, request, consumer_after, successor_bytes
+
+    replay_root = tmp_path / "replay"
+    module, request, consumer_after, successor_bytes = prepare(replay_root, "replay")
+    settled = module.supersede_current_bug(**request)
+    assert settled["status"] == "settled"
+    assert request["successor_record"].read_bytes() == successor_bytes
+    before_replay = tree_file_bytes(replay_root / "work-items")
+    missing_runtime_path = replay_root / "receiving-registry" / "not-present.md"
+    replay_request = dict(request)
+    replay_request["successor_record"] = missing_runtime_path
+    assert module.supersede_current_bug(**replay_request) == settled
+    assert tree_file_bytes(replay_root / "work-items") == before_replay
+
+    mismatch_requests = {
+        "binding": {
+            "successor_binding_data": request["successor_binding_data"] + b" "
+        },
+        "inventory": {
+            "incoming_links_inventory_data": request["incoming_links_inventory_data"]
+            + b" "
+        },
+        "bug-hash": {"expected_bug_sha256": "0" * 64},
+        "readme-hash": {"expected_readme_sha256": "1" * 64},
+        "terminal": {"terminal_instant": "2026-09-10T08:04:00Z"},
+        "operation": {"operation_id": request["operation_id"] + "-other"},
+    }
+    for case, delta in mismatch_requests.items():
+        mismatched = dict(replay_request)
+        mismatched.update(delta)
+        try:
+            module.supersede_current_bug(**mismatched)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH", case
+        else:
+            raise AssertionError(f"{case} replay mismatch was accepted")
+        assert tree_file_bytes(replay_root / "work-items") == before_replay, case
+
+    drift_root = tmp_path / "archive-byte-drift"
+    module, request, _consumer_after, _successor_bytes = prepare(
+        drift_root, "archive-byte-drift"
+    )
+    module.supersede_current_bug(**request)
+    archived_bug = (
+        drift_root
+        / "work-items"
+        / "bugs"
+        / "archive"
+        / "2026-09"
+        / f"{request['slug']}.md"
+    )
+    archived_bug.write_bytes(b"\xff")
+    drift_replay = dict(request)
+    drift_replay["successor_record"] = drift_root / "missing-runtime-record.md"
+    try:
+        module.supersede_current_bug(**drift_replay)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH"
+    else:
+        raise AssertionError("non-UTF-8 archived bug drift passed replay")
+
+    for boundary_index in range(8):
+        boundary = f"B{boundary_index}"
+        root = tmp_path / boundary.casefold()
+        module, request, expected_consumer, successor_bytes = prepare(
+            root, boundary.casefold()
+        )
+        try:
+            module.supersede_current_bug(
+                **request, inject_failure_at=boundary
+            )
+        except module.LifecycleError as exc:
+            expected_failure = (
+                "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE"
+                if boundary_index <= 2
+                else "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE"
+            )
+            assert exc.failure_id == expected_failure, boundary
+        else:
+            raise AssertionError(f"{boundary} did not interrupt settlement")
+
+        recovered = module.supersede_current_bug(**request)
+        assert recovered["status"] == "settled", boundary
+        source = root / "work-items" / "bugs" / f"{request['slug']}.md"
+        archive = (
+            root
+            / "work-items"
+            / "bugs"
+            / "archive"
+            / "2026-09"
+            / f"{request['slug']}.md"
+        )
+        consumer = (
+            root
+            / "work-items"
+            / "active"
+            / f"consumer-{boundary.casefold()}"
+            / "status.md"
+        )
+        assert not source.exists() and archive.is_file(), boundary
+        assert consumer.read_bytes() == expected_consumer, boundary
+        assert request["successor_record"].read_bytes() == successor_bytes, boundary
+        assert not (
+            root
+            / ".scratch"
+            / "work-items-lifecycle-transitions"
+            / f"{request['operation_id']}.json"
+        ).exists(), boundary
+
+
 def test_category_audit_rejects_unapplied_active_bug_dispositions(
     tmp_path: Path,
 ) -> None:
@@ -975,7 +2262,10 @@ def test_staged_start_ledger_failure_restores_candidate(tmp_path: Path) -> None:
                 return real_ledger.serialize_event(event)
 
         class RejectingValidator:
-            def validate_work_item(self, _item):
+            def validate_obligation_transfer_ownership(self, _root):
+                return []
+
+            def validate_work_item(self, _item, *, strict_revise=True):
                 return ["injected temporary validation failure"]
 
         def injected_atomic_write(path: Path, data: bytes) -> None:
@@ -1102,12 +2392,95 @@ def test_staged_start_readme_failure_leaves_valid_canonical_item(tmp_path: Path)
         module.start_item(root, slug, status, inject_readme_failure=True)
     except module.LifecycleError as exc:
         assert exc.failure_id == "WI-README-STALE"
+        assert str(exc) == (
+            "start committed canonical state; README refresh required; "
+            "do not retry start; run refresh, then verify the target."
+        )
     else:
         raise AssertionError("injected README failure did not abort the derived-view refresh")
 
     target = root / "work-items" / "active" / slug
+    assert target.is_dir()
+    assert not (root / "work-items" / "backlog" / f"{slug}.md").exists()
     result = run_state_validator(target)
     assert result.returncode == 0, result.stdout
+    try:
+        module.check_readme(root)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+    else:
+        raise AssertionError("post-commit start unexpectedly refreshed README")
+    module.refresh_readme(root)
+    module.audit(root)
+    assert module.resolve_category(root, f"work-item:{slug}") == target.resolve()
+
+
+def test_update_and_reopen_readme_failures_share_actionable_postcommit_diagnostic(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+
+    update_root = tmp_path / "update"
+    update_slug = "postcommit-update"
+    seed_active(module, update_root, update_slug)
+    updated_status = quick_status("Updated canonical task state.").encode("utf-8")
+    try:
+        module.update_status(
+            update_root,
+            update_slug,
+            updated_status,
+            inject_readme_failure=True,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+        assert str(exc) == (
+            "update committed canonical state; README refresh required; "
+            "do not retry update; run refresh, then verify the target."
+        )
+    else:
+        raise AssertionError("injected update README failure returned success")
+    updated = update_root / "work-items" / "active" / update_slug / "status.md"
+    assert updated.read_bytes() == updated_status
+    module.refresh_readme(update_root)
+    module.audit(update_root)
+
+    reopen_root = tmp_path / "reopen"
+    archived_slug = "postcommit-reopen-source"
+    successor_slug = "postcommit-reopen-successor"
+    seed_active(module, reopen_root, archived_slug)
+    instant = "2026-07-31T13:00:00Z"
+    write_empty_bug_dispositions(reopen_root, archived_slug, instant)
+    archived = module.close_item(
+        reopen_root,
+        archived_slug,
+        closure(instant).encode("utf-8"),
+        instant,
+    )
+    successor_status = staged_status(archived_slug).encode("utf-8")
+    try:
+        module.reopen_item(
+            reopen_root,
+            archived_slug,
+            successor_slug,
+            successor_status,
+            inject_readme_failure=True,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+        assert str(exc) == (
+            "reopen committed canonical state; README refresh required; "
+            "do not retry reopen; run refresh, then verify the target."
+        )
+    else:
+        raise AssertionError("injected reopen README failure returned success")
+    successor = reopen_root / "work-items" / "active" / successor_slug
+    assert successor.joinpath("status.md").read_bytes() == successor_status
+    assert archived.is_dir()
+    module.refresh_readme(reopen_root)
+    module.audit(reopen_root)
+    assert module.resolve_category(
+        reopen_root, f"work-item:{archived_slug}"
+    ) == archived.resolve()
 
 
 def test_start_quick_fix_preserves_ledger_free_contract(tmp_path: Path) -> None:
@@ -6340,6 +7713,69 @@ def test_decision_v1_list_metadata_accepts_exact_h2_decision_body_heading(
     assert record.body_offset == len(payload.split("## Decision\n", 1)[0].encode("utf-8"))
 
 
+def test_decision_v1_first_heading_diagnostics_preserve_supported_formats_and_metadata_errors(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    slug = "2026-08-11-first-heading-diagnostic"
+    canonical = _canonical_decision_record(slug)
+
+    h1_path = tmp_path / "h1" / f"{slug}.md"
+    write(h1_path, canonical)
+    assert module._validate_current_decision_record(h1_path, slug).format == "canonical-list-v1"
+
+    h2_payload = canonical.replace(f"# Decision: {slug}\n\n", "")
+    h2_path = tmp_path / "h2" / f"{slug}.md"
+    write(h2_path, h2_payload)
+    assert module._validate_current_decision_record(h2_path, slug).format == "canonical-list-v1"
+
+    missing_metadata = canonical.replace("- context: schema-test\n", "")
+    missing_metadata_path = tmp_path / "missing-metadata" / f"{slug}.md"
+    write(missing_metadata_path, missing_metadata)
+    with unittest.TestCase().assertRaises(module.LifecycleError) as metadata_caught:
+        module._validate_current_decision_record(missing_metadata_path, slug)
+    assert metadata_caught.exception.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    assert str(metadata_caught.exception) == (
+        f"decision:{slug} requires one non-empty leading 'context' field"
+    )
+
+    unsupported = canonical.replace(
+        f"# Decision: {slug}", "## Acceptance gate"
+    )
+    unsupported_path = tmp_path / "unsupported" / f"{slug}.md"
+    write(unsupported_path, unsupported)
+    with unittest.TestCase().assertRaises(module.LifecycleError) as unsupported_caught:
+        module._validate_current_decision_record(unsupported_path, slug)
+    assert unsupported_caught.exception.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    assert str(unsupported_caught.exception) == (
+        f"decision:{slug} has unsupported first body heading at line 11: "
+        "'## Acceptance gate'"
+    )
+
+    missing_heading = canonical.replace(
+        f"# Decision: {slug}\n\n", "Decision title\n\n"
+    ).replace("## Decision\n", "Decision body\n")
+    missing_heading_path = tmp_path / "missing-heading" / f"{slug}.md"
+    write(missing_heading_path, missing_heading)
+    with unittest.TestCase().assertRaises(module.LifecycleError) as missing_heading_caught:
+        module._validate_current_decision_record(missing_heading_path, slug)
+    assert missing_heading_caught.exception.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    assert str(missing_heading_caught.exception) == (
+        f"decision:{slug} has no body heading"
+    )
+
+    long_heading = "## " + "x" * 300
+    long_payload = canonical.replace(f"# Decision: {slug}", long_heading)
+    long_path = tmp_path / "long-heading" / f"{slug}.md"
+    write(long_path, long_payload)
+    with unittest.TestCase().assertRaises(module.LifecycleError) as long_caught:
+        module._validate_current_decision_record(long_path, slug)
+    message = str(long_caught.exception)
+    assert long_caught.exception.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    assert len(message) < 300
+    assert "x" * 200 not in message
+
+
 def test_decision_v1_list_metadata_rejects_malformed_h2_body_headings(
     tmp_path: Path,
 ) -> None:
@@ -7254,6 +8690,7 @@ class LifecycleTransactionTests(unittest.TestCase):
             "migrate_legacy_ledger_obligation",
             "revoke_legacy_ledger_obligation",
             "archive_with_successor",
+            "supersede_current_bug",
             "build_migration_inventory",
             "write_migration_inventory",
             "migrate_legacy",
@@ -8329,6 +9766,82 @@ class PartialMigrationRecoveryCliTests(unittest.TestCase):
                     'CLEANUP-SUMMARY: {"count":1,"rollback":"not-needed"}',
                 )
                 self.assertNotIn("WI-TEST-PRIMARY", output.getvalue())
+
+
+def test_ledger_location_intent_discovery_bounds_file_count_before_loading(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    transition_root = root / ".scratch" / "work-items-lifecycle-transitions"
+    transition_root.mkdir(parents=True)
+    for index in range(1025):
+        (transition_root / f"intent-{index:04d}.json").write_text("{}", encoding="utf-8")
+    loaded: list[Path] = []
+    original = module._ledger_location_proof_object
+
+    def track(path: Path, **kwargs):
+        loaded.append(path)
+        return original(path, **kwargs)
+
+    with patch.object(module, "_ledger_location_proof_object", side_effect=track):
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module._matching_ledger_location_intents(
+                root, root, slug="target", logical_work_item="work-items/active/target"
+            )
+
+    assert caught.exception.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+    assert "inventory limit" in str(caught.exception)
+    assert loaded == []
+
+
+def test_ledger_location_intent_discovery_bounds_each_file_before_full_read(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    transition_root = root / ".scratch" / "work-items-lifecycle-transitions"
+    transition_root.mkdir(parents=True)
+    oversized = transition_root / "oversized.json"
+    oversized.write_bytes(b" " * (256 * 1024 + 1))
+    observed_reads: list[Path] = []
+    original_read_bytes = Path.read_bytes
+
+    def track_read(path: Path) -> bytes:
+        if path == oversized:
+            observed_reads.append(path)
+        return original_read_bytes(path)
+
+    with patch.object(Path, "read_bytes", track_read):
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module._matching_ledger_location_intents(
+                root, root, slug="target", logical_work_item="work-items/active/target"
+            )
+
+    assert caught.exception.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+    assert "byte limit" in str(caught.exception)
+    assert observed_reads == []
+
+def test_ledger_location_intent_discovery_bounds_cumulative_bytes_before_loading(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    transition_root = root / ".scratch" / "work-items-lifecycle-transitions"
+    transition_root.mkdir(parents=True)
+    payload = b"{}" + b" " * (256 * 1024 - 2)
+    for index in range(33):
+        (transition_root / f"intent-{index:02d}.json").write_bytes(payload)
+    loaded: list[Path] = []
+    original = module._ledger_location_proof_object
+
+    def track(path: Path, **kwargs):
+        loaded.append(path)
+        return original(path, **kwargs)
+
+    with patch.object(module, "_ledger_location_proof_object", side_effect=track):
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module._matching_ledger_location_intents(
+                root, root, slug="target", logical_work_item="work-items/active/target"
+            )
+
+    assert caught.exception.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+    assert "cumulative byte limit" in str(caught.exception)
+    assert loaded == []
 
 
 class _UnittestAdapter(unittest.TestCase):

@@ -222,8 +222,8 @@ def scalar_comment(scalar: dict[str, Any]) -> str:
         )
         return (
             f"# selectable here: {selectable}; default: {default}; "
-            "kimi requires explicit global Windows enrollment and is not "
-            "initialized as a project-local scalar; grok remains unavailable "
+            "kimi is explicit-only and is not initialized as a project-local "
+            "scalar; grok remains unavailable "
             "in 1.x; removed gemini/qwen values fail closed with "
             "E_EXTERNAL_PROVIDER_REMOVED"
         )

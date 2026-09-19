@@ -132,6 +132,7 @@ class RootInspection:
     is_directory: bool
     is_link_or_reparse: bool
     identity: tuple[int, int, int, int, int] | None
+    is_regular_file: bool = False
 
 
 @dataclass(frozen=True)
@@ -396,6 +397,7 @@ def inspect_root_no_follow(path: Path) -> RootInspection:
         stat_module.S_ISDIR(info.st_mode),
         linked,
         _identity_parts(info),
+        stat_module.S_ISREG(info.st_mode),
     )
 
 
@@ -424,13 +426,21 @@ def inspect_owned_namespace(owner_root: Path) -> OwnedNamespaceInspection:
                 leaves = list(entries)
             for entry in leaves:
                 leaf = inspect_root_no_follow(Path(entry.path))
-                if leaf.is_link_or_reparse or not leaf.is_directory:
+                tombstone = re.fullmatch(
+                    r"\..+\.orchestrarium-delete-[0-9a-f]{16}", entry.name
+                ) is not None
+                valid_original = leaf.is_directory or leaf.is_regular_file
+                if (
+                    leaf.is_link_or_reparse
+                    or (tombstone and not leaf.is_directory)
+                    or (not tombstone and not valid_original)
+                ):
                     raise OwnedTreeClassificationError(
                         "SCRATCH-INVENTORY-UNSAFE",
                         f"unsafe scratch evidence namespace entry: {run.name}/{entry.name}",
                     )
                 path = Path(entry.path)
-                if re.fullmatch(r"\..+\.orchestrarium-delete-[0-9a-f]{16}", entry.name):
+                if tombstone:
                     tombstones.add(path)
                 else:
                     originals.add(path)

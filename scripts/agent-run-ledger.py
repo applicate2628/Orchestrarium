@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import re
+import stat
 import sys
 import tempfile
 import time
@@ -32,8 +33,11 @@ STATUS_SECTIONS = {
 # Post-commit stdout contract for consumers that need to distinguish a durable
 # append from a rejected or rolled-back attempt. Keep the text in this writer.
 APPEND_SUCCESS_MARKER = "RESULT: PASS append"
+SETTLE_SUCCESS_MARKER = "RESULT: PASS settle-launch"
+SETTLE_ALREADY_MARKER = "RESULT: PASS already-settled"
 RECOVERY_SUCCESS_MARKER = "RESULT: PASS recover-invalid-closure"
 INVALID_CURRENT_DISPOSITION_SUCCESS_MARKER = "RESULT: PASS dispose-invalid-current"
+NONCANONICAL_HISTORY_SUCCESS_MARKER = "RESULT: PASS recover-noncanonical-history"
 
 
 def load_validator():
@@ -502,6 +506,18 @@ class LedgerWriteLockError(RuntimeError):
     pass
 
 
+class LedgerNoncanonicalRecoveryError(RuntimeError):
+    def __init__(self, failure_id: str, message: str):
+        super().__init__(message)
+        self.failure_id = failure_id
+
+
+def _noncanonical_fail(failure_id: str, message: str) -> None:
+    raise LedgerNoncanonicalRecoveryError(
+        f"WI-LEDGER-NONCANONICAL-{failure_id}", message
+    )
+
+
 @contextmanager
 def ledger_write_lock(item: Path):
     """The existing per-item writer lock, reusable by the lifecycle owner."""
@@ -531,6 +547,728 @@ def ledger_write_lock(item: Path):
         lock_path.unlink(missing_ok=True)
 
 
+def _normalize_noncanonical_sha256(value: str) -> str:
+    try:
+        value.encode("ascii", errors="strict")
+    except UnicodeEncodeError:
+        _noncanonical_fail("DRIFT", "expected ledger digest is not ASCII hexadecimal")
+    if re.fullmatch(r"[0-9A-Fa-f]{64}", value, re.ASCII) is None:
+        _noncanonical_fail("DRIFT", "expected ledger digest must be SHA-256")
+    return value.lower()
+
+
+def _strict_noncanonical_inputs(operation_id: str, recorded_at: str) -> None:
+    if re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", operation_id, re.ASCII
+    ) is None:
+        _noncanonical_fail("IDENTITY-BEARING", "operation id is not bounded")
+    if re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z",
+        recorded_at,
+        re.ASCII,
+    ) is None:
+        _noncanonical_fail("MALFORMED", "recorded-at is not strict UTC")
+
+
+def _has_valid_v3_identity(event: dict[str, Any], validator: Any) -> bool:
+    event_id = event.get("eventId")
+    operation_id = event.get("operationId")
+    fingerprint = event.get("fingerprint")
+    prior_head = event.get("priorHead")
+    return bool(
+        isinstance(event_id, str)
+        and validator.SCRATCH_IDENTIFIER_RE.fullmatch(event_id)
+        and len(event_id) <= 128
+        and isinstance(operation_id, str)
+        and validator.SCRATCH_IDENTIFIER_RE.fullmatch(operation_id)
+        and len(operation_id) <= 128
+        and isinstance(fingerprint, str)
+        and validator.SHA256_RE.fullmatch(fingerprint)
+        and (
+            prior_head == "GENESIS"
+            or (
+                isinstance(prior_head, str)
+                and validator.SHA256_RE.fullmatch(prior_head)
+            )
+        )
+    )
+
+
+def _validate_noncanonical_history(
+    item: Path, ledger_bytes: bytes, validator: Any
+) -> tuple[dict[str, Any], ...]:
+    parse_errors: list[str] = []
+    events = validator.load_jsonl(
+        item / "agent-runs.jsonl", parse_errors, None, ledger_bytes
+    )
+    if parse_errors:
+        _noncanonical_fail("MALFORMED", "; ".join(parse_errors))
+
+    for event in events:
+        event_errors: list[str] = []
+        if validator.validate_event(dict(event), item, set(), event_errors):
+            _noncanonical_fail(
+                "CURRENT-EVENT", "history contains a current-schema-valid event"
+            )
+        schema_version = event.get("schemaVersion")
+        if schema_version in (1, 2, 3):
+            _noncanonical_fail(
+                "CURRENT-EVENT", f"history declares schemaVersion {schema_version}"
+            )
+        run_id = event.get("runId")
+        if isinstance(run_id, str) and run_id.strip() and len(run_id) >= 8:
+            _noncanonical_fail(
+                "IDENTITY-BEARING", "history contains a valid V1/V2 runId identity"
+            )
+        if _has_valid_v3_identity(event, validator):
+            _noncanonical_fail(
+                "IDENTITY-BEARING", "history contains a complete valid V3 identity"
+            )
+    return tuple(events)
+
+
+def _noncanonical_history_marker(
+    item: Path,
+    expected_sha256: str,
+    original_bytes: bytes,
+    operation_id: str,
+    recorded_at: str,
+) -> dict[str, Any]:
+    history_name = f"agent-runs.history.{expected_sha256}.jsonl"
+    return {
+        "schemaVersion": 2,
+        "runId": f"ledger-history-{operation_id}",
+        "workItem": item.name,
+        "role": "lead",
+        "executionRole": "main",
+        "status": "completed",
+        "gate": "none",
+        "scope": ["ledger-recovery:noncanonical-history-seal"],
+        "eventKind": "standalone",
+        "startedAt": recorded_at,
+        "updatedAt": recorded_at,
+        "notes": (
+            f"opaqueHistoryPath={history_name} "
+            f"opaqueHistorySha256={expected_sha256} "
+            f"opaqueHistoryBytes={len(original_bytes)} authority=none"
+        ),
+    }
+
+
+def _noncanonical_is_reparse(metadata: os.stat_result) -> bool:
+    flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return bool(getattr(metadata, "st_file_attributes", 0) & flag)
+
+
+def _noncanonical_file_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        getattr(metadata, "st_file_attributes", 0),
+    )
+
+
+def _noncanonical_open_ordinary(
+    path: Path,
+    *,
+    writable: bool,
+    failure_id: str = "HISTORY-CONFLICT",
+) -> tuple[int, os.stat_result]:
+    try:
+        before = path.lstat()
+    except OSError as exc:
+        _noncanonical_fail(failure_id, str(exc))
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or stat.S_ISLNK(before.st_mode)
+        or _noncanonical_is_reparse(before)
+    ):
+        _noncanonical_fail(failure_id, f"linked or non-ordinary path: {path.name}")
+    flags = (os.O_RDWR if writable else os.O_RDONLY) | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        _noncanonical_fail(failure_id, str(exc))
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or _noncanonical_is_reparse(opened)
+            or _noncanonical_file_identity(before) != _noncanonical_file_identity(opened)
+        ):
+            _noncanonical_fail(failure_id, f"path identity changed while opening: {path.name}")
+        return descriptor, opened
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _collect_noncanonical_binary_lines(
+    stream, *, validator: Any, failure_id: str
+) -> bytes:
+    aggregate_limit = validator.MAX_LEDGER_EVENTS * (validator.MAX_LEDGER_LINE_BYTES + 2)
+    chunks: list[bytes] = []
+    total_bytes = 0
+    event_count = 0
+    while True:
+        raw = stream.readline(validator.MAX_LEDGER_LINE_BYTES + 3)
+        if raw == b"":
+            break
+        if raw.endswith(b"\r\n"):
+            body = raw[:-2]
+        elif raw.endswith(b"\n"):
+            body = raw[:-1]
+        else:
+            body = raw
+        if len(body) > validator.MAX_LEDGER_LINE_BYTES:
+            _noncanonical_fail(failure_id, "ledger line exceeds bounded length")
+        if total_bytes + len(raw) > aggregate_limit:
+            _noncanonical_fail(failure_id, "ledger exceeds bounded aggregate length")
+        try:
+            nonblank = bool(body.decode("utf-8", errors="strict").strip())
+        except UnicodeDecodeError:
+            nonblank = True
+        if nonblank:
+            if event_count >= validator.MAX_LEDGER_EVENTS:
+                _noncanonical_fail(failure_id, "ledger exceeds bounded event count")
+            event_count += 1
+        chunks.append(raw)
+        total_bytes += len(raw)
+    return b"".join(chunks)
+
+
+def _noncanonical_read_owned_bytes(path: Path, *, failure_id: str) -> bytes:
+    descriptor, opened = _noncanonical_open_ordinary(
+        path, writable=False, failure_id=failure_id
+    )
+    if getattr(opened, "st_nlink", 1) != 1:
+        os.close(descriptor)
+        _noncanonical_fail(failure_id, f"path has extra hardlinks: {path.name}")
+    try:
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            return _collect_noncanonical_binary_lines(
+                stream, validator=load_validator(), failure_id=failure_id
+            )
+    except OSError as exc:
+        _noncanonical_fail(failure_id, str(exc))
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or _noncanonical_is_reparse(metadata)
+    ):
+        _noncanonical_fail("HISTORY-CONFLICT", "history blob is linked or non-ordinary")
+    # A crash after linking history but before private-handoff cleanup leaves the
+    # history name plus its reserved staging name on one inode. Admit only that
+    # known two-link recovery state; any other hardlink is not authority.
+    links = getattr(metadata, "st_nlink", 1)
+    if links != 1:
+        staging = path.parent / f".{path.name}.tmp"
+        try:
+            staging_metadata = staging.lstat()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", "history blob has an unowned hardlink")
+        if (
+            links != 2
+            or not stat.S_ISREG(staging_metadata.st_mode)
+            or stat.S_ISLNK(staging_metadata.st_mode)
+            or _noncanonical_is_reparse(staging_metadata)
+            or (metadata.st_dev, metadata.st_ino) != (staging_metadata.st_dev, staging_metadata.st_ino)
+        ):
+            _noncanonical_fail("HISTORY-CONFLICT", "history blob has an unowned hardlink")
+    descriptor, _opened = _noncanonical_open_ordinary(path, writable=False)
+    try:
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            value = _collect_noncanonical_binary_lines(
+                stream, validator=load_validator(), failure_id="HISTORY-CONFLICT"
+            )
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if hashlib.sha256(value).hexdigest() != expected_sha256:
+        _noncanonical_fail("HISTORY-CONFLICT", "history blob digest changed")
+    return value
+
+
+def _cleanup_owned_history_staging(history_path: Path, staging: Path) -> None:
+    """Retire the admitted history hardlink without unlinking its fixed name."""
+    try:
+        staging_metadata = staging.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    try:
+        history_metadata = history_path.lstat()
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    identity = _noncanonical_file_identity(history_metadata)
+    if (
+        not stat.S_ISREG(history_metadata.st_mode)
+        or stat.S_ISLNK(history_metadata.st_mode)
+        or _noncanonical_is_reparse(history_metadata)
+        or not stat.S_ISREG(staging_metadata.st_mode)
+        or stat.S_ISLNK(staging_metadata.st_mode)
+        or _noncanonical_is_reparse(staging_metadata)
+        or getattr(history_metadata, "st_nlink", 1) != 2
+        or getattr(staging_metadata, "st_nlink", 1) != 2
+        or _noncanonical_file_identity(staging_metadata) != identity
+    ):
+        _noncanonical_fail(
+            "HISTORY-CONFLICT", "reserved history staging path conflicts"
+        )
+
+    handoff_directory = Path(
+        tempfile.mkdtemp(prefix=f".{staging.name}.cleanup-", dir=staging.parent)
+    )
+    handoff = handoff_directory / "staging"
+    removed = False
+    try:
+        try:
+            os.replace(staging, handoff)
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        try:
+            moved_metadata = handoff.lstat()
+            current_history = history_path.lstat()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        if (
+            not stat.S_ISREG(moved_metadata.st_mode)
+            or stat.S_ISLNK(moved_metadata.st_mode)
+            or _noncanonical_is_reparse(moved_metadata)
+            or not stat.S_ISREG(current_history.st_mode)
+            or stat.S_ISLNK(current_history.st_mode)
+            or _noncanonical_is_reparse(current_history)
+            or getattr(moved_metadata, "st_nlink", 1) != 2
+            or getattr(current_history, "st_nlink", 1) != 2
+            or _noncanonical_file_identity(moved_metadata) != identity
+            or _noncanonical_file_identity(current_history) != identity
+        ):
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", "history staging changed during private handoff"
+            )
+        try:
+            handoff.unlink()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        removed = True
+        try:
+            final_history = history_path.lstat()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        if (
+            not stat.S_ISREG(final_history.st_mode)
+            or stat.S_ISLNK(final_history.st_mode)
+            or _noncanonical_is_reparse(final_history)
+            or getattr(final_history, "st_nlink", 1) != 1
+            or _noncanonical_file_identity(final_history) != identity
+        ):
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", "history identity changed during staging cleanup"
+            )
+    finally:
+        # A contested handoff is evidence. Remove only an empty private directory.
+        if removed or not handoff.exists():
+            try:
+                handoff_directory.rmdir()
+            except OSError:
+                pass
+
+
+def _write_exact_staging_file(
+    path: Path, expected: bytes
+) -> tuple[int, int, int, int]:
+    def confirm_path(identity: tuple[int, int, int, int]) -> None:
+        try:
+            metadata = path.lstat()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or _noncanonical_is_reparse(metadata)
+            or getattr(metadata, "st_nlink", 1) != 1
+            or _noncanonical_file_identity(metadata) != identity
+        ):
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", f"staging path identity changed: {path.name}"
+            )
+
+    def accept_existing() -> tuple[int, int, int, int]:
+        descriptor, opened = _noncanonical_open_ordinary(path, writable=False)
+        identity = _noncanonical_file_identity(opened)
+        if getattr(opened, "st_nlink", 1) != 1:
+            os.close(descriptor)
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", f"staging path has extra hardlinks: {path.name}"
+            )
+        try:
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = -1
+                actual = stream.read(len(expected) + 1)
+                after_read = os.fstat(stream.fileno())
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        if (
+            _noncanonical_file_identity(after_read) != identity
+            or getattr(after_read, "st_nlink", 1) != 1
+        ):
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", f"staging descriptor identity changed: {path.name}"
+            )
+        if actual != expected:
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", f"staging path conflicts: {path.name}"
+            )
+        confirm_path(identity)
+        return identity
+
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    else:
+        return accept_existing()
+
+    flags = (
+        os.O_CREAT
+        | os.O_EXCL
+        | os.O_RDWR
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError:
+        return accept_existing()
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+
+    try:
+        opened = os.fstat(descriptor)
+        identity = _noncanonical_file_identity(opened)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or _noncanonical_is_reparse(opened)
+            or getattr(opened, "st_nlink", 1) != 1
+        ):
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", f"created staging path is not ordinary: {path.name}"
+            )
+        with os.fdopen(descriptor, "w+b") as stream:
+            descriptor = -1
+            stream.write(expected)
+            stream.flush()
+            os.fsync(stream.fileno())
+            stream.seek(0)
+            actual = stream.read(len(expected) + 1)
+            after_read = os.fstat(stream.fileno())
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if (
+        _noncanonical_file_identity(after_read) != identity
+        or getattr(after_read, "st_nlink", 1) != 1
+    ):
+        _noncanonical_fail(
+            "HISTORY-CONFLICT", f"created staging identity changed: {path.name}"
+        )
+    if actual != expected:
+        _noncanonical_fail(
+            "HISTORY-CONFLICT", f"staging readback changed: {path.name}"
+        )
+    confirm_path(identity)
+    return identity
+
+
+def _replace_exact_staging_file(
+    path: Path,
+    destination: Path,
+    expected: bytes,
+    identity: tuple[int, int, int, int],
+) -> None:
+    """Publish only the admitted inode after a private same-directory handoff."""
+
+    def admit(candidate: Path) -> None:
+        descriptor, opened = _noncanonical_open_ordinary(candidate, writable=False)
+        try:
+            if (
+                _noncanonical_file_identity(opened) != identity
+                or getattr(opened, "st_nlink", 1) != 1
+            ):
+                _noncanonical_fail(
+                    "HISTORY-CONFLICT",
+                    f"staging descriptor identity changed: {candidate.name}",
+                )
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = -1
+                actual = stream.read(len(expected) + 1)
+                after_read = os.fstat(stream.fileno())
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        try:
+            current = candidate.lstat()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        if (
+            actual != expected
+            or _noncanonical_file_identity(after_read) != identity
+            or getattr(after_read, "st_nlink", 1) != 1
+            or not stat.S_ISREG(current.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+            or _noncanonical_is_reparse(current)
+            or getattr(current, "st_nlink", 1) != 1
+            or _noncanonical_file_identity(current) != identity
+        ):
+            _noncanonical_fail(
+                "HISTORY-CONFLICT",
+                f"staging path changed before publication: {candidate.name}",
+            )
+
+    admit(path)
+    handoff_directory = Path(
+        tempfile.mkdtemp(prefix=f".{path.name}.publish-", dir=path.parent)
+    )
+    handoff = handoff_directory / "candidate"
+    published = False
+    try:
+        try:
+            os.replace(path, handoff)
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        # A fixed-name swap is now quarantined under an unpredictable private
+        # directory. Re-admit the moved object before the canonical name is touched.
+        admit(handoff)
+        try:
+            os.replace(handoff, destination)
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        published = True
+        try:
+            current = destination.lstat()
+        except OSError as exc:
+            _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
+        if (
+            not stat.S_ISREG(current.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+            or _noncanonical_is_reparse(current)
+            or getattr(current, "st_nlink", 1) != 1
+            or _noncanonical_file_identity(current) != identity
+        ):
+            _noncanonical_fail(
+                "READBACK-INDETERMINATE",
+                "published ledger identity changed at replacement",
+            )
+    finally:
+        # rmdir cannot remove a foreign file. A contested or failed handoff is
+        # deliberately preserved for diagnosis rather than pathname-cleaned.
+        if published or not handoff.exists():
+            try:
+                handoff_directory.rmdir()
+            except OSError:
+                pass
+
+
+def _publish_noncanonical_history_blob(
+    item: Path, history_path: Path, expected_sha256: str, original_bytes: bytes
+) -> None:
+    staging = item / f".{history_path.name}.tmp"
+    existing = _read_exact_history_blob(history_path, expected_sha256)
+    if existing is not None:
+        if existing != original_bytes:
+            _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
+        _cleanup_owned_history_staging(history_path, staging)
+        return
+    _write_exact_staging_file(staging, original_bytes)
+    try:
+        try:
+            os.link(staging, history_path, follow_symlinks=False)
+        except FileExistsError:
+            existing = _read_exact_history_blob(history_path, expected_sha256)
+            if existing is None:
+                _noncanonical_fail(
+                    "HISTORY-CONFLICT", "history publication raced without a file"
+                )
+        published = _read_exact_history_blob(history_path, expected_sha256)
+        if published != original_bytes:
+            _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    _cleanup_owned_history_staging(history_path, staging)
+
+
+def _noncanonical_recovery_state(
+    item: Path,
+    expected_sha256: str,
+    operation_id: str,
+    recorded_at: str,
+    validator: Any,
+) -> tuple[str, bytes, Path, bytes]:
+    ledger_path = item / "agent-runs.jsonl"
+    history_path = item / f"agent-runs.history.{expected_sha256}.jsonl"
+    current = _noncanonical_read_owned_bytes(ledger_path, failure_id="DRIFT")
+    history = _read_exact_history_blob(history_path, expected_sha256)
+    original = history if history is not None else current
+    _validate_noncanonical_history(item, original, validator)
+    marker = _noncanonical_history_marker(
+        item, expected_sha256, original, operation_id, recorded_at
+    )
+    marker_bytes = (serialize_event(marker) + "\n").encode("utf-8")
+    if current == marker_bytes and history is not None:
+        return "applied", original, history_path, marker_bytes
+    if current == original and hashlib.sha256(current).hexdigest() == expected_sha256:
+        return "original", original, history_path, marker_bytes
+    return "other", original, history_path, marker_bytes
+
+
+def _validate_noncanonical_marker_candidate(
+    item: Path, candidate: Path, validator: Any
+) -> None:
+    errors = validator.validate_work_item(
+        item, ledger_path=candidate, strict_revise=False
+    )
+    if errors:
+        _noncanonical_fail("CANDIDATE-INVALID", "; ".join(errors))
+
+
+def _command_apply_noncanonical_history(
+    item: Path,
+    expected_sha256: str,
+    operation_id: str,
+    recorded_at: str,
+    validator: Any,
+    inject_failure: str | None,
+) -> tuple[bool, Path]:
+    state, original, history_path, marker_bytes = _noncanonical_recovery_state(
+        item, expected_sha256, operation_id, recorded_at, validator
+    )
+    if state == "applied":
+        return True, history_path
+    if state != "original":
+        _noncanonical_fail("DRIFT", "ledger digest or recovery marker changed")
+
+    ledger_path = item / "agent-runs.jsonl"
+    candidate = ledger_path.with_suffix(".jsonl.tmp")
+    replaced = False
+    staging_identity = None
+    try:
+        # The history blob is digest-bound and nonauthorizing. Publish that inert
+        # prerequisite before materializing the fixed-name ledger candidate, so a
+        # post-history interruption leaves no candidate path to recover or clean.
+        _publish_noncanonical_history_blob(
+            item, history_path, expected_sha256, original
+        )
+        if inject_failure == "post-history-publish":
+            print("FAIL: injected post-history-publish interruption", file=sys.stderr)
+            return False, history_path
+        staging_identity = _write_exact_staging_file(candidate, marker_bytes)
+        _validate_noncanonical_marker_candidate(item, candidate, validator)
+        if inject_failure == "pre-ledger-replace":
+            print("FAIL: injected pre-ledger-replace interruption", file=sys.stderr)
+            return False, history_path
+        _replace_exact_staging_file(
+            candidate, ledger_path, marker_bytes, staging_identity
+        )
+        replaced = True
+        if inject_failure == "post-ledger-replace-readback":
+            _noncanonical_fail(
+                "READBACK-INDETERMINATE", "injected post-replace readback failure"
+            )
+        actual = _noncanonical_read_owned_bytes(
+            ledger_path, failure_id="READBACK-INDETERMINATE"
+        )
+        if actual != marker_bytes:
+            _noncanonical_fail("READBACK-INDETERMINATE", "marker readback changed")
+    except OSError as exc:
+        if replaced:
+            _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
+        _noncanonical_fail("CANDIDATE-INVALID", str(exc))
+    return False, history_path
+
+
+def _command_rollback_noncanonical_history(
+    item: Path,
+    expected_sha256: str,
+    operation_id: str,
+    recorded_at: str,
+    validator: Any,
+    inject_failure: str | None,
+) -> tuple[bool, Path]:
+    state, original, history_path, marker_bytes = _noncanonical_recovery_state(
+        item, expected_sha256, operation_id, recorded_at, validator
+    )
+    if state == "original":
+        if history_path.exists():
+            return True, history_path
+        _noncanonical_fail("ROLLBACK-NOT-EMPTY", "recovery marker is absent")
+    if state != "applied":
+        _noncanonical_fail(
+            "ROLLBACK-NOT-EMPTY", "rollback is frozen after a later append"
+        )
+
+    ledger_path = item / "agent-runs.jsonl"
+    current = _noncanonical_read_owned_bytes(
+        ledger_path, failure_id="ROLLBACK-NOT-EMPTY"
+    )
+    if current != marker_bytes:
+        _noncanonical_fail(
+            "ROLLBACK-NOT-EMPTY", "rollback is frozen after a later append"
+        )
+    candidate = ledger_path.with_suffix(".jsonl.tmp")
+    replaced = False
+    staging_identity = None
+    try:
+        staging_identity = _write_exact_staging_file(candidate, original)
+        if inject_failure == "pre-ledger-replace":
+            print("FAIL: injected pre-ledger-replace interruption", file=sys.stderr)
+            return False, history_path
+        _replace_exact_staging_file(
+            candidate, ledger_path, original, staging_identity
+        )
+        replaced = True
+        if inject_failure == "post-ledger-replace-readback":
+            _noncanonical_fail(
+                "READBACK-INDETERMINATE", "injected rollback readback failure"
+            )
+        actual = _noncanonical_read_owned_bytes(
+            ledger_path, failure_id="READBACK-INDETERMINATE"
+        )
+        if actual != original:
+            _noncanonical_fail("READBACK-INDETERMINATE", "rollback readback changed")
+    except OSError as exc:
+        if replaced:
+            _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
+        _noncanonical_fail("CANDIDATE-INVALID", str(exc))
+    return False, history_path
+
+
 def _iter_active_items(active_dir: Path) -> list[Path]:
     if not active_dir.is_dir():
         return []
@@ -557,6 +1295,79 @@ def active_work_item(args: argparse.Namespace, command: str) -> Path | None:
     return item
 
 
+def command_recover_noncanonical_history(args: argparse.Namespace) -> int:
+    item = active_work_item(args, "recover-noncanonical-history")
+    if item is None or not item.exists():
+        print(f"FAIL: missing work item: {item}", file=sys.stderr)
+        return 1
+    try:
+        expected_sha256 = _normalize_noncanonical_sha256(
+            args.expected_ledger_sha256
+        )
+        _strict_noncanonical_inputs(args.operation_id, args.recorded_at)
+        validator = load_validator()
+        if not args.apply_admitted and not args.rollback_admitted:
+            state, _original, history_path, marker_bytes = _noncanonical_recovery_state(
+                item,
+                expected_sha256,
+                args.operation_id,
+                args.recorded_at,
+                validator,
+            )
+            if state == "other":
+                _noncanonical_fail("DRIFT", "ledger digest or recovery marker changed")
+            marker_errors: list[str] = []
+            marker_event = json.loads(marker_bytes)
+            validator.validate_event(marker_event, item, set(), marker_errors)
+            validator.validate_status(item, [marker_event], marker_errors)
+            if marker_errors:
+                _noncanonical_fail("CANDIDATE-INVALID", "; ".join(marker_errors))
+            print(
+                f"{NONCANONICAL_HISTORY_SUCCESS_MARKER} action=preflight "
+                f"state={state} history={history_path.name}"
+            )
+            return 0
+        try:
+            with ledger_write_lock(item):
+                if args.apply_admitted:
+                    replay, history_path = _command_apply_noncanonical_history(
+                        item,
+                        expected_sha256,
+                        args.operation_id,
+                        args.recorded_at,
+                        validator,
+                        args.inject_failure,
+                    )
+                    action = "apply"
+                else:
+                    replay, history_path = _command_rollback_noncanonical_history(
+                        item,
+                        expected_sha256,
+                        args.operation_id,
+                        args.recorded_at,
+                        validator,
+                        args.inject_failure,
+                    )
+                    action = "rollback"
+        except LedgerWriteLockError as exc:
+            _noncanonical_fail("LOCKED", str(exc))
+        if args.apply_admitted and args.inject_failure in {
+            "post-history-publish",
+            "pre-ledger-replace",
+        }:
+            return 1
+        if args.rollback_admitted and args.inject_failure == "pre-ledger-replace":
+            return 1
+        print(
+            f"{NONCANONICAL_HISTORY_SUCCESS_MARKER} action={action} "
+            f"replay={str(replay).lower()} history={history_path.name}"
+        )
+        return 0
+    except LedgerNoncanonicalRecoveryError as exc:
+        print(f"FAIL: {exc.failure_id}: {exc}", file=sys.stderr)
+        return 1
+
+
 def command_init(args: argparse.Namespace) -> int:
     item = active_work_item(args, "init")
     if item is None:
@@ -574,21 +1385,14 @@ def command_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def command_append(args: argparse.Namespace) -> int:
-    item = active_work_item(args, "append")
-    if item is None:
-        return 1
-    if not item.exists():
-        print(f"FAIL: missing work item: {item}", file=sys.stderr)
-        return 1
+def _append_event_transaction(
+    item: Path, validator: Any, event_factory: Any
+) -> bool:
+    """Append one validator-approved event, or report an idempotent no-op.
 
-    validator = load_validator()
-    try:
-        event = build_event(args, validator)
-    except ValueError as exc:
-        print(f"FAIL: {exc}", file=sys.stderr)
-        return 1
-
+    The factory runs while the ledger lock is held so a launch lookup and its
+    terminal append observe one indivisible ledger state.
+    """
     ledger_path = item / "agent-runs.jsonl"
     # Kill-safe old-or-new transaction (decision 2026-07-16-review-verdict-closure):
     # lock -> read -> merge -> write TEMP (same dir) -> validate the CANDIDATE ->
@@ -610,15 +1414,16 @@ def command_append(args: argparse.Namespace) -> int:
             holder = lock_path.read_text(encoding="utf-8").strip()
         except OSError:
             pass
-        print(
-            f"FAIL: ledger locked ({lock_path}; holder: {holder or 'unknown'}). "
-            "No automatic takeover — verify the holder pid is dead, remove the lock file, retry.",
-            file=sys.stderr,
+        raise LedgerWriteLockError(
+            f"ledger locked ({lock_path}; holder: {holder or 'unknown'}). "
+            "No automatic takeover — verify the holder pid is dead, remove the lock file, retry."
         )
-        return 1
 
     try:
         previous = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else ""
+        event = event_factory(previous)
+        if event is None:
+            return False
         prefix = "" if not previous or previous.endswith("\n") else "\n"
         line = serialize_event(event)
         candidate = ledger_path.with_suffix(".jsonl.tmp")
@@ -634,13 +1439,128 @@ def command_append(args: argparse.Namespace) -> int:
             for error in errors:
                 print(f"FAIL: {error}", file=sys.stderr)
             print(f"RESULT: FAIL ({len(errors)} errors)", file=sys.stderr)
-            return 1
+            raise ValueError("; ".join(errors))
         os.replace(candidate, ledger_path)
     finally:
         os.close(lock_fd)
         lock_path.unlink(missing_ok=True)
 
-    print(f"{APPEND_SUCCESS_MARKER} ({ledger_path})")
+    return True
+
+
+def command_append(args: argparse.Namespace) -> int:
+    item = active_work_item(args, "append")
+    if item is None:
+        return 1
+    if not item.exists():
+        print(f"FAIL: missing work item: {item}", file=sys.stderr)
+        return 1
+
+    validator = load_validator()
+    try:
+        event = build_event(args, validator)
+        _append_event_transaction(item, validator, lambda _previous: event)
+    except (ValueError, LedgerWriteLockError) as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"{APPEND_SUCCESS_MARKER} ({item / 'agent-runs.jsonl'})")
+    return 0
+
+
+def _settlement_event(
+    args: argparse.Namespace, launch: dict[str, Any], validator: Any
+) -> dict[str, Any]:
+    if args.status in {"planned", "running"}:
+        raise ValueError(
+            "WI-LEDGER-SETTLE-TARGET: terminal status must not be planned or running"
+        )
+
+    immutable = {
+        "work_item_name": launch.get("workItem"),
+        "role": launch.get("role"),
+        "execution_role": launch.get("executionRole"),
+        "assigned_role": launch.get("assignedRole"),
+        "provider": launch.get("provider"),
+        "model": launch.get("model"),
+        "scope": launch.get("scope"),
+        "prompt_file": launch.get("promptFile"),
+        "effort": launch.get("effort"),
+        "launch_flags_json": (
+            json.dumps(launch["launchFlags"], separators=(",", ":"))
+            if "launchFlags" in launch
+            else None
+        ),
+    }
+    if not isinstance(immutable["work_item_name"], str) or not isinstance(
+        immutable["role"], str
+    ) or not isinstance(immutable["execution_role"], str) or not isinstance(
+        immutable["scope"], list
+    ):
+        raise ValueError(
+            "WI-LEDGER-SETTLE-TARGET: launch lacks immutable event metadata"
+        )
+
+    terminal = argparse.Namespace(**vars(args), **immutable)
+    terminal.event_kind = "terminal"
+    terminal.closes = None
+    return build_event(terminal, validator)
+
+
+def _settle_launch_from_ledger(
+    previous: str, args: argparse.Namespace, validator: Any
+) -> dict[str, Any] | None:
+    try:
+        events = [json.loads(line) for line in previous.splitlines() if line.strip()]
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "WI-LEDGER-SETTLE-TARGET: existing ledger is not valid JSONL"
+        ) from exc
+    launches = [event for event in events if event.get("runId") == args.launch_run_id]
+    if len(launches) != 1 or launches[0].get("eventKind") != "launch":
+        raise ValueError(
+            "WI-LEDGER-SETTLE-TARGET: launch must identify one V2 launch event"
+        )
+    terminals = [
+        event
+        for event in events
+        if event.get("eventKind") == "terminal"
+        and event.get("launchRunId") == args.launch_run_id
+    ]
+    if len(terminals) > 1:
+        raise ValueError(
+            "WI-LEDGER-SETTLE-TARGET: launch has multiple terminal events"
+        )
+
+    event = _settlement_event(args, launches[0], validator)
+    if terminals:
+        if terminals[0] == event:
+            return None
+        raise ValueError(
+            "WI-LEDGER-SETTLE-CONFLICT: launch already has a different terminal event"
+        )
+    return event
+
+
+def command_settle_launch(args: argparse.Namespace) -> int:
+    item = active_work_item(args, "settle-launch")
+    if item is None or not item.exists():
+        print(f"FAIL: missing work item: {item}", file=sys.stderr)
+        return 1
+    validator = load_validator()
+    try:
+        appended = _append_event_transaction(
+            item,
+            validator,
+            lambda previous: _settle_launch_from_ledger(previous, args, validator),
+        )
+    except (ValueError, LedgerWriteLockError) as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+    if appended:
+        print(f"{SETTLE_SUCCESS_MARKER} ({item / 'agent-runs.jsonl'})")
+    else:
+        print(f"{SETTLE_ALREADY_MARKER} ({item / 'agent-runs.jsonl'})")
     return 0
 
 
@@ -981,6 +1901,37 @@ def build_parser() -> argparse.ArgumentParser:
     append.add_argument("--target-tuple-json", help="Exact external target tuple as a JSON object.")
     append.set_defaults(func=command_append)
 
+    settle = subparsers.add_parser(
+        "settle-launch",
+        help="Append one terminal event derived from a unique open V2 launch.",
+    )
+    settle.add_argument("--launch-run-id", required=True)
+    settle.add_argument("--run-id", required=True)
+    settle.add_argument("--status", required=True)
+    settle.add_argument("--gate", required=True)
+    settle.add_argument("--artifact")
+    settle.add_argument("--evidence", action="append")
+    settle.add_argument("--evidence-json", action="append")
+    settle.add_argument("--scratch-evidence-json", action="append")
+    settle.add_argument("--started-at", required=True)
+    settle.add_argument("--updated-at", required=True)
+    settle.add_argument("--notes")
+    settle.add_argument(
+        "--terminal-class",
+        choices=["external-nonauthorizing", "internal-authorizing"],
+    )
+    settle.add_argument("--authorizing", choices=["true", "false"])
+    settle.add_argument(
+        "--actual-execution-path", choices=["direct-external-cli", "internal"]
+    )
+    settle.add_argument("--artifact-identity")
+    settle.add_argument("--external-dispatch-id")
+    settle.add_argument("--external-evidence-run-id")
+    settle.add_argument("--effort-mapping-loss")
+    settle.add_argument("--closer-run-id")
+    settle.add_argument("--target-tuple-json")
+    settle.set_defaults(func=command_settle_launch)
+
     recovery = subparsers.add_parser("recover-invalid-closure", help="Append one digest-bound V2 closure invalidation")
     recovery.add_argument("--run-id", required=True)
     recovery.add_argument("--target-run-id", required=True)
@@ -1009,6 +1960,27 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
     disposition.set_defaults(func=command_dispose_invalid_current)
+
+    noncanonical = subparsers.add_parser(
+        "recover-noncanonical-history",
+        help="Seal one exact noncanonical ledger as inert history and start a canonical ledger",
+    )
+    noncanonical.add_argument("--expected-ledger-sha256", required=True)
+    noncanonical.add_argument("--operation-id", required=True)
+    noncanonical.add_argument("--recorded-at", required=True)
+    action = noncanonical.add_mutually_exclusive_group()
+    action.add_argument("--apply-admitted", action="store_true")
+    action.add_argument("--rollback-admitted", action="store_true")
+    noncanonical.add_argument(
+        "--inject-failure",
+        choices=[
+            "post-history-publish",
+            "pre-ledger-replace",
+            "post-ledger-replace-readback",
+        ],
+        help=argparse.SUPPRESS,
+    )
+    noncanonical.set_defaults(func=command_recover_noncanonical_history)
 
     rollup = subparsers.add_parser("rollup", help="Aggregate ledger events (one work-item via --work-item, or all active via --root)")
     rollup.add_argument("--root", type=Path, default=Path("."), help="Repository root for an all-active rollup (when --work-item is omitted).")

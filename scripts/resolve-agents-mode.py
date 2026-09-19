@@ -24,14 +24,22 @@ PROVIDER_DIRS = {
 }
 REMOVED_EXTERNAL_PROVIDERS = frozenset({"gemini", "qwen"})
 EXTERNAL_DISPATCH_PROVIDERS = ("kimi", "grok")
+_EXTERNAL_ROLE_TAXONOMY_NAME = "external-role-taxonomy.v1.json"
+_EXTERNAL_ROLE_TAXONOMY_MAX_BYTES = 64 * 1024
+_EXTERNAL_ROLE_LANES = frozenset(
+    {"consultant", "external-worker", "external-reviewer", "none"}
+)
 PROVIDER_CHOICES = tuple(sorted((*PROVIDER_DIRS, *EXTERNAL_DISPATCH_PROVIDERS)))
 _EXTERNAL_EXECUTION_DISPOSITIONS = frozenset(
-    {"explicit-read-only", "classifier-only"}
+    {"explicit-wrapper", "classifier-only"}
 )
+_LEGACY_EXTERNAL_EXECUTION_DISPOSITIONS = {
+    "explicit-read-only": "explicit-wrapper"
+}
 _EXTERNAL_AVAILABILITIES = frozenset({"available", "unavailable"})
 _EXTERNAL_DISPOSITION_AVAILABILITY_PAIRS = frozenset(
     {
-        ("explicit-read-only", "available"),
+        ("explicit-wrapper", "available"),
         ("classifier-only", "unavailable"),
     }
 )
@@ -992,13 +1000,34 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
         realization = realizations.get(provider)
         if not isinstance(realization, dict):
             raise ValueError(f"E_ROLE_POLICY_INVALID: {provider} realization")
+        disposition = realization.get("executionDisposition")
+        if isinstance(disposition, str):
+            realization["executionDisposition"] = (
+                _LEGACY_EXTERNAL_EXECUTION_DISPOSITIONS.get(
+                    disposition, disposition
+                )
+            )
         allowed = realization.get("allowedTaskClasses")
+        advisory = realization.get("advisoryTaskClasses", [])
+        mutation_policy = realization.get("requiredMutationClass")
+        mutation_classes = (
+            [mutation_policy]
+            if isinstance(mutation_policy, str)
+            else mutation_policy
+        )
         if (
             not isinstance(allowed, list)
             or len(allowed) != len(set(allowed))
             or any(task not in task_classes for task in allowed)
-            or realization.get("requiredMutationClass") != "read-only"
+            or not isinstance(mutation_classes, list)
+            or not mutation_classes
+            or len(mutation_classes) != len(set(mutation_classes))
+            or any(
+                mutation not in {"read-only", "bounded-write"}
+                for mutation in mutation_classes
+            )
             or realization.get("independentVerification") is not True
+            or not isinstance(realization.get("executionDisposition"), str)
             or realization.get("executionDisposition")
             not in _EXTERNAL_EXECUTION_DISPOSITIONS
             or realization.get("availability") not in _EXTERNAL_AVAILABILITIES
@@ -1011,6 +1040,19 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
             or not realization["effortMappingLoss"]
         ):
             raise ValueError(f"E_ROLE_POLICY_INVALID: {provider} realization shape")
+        if (
+            not isinstance(advisory, list)
+            or any(not isinstance(task, str) for task in advisory)
+            or len(advisory) != len(set(advisory))
+            or any(task not in allowed for task in advisory)
+            or any(
+                task_classes[task].get("mutationClass") != "read-only"
+                for task in advisory
+            )
+        ):
+            raise ValueError(
+                f"E_ROLE_POLICY_INVALID: {provider} advisory task classes"
+            )
     return policy, path
 
 
@@ -1354,11 +1396,16 @@ def _describe_ordinary_native_role_options_in_layout(
         options.append(
             {
                 "profile": name,
+                "modelTier": profile["modelTier"],
                 "model": profile["codexModel"],
                 "effort": profile["effort"],
                 "useCriteria": profile["useCriteria"],
                 "hostCapability": capability,
             }
+        )
+    if not options:
+        return _ordinary_native_denied(
+            task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
         )
     profession = _profession_skill_metadata(
         repo_root, contract["role"], contract["developerInstructions"]
@@ -1398,6 +1445,7 @@ def _describe_ordinary_native_role_options_in_layout(
         "roleKind": contract["roleKind"],
         "mutationClass": contract["task"]["mutationClass"],
         "defaultProfile": contract["profile"],
+        "defaultModelTier": policy["profiles"][contract["profile"]]["modelTier"],
         "defaultModel": contract["model"],
         "defaultEffort": contract["effort"],
         "profession": profession,
@@ -1508,6 +1556,7 @@ def resolve_ordinary_native_dispatch(
             )
     invocation = copy.deepcopy(description["defaultInvocation"])
     resolved_profile = description["defaultProfile"]
+    resolved_model_tier = description["defaultModelTier"]
     resolved_model = description["defaultModel"]
     resolved_effort = description["defaultEffort"]
     host_capability = description.get(
@@ -1515,6 +1564,7 @@ def resolve_ordinary_native_dispatch(
     )
     if selected is not None:
         resolved_profile = selected["profile"]
+        resolved_model_tier = selected["modelTier"]
         resolved_model = selected["model"]
         resolved_effort = selected["effort"]
         host_capability = selected["hostCapability"]
@@ -1534,6 +1584,7 @@ def resolve_ordinary_native_dispatch(
         "role": description["role"],
         "requestedModel": requested_model,
         "requestedEffort": requested_effort,
+        "modelTier": resolved_model_tier,
         "resolvedProfile": resolved_profile,
         "resolvedModel": resolved_model,
         "resolvedEffort": resolved_effort,
@@ -1667,6 +1718,64 @@ def _external_dispatch_decision(
     }
 
 
+def _external_role_mapping(policy_root: Path) -> dict[str, str]:
+    """Load the paired external role taxonomy without retyping its membership."""
+
+    candidates = (
+        policy_root / "shared" / _EXTERNAL_ROLE_TAXONOMY_NAME,
+        policy_root / "scripts" / _EXTERNAL_ROLE_TAXONOMY_NAME,
+    )
+    taxonomy_paths = [path for path in candidates if _ordinary_file(path)]
+    if len(taxonomy_paths) != 1:
+        raise ValueError("external role taxonomy is missing or ambiguous")
+    taxonomy_path = taxonomy_paths[0]
+    metadata = taxonomy_path.lstat()
+    descriptor = os.open(
+        taxonomy_path,
+        os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino, opened.st_mode) != (
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_mode,
+        ):
+            raise ValueError("external role taxonomy identity changed")
+        payload = os.read(descriptor, _EXTERNAL_ROLE_TAXONOMY_MAX_BYTES + 1)
+    finally:
+        os.close(descriptor)
+    if len(payload) > _EXTERNAL_ROLE_TAXONOMY_MAX_BYTES:
+        raise ValueError("external role taxonomy exceeds byte limit")
+    document = json.loads(payload.decode("utf-8", errors="strict"))
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"schemaVersion", "roles"}
+        or document.get("schemaVersion") != 1
+        or not isinstance(document.get("roles"), dict)
+    ):
+        raise ValueError("external role taxonomy shape")
+    mapping = document["roles"]
+    if any(
+        not isinstance(role, str)
+        or not role
+        or lane not in _EXTERNAL_ROLE_LANES
+        for role, lane in mapping.items()
+    ):
+        raise ValueError("external role taxonomy membership")
+    return mapping
+
+
+def _external_consultant_role(policy_root: Path) -> str:
+    """Derive the single advisory role from the paired external taxonomy."""
+
+    mapping = _external_role_mapping(policy_root)
+    consultant_roles = [role for role, lane in mapping.items() if lane == "consultant"]
+    if len(consultant_roles) != 1:
+        raise ValueError("external role taxonomy consultant lane")
+    return consultant_roles[0]
+
+
 def resolve_external_dispatch(
     provider: Any,
     task_class: Any,
@@ -1709,20 +1818,41 @@ def resolve_external_dispatch(
         eligible = policy["taskRoleEligibility"].get(task_name)
         final_authorizing_role = role_name in policy["finalAuthorizingRoles"]
         independent_verification = realization["independentVerification"] is True
+        role_lane = _external_role_mapping(source_root).get(role_name)
+        ordinary_role_admitted = (
+            isinstance(eligible, list)
+            and role_name in eligible
+            and role_lane != "consultant"
+        )
+        task_mutation = task.get("mutationClass") if isinstance(task, dict) else None
+        mutation_policy = realization["requiredMutationClass"]
+        admitted_mutations = (
+            [mutation_policy]
+            if isinstance(mutation_policy, str)
+            else mutation_policy
+        )
+        bounded_role_admitted = True
+        if task_mutation == "bounded-write":
+            bounded_role_admitted = role_lane == "external-worker"
+        advisory_role_admitted = False
+        if (
+            not ordinary_role_admitted
+            and task_name in realization.get("advisoryTaskClasses", [])
+        ):
+            advisory_role_admitted = role_name == _external_consultant_role(source_root)
         base_admitted = (
             isinstance(task, dict)
             and isinstance(eligible, list)
             and task_name in realization["allowedTaskClasses"]
-            and role_name in eligible
-            and task.get("mutationClass")
-            == realization["requiredMutationClass"]
-            == "read-only"
+            and (ordinary_role_admitted or advisory_role_admitted)
+            and task_mutation in admitted_mutations
+            and bounded_role_admitted
             and independent_verification
         )
         admitted = base_admitted and not final_authorizing_role
         execution_authorized = (
             admitted
-            and realization["executionDisposition"] == "explicit-read-only"
+            and realization["executionDisposition"] == "explicit-wrapper"
             and realization["availability"] == "available"
         )
         unavailable = (

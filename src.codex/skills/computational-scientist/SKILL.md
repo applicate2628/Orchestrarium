@@ -11,6 +11,11 @@ description: "Physics, numerics, simulation: solver, discretization, stability, 
 - Turn continuous-domain or simulation-heavy ideas into explicit mathematical or physical models.
 - Optimize for model validity, numerical robustness, and falsifiable validation criteria before code.
 
+## Mode selection
+
+- Modeling mode is the default. In modeling mode, the existing `Input contract`, `Return exactly one artifact`, and `Gate` below apply unchanged.
+- Use `scientific-conformance-review` only when it is explicitly assigned. For that run, use the mode-specific input, artifact, and gate clauses below instead of the modeling-only input, artifact, and gate requirements. Shared working and boundary rules still apply where relevant.
+
 ## Input contract
 
 - Take one bounded scientific-computing, simulation, or numerical-method problem.
@@ -30,6 +35,32 @@ description: "Physics, numerics, simulation: solver, discretization, stability, 
 - The package contains a symbol table with units for every variable, and every governing equation is checked dimensionally consistent or fully nondimensionalized with named characteristic scales; a unit-less symbol in a governing equation is `REVISE`.
 - When an explicit time-stepping scheme is chosen, state its stability-constraint formula in problem parameters. When stiffness is plausible, justify the explicit/implicit choice against a stiffness estimate.
 - No implementation code is included.
+
+## Scientific-conformance-review mode
+
+### Input
+
+- Take the accepted computational model artifact and revision, its existing numbered claims, the scientific implementation artifact and revision, implementation evidence, the approved scope, and the author and run identity of the implementation and proposed reviewer.
+- The conformance reviewer must be independent of the Scientific Software Engineer run. If the conformance author or run identity matches the implementation author or run identity, return `REVISE` without self-reviewing the work.
+
+### Return exactly one artifact
+
+- Return one scientific conformance report, not a replacement computational model package.
+- Map every upstream claim 1:1 and in its existing order to the canonical S4 verdict `verified | failed | not-verifiable (with reason)`. For each claim, name the accepted expectation, inspected implementation surface, evidence and observed result, and verdict or reason.
+- The report ends with exactly one overall `PASS | REVISE | BLOCKED` decision.
+
+### Gate
+
+- Verify equations and model assumptions, units, coordinate and gauge conventions, discretization and solver choices, parameter domain, tolerances, and scientific validation evidence against the accepted model and approved scope.
+- A changed unit or tolerance is a failed claim and requires `REVISE`.
+- PASS requires every mandatory claim `verified`, no unexplained model deviation, and no self-review.
+- Return `REVISE` for any failed mandatory claim, unexplained model deviation, self-review, or scientific change required from an existing owner. Return `BLOCKED` only when a required accepted input or evidence source is unavailable, making a mandatory claim `not-verifiable (with reason)` until that external prerequisite is restored.
+- Generic Quality Assurance remains a separate gate and is unchanged.
+
+### Review-only boundary
+
+- This mode is review-only: it must not change implementation code, physics, equations, assumptions, scientific settings, units, tolerances, or the accepted model. Return every required change or deviation to its existing owner.
+- A source-fixture check can confirm that this contract is present; it does not prove that a conformance reviewer ran or that provider-runtime behavior complied.
 
 ## Working rules
 
@@ -52,9 +83,9 @@ Frame the layering as constraints for the implementers who build from your spec;
 - **Specify the stable contract, not a scenario-specific backend reach:** define the capability as a contract on a stable surface (a lower module or a neutral interface leaf) that callers depend on and implementations are injected into; never require a higher module to import a private/impl module of a lower one.
 - **Single owner per cross-cutting invariant (C1):** call out every mode predicate, canonical ordering, shared constant, or tolerance that must stay globally consistent and name its single owner; re-deriving it in multiple places is a correctness/reproducibility bug (except a generated-from-one-source or drift-gated duplicate across a hard process/ABI/schema boundary).
 - **Config and selectors are top-injected inputs:** require env/CLI/scenario selectors to be resolved once at the top into typed config and passed down; a lower module reading ambient policy is an upward control-flow leak (the only exception is documented diagnostic/observability instrumentation with no business/semantic/output/persistence/security/control-flow effect).
-- **Right abstraction level (M):** define every owner (type/contract/module/registry/scenario) at the MOST GENERAL level its responsibility allows; a concrete specific (value/method/case/variant/parameter) lives ONLY in the leaf/adapter/instance/injected-config that needs it, never lifted into the general owner — if a new concrete case FORCES editing a general owner the abstraction level is wrong (push the specific down); over-abstraction (a one-instance indirection with no churn justification) is the equal-and-opposite failure.
-- **Reproducibility is a publication-safe run manifest (D3):** every result-producing/golden/validation/release run emits a machine-readable manifest of run provenance — toolchain + flags, PINNED dependency versions (exact version/hash, never a moving tag/branch/latest), platform identity, determinism/FP mode, seed, parallel config + reduction partitioning, input hashes, an allowlist-built config snapshot, contract/schema versions, strategy/algorithm; missing/divergent/silently-incomplete fails packaging (declared-absent passes). Broader than C1 output equivalence; the snapshot is default-closed allowlist + a two-detector path/credential value-scan, never a raw env dump.
-- **Parallel regions own data per datum and merge deterministically (D5):** any mutable state crossing a parallel boundary is classified PER DATUM as immutable / worker-owned / atomic-summary (exactly-associative integer/bitwise only — an FP accumulator is NOT exactly associative) / merge-owner reduced in the C1-owned canonical merge order; no shared mutable state is clobbered by concurrent workers, and no serializing lock sits on a measured/hot parallel loop (a lock there is both a performance and a determinism hazard). Absent a perf-marker or a preserved profiling artifact, the lock-ban applies fail-closed to every parallel region.
+- **Generality, extensibility, and simplicity (A4/A7/M):** Treat generality, extensibility, low coupling, cohesion, simplicity, and efficiency as one design tradeoff. Keep changes local to the correct owner and extend an accepted seam when it fits. Create the smallest stable seam when justified by an accepted current requirement, accepted declared future direction, concrete second consumer, evidenced domain variability, or verified external-contract evolution; a second consumer is evidence, not a prerequisite. Otherwise correct the current owner directly. Do not add a speculative framework, duplicate decisions, or cascade edits across unrelated modules; preserve correctness, required performance, and external contracts.
+- **Reproducibility evidence (D3):** A machine-readable run manifest is required only when output is published, packaged, or golden; compared across environments; or an accepted scientific/performance reproducibility requirement applies. Otherwise, ordinary repo-standard run evidence suffices. When required, the manifest records toolchain + flags, pinned dependency versions, platform identity, determinism/floating-point mode, seed, parallel configuration + reduction partitioning, input hashes, an allowlist-built config snapshot, contract/schema versions, and strategy/algorithm; missing, divergent, or silently incomplete data fails packaging (declared-absent passes). The snapshot remains default-closed, runs both machine-path and credential detectors, and is never a raw environment dump.
+- **Parallel regions own data per datum and merge deterministically (D5):** classify every datum crossing a parallel boundary as immutable / worker-owned / atomic-summary (exactly-associative integer/bitwise only — a floating-point accumulator is not exactly associative) / merge-owner reduced in the C1-owned canonical merge order; no shared mutable state is clobbered by concurrent workers, and lock acquisition order never supplies the merge order for floating-point or other order-sensitive reductions. A correctness-required lock may guard classified order-insensitive state; a cold lock needs no automatic profile. In a reviewer-verified hot region, measure the lock against the accepted budget: it passes only when correctness and budget pass, and fails when the budget fails; do not impose a blanket lock-free mandate.
 
 ## Non-goals
 

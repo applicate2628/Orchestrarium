@@ -124,8 +124,8 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'agents-design-panel command points at the installed contract'),
  ('check_contains',
   'src.claude/CLAUDE.md',
-  'agents-design-panel.md',
-  'CLAUDE.md dispatch index exposes the design-panel command'),
+  '.claude/commands/agents-help.md',
+  'CLAUDE.md points to the installed command index'),
  ('check_contains',
   'src.claude/commands/agents-help.md',
   '/agents-design-panel',
@@ -421,7 +421,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'Claude addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
   '@ROOT/shared/references/subagent-operating-model.md',
-  'ce7997cfef3b03a9e60cd4e45d71ee9e481e46463b664c2073611894eb10479b',
+  'bf19b22233d550dbdbcd012a69ef729eae265549956c7c1cf1c1d7c7675b1b12',
   'shared subagent-operating-model matches the current canonical normalized fingerprint'),
  ('check_normalized_sha256',
   '@ROOT/references-claude/subagent-operating-model.md',
@@ -442,7 +442,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'src.claude/skills/explain-simply/SKILL.md'),
  ('check_common_skill_body_pin',
   'github-pr-review-bot',
-  'd276aa377d70532d47c8550042467c946f1fe73f51205fc6ea7f87db856a6ce2',
+  'aea0d0e4529326d6347368ce6d811e7f398a4cb0ee18df8504444e8d4f621935',
   'src.claude/skills/github-pr-review-bot/SKILL.md'),
  ('check_contains',
    'src.claude/skills/github-pr-review-bot/SKILL.md',
@@ -470,15 +470,19 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'github-pr-review-bot prioritizes exact post-trigger current-head findings'),
  ('check_common_skill_body_pin',
   'generalize-from-instance',
-  '7233fcd0d38ccb87e2b95d5f95af3811aa5224e873591eaefd397d3c20b9fea4',
+  'c55e0d9389abce424e778c41816127c76948d67d92233e9afb26ab4d92cfaf97',
   'src.claude/skills/generalize-from-instance/SKILL.md'),
  ('check_common_skill_body_pin',
+  'implementation-to-theory',
+  '2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78',
+  'src.claude/skills/implementation-to-theory/SKILL.md'),
+ ('check_common_skill_body_pin',
   'manual-repo-transfer',
-  '9aa447a9a0c908482d9186a9629bf8dcd10936240120159cbaa406ca594dd7b6',
+  '38d4c980d74adb1ff09c0e77eeecae08079d5af9a48fd2ace5c4a329bf223061',
   'src.claude/skills/manual-repo-transfer/SKILL.md'),
  ('check_common_skill_body_pin',
   'repo-cleanup',
-  '3cf6f3fbf116f3db34a907ba36f91c961bded187dd52ef554f630e8ac0eec4ff',
+  '1e71d73c531cab45a984de7cd1e31ded753b73e09dbb5e90e0a979fb3ccdcd36',
   'src.claude/skills/repo-cleanup/SKILL.md'),
  ('check_common_skill_body_pin',
   'mathtype-book-page',
@@ -506,7 +510,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'src.claude/skills/product-manager/SKILL.md',
   'product-manager has a curated role-skill file'),
  ('check_file', 'src.claude/skills/analyst/SKILL.md', 'analyst has a curated role-skill file'),
- ('check_file', 'src.claude/skills/architect/SKILL.md', 'architect has a curated role-skill file'),
+ ('check_file', 'src.codex/skills/architect/SKILL.md', 'architect has the universal role-contract body'),
  ('check_file', 'src.claude/skills/planner/SKILL.md', 'planner has a curated role-skill file'),
  ('check_contains',
   'src.claude/agents/product-manager.md',
@@ -526,12 +530,11 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'analyst agent wrapper is not a fail-closed stub (dual role must stay a valid dispatch target)'),
  ('check_contains',
   'src.claude/agents/architect.md',
-  'invoke the `Skill` tool with name `architect` to load the full role contract',
-  'architect agent wrapper pins to its curated skill via the Skill tool'),
- ('check_absent',
-  'src.claude/agents/architect.md',
-  'lead-is-a-main-conversation-role',
-  'architect agent wrapper is not a fail-closed stub (dual role must stay a valid dispatch target)'),
+  'The universal Architect skill (`.agents/skills/architect/SKILL.md`, sourced from `src.codex/skills/architect/SKILL.md`) is the sole role-contract body owner',
+  'architect agent wrapper pins to the universal role-contract body via the Skill tool'),
+ ('check_not_exists',
+  'src.claude/skills/architect/SKILL.md',
+  'architect has no duplicate Claude-owned source body'),
  ('check_contains',
   'src.claude/agents/planner.md',
   'invoke the `Skill` tool with name `planner` to load the full role contract',
@@ -681,11 +684,11 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'shared governance no longer allows adapter-host metadata for external execution'),
  ('check_contains',
   'shared/AGENTS.shared.md',
-  'must use direct external launch',
+  'use orchestrating runtime/approved wrapper, never an internal relay',
   'shared governance requires direct external launch'),
  ('check_contains',
   'shared/AGENTS.shared.md',
-  'substantive task prompt must use file-based prompt delivery',
+  'file-based prompt via stdin/file, never argv',
   'shared governance requires file-based external CLI prompts'),
  ('check_contains',
   'shared/AGENTS.shared.md',
@@ -697,7 +700,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'shared governance requires state synchronization ownership discipline'),
  ('check_contains',
   'shared/AGENTS.shared.md',
-  'split-brain state sync as an architecture bug',
+  'Split-brain sync is an architecture bug',
   'shared governance rejects split-brain state synchronization'),
  ('check_contains',
   'shared/AGENTS.shared.md',
@@ -733,7 +736,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'external-dispatch limits inline argv to synthetic smoke'),
  ('check_contains',
   'shared/AGENTS.shared.md',
-  'verify every subagent result before accepting it',
+  'verify its result before acceptance/forwarding/completion claims',
   'shared governance requires verification before trusting subagent results'),
  ('check_contains',
   'shared/AGENTS.shared.md',
@@ -745,7 +748,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'shared governance requires terminology and abbreviation explanations in documents'),
  ('check_contains',
   'shared/AGENTS.shared.md',
-  'concrete observable data',
+  'capture observable wording/error/log/return/repro or `file:line`; verify the causal chain',
   'shared governance requires measured evidence before root-cause or fix claims'),
  ('check_contains',
   'shared/AGENTS.shared.md',
@@ -1266,7 +1269,22 @@ _APAT_ACTIONS = (
     *(("check_contains", "@PACK/skills/architect/SKILL.md", f'<!-- APAT-SEMANTIC id="AP{number}.', f"APAT-E006-INSTALLED-MISSING: claude architect AP{number} marker") for number in range(6)),
     ("check_contains", "@PACK/skills/architect/SKILL.md", "<!-- APAT-BLOCK:ARCHITECT-DISPOSITION:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude architect AP0-AP5 projection section marker"),
     ("check_contains", "@PACK/agents/architecture-reviewer.md", "<!-- APAT-BLOCK:ARCHITECTURE-REVIEW:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT projection section marker"),
-    ("check_contains", "@PACK/agents/architecture-reviewer.md", "each tempting but unsuitable pattern has explicit negative evidence", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT negative-selection wording"),
+    ("check_contains", "@PACK/agents/architecture-reviewer.md", "each evidence-triggered candidate that is rejected has explicit negative evidence; an unadmitted pattern needs no invented rejection", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT negative-selection wording"),
+)
+
+_APAT_ARCHITECT_INSTALLED_PATH = "@PACK/skills/architect/SKILL.md"
+_APAT_ARCHITECT_SOURCE_PATH = "@ROOT/src.codex/skills/architect/SKILL.md"
+_APAT_ARCHITECT_INSTALLED_ACTIONS = tuple(
+    action for action in _APAT_ACTIONS
+    if action[1] == _APAT_ARCHITECT_INSTALLED_PATH
+)
+_APAT_SHARED_ACTIONS = tuple(
+    action for action in _APAT_ACTIONS
+    if action[1] != _APAT_ARCHITECT_INSTALLED_PATH
+)
+_APAT_ARCHITECT_SOURCE_ACTIONS = tuple(
+    (action[0], _APAT_ARCHITECT_SOURCE_PATH, *action[2:])
+    for action in _APAT_ARCHITECT_INSTALLED_ACTIONS
 )
 
 _APAT_DEV_ACTIONS = (
@@ -1327,7 +1345,12 @@ _SOURCE_ONLY_MAINTAINER_OPERATIONS = (
 def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
     return (
         action[:2] == ("direct", "curated_registry")
-        or any(str(value).startswith("src.claude/skills/lead/") for value in action)
+        or any(
+            str(value).startswith(
+                ("src.claude/skills/lead/", "src.claude/skills/architect/", "src.codex/skills/architect/")
+            )
+            for value in action
+        )
         or action[0] in _SOURCE_ONLY_MAINTAINER_OPERATIONS
         or any(
             str(value).startswith(_SOURCE_ONLY_MAINTAINER_PREFIXES)
@@ -1338,8 +1361,8 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:42]
-    + _DECLARED_ACTIONS[114:257]
-    + _APAT_ACTIONS
+    + _DECLARED_ACTIONS[114:258]
+    + _APAT_SHARED_ACTIONS
 )
 
 
@@ -1354,27 +1377,28 @@ ACTIONS = (
     (
         "dev_repo",
         _DECLARED_ACTIONS[42:114]
-        + _DECLARED_ACTIONS[270:274]
-        + _DECLARED_ACTIONS[275:280]
-        + _DECLARED_ACTIONS[281:287]
-        + _DECLARED_ACTIONS[294:309]
+        + _DECLARED_ACTIONS[271:275]
+        + _DECLARED_ACTIONS[276:281]
+        + _DECLARED_ACTIONS[282:288]
+        + _DECLARED_ACTIONS[295:310]
         # Declaration 309 reads the source-only root README, absent when installed.
-        + _DECLARED_ACTIONS[309:310]
+        + _DECLARED_ACTIONS[310:311]
         + tuple(
             action for action in _ALL_ACTIONS
             if _is_source_only_maintainer_action(action)
         )
+        + _APAT_ARCHITECT_SOURCE_ACTIONS
         + _APAT_DEV_ACTIONS
         + _UI_CONTINUITY_DEV_ACTIONS,
     ),
     (
         "dev_repo_nonstandalone",
-        _DECLARED_ACTIONS[257:270]
-        + _DECLARED_ACTIONS[274:275]
-        + _DECLARED_ACTIONS[280:281]
-        + _DECLARED_ACTIONS[287:294],
+        _DECLARED_ACTIONS[258:271]
+        + _DECLARED_ACTIONS[275:276]
+        + _DECLARED_ACTIONS[281:282]
+        + _DECLARED_ACTIONS[288:295],
     ),
-    ("installed", _INSTALLED_ACTIONS),
+    ("installed", _INSTALLED_ACTIONS + _APAT_ARCHITECT_INSTALLED_ACTIONS),
 )
 
 def validate(root: Path | None = None):

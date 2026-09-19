@@ -224,7 +224,7 @@ def _same_lexical_path(left: Path, right: Path) -> bool:
 def _linked_runtime_subroots_module() -> Any:
     """Load the installed sibling that owns linked global-runtime authority."""
 
-    path = Path(__file__).with_name("linked_runtime_subroots.py")
+    path = Path(__file__).resolve().with_name("linked_runtime_subroots.py")
     bound = _open_ordinary_file(path, "Claude linked runtime authority")
     try:
         payload = bound.read_bytes()
@@ -261,6 +261,20 @@ def _bind_global_claude_agents_authority(install_root: Path) -> Any | None:
         raise _fail("Claude linked runtime authority is unavailable") from exc
 
 
+def _bind_global_canonical_agents_authority(install_root: Path) -> Any | None:
+    """Bind only the installer-approved global logical canonical agents root."""
+
+    logical_root = Path(install_root) / ".agents"
+    try:
+        return _linked_runtime_subroots_module().LinkedRuntimeSubrootAuthority.bind(
+            logical_root,
+            scope="global",
+            trusted_global_roots=(logical_root,),
+        )
+    except (AttributeError, OSError, ValueError) as exc:
+        raise _fail("canonical linked runtime authority is unavailable") from exc
+
+
 def _assert_current_claude_agents_authority(authority: Any) -> None:
     try:
         authority.assert_current()
@@ -268,18 +282,26 @@ def _assert_current_claude_agents_authority(authority: Any) -> None:
         raise _fail("Claude linked runtime authority changed") from exc
 
 
+def _assert_current_canonical_agents_authority(authority: Any) -> None:
+    try:
+        authority.assert_current()
+    except (OSError, ValueError) as exc:
+        raise _fail("canonical linked runtime authority changed") from exc
+
+
 def _open_projection_file(
     projection_root: Path,
     label: str,
     name: str,
-    claude_agents_authority: Any | None,
+    linked_authority: Any | None,
+    authority_relative_root: Path | None,
 ) -> _BoundOrdinaryFile:
-    if claude_agents_authority is None:
+    if linked_authority is None:
         return _open_ordinary_file(projection_root / name, f"{label}/{name}")
-    if label != "claude-host":
-        raise _fail("linked Claude authority was assigned to a non-Claude projection")
+    if authority_relative_root is None:
+        raise _fail(f"{label} linked runtime authority root")
     try:
-        leaf = claude_agents_authority.ordinary_file(Path("scripts") / name)
+        leaf = linked_authority.ordinary_file(authority_relative_root / name)
     except (OSError, ValueError) as exc:
         raise _fail(f"{label}/{name} linked runtime authority") from exc
     return _open_ordinary_leaf(leaf, f"{label}/{name}")
@@ -408,6 +430,7 @@ def validate_projection_manifest(
     source_root: Path,
     projections: Sequence[tuple[str, Path]],
     *,
+    canonical_agents_authority: Any | None = None,
     claude_agents_authority: Any | None = None,
 ) -> dict[str, Any]:
     """Validate one source set and every named local projection without mutation."""
@@ -423,6 +446,21 @@ def validate_projection_manifest(
         normalized.append((label, Path(root)))
     if not normalized:
         raise _fail("no projection was supplied")
+    if canonical_agents_authority is not None:
+        expected_root = (
+            canonical_agents_authority.logical_root
+            / "skills"
+            / "lead"
+            / "scripts"
+        )
+        canonical_roots = [
+            root for label, root in normalized if label == "canonical"
+        ]
+        if (
+            len(canonical_roots) != 1
+            or not _same_lexical_path(canonical_roots[0], expected_root)
+        ):
+            raise _fail("linked canonical authority projection root")
     if claude_agents_authority is not None:
         expected_root = claude_agents_authority.logical_root / "scripts"
         claude_roots = [
@@ -439,6 +477,8 @@ def validate_projection_manifest(
     _validate_external_role_taxonomy(source_root)
     bindings: list[tuple[_BoundOrdinaryFile, str, str]] = []
     try:
+        if canonical_agents_authority is not None:
+            _assert_current_canonical_agents_authority(canonical_agents_authority)
         if claude_agents_authority is not None:
             _assert_current_claude_agents_authority(claude_agents_authority)
         for name in TRANSPORT_FILES:
@@ -451,17 +491,28 @@ def validate_projection_manifest(
             if packed_destination != Path("scripts") / name:
                 raise _fail(f"packed runtime destination for {name}")
             for label, projection_root in normalized:
+                linked_authority = (
+                    canonical_agents_authority
+                    if label == "canonical"
+                    else claude_agents_authority
+                    if label == "claude-host"
+                    else None
+                )
+                authority_relative_root = (
+                    Path("skills") / "lead" / "scripts"
+                    if label == "canonical" and linked_authority is not None
+                    else Path("scripts")
+                    if label == "claude-host" and linked_authority is not None
+                    else None
+                )
                 bindings.append(
                     (
                         _open_projection_file(
                             projection_root,
                             label,
                             name,
-                            (
-                                claude_agents_authority
-                                if label == "claude-host"
-                                else None
-                            ),
+                            linked_authority,
+                            authority_relative_root,
                         ),
                         digest,
                         f"{label}/{name}",
@@ -469,6 +520,8 @@ def validate_projection_manifest(
                 )
         for bound, digest, label in bindings:
             _validate_bound_bytes(bound, digest, label)
+        if canonical_agents_authority is not None:
+            _assert_current_canonical_agents_authority(canonical_agents_authority)
         if claude_agents_authority is not None:
             _assert_current_claude_agents_authority(claude_agents_authority)
     finally:
@@ -565,6 +618,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     manifest,
                     source_root,
                     projections,
+                    canonical_agents_authority=(
+                        _bind_global_canonical_agents_authority(args.install_root)
+                        if args.scope == "global"
+                        else None
+                    ),
                     claude_agents_authority=(
                         _bind_global_claude_agents_authority(args.install_root)
                         if args.scope == "global"

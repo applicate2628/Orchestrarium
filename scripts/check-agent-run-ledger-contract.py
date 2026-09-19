@@ -82,7 +82,7 @@ MIGRATION_ALLOWED_BASELINE_DRIFT = {
     "docs/work-item-execution-tracking.md",
 }
 MIGRATION_ACCEPTED_CURRENT_BYTES = {
-    "tests/test_agent_run_ledger.py": "e11b56562d1e14b85c6966a392352fa90935a62a943e561934557d9ae311bf75",
+    "tests/test_agent_run_ledger.py": "4cb66d9bf615291a4799aae37e3df2677b9a019124ffe8522bf047f5947c2312",
 }
 
 

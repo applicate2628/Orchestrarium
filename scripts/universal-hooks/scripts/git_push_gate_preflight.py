@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import shlex
 import types
@@ -12,7 +13,9 @@ from typing import NamedTuple, get_args, get_origin, get_type_hints
 
 from hook_common import (
     CURRENT_TURN_BYTE_CAP,
+    HISTORY_STATUSES,
     STATUS_FOUND,
+    TURN_BOUNDARY_STATUSES,
     extract_user_typed_text,
     parse_envelope,
     read_stdin_utf8,
@@ -20,6 +23,103 @@ from hook_common import (
 )
 
 APPROVE_MARKER_REGEX = re.compile(r"\[approve-publication\]", re.IGNORECASE)
+SIMPLE_PR_APPROVAL_MARKER = "[approve-pr-publication]"
+PR_GRANT_PREFIX = "[approve-pr-publication:v1 pr="
+PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
+PR_URL_REGEX = re.compile(
+    r"^(?P<url>https://github\.com/"
+    r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/"
+    r"(?P<repo>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/pull/"
+    r"(?P<number>[1-9][0-9]*))$"
+)
+PR_GRANT_NUMBER_REGEX = re.compile(r"^[1-9][0-9]*$")
+PR_GRANT_MARKDOWN_REGEX = re.compile(
+    r"^\[(?P<label>[^\]]+)\]\((?P<destination>[^)]+)\)$"
+)
+_QUESTION_REPLY_OPEN = "<send_user_message_question_reply>\n"
+_QUESTION_REPLY_CLOSE = "\n</send_user_message_question_reply>"
+
+
+class PublicationUserReply(NamedTuple):
+    kind: str
+    text: str
+
+
+class PublicationPrGrant(NamedTuple):
+    url: str
+    owner: str
+    repo: str
+    number: int
+
+
+def normalize_publication_approval_text(text: str) -> str:
+    """Remove at most one accepted display wrapper from a whole approval."""
+    normalized = text.strip()
+    for wrapper in ("`", "**"):
+        if (
+            normalized.startswith(wrapper)
+            and normalized.endswith(wrapper)
+            and len(normalized) > len(wrapper) * 2
+        ):
+            return normalized[len(wrapper):-len(wrapper)]
+    return normalized
+
+
+def extract_publication_user_reply(entry: object) -> PublicationUserReply:
+    """Decode the one observed structured UI reply without trusting its question."""
+    text = extract_user_typed_text(entry)
+    if not text.startswith("<send_user_message_question_reply>"):
+        return PublicationUserReply("plain", text)
+    if not (text.startswith(_QUESTION_REPLY_OPEN) and text.endswith(_QUESTION_REPLY_CLOSE)):
+        return PublicationUserReply("recognized-malformed", "")
+    encoded = text[len(_QUESTION_REPLY_OPEN):-len(_QUESTION_REPLY_CLOSE)]
+    try:
+        payload = json.loads(encoded)
+    except (TypeError, ValueError):
+        return PublicationUserReply("recognized-malformed", "")
+    if (
+        type(payload) is not list
+        or len(payload) != 1
+        or type(payload[0]) is not dict
+        or set(payload[0]) != {"questionItemId", "question", "answer"}
+        or any(type(payload[0][key]) is not str for key in payload[0])
+    ):
+        return PublicationUserReply("recognized-malformed", "")
+    return PublicationUserReply("structured-answer", payload[0]["answer"])
+
+
+def parse_publication_pr_grant(text: str) -> PublicationPrGrant | None:
+    """Parse only a whole, targeted grant; never infer target identity."""
+    normalized = normalize_publication_approval_text(text)
+    target: str
+    if normalized.startswith(PR_GRANT_PREFIX) and normalized.endswith("]"):
+        target = normalized[len(PR_GRANT_PREFIX):-1]
+        if PR_GRANT_NUMBER_REGEX.fullmatch(target):
+            return PublicationPrGrant(target, "", "", int(target))
+        markdown = PR_GRANT_MARKDOWN_REGEX.fullmatch(target)
+        if markdown:
+            if markdown.group("label") != markdown.group("destination"):
+                return None
+            target = markdown.group("label")
+    else:
+        for prefix in ("[approve-publication pr=", "[approve-pr-publication pr="):
+            if normalized.startswith(prefix) and normalized.endswith("]"):
+                target = normalized[len(prefix):-1]
+                break
+        else:
+            return None
+    match = PR_URL_REGEX.fullmatch(target)
+    if match is None or match.group("owner") in (".", "..") or match.group("repo") in (".", ".."):
+        return None
+    return PublicationPrGrant(
+        match.group("url"), match.group("owner"), match.group("repo"),
+        int(match.group("number")),
+    )
+
+
+def is_simple_pr_approval(text: str) -> bool:
+    """Accept only the three finite whole-message display forms."""
+    return normalize_publication_approval_text(text) == SIMPLE_PR_APPROVAL_MARKER
 
 class DataRegion(NamedTuple):
     kind: str
@@ -231,10 +331,25 @@ class GenericPushDecision(NamedTuple):
     status: str
     binding: tuple[str, str, str] | None
 
+class TranscriptDiagnostic(NamedTuple):
+    envelope: str
+    current_turn: str
+    history: str
+    recovery: str
+
 class PrRouteDenied(Exception):
-    def __init__(self, failure_id: str):
+    def __init__(
+        self,
+        failure_id: str,
+        transcript_diagnostic: TranscriptDiagnostic | None = None,
+    ):
         super().__init__(failure_id)
         self.failure_id = failure_id
+        self.transcript_diagnostic = (
+            validate_transcript_diagnostic(transcript_diagnostic)
+            if transcript_diagnostic is not None
+            else None
+        )
 
 def _wrapper_option(
     spelling: str,
@@ -549,7 +664,9 @@ def _mask_non_newlines(chars: list[str], start: int, end: int) -> None:
         if chars[index] not in "\r\n":
             chars[index] = " "
 
-def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
+def _posix_heredoc_specs(
+    line: str, quote: str | None = None
+) -> tuple[list[tuple[str, bool]], bool, str | None]:
     """Return literal heredoc delimiters from one command line.
 
     The parse is all-or-nothing.  POSIX ``<<<`` is an ordinary here-string
@@ -559,7 +676,6 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
     grammar and make the whole header uncertain.
     """
     specs: list[tuple[str, bool]] = []
-    quote: str | None = None
     index = 0
     while index < len(line):
         character = line[index]
@@ -593,7 +709,7 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
         while index < len(line) and line[index] in " \t":
             index += 1
         if index >= len(line):
-            return [], False
+            return [], False, quote
 
         value: list[str] = []
         while index < len(line) and line[index] not in " \t;|&()<>":
@@ -601,14 +717,14 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
             if character == "\\":
                 index += 1
                 if index >= len(line):
-                    return [], False
+                    return [], False, quote
                 value.append(line[index])
                 index += 1
                 continue
             if character == "'":
                 end = line.find("'", index + 1)
                 if end < 0:
-                    return [], False
+                    return [], False, quote
                 value.extend(line[index + 1:end])
                 index = end + 1
                 continue
@@ -618,7 +734,7 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
                     character = line[index]
                     if character == "\\":
                         if index + 1 >= len(line):
-                            return [], False
+                            return [], False, quote
                         escaped = line[index + 1]
                         if escaped in '$`"\\':
                             value.append(escaped)
@@ -628,22 +744,22 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
                         index += 1
                         continue
                     if character in "$`":
-                        return [], False
+                        return [], False, quote
                     value.append(character)
                     index += 1
                 if index >= len(line):
-                    return [], False
+                    return [], False, quote
                 index += 1
                 continue
             if character in "$`":
-                return [], False
+                return [], False, quote
             value.append(character)
             index += 1
         delimiter = "".join(value)
         if not delimiter:
-            return [], False
+            return [], False, quote
         specs.append((delimiter, strip_tabs))
-    return specs, True
+    return specs, True, quote
 
 def _powershell_data_regions(command: str) -> tuple[tuple[DataRegion, ...], str]:
     lines = command.splitlines(keepends=True)
@@ -757,10 +873,11 @@ def _mask_shell_data_regions(command: str, dialect: str) -> tuple[str, tuple[Dat
         pending_regions.extend(ps_regions)
 
     line_index = 0
+    posix_quote: str | None = None
     while line_index < len(lines):
         content = _line_content(lines[line_index])
         if dialect in ("posix", "posix-compat"):
-            specs, valid = _posix_heredoc_specs(content)
+            specs, valid, posix_quote = _posix_heredoc_specs(content, posix_quote)
             if not valid:
                 return command, (), "SCG-AMBIGUOUS-DATA"
             if specs:
@@ -2282,6 +2399,8 @@ class PreflightResult(NamedTuple):
     failure_id: str | None
     repository_workdir: str = ""
     repository_workdir_source: str = ""
+    transcript_diagnostic: TranscriptDiagnostic | None = None
+    simple_pr_approval: bool = False
 
 
 _OUTCOMES = frozenset(("ALLOW_FINAL", "DEFER"))
@@ -2290,6 +2409,14 @@ _DIALECTS = frozenset(("posix", "powershell", "unsupported"))
 _CURRENT_TURN_STATUSES = frozenset(
     ("found", "absent", "unreadable", "invalid", "limit", "not-in-window")
 )
+_TRANSCRIPT_NOT_RUN = "not-run"
+_TRANSCRIPT_ENVELOPE_STATUSES = frozenset(
+    ("missing", "null", "non-string", "empty-string", "string")
+)
+_TRANSCRIPT_CURRENT_TURN_STATUSES = frozenset(
+    (_TRANSCRIPT_NOT_RUN, *TURN_BOUNDARY_STATUSES)
+)
+_TRANSCRIPT_HISTORY_STATUSES = frozenset((_TRANSCRIPT_NOT_RUN, *HISTORY_STATUSES))
 _PREFLIGHT_REASONS = frozenset((
     "PFP-ALLOW-SUBAGENT", "PFP-ALLOW-NO-COMMAND", "PFP-ALLOW-NON-PUSH",
     "PFP-DENY-PARSE", "PFP-ALLOW-DRY-RUN", "PFP-DENY-TRANSCRIPT",
@@ -2360,6 +2487,33 @@ _PREFLIGHT_OPTIONAL_DEFAULTS = {
     "repository_workdir": "",
     "repository_workdir_source": "",
 }
+
+
+def validate_transcript_diagnostic(
+    diagnostic: object,
+) -> TranscriptDiagnostic:
+    if type(diagnostic) is not TranscriptDiagnostic:
+        raise TypeError("foreign transcript diagnostic")
+    if diagnostic.envelope not in _TRANSCRIPT_ENVELOPE_STATUSES:
+        raise ValueError("invalid transcript envelope status")
+    if diagnostic.current_turn not in _TRANSCRIPT_CURRENT_TURN_STATUSES:
+        raise ValueError("invalid transcript current-turn status")
+    if diagnostic.history not in _TRANSCRIPT_HISTORY_STATUSES:
+        raise ValueError("invalid transcript history status")
+    if diagnostic.recovery not in _TRANSCRIPT_HISTORY_STATUSES:
+        raise ValueError("invalid transcript recovery status")
+    if diagnostic.envelope != "string":
+        if (
+            diagnostic.current_turn != _TRANSCRIPT_NOT_RUN
+            or diagnostic.history != _TRANSCRIPT_NOT_RUN
+            or diagnostic.recovery != _TRANSCRIPT_NOT_RUN
+        ):
+            raise ValueError("unread transcript has reader status")
+    elif diagnostic.current_turn == _TRANSCRIPT_NOT_RUN:
+        raise ValueError("string transcript lacks current-turn status")
+    if diagnostic.history not in ("limit", "found") and diagnostic.recovery != _TRANSCRIPT_NOT_RUN:
+        raise ValueError("unexpected transcript recovery status")
+    return diagnostic
 
 
 def _repository_workdir(envelope: dict, tool_input: dict) -> tuple[str, str]:
@@ -2480,6 +2634,8 @@ def validate_preflight_result(result: object) -> PreflightResult:
         raise ValueError("invalid preflight failure identifier")
     if result.repository_workdir_source not in ("", "tool", "envelope"):
         raise ValueError("invalid repository workdir source")
+    if result.transcript_diagnostic is not None:
+        validate_transcript_diagnostic(result.transcript_diagnostic)
     branch = _PREFLIGHT_BRANCHES[result.reason_id]
     expected_outcome, expected_continuation, present_fields, expected_failure = branch
     if (result.outcome, result.continuation) != (
@@ -2498,6 +2654,8 @@ def validate_preflight_result(result: object) -> PreflightResult:
         and result.push_instruction
     ):
         raise ValueError("unexpected branch push instruction")
+    if result.reason_id != "PFP-HEAVY" and result.simple_pr_approval:
+        raise ValueError("unexpected simple PR approval")
     if expected_failure == "REGISTERED":
         if result.failure_id not in _PREFLIGHT_FAILURE_IDS:
             raise ValueError("missing registered preflight failure")
@@ -2521,12 +2679,16 @@ def _result(
     failure_id: str | None = None,
     repository_workdir: str = "",
     repository_workdir_source: str = "",
+    transcript_diagnostic: TranscriptDiagnostic | None = None,
+    simple_pr_approval: bool = False,
 ) -> PreflightResult:
     return validate_preflight_result(PreflightResult(
         outcome, reason_id, continuation, command, dialect, transcript_path,
         parsed, current_turn_status, generic_decision, push_instruction, failure_id,
         repository_workdir,
         repository_workdir_source,
+        transcript_diagnostic,
+        simple_pr_approval,
     ))
 
 
@@ -2567,23 +2729,52 @@ def build_preflight(envelope: dict) -> PreflightResult:
                 "ALLOW_FINAL", "PFP-ALLOW-DRY-RUN", "NONE",
                 command=command, dialect=resolution.dialect, parsed=parsed,
             )
-        transcript_path = envelope.get("transcript_path") or ""
-        if not transcript_path:
+        if "transcript_path" not in envelope:
+            envelope_status = "missing"
+            transcript_path = ""
+        else:
+            raw_transcript_path = envelope.get("transcript_path")
+            if raw_transcript_path is None:
+                envelope_status = "null"
+                transcript_path = ""
+            elif type(raw_transcript_path) is not str:
+                envelope_status = "non-string"
+                transcript_path = ""
+            elif not raw_transcript_path:
+                envelope_status = "empty-string"
+                transcript_path = ""
+            else:
+                envelope_status = "string"
+                transcript_path = raw_transcript_path
+        if envelope_status != "string":
             return _result(
                 "DEFER", "PFP-DENY-TRANSCRIPT", "RENDER_DENY",
                 command=command, dialect=resolution.dialect, parsed=parsed,
                 failure_id="PRG-TRANSCRIPT-UNAVAILABLE",
+                transcript_diagnostic=TranscriptDiagnostic(
+                    envelope_status,
+                    _TRANSCRIPT_NOT_RUN,
+                    _TRANSCRIPT_NOT_RUN,
+                    _TRANSCRIPT_NOT_RUN,
+                ),
             )
         last_user, _after_user, status = scan_current_turn_boundary(
             transcript_path, byte_cap=CURRENT_TURN_BYTE_CAP
         )
-        user_text = (
-            extract_user_typed_text(last_user)
+        reply = (
+            extract_publication_user_reply(last_user)
             if status == STATUS_FOUND and last_user is not None
-            else ""
+            else PublicationUserReply("plain", "")
         )
+        user_text = reply.text
         instruction = PUSH_INSTRUCTION_REGEX.search(user_text) is not None
         grammar = classify_generic_push(parsed)
+        transcript_diagnostic = TranscriptDiagnostic(
+            envelope_status,
+            status,
+            _TRANSCRIPT_NOT_RUN,
+            _TRANSCRIPT_NOT_RUN,
+        )
         if APPROVE_MARKER_REGEX.search(user_text) and len(user_text) <= MARKER_MAX_MESSAGE_LENGTH:
             return _result(
                 "ALLOW_FINAL", "PFP-ALLOW-USER-APPROVED", "NONE",
@@ -2602,6 +2793,8 @@ def build_preflight(envelope: dict) -> PreflightResult:
             current_turn_status=status, generic_decision=grammar,
             push_instruction=instruction, repository_workdir=repository_workdir,
             repository_workdir_source=repository_workdir_source,
+            transcript_diagnostic=transcript_diagnostic,
+            simple_pr_approval=is_simple_pr_approval(user_text),
         )
     except PrRouteDenied as exc:
         return _result(

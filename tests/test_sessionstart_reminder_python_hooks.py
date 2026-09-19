@@ -112,16 +112,30 @@ class McpUsageReminderPythonHookTest(unittest.TestCase):
                     policy.TURN_ANCHOR_CONTEXT, CANONICAL_TURN_ANCHOR_CONTEXT
                 )
 
-    def test_canonical_session_context_uses_runtime_discovery_and_non_normative_examples(self) -> None:
+    def test_canonical_session_context_keeps_discovery_freshness_and_bounded_fallback(self) -> None:
         for marker in (
-            "runtime tool discovery",
-            "Non-normative interface example only",
-            "its name never selects a tool",
-            "Non-normative workflow examples only",
-            "These names never select a tool",
+            "discover connected MCP/tools at runtime",
+            "mcpMode: force",
+            "connected but uninitialized",
+            "status/freshness",
+            "sync/update/reindex",
+            "refresh fails",
+            "tool is unavailable",
+            "user forbids it",
+            "explicit resource bound",
+            "each lane only needed MCP/tools and context",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, CANONICAL_SESSION_START_CONTEXT)
+        for removed_manual in (
+            "Non-normative interface example only",
+            "Non-normative workflow examples only",
+            "Graphify follows",
+            "CodeGraph follows",
+            "Non-normative capability examples only",
+        ):
+            with self.subTest(removed_manual=removed_manual):
+                self.assertNotIn(removed_manual, CANONICAL_SESSION_START_CONTEXT)
 
     def test_all_three_adapters_emit_their_policy_owned_exact_context(self) -> None:
         for index, (script, policy_path) in enumerate(

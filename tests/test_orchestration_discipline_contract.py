@@ -22,7 +22,6 @@ SPINE = "shared/AGENTS.shared.md"
 CLAUDE_QUICK_FIX_TEMPLATE = "src.claude/agents/team-templates/quick-fix.json"
 CLAUDE_RESEARCH_TEMPLATE = "src.claude/agents/team-templates/research.json"
 
-ROUTING_ENTRYPOINTS = ("src.codex/AGENTS.codex.md", "src.claude/CLAUDE.md")
 HANDOFF_CONTRACTS = (
     "src.codex/skills/lead/subagent-contracts.md",
     "src.claude/agents/contracts/subagent-contracts.md",
@@ -80,13 +79,13 @@ STATUS_ACCEPTANCE_CARRIER_FRAGMENTS = (
 PINS = [
     # Repository-orientation Bootstrap checkpoint — both installed provider roots.
     ("orientation-a0", "**(a0) Pre-action orientation trigger**",
-     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+     ["src.codex/AGENTS.codex.md"]),
     ("orientation-step0", "0. **Repository orientation.**",
-     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+     ["src.codex/AGENTS.codex.md"]),
     ("orientation-record", "REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>",
-     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+     [SPINE, "src.codex/AGENTS.codex.md"]),
     ("orientation-violation", "Treating missing or conflicting orientation as permission to proceed.",
-     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+     ["src.codex/AGENTS.codex.md"]),
 
     # P4 — spine stop-rule (Fable probe text) + operational bullet (Sol text)
     ("P4-spine", "Stop-rule: a SECOND fix in one session that breaks a previously-working neighbor", [SPINE]),
@@ -101,7 +100,7 @@ PINS = [
      ["src.claude/skills/bug-hunting/SKILL.md", "src.codex/skills/bug-hunting/SKILL.md"]),
 
     # P2+P5 — oracle-anchored, absolute QA (three bullets)
-    ("P2P5-letpass", "Before any run, write `What would this criterion let pass?` for each acceptance criterion",
+    ("P2P5-letpass", "Before any run, challenge each acceptance criterion with a falsifying case and its required property; if the criterion admits the known failure or a degenerate result, return `REVISE` with that evidence to the acceptance owner instead of rewriting accepted success semantics.",
      ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
     ("P2P5-oracle", "Anchor expected behavior to a known-good oracle (a shipped release or independent ground truth)",
      ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
@@ -111,8 +110,10 @@ PINS = [
     # Batch 3 acceptance — role floors augment retained/canonical obligations.
     ("B1-S1-input", "inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`",
      ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
-    ("B1-S1-class-audit", "when the dispatch cited a defect class, the verification report classifies every enumerated participant as `fixed` or `not-affected`.",
+    ("B1-S1-class-audit", "actual defects outside admitted scope must be reported as `out-of-scope` or `unresolved`, never `not-affected`",
      ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
+    ("F2-receiving-classification", "actual defects outside admitted scope must be reported as `out-of-scope` or `unresolved`, never `not-affected`",
+     list(HANDOFF_CONTRACTS)),
     ("B2-qt-delete-later", "`QObject` deletion uses `deleteLater()` invoked on the object's owning thread; never `delete` a `QObject` with pending events or from a foreign thread",
      ["src.claude/agents/qt-ui-engineer.md", "src.codex/skills/qt-ui-engineer/SKILL.md"]),
     ("B3-model-view-settled-signals", "Model/view-specific settled-signal evidence names the applicable signal—`dataChanged`, `rowsInserted`, or `modelReset`",
@@ -136,7 +137,9 @@ PINS = [
      ["src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
     # A2 — hook doc discriminator sentence (installed provider roots + INSTALL)
     ("A2-doc", "warns on every confidently parsed `git worktree add` except one add whose command ends with the exact `# orchestrarium:requested-isolation-worktree` marker required by the installed parallel-isolation protocol; missing, near-match, quoted, reused, or batch markers do not suppress the audit.",
-     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md", "INSTALL.md"]),
+     ["src.codex/AGENTS.codex.md", "INSTALL.md"]),
+    ("A2-doc-claude", "The worktree audit recognizes only an exact trailing `# orchestrarium:requested-isolation-worktree` marker.",
+     ["src.claude/CLAUDE.md"]),
     # A2 — hook marker constant present in BOTH hook copies
     ("A2-hook-const", 'REQUESTED_ISOLATION_MARKER = "# orchestrarium:requested-isolation-worktree"',
      ["src.claude/agents/hooks/check-no-trash-in-repo.py", "src.codex/skills/lead/hooks/check-no-trash-in-repo.py"]),
@@ -180,10 +183,8 @@ PINS = [
       "src.codex/skills/performance-reviewer/SKILL.md",
       "src.codex/skills/ux-reviewer/SKILL.md",
       "src.codex/skills/accessibility-reviewer/SKILL.md"]),
-    ("fix-class-A-ratchet", "escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse",
-     ["src.claude/agents/architecture-reviewer.md",
-      "src.codex/skills/architecture-reviewer/SKILL.md",
-      "src.claude/agents/security-reviewer.md",
+    ("fix-class-A-ratchet", "architecture-reviewer's current evidence-based classification/reclassification contract",
+     ["src.claude/agents/security-reviewer.md",
       "src.claude/agents/performance-reviewer.md",
       "src.claude/agents/ux-reviewer.md",
       "src.claude/agents/accessibility-reviewer.md",
@@ -191,6 +192,14 @@ PINS = [
       "src.codex/skills/performance-reviewer/SKILL.md",
       "src.codex/skills/ux-reviewer/SKILL.md",
       "src.codex/skills/accessibility-reviewer/SKILL.md"]),
+    ("fix-class-A-reclassification", "Reverse classification is permitted only by the original tagging reviewer or owning architect with cited resolution or disproof of the original trigger, a fixed owner/seam, a named guard, and no current trigger; an implementer or Lead cannot waive an actual mandatory gate.",
+     ["src.claude/agents/architecture-reviewer.md",
+      "src.codex/skills/architecture-reviewer/SKILL.md"]),
+    ("fix-class-A-current-trigger5", "(5) current sibling investigation leaves scope, owner, or repair uncertainty unresolved;",
+     ["src.claude/agents/architecture-reviewer.md",
+      "src.codex/skills/architecture-reviewer/SKILL.md"]),
+    ("fix-class-A-f3", "Vague unsupported doubt alone adds no new gate; missing required evidence or risk is not silently waived.",
+     ["src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
     ("fix-class-A-independence", "HOW→VERIFY independence: VERIFY(F) owner/engine ≠ HOW(F) author",
      ["src.claude/agents/contracts/review-loop.md",
       "src.codex/skills/review-loop/SKILL.md",
@@ -265,15 +274,12 @@ PINS = [
     ("A13", "Once a provider or subagent run is launched, a later preference change to effort, model, or framing applies to the next dispatch.",
      ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
 
-    # P8 — writer-owner + settled event (architect return + reviewer gate).
-    # The Claude pointer targets skills/architect/SKILL.md (not agents/architect.md): the
-    # roles-as-skills curated subset made architect a dual role-skill, and the full role
-    # contract — including this P8 sentence — moved into the skill; agents/architect.md is
-    # now a thin delegate wrapper that loads the skill. This matches the codex pointer shape,
-    # which already targeted skills/architect/SKILL.md.
-    ("P8-architect", "the Change-Surface Contract MUST name exactly one writer-owner and one downstream-observable `settled/committed` event. Missing either is `REVISE` at design input.",
-     ["src.claude/skills/architect/SKILL.md", "src.codex/skills/architect/SKILL.md"]),
-    ("P8-reviewer", "Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner and a downstream-observable `settled/committed` event, and the implementation preserves both.",
+    # P8 — writer-owner + conditionally required settlement observation.
+    # Architect has one universal role-contract body. Claude routing authority remains in
+    # CLAUDE.md and agents/architect.md; neither surface duplicates this P8 contract.
+    ("P8-architect", "For every pipeline touching shared mutable state (for example scroll, geometry, or cache), the Change-Surface Contract MUST name exactly one writer-owner. When another consumer observes or reconciles after the writer returns, the owning contract MUST expose authoritative settled state independently through an event, callback/future, versioned query, or equivalent; an ordinary synchronous return is sufficient for the sole caller. Missing the writer-owner or required settlement observation is `REVISE` at design input.",
+     ["src.codex/skills/architect/SKILL.md"]),
+    ("P8-reviewer", "Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner. When another consumer observes or reconciles after the writer returns, require independent observation of authoritative settled state through the owning contract; an event, callback/future, versioned query, or equivalent may satisfy it, while an ordinary synchronous return is sufficient for the sole caller. Verify the implementation preserves the writer-owner, required observation, and cross-surface convergence.",
      ["src.claude/agents/architecture-reviewer.md", "src.codex/skills/architecture-reviewer/SKILL.md"]),
 
     # Single-writer orchestration — the root main conversation owns dispatch and lifecycle
@@ -301,6 +307,26 @@ PINS = [
       "src.codex/skills/lead/subagent-contracts.md",
       "src.claude/agents/architecture-reviewer.md",
       "src.codex/skills/architecture-reviewer/SKILL.md"]),
+
+    # Batch B — route-appropriate handoffs and fixed-value criteria.
+    ("batch-b-hardcoding", "Classify a fixed value before changing it: a true invariant or protocol/schema constant may remain fixed; a policy-owner default must be single-owned and omission-safe; deployment, calibration, and user inputs require variability and omission tests.",
+     [SPINE, "shared/external-prompt-governance.md"]),
+    ("batch-b-implementation-route", "Implementation and Quality Assurance receive route-appropriate accepted artifacts; a Plan is required only when the selected route admits a Plan stage.",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+    ("batch-b-qa-input", "Require the accepted artifact for the selected route, the implementation artifact being tested, any relevant specialist constraints, and the inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`. A Plan is required only when the selected route admits a Plan stage.",
+     ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
+    ("batch-b-external-review", "Require the approved reviewable artifact (implementation, governance/control-plane change, plan, or other routed artifact) to review.",
+     ["src.claude/agents/external-reviewer.md", "src.codex/skills/external-reviewer/SKILL.md"]),
+    ("batch-b-analyst-taxonomy", "If a research admission gate fails without a real external prerequisite, return `REVISE` or `rejected` with the failed gate; reserve `BLOCKED` for a real external prerequisite.",
+     ["src.claude/skills/analyst/SKILL.md", "src.codex/skills/analyst/SKILL.md"]),
+    ("batch-b-analyst-adjacent-blocker", "If a real external prerequisite blocks the current task, return `BLOCKED:prerequisite` instead of working around it.",
+     ["src.claude/skills/analyst/SKILL.md", "src.codex/skills/analyst/SKILL.md"]),
+    ("batch-b-resource-free", "When no resource is selected, Cleanup disposition is `none` and no `ResourceRowV1` is required; do not invent a row.",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+    ("batch-b-inline-alternative", "For an `inline-sufficient` finding with one dominant correction, report `material alternative: none`.",
+     ["src.claude/agents/architecture-reviewer.md", "src.codex/skills/architecture-reviewer/SKILL.md"]),
+    ("batch-b-planner-criteria", "Derive each acceptance criterion from the accepted contract or oracle; write it as an absolute observable assertion with the contract/oracle's value, count, order, or invariant. Do not invent literals.",
+     ["src.claude/skills/planner/SKILL.md", "src.codex/skills/planner/SKILL.md"]),
 ]
 
 # P7 must NOT be in the spine (synthesis D-spine-P7: spine gets ONLY P4 + A5).
@@ -330,6 +356,15 @@ DYNAMIC_ADMISSION_CLAUSES = (
     "A waiting or long-running lane does not head-of-line block independent ready work.",
     "waiting on an external prerequisite is parked or closed with a durable recovery point",
     "Integration-owner and shared integration-surface work is serialized.",
+)
+
+PLAN_CHECKPOINT_LEAD_OWNERS = (
+    "src.claude/skills/lead/SKILL.md",
+    "src.codex/skills/lead/SKILL.md",
+)
+PLAN_CHECKPOINT_PLANNER_OWNERS = (
+    "src.claude/skills/planner/SKILL.md",
+    "src.codex/skills/planner/SKILL.md",
 )
 
 RUSSIAN_DYNAMIC_ADMISSION_CLAUSES = (
@@ -389,6 +424,38 @@ DYNAMIC_FORCE_PARITY = (
     ),
 )
 
+STALE_PASS_FORWARD_FIXTURE = {
+    "dispatch": {
+        "task_identity": "handoff-current",
+        "scope": "current-scope",
+        "expected_artifact": "current-result.md",
+    },
+    "returned_prior_pass": {
+        "task_identity": "handoff-previous",
+        "scope": "previous-scope",
+        "expected_artifact": "previous-result.md",
+        "gate": "PASS",
+    },
+}
+
+ARCHIVED_SUCCESSOR_FORWARD_FIXTURE = {
+    "accepted_snapshot": {
+        "stable_identifier": "external-successor-001",
+        "sha256": "a" * 64,
+        "root": "current",
+    },
+    "qa_lookup": {
+        "stable_identifier": "external-successor-001",
+        "matches": [
+            {
+                "root": "archive/2026-09",
+                "source_relation": "source-bug-001",
+                "lifecycle": "terminal",
+            }
+        ],
+    },
+}
+
 
 class TestOrchestrationDisciplineContract(unittest.TestCase):
     _cache: dict[str, str] = {}
@@ -397,7 +464,10 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         if rel not in self._cache:
             path = REPO_ROOT / rel
             self.assertTrue(path.is_file(), f"owner file missing: {rel}")
-            self._cache[rel] = path.read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8")
+            if rel == "src.claude/CLAUDE.md":
+                text = self._read(SPINE) + "\n" + text
+            self._cache[rel] = text
         return self._cache[rel]
 
     def test_normative_sentences_present_in_every_owner(self) -> None:
@@ -418,6 +488,25 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     substring, spine,
                     f"[{gap_id}] {substring!r} must NOT be in the spine (P7 is Lead-file-only)",
                 )
+
+    def test_implementation_prerequisite_is_route_appropriate_without_relaxing_planner(self) -> None:
+        codex = self._read("src.codex/skills/lead/subagent-contracts.md")
+        claude = self._read("src.claude/agents/contracts/subagent-contracts.md")
+        route_rule = (
+            "Implementation and Quality Assurance receive route-appropriate accepted artifacts; "
+            "a Plan is required only when the selected route admits a Plan stage."
+        )
+        for owner, text in (
+            ("src.codex/skills/lead/subagent-contracts.md", codex),
+            ("src.claude/agents/contracts/subagent-contracts.md", claude),
+        ):
+            with self.subTest(owner=owner):
+                self.assertIn(route_rule, text)
+        self.assertNotIn("Use only after plan approval.", codex)
+        self.assertIn(
+            "## Planner\n\nUse after the required design and specialist constraints are accepted.",
+            codex,
+        )
 
     def test_dynamic_lane_ready_admission_contract_is_cross_pack_and_canonical(self) -> None:
         for owner in DYNAMIC_ADMISSION_OWNERS:
@@ -449,6 +538,32 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             for residue in stale:
                 with self.subTest(owner=owner, residue=residue):
                     self.assertNotIn(residue, text)
+
+    def test_plan_checkpoints_prioritize_downstream_work_reduction(self) -> None:
+        lead_clauses = (
+            "At natural checkpoints—stage completion, changed dependencies or blockers, or material cost growth—",
+            "removes, simplifies, or reuses downstream work",
+            "preserve scope, quality, gates, and authority",
+        )
+        planner_clauses = (
+            "Prioritize critical-path and concrete enabling phases by dependencies; a blocker delays only dependent phases.",
+            "Apply Lead's plan-checkpoint rule",
+            "total remaining verified delivery cost",
+        )
+        retired = "If the work item includes an admitted bug or prerequisite issue, always make that fix Phase A."
+
+        for owner in PLAN_CHECKPOINT_LEAD_OWNERS:
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                for clause in lead_clauses:
+                    self.assertIn(clause, text)
+
+        for owner in PLAN_CHECKPOINT_PLANNER_OWNERS:
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                for clause in planner_clauses:
+                    self.assertIn(clause, text)
+                self.assertNotIn(retired, text)
 
     def test_model_and_effort_truth_is_provider_neutral_in_the_shared_owner(self) -> None:
         shared = self._read("shared/references/subagent-operating-model.md")
@@ -515,6 +630,140 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                 self.assertNotIn("runtime default surface", text)
                 self.assertNotIn("all MCP", text)
 
+    def test_actionable_handoff_activation_contract_is_provider_aware(self) -> None:
+        codex = self._read("src.codex/skills/lead/SKILL.md")
+        self.assertIn("Treat informational delivery and task activation as distinct operations", codex)
+        self.assertIn("proves only delivery, not that execution was scheduled or progress resumed", codex)
+        self.assertIn("wait only after scheduling succeeds or current-running evidence exists", codex)
+        self.assertIn("`collaboration.followup_task` schedules an idle agent", codex)
+        self.assertIn("On other hosts, use the actual host-equivalent operations and semantics, not the Codex tool names", codex)
+
+        generic_clause = "an informational delivery does not schedule recipient execution"
+        for owner in (
+            "src.claude/skills/lead/SKILL.md",
+            "shared/references/subagent-operating-model.md",
+        ):
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                self.assertIn(generic_clause, text.casefold())
+                self.assertIn("host's explicit follow-up task mechanism", text)
+                self.assertNotIn("collaboration.send_message", text)
+                self.assertNotIn("collaboration.followup_task", text)
+
+    def test_receiving_correlation_rejects_prior_pass_forward_fixture(self) -> None:
+        # Source-contract forward fixture only; this does not claim host enforcement.
+        dispatch = STALE_PASS_FORWARD_FIXTURE["dispatch"]
+        returned = STALE_PASS_FORWARD_FIXTURE["returned_prior_pass"]
+        compared = ("task_identity", "scope", "expected_artifact")
+        self.assertNotEqual(
+            tuple(dispatch[key] for key in compared),
+            tuple(returned[key] for key in compared),
+        )
+        self.assertEqual(returned["gate"], "PASS")
+
+        for owner in HANDOFF_CONTRACTS:
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                self.assertIn("Current-assignment correlation is part of the existing Receiving-side echo", text)
+                self.assertIn("current host task identity, or the existing ledger `runId` when present", text)
+                self.assertIn("together with the echoed `Scope` and `Expected artifact`", text)
+                self.assertIn("Hash only declared file `Approved inputs`", text)
+                self.assertIn("is stale and nonauthorizing", text)
+                self.assertIn("Trivial inline work and legitimate artifactless fact lookup require neither a ledger nor an artifact nor a new field", text)
+                self.assertIn("| Root main conversation | `lead` | `main` | omit |", text)
+                self.assertIn("| Native specialist | `toolchain-engineer` | `internal` | omit |", text)
+                self.assertIn("| External worker assigned analysis | `external-worker` | `external-worker` | `analyst` |", text)
+                self.assertIn("Human artifact labels such as `Execution role` are not JSON values", text)
+                self.assertIn("existing `launch`, `terminal`, or `standalone` relation", text)
+                self.assertIn("Never hand-append invented `resume` or `accept` JSON", text)
+                self.assertIn("preserve accepted engineering artifacts", text)
+                self.assertIn("Do not invent a bypass or administrative journal", text)
+
+        shared = self._read("shared/references/subagent-operating-model.md")
+        self.assertIn("**Receiving correlation**", shared)
+        self.assertIn("Trivial inline work and legitimate artifactless fact lookup require no ledger, artifact, or new field", shared)
+
+    def test_work_item_closure_guidance_matches_lifecycle_owner(self) -> None:
+        owners = (
+            "src.codex/AGENTS.codex.md",
+            "src.codex/skills/lead/SKILL.md",
+            "src.claude/skills/lead/SKILL.md",
+            "docs/work-item-execution-tracking.md",
+        )
+        required = (
+            "nonempty `Closed`, `Outcome`, `Evidence`, and `Residual risk` fields",
+            "`Closed` MUST exactly equal the requested `--terminal-instant` and use strict UTC `YYYY-MM-DDTHH:MM:SSZ`",
+        )
+        for owner in owners:
+            with self.subTest(owner=owner):
+                text = " ".join(self._read(owner).split())
+                for fragment in required:
+                    self.assertIn(fragment, text)
+
+        codex = self._read("src.codex/AGENTS.codex.md")
+        self.assertIn("versioned Lead/lifecycle-owner contract", codex)
+        self.assertNotIn(
+            "enumerating exactly all current bugs whose parsed `context` equals the item slug",
+            codex,
+        )
+
+        stale_work_item_clause = (
+            "It holds the final closeout record: outcome, residual risk, and archive "
+            "location, and MUST carry a `Closed: <YYYY-MM-DD>` line."
+        )
+        for owner in (
+            "src.codex/skills/lead/SKILL.md",
+            "src.claude/skills/lead/SKILL.md",
+        ):
+            with self.subTest(owner=owner):
+                self.assertNotIn(stale_work_item_clause, self._read(owner))
+
+    def test_design_readiness_contract_is_cross_pack_and_sample_honest(self) -> None:
+        for owner in (
+            "src.codex/skills/architect/SKILL.md",
+        ):
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                self.assertIn("When the design creates, changes, or consumes a serialized/wire boundary", text)
+                self.assertIn("before `Design PASS`, walk one producer serialization through the exact consumer signature and validation", text)
+                self.assertIn("actual wire shape and codec", text)
+                self.assertIn("field order only when protocol semantics require it", text)
+                self.assertIn("an acyclic provenance dependency graph", text)
+                self.assertIn("include one actual serialized sample", text)
+                self.assertIn("explicitly proposed representative specimen", text)
+                self.assertIn("Hand off a ready decision before optional prose polishing", text)
+
+        shared = self._read("shared/references/subagent-operating-model.md")
+        self.assertIn("Before Design PASS, walk one producer record through the exact consumer signature and validation", shared)
+        self.assertIn("For an existing producer, use an actual serialized sample", shared)
+        self.assertIn("not fake production data or runtime proof", shared)
+
+    def test_archived_external_successor_forward_fixture_is_guidance_only(self) -> None:
+        # The fixture pins the accepted source contract; no resolver or host behavior is exercised.
+        accepted = ARCHIVED_SUCCESSOR_FORWARD_FIXTURE["accepted_snapshot"]
+        lookup = ARCHIVED_SUCCESSOR_FORWARD_FIXTURE["qa_lookup"]
+        self.assertEqual(accepted["stable_identifier"], lookup["stable_identifier"])
+        self.assertEqual(accepted["root"], "current")
+        self.assertEqual(len(lookup["matches"]), 1)
+        self.assertEqual(lookup["matches"][0]["root"], "archive/2026-09")
+        self.assertNotIn("sha256", lookup)
+
+        for owner in (
+            "src.codex/skills/qa-engineer/SKILL.md",
+            "src.claude/agents/qa-engineer.md",
+        ):
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                self.assertIn("target registry owner to resolve the stable identifier across its complete physical lifecycle, current plus archive", text)
+                self.assertIn("missing, unique current, unique archived, or duplicate", text)
+                self.assertIn("A unique archived successor remains valid", text)
+                self.assertIn("accepted successor hash freezes only the acceptance snapshot", text)
+                self.assertIn("does not freeze future external record bytes", text)
+
+        shared = self._read("shared/references/subagent-operating-model.md")
+        self.assertIn("resolve the stable identifier across current and archive", shared)
+        self.assertIn("accepted hash as the acceptance snapshot rather than a freeze on future external bytes", shared)
+
     def test_cleanup_disposition_is_one_exact_cross_pack_field(self) -> None:
         field = (
             "Cleanup disposition:\n"
@@ -553,7 +802,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             self.assertIn("route `implementation -> QA`", text)
             self.assertIn("create the minimal `work-items/active/<slug>/status.md`", text)
         self.assertIn(
-            "For `requiresLead: false` routes that need continuation",
+            "For `requiresLead: false` routes",
             self._read("src.claude/CLAUDE.md"),
         )
         self.assertIn("Evaluate the shared `quick-fix` predicate before invoking a process skill",
@@ -638,7 +887,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     {"research", "design", "plan", "pre-implementation review"},
                 )
 
-        for entrypoint in ("src.codex/AGENTS.codex.md", "src.claude/CLAUDE.md"):
+        for entrypoint in ("src.codex/AGENTS.codex.md",):
             with self.subTest(entrypoint=entrypoint):
                 text = self._read(entrypoint)
                 self.assertIn(
@@ -655,9 +904,8 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
     def test_fact_lookup_routes_by_decision_need_and_preserves_active_task_continuity(self) -> None:
         direct_role_priority = {
             "src.codex/AGENTS.codex.md": "1. User explicitly names a role: invoke it directly.",
-            "src.claude/CLAUDE.md": "1. Did the user explicitly name a role? → invoke that role directly",
         }
-        for entrypoint in ROUTING_ENTRYPOINTS:
+        for entrypoint in ("src.codex/AGENTS.codex.md",):
             with self.subTest(entrypoint=entrypoint):
                 text = self._read(entrypoint)
                 for fragment in FACT_ROUTING_FRAGMENTS + SIDE_QUESTION_CONTINUITY_FRAGMENTS:
@@ -667,8 +915,12 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     )
                 self.assertTrue(
                     direct_role_priority[entrypoint] in text,
-                    f"{entrypoint}: explicit user role must precede default factual routing",
-                )
+                        f"{entrypoint}: explicit user role must precede default factual routing",
+                    )
+
+        claude = self._read("src.claude/CLAUDE.md")
+        self.assertIn("1. Did the user explicitly name a role? → invoke that role directly.", claude)
+        self.assertIn(".claude/agents/team-templates/<template>.json", claude)
 
         template = json.loads(self._read(CLAUDE_RESEARCH_TEMPLATE))
         roles = {role["agentType"]: role for role in template["roles"]}

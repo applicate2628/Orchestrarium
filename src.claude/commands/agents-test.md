@@ -47,4 +47,4 @@ The user does not need to type `/agents-test` for this flow to fire. Apply it tr
 - Match existing test patterns and frameworks in the repo.
 - Do not change source code — only test files.
 - Do NOT commit any code. Tests are written/updated; committing is the user's decision.
-- When tests reveal defects, the QA agent must create bug files in `work-items/bugs/` following the bug registry format from the qa-engineer role. This ensures defects survive across sessions even if not fixed immediately.
+- When tests reveal a real potential defect, return an actionable proposed finding in-band for the root or lifecycle owner. Direct registry write requires explicit dispatcher authority and an allowed registry path. Deduplicate against tracked defects before proposing a record. Expected negative or TDD controls are not defects. Unexpected transient or flaky regressions remain findings.

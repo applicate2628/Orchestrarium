@@ -22,7 +22,6 @@ TRANSPORT_CONSUMERS = {
     "codex-review-loop": ROOT / "src.codex" / "skills" / "review-loop" / "SKILL.md",
     "codex-design-panel": ROOT / "src.codex" / "skills" / "design-panel" / "SKILL.md",
     "codex-consultant": ROOT / "src.codex" / "skills" / "consultant" / "SKILL.md",
-    "claude-main": ROOT / "src.claude" / "CLAUDE.md",
     "claude-dispatch-owner": ROOT / "src.claude" / "agents" / "contracts" / "external-dispatch.md",
     "claude-worker": ROOT / "src.claude" / "agents" / "external-worker.md",
     "claude-reviewer": ROOT / "src.claude" / "agents" / "external-reviewer.md",
@@ -36,6 +35,31 @@ TRANSPORT_CONSUMERS = {
     "verification-discipline": ROOT / "shared" / "references" / "spine" / "verification-and-decision-discipline.md",
     "review-loop-methodology": ROOT / "shared" / "references" / "review-loop-methodology.md",
 }
+
+THIN_TRANSPORT_POINTERS = {
+    "claude-main": (
+        ROOT / "src.claude" / "CLAUDE.md",
+        "agents/contracts/external-dispatch.md",
+        ROOT / "src.claude" / "agents" / "contracts" / "external-dispatch.md",
+    ),
+}
+
+KIMI_TRANSPORT_OWNER_CONTRACTS = (
+    ROOT / "src.codex" / "skills" / "lead" / "external-dispatch.md",
+    ROOT / "src.claude" / "agents" / "contracts" / "external-dispatch.md",
+)
+
+SHARED_KIMI_TRANSPORT_REQUIREMENTS = (
+    "fixed wrapper `kimi-code/k3`",
+    "independent verification; nonauthorizing",
+    "use orchestrating runtime/approved wrapper, never an internal relay",
+    "file-based prompt via stdin/file, never argv",
+)
+KIMI_BEHAVIORAL_READ_ONLY_BOUNDARY = (
+    "For `mutationClass: read-only`, read-only constrains the assigned work and expected "
+    "operations, not the runtime effects of selected tools, Model Context Protocol servers, "
+    "`cwd`, or permission."
+)
 
 RETIRED_TRANSPORT_RELATIONS = (
     "ships no primary-run prompt wrappers",
@@ -201,7 +225,7 @@ def test_composer_counts_the_governance_frame_inside_the_existing_prompt_limit(
 
 
 def test_every_external_transport_consumer_uses_the_wrapper_owner_contract() -> None:
-    """Catches one consumer class retaining a retired transport or local parser."""
+    """Catches a consumer or its thin pointer drifting from the wrapper owner."""
 
     for name, path in TRANSPORT_CONSUMERS.items():
         text = path.read_text(encoding="utf-8")
@@ -212,6 +236,13 @@ def test_every_external_transport_consumer_uses_the_wrapper_owner_contract() -> 
         if name not in CANONICAL_TRANSPORT_OWNER_NAMES:
             raw_launches = _raw_kimi_executable_surfaces(text)
             assert not raw_launches, f"{name} retains raw Kimi launch: {raw_launches[0]}"
+
+    for name, (path, pointer, owner_path) in THIN_TRANSPORT_POINTERS.items():
+        text = path.read_text(encoding="utf-8")
+        assert pointer in text, f"{name} omits its canonical transport-owner pointer"
+        owner_text = owner_path.read_text(encoding="utf-8")
+        for required in TRANSPORT_CONSUMER_REQUIREMENTS:
+            assert required in owner_text, f"{name} owner omits {required}"
 
 
 def test_transport_owners_keep_the_full_nonauthorizing_boundary_and_no_retired_fallback() -> None:
@@ -447,23 +478,31 @@ def test_external_contracts_require_wrappers_and_forbid_inline_or_sidecar_prompt
 
 
 def test_kimi_orchestration_is_wrapper_only_and_callers_do_not_compose_provider_argv() -> None:
-    """Catches any Kimi caller regaining direct CLI, argv, or prompt ownership."""
+    """Catches shared or full-owner Kimi transport boundaries from drifting."""
 
-    contracts = (
-        ROOT / "shared" / "AGENTS.shared.md",
-        ROOT / "src.codex" / "skills" / "lead" / "external-dispatch.md",
-        ROOT / "src.claude" / "agents" / "contracts" / "external-dispatch.md",
-    )
+    shared_text = (ROOT / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
+    for statement in SHARED_KIMI_TRANSPORT_REQUIREMENTS:
+        assert statement in shared_text, f"shared governance omits Kimi boundary: {statement}"
+
     required = (
         "`invoke-kimi-prompt` is the only approved Kimi launch surface",
         "The wrapper alone owns every Kimi provider argument",
         "Callers pass the unchanged task prompt file to the wrapper",
         "must not invoke `kimi`, `kimi.exe`, `kimi --prompt`, or compose `--auto`",
     )
-    for contract in contracts:
+    for contract in KIMI_TRANSPORT_OWNER_CONTRACTS:
         text = contract.read_text(encoding="utf-8")
         for statement in required:
             assert statement in text, f"{contract} omits Kimi wrapper-only contract: {statement}"
+
+
+def test_kimi_read_only_is_behavioral_not_a_capability_sandbox() -> None:
+    for contract in KIMI_TRANSPORT_OWNER_CONTRACTS:
+        text = contract.read_text(encoding="utf-8")
+        assert KIMI_BEHAVIORAL_READ_ONLY_BOUNDARY in text
+        assert "Those selections are caller-owned task inputs, not a sandbox" in text
+        assert "write intent requires the existing `engineering` mutation class" in text
+        assert "Every external result remains nonauthorizing and independently verified." in text
 
 
 @pytest.mark.parametrize(

@@ -160,7 +160,9 @@ _BINARY_SIMPLE_PATTERNS = tuple(
     if binary_rule
 )
 _BINARY_ASCII_RUN = re.compile(rb"[\x09\x20-\x7e]+")
-_IDENTIFIER_PREFIX = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+_IDENTIFIER_PREFIX = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:(?:::|[-._:/\\])[A-Za-z_][A-Za-z0-9_]*)*(?:::|[-._:/\\])?$"
+)
 _VALUE = r"[A-Za-z0-9_./+=-]"
 _DIGIT_SHAPE = rf"(?:{_VALUE}{{5,}}[0-9]{_VALUE}*|{_VALUE}*[0-9]{_VALUE}{{5,}})"
 _QUOTED = rf"""["'`!@#$%^&*?|](?:{_VALUE}{{12,}}|{_DIGIT_SHAPE})["'`!@#$%^&*?|]"""
@@ -168,13 +170,45 @@ _BARE = rf"(?:[A-Za-z0-9_+/=-]{{5,}}[0-9][A-Za-z0-9_+/=-]*|[A-Za-z0-9_+/=-]*[0-9
 _CALLABLE_RHS = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\s*\("
 )
+_PUBLIC_TOKEN_AUTH_CUE = "AUTH"
+_PUBLIC_TOKEN_CREDENTIAL_CUES = (
+    _PUBLIC_TOKEN_AUTH_CUE, "ACCESS", "API", "BEARER", "REFRESH", "SESSION", "OAUTH", "JWT",
+    "CREDENTIAL", "SECRET", "IDENTITY", "CSRF", "PASSWORD",
+)
+_PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS = frozenset(
+    {"accessibilitytoken", "authorshiptoken", "capitaltoken", "rapidtoken"}
+)
+_PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS = tuple(
+    sorted(
+        {
+            *(cue.lower() for cue in _PUBLIC_TOKEN_CREDENTIAL_CUES),
+            "authentication",
+            "authorization",
+            "authorisation",
+        },
+        key=lambda value: (-len(value), value),
+    )
+)
+_PUBLIC_TOKEN_LOWER_CREDENTIAL_PREFIX_PATTERN = "|".join(
+    re.escape(stem)
+    for stem in _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS
+)
+_PUBLIC_TOKEN_LOWER_CREDENTIAL_SUFFIX_PATTERN = "|".join(
+    re.escape(stem) for stem in _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS
+)
+_CONCATENATED_CREDENTIAL_TOKEN = re.compile(
+    rf"(?<![A-Za-z0-9])(?P<credential_token_identifier>(?i:"
+    rf"(?:(?:{_PUBLIC_TOKEN_LOWER_CREDENTIAL_PREFIX_PATTERN})[a-z0-9]*|"
+    rf"[a-z0-9]*(?:{_PUBLIC_TOKEN_LOWER_CREDENTIAL_SUFFIX_PATTERN}))token))"
+    rf"\s*[:=]\s*(?P<rhs_value>{_QUOTED}|{_BARE})"
+)
 _KEYWORDS = (
     ("password", r"password", "Password", "PASSWORD"),
     ("secret", r"secret", "Secret", "SECRET"),
     ("token", r"token", "Token", "TOKEN"),
     ("api-key", r"api[_-]?key", "ApiKey", "APIKEY"),
 )
-_VALUE_RULES = tuple(
+_VALUE_RULES = (("token", _CONCATENATED_CREDENTIAL_TOKEN),) + tuple(
     (
         family,
         re.compile(
@@ -186,6 +220,12 @@ _VALUE_RULES = tuple(
     for family, keyword, title, upper in _KEYWORDS
 )
 _VALUE_PATTERNS = tuple(pattern for _family, pattern in _VALUE_RULES)
+_IDENTIFIER_COMPONENT = re.compile(
+    r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+"
+)
+_PUBLIC_TOKEN_ANNOTATION_SUFFIX = re.compile(
+    r"[ \t,;)\]}]+(?:# orchestrarium:public-token|// orchestrarium:public-token)[ \t]*$"
+)
 _SCANNER_REGEX_CATALOG_LINE = re.compile(
     r"""(?P<binary_rule>\((?:True|False),\s*)?re\.compile\([rubfRUBF]*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\)(?(binary_rule)\)),?"""
 )
@@ -303,12 +343,21 @@ class ScanSubject:
 
 
 @dataclass(frozen=True)
+class StagedEntry:
+    status: str
+    source_path: str | None
+    destination_path: str
+
+
+@dataclass(frozen=True)
 class Finding:
     failure_id: str
     subject_kind: str
     locator: str
     line: int
     detector_class: str
+    display_locator: str | None = None
+    staged_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1050,6 +1099,9 @@ def _content_hits(
     *,
     subject_kind: str = "tracked-blob",
     max_findings: int | None = None,
+    machine_path_lines: frozenset[int] | None = None,
+    display_locator: str | None = None,
+    staged_index: int | None = None,
 ) -> list[Finding]:
     findings: list[Finding] = []
     normalized_path = path.replace("\\", "/")
@@ -1071,6 +1123,8 @@ def _content_hits(
                     locator,
                     line_number,
                     f"simple-{index + 1}",
+                    display_locator,
+                    staged_index,
                 ))
                 if max_findings is not None and len(findings) >= max_findings:
                     break
@@ -1082,6 +1136,9 @@ def _content_hits(
                         candidate
                         for candidate in pattern.finditer(line)
                         if not _is_callable_rhs(line, candidate)
+                        and not _is_annotated_public_token_match(
+                            line, family, candidate, subject_kind
+                        )
                     ),
                     None,
                 )
@@ -1092,19 +1149,26 @@ def _content_hits(
                         locator,
                         line_number,
                         f"value-{family}",
+                        display_locator,
+                        staged_index,
                     ))
                     if max_findings is not None and len(findings) >= max_findings:
                         break
                     break
         if max_findings is not None and len(findings) >= max_findings:
             continue
-        if find_machine_paths(line):
+        if (
+            (machine_path_lines is None or line_number in machine_path_lines)
+            and find_machine_paths(line)
+        ):
             findings.append(Finding(
                 "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
                 subject_kind,
                 locator,
                 line_number,
                 "machine-path",
+                display_locator,
+                staged_index,
             ))
     return findings
 
@@ -1115,6 +1179,62 @@ def _is_binary(raw: bytes) -> bool:
 
 def _is_callable_rhs(line: str, match: re.Match[str]) -> bool:
     return _CALLABLE_RHS.match(line, match.start("rhs_value")) is not None
+
+
+def _is_public_token_credential_identifier(line: str, match: re.Match[str]) -> bool:
+    credential_identifier = match.groupdict().get("credential_token_identifier")
+    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    identifier_suffix = (
+        credential_identifier
+        if credential_identifier is not None
+        else line[match.start():match.start() + len("token")]
+    )
+    identifier = (prefix.group(0) if prefix is not None else "") + identifier_suffix
+    components = tuple(
+        component_match.group(0).upper()
+        for component_match in _IDENTIFIER_COMPONENT.finditer(identifier)
+    )
+    public_lexical_start = next(
+        (
+            index
+            for index in range(len(components))
+            if "".join(components[index:]).casefold()
+            in _PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS
+        ),
+        None,
+    )
+    credential_components = (
+        components if public_lexical_start is None else components[:public_lexical_start]
+    )
+    has_credential_cue = (
+        credential_identifier is not None
+        and credential_identifier.casefold()
+        not in _PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS
+    ) or any(
+        component in _PUBLIC_TOKEN_CREDENTIAL_CUES
+        or component.startswith(_PUBLIC_TOKEN_AUTH_CUE)
+        for component in credential_components
+    )
+    return has_credential_cue
+
+
+def _is_annotated_public_token_match(
+    line: str,
+    family: str,
+    match: re.Match[str],
+    subject_kind: str,
+) -> bool:
+    if family != "token" or subject_kind == "commit-message":
+        return False
+    if _is_public_token_credential_identifier(line, match):
+        return False
+    rhs = match.group("rhs_value")
+    if len(rhs) < 2 or rhs[0] not in {"'", '"'} or rhs[-1] != rhs[0]:
+        return False
+    annotation_match = _PUBLIC_TOKEN_ANNOTATION_SUFFIX.fullmatch(
+        line[match.end("rhs_value"):]
+    )
+    return annotation_match is not None
 
 
 def _is_public_key_token_match(line: str, family: str, match: re.Match[str]) -> bool:
@@ -1187,18 +1307,201 @@ def _binary_content_hits(
     return findings
 
 
-def _tracked_files() -> tuple[list[str], dict[str, bytes]]:
-    names = _run_git(["diff", "--cached", "--name-only", "--diff-filter=ACMRTUXB", "-z", "--"])
+_STAGED_HUNK_HEADER = re.compile(
+    rb"^@@ -([0-9]+)(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@(?: .*)?$"
+)
+_STAGED_OID = re.compile(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})")
+_STAGED_INDEX_ENTRY = re.compile(
+    rb"(?P<mode>[0-7]{6}) (?P<oid>[0-9a-f]{40}|[0-9a-f]{64}) 0\t(?P<path>.*)\0",
+    re.DOTALL,
+)
+
+
+def _parse_staged_entries(raw: bytes) -> tuple[StagedEntry, ...]:
+    if not raw:
+        return ()
+    if not raw.endswith(b"\0"):
+        raise RuntimeError("malformed staged name-status output")
+    fields = raw[:-1].split(b"\0")
+    entries: list[StagedEntry] = []
+    destinations: set[str] = set()
+    index = 0
+
+    def take_path() -> str:
+        nonlocal index
+        if index >= len(fields) or not fields[index]:
+            raise RuntimeError("malformed staged name-status output")
+        value = fields[index].decode("utf-8", "surrogateescape")
+        index += 1
+        return value
+
+    while index < len(fields):
+        try:
+            status = fields[index].decode("ascii", "strict")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("malformed staged name-status output") from exc
+        index += 1
+        if not status:
+            raise RuntimeError("malformed staged name-status output")
+        code = status[0]
+        source_path: str | None = None
+        if code in {"R", "C"}:
+            score = status[1:]
+            if not score.isdigit() or len(score) > 3 or int(score) > 100:
+                raise RuntimeError("malformed staged rename/copy status")
+            source_path = take_path()
+            destination_path = take_path()
+        elif code in {"A", "M"} and len(status) == 1:
+            destination_path = take_path()
+        elif code in {"T", "U", "X", "B"}:
+            raise RuntimeError("unsupported staged status")
+        else:
+            raise RuntimeError("malformed staged name-status output")
+        if destination_path in destinations:
+            raise RuntimeError("ambiguous staged destination")
+        destinations.add(destination_path)
+        entries.append(StagedEntry(status, source_path, destination_path))
+    return tuple(entries)
+
+
+def _staged_blob_oid(revision: str) -> str:
+    proc = _run_git(
+        ["rev-parse", "--verify", "--end-of-options", revision],
+        timeout=30,
+    )
+    value = proc.stdout.strip()
+    if proc.returncode or _STAGED_OID.fullmatch(value) is None:
+        raise RuntimeError("could not resolve staged blob")
+    return value.decode("ascii")
+
+
+def _staged_index_entry(path: str) -> tuple[str, str]:
+    proc = _run_git(["ls-files", "--stage", "-z", "--", path], timeout=30)
+    match = _STAGED_INDEX_ENTRY.fullmatch(proc.stdout)
+    if (
+        proc.returncode
+        or match is None
+        or match.group("path").decode("utf-8", "surrogateescape") != path
+    ):
+        raise RuntimeError("could not resolve staged index entry")
+    mode = match.group("mode").decode("ascii")
+    if mode not in {"100644", "100755", "120000", "160000"}:
+        raise RuntimeError("unsupported staged mode")
+    return mode, match.group("oid").decode("ascii")
+
+
+def _staged_post_image(oid: str) -> bytes:
+    proc = _run_git(["cat-file", "blob", oid], timeout=30)
+    if proc.returncode:
+        raise RuntimeError("could not read staged post-image")
+    return proc.stdout
+
+
+def _staged_added_line_numbers(old_oid: str, new_oid: str) -> frozenset[int]:
+    if old_oid == new_oid:
+        return frozenset()
+    proc = _run_git(
+        [
+            "diff", "--text", "--unified=0", "--no-color", "--no-ext-diff",
+            "--no-textconv", old_oid, new_oid,
+        ],
+        timeout=30,
+    )
+    if proc.returncode:
+        raise RuntimeError("could not diff staged blobs")
+
+    added: set[int] = set()
+    old_remaining: int | None = None
+    new_remaining: int | None = None
+    new_line = 0
+    saw_hunk = False
+
+    def finish_hunk() -> None:
+        if old_remaining not in {None, 0} or new_remaining not in {None, 0}:
+            raise RuntimeError("malformed staged blob diff")
+
+    for raw_line in proc.stdout.splitlines():
+        if raw_line.startswith(b"@@"):
+            finish_hunk()
+            match = _STAGED_HUNK_HEADER.fullmatch(raw_line)
+            if match is None:
+                raise RuntimeError("malformed staged blob diff")
+            old_remaining = int(match.group(2) or b"1")
+            new_line = int(match.group(3))
+            new_remaining = int(match.group(4) or b"1")
+            saw_hunk = True
+            continue
+        if old_remaining is None or new_remaining is None:
+            continue
+        if raw_line == b"\\ No newline at end of file":
+            continue
+        prefix = raw_line[:1]
+        if prefix == b"-" and old_remaining > 0:
+            old_remaining -= 1
+        elif prefix == b"+" and new_remaining > 0:
+            if new_line < 1:
+                raise RuntimeError("malformed staged blob diff")
+            added.add(new_line)
+            new_line += 1
+            new_remaining -= 1
+        elif prefix == b" " and old_remaining > 0 and new_remaining > 0:
+            old_remaining -= 1
+            new_line += 1
+            new_remaining -= 1
+        else:
+            raise RuntimeError("malformed staged blob diff")
+    finish_hunk()
+    if not saw_hunk:
+        raise RuntimeError("ambiguous staged blob diff")
+    return frozenset(added)
+
+
+def _tracked_files() -> tuple[
+    list[str],
+    dict[str, bytes],
+    dict[str, frozenset[int] | None],
+]:
+    names = _run_git(
+        [
+            "diff", "--cached", "--name-status", "-z", "--find-renames",
+            "--diff-filter=ACMRTUXB", "--",
+        ],
+        timeout=30,
+    )
     if names.returncode:
         raise RuntimeError("could not enumerate staged tracked files")
-    paths = [part.decode("utf-8", "surrogateescape") for part in names.stdout.split(b"\0") if part]
+    entries = _parse_staged_entries(names.stdout)
+    paths = [entry.destination_path for entry in entries]
     blobs: dict[str, bytes] = {}
-    for path in paths:
-        proc = _run_git(["show", f":{path}"])
-        if proc.returncode:
-            raise RuntimeError(f"could not read staged content for {path!r}")
-        blobs[path] = proc.stdout
-    return paths, blobs
+    machine_path_lines: dict[str, frozenset[int] | None] = {}
+    for entry in entries:
+        path = entry.destination_path
+        new_mode, new_oid = _staged_index_entry(path)
+        if new_mode == "160000":
+            blobs[path] = b""
+            machine_path_lines[path] = frozenset()
+            continue
+        raw = _staged_post_image(new_oid)
+        blobs[path] = raw
+        code = entry.status[0]
+        if code in {"A", "C"}:
+            machine_path_lines[path] = None
+            continue
+        old_path = entry.source_path if code == "R" else path
+        if old_path is None:
+            raise RuntimeError("missing staged source path")
+        old_oid = _staged_blob_oid(f"HEAD:{old_path}")
+        if code == "R" and entry.status == "R100" and old_oid != new_oid:
+            raise RuntimeError("ambiguous pure rename")
+        if _is_binary(raw):
+            machine_path_lines[path] = frozenset()
+            continue
+        selected = _staged_added_line_numbers(old_oid, new_oid)
+        line_count = len(raw.decode("utf-8", "replace").splitlines())
+        if any(line_number > line_count for line_number in selected):
+            raise RuntimeError("staged line outside post-image")
+        machine_path_lines[path] = selected
+    return paths, blobs, machine_path_lines
 
 
 def _length_frame(value: bytes) -> bytes:
@@ -2274,8 +2577,27 @@ class _AsyncGitObjectReader:
         except asyncio.TimeoutError:
             return False
         except Exception:
-            errors.append(phase)
-            return process.returncode is not None
+            terminal = process.returncode is not None
+            if not terminal:
+                errors.append(phase)
+            return terminal
+
+    async def _discard_stdout(self, deadline: float) -> tuple[bool, bool]:
+        """Drain fixed chunks to EOF without retaining child output."""
+        process = self._process
+        if process is None or process.stdout is None:
+            return True, False
+        observed_data = False
+        try:
+            while True:
+                chunk = await self._within(
+                    process.stdout.read(_READ_CHUNK_BYTES), deadline
+                )
+                if not chunk:
+                    return True, observed_data
+                observed_data = True
+        except (asyncio.TimeoutError, OSError, RuntimeError, ValueError):
+            return False, observed_data
 
     async def _drive_finalizer(self) -> _ReaderFinalizerResult:
         process = self._process
@@ -2318,13 +2640,19 @@ class _AsyncGitObjectReader:
             None,
             loop.time(),
         )
+        drain_task = (
+            asyncio.create_task(self._discard_stdout(deadline))
+            if process.stdout is not None
+            else None
+        )
+        terminate_failed = False
         if os.name == "nt":
             terminal = await self._wait_step(deadline, errors, "wait")
             if not terminal:
                 try:
                     process.terminate()
                 except Exception:
-                    errors.append("terminate")
+                    terminate_failed = True
                 terminal = await self._wait_step(
                     deadline, errors, "terminate-wait"
                 )
@@ -2338,28 +2666,38 @@ class _AsyncGitObjectReader:
         )
         if not terminal:
             errors.append("group-settle")
+            if terminate_failed:
+                errors.append("terminate")
         child = ChildObservation(
             child_identity,
             process.returncode,
             terminal and process.returncode is not None,
             loop.time(),
         )
-        if process.stdout is not None and child.terminal_observed:
+        if drain_task is not None:
             try:
-                trailing = False
-                while True:
-                    chunk = await self._within(
-                        process.stdout.read(_READ_CHUNK_BYTES), deadline
+                drained, trailing = await asyncio.shield(drain_task)
+                if not drained:
+                    errors.append("stdout-drain")
+                    stdout = TransportObservation(
+                        "owned", "unobserved", False, "stdout-drain", loop.time()
                     )
-                    if not chunk:
-                        break
-                    trailing = True
-                if trailing:
+                elif trailing and not self._poisoned:
                     errors.append("stdout-trailing")
-                stdout = TransportObservation("owned", "output-eof", True, None, loop.time())
+                    stdout = TransportObservation(
+                        "owned", "output-eof", True, None, loop.time()
+                    )
+                else:
+                    stdout = TransportObservation(
+                        "owned", "output-eof", True, None, loop.time()
+                    )
             except Exception:
+                if not drain_task.done():
+                    drain_task.cancel()
                 errors.append("stdout-drain")
-                stdout = TransportObservation("owned", "unobserved", False, "stdout-drain", loop.time())
+                stdout = TransportObservation(
+                    "owned", "unobserved", False, "stdout-drain", loop.time()
+                )
         if child.terminal_observed and stdin.observed and stdout.observed:
             return _ReaderFinalizerResult(None, child, stdin, stdout, tuple(errors))
         self._state = ReaderState.REAP_PENDING
@@ -3153,14 +3491,53 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _filename_findings(path: str, subject_kind: str) -> list[Finding]:
+def _filename_findings(
+    path: str,
+    subject_kind: str,
+    *,
+    display_locator: str | None = None,
+    staged_index: int | None = None,
+) -> list[Finding]:
     base = Path(path).name
     locator = _safe_locator(path, subject_kind)
     if base == ".env":
-        return [Finding("PS-FINDING-CONTENT", subject_kind, locator, 1, "filename-env")]
+        return [Finding(
+            "PS-FINDING-CONTENT", subject_kind, locator, 1, "filename-env",
+            display_locator, staged_index,
+        )]
     if base.casefold() == "secret.md":
-        return [Finding("PS-FINDING-CONTENT", subject_kind, locator, 1, "filename-secret")]
+        return [Finding(
+            "PS-FINDING-CONTENT", subject_kind, locator, 1, "filename-secret",
+            display_locator, staged_index,
+        )]
     return []
+
+
+def _staged_display_locator(path: str, find_machine_paths) -> str:
+    normalized = path.replace("\\", "/")
+    segments = normalized.split("/")
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or re.match(r"^[A-Za-z]:", normalized) is not None
+        or any(not segment or segment in {".", ".."} for segment in segments)
+        or any(ord(char) < 32 or ord(char) == 127 for char in normalized)
+    ):
+        return "redacted"
+    if _filename_findings(normalized, "tracked-blob"):
+        return "redacted"
+    if _content_hits(
+        normalized,
+        normalized,
+        find_machine_paths,
+        subject_kind="commit-message",
+        max_findings=1,
+    ):
+        return "redacted"
+    try:
+        return _encode_receipt_token(normalized)
+    except (UnicodeError, ValueError):
+        return "redacted"
 
 
 def _scan_content_blobs(
@@ -3168,11 +3545,28 @@ def _scan_content_blobs(
     paths: list[str],
     blobs: dict[str, bytes],
     find_machine_paths,
+    *,
+    machine_path_lines_by_path: dict[str, frozenset[int] | None] | None = None,
 ) -> ScanOutcome:
     findings: list[Finding] = []
     subject_kind = "path-blob" if mode == "path" else "tracked-blob"
-    for path in paths:
-        findings.extend(_filename_findings(path, subject_kind))
+    if machine_path_lines_by_path is not None and (
+        mode != "tracked" or set(machine_path_lines_by_path) != set(paths)
+    ):
+        raise RuntimeError("staged machine-path selection mismatch")
+    for one_based_index, path in enumerate(paths, 1):
+        staged_index = one_based_index if machine_path_lines_by_path is not None else None
+        display_locator = (
+            _staged_display_locator(path, find_machine_paths)
+            if staged_index is not None
+            else None
+        )
+        findings.extend(_filename_findings(
+            path,
+            subject_kind,
+            display_locator=display_locator,
+            staged_index=staged_index,
+        ))
         raw = blobs[path]
         if _is_binary(raw):
             continue
@@ -3181,6 +3575,13 @@ def _scan_content_blobs(
             path,
             find_machine_paths,
             subject_kind=subject_kind,
+            machine_path_lines=(
+                machine_path_lines_by_path[path]
+                if machine_path_lines_by_path is not None
+                else None
+            ),
+            display_locator=display_locator,
+            staged_index=staged_index,
         ))
     return ScanOutcome(
         "findings" if findings else "clean",
@@ -3208,10 +3609,23 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
                     f"line={finding.line} class={finding.detector_class}"
                 )
             else:
-                lines.append(
-                    f"{finding.failure_id} kind={finding.subject_kind} "
-                    f"line={finding.line} class={finding.detector_class}"
-                )
+                if (
+                    finding.subject_kind == "tracked-blob"
+                    and finding.display_locator is not None
+                    and finding.staged_index is not None
+                    and finding.staged_index > 0
+                ):
+                    lines.append(
+                        f"{finding.failure_id} kind=tracked-blob "
+                        f"locator={finding.display_locator} "
+                        f"staged-index={finding.staged_index} "
+                        f"line={finding.line} class={finding.detector_class}"
+                    )
+                else:
+                    lines.append(
+                        f"{finding.failure_id} kind={finding.subject_kind} "
+                        f"line={finding.line} class={finding.detector_class}"
+                    )
         lines.append("publication-safety scan found potential tracked-content leak markers")
         return "", "\n".join(lines), 1
     if outcome.mode == "range":
@@ -3297,10 +3711,17 @@ def main(argv: list[str] | None = None) -> int:
         elif args.path or args.legacy_path:
             mode = "path"
             paths, blobs = _path_files(args.path or args.legacy_path)
+            machine_path_lines_by_path = None
         else:
             mode = "tracked"
-            paths, blobs = _tracked_files()
-        return _emit_outcome(_scan_content_blobs(mode, paths, blobs, find_machine_paths))
+            paths, blobs, machine_path_lines_by_path = _tracked_files()
+        return _emit_outcome(_scan_content_blobs(
+            mode,
+            paths,
+            blobs,
+            find_machine_paths,
+            machine_path_lines_by_path=machine_path_lines_by_path,
+        ))
     except KeyboardInterrupt:
         print(
             "publication-safety: refusing id=PS-INPUT-REFUSAL "

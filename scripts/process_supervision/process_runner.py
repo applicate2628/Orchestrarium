@@ -26,6 +26,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
@@ -44,6 +45,8 @@ MAX_ENVIRONMENT_NAME_BYTES = 128
 MAX_ENVIRONMENT_VALUE_BYTES = 64 * 1024
 MAX_ENVIRONMENT_BYTES = 128 * 1024
 MAX_STDIN_BYTES = 16 * 1024 * 1024
+# Concurrent complete-line backlog, distinct from provider receipt/event limits.
+MAX_DIALOGUE_PENDING_LINES = 4096
 MAX_JSON_HEADER_BYTES = 512 * 1024
 MAX_REQUEST_BUNDLE_BYTES = 17_301_556
 MAX_WINDOWS_COMMAND_LINE_UNITS = 32_766
@@ -71,6 +74,7 @@ FAILURE_IDS = frozenset(
         "PSV1-JOB-TERMINATE",
         "PSV1-STDIN-SHORT-WRITE",
         "PSV1-STDIN-BROKEN-PIPE",
+        "PSV1-KIMI-ACP-PROTOCOL",
         "PSV1-CAPTURE-LIMIT",
         "PSV1-CAPTURE-IO",
         "PSV1-DEADLINE",
@@ -124,42 +128,15 @@ _WINDOWS_ARGV_PROFILES = frozenset(
 
 
 class KimiWindowsProfileV1:
-    """The sole owner of the sealed Windows Kimi bundle grammar."""
+    """The sole owner of the bounded Windows Kimi ACP argv grammar."""
 
-    profile_id = "kimi-sealed-bundle-text-v1"
+    profile_id = "kimi-acp-one-shot-v1"
     probe_profile_id = "kimi-metadata-probe-v2"
     model = "kimi-code/k3"
-    constant_prompt = "Review the sealed bundle and return only the requested result."
-    argv_shape = (
-        "--agent-file", None,
-        "--skills-dir", None,
-        "--model", model,
-        "--output-format", "text",
-        "--prompt", constant_prompt,
-    )
-    agent_frontmatter = (
-        b"---\n"
-        b"name: orchestrarium-bundle-reviewer\n"
-        b"description: Reviews only the context bundled in this file\n"
-        b"tools: []\n"
-        b"subagents: []\n"
-        b"---\n\n"
-    )
 
     @classmethod
-    def build_args(cls, agent_file: Path, skills_dir: Path) -> list[str]:
-        arguments = list(cls.argv_shape)
-        arguments[1] = str(agent_file.resolve(strict=True))
-        arguments[3] = str(skills_dir.resolve(strict=True))
-        return arguments
-
-    @classmethod
-    def matches_argv(cls, argv: Sequence[str]) -> bool:
-        values = argv[1:]
-        return len(values) == len(cls.argv_shape) and all(
-            expected is None or actual == expected
-            for actual, expected in zip(values, cls.argv_shape, strict=True)
-        )
+    def build_args(cls) -> list[str]:
+        return ["acp"]
 
 
 _WINDOWS_ARGV_PROFILES = _WINDOWS_ARGV_PROFILES | frozenset(
@@ -280,7 +257,7 @@ class ExecutableBindingV1:
 def _expected_executable_binding_matches(
     expected: object, live: ExecutableBindingV1
 ) -> bool:
-    """Compare the enrolled portable pin with the live OS-object evidence."""
+    """Compare a caller-supplied binding with the live OS-object evidence."""
 
     if type(expected) is not ExecutableBindingV1:
         return False
@@ -563,6 +540,13 @@ class ProcessRequestV1:
     request_id: str | None = None
     policy_id: str | None = None
     expected_executable_binding: ExecutableBindingV1 | None = None
+
+
+@dataclass(frozen=True)
+class ProcessDialogueV1:
+    protocol_id: str
+    handler: Callable[["ProcessDialogueChannelV1"], None]
+    continue_after_stdout_capture_limit: bool = False
 
 
 def _hook_script_binding(path: Path) -> dict[str, object]:
@@ -1229,92 +1213,6 @@ def resolve_executable_version(path: Path) -> str:
     return _stream_executable_binding(path)[1]
 
 
-def _kimi_bundle_file_binding(
-    request: ProcessRequestV1, *, failure_id: str
-) -> tuple[str, str, str]:
-    def reject() -> ProcessSupervisionError:
-        return ProcessSupervisionError(failure_id, "request-validation")
-
-    try:
-        argv = request.argv
-        if not KimiWindowsProfileV1.matches_argv(argv):
-            raise reject()
-        raw_path = argv[2]
-        if not raw_path or "\x00" in raw_path:
-            raise reject()
-        prompt = Path(raw_path)
-        normalized = Path(os.path.abspath(prompt))
-        if (
-            not prompt.is_absolute()
-            or os.path.normcase(str(normalized)) != os.path.normcase(raw_path)
-        ):
-            raise reject()
-        root = Path(os.path.abspath(request.cwd))
-        bind_cwd_identity(str(root))
-        try:
-            relative = normalized.relative_to(root)
-        except ValueError as exc:
-            raise reject() from exc
-        if not relative.parts:
-            raise reject()
-        for component in reversed((normalized, *normalized.parents)):
-            metadata = component.lstat()
-            if stat.S_ISLNK(metadata.st_mode) or _is_reparse(metadata):
-                raise reject()
-            if component == root:
-                break
-        else:
-            raise reject()
-        before = normalized.lstat()
-        if not stat.S_ISREG(before.st_mode):
-            raise reject()
-        descriptor = os.open(
-            normalized,
-            os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
-        )
-        try:
-            opened = os.fstat(descriptor)
-            if (opened.st_dev, opened.st_ino, opened.st_mode) != (
-                before.st_dev,
-                before.st_ino,
-                before.st_mode,
-            ):
-                raise reject()
-            digest = hashlib.sha256()
-            while True:
-                chunk = os.read(descriptor, 1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
-        finally:
-            os.close(descriptor)
-        content = normalized.read_bytes()
-        if not content.startswith(KimiWindowsProfileV1.agent_frontmatter) or b"${" in content:
-            raise reject()
-        skills = Path(argv[4])
-        if not skills.is_absolute() or Path(os.path.abspath(skills)) != skills or not skills.is_dir() or any(skills.iterdir()):
-            raise reject()
-        try:
-            skills.relative_to(root)
-        except ValueError as exc:
-            raise reject() from exc
-        identity = hashlib.sha256(
-            struct.pack(
-                ">QQQQQ",
-                opened.st_dev & ((1 << 64) - 1),
-                opened.st_ino & ((1 << 64) - 1),
-                opened.st_mode & ((1 << 64) - 1),
-                opened.st_size & ((1 << 64) - 1),
-                opened.st_mtime_ns & ((1 << 64) - 1),
-            )
-        ).hexdigest()
-        return str(normalized), identity, digest.hexdigest()
-    except ProcessSupervisionError:
-        raise
-    except (OSError, ValueError, OverflowError, UnicodeError) as exc:
-        raise reject() from exc
-
-
 def _argv_shape_sha256(argv: Sequence[str]) -> str:
     shapes: list[tuple[str, ...]] = []
     for index, item in enumerate(argv):
@@ -1615,17 +1513,12 @@ class WindowsArgvAdmissionOwnerV1:
         prompt_binding: tuple[str, str, str] | None = None
         executable_binding: ExecutableBindingV1 | None = None
         if _is_kimi_executable_profile(profile_id):
-            if profile_id == KimiWindowsProfileV1.profile_id:
-                prompt_binding = _kimi_bundle_file_binding(
-                    request, failure_id="PSV1-ARGV-CODEC-UNSUPPORTED"
-                )
-            if executable.name.casefold() != "kimi.exe":
-                raise ProcessSupervisionError(
-                    "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
-                )
             executable_binding = launch_owner.binding
-            if not _expected_executable_binding_matches(
-                request.expected_executable_binding, executable_binding
+            if executable_binding is None or (
+                request.expected_executable_binding is not None
+                and not _expected_executable_binding_matches(
+                    request.expected_executable_binding, executable_binding
+                )
             ):
                 raise ProcessSupervisionError(
                     "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
@@ -1664,11 +1557,14 @@ class WindowsArgvAdmissionOwnerV1:
                 lifecycle, request, executable, launch_owner
             )
         elif profile_id == KimiWindowsProfileV1.profile_id:
-            if _windows_argv_roundtrip(request.argv) != request.argv:
+            if (
+                request.argv != (str(executable), "acp")
+                or _windows_argv_roundtrip(request.argv) != request.argv
+            ):
                 raise ProcessSupervisionError(
                     "PSV1-ARGV-ATTESTATION", "request-validation"
                 )
-            probe_kind = "kimi-sealed-bundle-v1"
+            probe_kind = "kimi-acp-one-shot-v1"
             requested = observed = _json_argv_sha256(request.argv)
         elif profile_id == KimiWindowsProfileV1.probe_profile_id:
             if (
@@ -1739,11 +1635,7 @@ class WindowsArgvAdmissionOwnerV1:
         else:
             identity = launch_owner.identity_sha256
             version = launch_owner.version_sha256
-        prompt_binding = (
-            _kimi_bundle_file_binding(request, failure_id="PSV1-ARGV-ATTESTATION")
-            if admission.profile_id == KimiWindowsProfileV1.profile_id
-            else (None, None, None)
-        )
+        prompt_binding = (None, None, None)
         valid = (
             type(admission) is WindowsArgvAdmissionV1
             and admission._seal is _WINDOWS_ARGV_ADMISSION_SEAL
@@ -1756,11 +1648,13 @@ class WindowsArgvAdmissionOwnerV1:
             and admission.resolved_executable_version == version
             and admission.executable_binding == executable_binding
             and (
-                _expected_executable_binding_matches(
-                    request.expected_executable_binding, executable_binding
+                request.expected_executable_binding is None
+                or (
+                    executable_binding is not None
+                    and _expected_executable_binding_matches(
+                        request.expected_executable_binding, executable_binding
+                    )
                 )
-                if executable_binding is not None
-                else request.expected_executable_binding is None
             )
             and admission.actual_argv_sha256 == _json_argv_sha256(request.argv)
             and admission.actual_argv_shape_sha256 == _argv_shape_sha256(request.argv)
@@ -2639,6 +2533,201 @@ def _windows_environment_block(request: ProcessRequestV1) -> ctypes.Array[Any]:
     return ctypes.create_unicode_buffer(text)
 
 
+class _DialogueLineRouterV1:
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._buffer = bytearray()
+        self._lines: deque[bytes] = deque()
+        self._queued_bytes = 0
+        self._eof = False
+        self._failed = False
+
+    def feed(self, data: bytes) -> None:
+        with self._condition:
+            if self._failed:
+                return
+            retained_bytes = self._queued_bytes + len(self._buffer)
+            if len(data) > MAX_STDIN_BYTES - retained_bytes:
+                self._failed = True
+                self._condition.notify_all()
+                return
+            if data.count(b"\n") > MAX_DIALOGUE_PENDING_LINES - len(self._lines):
+                self._buffer.clear()
+                self._failed = True
+                self._condition.notify_all()
+                return
+            search_from = len(self._buffer)
+            self._buffer.extend(data)
+            while not self._failed:
+                newline = self._buffer.find(b"\n", search_from)
+                if newline < 0:
+                    break
+                line = bytes(self._buffer[: newline + 1])
+                self._lines.append(line)
+                self._queued_bytes += len(line)
+                del self._buffer[: newline + 1]
+                search_from = 0
+            self._condition.notify_all()
+
+    def finish(self, *, failed: bool = False) -> None:
+        with self._condition:
+            self._failed = self._failed or failed or bool(self._buffer)
+            self._eof = True
+            self._condition.notify_all()
+
+    def read_line(
+        self,
+        deadline: float,
+        cancellation_requested: Callable[[], bool],
+    ) -> bytes:
+        with self._condition:
+            while True:
+                if self._failed:
+                    raise ProcessSupervisionError(
+                        "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
+                    )
+                if self._lines:
+                    line = self._lines.popleft()
+                    self._queued_bytes -= len(line)
+                    return line
+                if self._eof:
+                    raise EOFError("ACP stdout closed")
+                if cancellation_requested():
+                    raise ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ProcessSupervisionError("PSV1-DEADLINE", "deadline")
+                self._condition.wait(min(ENGINE_POLL_INTERVAL_SECONDS, remaining))
+
+
+class ProcessDialogueChannelV1:
+    def __init__(
+        self,
+        stdin_fd: int,
+        lines: _DialogueLineRouterV1,
+        lifecycle: RunLifecycleV1,
+        deadline: float,
+        cancellation_probe: CancellationProbeV1 | None,
+    ) -> None:
+        self._stdin_fd = stdin_fd
+        self._lines = lines
+        self._lifecycle = lifecycle
+        self._deadline = deadline
+        self._cancellation_probe = cancellation_probe
+        self._cleanup_mode = False
+        self._cleanup_end: float | None = None
+        self._cleanup_span: float | None = None
+        self.written_bytes = 0
+
+    def cancellation_requested(self) -> bool:
+        if self._cleanup_mode:
+            return False
+        return self._lifecycle.cancelled or bool(
+            self._cancellation_probe is not None and self._cancellation_probe()
+        )
+
+    def begin_cleanup(self) -> None:
+        if self._cleanup_mode:
+            return
+        self._cleanup_span = RUNNER_CLOSE_TIMEOUT_SECONDS
+        self._cleanup_end = time.monotonic() + self._cleanup_span
+        self._deadline = self._cleanup_end
+        self._cleanup_mode = True
+
+    def write_line(
+        self, payload: bytes, *, reserve_cleanup_fraction: float = 0.0
+    ) -> int:
+        if self.cancellation_requested():
+            raise ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
+        if (
+            isinstance(reserve_cleanup_fraction, bool)
+            or not isinstance(reserve_cleanup_fraction, (int, float))
+            or not 0.0 <= reserve_cleanup_fraction <= 1.0
+            or reserve_cleanup_fraction
+            and (self._cleanup_end is None or self._cleanup_span is None)
+        ):
+            raise ProcessSupervisionError("PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery")
+        deadline = (
+            self._cleanup_end - self._cleanup_span * reserve_cleanup_fraction
+            if reserve_cleanup_fraction
+            else self._deadline
+        )
+        if (
+            not isinstance(payload, bytes)
+            or not payload
+            or len(payload) > MAX_STDIN_BYTES
+            or len(payload) > MAX_STDIN_BYTES - self.written_bytes
+            or not payload.endswith(b"\n")
+            or b"\n" in payload[:-1]
+            or time.monotonic() >= deadline
+        ):
+            raise ProcessSupervisionError(
+                "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
+        )
+        written = write_all_bytes(payload, lambda view: os.write(self._stdin_fd, view))
+        self.written_bytes += written
+        return written
+
+    def read_line(self, *, reserve_cleanup_fraction: float = 0.0) -> bytes:
+        if (
+            isinstance(reserve_cleanup_fraction, bool)
+            or not isinstance(reserve_cleanup_fraction, (int, float))
+            or not 0.0 <= reserve_cleanup_fraction <= 1.0
+            or reserve_cleanup_fraction
+            and (self._cleanup_end is None or self._cleanup_span is None)
+        ):
+            raise ProcessSupervisionError("PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery")
+        deadline = (
+            self._cleanup_end - self._cleanup_span * reserve_cleanup_fraction
+            if reserve_cleanup_fraction
+            else self._deadline
+        )
+        return self._lines.read_line(
+            deadline,
+            self.cancellation_requested,
+        )
+
+
+def _dialogue_fd(
+    fd: int,
+    dialogue: ProcessDialogueV1,
+    lines: _DialogueLineRouterV1,
+    observation: dict[str, object],
+    issues: list[str],
+    lifecycle: RunLifecycleV1,
+    resource_name: str,
+    deadline: float,
+    cancellation_probe: CancellationProbeV1 | None,
+) -> None:
+    channel = ProcessDialogueChannelV1(
+        fd, lines, lifecycle, deadline, cancellation_probe
+    )
+    try:
+        dialogue.handler(channel)
+        observation.update(
+            expected=channel.written_bytes,
+            written=channel.written_bytes,
+            complete=True,
+        )
+    except ProcessSupervisionError as exc:
+        observation.update(
+            failure=exc.failure_id,
+            written=channel.written_bytes,
+            complete=False,
+        )
+    except BaseException:
+        observation.update(
+            failure="PSV1-KIMI-ACP-PROTOCOL",
+            written=channel.written_bytes,
+            complete=False,
+        )
+    finally:
+        if not lifecycle.close_resource(
+            resource_name, time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
+        ):
+            issues.append("PSV1-DESCRIPTOR-OWNERSHIP")
+
+
 def _reader_fd(
     fd: int,
     stream: str,
@@ -2647,6 +2736,7 @@ def _reader_fd(
     issues: list[str],
     lifecycle: RunLifecycleV1 | None = None,
     resource_name: str | None = None,
+    dialogue_lines: _DialogueLineRouterV1 | None = None,
 ) -> None:
     try:
         while True:
@@ -2654,9 +2744,15 @@ def _reader_fd(
             if not data:
                 return
             capture.feed(stream, data)
+            if dialogue_lines is not None:
+                dialogue_lines.feed(data)
     except BaseException:
         issues.append("PSV1-CAPTURE-IO")
+        if dialogue_lines is not None:
+            dialogue_lines.finish(failed=True)
     finally:
+        if dialogue_lines is not None:
+            dialogue_lines.finish()
         if lifecycle is not None and resource_name is not None:
             if not lifecycle.close_resource(
                 resource_name, time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
@@ -2718,9 +2814,10 @@ def _result_from_parts(
     resources_closed: bool,
     poisoned: bool,
     cleanup_issues: Sequence[str],
+    capture_limit_is_failure: bool = True,
 ) -> ProcessResultV1:
     streams = capture.snapshot()
-    if failure_id is None and (
+    if failure_id is None and capture_limit_is_failure and (
         capture.limit_crossed or any(stream.truncated for stream in streams.values())
     ):
         failure_id = "PSV1-CAPTURE-LIMIT"
@@ -2750,7 +2847,7 @@ def _result_from_parts(
         cancelled,
         max(0.0, time.monotonic() - started),
         StdinObservationV1(
-            len(request.stdin_bytes or b""),
+            int(stdin_state.get("expected", len(request.stdin_bytes or b""))),
             int(stdin_state.get("written", 0)),
             bool(stdin_state.get("complete", not request.stdin_bytes)),
         ),
@@ -2791,6 +2888,7 @@ class _WindowsBackendV1:
         executable_launch_owner: "_ExecutableLaunchOwnerV1",
         admission: WindowsArgvAdmissionV1 | None = None,
         internal_probe_admission: WindowsInternalProbeAdmissionV1 | None = None,
+        dialogue: ProcessDialogueV1 | None = None,
     ) -> ProcessResultV1:
         import msvcrt
 
@@ -2822,7 +2920,10 @@ class _WindowsBackendV1:
             request.capture_policy, request.capture_sink_binding
         )
         issues: list[str] = []
-        stdin_state: dict[str, object] = {"written": 0, "complete": not request.stdin_bytes}
+        stdin_state: dict[str, object] = {
+            "written": 0,
+            "complete": not request.stdin_bytes and dialogue is None,
+        }
         failure_id: str | None = None
         stage = "completed"
         timed_out = False
@@ -3090,6 +3191,7 @@ class _WindowsBackendV1:
             stderr_fd, stderr_resource = convert_parent(
                 "stderr_parent", os.O_RDONLY | os.O_BINARY
             )
+            dialogue_lines = _DialogueLineRouterV1() if dialogue is not None else None
             for fd, name, resource_name in (
                 (stdout_fd, "stdout", stdout_resource),
                 (stderr_fd, "stderr", stderr_resource),
@@ -3105,6 +3207,7 @@ class _WindowsBackendV1:
                         issues,
                         lifecycle,
                         resource_name,
+                        dialogue_lines if name == "stdout" else None,
                     ),
                     daemon=True,
                 )
@@ -3112,14 +3215,28 @@ class _WindowsBackendV1:
                 reader_threads.append(thread)
             lifecycle.register_worker(f"{worker_prefix}stdin")
             writer_thread = threading.Thread(
-                target=_writer_fd,
+                target=_dialogue_fd if dialogue is not None else _writer_fd,
                 args=(
-                    stdin_fd,
-                    request.stdin_bytes or b"",
-                    stdin_state,
-                    issues,
-                    lifecycle,
-                    stdin_resource,
+                    (
+                        stdin_fd,
+                        dialogue,
+                        dialogue_lines,
+                        stdin_state,
+                        issues,
+                        lifecycle,
+                        stdin_resource,
+                        request.deadline_monotonic,
+                        request.cancellation_probe,
+                    )
+                    if dialogue is not None
+                    else (
+                        stdin_fd,
+                        request.stdin_bytes or b"",
+                        stdin_state,
+                        issues,
+                        lifecycle,
+                        stdin_resource,
+                    )
                 ),
                 daemon=True,
             )
@@ -3134,16 +3251,27 @@ class _WindowsBackendV1:
                 wait_failed = wait == self.api.INFINITE
                 if wait_failed:
                     failure_id, stage = "PSV1-INTERNAL", "execution"
-                elif capture.limit_crossed:
+                elif capture.limit_crossed and not (
+                    dialogue is not None
+                    and dialogue.continue_after_stdout_capture_limit
+                    and capture.snapshot()["stdout"].truncated
+                    and not capture.snapshot()["stderr"].truncated
+                ):
                     failure_id, stage = "PSV1-CAPTURE-LIMIT", "capture-limit"
                 elif capture.io_failed or "PSV1-CAPTURE-IO" in issues:
                     failure_id, stage = "PSV1-CAPTURE-IO", "execution"
                 elif stdin_state.get("failure"):
-                    failure_id, stage = str(stdin_state["failure"]), "stdin-delivery"
-                elif lifecycle.cancelled or (
+                    failure_id = str(stdin_state["failure"])
+                    if failure_id == "PSV1-CANCELLED":
+                        stage, cancelled = "cancellation", True
+                    elif failure_id == "PSV1-DEADLINE":
+                        stage, timed_out = "deadline", True
+                    else:
+                        stage = "stdin-delivery"
+                elif dialogue is None and (lifecycle.cancelled or (
                     request.cancellation_probe is not None
                     and request.cancellation_probe()
-                ):
+                )):
                     failure_id, stage, cancelled = "PSV1-CANCELLED", "cancellation", True
                 elif now >= request.deadline_monotonic:
                     failure_id, stage, timed_out = "PSV1-DEADLINE", "deadline", True
@@ -3256,6 +3384,13 @@ class _WindowsBackendV1:
         resources_closed = not any(handles.values()) and not issues
         if settlement == "AMBIGUOUS" and direct_reaped and ownership_confirmed and not failure_id:
             failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
+        final_streams = capture.snapshot()
+        continued_stdout_capture_limit = (
+            dialogue is not None
+            and dialogue.continue_after_stdout_capture_limit
+            and final_streams["stdout"].truncated
+            and not final_streams["stderr"].truncated
+        )
         return _result_from_parts(
             request, started,
             executable_identity_sha256=validated_cwd.executable_identity_sha256,
@@ -3266,6 +3401,7 @@ class _WindowsBackendV1:
             direct_reaped=direct_reaped, primary_thread_closed=primary_thread_closed,
             job_handle_closed=job_handle_closed, resources_closed=resources_closed,
             poisoned=self.coordinator.poisoned, cleanup_issues=issues,
+            capture_limit_is_failure=not continued_stdout_capture_limit,
         )
 
 
@@ -3548,6 +3684,7 @@ class ProcessRunnerV1:
         request: ProcessRequestV1,
         *,
         lifecycle: RunLifecycleV1 | None = None,
+        dialogue: ProcessDialogueV1 | None = None,
     ) -> ProcessResultV1:
         started = time.monotonic()
         owned_lifecycle = lifecycle
@@ -3564,6 +3701,26 @@ class ProcessRunnerV1:
                     "PSV1-REQUEST-INVALID", "request-validation"
                 )
             _validate_request_shape_before_executable_acquisition(request)
+            if dialogue is not None and (
+                type(dialogue) is not ProcessDialogueV1
+                or dialogue.protocol_id != KimiWindowsProfileV1.profile_id
+                or not callable(dialogue.handler)
+                or type(dialogue.continue_after_stdout_capture_limit) is not bool
+                or request.windows_argv_profile_id
+                != KimiWindowsProfileV1.profile_id
+                or request.stdin_bytes is not None
+            ):
+                raise ProcessSupervisionError(
+                    "PSV1-REQUEST-INVALID", "request-validation"
+                )
+            if (
+                dialogue is None
+                and request.windows_argv_profile_id
+                == KimiWindowsProfileV1.profile_id
+            ):
+                raise ProcessSupervisionError(
+                    "PSV1-REQUEST-INVALID", "request-validation"
+                )
             if os.name != "nt":
                 raise ProcessSupervisionError(
                     "PSV1-POSIX-ORACLE-UNAVAILABLE", "request-validation"
@@ -3696,6 +3853,10 @@ class ProcessRunnerV1:
             ):
                 raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
             if self._backend_factory is not None:
+                if dialogue is not None:
+                    raise ProcessSupervisionError(
+                        "PSV1-REQUEST-INVALID", "request-validation"
+                    )
                 backend = self._backend_factory(self, owned_lifecycle)
                 assert executable_launch_owner is not None
                 result = backend(
@@ -3717,6 +3878,7 @@ class ProcessRunnerV1:
                     validated_cwd,
                     executable_launch_owner,
                     admission,
+                    dialogue=dialogue,
                 )
         except ProcessSupervisionError as exc:
             result = _request_failure(

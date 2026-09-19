@@ -2,220 +2,59 @@
 
 # Claude Code Pack
 
-Platform-specific rules for Claude Code. Shared governance (hygiene, publication safety, role index, core delegation) is imported from `AGENTS.md` above via `@import`.
+`AGENTS.md` is the required shared-governance owner. This file contains only the Claude Code runtime delta.
 
-## Bootstrap — verified premises plus edit/commit checkpoints
+## Claude tool mapping
 
-> **STOP. Universal premise rule first; three stricter trigger moments below.**
->
-> Every decision, plan, review verdict, root-cause claim, fix, implementation action, or behavior-changing commit must rest on verified premises. The trigger moments below add mandatory edit/commit checkpoints; they do not limit the universal rule. Run the checklist at each trigger moment.
->
-> **(a0) Pre-action orientation trigger** — before the first repository-local runner/build invocation or mutating tool call in an unfamiliar repo/subtree, complete step 0. This trigger is independent of whether the task is a bug fix; bug-fix steps 1-3 still apply at their existing trigger.
->
-> **(a) Pre-fix trigger** — before the first code-mutating tool call (`Edit`, `Write`, `NotebookEdit`, or equivalent) in response to a bug report, runtime failure, error trace, regression, "does not work" claim, "не работает" claim, "broken" claim, or any user message naming a defect in behavior — or before changing behavior that already works, for speed, cleanup, or refactor with no defect reported (there, runtime diagnosis or profiling before the edit is mandatory) — **steps 1-3 must complete before the first edit lands**. The trigger fires regardless of whether the session invoked `/agents-bugfix` or any other flow — the discipline binds the session independent of the routing wrapper. Step 5 (Recovery readiness) does not apply at this moment; step 4 (Scope proportionality) and 4.5 (No-kostyl check) apply when you draft the planned edit.
->
-> **(b) Pre-commit trigger** — before committing any change that fixes a bug, alters behavior, modifies a contract, or implements a feature, run **all 5 steps**. Step 5 is pre-commit-specific.
->
-> This Bootstrap is the operational form of the shared `Hypothesis disclosure discipline` and `Pre-fix diagnostic gate` rules in `AGENTS.md`. It binds the main conversation and any role that authors code mutations or commits.
->
-> 0. **Repository orientation.** Before the first repository-local run, build, or mutation in an unfamiliar repo/subtree, state `scope`, `status`, `workflow`, `protected`, and `evidence` from applicable governing docs; `evidence` carries `file:line` citations. Names, counts, recency, and layout do not prove liveness. Missing or conflicting authority means `status=conflict`: do not run/build/edit until the owning source or user resolves it.
->
->    ```text
->    REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>
->    ```
->
-> 1. **Diagnostic data.** Name the concrete observed data points that drive this decision or change: `file:line` citation, command output captured this session, log line, user statement quoted verbatim, reproduction transcript. If you cannot name any — go investigate first; do not commit yet.
->
-> 2. **Hypothesis inventory.** List every interpretive leap the fix depends on. Examples:
->    - "Word X in the user's message means Y."
->    - "Mechanism A is what is hiding behind label B in the user's vocabulary."
->    - "Flag `--foo` produces behavior C."
->    - "This fix touches three files because the contract spans them."
->    Each item is a HYPOTHESIS until verified. The chain typically has more than one node — list each one separately rather than collapsing them.
->
-> 3. **For each hypothesis, decide one of two paths:**
->    - **Verify now** — run the empirical test (`Bash` / `PowerShell` shell-out, smoke run, file read), check the authoritative doc (`WebFetch` to versioned source), or ask the user directly via `AskUserQuestion`. Do not commit until verified.
->    - **Label `ASSUMPTION (UNVERIFIED)`** in the commit message body alongside the verification step that would resolve it. Only allowed when the cost of asking/verifying is genuinely higher than the cost of being wrong, AND the assumption is disclosed in the commit message — never silent. An unlabelled unverified claim driving a commit is a violation.
->
-> 4. **Scope proportionality.** Is the change scope what the verified hypothesis actually requires? Minimal is the default — if the verified bug is a one-character typo, the fix is one character. Wider scope (refactor, multi-file edit, contract change, abstraction extraction) is allowed when the verified hypothesis itself names the wider scope (for example "wire-shape mismatch between producer and consumer requires updating both sides"); state that explicitly in the commit message. "While I'm here let me also..." additions and opportunistic cleanups without their own verified hypothesis are forbidden.
->
-> **4.5. Fix means correct logic, not workaround (no kostyl check).** Before committing, ask: does this implement the right behavior, or just hide the symptom? A fix names the root cause (a specific function, contract, invariant, or boundary that produced the wrong behavior) and corrects it; a workaround silences a visible failure mode without changing the underlying logic. Catch-and-swallow error handling, defensive checks without root-cause understanding, type assertions that silence the type contract, fallback values that mask missing-data bugs, hardcoding to dodge a configuration-resolution bug, `try/except: pass` around recurring failures, log filtering to hide real errors — all count as *kostyl*, not fix. Kostyl is allowed only as an explicit `WORKAROUND` commit that names the root cause separately, states scope/lifetime, and discloses that the underlying defect is unfixed. See the shared `Hypothesis disclosure discipline` rule clause "Fix means correct logic" for the full definition.
->
-> 5. **Recovery readiness.** If a hypothesis later turns out wrong, what is the rollback path? For local-only commits, prefer `git reset --hard HEAD~N` over `git revert` because the hypothesis-bearing commit then disappears from history rather than being preserved as a partial truth. Do not `git push` hypothesis-bearing commits before user review; user review is the final hypothesis verification step. **Clean self-introduced churn before the first push:** the same logic extends beyond hypothesis failures — a broke-it-then-fixed-it sequence you authored (a bug introduced in one local commit, corrected in a later one) should not reach pushed history. While the commits are still local, squash or `git reset` the churn so the published history shows the correct fix directly, not your intermediate self-made error and its correction. Clean it BEFORE the first push; do not `git push --force` already-published history to hide it after the fact.
->
-> **Violation triggers** — if you find yourself writing or thinking any of these as load-bearing reasoning for a fix *or* a fix-attempt code edit, that IS the trigger to invoke this Bootstrap:
->
-> **Pre-action orientation triggers** (fire before the first repository-local run, build, or mutation in an unfamiliar repo/subtree):
->
-> - "This has the most files, so it is the live/current suite," or any target choice based on name, count, recency, or layout without governing-doc evidence.
-> - "I will fork/copy this runner/scorer" without first proving its status and inventorying the current owner/mechanism.
-> - Running, building, or editing an archived/deprecated/superseded/frozen target without explicit user-approved historical scope.
-> - Treating missing or conflicting orientation as permission to proceed.
->
-> **Pre-fix triggers** (fire before the first `Edit` / `Write` / `NotebookEdit` tool call):
->
-> - "I see the bug, let me edit X" without a captured `file:line` symptom citation or verbatim error output
-> - "the fix is to add Y" or "let me just patch Z" without a verified hypothesis about what is broken and where
-> - starting an `Edit` / `Write` tool call in a bug-report context with no diagnostic data captured in this session's conversation (user's wording verbatim, error output verbatim, return code, log line, reproduction step, or `file:line` symptom anchor)
-> - "I didn't touch that component's code, so my change can't have broken it" as a regression dismissal — behavior couples indirectly (timing, ordering, lifecycle, render/layout passes, shared state, viewport), so your change is the prime suspect until you revert it and reproduce the REAL symptom (the actual broken interaction, not a convenient proxy state); see `Indirect-regression discipline`
->
-> **Pre-commit triggers** (fire before authoring the commit):
->
-> - `most likely means`, `presumably`, `I believe it refers to`, `this should map to`, `based on training data`, `extrapolating from`, `in general X means Y`
-> - `while I'm here let me also`, `since we're touching this anyway`
-> - `I'll just commit this and we can fix it if wrong`
->
-> These phrases and patterns are not banned in open exploration or hypothesis formation. They are banned **only** as the justification for a code edit (pre-fix triggers) or a commit (pre-commit triggers). When one appears in that position, name it, treat the underlying claim as a HYPOTHESIS, and apply the relevant steps (1-3 at pre-fix; 1-5 at pre-commit).
+Apply the shared repository-orientation, diagnostic, hypothesis, scope, no-kostyl, and recovery rules through Claude's tools:
 
-### Structural enforcement (auto-installed)
+- Before a repository-local `Bash|PowerShell` run/build or mutation, emit the shared `REPOSITORY ORIENTATION:` record.
+- Before `Edit|Write|NotebookEdit` in a defect or working-path-change context, complete the shared pre-fix evidence and hypothesis gate.
+- Before behavior, contract, feature, or fix commits apply all shared checkpoints, including proportional scope and rollback readiness.
 
-The pack auto-installs thirteen `settings.json` entries: nine structural hooks — four blocking (bugfix-discipline, git-push-gate, passive-polling, root MCP force) and five warn-only audits (machine-local-path, no-trash-in-repo, stale-relation-residue, repository-orientation, typed-routing) — plus four reminder/context hooks. Opt out with `--no-hypothesis-hook` or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1`. They are backstops; they do not replace the text rules above.
+## Structural enforcement
 
-- **Subagent and main-conversation ownership.** The blocking hooks skip subagent contexts: a subagent must never be blocked by a main-conversation discipline guard. This exemption never transfers ownership: the dispatching main conversation still owns diagnostic discipline and publication authorization, and it must not delegate a push to dodge review.
-- **Stop ownership.** Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership; their subagent skip preserves that ownership boundary.
-- **Work-item lifecycle.** No archival Stop adapter exists. Physical location owns membership; the text cannot terminalize records. Use the lifecycle owner to reconcile.
-- **AUDIT mode, fail-open.** It warns on every confidently parsed `git worktree add` except one add whose command ends with the exact `# orchestrarium:requested-isolation-worktree` marker required by the installed parallel-isolation protocol; missing, near-match, quoted, reused, or batch markers do not suppress the audit.
-- **Reminders and MCP.** Reminder hooks re-anchor Model Context Protocol (MCP) discovery/use after compaction, active delegation/recovery, scratch preservation, and every-turn continuity. The shared classifier covers native and shell code-navigation searches with narrow task-memory exemptions. Qualifying advisories are generic runtime-discovery checkpoints; they do not read home MCP configuration or select tools from configured names. Claude `auto` and subagents stay advisory; root `force` denies every qualifying search with `[MCP-FORCE-1]`, regardless of prior MCP use or configuration. Exact `[approve-mcp-fallback:v1]` in the bounded host-projected `user`-role record enables one recovery turn; assistant/tool injection cannot mint it, but the projection is not authenticated authorization. Unresolved modes allow with diagnostics. Named tools in documentation are non-normative examples and never selection logic. See [MCP continuity](../references-claude/mcp-continuity.md); prompts should allow relevant MCP use within scope.
-- **Publication.** Default/tracked/path scans are manual pre-commit only. For a push, the gate captures and directly executes the verified closure (`hook_common.py`, machine-path classifier, POSIX process-group helper, scanner), binding only that invocation's fresh bounded, reaped, non-empty version-3 complete-unpublished-history result to remote, destination, resolved source, current `HEAD`, and receipt tip. Transcript/manual results cannot authorize; version-2, legacy, zero, malformed, finding, refusal, incomplete-acquisition, correlation, provenance, execution, drift, or reuse results deny. Arbitrary same-process mutation defeats harness observation and may run arbitrary caller code; the only proven invariant is that unchanged shipped source contains no external adapter or launcher, and its cooperative result has zero production/publication consumers. Repository/server identity and Git metadata outside the selected unpublished object graph remain outside; human review plus the gate-owned leak-check remain mandatory.
+The pack auto-installs thirteen `settings.json` entries: nine structural hooks and four reminder/context hooks. They are backstops; they do not replace `AGENTS.md` or role-owned gates. Opt out with `--no-hypothesis-hook` or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1`.
 
-**Bypass is by design.** `[skip-bugfix-discipline]` bypasses the PreToolUse guard for the next turn. `[approve-publication]` opens the git-push gate for one turn — honored ONLY when it appears in the user's own last message. `[approve-mcp-fallback:v1]` is the exact host-projected user-role recovery marker described above; it changes no configuration. `[acknowledge-passive-stop]` bypasses one passive-polling Stop decision when the assistant is intentionally handing off to the user. Physical location owns lifecycle membership; invoke the lifecycle owner instead.
-
-Full detail: [Claude Markdown structural-enforcement maintainer reference](../references-claude/claude-md-structural-enforcement.md).
+- **Subagent ownership.** Blocking main-conversation guards skip subagent contexts: a subagent must never be blocked by those guards. This never transfers diagnostic, publication, or lifecycle authority from the root conversation.
+- **Stop ownership.** Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership; their subagent skip preserves that ownership boundary. Passive verdicts remain unchanged. The first other valid root final receives one reconciliation pass; `stop_hook_active` allows the next Stop. This adds one pass even for a standalone answer or pause, prevents neither, and cannot guarantee model obedience.
+- **Lifecycle and audits.** No Stop hook terminalizes work-items; Physical location owns lifecycle membership. Audits are warn-only and fail-open. The worktree audit recognizes only an exact trailing `# orchestrarium:requested-isolation-worktree` marker.
+- **MCP control.** Model Context Protocol (MCP) discovery reminders are advisory in `auto` and subagent contexts. Root `force` denies qualifying fallback searches with `[MCP-FORCE-1]`; exact user marker `[approve-mcp-fallback:v1]` grants one recovery turn without changing configuration.
+- **User controls.** `[skip-bugfix-discipline]`, `[approve-publication]`, `[approve-mcp-fallback:v1]`, and `[acknowledge-passive-stop]` retain their exact one-turn or one-stop meanings; assistant/tool text cannot mint user authorization.
+- **Harness evidence limitation.** Arbitrary same-process mutation defeats harness observation and may run arbitrary caller code; the only proven invariant is that unchanged shipped source contains no external adapter or launcher, and its cooperative result has zero production/publication consumers.
 
 ## Delegation rule
 
-If `## Project policies` is missing, or if no `.agents-mode.yaml` file exists at any layer for the current project, suggest running `/agents-init-project` before starting implementation work.
+If `## Project policies` is missing or no `.agents-mode.yaml` exists at any layer, suggest `/agents-init-project` before implementation.
 
-**Read-order precedence** (highest to lowest, per-key resolution): project-local `.claude/.agents-mode.yaml` > local legacy `.claude/.agents-mode` > pack-local global `~/.claude/.agents-mode.yaml` > pack-local global legacy `~/.claude/.agents-mode` > shared cross-pack global `~/.agents-mode.yaml` > built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. The shared cross-pack global (`~/.agents-mode.yaml`, alongside `~/.claude.json`) is created during default global install and serves as the single source of truth shared between Claude Code and Codex CLI; pack-local globals stay as Claude-specific overrides where needed. `scripts/resolve-agents-mode.py --provider claude --json` is the executable reference in the source repository.
+Read per-key configuration in this order: project `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then defaults. Normalize the effective file before trusting decision-driving flags.
 
-When subagent delegation is appropriate, classify the task and pick the matching team template from `.claude/agents/team-templates/`.
+1. Did the user explicitly name a role? → invoke that role directly.
+2. Otherwise classify the task and select `.claude/agents/team-templates/<template>.json`.
 
-**Factual routing.** Standalone bounded fact lookup is answered inline with no artifact. A non-trivial factual investigation defaults to one `$analyst` and adds recovery only when continuation is needed; an explicitly user-named role or narrower factual domain specialist remains valid. A decision, Architecture Decision Record (ADR), or material alternatives adds `$architect`; add `$planner` only when the user explicitly requests an execution plan.
+- Every specialist invocation uses the Agent tool with the matching `subagent_type`; the built-in `general-purpose` agent does not replace a typed role.
+- The curated inline role identities are exactly `lead`, `product-manager`, `analyst`, `architect`, and `planner`. Architect's sole role-contract body is the universal `.agents/skills/architect/SKILL.md` projection. Explicit Skill invocation may adopt these identities inline; the shared quick-fix route may self-invoke only its already-admitted bounded intake/factual/seam decision. Inline adoption is neither isolated nor an independent gate.
+- `lead` is a host-selected main agent and inline `/lead` role. Lead is never spawned as a subagent. The wrapper rejects a stale dispatched `subagent_type: lead`; only a stale `subagent_type: lead` dispatch is fail-closed. `product-manager`, `analyst`, and `planner` remain typed Agent targets whose wrappers load their same-named Claude skill; the Architect wrapper loads the universal body.
+- For `requiresLead: false` routes, the main conversation invokes the declared Agent chain directly. For `requiresLead: true`, it adopts `/lead`, owns integration/recovery, and invokes leaf specialists; `requiresLead` never creates a Lead subagent.
+- Launch independent Agent calls together only when their complete resource surfaces are disjoint. External worker/reviewer substitution follows the installed [external-dispatch contract](agents/contracts/external-dispatch.md).
 
-**Active-task side questions.** When a primary task is active, answer a side question briefly in commentary and continue the next authorized primary-task action in the same turn; never end the turn with a final-only answer or defer continuation to the next turn. This projects the existing same-turn control; it does not claim a new runtime guarantee.
+Team-template JSON files under `.claude/agents/team-templates/` are the sole owners of each chain, trigger, required role, and `requiresLead` value. Select the exact file after classification; apply the `requiresLead` rules above.
 
-External adapter preferences live in `.claude/.agents-mode.yaml`, with `~/.claude/.agents-mode.yaml` as the global fallback when the project-local overlay is absent. The file keeps `consultantMode` for consultant behavior, adds `delegationMode`, `parallelMode`, and `mcpMode` for operator-level routing/tooling preference, keeps `preferExternalWorker` / `preferExternalReviewer` for eligible implement and review-side substitutions, and uses `externalProvider: auto | codex | claude | kimi | grok` for provider-backed execution through the active named production priority profile. Shipped production `auto` routing stays on the Codex/Claude pair. Kimi is an explicit read-only broad-research/review route using fixed model `kimi-code/k3` and a neutral captured prompt-file reference; it is independently verified, nonauthorizing, and never a provider entry inside `externalPriorityProfiles`. Grok remains unavailable and must not be launched or probed in 1.x. `parallelMode` is the general helper fan-out rule across internal and external lanes; external opinion counts and brigade routing stay overlays on top of it. Claude-line canonical config may also include the shared `externalModelMode` and `externalCodexProfile`, while `externalClaudeProfile` remains Codex-line only. On the Claude line, plain Claude CLI stays plain; `reserve` is a symbolic supplemental read-only candidate in `advisory.*` and `review.*` profile orders, after primary `claude`/`codex`, and is independent of the primary provider candidate. `reserveResolver` binds that symbolic candidate to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`; `wrapper:<command>` must be a PATH-resolved command or repo-relative wrapper path. Worker, mutating implementation, code-generation, file-editing, installer, publication, or write-producing repository-hygiene routes must not use `reserve`. `externalProvider: auto` is lane-driven, not host-default-driven; Kimi is explicit-only and Grok is unavailable.
-If the effective Claude overlay exists but is stale, comment-free, or from an older pack version, decision-driving reads must normalize that file to the current canonical format before trusting its flags.
+`externalProvider: auto | codex | claude | kimi | grok` is the policy vocabulary. Shipped `auto` uses only Codex/Claude. Kimi is explicit-only through the approved thin wrapper; its installed external-dispatch contract owns admitted read-only/engineering capabilities, independent verification, and the independently verified and nonauthorizing result. Grok remains unavailable in 1.x and is not launched or probed.
 
-**External CLI transport (Claude line):** the approved thin wrapper `invoke-<provider>-prompt` is the only substantive file-based-prompt path. Its owner supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract; raw, inline, transport-neutral, and sidecar routes are unsupported rather than fallbacks. `invoke-claude-api.py` (or its thin `.sh` launcher) is a separate secret-backed transport used only when `reserveResolver` resolves to `claude-wrapper`, not interchangeable with prompt wrappers. Wrapper operating detail: `.claude/agents/contracts/external-dispatch.md`.
+## Slash command routing
 
-**Decision tree:**
-
-1. Did the user explicitly name a role? → invoke that role directly
-2. Does the task need parallel risk owners (security + performance + ...)? → `requiresLead: true` template
-3. Is it a standalone bounded fact lookup? → answer inline with no artifact
-4. Is it a non-trivial factual investigation without a decision? → one `analyst` by default, unless a narrower factual domain specialist owns it
-5. Is it a decision, Architecture Decision Record, or material-alternatives task without implementation? → `research`, adding `architect`; add `planner` only for an explicitly requested execution plan
-6. Is it a review or quality gate with no implementation? → `review`
-7. Satisfies the shared `quick-fix` predicate? → `quick-fix`
-8. Otherwise → `full-delivery`
-
-**Templates:**
-
-| Template | When | Full lead pipeline? | Routing |
-| --- | --- | --- | --- |
-| `quick-fix` | Shared `quick-fix` predicate | No | Main conv → implementer → QA |
-| `research` | Non-trivial factual investigation or decision/ADR/alternatives — no implementation | No | Main conv → analyst; add architect for a decision/ADR/material alternatives and planner only for a requested execution plan |
-| `review` | Architecture/code quality gate, project audit, post-impl validation | No | Main conv selects the objective-named reviewer and only evidence-triggered helpers; when present, order helpers as research → QA → review |
-| `full-delivery` | New feature, substantial change, multi-stage pipeline | Yes | Main conv (as Lead) coordinates full pipeline |
-| `security-sensitive` | Auth, trust boundaries, credentials, vulnerability | Yes | Main conv (as Lead) coordinates, security-reviewer mandatory |
-| `performance-sensitive` | Hard budgets, SLAs, latency targets | Yes | Main conv (as Lead) coordinates, performance-reviewer mandatory |
-| `geometry-review` | Spatial computation, transforms, meshing | Yes | Main conv (as Lead) coordinates, computational-scientist + arch-reviewer |
-| `combined-critical` | Multiple risk domains simultaneously | Yes | Main conv (as Lead) coordinates all risk owners |
-
-`Quick-fix` follows the shared predicate; explicit `/lead` use and `delegationMode: auto|force` change coordination, not template admission or artifact requirements.
-
-**Claude Code routing rules:**
-
-- Every specialist invocation MUST use the Agent tool with the matching `subagent_type`. Do not simulate roles in the main conversation. **Narrow exception — curated inline role-skills:** exactly five roles carry a canonical contract under `.claude/skills/<role>/SKILL.md` and may be adopted inline instead of dispatched: `lead`, `product-manager`, `analyst`, `architect`, `planner`. Inline adoption has exactly two triggers: (a) the operator explicitly invokes the named skill (`/lead`, `/product-manager`, `/analyst`, `/architect`, `/planner` or an equivalent explicit `Skill` tool call), or (b) the model self-invokes `product-manager`, `analyst`, or `architect` for the ONE bounded decision the `quick-fix` route already makes inline — light intake, a trivial factual read, or a seam/blast-radius call — PROVIDED the adoption is announced in-chat before executing and stays scoped to that one decision. `planner` remains explicit-user-only until `quick-fix` admission fails and routing selects a Plan stage; it never upgrades an admitted `quick-fix` into a paper artifact. Unannounced inline adoption remains forbidden, and inline adoption is never a substitute for a template's dispatched stages or for an independent gate. Inline adoption preserves the current conversation's accumulated context and produces that role's one artifact; it does NOT claim isolation or independence, and it satisfies no independent gate. `lead` is a host-selected main agent and inline `/lead` role; only a stale `subagent_type: lead` dispatch is fail-closed, and Lead is never spawned. The other four stay valid fresh-context Agent targets (`subagent_type: product-manager | analyst | architect | planner`) whose wrapper loads the same skill inside an isolated subagent context. `product-manager` carries an additional separation caveat: inline adoption is for quick intake/scope framing only — a formal cross-initiative roadmap decision, or admitting work that will gate other work, still routes to the `product-manager` subagent. Every other role stays Agent-tool-only; this exception is not a general permission to simulate any role inline.
-- If the template says `requiresLead: false`, the main conversation manages the chain directly — invoke specialists via Agent tool in order, pass each accepted artifact to the next.
-- If the template says `requiresLead: true`, the main conversation holds the Lead role and runs the full lead pipeline directly (per the `/lead` skill) — coordinating work-items, risk owners, integration, and gates while dispatching each specialist via the Agent tool. `requiresLead` sets how heavy the orchestration is, not who is lead; Lead is never spawned as a subagent.
-- Independent roles (e.g., security-engineer and performance-engineer) SHOULD be launched in parallel via multiple Agent tool calls in a single message when their scopes do not overlap.
-- External adapter substitution is a routing decision, not a template change. When the preferences file favors external dispatch, eligible worker-side slots may route through `$external-worker` and eligible review/QA slots through `$external-reviewer`.
-- Independent external adapters may also run in parallel when their scopes are disjoint and the selected provider runtimes support concurrent non-interactive execution. If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
-- The built-in `general-purpose` subagent is not a substitute for a typed pack role: route specialist work (implementation, review, design, security, performance, toolchain) to the matching typed `subagent_type`. A warn-only `check-typed-routing` audit surfaces a `general-purpose` dispatch that carries a specialist-work signal.
-
-**Recovery rule:**
-
-- Every admitted `quick-fix` creates a minimal `work-items/active/<slug>/status.md` before its first repository mutation. That file contains only ordinary lifecycle fields plus task, current step, last result, and next action; no `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or report is required before that mutation. Re-classification enriches the same work-item instead of creating a late unrelated item, and delivery applies the normal immediate closure/archive rule.
-- The main conversation owns `work-items/` recovery after routing selects recovery-tracked or heavier orchestration. For `requiresLead: true` (heavier-orchestration) chains it runs the full lead pipeline in the `/lead` skill, maintaining `roadmap.md`, `brief.md`, `status.md` (and `plan.md`) throughout.
-- For `requiresLead: false` routes that need continuation, the main conversation saves recovery state in `work-items/active/<date>-<slug>/` after each accepted stage: the existing `status.md` format plus the accepted artifact. A one-Analyst factual investigation creates recovery only when continuation is needed; a decision/ADR route records the accepted Analyst artifact before Architect, and records Planner only when an execution plan was requested. This allows a future session to resume from the last accepted artifact without replaying the chain.
-- **Close is mandatory.** For a delivered, parked, cancelled, or reprioritized item, Lead writes `closure.md` and exact `bug-dispositions.json`: every current bug whose parsed `context` equals the item slug is declared `terminalize` or `preserve-current`. The lifecycle owner applies those dispositions, archives the item, writes `bug-dispositions-receipt.json`, and refreshes `work-items/README.md` atomically; an active manifest is pending close. Routine single-item mechanics stay inline; drift or multi-item closure routes to `$knowledge-archivist`. Only archive placement is terminal; `work-items/index.md` is compatibility-only and lessons use `work-items/lessons/`.
-- **Epics.** Child roll-up uses physical active/archive locations. After every child is archived and the goal is met, `$lead` records closure and `$knowledge-archivist` uses the lifecycle owner to move the epic from `work-items/epics/<slug>.md` to `work-items/epics/archive/<YYYY-MM>/<slug>.md`; reopening reverses that move. Duplicate locations fail closed. Details: the lead skill `## Epics`.
-- **Dependencies & decisions.** A work-item that needs prior work declares `Depends-on: <slug>, <slug>` (work-item slugs) in its `status.md` — a standing, planned inter-work-item dependency edge (distinct from the runtime `BLOCKED:*` gate verdicts); `/agents-status` derives `blocked-by` (open targets) and the ready-set from these lines. Durable cross-cutting architecture decisions go in the `work-items/decisions/` registry (a flat `<date>-<slug>.md`, `status: proposed | accepted | dropped | superseded | reverted`), referenced from a work-item's `design.md` rather than buried in it. Full rules: the lead skill `## Dependencies` + `## Decisions` + `docs/decisions.md` + `docs/dependencies.md` (the two `docs/` files are maintainer references; not installed at runtime).
-- For a direct single-specialist invocation (the user names a role directly), no recovery file is needed unless that invocation is itself admitted as `quick-fix`; this exception does not broaden recovery to trivial questions.
-
-## Slash command auto-invocation
-
-The pack ships entry-point slash commands in `.claude/commands/` (`/agents-bugfix`, `/agents-implement`, `/agents-design`, `/agents-research`, `/agents-review`, `/agents-refactor`, and others). Each command file owns its own `## When to auto-invoke` block listing the trigger phrases and intent patterns that should activate its flow.
-
-**Auto-invocation contract:** when a user's request matches one of the trigger patterns and the user did not explicitly type the slash command, apply that command's flow as if the user had typed it. Announce the routing decision in your first response (for example: *"I'm routing this through the bugfix flow because the report names a defect without a proposed fix"*) and let the user redirect if the auto-routing was wrong.
-
-**Dispatch index** — short pointer table from user intent to command file. The owning content (full trigger list, edge cases, do-not-auto-invoke exceptions) lives in each command's `## When to auto-invoke` block; this index is just the lookup surface:
-
-| Intent signal | Command flow to apply |
-| --- | --- |
-| Bug report, error trace, "fix this", "broken", "не работает", regression, registry bug slug | `.claude/commands/agents-bugfix.md` |
-| New feature without accepted plan: "build X", "add Y", "design Z", unclear creative work | `.claude/commands/agents-design.md` |
-| N independently-framed design lanes on one pinned problem + mandatory synthesis: "design panel", "дизайн-панель", "two architects" (NOT plain "design") | `.claude/commands/agents-design-panel.md` |
-| Accepted plan in `work-items/active/`, user says "proceed", "continue", "next phase" | `.claude/commands/agents-implement.md` |
-| Investigation question, "how does X work", ADR exploration, code-surface understanding | `.claude/commands/agents-research.md` |
-| Review of completed work, pre-merge gate, post-implementation validation | `.claude/commands/agents-review.md` |
-| Autonomous multi-angle convergence on one fix-design: "review loop", "проводи review loop", "loop review", "автономная петля" (NOT plain "review"/"second opinion") | `.claude/commands/agents-review-loop.md` |
-| One independent opinion on a decision/artifact: "second opinion", "второе мнение", "ask the consultant" (NOT plain "review", NOT "review loop") | `.claude/commands/agents-second-opinion.md` |
-| Refactor request without functional change, deduplication, readability improvement | `.claude/commands/agents-refactor.md` |
-| Performance budget breach, SLA, latency, throughput | `.claude/commands/agents-perf.md` |
-| Security, auth, credentials, trust boundary, vulnerability | `.claude/commands/agents-security.md` |
-| Interactive testing session, "let's test X together" | `.claude/commands/agents-qa-session.md` |
-| Test writing request, "add tests for X", "what's the coverage of Y" | `.claude/commands/agents-test.md` |
-
-**Resolution rules:**
-
-- If multiple commands could match (e.g., a bug whose fix requires substantial architecture review): pick the most specialized one (`agents-security` or `agents-perf` over `agents-bugfix`), or ask the user to confirm before proceeding.
-- If the user's request does not match any auto-invoke trigger, fall back to the decision tree in `## Delegation rule` above and select a template (`quick-fix`, `research`, `review`, `full-delivery`, etc.) directly.
-- Auto-invocation is a routing convenience, not a forcing function. The user can always override with explicit `/agents-<name>` typing or with a direct instruction such as "skip the bugfix flow, just answer".
+Auto-match user intent against the installed command contracts and apply the owning flow as if explicitly invoked. Each command file owns its `## When to auto-invoke` rules and exceptions. Announce automatic routing and let the user redirect; an explicit `/agents-<name>` or direct instruction wins. Use `.claude/commands/agents-help.md` as the installed command index, then open the matching `.claude/commands/agents-<name>.md` owner.
 
 ## Coexistence with the superpowers plugin
 
-When the Claude Code superpowers plugin is installed alongside this pack, the two systems compose; they do not compete. **superpowers skills shape main conv's process discipline** (HOW to think and work) — brainstorming, systematic-debugging, verification-before-completion, writing-plans, test-driven-development, subagent-driven-development. **Orchestrator templates shape delegation routing** (WHO does what and through which gate) — `quick-fix`, `research`, `review`, `full-delivery`, `security-sensitive`, `performance-sensitive`, `geometry-review`, `combined-critical`.
-
-**Standard composition order:**
-
-1. Evaluate the shared `quick-fix` predicate before invoking a process skill. If it passes, select `quick-fix` directly; no brainstorming, writing-plan, consultant, or review prelude is admitted.
-2. Only after `quick-fix` admission fails, invoke an applicable process skill — brainstorming for new or unclear creative work, systematic-debugging when a runtime cause is unknown, writing-plans when the selected route needs a plan, requesting-code-review before merge — then select the heavier template.
-3. Subagents may invoke common-skills (`$bug-hunting`, `$analyzing-video-bugs`, `$windows-gui-manual-testing`, `$mathtype-book-page`, `$repo-cleanup`, `$manual-repo-transfer`, `$github-pr-review-bot`, `$explain-simply`, `$vak-dissertation-review`, `$vcpkg-ports-updater`, `$vcpkg-builder`, `$generalize-from-instance`) via in-context `Skill`; they typically cannot spawn subagents, and share methodology across the tree.
-
-**Resolving apparent overlaps:**
-
-| superpowers skill | Orchestrator counterpart | How they compose |
-| --- | --- | --- |
-| `brainstorming` | `research` / `full-delivery` template | Brainstorming clarifies user intent and design direction; `$analyst` / `$architect` / `$planner` then turn the accepted direction into a delivery plan with evidence and gates. |
-| `systematic-debugging` | `quick-fix` template + `$bug-hunting` common-skill | systematic-debugging is main conv's diagnostic frame; `$bug-hunting` is the loaded discipline inside the implementer's context; `quick-fix` is the delegation shape after the cause is known. |
-| `writing-plans` | `$planner` role | Use `writing-plans` for ad-hoc plans **outside** a tracked delivery flow; for delivery, delegate to `$planner` so the plan becomes a recovery-tracked artifact in `work-items/`. |
-| `verification-before-completion` | `$qa-engineer` role | verification-before-completion is main conv's pre-claim discipline; `$qa-engineer` is the dedicated phase-gate specialist. Both apply at different layers — the skill for main conv's own claims, the role for the formal phase gate. |
-| `test-driven-development` | `$backend-engineer` / `$frontend-engineer` / `$qt-ui-engineer` execution | TDD shapes how the implementer writes code; the Orchestrator implementer role follows that discipline inside its own execution. |
-| `subagent-driven-development` | This pack's templates and routing | The skill provides procedural guidance for multi-subagent runs; this pack provides the role catalog, team templates, and acceptance gates. Use both: the skill says "spawn parallel independent subagents"; the templates say which `subagent_type` is correct for each lane. |
-| `requesting-code-review` / `receiving-code-review` | `$architecture-reviewer` / `$security-reviewer` / `$performance-reviewer` | superpowers procedures shape how main conv frames the request and processes the feedback; the Orchestrator reviewers are the specialists who actually produce the review artifact. |
-
-**Quick rubric — when do I invoke which?**
-
-- New feature, exploration, or unclear request → invoke `brainstorming` first, then pick a template.
-- Bug whose cause is not obvious from code → invoke `systematic-debugging` (and optionally load `$bug-hunting` via Skill) first, then `quick-fix` or `full-delivery` once the cause is known.
-- Work satisfying the shared `quick-fix` predicate → pick `quick-fix` directly, no superpowers prelude.
-- Research question or ADR exploration → pick `research` template directly.
-- Review-only or audit → pick `review` template directly.
-- Already in mid-flow with admitted scope → continue delegation along the active template; do not re-invoke a process skill unless the task type changes.
-
-**Precedence when superpowers and this pack appear to conflict on the same step:** per superpowers' own `using-superpowers` rule, the priority order is user instructions → superpowers skills → default system prompt. This pack is installed through the user-instruction tier (via `@AGENTS.md` import in this file), so its delegation rules are not subordinate to superpowers; they apply at the **delegation layer** while superpowers applies at the **process layer**. Most apparent conflicts are compositions at different stages; if a genuine same-step contradiction appears, surface it to the user before silently picking one side.
+- Evaluate the shared `quick-fix` predicate before invoking a process skill; an admitted quick fix has no brainstorming, writing-plan, consultant, or pre-review prelude.
+- After quick-fix admission fails, applicable process skills govern method; Orchestrarium governs delegation, typed roles, artifacts, and gates. Continue an active admitted flow unless its task type changes.
 
 ## Role definitions
 
-Role definitions live in `.claude/agents/<role>.md`. Exception — the curated inline role-skills (see the narrow exception above): `lead`, `product-manager`, `analyst`, `architect`, and `planner` keep their canonical contracts under `.claude/skills/<role>/SKILL.md` instead. When Claude selects `lead` as its main agent, `.claude/agents/lead.md` uses documented `initialPrompt: /lead` to load that contract; the same definition rejects a stale dispatched `subagent_type: lead`. The other four (`product-manager`, `analyst`, `architect`, `planner`) are duals: `.claude/agents/<role>.md` is a thin fresh-context delegate wrapper whose required first step loads the same-named skill. Every other core role's canonical contract stays in `.claude/agents/<role>.md` as before.
+Ordinary roles live in `.claude/agents/<role>.md`; the four Claude-owned curated inline roles `lead`, `product-manager`, `analyst`, and `planner` use `.claude/skills/<role>/SKILL.md`. Architect uses the `.claude/skills/architect` projection to the universal `.agents/skills/architect/SKILL.md` body. `.claude/agents/lead.md` uses `initialPrompt: /lead` for main-agent activation and refuses stale dispatch; the `product-manager`, `analyst`, and `planner` wrappers load their same-named skill, while the Architect wrapper loads the universal body.
 
 ## Publication safety scan
 
-Pre-publication scan: run `/agents-check-safety`, or manually: `bash .claude/agents/scripts/check-publication-safety.sh` (Windows PowerShell: `python .claude/agents/scripts/check-publication-safety.py`).
-
-Default is staged-only. A manual final range command is diagnostic; at push evaluation the gate runs its own fresh canonical sibling range scan. Review and user approval remain separate.
-
-Claude secret-backed wrapper: `python .claude/agents/scripts/invoke-claude-api.py [args...]` or `bash .claude/agents/scripts/invoke-claude-api.sh [args...]`. The wrapper prefers repo-local `.claude/SECRET.md` and then falls back to `~/.claude/SECRET.md`, exports the declared `ANTHROPIC_*` environment, and runs plain `claude`. The Python entrypoint accepts `--print-secret-path`; the Bash launcher delegates to it and honors `CLAUDE_BIN` when the active shell PATH cannot see `claude`.
+Pre-publication scan: run `/agents-check-safety`, or `python .claude/agents/scripts/check-publication-safety.py` (POSIX: `bash .claude/agents/scripts/check-publication-safety.sh`). Default is staged-only; a manual range scan is diagnostic. Human review, the push gate's fresh scan, and explicit publication authority remain separate.

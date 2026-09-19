@@ -437,6 +437,19 @@ def _linked_global_claude(
     return logical, backing
 
 
+def _linked_global_canonical_agents(tmp_path: Path, home: Path) -> tuple[Path, Path]:
+    logical = home / ".agents"
+    backing_parent = tmp_path / "OneDrive - operator"
+    backing_parent.mkdir()
+    backing = backing_parent / "canonical-agents"
+    shutil.move(str(logical), str(backing))
+    try:
+        os.symlink(backing, logical, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    return logical, backing
+
+
 def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     source = tmp_path / "source"
     canonical = tmp_path / "canonical" / "scripts"
@@ -736,6 +749,99 @@ def test_global_scope_accepts_installer_authorized_linked_claude_agents(
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert '"projections":["canonical","claude-host"]' in result.stdout
+
+
+def test_global_scope_accepts_installer_authorized_linked_canonical_agents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    logical_claude, _claude_backing = _linked_global_claude(
+        tmp_path, monkeypatch, installer
+    )
+    _logical_agents, _agents_backing = _linked_global_canonical_agents(
+        tmp_path, logical_claude.parent
+    )
+
+    result = _run_scoped_validator("global", ROOT, logical_claude.parent)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '"projections":["canonical","claude-host"]' in result.stdout
+
+
+def test_installed_validator_bootstraps_pinned_authority_through_linked_canonical_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    logical_claude, _claude_backing = _linked_global_claude(
+        tmp_path, monkeypatch, installer
+    )
+    logical_agents, agents_backing = _linked_global_canonical_agents(
+        tmp_path, logical_claude.parent
+    )
+    installed_validator = (
+        agents_backing
+        / "skills"
+        / "lead"
+        / "scripts"
+        / "validate-provider-prompt-projections.py"
+    )
+    shutil.copyfile(VALIDATOR_PATH, installed_validator)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(
+                logical_agents
+                / "skills"
+                / "lead"
+                / "scripts"
+                / "validate-provider-prompt-projections.py"
+            ),
+            "--require",
+            "--scope",
+            "global",
+            "--source-root",
+            str(ROOT),
+            "--install-root",
+            str(logical_claude.parent),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '"projections":["canonical","claude-host"]' in result.stdout
+
+
+def test_global_scope_rejects_linked_leaf_below_authorized_canonical_agents_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    logical_claude, _claude_backing = _linked_global_claude(
+        tmp_path, monkeypatch, installer
+    )
+    _logical_agents, agents_backing = _linked_global_canonical_agents(
+        tmp_path, logical_claude.parent
+    )
+    leaf = agents_backing / "skills" / "lead" / "scripts" / TRANSPORT_FILES[0]
+    replacement = tmp_path / "linked-canonical-provider-prompt.py"
+    shutil.copyfile(leaf, replacement)
+    leaf.unlink()
+    try:
+        os.symlink(replacement, leaf)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"file symlink unavailable: {exc}")
+
+    result = _run_scoped_validator("global", ROOT, logical_claude.parent)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith(
+        "E_TRANSPORT_PROJECTION_PARITY: "
+        "canonical/provider_prompt.py linked runtime authority"
+    )
 
 
 def test_linked_runtime_subroots_helper_is_pinned_to_canonical_digest() -> None:
@@ -1099,6 +1205,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
         "process_supervision/process_runner.py",
         "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1120,6 +1227,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
                 "invoke-kimi-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1131,6 +1239,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
                 "invoke-kimi-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1142,6 +1251,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
                 "invoke-kimi-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1152,6 +1262,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "provider_prompt.py",
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1162,6 +1273,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "provider_prompt.py",
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1172,6 +1284,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "provider_prompt.py",
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1405,6 +1518,10 @@ def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifes
             STOCK_448E_PROJECTION_SHA256["invoke-codex-prompt.py"],
         ),
         (
+            "scripts/external-prompt-governance.md",
+            STOCK_448E_PROJECTION_SHA256["external-prompt-governance.md"],
+        ),
+        (
             "scripts/external-role-taxonomy.v1.json",
             STOCK_448E_PROJECTION_SHA256["external-role-taxonomy.v1.json"],
         ),
@@ -1446,6 +1563,7 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
         "process_supervision/process_runner.py",
         "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1475,6 +1593,7 @@ def test_exact_7872_six_member_transport_is_one_atomic_nine_member_plan(
         "process_supervision/process_runner.py",
         "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1746,7 +1865,7 @@ def test_8521_transport_final_parity_failure_restores_original_identities(
     assert not tuple(projection.parent.rglob("*.prior"))
 
 
-def test_8521_transport_real_install_replaces_six_members_then_is_noop(
+def test_8521_transport_real_install_replaces_seven_members_then_is_noop(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
@@ -1784,6 +1903,7 @@ def test_8521_transport_real_install_replaces_six_members_then_is_noop(
         "process_supervision/process_runner.py",
         "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
         "external-role-taxonomy.v1.json",
         current_manifest.name,
     }:
@@ -1800,7 +1920,7 @@ def test_8521_transport_real_install_replaces_six_members_then_is_noop(
     } == after_first
 
 
-def test_8521_transport_dry_run_reports_six_replacements_without_mutation(
+def test_8521_transport_dry_run_reports_seven_replacements_without_mutation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     installer = _load_installer()
@@ -1818,7 +1938,7 @@ def test_8521_transport_dry_run_reports_six_replacements_without_mutation(
 
     assert installer.install("claude", [*args, "--dry-run"]) == 0
     output = capsys.readouterr().out
-    assert "transport prior 8521b638: 6 replacements" in output
+    assert "transport prior 8521b638: 7 replacements" in output
     assert {
         name: (
             path.read_bytes(),

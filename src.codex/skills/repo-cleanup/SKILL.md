@@ -1,6 +1,6 @@
 ---
 name: repo-cleanup
-description: Coordinate read-only repository cleanup and prepare-for-transfer requests by classifying current state, routing separately authorized work to existing owners, and rechecking evidence; never use as a deletion or process-killing engine.
+description: Coordinate read-only repository cleanup and prepare-for-transfer requests by classifying current state, routing separately authorized work to existing owners, and rechecking evidence; when work-items/ is selected, enumerate every immediate child exactly once and never treat audit PASS as the census; never use as a deletion or process-killing engine.
 ---
 
 # Repository Cleanup
@@ -26,8 +26,9 @@ Explicit `$repo-cleanup` wins. Compound prepare-plus-cleanup intent performs one
 
 1. Bind the physical repository identity and current `HEAD`, or record the unborn state. Take a pre-mutation Git/resource census. Treat prior cleanup reports as nonexistent.
 2. Use governance plus existing read-only inventories and audits. For Orchestrarium work-item structure, project the exact current result of `python scripts/check-work-items-state.py`; do not duplicate its logic.
-3. Create one `ResourceRowV1` for every selected resource. Direct-root work derives rows only from its own census and tool/resource actions.
-4. Project lifecycle, Git, and transfer predicate rows only from one exact existing owner result. Missing, stale, null, cross-repository, cross-`HEAD`, or incomplete evidence yields `REVISE`; never combine partial owner evidence.
+3. When `work-items/` is selected, enumerate every immediate child exactly once as `category | derived | repository-local exception | unknown`; audit `PASS` does not satisfy this census. An `unknown` remains preserved and yields `REVISE`.
+4. Create one `ResourceRowV1` for every selected resource. Direct-root work derives rows only from its own census and tool/resource actions.
+5. Project lifecycle, Git, and transfer predicate rows only from one exact existing owner result. Missing, stale, null, cross-repository, cross-`HEAD`, or incomplete evidence yields `REVISE`; never combine partial owner evidence.
 
 ### ResourceRowV1
 
@@ -42,7 +43,7 @@ Each transient row contains:
 
 An absent or unknown field, invalid exception, or missing settlement result classifies the row as `unclassified`, preserves the resource, and yields `REVISE`. Pre-existing user state is untouched. Ambiguous ownership never authorizes deletion.
 
-Agent-owned residue includes temporary/generated artifacts, half-finished alternatives, dead or superseded code/helpers/docs/names/registry entries, live process descendants, temporary worktrees or branches, locks, handles, subscriptions, transactions, quarantine/recovery roots, tombstones, and temporary reports/plans/logs/captures/caches/scratch roots without an accepted canonical pointer.
+Agent-owned residue includes temporary/generated artifacts, half-finished alternatives, dead or superseded code/helpers/docs/names/registry entries, live process descendants, temporary worktrees or branches, locks, handles, subscriptions, transactions, quarantine/recovery roots, tombstones, and temporary reports/plans/logs/captures/caches/scratch roots. An accepted canonical pointer does not make scratch archival: the producer must promote required results before task completion, then settle owned temporary scratch; unfinished, foreign, ambiguous, or denied state remains preserved and `REVISE`.
 
 ### Ephemeral volume hysteresis
 

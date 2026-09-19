@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the always-loaded Claude Code entrypoint size and rule manifest.
-
-The post-extraction cap is the freshly verified 36,271-unit binding size plus
-an exact 500-unit guard after the maintainer narrative moved to
-references-claude/claude-md-structural-enforcement.md.  The inclusive 250-unit
-warning band begins at 36,521, leaving 250 units between the live source and
-the first warning.  The binding metric conservatively uses the larger of
-Unicode code points and UTF-8 bytes because the upstream warning unit is not
-empirically pinned in this repository.
-"""
+"""Validate the composed shared-governance plus thin Claude entrypoint pair."""
 
 from __future__ import annotations
 
@@ -18,7 +9,7 @@ import re
 from pathlib import Path
 
 
-SIZE_CAP = 36_771
+SIZE_CAP = 8_192
 WARNING_BAND = 250
 
 REFERENCE_PAYLOAD_BEGIN = re.compile(
@@ -33,104 +24,117 @@ USER_CONTROL_MARKER = re.compile(
     r"\[(?:approve|skip|acknowledge|revoke)[^\]\r\n]*\]"
 )
 RU_HOOK_BEHAVIOR_PAYLOAD_PIN = (
-    22_849,
-    "37bcf9b3f9d904eb0f1d3235b515e2c1dfa29508883002b9b9c55bf3ebc97aea",
+    24_967,
+    "9cd2600075d9b9b183a03a449a7cbc5bc944a89e3bc710b8766d9dbfeafca80f",
 )
 
-INSTALL_ANCHORS = (
-    "@AGENTS.md",
-    "## Delegation rule",
-    "## Publication safety scan",
-)
-
-BOOTSTRAP_TEETH = (
-    "STOP. Universal premise rule first",
-    "**(a0) Pre-action orientation trigger**",
-    "**(a) Pre-fix trigger**",
-    "**(b) Pre-commit trigger**",
-    "REPOSITORY ORIENTATION: scope=",
-    "**Diagnostic data.**",
-    "**Hypothesis inventory.**",
-    "ASSUMPTION (UNVERIFIED)",
-    "**Scope proportionality.**",
-    "Fix means correct logic, not workaround",
-    "**Recovery readiness.**",
-    "most likely means",
-    "while I'm here let me also",
-    "I'll just commit this and we can fix it if wrong",
-)
-
-STRUCTURAL_ENFORCEMENT_TEETH = (
-    "They are backstops; they do not replace the text rules above.",
-    "prompts should allow relevant MCP use",
-    "gate captures and directly executes the verified",
-    "a subagent must never be blocked",
-    "This exemption never transfers ownership: the dispatching main conversation still owns diagnostic discipline and publication authorization",
-    "Transcript/manual results cannot authorize",
-    "Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership",
-    "Reminder hooks re-anchor Model Context Protocol (MCP) discovery/use after compaction, active delegation/recovery, scratch preservation, and every-turn continuity",
-    "AUDIT mode",
-    "fail-open",
-    "[skip-bugfix-discipline]` bypasses the PreToolUse guard for the next turn",
-    "[approve-publication]` opens the git-push gate for one turn — honored ONLY when it appears in the user's own last message",
-    "[acknowledge-passive-stop]` bypasses one passive-polling Stop decision when the assistant is intentionally handing off to the user",
-    "Physical location owns lifecycle membership",
-)
-
-DELEGATION_AND_RECOVERY_TEETH = (
-    "/agents-init-project",
-    "externalProvider: auto | codex | claude | kimi | grok",
-    "never a provider entry inside `externalPriorityProfiles`",
-    "Every specialist invocation MUST use the Agent tool",
-    "Lead is never spawned as a subagent",
-    "The main conversation owns `work-items/`",
-    "**Close is mandatory.**",
-)
-
-ROUTING_AND_ROLE_TEETH = (
-    "## Slash command auto-invocation",
-    "**Auto-invocation contract:**",
-    "**Dispatch index**",
-    "## Coexistence with the superpowers plugin",
-    "New feature, exploration, or unclear request → invoke `brainstorming` first, then pick a template.",
-    "Already in mid-flow with admitted scope",
-    "## Role definitions",
-    "Pre-publication scan: run `/agents-check-safety`",
-)
-
-MANIFEST: dict[str, tuple[str, ...]] = {
-    "install anchors": INSTALL_ANCHORS,
-    "bootstrap teeth": BOOTSTRAP_TEETH,
-    "structural-enforcement teeth": STRUCTURAL_ENFORCEMENT_TEETH,
-    "delegation and recovery teeth": DELEGATION_AND_RECOVERY_TEETH,
-    "routing and role teeth": ROUTING_AND_ROLE_TEETH,
+SHARED_MANIFEST: dict[str, tuple[str, ...]] = {
+    "shared owners": (
+        "# Shared Governance",
+        "## Role index",
+        "## Common skills",
+        "### Physical lifecycle V1",
+        "### Session persistence rule (mandatory)",
+        "## Core delegation principles",
+        "## Engineering hygiene",
+        "## Publication safety",
+    ),
+    "shared gates": (
+        "`quick-fix`: target+steps",
+        "before QA across phases/specialists, assign one integration owner",
+        "**Repository orientation; Mechanism inventory before new paths:**",
+        "REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>",
+        "**Hypothesis disclosure discipline:**",
+        "**Pre-fix diagnostic gate:**",
+        "**Evidence-based completion:**",
+        "Human review before",
+    ),
 }
 
+CLAUDE_MANIFEST: dict[str, tuple[str, ...]] = {
+    "Claude tool mapping": (
+        "## Claude tool mapping",
+        "`Bash|PowerShell`",
+        "`Edit|Write|NotebookEdit`",
+        "commits apply all shared checkpoints",
+    ),
+    "Claude hooks": (
+        "auto-installs thirteen `settings.json` entries",
+        "nine structural hooks",
+        "They are backstops; they do not replace `AGENTS.md`",
+        "a subagent must never be blocked",
+        "The first other valid root final receives one reconciliation pass",
+        "`stop_hook_active` allows the next Stop",
+        "[skip-bugfix-discipline]",
+        "[approve-publication]",
+        "[approve-mcp-fallback:v1]",
+        "[acknowledge-passive-stop]",
+    ),
+    "Claude delegation": (
+        "/agents-init-project",
+        "externalProvider: auto | codex | claude | kimi | grok",
+        "Every specialist invocation uses the Agent tool",
+        "matching `subagent_type`",
+        "curated inline role identities",
+        "Lead is never spawned as a subagent",
+        "requiresLead",
+        "general-purpose",
+        "approved thin wrapper",
+        "independently verified and nonauthorizing",
+        "Grok remains unavailable",
+    ),
+    "Claude commands and roles": (
+        "## Slash command routing",
+        ".claude/agents/team-templates/",
+        ".claude/commands/agents-help.md",
+        "Each command file owns its `## When to auto-invoke` rules",
+        "## Role definitions",
+        "initialPrompt: /lead",
+        "Evaluate the shared `quick-fix` predicate before invoking a process skill",
+        "process skills govern method; Orchestrarium governs delegation",
+        "Pre-publication scan: run `/agents-check-safety`",
+    ),
+}
 
-def validate(claude_md: Path, size_cap: int = SIZE_CAP) -> tuple[bool, list[str]]:
-    """Return a fail-closed result and human-readable validation messages."""
-    if not claude_md.is_file():
-        return False, [f"FAIL: Claude Markdown file not found: {claude_md}"]
+H2_HEADING = re.compile(r"^## [^\r\n]+", re.MULTILINE)
 
+
+def _read_utf8(path: Path, label: str) -> tuple[bytes | None, str | None, list[str]]:
+    if not path.is_file():
+        return None, None, [f"FAIL: {label} file not found: {path}"]
     try:
-        raw = claude_md.read_bytes()
+        raw = path.read_bytes()
     except OSError as exc:
-        return False, [f"FAIL: unable to read Claude Markdown: {claude_md}: {exc}"]
-
+        return None, None, [f"FAIL: unable to read {label}: {path}: {exc}"]
     try:
-        text = raw.decode("utf-8", errors="strict")
+        return raw, raw.decode("utf-8", errors="strict"), []
     except UnicodeDecodeError as exc:
-        return False, [f"FAIL: Claude Markdown is not valid UTF-8: {exc}"]
+        return None, None, [f"FAIL: {label} is not valid UTF-8: {exc}"]
+
+
+def validate(
+    claude_md: Path,
+    agents_md: Path,
+    size_cap: int = SIZE_CAP,
+) -> tuple[bool, list[str]]:
+    """Return a fail-closed verdict for both semantic owners and their composition."""
+    raw, text, messages = _read_utf8(claude_md, "Claude Markdown")
+    _agents_raw, agents_text, agents_messages = _read_utf8(
+        agents_md, "shared AGENTS Markdown"
+    )
+    messages.extend(agents_messages)
+    if raw is None or text is None or agents_text is None:
+        return False, messages
 
     code_points = len(text)
     utf8_bytes = len(raw)
     binding_size = max(code_points, utf8_bytes)
     warning_threshold = size_cap - WARNING_BAND
     messages = [
-        f"Code points: {code_points}",
-        f"UTF-8 bytes: {utf8_bytes}",
-        f"Binding size: {binding_size}",
-        f"Size cap: {size_cap}",
+        f"Claude delta code points: {code_points}",
+        f"Claude delta UTF-8 bytes: {utf8_bytes}",
+        f"Claude delta binding size: {binding_size}",
+        f"Claude delta size cap: {size_cap}",
         f"Warning threshold: {warning_threshold}",
     ]
     ok = True
@@ -138,7 +142,7 @@ def validate(claude_md: Path, size_cap: int = SIZE_CAP) -> tuple[bool, list[str]
     if binding_size > size_cap:
         ok = False
         messages.append(
-            f"FAIL: Claude Markdown binding size {binding_size} > size cap {size_cap}"
+            f"FAIL: Claude delta binding size {binding_size} > size cap {size_cap}"
         )
     elif binding_size >= warning_threshold:
         messages.append(
@@ -147,23 +151,55 @@ def validate(claude_md: Path, size_cap: int = SIZE_CAP) -> tuple[bool, list[str]
         )
     else:
         messages.append(
-            f"PASS: Claude Markdown binding size {binding_size} is below "
+            f"PASS: Claude delta binding size {binding_size} is below "
             f"warning threshold {warning_threshold}"
         )
 
-    total_missing = 0
-    for group, tokens in MANIFEST.items():
-        missing = [token for token in tokens if token not in text]
-        total_missing += len(missing)
-        if missing:
-            ok = False
-            messages.append(f"FAIL: missing {len(missing)}/{len(tokens)} [{group}]:")
-            messages.extend(f"         - {token}" for token in missing)
-        else:
-            messages.append(f"PASS: all {len(tokens)} present [{group}]")
+    import_count = text.splitlines().count("@AGENTS.md")
+    if import_count != 1:
+        ok = False
+        messages.append(f"FAIL: managed @AGENTS.md import count {import_count} != 1")
+    else:
+        messages.append("PASS: exactly one managed @AGENTS.md import")
 
-    pinned = sum(len(tokens) for tokens in MANIFEST.values())
-    messages.append(f"Manifest: {pinned - total_missing}/{pinned}")
+    shared_headings = set(H2_HEADING.findall(agents_text))
+    claude_headings = set(H2_HEADING.findall(text))
+    duplicate_headings = sorted(shared_headings & claude_headings)
+    duplicate_bootstrap = sorted(
+        heading for heading in claude_headings if heading.startswith("## Bootstrap")
+    )
+    if duplicate_headings or duplicate_bootstrap:
+        ok = False
+        duplicates = ", ".join((*duplicate_headings, *duplicate_bootstrap))
+        messages.append(f"FAIL: Claude delta duplicates shared owner heading(s): {duplicates}")
+    else:
+        messages.append("PASS: Claude delta has no shared-owner headings")
+
+    totals: dict[str, tuple[int, int]] = {}
+    for owner, owner_text, manifest in (
+        ("Shared", agents_text, SHARED_MANIFEST),
+        ("Claude", text, CLAUDE_MANIFEST),
+    ):
+        missing_count = 0
+        pinned = 0
+        for group, tokens in manifest.items():
+            missing = [token for token in tokens if token not in owner_text]
+            pinned += len(tokens)
+            missing_count += len(missing)
+            if missing:
+                ok = False
+                messages.append(
+                    f"FAIL: missing {len(missing)}/{len(tokens)} [{owner}: {group}]:"
+                )
+                messages.extend(f"         - {token}" for token in missing)
+            else:
+                messages.append(
+                    f"PASS: all {len(tokens)} present [{owner}: {group}]"
+                )
+        totals[owner] = (pinned - missing_count, pinned)
+
+    messages.append(f"Shared manifest: {totals['Shared'][0]}/{totals['Shared'][1]}")
+    messages.append(f"Claude manifest: {totals['Claude'][0]}/{totals['Claude'][1]}")
     return ok, messages
 
 
@@ -291,12 +327,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Claude Code entrypoint to validate (default: src.claude/CLAUDE.md).",
     )
     parser.add_argument(
+        "--agents-md",
+        type=Path,
+        default=repo_root / "shared" / "AGENTS.shared.md",
+        help="Shared governance owner paired with the Claude entrypoint.",
+    )
+    parser.add_argument(
         "--size-cap",
         type=int,
         default=SIZE_CAP,
         help=(
-            "Maximum max(code points, UTF-8 bytes) value "
-            f"(post-extraction default: {SIZE_CAP})."
+            "Maximum max(code points, UTF-8 bytes) for the Claude-only delta "
+            f"(default: {SIZE_CAP})."
         ),
     )
     parser.add_argument(
@@ -318,13 +360,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    ok, messages = validate(args.claude_md, args.size_cap)
+    ok, messages = validate(args.claude_md, args.agents_md, args.size_cap)
     mirror_ok, mirror_messages = validate_reference_mirror(
         args.reference, args.ru_reference
     )
     ok = ok and mirror_ok
     messages.extend(mirror_messages)
-    print(f"=== Claude Markdown validation ({args.claude_md}) ===")
+    print(
+        f"=== Claude Markdown composition validation "
+        f"({args.claude_md} + {args.agents_md}) ==="
+    )
     for message in messages:
         print(message)
     print("RESULT:", "PASS" if ok else "FAIL")

@@ -17,6 +17,7 @@ Common-skill index (installed names):
 - `$mathtype-book-page` — knowledge-style. Bring translated technical-book DOCX pages to accepted MathType format with source-PDF authority, gate discipline, and defective-chunk repair workflow.
 - `$manual-repo-transfer` — knowledge-style. Prepare a Git repository for an offline machine transfer by inventorying dirty, ignored, recovery, and runtime state; create and validate a selected byte-only transfer bundle; and produce preview-only cleanup evidence. Actual transfer waits for current tasks and pull-request gates to pass; it never authorizes deletion, wipe, or publication.
 - `$explain-simply` — knowledge-style. Turn concepts, code paths, results, decisions, or learner notes into reader-tailored plain-language explanations with analogies, explicit assumptions, and term definitions.
+- `$implementation-to-theory` — knowledge-style. Reconstruct the theory, numerical algorithms, and derivation behind existing scientific code with equation-to-implementation traceability, explicit conventions and limitations, and verified technical illustrations; it does not authorize solver changes, expensive computations, or publication.
 
 ## Terms and Abbreviations
 

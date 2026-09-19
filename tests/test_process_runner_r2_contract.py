@@ -121,6 +121,285 @@ def test_capture_tail_is_compact_bytes_and_diagnostic_storage_is_bounded() -> No
     assert not hasattr(capture, "total_write_bytes")
 
 
+def test_kimi_acp_dialogue_channel_writes_and_reads_complete_json_lines() -> None:
+    runner = _load_runner()
+    read_fd, write_fd = os.pipe()
+    lifecycle = runner.RunLifecycleV1(runner.RunTokenV1(b"d" * 16, 1))
+    lifecycle.register_resource("dialogue-stdin", lambda _remaining: os.close(write_fd))
+    lines = runner._DialogueLineRouterV1()
+    lines.feed(b'{"jsonrpc":"2.0","id":1,"result":{}}\n')
+    lines.finish()
+    state: dict[str, object] = {}
+    issues: list[str] = []
+
+    def handler(channel) -> None:
+        assert channel.write_line(b'{"jsonrpc":"2.0","id":1}\n') > 0
+        assert channel.read_line() == b'{"jsonrpc":"2.0","id":1,"result":{}}\n'
+
+    runner._dialogue_fd(
+        write_fd,
+        runner.ProcessDialogueV1("kimi-acp-one-shot-v1", handler),
+        lines,
+        state,
+        issues,
+        lifecycle,
+        "dialogue-stdin",
+        time.monotonic() + 1.0,
+        None,
+    )
+    written = os.read(read_fd, 4096)
+    os.close(read_fd)
+
+    assert written == b'{"jsonrpc":"2.0","id":1}\n'
+    assert state["complete"] is True
+    assert state["written"] == len(written)
+    assert issues == []
+
+
+def test_kimi_acp_dialogue_channel_rejects_cumulative_stdin_before_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    monkeypatch.setattr(runner, "MAX_STDIN_BYTES", 4)
+    writes: list[bytes] = []
+
+    def counted_write(_fd: int, view: memoryview) -> int:
+        data = bytes(view)
+        writes.append(data)
+        return len(data)
+
+    monkeypatch.setattr(runner.os, "write", counted_write)
+    lifecycle = runner.RunLifecycleV1(runner.RunTokenV1(b"b" * 16, 1))
+    channel = runner.ProcessDialogueChannelV1(
+        41,
+        runner._DialogueLineRouterV1(),
+        lifecycle,
+        time.monotonic() + 1.0,
+        None,
+    )
+
+    assert channel.write_line(b"a\n") == 2
+    with pytest.raises(runner.ProcessSupervisionError) as overflow:
+        channel.write_line(b"bcd\n")
+
+    assert overflow.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+    assert overflow.value.terminal_stage == "stdin-delivery"
+    assert writes == [b"a\n"]
+    assert channel.written_bytes == 2
+
+
+def test_kimi_dialogue_cancellation_blocks_normal_write_but_allows_cleanup() -> None:
+    runner = _load_runner()
+    read_fd, write_fd = os.pipe()
+    lifecycle = runner.RunLifecycleV1(runner.RunTokenV1(b"c" * 16, 1))
+    channel = runner.ProcessDialogueChannelV1(
+        write_fd,
+        runner._DialogueLineRouterV1(),
+        lifecycle,
+        time.monotonic() + 1.0,
+        None,
+    )
+    normal = b'{"jsonrpc":"2.0","id":1,"method":"session/prompt"}\n'
+    cleanup = b'{"jsonrpc":"2.0","id":2,"method":"session/close"}\n'
+    lifecycle.request_cancel()
+    try:
+        with pytest.raises(runner.ProcessSupervisionError) as stopped:
+            channel.write_line(normal)
+        assert stopped.value.failure_id == "PSV1-CANCELLED"
+        assert stopped.value.terminal_stage == "cancellation"
+
+        channel.begin_cleanup()
+        assert channel.write_line(cleanup) == len(cleanup)
+    finally:
+        os.close(write_fd)
+    try:
+        assert os.read(read_fd, 4096) == cleanup
+    finally:
+        os.close(read_fd)
+
+
+def test_kimi_acp_line_router_fails_closed_on_eof_fragment_and_cancel() -> None:
+    runner = _load_runner()
+    fragment = runner._DialogueLineRouterV1()
+    fragment.feed(b'{"jsonrpc":"2.0"}')
+    fragment.finish()
+    with pytest.raises(runner.ProcessSupervisionError) as malformed:
+        fragment.read_line(time.monotonic() + 1.0, lambda: False)
+    assert malformed.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+
+    cancelled = runner._DialogueLineRouterV1()
+    with pytest.raises(runner.ProcessSupervisionError) as stopped:
+        cancelled.read_line(time.monotonic() + 1.0, lambda: True)
+    assert stopped.value.failure_id == "PSV1-CANCELLED"
+
+
+def test_kimi_acp_line_router_bounds_all_retained_bytes_and_reclaims_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    monkeypatch.setattr(runner, "MAX_STDIN_BYTES", 32)
+    lines = runner._DialogueLineRouterV1()
+    complete = b"x" * 15 + b"\n"
+
+    lines.feed(complete)
+    lines.feed(complete)
+    assert lines.read_line(time.monotonic() + 1.0, lambda: False) == complete
+
+    lines.feed(complete)
+    lines.feed(b"overflow\n")
+
+    assert sum(map(len, lines._lines)) + len(lines._buffer) <= 32
+    with pytest.raises(runner.ProcessSupervisionError) as overflow:
+        lines.read_line(time.monotonic() + 1.0, lambda: False)
+    assert overflow.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+
+
+def test_kimi_acp_line_router_rejects_tiny_line_count_before_materializing() -> None:
+    runner = _load_runner()
+    lines = runner._DialogueLineRouterV1()
+
+    lines.feed(b"\n" * 4097)
+
+    assert len(lines._lines) <= 4096
+    with pytest.raises(runner.ProcessSupervisionError) as overflow:
+        lines.read_line(time.monotonic() + 1.0, lambda: False)
+    assert overflow.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+
+
+def test_kimi_acp_line_router_reclaims_count_for_paced_final_response() -> None:
+    runner = _load_runner()
+    lines = runner._DialogueLineRouterV1()
+    lines.feed(b"\n" * 4096)
+
+    assert lines.read_line(time.monotonic() + 1.0, lambda: False) == b"\n"
+    lines.feed(b"FINAL\n")
+
+    for _ in range(4095):
+        assert lines.read_line(time.monotonic() + 1.0, lambda: False) == b"\n"
+    assert lines.read_line(time.monotonic() + 1.0, lambda: False) == b"FINAL\n"
+
+
+def test_kimi_acp_cleanup_uses_one_finite_grace_after_operation_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    now = [100.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: now[0])
+    read_fd, write_fd = os.pipe()
+    lifecycle = runner.RunLifecycleV1(runner.RunTokenV1(b"g" * 16, 1))
+    lines = runner._DialogueLineRouterV1()
+    lines.feed(
+        b'{"jsonrpc":"2.0","id":1,"result":{}}\n'
+        b'{"jsonrpc":"2.0","id":2,"result":{}}\n'
+    )
+    channel = runner.ProcessDialogueChannelV1(
+        write_fd,
+        lines,
+        lifecycle,
+        99.0,
+        None,
+    )
+    close = b'{"jsonrpc":"2.0","id":1,"method":"session/close"}\n'
+    delete = b'{"jsonrpc":"2.0","id":2,"method":"session/delete"}\n'
+
+    try:
+        channel.begin_cleanup()
+        cleanup_deadline = 100.0 + runner.RUNNER_CLOSE_TIMEOUT_SECONDS
+        assert channel._deadline == cleanup_deadline
+        now[0] = cleanup_deadline - 1.0
+        channel.begin_cleanup()
+        assert channel._deadline == cleanup_deadline
+
+        assert channel.write_line(close) == len(close)
+        assert channel.read_line() == b'{"jsonrpc":"2.0","id":1,"result":{}}\n'
+        assert channel.write_line(delete) == len(delete)
+        assert channel.read_line() == b'{"jsonrpc":"2.0","id":2,"result":{}}\n'
+
+        now[0] = cleanup_deadline
+        with pytest.raises(runner.ProcessSupervisionError) as write_expired:
+            channel.write_line(close)
+        assert write_expired.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+        with pytest.raises(runner.ProcessSupervisionError) as read_expired:
+            channel.read_line()
+        assert read_expired.value.failure_id == "PSV1-DEADLINE"
+    finally:
+        os.close(write_fd)
+    try:
+        assert os.read(read_fd, 4096) == close + delete
+    finally:
+        os.close(read_fd)
+
+
+def test_kimi_acp_cleanup_reserves_fraction_for_close_io_without_rearming(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    now = [100.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: now[0])
+    read_fd, write_fd = os.pipe()
+    lifecycle = runner.RunLifecycleV1(runner.RunTokenV1(b"h" * 16, 1))
+    channel = runner.ProcessDialogueChannelV1(
+        write_fd,
+        runner._DialogueLineRouterV1(),
+        lifecycle,
+        99.0,
+        None,
+    )
+    close = b'{"jsonrpc":"2.0","id":1,"method":"session/close"}\n'
+    delete = b'{"jsonrpc":"2.0","id":2,"method":"session/delete"}\n'
+
+    try:
+        channel.begin_cleanup()
+        cleanup_end = 100.0 + runner.RUNNER_CLOSE_TIMEOUT_SECONDS
+        assert channel._deadline == cleanup_end
+        now[0] = cleanup_end - runner.RUNNER_CLOSE_TIMEOUT_SECONDS * 0.5
+        with pytest.raises(runner.ProcessSupervisionError) as close_read:
+            channel.read_line(reserve_cleanup_fraction=0.5)
+        assert close_read.value.failure_id == "PSV1-DEADLINE"
+        assert channel.write_line(delete) == len(delete)
+        channel.begin_cleanup()
+        assert channel._deadline == cleanup_end
+        with pytest.raises(runner.ProcessSupervisionError) as close_write:
+            channel.write_line(close, reserve_cleanup_fraction=0.5)
+        assert close_write.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+    finally:
+        os.close(write_fd)
+    try:
+        assert os.read(read_fd, 4096) == delete
+    finally:
+        os.close(read_fd)
+
+
+def test_dialogue_router_scans_only_new_data_and_resets_after_prefix_delete() -> None:
+    runner = _load_runner()
+
+    class TrackingBuffer(bytearray):
+        def __init__(self, value: bytes) -> None:
+            super().__init__(value)
+            self.count_calls: list[tuple[object, ...]] = []
+            self.find_calls: list[tuple[object, ...]] = []
+
+        def count(self, *args) -> int:
+            self.count_calls.append(args)
+            return super().count(*args)
+
+        def find(self, *args) -> int:
+            self.find_calls.append(args)
+            return super().find(*args)
+
+    router = runner._DialogueLineRouterV1()
+    prefix = b"retained-prefix"
+    tracked = TrackingBuffer(prefix)
+    router._buffer = tracked
+
+    router.feed(b"one\ntwo\n")
+
+    assert tracked.count_calls == []
+    assert [call[1] for call in tracked.find_calls] == [len(prefix), 0, 0]
+    assert list(router._lines) == [b"retained-prefixone\n", b"two\n"]
+    assert router._queued_bytes == len(b"retained-prefixone\n") + len(b"two\n")
+
+
 @pytest.mark.skipif(os.name != "nt", reason="production backend execution is Windows-only")
 def test_run_tokens_are_non_recyclable_and_safe_results_expose_only_digest() -> None:
     """Repeated calls cannot use recyclable request object addresses as identities."""

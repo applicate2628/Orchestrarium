@@ -136,7 +136,7 @@ Do not invoke for:
   - **Prompt form:** <blind-options | critique-of-choice | not-applicable: reason>
   - **Inputs consumed:** <artifacts/files used, such as canonical brief, design decision id, or diff range>
   - **Deviation reason:** <none | external unavailable: [reason]>
-  - **Provider boundary:** Kimi is explicit-only Windows-enrolled read-only no-tools bundle review, independently verified and nonauthorizing; Grok remains unavailable in 1.x and must never be selected, resolved, executed, or recorded as a provenance provider.
+  - **Provider boundary:** Kimi is explicit-only Windows read-only work through the canonical fixed `kimi-code/k3` file-prompt/no-tools wrapper, independently verified and nonauthorizing; Grok remains unavailable in 1.x and must never be selected, resolved, executed, or recorded as a provenance provider.
 - Every consultant memo must end with an explicit continuation section:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
   - The continuation prompt must begin with a direct imperative to continue, for example `Continue working:` or `Proceed with the next batch:`.
@@ -162,24 +162,30 @@ Check the selected provider first:
 
 - Codex path: `codex`
 - Claude path: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows)
-- Kimi path: the approved canonical `invoke-kimi-prompt` wrapper after explicit Windows enrollment
+- Kimi path: the approved canonical `invoke-kimi-prompt` wrapper
 
-If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfile`, map it as follows:
+Before provider-specific transport, classify the advisory as `planning`, `review`, or `critical-design`, call `describe_ordinary_native_role_options`, then call `resolve_ordinary_native_dispatch` with the nonempty approved scope and caller rationale. Disabled mode performs neither call. An omitted model and effort selects the policy-owned `frontier-high` candidate (`gpt-5.6-sol`, `high`); a complete explicit admissible pair wins; a partial pair fails; and `max` still requires explicit user approval. The default candidate is not a minimum effort and does not authorize forcing `xhigh`.
+
+- `internal` mode consumes the resolved generic skill-only invocation. Exclude the orchestrator's actual model from the usable options; if that leaves no different-model option, return the existing unavailable advisory.
+- External Codex passes `resolvedModel` and `resolvedEffort` to the existing wrapper as complete model/effort flags.
+- External Claude never receives the resolver's Codex model token. A complete explicit admissible `externalClaudeProfile` wins; otherwise the omitted `frontier`/`high` result maps to `sonnet-high`. If the resolved tier/effort has no existing Claude profile mapping, return unavailable with no fallback.
+- External Kimi bypasses this effort mapping exactly as before: fixed `kimi-code/k3`, no caller-composed provider flags, independent verification, and nonauthorization. Grok remains unavailable.
+
+When `externalClaudeProfile` is selected, map it as follows:
 
 - `sonnet-high` → `--model sonnet --effort high`
 - `opus-xhigh` → `--model opus --effort xhigh` (shipped default)
 - `opus-max` → `--model opus --effort max` (max-depth escalation; caller discretion for especially hard tasks)
 - `fable-xhigh` → `--model fable --effort xhigh` (current Claude flagship-family best-effort tier; the `fable` flagship alias as of 2026-07)
-- key missing → use the current default Claude CLI invocation for this pack unless `externalModelMode: pinned-top-pro` requests the stronger Claude path
+- key missing for the omitted Consultant choice → `sonnet-high`; any other missing Consultant tier/effort mapping is unavailable with no fallback
 
-Honor `externalCodexProfile` and `externalModelMode` before provider-specific transport selection:
+For non-Consultant callers, continue to honor `externalCodexProfile` and `externalModelMode` before provider-specific transport selection. Consultant callers use the ordinary selector result above:
 
 - `runtime-default` → keep the selected provider on its native runtime default model/profile.
-- **Consultant calls run at high effort by default**, regardless of `externalModelMode` or `externalCodexProfile`: Codex uses model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path; the Claude path uses `--model opus --effort xhigh`. **`xhigh` is the default for BOTH providers. For especially heavy / complex tasks that genuinely need more depth, the orchestrator may escalate the consultant to the provider's deepest tier (Claude `--effort max`).** Do not DOWNSHIFT a consultant lane below `xhigh`. The shipped default `externalCodexProfile: gpt-5.6-sol-xhigh` matches this rule; `pinned-top-pro` mode and `externalCodexProfile: gpt-5.6-sol-xhigh` both resolve to the same xhigh path. Do not downgrade consultant memos to `gpt-5.6-terra` or to runtime-default, and do not silently switch to `gpt-5.6-terra` between attempts on the same consultant lane.
 - `externalCodexProfile: default` → inherit the selected `externalModelMode` when Codex is selected or `auto` resolves to Codex.
 - `externalCodexProfile: gpt-5.6-sol-max` → request model `gpt-5.6-sol` with `model_reasoning_effort = "max"` when Codex is selected or `auto` resolves to Codex, for higher-complexity/hard lanes (NOT `gpt-5.6-sol-ultra`, which spawns subagents and must never be shipped on a subagent lane).
-- `externalCodexProfile: gpt-5.6-terra` → select the balanced Codex model tier (a distinct model; `model_reasoning_effort = "high"`, so this is a model choice, not merely an effort downgrade) when Codex is selected or `auto` resolves to Codex; record unavailable or deviated if that model cannot be verified against the installed runtime. The consultant lane itself always uses `gpt-5.6-sol-xhigh`, so this branch only applies to operator-set callers, not to consultant memo dispatch.
-- `externalCodexProfile: gpt-5.6-sol-xhigh` → shipped as the default and used unconditionally by the consultant lane; explicitly request model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` via `-c model_reasoning_effort=xhigh` regardless of `externalModelMode`, symmetric to `externalClaudeProfile: opus-xhigh`.
+- `externalCodexProfile: gpt-5.6-terra` → select the balanced Codex model tier (a distinct model; `model_reasoning_effort = "high"`, so this is a model choice, not merely an effort downgrade) when Codex is selected or `auto` resolves to Codex; record unavailable or deviated if that model cannot be verified against the installed runtime.
+- `externalCodexProfile: gpt-5.6-sol-xhigh` → explicitly request model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` via `-c model_reasoning_effort=xhigh` regardless of `externalModelMode`, symmetric to `externalClaudeProfile: opus-xhigh`.
 Use the approved `invoke-claude-prompt` wrapper for substantive Claude consultation; do not substitute raw `claude -p` recipes.
 
 Reserve advisory candidate:

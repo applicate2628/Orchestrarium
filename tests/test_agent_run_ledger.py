@@ -171,6 +171,67 @@ def test_append_records_event_and_validator_passes(tmp_path: Path):
     assert event["evidence"][0]["kind"] == "command"
 
 
+def test_append_lock_timeout_fails_loud_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    ledger = load_ledger_module()
+    item = prepare_valid_work_item(tmp_path)
+    lock = item / "agent-runs.jsonl.lock"
+    lock.write_text("pid=fixture-append\n", encoding="utf-8")
+    args = ledger.build_parser().parse_args(
+        [
+            "--work-item", str(item), "append", "--run-id", "lock-append-001",
+            "--role", "qa-engineer", "--execution-role", "internal",
+            "--status", "completed", "--gate", "none", "--scope", "lock diagnostic",
+            "--event-kind", "standalone",
+        ]
+    )
+    before = (item / "agent-runs.jsonl").read_bytes() if (item / "agent-runs.jsonl").exists() else b""
+    monkeypatch.setattr(ledger.time, "sleep", lambda _seconds: None)
+
+    assert ledger.command_append(args) == 1
+
+    captured = capsys.readouterr()
+    assert ledger.APPEND_SUCCESS_MARKER not in captured.out
+    assert "FAIL: ledger locked" in captured.err
+    after = (item / "agent-runs.jsonl").read_bytes() if (item / "agent-runs.jsonl").exists() else b""
+    assert after == before
+    assert lock.read_text(encoding="utf-8") == "pid=fixture-append\n"
+
+
+def test_settle_lock_timeout_fails_loud_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    ledger = load_ledger_module()
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item, "append", "--run-id", "lock-launch-001", "--role", "qa-engineer",
+        "--execution-role", "internal", "--status", "running", "--gate", "none",
+        "--scope", "lock diagnostic", "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    lock = item / "agent-runs.jsonl.lock"
+    lock.write_text("pid=fixture-settle\n", encoding="utf-8")
+    args = ledger.build_parser().parse_args(
+        [
+            "--work-item", str(item), "settle-launch", "--launch-run-id", "lock-launch-001",
+            "--run-id", "lock-terminal-001", "--status", "completed", "--gate", "none",
+            "--started-at", "2026-09-13T00:00:00Z", "--updated-at", "2026-09-13T00:01:00Z",
+        ]
+    )
+    before = (item / "agent-runs.jsonl").read_bytes()
+    monkeypatch.setattr(ledger.time, "sleep", lambda _seconds: None)
+
+    assert ledger.command_settle_launch(args) == 1
+
+    captured = capsys.readouterr()
+    assert ledger.SETTLE_SUCCESS_MARKER not in captured.out
+    assert ledger.SETTLE_ALREADY_MARKER not in captured.out
+    assert "FAIL: ledger locked" in captured.err
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert lock.read_text(encoding="utf-8") == "pid=fixture-settle\n"
+
+
 def test_kimi_unsupported_effort_is_durable_and_validator_accepted(tmp_path: Path):
     item = prepare_valid_work_item(tmp_path)
     common = (
@@ -220,6 +281,55 @@ def test_kimi_unsupported_effort_is_durable_and_validator_accepted(tmp_path: Pat
         for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert [event["effort"] for event in events] == ["unsupported", "unsupported"]
+
+
+def test_kimi_configured_max_with_empty_flags_is_durable_and_validator_accepted(
+    tmp_path: Path,
+):
+    item = prepare_valid_work_item(tmp_path)
+    common = (
+        "--role", "qa-engineer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "max",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--scope", "provider configured effort fixture",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:provider-configured-effort-fixture",
+        "--started-at", "2026-09-14T10:00:00Z",
+        "--updated-at", "2026-09-14T10:00:00Z",
+        "--launch-flags-json", "[]",
+    )
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "dispatch-kimi-configured-max",
+        "--event-kind", "launch",
+        *common,
+    )
+    assert launch.returncode == 0, launch.stderr
+    terminal = run_ledger(
+        item,
+        "append",
+        "--run-id", "evidence-kimi-configured-max",
+        "--event-kind", "terminal",
+        "--launch-run-id", "dispatch-kimi-configured-max",
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--artifact-identity", "sha256:" + "b" * 64,
+        "--external-dispatch-id", "dispatch-kimi-configured-max",
+        "--external-evidence-run-id", "evidence-kimi-configured-max",
+        "--effort-mapping-loss", "none",
+        "--evidence", "command:provider-result-envelope-flushed",
+        *common,
+    )
+    assert terminal.returncode == 0, terminal.stderr
+    validator = run_validator(item)
+    assert validator.returncode == 0, validator.stderr
 
 
 def test_staged_init_and_append_preserve_status_bytes(tmp_path: Path):
@@ -1069,6 +1179,236 @@ def test_append_accepts_codex_external_terminal_without_extended_provenance_ids(
     assert validated.returncode == 0, validated.stdout
 
 
+def test_settle_launch_derives_launch_identity_and_replays_exactly(tmp_path: Path):
+    """A terminal settles one launch without reconstructing its dispatch metadata."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-settle-launch-001",
+        "--role", "external-reviewer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "codex",
+        "--model", "gpt-5.6-sol",
+        "--effort", "high",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "provider evidence",
+        "--event-kind", "launch",
+        "--started-at", "2026-09-12T10:00:00Z",
+        "--updated-at", "2026-09-12T10:00:00Z",
+    )
+    assert launch.returncode == 0, launch.stderr
+    settle = [
+        "settle-launch",
+        "--launch-run-id", "run-settle-launch-001",
+        "--run-id", "run-settle-terminal-001",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:pytest tests/test_agent_run_ledger.py -q",
+        "--notes", "observed terminal outcome",
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--artifact-identity", "sha256:" + "d" * 64,
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    ]
+
+    result = run_ledger(item, *settle)
+    assert result.returncode == 0, result.stderr
+    events = [
+        json.loads(line)
+        for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    terminal = events[-1]
+    assert terminal["eventKind"] == "terminal"
+    assert terminal["launchRunId"] == "run-settle-launch-001"
+    assert terminal["role"] == "external-reviewer"
+    assert terminal["executionRole"] == "external-reviewer"
+    assert terminal["assignedRole"] == "qa-engineer"
+    assert terminal["provider"] == "codex"
+    assert terminal["model"] == "gpt-5.6-sol"
+    assert terminal["scope"] == ["provider evidence"]
+    assert terminal["artifact"] == "reviews/qa.md"
+    assert "externalDispatchId" not in terminal
+    assert "externalEvidenceRunId" not in terminal
+    assert run_validator(item).returncode == 0
+
+    before = (item / "agent-runs.jsonl").read_bytes()
+    replay = run_ledger(item, *settle)
+    assert replay.returncode == 0, replay.stderr
+    assert "already-settled" in replay.stdout
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+    conflicting_settle = [*settle]
+    conflicting_settle[conflicting_settle.index("--notes") + 1] = "different outcome"
+    conflict = run_ledger(item, *conflicting_settle)
+    assert conflict.returncode != 0
+    assert "WI-LEDGER-SETTLE-CONFLICT" in conflict.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("status", "gate", "needs_artifact"),
+    (
+        ("completed", "none", False),
+        ("completed", "PASS", True),
+        ("completed", "REVISE", False),
+        ("revise", "REVISE", False),
+        ("blocked", "none", False),
+        ("blocked", "BLOCKED:prerequisite", False),
+        ("cancelled", "none", False),
+    ),
+)
+def test_settle_launch_accepts_existing_terminal_status_gate_pairs(
+    tmp_path: Path, status: str, gate: str, needs_artifact: bool
+):
+    """Settlement admits the validator's terminal states rather than inventing failed."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-terminal-state-launch",
+        "--role", "qa-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "lifecycle settlement",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    settle = [
+        "settle-launch",
+        "--launch-run-id", "run-terminal-state-launch",
+        "--run-id", "run-terminal-state-result",
+        "--status", status,
+        "--gate", gate,
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    ]
+    if needs_artifact:
+        settle.extend(
+            [
+                "--artifact", "reviews/qa.md",
+                "--evidence", "command:focused lifecycle settlement",
+            ]
+        )
+
+    result = run_ledger(item, *settle)
+    assert result.returncode == 0, result.stderr
+
+
+def test_settle_launch_rejects_unknown_launch_without_writing(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-known-launch",
+        "--role", "qa-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "lifecycle settlement",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    ledger = item / "agent-runs.jsonl"
+    before = ledger.read_bytes()
+
+    result = run_ledger(
+        item,
+        "settle-launch",
+        "--launch-run-id", "run-missing-launch",
+        "--run-id", "run-missing-terminal",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:unknown launch rejection",
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    )
+
+    assert result.returncode != 0
+    assert "launch must identify one V2 launch event" in result.stderr
+    assert ledger.read_bytes() == before
+
+
+@pytest.mark.parametrize("status", ("planned", "running", "failed"))
+def test_settle_launch_rejects_nonterminal_status_without_writing(
+    tmp_path: Path, status: str
+):
+    """A caller cannot encode an in-flight or invented terminal outcome."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-nonterminal-launch",
+        "--role", "qa-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "lifecycle settlement",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    before = (item / "agent-runs.jsonl").read_bytes()
+
+    result = run_ledger(
+        item,
+        "settle-launch",
+        "--launch-run-id", "run-nonterminal-launch",
+        "--run-id", "run-nonterminal-result",
+        "--status", status,
+        "--gate", "none",
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    )
+    assert result.returncode != 0
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+
+def test_settle_launch_refuses_incomplete_external_provenance_without_writing(
+    tmp_path: Path,
+):
+    """External terminal identity remains caller-observed instead of writer-invented."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-provenance-launch",
+        "--role", "external-reviewer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "codex",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "provider evidence",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    before = (item / "agent-runs.jsonl").read_bytes()
+
+    result = run_ledger(
+        item,
+        "settle-launch",
+        "--launch-run-id", "run-provenance-launch",
+        "--run-id", "run-provenance-terminal",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:focused lifecycle settlement",
+        "--terminal-class", "external-nonauthorizing",
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    )
+    assert result.returncode != 0
+    assert "typed terminal requires authorizing" in result.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+
 @pytest.mark.parametrize(
     "encoded",
     (
@@ -1197,6 +1537,251 @@ def test_internal_final_closer_binds_one_external_evidence_tuple(tmp_path: Path)
 
     validated = run_validator(item)
     assert validated.returncode == 0, validated.stdout
+
+
+def _append_external_review_revise(
+    item: Path,
+    *,
+    professional_role: str,
+    artifact_identity: str,
+    scope: str = "workflow-coherence",
+    artifact: str = "reviews/external-review.md",
+) -> subprocess.CompletedProcess:
+    report = item / artifact
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("REVISE\n", encoding="utf-8")
+    return run_ledger(
+        item,
+        "append",
+        "--run-id", "external-review-revise-001",
+        "--role", "external-reviewer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", professional_role,
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "unsupported",
+        "--status", "revise",
+        "--gate", "REVISE",
+        "--scope", scope,
+        "--artifact", artifact,
+        "--artifact-identity", artifact_identity,
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--external-dispatch-id", "external-review-dispatch-001",
+        "--external-evidence-run-id", "external-review-revise-001",
+        "--effort-mapping-loss", "no-native-effort-control",
+        "--evidence", f"review:{artifact}",
+        "--started-at", "2026-09-11T10:00:00Z",
+        "--updated-at", "2026-09-11T10:00:00Z",
+    )
+
+
+def _append_internal_professional_launch(
+    item: Path,
+    *,
+    professional_role: str,
+    scope: str,
+    artifact: str,
+) -> subprocess.CompletedProcess:
+    return run_ledger(
+        item,
+        "append",
+        "--run-id", "native-review-launch-001",
+        "--role", professional_role,
+        "--execution-role", "internal",
+        "--assigned-role", professional_role,
+        "--status", "running",
+        "--gate", "none",
+        "--event-kind", "launch",
+        "--scope", scope,
+        "--artifact", artifact,
+        "--started-at", "2026-09-11T10:00:30Z",
+        "--updated-at", "2026-09-11T10:00:30Z",
+    )
+
+
+def _append_internal_professional_closer(
+    item: Path,
+    *,
+    professional_role: str,
+    artifact_identity: str,
+    scope: str = "workflow-coherence",
+    artifact: str = "reviews/native-review.md",
+    closer_role: str | None = None,
+    event_kind: str = "standalone",
+    target_run_id: str = "external-review-revise-001",
+) -> subprocess.CompletedProcess:
+    report = item / artifact
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("PASS\n", encoding="utf-8")
+    args = [
+        item,
+        "append",
+        "--run-id", "native-review-pass-001",
+        "--role", closer_role or professional_role,
+        "--execution-role", "internal",
+        "--assigned-role", professional_role,
+        "--status", "completed",
+        "--gate", "PASS",
+        "--event-kind", event_kind,
+        "--scope", scope,
+        "--artifact", artifact,
+        "--artifact-identity", artifact_identity,
+        "--closes", target_run_id,
+        "--evidence", f"review:{artifact}",
+        "--started-at", "2026-09-11T10:01:00Z",
+        "--updated-at", "2026-09-11T10:01:00Z",
+    ]
+    if event_kind == "terminal":
+        args.extend(("--launch-run-id", "native-review-launch-001"))
+    return run_ledger(*args)
+
+
+def test_internal_backend_closer_discharges_external_worker_revise_terminal(
+    tmp_path: Path,
+) -> None:
+    item = prepare_valid_work_item(tmp_path)
+    identity = "sha256:" + "a" * 64
+    worker_report = "reviews/worker-report.md"
+    native_report = "reviews/native-backend-qa.md"
+    (item / worker_report).write_text("REVISE\n", encoding="utf-8")
+    external_launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "external-worker-launch-001",
+        "--role", "external-worker",
+        "--execution-role", "external-worker",
+        "--assigned-role", "backend-engineer",
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "unsupported",
+        "--status", "running",
+        "--gate", "none",
+        "--event-kind", "launch",
+        "--scope", "artifact-worker",
+        "--artifact", worker_report,
+        "--started-at", "2026-09-11T11:00:00Z",
+        "--updated-at", "2026-09-11T11:00:00Z",
+    )
+    target = run_ledger(
+        item,
+        "append",
+        "--run-id", "external-worker-revise-001",
+        "--role", "external-worker",
+        "--execution-role", "external-worker",
+        "--assigned-role", "backend-engineer",
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "unsupported",
+        "--status", "revise",
+        "--gate", "REVISE",
+        "--event-kind", "terminal",
+        "--launch-run-id", "external-worker-launch-001",
+        "--scope", "artifact-worker",
+        "--artifact", worker_report,
+        "--artifact-identity", identity,
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--external-dispatch-id", "external-worker-launch-001",
+        "--external-evidence-run-id", "external-worker-revise-001",
+        "--effort-mapping-loss", "no-native-effort-control",
+        "--evidence", f"review:{worker_report}",
+        "--started-at", "2026-09-11T11:00:30Z",
+        "--updated-at", "2026-09-11T11:00:30Z",
+    )
+    native_launch = _append_internal_professional_launch(
+        item,
+        professional_role="backend-engineer",
+        scope="artifact-worker",
+        artifact=native_report,
+    )
+    closer = _append_internal_professional_closer(
+        item,
+        professional_role="backend-engineer",
+        artifact_identity=identity,
+        scope="artifact-worker",
+        artifact=native_report,
+        event_kind="terminal",
+        target_run_id="external-worker-revise-001",
+    )
+
+    for result in (external_launch, target, native_launch):
+        assert result.returncode == 0, result.stdout + result.stderr
+    assert closer.returncode == 0, closer.stdout + closer.stderr
+    validated = run_validator(item)
+    assert validated.returncode == 0, validated.stdout + validated.stderr
+
+
+@pytest.mark.parametrize(
+    ("professional_role", "event_kind"),
+    (("qa-engineer", "terminal"), ("architecture-reviewer", "standalone")),
+)
+def test_internal_professional_closer_discharges_external_reviewer_revise(
+    tmp_path: Path, professional_role: str, event_kind: str
+) -> None:
+    item = prepare_valid_work_item(tmp_path)
+    identity = "sha256:" + "a" * 64
+
+    target = _append_external_review_revise(
+        item,
+        professional_role=professional_role,
+        artifact_identity=identity,
+    )
+    launch = None
+    if event_kind == "terminal":
+        launch = _append_internal_professional_launch(
+            item,
+            professional_role=professional_role,
+            scope="workflow-coherence",
+            artifact="reviews/native-review.md",
+        )
+    closer = _append_internal_professional_closer(
+        item,
+        professional_role=professional_role,
+        artifact_identity=identity,
+        event_kind=event_kind,
+    )
+
+    assert target.returncode == 0, target.stdout + target.stderr
+    if launch is not None:
+        assert launch.returncode == 0, launch.stdout + launch.stderr
+    assert closer.returncode == 0, closer.stdout + closer.stderr
+    validated = run_validator(item)
+    assert validated.returncode == 0, validated.stdout + validated.stderr
+
+
+@pytest.mark.parametrize(
+    ("closer_changes", "diagnostic"),
+    (
+        ({"closer_role": "architecture-reviewer"}, "C3-external-profession-fail"),
+        ({"artifact_identity": "sha256:" + "b" * 64}, "C3-external-artifact-identity-fail"),
+        ({"scope": "different-review-scope"}, "C3-external-scope-fail"),
+        ({"artifact": "reviews/external-review.md"}, "C3-external-report-fail"),
+    ),
+)
+def test_external_reviewer_revise_rejects_unbound_internal_closer(
+    tmp_path: Path, closer_changes: dict[str, str], diagnostic: str
+) -> None:
+    item = prepare_valid_work_item(tmp_path)
+    identity = "sha256:" + "a" * 64
+    professional_role = "qa-engineer"
+    target = _append_external_review_revise(
+        item,
+        professional_role=professional_role,
+        artifact_identity=identity,
+    )
+    closer_args = {
+        "professional_role": professional_role,
+        "artifact_identity": identity,
+    }
+    closer_args.update(closer_changes)
+    closer = _append_internal_professional_closer(item, **closer_args)
+
+    assert target.returncode == 0, target.stdout + target.stderr
+    assert closer.returncode != 0
+    assert diagnostic in closer.stdout + closer.stderr
 
 
 def test_internal_closer_binds_actual_codex_terminal_and_launch_without_extended_ids(tmp_path: Path):

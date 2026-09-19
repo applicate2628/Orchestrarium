@@ -249,11 +249,19 @@ Integration owner (multi-phase changes, optional):
 Field meanings:
 
 - **Approved inputs** means only accepted artifacts and facts.
+- **Context-dependent tool arguments** remain in existing fields: when a selected tool's current schema requires one, the caller supplies its concrete argument from `Scope` or `Approved inputs`. Recording only the tool name is incomplete when the recipient cannot derive the required argument. This is guidance, not a validator or sandbox, and adds no field or hardcoded tool name.
 - **Allowed change surface** means approved files, modules, or seams that may be touched.
 - **Must-not-break surfaces** means nearby areas that must stay stable or receive smoke coverage.
 - **Expected artifact** means one concrete output.
+- **Receiving correlation** means comparing the current host task identity, or the existing ledger `runId` when present, plus `Scope` and `Expected artifact` against the dispatch. Hash only declared file `Approved inputs`; a prior `PASS` with a mismatch is stale and nonauthorizing. Trivial inline work and legitimate artifactless fact lookup require no ledger, artifact, or new field.
 - **Gate to next stage** means what must be proven before work moves forward.
 - **Integration owner** means the explicitly named owner who assembles one coherent integrated artifact before QA when multiple implementation phases or specialists must land together.
+
+**Conditional PAO carry-forward.** Only when accepted work already has a Primary Acceptance Oracle (PAO), `Approved inputs` names its accepted revision, `Scope` carries its exact scenario plus source/configuration/environment and invocation bounds, and `Acceptance criteria` carries success, failure, safety, cleanup, evidence, and owner requirements. The receiver records actual source/configuration/environment and compares it with the approved revision and scenario. Any PAO revision, scoped scenario, source, configuration, or environment mismatch makes evidence stale and nonauthorizing. Trivial work and work with no PAO gain no requirement or new field.
+
+**Upstream claim ownership.** When an accepted Architect or domain artifact carries numbered `{ guarantee, single-owner, enforcement-probe }` claims, pass that artifact/revision unchanged to implementation and review. The implementer does not author, reorder, replace, or become owner of those claims; it maps each claim number to implementation surface and observed evidence/result. Review compares the upstream claims and implementation evidence side by side, receives the accepted constraints and claim identity needed for independent challenge without requiring the entire unused design prose, and preserves claim owner and order. No upstream claims means no synthetic set.
+
+**Ordinary profile admission.** Exact membership in task `admissibleProfiles` intersected with role `allowedProfiles`, followed by current host filtering, authorizes ordinary selection. `requiredEffort` is descriptive compatibility metadata, not an independent ordinal floor; effort labels are model-local and special corridors or explicit floors remain separate.
 
 ---
 
@@ -365,6 +373,7 @@ For a staged or full-delivery route, turn the request into a canonical brief:
 Call only the roles that are actually needed.
 Do not route work into implementation until every upstream artifact admitted by the selected template is accepted. A non-trivial task does not by itself require Research, Design, specialist constraints, and Plan as a universal prelude.
 Pass only minimal context, only approved inputs, only allowed tools, and exactly one expected artifact to each subagent.
+An informational delivery does not schedule recipient execution. For actionable work assigned to an idle or completed recipient, use the host's explicit follow-up task mechanism; delivered-only is not active progress.
 If a gate fails, route the work back to the correct prior stage with a bounded correction.
 ```
 
@@ -408,6 +417,7 @@ Describe:
 - test strategy
 
 Compare realistic alternatives and explain the choice.
+Before Design PASS, walk one producer record through the exact consumer signature and validation, with literal wire shape and field order, every field owner, acyclic provenance, and unresolved dependent inputs. For an existing producer, use an actual serialized sample; for a new format, use an explicitly proposed representative specimen, not fake production data or runtime proof. Hand off a ready decision before optional prose polishing.
 Do not write production code.
 ```
 
@@ -434,7 +444,7 @@ If the work item includes an admitted bug or prerequisite issue, the fix is alwa
 ### 7.6 Specialist prompts
 
 ```text
-`knowledge-archivist`: maintain accepted documentation, reports, references, and archive structure without inventing new requirements or rewriting accepted history. If the patch changes repository-wide governance semantics rather than hygiene, stop after the stewardship patch and hand it to `architecture-reviewer`.
+`knowledge-archivist`: maintain accepted documentation, reports, references, and archive structure without inventing new requirements or rewriting accepted history. For complete registry reconciliation, derive summary counts from the exact emitted rows, require grouped totals to equal the physical current-record count, and expose an explicit `unclassified` remainder with no dropped rows. If the patch changes repository-wide governance semantics rather than hygiene, stop after the stewardship patch and hand it to `architecture-reviewer`.
 
 `toolchain-engineer`: implement the approved build, packaging, compiler, linker, or reproducibility phase without drifting into product architecture or runtime policy.
 
@@ -450,7 +460,7 @@ If the work item includes an admitted bug or prerequisite issue, the fix is alwa
 
 `reliability-engineer`: define SLOs, failure modes, degradation behavior, observability requirements, and rollback or recovery expectations.
 
-`qa-engineer`: verify functional correctness, regressions, integration behavior, edge cases, nearby must-not-break surfaces, and basic performance acceptance when relevant.
+`qa-engineer`: verify functional correctness, regressions, integration behavior, edge cases, nearby must-not-break surfaces, and basic performance acceptance when relevant. For an external successor, require its target owner to resolve the stable identifier across current and archive, distinguish unique, missing, and duplicate states, accept a compatible unique archive identity, and treat the accepted hash as the acceptance snapshot rather than a freeze on future external bytes.
 
 `performance-reviewer`: independently confirm that budgets, methodology, and evidence are sufficient and that no blocking performance regressions remain.
 
@@ -574,7 +584,7 @@ product-manager -> lead -> analyst -> architect -> algorithm-scientist -> planne
 ### Scientific, physical, or numerical-method task
 
 ```text
-product-manager -> lead -> analyst -> architect -> computational-scientist -> planner -> implementation specialist -> qa-engineer -> lead
+product-manager -> lead -> analyst -> architect -> computational-scientist (model) -> planner -> scientific-software-engineer -> computational-scientist (scientific-conformance-review; independent run) -> qa-engineer -> lead
 ```
 
 ### Performance-sensitive task
@@ -733,6 +743,16 @@ The following is a catalog of artifacts that may be useful near the repository, 
 - `agent-runs.jsonl` is the machine-readable execution ledger for the work item. It records each launched or accepted agent run, assigned role, execution path, status, gate, artifact, and evidence. The lead must use it to reconcile active, completed, blocked, and revise states before closeout. When `scripts/agent-run-ledger.*` or an installed equivalent is available, use it to initialize legacy work items and append validated events instead of hand-editing JSONL. Use `scripts/check-work-items-state.* --root <repo>` or an installed equivalent for periodic scans of all active work items before broad closeout, interruption recovery, or publication review. The sole invalid-closure recovery procedure is maintained in the [execution-tracking operator runbook](../../docs/work-item-execution-tracking.md).
 - `status.md` and `agent-runs.jsonl` must agree at stage boundaries: no closed task with running ledger entries, no accepted `PASS` without evidence, no missing artifact for a completed gate, and no dependent downstream `PASS` left untouched after a material upstream revision.
 - Implementation and QA receive and echo the same accepted criteria, named regression guard, and observed result through the existing handoff and status carriers; no separate acceptance-record schema is created.
+
+#### Dispatch-boundary work-cycle recipe
+
+Apply this only before a non-trivial provider or subagent dispatch. Standalone bounded fact lookup remains inline; trivial coordination and a side question that does not become separately admitted work create no work-item. It is an orchestration ordering contract, not host enforcement.
+
+1. Bind the dispatch to exactly one admitted work-item whose current task, scope, and next action cover it.
+2. Independent authorized items may remain active concurrently; selecting one does not park or close another without a user instruction or accepted lifecycle decision.
+3. Create or select a separate item for newly admitted work not covered by an existing item, then append the root-owned running launch event through the existing ledger helper before scheduling.
+4. After accepting artifact and evidence, append the terminal event with its exact `launchRunId`, then refresh status and next action. Use `closesRunIds` only to discharge `REVISE`, never to settle an orphan launch.
+5. Request one bounded reconciliation only when the active set changes or is called into question by admission, parking, closure, identity-changing reprioritization, a delivery-wave or milestone boundary, or material status, ledger, or location drift. A stable active-item set, ordinary same-item continuation, and trivial turns do not retrigger it.
 
 ### 11.3 What should be automated
 

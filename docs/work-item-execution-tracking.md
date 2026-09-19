@@ -89,6 +89,25 @@ Current external provider wrappers record the exact resolved model, effort, and 
 
 `--execution-role` takes one of the canonical values from `shared/schemas/agent-runs.schema.json`: `main` (the one main-conversation identity, which also holds the Lead role), `internal`, `consultant`, `external-worker`, `external-reviewer`, or `external-brigade`. Orchestration weight belongs to the selected template and routing process; current staged status does not require a separate `orchestration: light | full-lead` field. Ledgers written before 2026-07-11 may carry the legacy value `lead`; validators and rollups read it as `main` (same owner), but a new append with `lead` is rejected — write `main`.
 
+## Close External Review Findings
+
+An external review records `role` and `executionRole` as `external-reviewer`; `assignedRole` identifies its professional reviewer. Its `external-nonauthorizing` terminal has empty `closesRunIds` and cannot authorize publication.
+
+A later native professional PASS may close its findings through a launch-bound terminal or a genuine standalone event. Preserve launch provenance when a launch exists:
+
+- The closer's `role` equals the target's `assignedRole`; any closer `assignedRole` must agree. Native `executionRole` stays `internal`, not the adapter role.
+- `artifact` identifies each produced report. The native and external reports must have distinct paths.
+- Matching nonblank `artifactIdentity` values identify the reviewed subject, not those report paths; `scope` must match exactly.
+- `closesRunIds` names the exact external REVISE event. Existing launch, lane, effort, and other checks still apply.
+
+This flag fragment supplements an otherwise valid native PASS append; use the actual target's identity and scope:
+
+```text
+--artifact reviews/native-qa.md --artifact-identity topic:subject --closes external-review-event
+```
+
+Unrelated professions, subjects, scopes, and invalid report relations still fail.
+
 ## Validate One Work Item
 
 Run this before stage closeout or archive movement.
@@ -167,6 +186,75 @@ The writer holds the existing ledger lock, builds and validates a temporary cand
 
 Invalidation removes every closure edge contributed by the target event. It can therefore reopen a `REVISE` obligation or a launch. Append an ordinary independently authorized replacement terminal or closure event through the normal writer; the invalidation itself never satisfies the reopened obligation.
 
+## Recover one noncanonical historical ledger
+
+Use this only after the Lead-owned main conversation admits one exact active-item
+ledger whose nonblank lines are bounded, duplicate-key-free UTF-8 JSON objects
+but are not canonical ledger events. Every row must fail the current event
+validator; a declared schema Version 1, 2, or 3, a valid Version 1/Version 2
+`runId`, a complete valid Version 3 identity tuple, any valid current event, or
+a mixture containing one of those forms is refused unchanged. Lone generic
+`status`, `gate`, `eventId`, or `operationId` fields remain opaque, as does a
+seven-character `runId`; none of those field names alone is treated as
+authority.
+
+Capture the exact current ledger digest without parsing or reserializing its
+rows. The same digest, new bounded operation identity, and strict Coordinated
+Universal Time (UTC) value bind preflight, apply, replay, and any pre-append
+rollback. ASCII hexadecimal digest casing is accepted and normalized; the
+history filename and marker store lowercase.
+
+Raw acquisition preserves every admitted byte, including CRLF/LF terminators,
+blank or whitespace-only lines, and an unterminated final line. Each physical
+line is limited to the existing 131,072-byte body plus an optional CRLF
+terminator, with at most 4,096 nonblank events and a finite aggregate ceiling
+of `4,096 * (131,072 + 2)` bytes. Blank padding and terminators consume that
+aggregate ceiling; this intentionally tightens the former unlimited blank-line
+admission while still allowing 4,096 maximum-body CRLF events.
+
+```powershell
+$ledger = 'work-items\active\<slug>\agent-runs.jsonl'
+$sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $ledger).Hash
+
+python -B scripts\agent-run-ledger.py --work-item work-items\active\<slug> recover-noncanonical-history --expected-ledger-sha256 $sha256 --operation-id <new-bounded-operation-id> --recorded-at <strict-UTC>
+
+python -B scripts\agent-run-ledger.py --work-item work-items\active\<slug> recover-noncanonical-history --expected-ledger-sha256 $sha256 --operation-id <same-operation-id> --recorded-at <same-strict-UTC> --apply-admitted
+```
+
+Omitting both action flags performs a read-only preflight: it creates no lock,
+temporary file, history blob, or marker. `--apply-admitted` holds the existing
+item lock, preserves the original bytes beside the ledger as
+`agent-runs.history.<lowercase-sha256>.jsonl`, validates one genuinely new
+canonical marker, atomically replaces the ledger, and verifies exact readback.
+The marker records only this recovery operation and has no historical launch,
+terminal, `REVISE`, closer, artifact, evidence, provider, model, gate, identity,
+or timestamp authority. `RESULT: PASS recover-noncanonical-history action=apply`
+means the exact history blob and marker passed readback; it makes no `fsync` or
+power-loss-durability claim. An exact blob plus exact marker replays without a
+duplicate.
+
+Continue only through the ordinary writer with new identities and times:
+
+```powershell
+python -B scripts\agent-run-ledger.py --work-item work-items\active\<slug> append --run-id <new-launch-run-id> --role <role> --execution-role internal --status running --gate none --scope <bounded-scope> --event-kind launch --started-at <new-started-at> --updated-at <new-started-at>
+
+python -B scripts\agent-run-ledger.py --work-item work-items\active\<slug> append --run-id <new-terminal-run-id> --role <same-role> --execution-role internal --status completed --gate PASS --scope <same-bounded-scope> --event-kind terminal --launch-run-id <new-launch-run-id> --artifact <accepted-item-relative-artifact> --evidence "command:<verification>" --started-at <new-terminal-at> --updated-at <new-terminal-at>
+```
+
+Before any later append, the admitted operator may restore the exact opaque
+bytes with the same binding:
+
+```powershell
+python -B scripts\agent-run-ledger.py --work-item work-items\active\<slug> recover-noncanonical-history --expected-ledger-sha256 $sha256 --operation-id <same-operation-id> --recorded-at <same-strict-UTC> --rollback-admitted
+```
+
+After a later append, rollback fails with
+`WI-LEDGER-NONCANONICAL-ROLLBACK-NOT-EMPTY`. Other stable refusal classes are
+`LOCKED`, `DRIFT`, `MALFORMED`, `CURRENT-EVENT`, `IDENTITY-BEARING`,
+`HISTORY-CONFLICT`, `CANDIDATE-INVALID`, and `READBACK-INDETERMINATE`, each
+prefixed by `WI-LEDGER-NONCANONICAL-`. A readback-indeterminate result requires
+inspection or exact replay; it never authorizes an ad hoc ledger rewrite.
+
 ## Dispose one invalid-current suffix row
 
 Use this only after the user admits one exact current-schema-invalid suffix row. This mode is separate from `recover-invalid-closure`: an individually valid relation-invalid closer continues to use that existing command, while `dispose-invalid-current` preserves one invalid target's exact bytes and makes no closure, gate, launch, terminal, `PASS`, or evidence authority claim.
@@ -235,22 +323,143 @@ python scripts/mutate-work-item.py --root . revoke-legacy-ledger-obligation --sl
 `WI-LEDGER-MIGRATION-REVOKED` restores the original invalid diagnostic in the
 effective view; it never deletes the apply anchor or the source line.
 
-### Archive with a backlog successor
+### Close with current-bug dispositions
 
-Use this only after strict ledger closure, accepted terminal evidence, exact
-`bug-dispositions.json`, and the first-use gates below:
+The existing close command consumes the active item's `bug-dispositions.json`:
+
+The supplied `closure.md` MUST contain nonempty `Closed`, `Outcome`, `Evidence`,
+and `Residual risk` fields. `Closed` MUST exactly equal the requested
+`--terminal-instant` and use strict UTC `YYYY-MM-DDTHH:MM:SSZ`.
 
 ```powershell
-python scripts/mutate-work-item.py --root . archive-with-successor --slug <active-slug> --closure-file <closure.md-input> --terminal-instant <strict-UTC> --successor-slug <new-backlog-slug> --successor-file <successor.md-input> --operation-id <bounded-transition-id> --expected-ledger-sha256 <current-ledger-sha256> --expected-readme-sha256 <current-readme-sha256>
+python scripts/mutate-work-item.py --root . close --slug <active-slug> --closure-file <closure.md-input> --terminal-instant <strict-UTC>
 ```
+
+Version 1 remains exact-context-only. Its `bugs` array enumerates every current
+bug whose parsed `context` equals the closing slug. A `terminalize` row contains
+`id`, `action`, `inputSha256`, `status`, `resolution`, and `evidence`; a
+`preserve-current` row uses `reason` instead of `resolution`.
+
+Version 2 keeps the same top-level fields (`schemaVersion`, `workItem`,
+`closedAt`, and `bugs`) and adds `contextBefore` and `contextAfter` to every
+Version 1 row. Every exact-context current bug remains required. The manifest
+may additionally select a current `adjacent-finding` or `standalone` bug only
+with `action: terminalize`; `contextBefore` must equal that bug's actual
+original context and `contextAfter` must equal `workItem`. Exact-context Version
+2 rows therefore use the closing slug for both context images. Unselected
+placeholder bugs remain current and byte-identical, and a placeholder cannot be
+`preserve-current`. Do not manually edit a bug's context: the lifecycle owner
+performs the admitted recontextualization and writes both context images to the
+Version 2 receipt. The ordinary `close` path alone admits Version 2;
+`archive-with-successor` keeps Version 1 bug-disposition admission.
+
+This is a complete one-row Version 2 shape for a close whose complete required
+set is one selected `adjacent-finding` bug. It is not runnable unchanged:
+replace every angle-bracket value with the actual current value, and add every
+exact-context bug row when the repository has any.
+
+```json
+{
+  "schemaVersion": 2,
+  "workItem": "<active-slug>",
+  "closedAt": "<same-strict-UTC-terminal-instant>",
+  "bugs": [
+    {
+      "id": "<selected-current-bug-id>",
+      "action": "terminalize",
+      "inputSha256": "<sha256-of-exact-current-bug-bytes>",
+      "status": "fixed",
+      "resolution": "<accepted-terminal-resolution>",
+      "evidence": "<accepted-evidence-reference>",
+      "contextBefore": "adjacent-finding",
+      "contextAfter": "<active-slug>"
+    }
+  ]
+}
+```
+
+### Archive with a backlog successor
+
+Use this after accepted terminal evidence, exact `bug-dispositions.json`, and
+the first-use gates below. Omit the optional transfer file for the ordinary
+strict-close path; supply it only when every unresolved review obligation is
+being transferred to the one successor created by this command:
+
+```powershell
+python scripts/mutate-work-item.py --root . archive-with-successor --slug <active-slug> --closure-file <closure.md-input> --terminal-instant <strict-UTC> --successor-slug <new-backlog-slug> --successor-file <successor.md-input> --operation-id <bounded-transition-id> --expected-ledger-sha256 <current-ledger-sha256> --expected-readme-sha256 <current-readme-sha256> [--obligation-transfer-file <strict-json>]
+```
+
+Without `--obligation-transfer-file`, the owner runs the unchanged strict
+validator and writes the existing schema-version 1 receipt. With the option,
+the strict UTF-8 JSON object is schema version 1 and binds the source slug,
+successor slug, expected source-ledger SHA-256, and the exact set of currently
+open REVISE rows by `runId`, raw line ordinal, raw line SHA-256, raw event
+SHA-256, and projected event SHA-256. Transfer requires zero open launches;
+missing, extra, duplicate, closed, or drifted rows fail before mutation.
 
 The owner fsyncs transition intent, applies the bound bug dispositions, moves
 the item to its final archive, writes the flat successor only after that
 archive exists, refreshes README, and writes
-`lifecycle-transition-receipt.json`. Its `status: settled` record binds
-`archivePath`, `successorPath`, `successorSha256`, `ledgerSha256`,
-`statusSha256`, `closureSha256`, `bugDispositionReceiptSha256`,
-`migrationReceiptSha256`, and `readmeSha256`.
+`lifecycle-transition-receipt.json`. Both receipt versions bind the existing
+archive, successor, ledger, status, closure, bug-disposition, migration-receipt,
+and README results. Transfer writes schema version 2 with owner
+`mutate-work-item:archive-with-successor-v2` and additionally binds the transfer
+input, immutable archive identity, predecessor operation, and derived
+obligation rows. Version 1 receipts remain readable and exact-replayable but
+confer no transferred ownership.
+
+The successor input must contain exactly one `Continues: <source-slug>` and
+`Obligation-transfer: <operation-id>` field. Ordinary `start` preserves both.
+Backlog, active, close, and re-transfer views resolve the same obligation under
+one current owner without copying source-ledger events: closure remains
+`closesRunIds`-driven, and a later transfer carries forward only the still-open
+set with its predecessor operation. Identical replay is a byte no-op; request,
+receipt, ledger, or ownership drift fails closed through the existing recovery
+owner.
+
+Plain `audit` is read-only. If a transition intent is pending, it fails with
+`WI-LIFECYCLE-TRANSITION-RECOVERY-REQUIRED`, names the bounded operation ID,
+and prints the exact command to run. Recover only that operation explicitly:
+
+```powershell
+python scripts/mutate-work-item.py recover-transition --root <repo> --operation-id <bounded-transition-id> --apply
+```
+
+The command delegates to the existing transition recovery owner and reports
+`outcome=rolled-back` or `outcome=settled`; rerun `audit` afterward. Omitting
+`--apply` or naming a non-pending operation changes no bytes. Do not use audit
+as a batch recovery command.
+
+If `start`, `update`, or `reopen` reports `WI-README-STALE` after saying the
+canonical state committed, do not retry that operation. Run `refresh`, then
+use `resolve` and `audit` to verify the target.
+
+### Finish an accepted current-bug successor handoff
+
+The receiving registry first creates and accepts its successor record. The
+source lifecycle owner then consumes a strict schema-version 1 binding for that
+accepted record plus a complete owner-bound incoming-link inventory:
+
+```powershell
+python scripts/mutate-work-item.py --root . supersede-current-bug --slug <bug-slug> --successor-record <runtime-path> --successor-binding-file <strict-json> --terminal-instant <strict-UTC> --incoming-links-inventory <strict-json> --expected-bug-sha256 <current-bug-sha256> --expected-readme-sha256 <current-readme-sha256> --operation-id <bounded-operation-id> --apply
+```
+
+The binding names the exact operation, `bug:<source-slug>`, stable registry and
+record references, accepted record SHA-256, accepting owner, strict UTC
+acceptance time, and bounded acceptance evidence. The inventory binds the same
+operation/source/binding and every current source-local incoming link with its
+exact before/after image. Before intent creation the owner verifies the
+successor as a no-follow regular file, its hash, the unique current source, and
+complete link coverage. It never writes the receiving registry or persists the
+runtime successor path.
+
+Settlement terminalizes and archives the source bug as `superseded`, replaces
+every inventoried local incoming link with the stable successor reference,
+refreshes README, and writes the source-local supersession receipt through the
+existing transition recovery dispatcher. Identical replay verifies the bound
+receipt and changes no bytes; mismatched replay or incomplete binding/inventory
+fails closed. Receiving-registry preparation is not claimed as local completion
+or rollback.
 
 ### Failures, recovery, and telemetry
 
@@ -261,6 +470,7 @@ archive exists, refreshes README, and writes
 | Unknown normalization kind, kind/scope/evidence drift, or cross-kind revoke | `WI-LEDGER-MIGRATION-NORMALIZATION-KIND` |
 | Lock; invalid candidate; uncertain commit; receipt mismatch | `WI-LIFECYCLE-LOCK-HELD`; `WI-LEDGER-MIGRATION-CANDIDATE-INVALID`; `WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE`; `WI-LEDGER-MIGRATION-RECEIPT-MISMATCH` |
 | Corrupt intent; rollback failure; roll-forward failure; settlement mismatch; late revoke | `WI-LIFECYCLE-TRANSITION-INTENT-INVALID`; `WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE`; `WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE`; `WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH`; `WI-LEDGER-MIGRATION-REVOCATION-FROZEN` |
+| Transfer coverage, ownership, or immutable-evidence drift; invalid accepted bug successor | `WI-OBLIGATION-TRANSFER-COVERAGE`; `WI-OBLIGATION-TRANSFER-OWNER`; `WI-OBLIGATION-TRANSFER-DRIFT`; `WI-BUG-SUCCESSOR-BINDING` |
 
 Telemetry always reports raw events separately from apply, revoke, and
 projected counts. Raw count never decreases; one active apply adds one raw
