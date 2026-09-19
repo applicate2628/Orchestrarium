@@ -4002,6 +4002,19 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             reason = _format_gate_denial(failure_id)
         else:
             remediation = pr_reasons.get(failure_id, pr_reasons["PRG-INTERNAL"])
+            if (
+                failure_id == "PRG-TRANSCRIPT-UNAVAILABLE"
+                and transcript_diagnostic is not None
+                and (
+                    transcript_diagnostic.history == "limit"
+                    or transcript_diagnostic.recovery == "limit"
+                )
+            ):
+                remediation = (
+                    "Cannot verify historical publication permission within "
+                    "bounded transcript history; summaries cannot authorize "
+                    "publication."
+                )
             scope = _denial_scope(failure_id)
             reason = f"{failure_id}: {scope}. {remediation}"
             if (

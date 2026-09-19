@@ -6616,6 +6616,7 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
         envelope: dict,
         *,
         history_byte_cap: int | None = None,
+        recovery_byte_cap: int | None = None,
     ) -> str:
         module = _load_gate_module(
             script,
@@ -6632,6 +6633,10 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
                 stack.enter_context(mock.patch.object(
                     module, "TRANSCRIPT_HISTORY_BYTE_CAP", history_byte_cap
                 ))
+            if recovery_byte_cap is not None:
+                stack.enter_context(mock.patch.object(
+                    module, "TRANSCRIPT_RECOVERY_BYTE_CAP", recovery_byte_cap
+                ))
             stack.enter_context(contextlib.redirect_stdout(stdout))
             self.assertEqual(module.main(), 0)
         return stdout.getvalue()
@@ -6646,11 +6651,18 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
             },
         }
 
-    def assert_transcript_denial(self, output: str, expected: str) -> None:
+    def assert_transcript_denial(
+        self,
+        output: str,
+        expected: str,
+        remediation: str = "Retry from a readable current session transcript",
+    ) -> None:
         self.assertIn("PRG-TRANSCRIPT-UNAVAILABLE", output)
         self.assertIn("Publication denied", output)
         self.assertNotIn("PR-scoped publication denied", output)
+        self.assertIn('"permissionDecision": "deny"', output)
         self.assertIn(expected, output)
+        self.assertIn(remediation, output)
 
     def test_found_history_recovery_status_is_valid_for_simple_grant_rereads(self) -> None:
         module = _load_gate_module(CANONICAL_HOOK, "found_history_recovery")
@@ -6727,6 +6739,60 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
                 self.assertIn(
                     "Transcript diagnostics: envelope=string; current-turn=found; "
                     "history=limit; recovery=found.",
+                    output,
+                )
+
+    def test_history_limit_diagnostic_does_not_claim_current_transcript_is_unreadable(self) -> None:
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                with synthetic_transcript([user("continue")]) as path:
+                    envelope = self._base_envelope()
+                    envelope["transcript_path"] = str(path)
+                    output = self._run_envelope(
+                        script,
+                        envelope,
+                        history_byte_cap=1,
+                        recovery_byte_cap=1,
+                    )
+                self.assert_transcript_denial(
+                    output,
+                    "Cannot verify historical publication permission within "
+                    "bounded transcript history; summaries cannot authorize "
+                    "publication.",
+                    remediation=(
+                        "Cannot verify historical publication permission within "
+                        "bounded transcript history"
+                    ),
+                )
+                self.assertIn(
+                    "Transcript diagnostics: envelope=string; current-turn=found; "
+                    "history=limit; recovery=limit.",
+                    output,
+                )
+                self.assertNotIn("Retry from a readable current session transcript", output)
+
+    def test_unknown_transcript_status_remains_a_deny_without_limit_remediation(self) -> None:
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                module = _load_gate_module(
+                    script, f"unknown_transcript_status_{script.parent.parent.name}"
+                )
+                preflight = module._a3_preflight.build_preflight(
+                    self._base_envelope()
+                )
+                diagnostic = preflight.transcript_diagnostic
+                self.assertIsNotNone(diagnostic)
+                malformed = preflight._replace(
+                    transcript_diagnostic=diagnostic._replace(history="unknown")
+                )
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    self.assertEqual(module.main(malformed), 0)
+                output = stdout.getvalue()
+                self.assertIn('"permissionDecision": "deny"', output)
+                self.assertNotIn(
+                    "Cannot verify historical publication permission within "
+                    "bounded transcript history",
                     output,
                 )
 

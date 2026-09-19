@@ -3122,6 +3122,19 @@ def test_kimi_optional_title_redacts_when_machine_path_classifier_is_unavailable
     assert exchange._receipt_text("Bash synthetic worker check") == "<redacted>"
 
 
+def test_kimi_machine_path_classifier_failure_remains_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches an unavailable classifier being treated as a clean Kimi stream."""
+
+    owner = _load_owner()
+    monkeypatch.setattr(owner, "_machine_path_finder", lambda: None)
+
+    assert owner.provider_output_safety_scan_terminal(
+        "kimi", (), stdout=b"", stderr=b""
+    ) == "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+
+
 @pytest.mark.parametrize(
     "update",
     (
@@ -3807,15 +3820,107 @@ def test_kimi_private_config_is_removed_when_alias_setup_fails(
     run_dir = tmp_path / "run"
     run_dir.mkdir()
 
+    native_calls: list[object] = []
+
     def fail_symlink(*_args, **_kwargs) -> None:
-        raise OSError("synthetic")
+        raise OSError(5, "synthetic", None, 5)
 
     monkeypatch.setattr(owner.os, "symlink", fail_symlink)
+    monkeypatch.setitem(
+        sys.modules,
+        "_winapi",
+        SimpleNamespace(CreateJunction=lambda *_args: native_calls.append(object())),
+    )
 
-    with pytest.raises(OSError, match="synthetic"):
+    with pytest.raises(OSError) as caught:
         owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
 
+    assert caught.value.winerror == 5
+    assert native_calls == []
     assert not (run_dir / "kimi-home" / "config.toml").exists()
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or not hasattr(__import__("_winapi"), "CreateJunction"),
+    reason="Windows native junction contract",
+)
+def test_kimi_private_home_uses_native_junction_after_symlink_privilege_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a 1314 credentials alias failure that needlessly blocks ACP setup."""
+
+    owner = _load_owner()
+    user_data = tmp_path / "user & percent% caret^ (source)"
+    credentials = user_data / "credentials"
+    credentials.mkdir(parents=True)
+    marker = credentials / "fixture-marker"
+    marker.write_bytes(b"unchanged")
+    run_dir = tmp_path / "run & percent% caret^ (destination)"
+    run_dir.mkdir()
+
+    monkeypatch.setattr(
+        owner.os,
+        "symlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError(22, "synthetic", None, 1314)
+        ),
+    )
+
+    aliases = owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+    alias = aliases.home / "credentials"
+
+    assert os.path.isjunction(alias)
+    assert not alias.is_symlink()
+    aliases.cleanup()
+    assert not os.path.lexists(alias)
+    assert marker.read_bytes() == b"unchanged"
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or not hasattr(__import__("_winapi"), "CreateJunction"),
+    reason="Windows native junction contract",
+)
+def test_kimi_native_junction_verification_failure_reclaims_registered_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a created junction escaping cleanup when its post-create check fails."""
+
+    owner = _load_owner()
+    user_data = tmp_path / "user-data"
+    credentials = user_data / "credentials"
+    credentials.mkdir(parents=True)
+    marker = credentials / "fixture-marker"
+    marker.write_bytes(b"unchanged")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    alias = run_dir / "kimi-home" / "credentials"
+    original_isjunction = owner.os.path.isjunction
+
+    monkeypatch.setattr(
+        owner.os,
+        "symlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError(22, "synthetic", None, 1314)
+        ),
+    )
+    monkeypatch.setattr(
+        owner.os.path,
+        "isjunction",
+        lambda path: False if Path(path) == alias else original_isjunction(path),
+    )
+
+    try:
+        with pytest.raises(OSError, match="Kimi private-home junction creation failed"):
+            owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+
+        assert not os.path.lexists(alias)
+        assert not (run_dir / "kimi-home" / "config.toml").exists()
+        assert marker.read_bytes() == b"unchanged"
+    finally:
+        if os.path.lexists(alias):
+            alias.rmdir()
 
 
 def test_kimi_selected_cwd_and_mcp_variants_reach_session_new_unchanged(
@@ -4888,6 +4993,102 @@ def test_kimi_unscannable_selection_has_only_minimal_prelaunch_failure(
     assert "selected" not in payload and "observed" not in payload
     assert canary not in public and canary not in receipt_path.read_text(encoding="utf-8")
     assert payload["cleanupStatus"] == "complete"
+
+
+def test_kimi_private_home_setup_failure_keeps_safe_primary_cause_without_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches pre-child Kimi setup being masked as unavailable output scanning."""
+
+    owner = _load_owner()
+    capture_root = tmp_path / "captures"
+    capture_root.mkdir()
+    prompt_path = tmp_path / "prompt.md"
+    prompt_path.write_text("fixture task\n", encoding="utf-8")
+    receipt_path = tmp_path / "terminal.receipt"
+    child_calls: list[object] = []
+    scan_calls: list[tuple[bytes, bytes, bool]] = []
+    fallback_calls: list[tuple[str, str]] = []
+    original_scan = owner.provider_output_safety_scan_terminal
+    user_home = tmp_path / "user home & percent% caret^ (setup)"
+    (user_home / ".kimi-code" / "credentials").mkdir(parents=True)
+
+    control = owner.Control(
+        topic="fixture",
+        prompt_file=prompt_path,
+        terminal_receipt=receipt_path,
+    )
+    prevalidated = owner.PolicyBoundLaunch(
+        control,
+        "fixture",
+        (),
+        "kimi-code/k3",
+        "high",
+        owner.ExternalRoleProvenance("none", "none"),
+        None,
+    )
+    monkeypatch.setattr(owner, "secure_output_dir", lambda _provider: capture_root)
+    monkeypatch.setattr(
+        owner, "_resolve_launch_provider_command", lambda *_: (["fixture"], None)
+    )
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_auth_configuration",
+        lambda _provider: SimpleNamespace(
+            needles=(), output_scan_disposition=owner.AUTH_OUTPUT_SCAN_ENVIRONMENT_EXACT
+        ),
+    )
+    monkeypatch.setattr(
+        owner.os,
+        "symlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError(22, "synthetic", None, 1314)
+        ),
+    )
+    monkeypatch.setenv("USERPROFILE", str(user_home))
+
+    def fail_native_junction(source: str, alias: str) -> None:
+        fallback_calls.append((source, alias))
+        raise OSError("native-fallback-detail")
+
+    monkeypatch.setitem(
+        sys.modules, "_winapi", SimpleNamespace(CreateJunction=fail_native_junction)
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_provider_process",
+        lambda *_args, **_kwargs: child_calls.append(object()) or pytest.fail("setup launched child"),
+    )
+
+    def scan(provider, needles, *, stdout, stderr, serialized_line=False):
+        scan_calls.append((stdout, stderr, serialized_line))
+        return original_scan(
+            provider, needles, stdout=stdout, stderr=stderr, serialized_line=serialized_line
+        )
+
+    monkeypatch.setattr(owner, "provider_output_safety_scan_terminal", scan)
+    with owner.ReservedExternalRunV1(owner.TerminalReceiptV1.reserve(receipt_path)) as reserved:
+        code = owner._launch_with_runner(
+            "kimi", [], object(), prevalidated=prevalidated, reserved_run=reserved
+        )
+
+    payload = owner.parse_provider_result(capsys.readouterr().out)
+    assert code == 1
+    assert payload["resultText"] == ""
+    assert payload["token"] == "UNVERIFIED:E_KIMI_ACP_SETUP"
+    assert payload["primaryOutcome"]["token"] == "UNVERIFIED:E_KIMI_ACP_SETUP"
+    assert payload["cleanupStatus"] == "complete"
+    assert payload["captureObservedBytes"] == 0
+    assert child_calls == []
+    assert len(fallback_calls) == 1
+    assert len(scan_calls) == 2
+    assert scan_calls[0] == (b"", b"", False)
+    assert scan_calls[1][1:] == (b"", True)
+    visible = json.dumps(payload)
+    assert "native-fallback-detail" not in visible
+    assert str(tmp_path) not in visible
+    assert "setup" not in receipt_path.read_text(encoding="utf-8")
+    assert not any(capture_root.iterdir())
 
 
 def test_kimi_unchanged_snapshot_allows_distinct_handle_and_path_ctime(

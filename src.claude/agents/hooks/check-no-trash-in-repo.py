@@ -100,7 +100,6 @@ follow-up, deliberately not taken in this slice.
 from __future__ import annotations
 
 import os
-import re
 import shlex
 import sys
 from pathlib import Path
@@ -110,6 +109,7 @@ from pathlib import Path
 # so add the sibling scripts/ dir to the import path before importing it.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
+from git_push_gate_preflight import parse_shell_command, resolve_command_dialect
 from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
 
 
@@ -168,14 +168,12 @@ _DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd"})
 
 _EXPLICIT_OUTPUT_FLAGS = frozenset({"-o", "--output", "-out", "/out"})
 
-# The token following a `>`/`>>` in the RAW command text. Read raw, not from the
-# tokenizer, for two independent reasons: posix `shlex` eats backslashes, so
+# Redirect targets must stay raw: POSIX `shlex` eats backslashes, so
 # `> r:\Temp\x\build.log` and the mangled `> r:Tempxbuild.log` tokenize
 # IDENTICALLY (verified) and trigger (2) could never tell them apart; and a
 # legitimate Windows scratch path `> .scratch\t\build.log` would collapse to a
-# bare name and falsely look root-destined to trigger (3). `&` is excluded so
-# `2>&1` yields no target.
-_RAW_REDIRECT_RE = re.compile(r">>?\s*([^\s>&|;()]+)")
+# bare name and falsely look root-destined to trigger (3). The raw scan below
+# observes shell quotes so a `>` inside a quoted argument is not a redirect.
 
 
 def _tokenize(command: str) -> list[str] | None:
@@ -326,20 +324,80 @@ def count_git_worktree_adds(command: str) -> int:
     return count
 
 
-def raw_redirect_targets(command: str) -> list[str]:
-    """Redirect targets as they appear in the RAW command text, unquoted.
+def raw_redirect_targets(command: str, dialect: str | None) -> list[str]:
+    """Return raw targets of outer-shell `>`/`>>` redirects.
 
-    Read raw rather than tokenized on purpose — see `_RAW_REDIRECT_RE`: posix
-    tokenization destroys exactly the backslash evidence triggers (2) and (3)
-    depend on."""
-    return [match.strip("'\"") for match in _RAW_REDIRECT_RE.findall(command)]
+    This is intentionally a narrow lexical scan, not a new shell parser: it
+    preserves raw Windows backslashes while ignoring operators inside single- or
+    double-quoted arguments. Its escape rule is selected by the existing shared
+    tool-name resolver: POSIX backslashes or PowerShell backticks protect the
+    next character. Unknown dialects fail open rather than guessing. `&` remains
+    an invalid target start, so `2>&1` yields no target.
+    """
+    if dialect not in {"posix", "powershell"}:
+        return []
+    targets: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if quote is not None:
+            if quote == "'":
+                quote = None if char == quote else quote
+                index += 1
+                continue
+            if (dialect == "posix" and char == "\\") or (
+                dialect == "powershell" and char == "`"
+            ):
+                index += 2
+                continue
+            quote = None if char == quote else quote
+            index += 1
+            continue
+        if char in {"'", '\"'}:
+            quote = char
+            index += 1
+            continue
+        if (dialect == "posix" and char == "\\") or (
+            dialect == "powershell" and char == "`"
+        ):
+            index += 2
+            continue
+        if char != ">":
+            index += 1
+            continue
+        index += 2 if index + 1 < len(command) and command[index + 1] == ">" else 1
+        while index < len(command) and command[index].isspace():
+            index += 1
+        if index >= len(command) or command[index] in ">&|;()":
+            continue
+        if command[index] in {"'", '\"'}:
+            target_quote = command[index]
+            index += 1
+            target_start = index
+            while index < len(command) and command[index] != target_quote:
+                if target_quote == '\"' and (
+                    (dialect == "posix" and command[index] == "\\")
+                    or (dialect == "powershell" and command[index] == "`")
+                ):
+                    index += 2
+                else:
+                    index += 1
+            targets.append(command[target_start:index])
+            index += 1
+            continue
+        target_start = index
+        while index < len(command) and not command[index].isspace() and command[index] not in ">&|;()":
+            index += 1
+        targets.append(command[target_start:index])
+    return targets
 
 
 def _has_directory_component(target: str) -> bool:
     return any(separator in target for separator in _PATH_SEPARATORS)
 
 
-def mangled_windows_targets(command: str) -> list[str]:
+def mangled_windows_targets(command: str, dialect: str | None) -> list[str]:
     """Trigger (2): redirect targets carrying a drive-letter prefix and NO path
     separator — the Git Bash backslash-eating signature (`r:Tempxbuild.log`).
 
@@ -348,7 +406,7 @@ def mangled_windows_targets(command: str) -> list[str]:
     colon, so a bare `r:` (which is what a well-formed backslash path leaves in
     front of its first separator) never matches."""
     found: list[str] = []
-    for target in raw_redirect_targets(command):
+    for target in raw_redirect_targets(command, dialect):
         if _has_directory_component(target):
             continue
         if len(target) > 2 and target[1] == ":" and target[0].isalpha():
@@ -356,7 +414,7 @@ def mangled_windows_targets(command: str) -> list[str]:
     return found
 
 
-def root_destined_artifact_targets(command: str) -> list[str]:
+def root_destined_artifact_targets(command: str, dialect: str | None) -> list[str]:
     """Trigger (3): redirect targets with no directory component whose name is a
     build/log artifact — i.e. written straight into the process CWD.
 
@@ -364,7 +422,7 @@ def root_destined_artifact_targets(command: str) -> list[str]:
     that the command performs no directory change; this function only decides
     the destination-and-name half."""
     found: list[str] = []
-    for target in raw_redirect_targets(command):
+    for target in raw_redirect_targets(command, dialect):
         name = target[2:] if target.startswith("./") else target
         if not name or _has_directory_component(name):
             continue
@@ -373,13 +431,22 @@ def root_destined_artifact_targets(command: str) -> list[str]:
     return found
 
 
-def changes_directory(command: str) -> bool:
+def changes_directory(command: str, dialect: str | None = None) -> bool:
     """Does the command move the process CWD (`cd`/`pushd`/`popd`)?
 
     When it does, the destination of a bare redirect or of a compiler's default
     output is no longer decidable from the command text, so the root-destination
     triggers fail open. Running a tool from inside its own scratch output
     directory is the documented, correct pattern — not a defect to warn about."""
+    if dialect == "powershell":
+        parsed = parse_shell_command(command, dialect)
+        if parsed.status != "SCG-PARSED":
+            return True
+        return any(
+            _basename(record.executable) in _DIRECTORY_CHANGE_COMMANDS
+            for record in parsed.commands
+        )
+
     tokens = _tokenize(command)
     if tokens is None:
         return True  # unparseable -> fail open (suppress the root triggers)
@@ -485,7 +552,10 @@ def main() -> int:
 
     # Trigger (2) is NOT gated on the repository-root probe: a drive-letter prefix
     # with no separator is always a mistake, wherever the process is running.
-    mangled = mangled_windows_targets(command)
+    resolved_dialect = resolve_command_dialect(envelope.get("tool_name"))
+    dialect = resolved_dialect.dialect if resolved_dialect.exact else None
+
+    mangled = mangled_windows_targets(command, dialect)
     if mangled:
         reasons.append(
             "this redirect target looks like a MANGLED Windows path: "
@@ -497,8 +567,8 @@ def main() -> int:
         )
 
     # Triggers (3)/(4) need a CONFIRMED repository-root CWD and no directory change.
-    if is_repository_root(envelope.get("cwd")) and not changes_directory(command):
-        artifacts = root_destined_artifact_targets(command)
+    if is_repository_root(envelope.get("cwd")) and not changes_directory(command, dialect):
+        artifacts = root_destined_artifact_targets(command, dialect)
         if artifacts:
             reasons.append(
                 "this redirect writes a build/log artifact into the repository ROOT: "
