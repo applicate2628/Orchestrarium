@@ -212,9 +212,10 @@ DESTRUCTIVE_POLARITY_TEETH = [
 ]
 
 GUARD_PRECONDITION_TEETH = [
-    "verify its own inputs satisfy its assumptions",
-    "missing, zero, empty, parse-fallback, both-sides-equal-by-default",
-    "fail closed on each",
+    "check input assumptions",
+    "missing, zero, empty, parse-fallback and both-sides-equal-by-default inputs",
+    "Accept observed contract-valid input",
+    "otherwise fail closed",
     "synthetically-degraded inputs",
     "never silently weaken the invariant",
 ]
