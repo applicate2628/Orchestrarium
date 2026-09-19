@@ -5937,15 +5937,26 @@ def finalize_reserved_run_once(
         if provider == "kimi"
         else "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
     )
+    kimi_prechild_setup_failure = (
+        provider == "kimi"
+        and launch_error == "E_KIMI_ACP_SETUP"
+        and process_result is None
+        and stream is None
+        and raw_stdout is None
+        and raw_stderr is None
+    )
     if credential_coverage_unavailable:
         scan_outcome = "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
     elif scan_required:
         try:
             scan_outcome = (
                 provider_output_safety_scan_terminal(
-                    provider, credential_needles, stdout=raw_stdout, stderr=raw_stderr
+                    provider,
+                    credential_needles,
+                    stdout=b"" if kimi_prechild_setup_failure else raw_stdout,
+                    stderr=b"" if kimi_prechild_setup_failure else raw_stderr,
                 )
-                if raw_streams_settled
+                if raw_streams_settled or kimi_prechild_setup_failure
                 else scan_unavailable
             )
         except Exception:
@@ -5977,11 +5988,18 @@ def finalize_reserved_run_once(
             if scan_outcome is not None and stream is not None and stream.overflow
             else empty_provider_stream_result()
             if scan_outcome is not None
+            else empty_provider_stream_result()
+            if process_result is None
             else provider_stream_result(process_result, include_stderr=False)
         )
     primary_terminal: TerminalResult | None = None
     combined_exit = exit_code
-    if scan_outcome is not None:
+    if kimi_prechild_setup_failure and scan_outcome is None:
+        result_text = ""
+        terminal = output_safety_scan_failure_terminal(lifecycle, launch_error)
+        primary_terminal = terminal
+        combined_exit = exit_code if exit_code != 0 else 1
+    elif scan_outcome is not None:
         result_text = ""
         terminal = output_safety_scan_failure_terminal(lifecycle, scan_outcome)
         if (

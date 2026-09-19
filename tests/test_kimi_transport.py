@@ -3122,6 +3122,19 @@ def test_kimi_optional_title_redacts_when_machine_path_classifier_is_unavailable
     assert exchange._receipt_text("Bash synthetic worker check") == "<redacted>"
 
 
+def test_kimi_machine_path_classifier_failure_remains_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches an unavailable classifier being treated as a clean Kimi stream."""
+
+    owner = _load_owner()
+    monkeypatch.setattr(owner, "_machine_path_finder", lambda: None)
+
+    assert owner.provider_output_safety_scan_terminal(
+        "kimi", (), stdout=b"", stderr=b""
+    ) == "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+
+
 @pytest.mark.parametrize(
     "update",
     (
@@ -4888,6 +4901,87 @@ def test_kimi_unscannable_selection_has_only_minimal_prelaunch_failure(
     assert "selected" not in payload and "observed" not in payload
     assert canary not in public and canary not in receipt_path.read_text(encoding="utf-8")
     assert payload["cleanupStatus"] == "complete"
+
+
+def test_kimi_private_home_setup_failure_keeps_safe_primary_cause_without_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches pre-child Kimi setup being masked as unavailable output scanning."""
+
+    owner = _load_owner()
+    capture_root = tmp_path / "captures"
+    capture_root.mkdir()
+    prompt_path = tmp_path / "prompt.md"
+    prompt_path.write_text("fixture task\n", encoding="utf-8")
+    receipt_path = tmp_path / "terminal.receipt"
+    child_calls: list[object] = []
+    scan_calls: list[tuple[bytes, bytes, bool]] = []
+    original_scan = owner.provider_output_safety_scan_terminal
+
+    control = owner.Control(
+        topic="fixture",
+        prompt_file=prompt_path,
+        terminal_receipt=receipt_path,
+    )
+    prevalidated = owner.PolicyBoundLaunch(
+        control,
+        "fixture",
+        (),
+        "kimi-code/k3",
+        "high",
+        owner.ExternalRoleProvenance("none", "none"),
+        None,
+    )
+    monkeypatch.setattr(owner, "secure_output_dir", lambda _provider: capture_root)
+    monkeypatch.setattr(
+        owner, "_resolve_launch_provider_command", lambda *_: (["fixture"], None)
+    )
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_auth_configuration",
+        lambda _provider: SimpleNamespace(
+            needles=(), output_scan_disposition=owner.AUTH_OUTPUT_SCAN_ENVIRONMENT_EXACT
+        ),
+    )
+    monkeypatch.setattr(
+        owner.KimiPrivateHomeAliasesV1,
+        "create",
+        classmethod(lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("setup"))),
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_provider_process",
+        lambda *_args, **_kwargs: child_calls.append(object()) or pytest.fail("setup launched child"),
+    )
+
+    def scan(provider, needles, *, stdout, stderr, serialized_line=False):
+        scan_calls.append((stdout, stderr, serialized_line))
+        return original_scan(
+            provider, needles, stdout=stdout, stderr=stderr, serialized_line=serialized_line
+        )
+
+    monkeypatch.setattr(owner, "provider_output_safety_scan_terminal", scan)
+    with owner.ReservedExternalRunV1(owner.TerminalReceiptV1.reserve(receipt_path)) as reserved:
+        code = owner._launch_with_runner(
+            "kimi", [], object(), prevalidated=prevalidated, reserved_run=reserved
+        )
+
+    payload = owner.parse_provider_result(capsys.readouterr().out)
+    assert code == 1
+    assert payload["resultText"] == ""
+    assert payload["token"] == "UNVERIFIED:E_KIMI_ACP_SETUP"
+    assert payload["primaryOutcome"]["token"] == "UNVERIFIED:E_KIMI_ACP_SETUP"
+    assert payload["cleanupStatus"] == "complete"
+    assert payload["captureObservedBytes"] == 0
+    assert child_calls == []
+    assert len(scan_calls) == 2
+    assert scan_calls[0] == (b"", b"", False)
+    assert scan_calls[1][1:] == (b"", True)
+    visible = json.dumps(payload)
+    assert "setup" not in visible
+    assert str(tmp_path) not in visible
+    assert "setup" not in receipt_path.read_text(encoding="utf-8")
+    assert not any(capture_root.iterdir())
 
 
 def test_kimi_unchanged_snapshot_allows_distinct_handle_and_path_ctime(
