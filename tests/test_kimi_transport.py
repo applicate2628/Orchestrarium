@@ -4538,6 +4538,235 @@ def test_kimi_serialized_metadata_cannot_escape_credential_scan(
         assert escaped not in public and escaped not in receipt
 
 
+def test_kimi_private_one_byte_argument_does_not_collide_with_terminal_protocol(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches wrapper protocol fields being mistaken for a selected private value."""
+
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(
+        mcp_servers=(
+            owner.KimiMcpServerV1(name="fixture", args=("--retries", "1")),
+        ),
+    )
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"review complete\nGATE: PASS\n",
+        stderr=b"",
+        capabilities=selection,
+        credential_needles=owner._kimi_mcp_credential_needles(selection),
+    )
+
+    assert code == 0
+    assert payload["gate"] == "PASS"
+    assert payload["resultText"] == "review complete\nGATE: PASS\n"
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_private_one_byte_argument_echo_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches a real one-byte selected-value echo after protocol filtering."""
+
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(
+        mcp_servers=(
+            owner.KimiMcpServerV1(name="fixture", args=("--retries", "1")),
+        ),
+    )
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"1\nGATE: PASS\n",
+        stderr=b"",
+        capabilities=selection,
+        credential_needles=owner._kimi_mcp_credential_needles(selection),
+    )
+
+    assert code != 0
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert payload["resultText"] == ""
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_private_state_argument_does_not_collide_with_primary_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches primary wrapper enums being scanned as selected argument values."""
+
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(
+        mcp_servers=(
+            owner.KimiMcpServerV1(name="fixture", args=("--state", "completed")),
+        ),
+    )
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"review complete\nGATE: PASS\n",
+        stderr=b"",
+        capabilities=selection,
+        credential_needles=owner._kimi_mcp_credential_needles(selection),
+    )
+
+    assert code == 0
+    assert payload["gate"] == "PASS"
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_private_state_argument_echo_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches a true provider echo after nested enum filtering."""
+
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(
+        mcp_servers=(
+            owner.KimiMcpServerV1(name="fixture", args=("--state", "completed")),
+        ),
+    )
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"completed\nGATE: PASS\n",
+        stderr=b"",
+        capabilities=selection,
+        credential_needles=owner._kimi_mcp_credential_needles(selection),
+    )
+
+    assert code != 0
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert payload["resultText"] == ""
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_malformed_serialized_terminal_fails_closed() -> None:
+    """Catches malformed public envelopes bypassing selected-value coverage."""
+
+    owner = _load_owner()
+
+    assert owner.provider_output_safety_scan_terminal(
+        "kimi",
+        (b"synthetic-private",),
+        stdout=b'{"resultText":',
+        stderr=b"",
+        serialized_line=True,
+    ) == "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+
+
+def _serialized_kimi_terminal_for_scan(
+    owner, *, result_text: str = "safe", primary_note: str = "complete"
+) -> str:
+    outcome = owner.FinalOutcome(
+        0,
+        "COMPLETE:EXTERNAL_NONAUTHORIZING",
+        "completed",
+        "PASS",
+        primary_note,
+        0,
+        "COMPLETE:PASS",
+        "completed",
+        "PASS",
+        "complete",
+        "complete",
+        0,
+        "",
+        False,
+        0,
+    )
+    return owner.build_provider_result_line(
+        "kimi",
+        "kimi-code/k3",
+        "high",
+        result_text,
+        outcome,
+        owner.StreamCaptureResult(False, 4, 4, "a" * 64, ()),
+        cancelled=False,
+        timed_out=False,
+        kimi_selected={
+            "tools": ["1"],
+            "mcpNames": [],
+            "subagents": [],
+            "permission": "reject",
+            "cwdSelected": False,
+        },
+        kimi_observed={"toolCalls": [], "permissionDecisions": []},
+    )
+
+
+def test_kimi_serialized_caller_metadata_one_byte_echo_is_rejected() -> None:
+    """Catches dropping selected caller metadata from serialized scanning."""
+
+    owner = _load_owner()
+    line = _serialized_kimi_terminal_for_scan(owner)
+
+    assert owner.provider_output_safety_scan_terminal(
+        "kimi", (b"1",), stdout=line.encode("utf-8"), stderr=b"", serialized_line=True
+    ) == "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+
+
+def test_kimi_serialized_primary_outcome_note_echo_is_rejected() -> None:
+    """Catches omitting the derived nested primary note from the projection."""
+
+    owner = _load_owner()
+    line = _serialized_kimi_terminal_for_scan(owner, primary_note="completed")
+
+    assert owner.provider_output_safety_scan_terminal(
+        "kimi",
+        (b"completed",),
+        stdout=line.encode("utf-8"),
+        stderr=b"",
+        serialized_line=True,
+    ) == "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+
+
+def test_kimi_serialized_unknown_field_fails_closed() -> None:
+    """Catches new terminal fields silently bypassing provenance classification."""
+
+    owner = _load_owner()
+    line = _serialized_kimi_terminal_for_scan(owner)
+    payload = json.loads(line[len(owner.RESULT_PREFIX) :])
+    payload["unclassified"] = "1"
+    serialized = owner.RESULT_PREFIX + json.dumps(payload, separators=(",", ":")) + "\n"
+
+    assert owner.provider_output_safety_scan_terminal(
+        "kimi", (b"1",), stdout=serialized.encode("utf-8"), stderr=b"", serialized_line=True
+    ) == "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+
+
+def test_kimi_serialized_terminal_keeps_complete_generic_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches generic output detection narrowing to the selected-value projection."""
+
+    owner = _load_owner()
+    line = _serialized_kimi_terminal_for_scan(owner)
+    scanned: list[bytes] = []
+    monkeypatch.setattr(
+        owner,
+        "_machine_path_scan_terminal",
+        lambda value: scanned.append(value) or "E_GENERIC_SCAN",
+    )
+
+    assert owner.provider_output_safety_scan_terminal(
+        "kimi", (), stdout=line.encode("utf-8"), stderr=b"", serialized_line=True
+    ) == "E_GENERIC_SCAN"
+    assert scanned == [line.encode("utf-8")]
+
+
 @pytest.mark.parametrize("url", (
     "https://fixture:synthetic%2Durl%2Dsecret@example.invalid/mcp",
     "https://example.invalid/mcp?custom=synthetic%2Durl%2Dsecret",

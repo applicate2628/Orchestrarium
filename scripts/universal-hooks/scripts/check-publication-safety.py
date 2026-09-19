@@ -170,13 +170,13 @@ _BARE = rf"(?:[A-Za-z0-9_+/=-]{{5,}}[0-9][A-Za-z0-9_+/=-]*|[A-Za-z0-9_+/=-]*[0-9
 _CALLABLE_RHS = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\s*\("
 )
+_PUBLIC_TOKEN_AUTH_CUE = "AUTH"
 _PUBLIC_TOKEN_CREDENTIAL_CUES = (
-    "AUTH", "ACCESS", "API", "BEARER", "REFRESH", "SESSION", "OAUTH", "JWT",
+    _PUBLIC_TOKEN_AUTH_CUE, "ACCESS", "API", "BEARER", "REFRESH", "SESSION", "OAUTH", "JWT",
     "CREDENTIAL", "SECRET", "IDENTITY", "CSRF", "PASSWORD",
 )
-_PUBLIC_TOKEN_AUTH_CUE_PREFIXES = ("AUTHENTICAT", "AUTHORIZ", "AUTHORIS")
 _PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS = frozenset(
-    {"accessibilitytoken", "authorshiptoken"}
+    {"accessibilitytoken", "authorshiptoken", "capitaltoken", "rapidtoken"}
 )
 _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS = tuple(
     sorted(
@@ -1181,6 +1181,43 @@ def _is_callable_rhs(line: str, match: re.Match[str]) -> bool:
     return _CALLABLE_RHS.match(line, match.start("rhs_value")) is not None
 
 
+def _is_public_token_credential_identifier(line: str, match: re.Match[str]) -> bool:
+    credential_identifier = match.groupdict().get("credential_token_identifier")
+    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    identifier_suffix = (
+        credential_identifier
+        if credential_identifier is not None
+        else line[match.start():match.start() + len("token")]
+    )
+    identifier = (prefix.group(0) if prefix is not None else "") + identifier_suffix
+    components = tuple(
+        component_match.group(0).upper()
+        for component_match in _IDENTIFIER_COMPONENT.finditer(identifier)
+    )
+    public_lexical_start = next(
+        (
+            index
+            for index in range(len(components))
+            if "".join(components[index:]).casefold()
+            in _PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS
+        ),
+        None,
+    )
+    credential_components = (
+        components if public_lexical_start is None else components[:public_lexical_start]
+    )
+    has_credential_cue = (
+        credential_identifier is not None
+        and credential_identifier.casefold()
+        not in _PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS
+    ) or any(
+        component in _PUBLIC_TOKEN_CREDENTIAL_CUES
+        or component.startswith(_PUBLIC_TOKEN_AUTH_CUE)
+        for component in credential_components
+    )
+    return has_credential_cue
+
+
 def _is_annotated_public_token_match(
     line: str,
     family: str,
@@ -1189,12 +1226,7 @@ def _is_annotated_public_token_match(
 ) -> bool:
     if family != "token" or subject_kind == "commit-message":
         return False
-    credential_identifier = match.groupdict().get("credential_token_identifier")
-    if (
-        credential_identifier is not None
-        and credential_identifier.casefold()
-        not in _PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS
-    ):
+    if _is_public_token_credential_identifier(line, match):
         return False
     rhs = match.group("rhs_value")
     if len(rhs) < 2 or rhs[0] not in {"'", '"'} or rhs[-1] != rhs[0]:
@@ -1202,20 +1234,6 @@ def _is_annotated_public_token_match(
     annotation_match = _PUBLIC_TOKEN_ANNOTATION_SUFFIX.fullmatch(
         line[match.end("rhs_value"):]
     )
-    if credential_identifier is not None:
-        return annotation_match is not None
-    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
-    identifier = (prefix.group(0) if prefix is not None else "") + line[
-        match.start():match.start() + len("token")
-    ]
-    components = set()
-    for component_match in _IDENTIFIER_COMPONENT.finditer(identifier):
-        component = component_match.group(0).upper()
-        if component.startswith(_PUBLIC_TOKEN_AUTH_CUE_PREFIXES):
-            component = "AUTH"
-        components.add(component)
-    if any(cue in components for cue in _PUBLIC_TOKEN_CREDENTIAL_CUES):
-        return False
     return annotation_match is not None
 
 

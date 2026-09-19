@@ -2,6 +2,11 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-19
+
+- **Kimi selected-value checks distinguish user/provider data from wrapper metadata.** Raw provider streams remain checked byte-for-byte, including one-character values. The terminal builder classifies its fields so numeric protocol constants and computed capture hashes no longer cause false credential-echo refusals; caller/provider data remains checked recursively, and the complete serialized result still passes the generic safety detector. Unclassified terminal fields remain explicit failures.
+- **Public-token annotations respect camelCase credential boundaries.** Prefixed auth-compound identifiers are checked consistently with their underscore forms while existing lexical public markers retain their behavior. Canonical and both installed scanner projections use the same identifier classifier.
+
 ## 2026-09-17
 
 - **Lifecycle artifact hashing is bounded and bound to the inspected file.** Recovery, settlement production and verification, and transition admission use one fixed-chunk digest owner with cumulative limits, parent/descriptor identity checks, and a second content pass. Nonblocking no-follow opens prevent a substituted named pipe from stalling before type validation. Ledgers retain the validator-owned envelope rather than inheriting the smaller proof-file limit. **Why it matters:** oversized or changing artifacts produce the caller's typed lifecycle failure instead of a whole-file allocation or a digest of a substituted pathname.

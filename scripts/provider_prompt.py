@@ -4967,9 +4967,24 @@ def provider_output_safety_scan_terminal(
         for needle in needles
         for ascii_only in (False, True)
     )
-    credential = credential_scan_terminal(
-        _merge_credential_needles(needles, escaped), stdout=stdout, stderr=stderr
-    )
+    if serialized_line:
+        try:
+            serialized = stdout.decode("utf-8", errors="strict")
+            projection = _provider_result_scan_projection(parse_provider_result(serialized))
+            selected_output = json.dumps(
+                projection, ensure_ascii=True, separators=(",", ":")
+            ).encode("utf-8")
+        except (UnicodeDecodeError, ValueError, TypeError):
+            return "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+        credential = credential_scan_terminal(
+            _merge_credential_needles(needles, escaped),
+            stdout=selected_output,
+            stderr=stderr,
+        )
+    else:
+        credential = credential_scan_terminal(
+            _merge_credential_needles(needles, escaped), stdout=stdout, stderr=stderr
+        )
     if credential is not None:
         return credential
     if provider != "kimi" and not serialized_line:
@@ -5292,6 +5307,86 @@ def _validate_kimi_receipt_fields(
         raise ValueError("provider result Kimi capability evidence mismatch")
 
 
+_SCAN_RECURSIVE = "scan-recursive"
+_TRUSTED_WRAPPER = "trusted-wrapper"
+_MIXED_WRAPPER = "mixed-wrapper"
+_PRIMARY_OUTCOME_FIELD_PROVENANCE = {
+    "exitCode": _TRUSTED_WRAPPER,
+    "token": _TRUSTED_WRAPPER,
+    "status": _TRUSTED_WRAPPER,
+    "gate": _TRUSTED_WRAPPER,
+    "note": _SCAN_RECURSIVE,
+    "childNonzeroCategory": _TRUSTED_WRAPPER,
+}
+_PROVIDER_RESULT_FIELD_PROVENANCE = {
+    "schema": _TRUSTED_WRAPPER,
+    "provider": _SCAN_RECURSIVE,
+    "model": _SCAN_RECURSIVE,
+    "effort": _SCAN_RECURSIVE,
+    "resultText": _SCAN_RECURSIVE,
+    "exitCode": _TRUSTED_WRAPPER,
+    "token": _TRUSTED_WRAPPER,
+    "status": _TRUSTED_WRAPPER,
+    "gate": _TRUSTED_WRAPPER,
+    "note": _SCAN_RECURSIVE,
+    "cancelled": _TRUSTED_WRAPPER,
+    "timedOut": _TRUSTED_WRAPPER,
+    "stderrMarkerCount": _TRUSTED_WRAPPER,
+    "cleanupStatus": _TRUSTED_WRAPPER,
+    "cleanupIssueCount": _TRUSTED_WRAPPER,
+    "captureRecoveryRetained": _TRUSTED_WRAPPER,
+    "primaryOutcome": _MIXED_WRAPPER,
+    "authorizing": _TRUSTED_WRAPPER,
+    "closesRunIds": _TRUSTED_WRAPPER,
+    "independentVerificationRequired": _TRUSTED_WRAPPER,
+    "terminalClass": _TRUSTED_WRAPPER,
+    "actualExecutionPath": _SCAN_RECURSIVE,
+    "assignedRole": _SCAN_RECURSIVE,
+    "executionRole": _SCAN_RECURSIVE,
+    "workItem": _SCAN_RECURSIVE,
+    "assignedInternalRole": _SCAN_RECURSIVE,
+    "launchFlags": _SCAN_RECURSIVE,
+    "artifactIdentity": _SCAN_RECURSIVE,
+    "externalDispatchId": _SCAN_RECURSIVE,
+    "externalEvidenceRunId": _SCAN_RECURSIVE,
+    "effortMappingLoss": _SCAN_RECURSIVE,
+    "cleanupDiagnostic": _SCAN_RECURSIVE,
+    "childNonzeroCategory": _TRUSTED_WRAPPER,
+    "selected": _SCAN_RECURSIVE,
+    "observed": _SCAN_RECURSIVE,
+    "captureOverflow": _TRUSTED_WRAPPER,
+    "captureObservedBytes": _TRUSTED_WRAPPER,
+    "capturePersistedBytes": _TRUSTED_WRAPPER,
+    "captureDigest": _TRUSTED_WRAPPER,
+    "captureIssueCount": _TRUSTED_WRAPPER,
+}
+
+
+def _provider_result_scan_projection(payload: dict[str, object]) -> dict[str, object]:
+    """Return only caller/provider-derived fields from one validated terminal payload."""
+
+    if not set(payload).issubset(_PROVIDER_RESULT_FIELD_PROVENANCE):
+        raise ValueError("provider result field provenance unavailable")
+    projection = {
+        name: value
+        for name, value in payload.items()
+        if _PROVIDER_RESULT_FIELD_PROVENANCE[name] == _SCAN_RECURSIVE
+    }
+    primary = payload.get("primaryOutcome")
+    if primary is not None:
+        if (
+            not isinstance(primary, dict)
+            or not set(primary).issubset(_PRIMARY_OUTCOME_FIELD_PROVENANCE)
+        ):
+            raise ValueError("provider result primary field provenance unavailable")
+        projection["primaryOutcome"] = {
+            name: value
+            for name, value in primary.items()
+            if _PRIMARY_OUTCOME_FIELD_PROVENANCE[name] == _SCAN_RECURSIVE
+        }
+    return projection
+
+
 def build_provider_result_line(
     provider: str,
     model: str,
@@ -5390,6 +5485,7 @@ def build_provider_result_line(
         )
     if realization is not None:
         raise ValueError("provider result realization is unsupported")
+    _provider_result_scan_projection(payload)
     line = RESULT_PREFIX + json.dumps(
         payload, ensure_ascii=True, separators=(",", ":")
     )

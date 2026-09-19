@@ -765,6 +765,9 @@ class TestPublicationSafetyScanner(unittest.TestCase):
             "mixed-case": f'aPItoken="{value}"; {marker}',
             "underscore-prefix": f'config_accesstoken="{value}"; {marker}',
             "auth-compound": f'config_authclientToken="{value}"; {marker}',
+            "camel-prefix": f'configAuthclientToken="{value}"; {marker}',
+            "camel-prefix-alternate": f'myAuthclientToken="{value}"; {marker}',
+            "credential-prefix-public-suffix": f'auth_authorshiptoken="{value}"; {marker}',
         }
         for scanner in (CANONICAL_SCANNER, *SCANNERS):
             for name, fixture in cases.items():
@@ -782,6 +785,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
             "embedded-api": f'rapidtoken="{value}"; {marker}',
             "embedded-api-long": f'capitaltoken="{value}"; {marker}',
             "authorship": f'authorshiptoken="{value}"; {marker}',
+            "camel-authorship": f'configAuthorshipToken="{value}"; {marker}',
             "underscore-prefix": f'config_protocoltoken="{value}"; {marker}',
             "accessibility": f'config_accessibilitytoken="{value}"; {marker}',
         }
