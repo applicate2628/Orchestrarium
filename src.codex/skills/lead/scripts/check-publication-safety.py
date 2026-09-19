@@ -1819,8 +1819,6 @@ async def _remote_destination_oid(
 def _parse_remote_ref_tip_oids(
     rows: tuple[bytes, ...], object_format: GitObjectFormat
 ) -> tuple[RemoteRefTip, ...] | Refusal:
-    if not rows:
-        return _refusal("PS-MSG-RANGE", "remote-refs")
     if len(rows) > 2 * _MAX_REMOTE_REFS:
         return _refusal("PS-MSG-LIMIT", "remote-ref-count")
     line_cap = object_format.hex_length + 1 + _MAX_PATH_BYTES + len(b"^{}")
@@ -1849,8 +1847,6 @@ def _parse_remote_ref_tip_oids(
         destination[base_ref] = oid
     if len(refs) > _MAX_REMOTE_REFS:
         return _refusal("PS-MSG-LIMIT", "remote-ref-count")
-    if not refs:
-        return _refusal("PS-MSG-RANGE", "remote-refs")
     if any(refname not in refs for refname in peeled_refs):
         return _refusal("PS-MSG-FRAME", "remote-ref")
     return tuple(

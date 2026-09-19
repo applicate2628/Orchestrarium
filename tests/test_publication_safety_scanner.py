@@ -1389,7 +1389,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             self.assertEqual(rc, 1, out + err)
             self.assertIn("PS-FINDING-CONTENT", err)
 
-    def test_range_mode_empty_remote_ref_inventory_refuses(self) -> None:
+    def test_range_mode_empty_remote_ref_inventory_scans_and_redacts_secret(self) -> None:
         leak = "pass" + "word" + ": hunter2"
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1404,9 +1404,9 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             subprocess.run([_git(), "-C", str(repo), "remote", "add", "origin", str(origin)], check=True)
             self._commit_file(repo, "root.txt", leak, message="root commit")
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
-            self.assertEqual(rc, 2, out + err)
-            self.assertIn("id=PS-MSG-RANGE reason=remote-refs", err)
-            self.assertNotIn("PS-FINDING", out + err)
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("PS-FINDING-CONTENT", err)
+            self.assertNotIn(leak, err)
 
     def test_range_mode_merge_parent_history_is_scanned_after_tip_delete(self) -> None:
         leak = "pass" + "word" + ": hunter2"
@@ -2102,17 +2102,19 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                     self._commit(repo, "base.txt", "clean base", "clean base")
                     self._git_run(repo, "merge", "--no-ff", "side", "-q", "-m", message)
                 proc = self._run_range(repo)
-                if case in {"initial", "other-remote"}:
-                    self.assertEqual(
-                        proc.returncode,
-                        2,
-                        f"case={case} out={proc.stdout!r} err={proc.stderr!r}",
-                    )
-                    self.assertIn("reason=remote-refs", proc.stderr)
-                    self.assertNotIn("PS-FINDING", proc.stdout + proc.stderr)
-                else:
-                    self.assertEqual(proc.returncode, 1, f"case={case} out={proc.stdout!r} err={proc.stderr!r}")
-                    self.assertNotIn("A1B2C3D4E5F6G7H8IJK", proc.stdout + proc.stderr)
+                self.assertEqual(proc.returncode, 1, f"case={case} out={proc.stdout!r} err={proc.stderr!r}")
+                self.assertNotIn("A1B2C3D4E5F6G7H8IJK", proc.stdout + proc.stderr)
+
+    def test_range_first_push_empty_remote_scans_clean_initial_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td), publish_seed=False)
+
+            proc = self._run_range(repo)
+
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("publication-safety: clean (range, receipt=v3, commits=1,", proc.stdout)
+            self.assertIn("messages=complete", proc.stdout)
+            self.assertIn("remote=origin, dst=main, src=main,", proc.stdout)
 
     def test_range_message_zero_file_nonzero_commit(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2559,7 +2561,6 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
         tip = "1" * 40
         other = "2" * 40
         cases = {
-            "empty": (),
             "invalid-oid": (b"not-an-oid\trefs/heads/main",),
             "malformed-row": (tip.encode("ascii"),),
             "invalid-ref": (f"{tip}\tHEAD".encode("ascii"),),
@@ -3559,13 +3560,8 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
 
                 proc = self._run_range(repo)
 
-                if push_has_seed:
-                    self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
-                    self.assertIn("PS-FINDING-COMMIT-MESSAGE", proc.stderr)
-                else:
-                    self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
-                    self.assertIn("reason=remote-refs", proc.stderr)
-                    self.assertNotIn("PS-FINDING", proc.stdout + proc.stderr)
+                self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                self.assertIn("PS-FINDING-COMMIT-MESSAGE", proc.stderr)
                 self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
 
     def test_range_refuses_multiple_configured_push_destinations(self) -> None:
