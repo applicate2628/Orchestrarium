@@ -27,7 +27,7 @@ intended query. As an explicitly non-normative workflow example, CodeGraph uses
 When selecting or changing a project, or recovering stale state, the reported project/index identity matches the selected root before use;
 known omitted coverage is reported with the result. If instructions conflict
 with an installed tool, inspect its own supported entrypoint, help, and version
-before acting; do not invent or reimplement that tool's pipeline.
+before acting; do not invent or reimplement that tool's pipeline. Before treating graph call, dependency, or blast-radius output as exact decision evidence, match the qualified symbol plus declaring type/file where applicable to the requested target; distinguish direct calls, callback/indirect reachability, and fuzzy suggestions. Ambiguous/unmatched rows require source verification; do not declare them exact.
 
 This is capability-based, not a per-provider or per-server registry: a
 stateless or live MCP does not need a refresh. A failed refresh is reported
