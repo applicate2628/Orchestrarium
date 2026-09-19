@@ -1469,7 +1469,18 @@ class KimiPrivateHomeAliasesV1:
                 if not os.path.lexists(source):
                     continue
                 alias = home / name
-                os.symlink(str(source), alias, target_is_directory=is_directory)
+                try:
+                    os.symlink(str(source), alias, target_is_directory=is_directory)
+                except OSError as exc:
+                    if os.name != "nt" or exc.winerror != 1314:
+                        raise
+                    from _winapi import CreateJunction
+
+                    CreateJunction(str(source), str(alias))
+                    aliases.append((alias, str(source)))
+                    if not os.path.isjunction(alias):
+                        raise OSError("Kimi private-home junction creation failed") from exc
+                    continue
                 aliases.append((alias, str(source)))
             owner.aliases = tuple(aliases)
             return owner

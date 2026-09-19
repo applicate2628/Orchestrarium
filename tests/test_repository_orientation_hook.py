@@ -150,7 +150,13 @@ class RepositoryOrientationHookTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def assert_warns(self, entries: list[dict], **kwargs: object) -> None:
+    def assert_warns(
+        self,
+        entries: list[dict],
+        *,
+        expected: str | None = None,
+        **kwargs: object,
+    ) -> None:
         for script in HOOKS:
             with self.subTest(script=script):
                 result = run_hook(script, self.repo, entries, **kwargs)
@@ -163,6 +169,13 @@ class RepositoryOrientationHookTests(unittest.TestCase):
                 specific = payload["hookSpecificOutput"]
                 self.assertEqual(specific["hookEventName"], "PreToolUse")
                 self.assertIn(WARNING, specific["additionalContext"])
+                if expected is not None:
+                    self.assertIn(expected, specific["additionalContext"])
+                    self.assertIn(
+                        "Expected grammar: `REPOSITORY ORIENTATION: "
+                        "scope=<repo-relative path>;",
+                        specific["additionalContext"],
+                    )
 
     def assert_silent(self, entries: list[dict], **kwargs: object) -> None:
         for script in HOOKS:
@@ -216,6 +229,46 @@ class RepositoryOrientationHookTests(unittest.TestCase):
         for record in (malformed, duplicate, orientation(scope="src", evidence="no-line-citation")):
             with self.subTest(record=record):
                 self.assert_warns([claude_user("Update src."), claude_assistant(record)])
+
+    def test_rejected_record_identifies_backtick_and_status_grammar(self) -> None:
+        backticked = (
+            "REPOSITORY ORIENTATION: scope=`src`; status=`ready`; "
+            "workflow=`Обновить тесты`; protected=`none`; evidence=`AGENTS.md:1`"
+        )
+        unrecognized_status = orientation(scope="src", status="ready")
+        cases = (
+            (backticked, "field status must be one of live, mutable, frozen, archived, deprecated, superseded, conflict"),
+            (unrecognized_status, "field status must be one of live, mutable, frozen, archived, deprecated, superseded, conflict"),
+        )
+        for record, expected in cases:
+            with self.subTest(record=record):
+                self.assert_warns(
+                    [claude_user("Update src."), claude_assistant(record)],
+                    expected=expected,
+                )
+
+        self.assert_silent(
+            [
+                claude_user("Update src."),
+                claude_assistant(
+                    orientation(scope="src", workflow="Обновить тесты")
+                ),
+            ]
+        )
+
+    def test_backticked_workflow_and_protected_preserve_existing_acceptance(self) -> None:
+        self.assert_silent(
+            [
+                claude_user("Update src."),
+                claude_assistant(
+                    orientation(
+                        scope="src",
+                        workflow="`entry`",
+                        protected="`none`",
+                    )
+                ),
+            ]
+        )
 
     def test_archived_path_gets_stronger_warning_without_historical_scope(self) -> None:
         archived = self.repo / "Archive" / "snapshot.md"

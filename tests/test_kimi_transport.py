@@ -3820,15 +3820,107 @@ def test_kimi_private_config_is_removed_when_alias_setup_fails(
     run_dir = tmp_path / "run"
     run_dir.mkdir()
 
+    native_calls: list[object] = []
+
     def fail_symlink(*_args, **_kwargs) -> None:
-        raise OSError("synthetic")
+        raise OSError(5, "synthetic", None, 5)
 
     monkeypatch.setattr(owner.os, "symlink", fail_symlink)
+    monkeypatch.setitem(
+        sys.modules,
+        "_winapi",
+        SimpleNamespace(CreateJunction=lambda *_args: native_calls.append(object())),
+    )
 
-    with pytest.raises(OSError, match="synthetic"):
+    with pytest.raises(OSError) as caught:
         owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
 
+    assert caught.value.winerror == 5
+    assert native_calls == []
     assert not (run_dir / "kimi-home" / "config.toml").exists()
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or not hasattr(__import__("_winapi"), "CreateJunction"),
+    reason="Windows native junction contract",
+)
+def test_kimi_private_home_uses_native_junction_after_symlink_privilege_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a 1314 credentials alias failure that needlessly blocks ACP setup."""
+
+    owner = _load_owner()
+    user_data = tmp_path / "user & percent% caret^ (source)"
+    credentials = user_data / "credentials"
+    credentials.mkdir(parents=True)
+    marker = credentials / "fixture-marker"
+    marker.write_bytes(b"unchanged")
+    run_dir = tmp_path / "run & percent% caret^ (destination)"
+    run_dir.mkdir()
+
+    monkeypatch.setattr(
+        owner.os,
+        "symlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError(22, "synthetic", None, 1314)
+        ),
+    )
+
+    aliases = owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+    alias = aliases.home / "credentials"
+
+    assert os.path.isjunction(alias)
+    assert not alias.is_symlink()
+    aliases.cleanup()
+    assert not os.path.lexists(alias)
+    assert marker.read_bytes() == b"unchanged"
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or not hasattr(__import__("_winapi"), "CreateJunction"),
+    reason="Windows native junction contract",
+)
+def test_kimi_native_junction_verification_failure_reclaims_registered_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a created junction escaping cleanup when its post-create check fails."""
+
+    owner = _load_owner()
+    user_data = tmp_path / "user-data"
+    credentials = user_data / "credentials"
+    credentials.mkdir(parents=True)
+    marker = credentials / "fixture-marker"
+    marker.write_bytes(b"unchanged")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    alias = run_dir / "kimi-home" / "credentials"
+    original_isjunction = owner.os.path.isjunction
+
+    monkeypatch.setattr(
+        owner.os,
+        "symlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError(22, "synthetic", None, 1314)
+        ),
+    )
+    monkeypatch.setattr(
+        owner.os.path,
+        "isjunction",
+        lambda path: False if Path(path) == alias else original_isjunction(path),
+    )
+
+    try:
+        with pytest.raises(OSError, match="Kimi private-home junction creation failed"):
+            owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+
+        assert not os.path.lexists(alias)
+        assert not (run_dir / "kimi-home" / "config.toml").exists()
+        assert marker.read_bytes() == b"unchanged"
+    finally:
+        if os.path.lexists(alias):
+            alias.rmdir()
 
 
 def test_kimi_selected_cwd_and_mcp_variants_reach_session_new_unchanged(
@@ -4916,7 +5008,10 @@ def test_kimi_private_home_setup_failure_keeps_safe_primary_cause_without_child(
     receipt_path = tmp_path / "terminal.receipt"
     child_calls: list[object] = []
     scan_calls: list[tuple[bytes, bytes, bool]] = []
+    fallback_calls: list[tuple[str, str]] = []
     original_scan = owner.provider_output_safety_scan_terminal
+    user_home = tmp_path / "user home & percent% caret^ (setup)"
+    (user_home / ".kimi-code" / "credentials").mkdir(parents=True)
 
     control = owner.Control(
         topic="fixture",
@@ -4944,9 +5039,20 @@ def test_kimi_private_home_setup_failure_keeps_safe_primary_cause_without_child(
         ),
     )
     monkeypatch.setattr(
-        owner.KimiPrivateHomeAliasesV1,
-        "create",
-        classmethod(lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("setup"))),
+        owner.os,
+        "symlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError(22, "synthetic", None, 1314)
+        ),
+    )
+    monkeypatch.setenv("USERPROFILE", str(user_home))
+
+    def fail_native_junction(source: str, alias: str) -> None:
+        fallback_calls.append((source, alias))
+        raise OSError("native-fallback-detail")
+
+    monkeypatch.setitem(
+        sys.modules, "_winapi", SimpleNamespace(CreateJunction=fail_native_junction)
     )
     monkeypatch.setattr(
         owner,
@@ -4974,11 +5080,12 @@ def test_kimi_private_home_setup_failure_keeps_safe_primary_cause_without_child(
     assert payload["cleanupStatus"] == "complete"
     assert payload["captureObservedBytes"] == 0
     assert child_calls == []
+    assert len(fallback_calls) == 1
     assert len(scan_calls) == 2
     assert scan_calls[0] == (b"", b"", False)
     assert scan_calls[1][1:] == (b"", True)
     visible = json.dumps(payload)
-    assert "setup" not in visible
+    assert "native-fallback-detail" not in visible
     assert str(tmp_path) not in visible
     assert "setup" not in receipt_path.read_text(encoding="utf-8")
     assert not any(capture_root.iterdir())

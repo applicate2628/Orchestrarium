@@ -37,7 +37,7 @@ For external adapters, include the provenance header from `external-dispatch.md`
 Role:
 Goal:
 Approved inputs:
-- <accepted artifact or fact>
+- <accepted artifact or fact; for a file, its complete portable path relative to the concrete base directory identity declared in Scope>
 Allowed tools:
 - <exact task-scoped tool or MCP identifier discovered immediately before this spawn, or none>
 Scope:
@@ -73,6 +73,8 @@ Gate to next stage:
 ```
 
 Before dispatch, fill `Diff-invisible invariants`, `Named regression guard`, `Dead/superseded code disposition`, and `Cleanup disposition`. For `Dead/superseded code disposition`, `none` is valid only with a one-line reason. When a change supersedes a mechanism, `none` is invalid. For `Cleanup disposition`, `preserved` requires a reason and `none` means the recipient owns no resource in that category. An implementation or review handoff with any field omitted is incomplete.
+
+For a file `Approved input`, `Scope` names its concrete base directory identity (the repository root, selected worktree root, or producing run root). The receiving side resolves the complete portable relative path against that declared base only; it never infers that workspace, repository, worktree, and run roots are equal. Existing declared-file hash rules remain unchanged. Fact-only inputs are unaffected.
 
 The caller performs fresh discovery before every subagent spawn and records only the exact task-scoped identifiers selected for that run, or `none`. An inherited but unlisted tool remains behaviorally forbidden; blanket Model Context Protocol or whole-runtime authorization is invalid.
 

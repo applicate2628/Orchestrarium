@@ -23,7 +23,7 @@ SESSION_START_CONTEXT = "\n".join(
         "[MCP/tools reminder - session start and compaction]",
         "For codebase, architecture, API/docs, search, browser, debugger, profiler, or repository-understanding work, discover connected MCP/tools at runtime, load the relevant schema, and use the fitting tool before ad-hoc shell reads. Under mcpMode: force this is mandatory; under mcpMode: auto, consider MCP first and explain a skip when MCP was explicitly requested.",
         "A connected but uninitialized, empty, or unindexed tool is not unavailable: initialize it by its own instructions and use or await the result.",
-        "Before using stateful or indexed repository evidence after repository, project, branch, worktree, or indexed-input changes, check status/freshness; when stale or pending, sync/update/reindex, confirm fresh, and repeat the intended query. Never present stale evidence. Use another path only if refresh fails, the tool is unavailable, the user forbids it, or an explicit resource bound is exceeded; state why. Stateless or live tools need no refresh.",
+        "Before using stateful or indexed repository evidence after repository, project, branch, worktree, or indexed-input changes, check status/freshness; when stale or pending, sync/update/reindex, confirm fresh, and repeat the intended query. When selecting/changing a project or recovering stale state, verify the reported project/index identity matches the selected root before use. Report known omitted coverage. When instructions conflict with an installed tool, inspect its own supported entrypoint/help/version; do not invent or reimplement its pipeline. This is not a per-call version check. Never present stale evidence. Use another path only if refresh fails, the tool is unavailable, the user forbids it, or an explicit resource bound is exceeded; state why. Stateless or live tools need no refresh.",
         "For dispatched work, give each lane only needed MCP/tools and context; keep its role, scope, safety limits, and mandatory gates unchanged.",
     )
 )
@@ -41,7 +41,11 @@ TURN_ANCHOR_CONTEXT = (
     " Give each lane only needed tools and context; keep mandatory gates.\n"
     "For repository understanding, discover fitting runtime MCP/tools before ad-hoc search."
     " After repository, project, branch, worktree, or indexed-input changes, check"
-    " status/freshness, sync/update/reindex stale state, confirm fresh, and retry. Use fallback"
+    " status/freshness, sync/update/reindex stale state, confirm fresh, and retry. When selecting/changing"
+    " a project or recovering stale state, verify the reported project/index identity matches the selected"
+    " root before use, report known omitted coverage, and when instructions conflict with an installed tool"
+    " inspect its own supported entrypoint/help/version rather than invent or reimplement its pipeline; this"
+    " is not a per-call version check. Use fallback"
     " only if refresh fails, the tool is unavailable, the user forbids it, or an explicit"
     " resource bound is exceeded; state why and never use stale evidence.\n"
     "Universal no-self-residue checkpoint: before completion, commit, push, or handoff, and"

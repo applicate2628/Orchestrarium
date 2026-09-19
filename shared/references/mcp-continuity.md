@@ -24,9 +24,16 @@ sync, update, or reindex operation, confirm freshness again, then repeat the
 intended query. As an explicitly non-normative workflow example, CodeGraph uses
 `status -> sync -> fresh status -> repeat query`; this name never selects a tool.
 
+When selecting or changing a project, or recovering stale state, the reported project/index identity matches the selected root before use;
+known omitted coverage is reported with the result. If instructions conflict
+with an installed tool, inspect its own supported entrypoint, help, and version
+before acting; do not invent or reimplement that tool's pipeline.
+
 This is capability-based, not a per-provider or per-server registry: a
 stateless or live MCP does not need a refresh. A failed refresh is reported
-explicitly and stale output is not presented as current.
+explicitly and stale output is not presented as current. The selection, change,
+and recovery guard is not a per-call version check, requires no new vendor API,
+and never directs an automatic deep or large-language-model build.
 
 ## Navigation classification
 
