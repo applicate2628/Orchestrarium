@@ -23,6 +23,7 @@ The rules below apply to every tracked file in the repository, including docs, r
 ## Review and publication
 
 - Human review is mandatory before `git push`, release, or equivalent publication.
+- A history/recovery size-limit refusal means earlier permission could not be verified within the acquisition bounds; it does not establish that the current transcript is unreadable or that the user never granted permission. Diagnostics must preserve that distinction without granting authority from summaries or weakening limits.
 - `RELEASE_NOTES.md` is the canonical tracked release log for this repository.
 - Keep `RELEASE_NOTES.md` in reverse-chronological `## YYYY-MM-DD` sections. New release-relevant notes belong under the current date heading, or under a newly created heading for today's date if that heading does not exist yet.
 - Default publication-gate approver is `$knowledge-archivist`.
