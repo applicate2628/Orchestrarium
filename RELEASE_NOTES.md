@@ -4,6 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-09-19
 
+- **Stray-artifact warnings ignore quoted shell data.** JavaScript arrows inside quoted command arguments no longer look like output redirection. The existing shell resolver selects POSIX or PowerShell escaping; real outer redirections, quoted output targets, and raw Windows path spelling remain checked. Missing or unsupported shell metadata leaves redirect classification silent rather than guessing; worktree/compiler checks retain their existing paths. The hook remains warn-only.
 - **Kimi selected-value checks distinguish user/provider data from wrapper metadata.** Raw provider streams remain checked byte-for-byte, including one-character values. The terminal builder classifies its fields so numeric protocol constants and computed capture hashes no longer cause false credential-echo refusals; caller/provider data remains checked recursively, and the complete serialized result still passes the generic safety detector. Unclassified terminal fields remain explicit failures.
 - **Public-token annotations respect camelCase credential boundaries.** Prefixed auth-compound identifiers are checked consistently with their underscore forms while existing lexical public markers retain their behavior. Canonical and both installed scanner projections use the same identifier classifier.
 
