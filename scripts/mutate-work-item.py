@@ -13042,7 +13042,14 @@ def _projection_registry_records(data: bytes) -> list[tuple[dict, bytes]]:
     return records
 
 
-def _projection_entry(manifest: dict, entry_id: str, raw_ordinal: int, root: Path) -> dict:
+def _projection_entry(
+    manifest: dict,
+    entry_id: str,
+    raw_ordinal: int,
+    root: Path,
+    *,
+    candidate_ledger_bytes: bytes | None = None,
+) -> dict:
     manifest_id = manifest.get("manifestId")
     if not isinstance(manifest_id, str) or _PROJECTION_OPERATION_RE.fullmatch(manifest_id) is None:
         _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest id is invalid")
@@ -13116,7 +13123,7 @@ def _projection_entry(manifest: dict, entry_id: str, raw_ordinal: int, root: Pat
             "WI-LEDGER-MIGRATION-TARGET-IDENTITY",
             "; ".join(target_errors) or "manifest target is not one safe active or archive work-item ledger",
         )
-    ledger_bytes = ledger.read_bytes()
+    ledger_bytes = ledger.read_bytes() if candidate_ledger_bytes is None else candidate_ledger_bytes
     lines = ledger_bytes.splitlines(keepends=True)
     if _sha256_bytes(ledger_bytes) != entry["ledgerSha256"]:
         _projection_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "manifest ledger digest differs")
@@ -13130,8 +13137,26 @@ def _projection_entry(manifest: dict, entry_id: str, raw_ordinal: int, root: Pat
     return {**entry, "_item": item, "_ledger": ledger, "_ledgerBytes": ledger_bytes, "_rawDigest": raw_digest, "_projected": projected, "_projectedDigest": projected_digest}
 
 
-def _projection_record(manifest: dict, manifest_bytes: bytes, entry_id: str, raw_ordinal: int, operation_group_id: str, group_member_index: int, group_member_count: int, recorded_at: str, root: Path) -> dict:
-    entry = _projection_entry(manifest, entry_id, raw_ordinal, root)
+def _projection_record(
+    manifest: dict,
+    manifest_bytes: bytes,
+    entry_id: str,
+    raw_ordinal: int,
+    operation_group_id: str,
+    group_member_index: int,
+    group_member_count: int,
+    recorded_at: str,
+    root: Path,
+    *,
+    candidate_ledger_bytes: bytes | None = None,
+) -> dict:
+    entry = _projection_entry(
+        manifest,
+        entry_id,
+        raw_ordinal,
+        root,
+        candidate_ledger_bytes=candidate_ledger_bytes,
+    )
     operation_id = _projection_group_ids(operation_group_id, group_member_count)[group_member_index - 1]
     return {
         "schemaVersion": 2, "operationId": operation_id, "operationGroupId": operation_group_id,
@@ -13400,6 +13425,659 @@ def apply_legacy_ledger_projection(root: Path, manifest_bytes: bytes, entry_id: 
         child_ids = _projection_group_ids(operation_id, len(entry["rawLineOrdinals"]))
         return {"schemaVersion": 1, "dryRun": True, "byteInventory": {}, "operationIds": child_ids}
     return _apply_legacy_ledger_projection_transaction(root, manifest_bytes, entry_id, raw_ordinal, expected_registry_sha256, operation_id, recorded_at, inject_failure=inject_failure)
+
+
+_LEGACY_SETTLEMENT_PROFILE = "identity-ledger-v1-string"
+_LEGACY_SETTLEMENT_REQUEST_FIELDS = {
+    "schemaVersion", "operationId", "recordedAt", "workItem",
+    "expectedLedgerSha256", "profileId", "profileVersion", "settlements",
+}
+_LEGACY_SETTLEMENT_ROW_FIELDS = {"targetRunId", "disposition", "evidence"}
+_LEGACY_SETTLEMENT_EVIDENCE_FIELDS = {"path", "sha256"}
+
+
+def _legacy_settlement_fail(failure_id: str, message: str) -> None:
+    raise LifecycleError(failure_id, message)
+
+
+def _legacy_settlement_request(request_bytes: bytes) -> dict:
+    request = _projection_object(request_bytes, "legacy ledger settlement request")
+    if set(request) != _LEGACY_SETTLEMENT_REQUEST_FIELDS:
+        _legacy_settlement_fail(
+            "WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED",
+            "settlement request fields differ from schema version 1",
+        )
+    operation_id = request.get("operationId")
+    recorded_at = request.get("recordedAt")
+    _projection_operation(operation_id, recorded_at)
+    if (
+        request.get("schemaVersion") != 1
+        or request.get("profileId") != _LEGACY_SETTLEMENT_PROFILE
+        or request.get("profileVersion") != 1
+        or not isinstance(request.get("workItem"), str)
+        or SLUG_RE.fullmatch(request["workItem"]) is None
+        or not isinstance(request.get("expectedLedgerSha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", request["expectedLedgerSha256"]) is None
+        or not isinstance(request.get("settlements"), list)
+    ):
+        _legacy_settlement_fail(
+            "WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED",
+            "settlement request identity or profile is invalid",
+        )
+    seen: set[str] = set()
+    for row in request["settlements"]:
+        if not isinstance(row, dict) or set(row) != _LEGACY_SETTLEMENT_ROW_FIELDS:
+            _legacy_settlement_fail(
+                "WI-LEDGER-LEGACY-SETTLEMENT-INCOMPLETE",
+                "settlement row shape is invalid",
+            )
+        target = row.get("targetRunId")
+        evidence = row.get("evidence")
+        disposition = row.get("disposition")
+        if (
+            not isinstance(target, str)
+            or len(target) < 8
+            or target in seen
+            or disposition not in {"satisfied-by-current-evidence", "preserve-open"}
+            or not isinstance(evidence, list)
+            or (disposition == "preserve-open" and evidence)
+            or (disposition == "satisfied-by-current-evidence" and not evidence)
+        ):
+            _legacy_settlement_fail(
+                "WI-LEDGER-LEGACY-SETTLEMENT-INCOMPLETE",
+                "settlement targets, dispositions, and evidence must be exact and unique",
+            )
+        seen.add(target)
+        for proof in evidence:
+            if (
+                not isinstance(proof, dict)
+                or set(proof) != _LEGACY_SETTLEMENT_EVIDENCE_FIELDS
+                or not isinstance(proof.get("path"), str)
+                or not proof["path"]
+                or not isinstance(proof.get("sha256"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", proof["sha256"]) is None
+            ):
+                _legacy_settlement_fail(
+                    "WI-LEDGER-LEGACY-EVIDENCE-DRIFT",
+                    "settlement evidence binding is invalid",
+                )
+    return request
+
+
+def _legacy_settlement_evidence(root: Path, request: dict) -> None:
+    root = Path(root).resolve()
+    for row in request["settlements"]:
+        for proof in row["evidence"]:
+            relative = PurePosixPath(proof["path"])
+            if relative.is_absolute() or not relative.parts or any(
+                part in {"", ".", ".."} for part in relative.parts
+            ):
+                _legacy_settlement_fail(
+                    "WI-LEDGER-LEGACY-EVIDENCE-DRIFT",
+                    "settlement evidence path is not repository-relative",
+                )
+            candidate = root.joinpath(*relative.parts)
+            if not candidate.is_file() or any(
+                _lifecycle_path_has_reparse(root.joinpath(*relative.parts[:index]))
+                for index in range(1, len(relative.parts) + 1)
+            ):
+                _legacy_settlement_fail(
+                    "WI-LEDGER-LEGACY-EVIDENCE-DRIFT",
+                    f"settlement evidence is missing or unsafe: {proof['path']}",
+                )
+            if _sha256_bytes(candidate.read_bytes()) != proof["sha256"]:
+                _legacy_settlement_fail(
+                    "WI-LEDGER-LEGACY-EVIDENCE-DRIFT",
+                    f"settlement evidence digest changed: {proof['path']}",
+                )
+
+
+def _legacy_settlement_manifest(
+    root: Path,
+    item: Path,
+    ledger_bytes: bytes,
+    request_bytes: bytes,
+    request: dict,
+    *,
+    legacy_line_count: int | None = None,
+) -> tuple[dict, bytes, str, list[dict]]:
+    all_lines = ledger_bytes.splitlines(keepends=True)
+    count = len(all_lines) if legacy_line_count is None else legacy_line_count
+    lines = all_lines[:count]
+    if (
+        not lines
+        or count > len(all_lines)
+        or any(not line.endswith(b"\n") or not line[:-1].strip() for line in all_lines)
+    ):
+        _legacy_settlement_fail(
+            "WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED",
+            "legacy ledger must contain bounded nonblank newline-terminated rows",
+        )
+    try:
+        events = [
+            _projection_object(line.rstrip(b"\r\n"), f"legacy ledger line {ordinal}")
+            for ordinal, line in enumerate(lines, start=1)
+        ]
+    except LifecycleError as exc:
+        if exc.failure_id == "WI-LEDGER-MIGRATION-MANIFEST-INVALID":
+            raise LifecycleError(
+                "WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED",
+                "legacy ledger contains a malformed row",
+            ) from exc
+        raise
+    manifest_id = f"legacy-settlement-{_sha256_bytes(request_bytes)[:32]}"
+    entry_id = "identity-ledger-v1-string"
+    entry = {
+        "entryId": entry_id,
+        "profileId": _LEGACY_SETTLEMENT_PROFILE,
+        "profileVersion": 1,
+        "workItem": item.relative_to(root).as_posix(),
+        "ledgerPath": (item / "agent-runs.jsonl").relative_to(root).as_posix(),
+        "ledgerSha256": _sha256_bytes(ledger_bytes),
+        "rawLineOrdinals": list(range(1, len(lines) + 1)),
+        "rawLineSha256": [_sha256_bytes(line) for line in lines],
+        "projectedEvents": events,
+        "projectedEventSha256": [_sha256_bytes(_projection_json(event)) for event in events],
+    }
+    manifest = {
+        "schemaVersion": 1,
+        "manifestId": manifest_id,
+        "profiles": [
+            {"profileId": _LEGACY_SETTLEMENT_PROFILE, "profileVersion": 1}
+        ],
+        "entries": [entry],
+    }
+    profile_errors: list[str] = []
+    validator = _load_agent_run_ledger().load_validator()
+    projected = validator._profile_projection(
+        (_LEGACY_SETTLEMENT_PROFILE, 1), events, item, entry, profile_errors
+    )
+    if projected is None or profile_errors:
+        _raise_legacy_settlement_validation(profile_errors)
+    return manifest, _projection_json(manifest), entry_id, events
+
+
+def _legacy_settlement_projection_candidate(
+    root: Path,
+    manifest: dict,
+    manifest_bytes: bytes,
+    entry_id: str,
+    request: dict,
+    ledger_bytes: bytes,
+) -> tuple[dict[str, bytes], bytes]:
+    manifests_path, registry_path, _receipts = _projection_paths(root)
+    manifests = _projection_manifest_blobs(
+        Path(root).resolve(), manifests_path, manifest["manifestId"], manifest_bytes
+    )
+    registry_before = registry_path.read_bytes() if registry_path.exists() else b""
+    if registry_path.exists() and (
+        not registry_path.is_file() or _lifecycle_path_has_reparse(registry_path)
+    ):
+        _legacy_settlement_fail(
+            "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+            "projection registry is unsafe",
+        )
+    ordinals = manifest["entries"][0]["rawLineOrdinals"]
+    records = [
+        _projection_record(
+            manifest,
+            manifest_bytes,
+            entry_id,
+            ordinal,
+            request["operationId"],
+            index,
+            len(ordinals),
+            request["recordedAt"],
+            Path(root).resolve(),
+            candidate_ledger_bytes=ledger_bytes,
+        )
+        for index, ordinal in enumerate(ordinals, start=1)
+    ]
+    child_ids = _projection_group_ids(request["operationId"], len(records))
+    existing_ids = {
+        row.get("operationId")
+        for row, _physical in _projection_registry_records(registry_before)
+    }
+    if any(child_id in existing_ids for child_id in child_ids):
+        _legacy_settlement_fail(
+            "WI-LEDGER-COMPAT-REPLAY-MISMATCH",
+            "settlement operation already has registry state without an exact replay receipt",
+        )
+    return manifests, registry_before + b"".join(
+        _projection_json(record) + b"\n" for record in records
+    )
+
+
+def _raise_legacy_settlement_validation(errors: list[str]) -> None:
+    if not errors:
+        return
+    preferred = next(
+        (
+            error for error in errors
+            if error.startswith("WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED:")
+        ),
+        errors[0],
+    )
+    failure_id = preferred.split(":", 1)[0]
+    _legacy_settlement_fail(failure_id, "; ".join(errors))
+
+
+def _legacy_settlement_target(root: Path, request_bytes: bytes) -> dict:
+    root = Path(root).resolve()
+    request = _legacy_settlement_request(request_bytes)
+    _legacy_settlement_evidence(root, request)
+    item = _work_items_root(root) / "active" / request["workItem"]
+    ledger = item / "agent-runs.jsonl"
+    if not item.is_dir() or not ledger.is_file() or _lifecycle_path_has_reparse(ledger):
+        _legacy_settlement_fail(
+            "WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+            "settlement target is not one ordinary active work-item ledger",
+        )
+    ledger_bytes = ledger.read_bytes()
+    if _sha256_bytes(ledger_bytes) != request["expectedLedgerSha256"]:
+        _legacy_settlement_fail(
+            "WI-LEDGER-MIGRATION-LEDGER-DRIFT",
+            "settlement ledger digest changed",
+        )
+    manifest, manifest_bytes, entry_id, events = _legacy_settlement_manifest(
+        root, item, ledger_bytes, request_bytes, request
+    )
+    return {
+        "request": request,
+        "item": item,
+        "ledger": ledger,
+        "ledgerBytes": ledger_bytes,
+        "manifest": manifest,
+        "manifestBytes": manifest_bytes,
+        "entryId": entry_id,
+        "events": events,
+    }
+
+
+def _preflight_legacy_ledger_settlement(
+    root: Path, request_bytes: bytes
+) -> tuple[dict, dict]:
+    root = Path(root).resolve()
+    plan = _legacy_settlement_target(root, request_bytes)
+    request = plan["request"]
+    item = plan["item"]
+    ledger_bytes = plan["ledgerBytes"]
+    manifest = plan["manifest"]
+    manifest_bytes = plan["manifestBytes"]
+    entry_id = plan["entryId"]
+    events = plan["events"]
+    manifests, registry_candidate = _legacy_settlement_projection_candidate(
+        root, manifest, manifest_bytes, entry_id, request, ledger_bytes
+    )
+    validator = _load_agent_run_ledger().load_validator()
+    obligations: list[object] = []
+    errors = validator.validate_work_item(
+        item,
+        strict_revise=False,
+        validate_status_file=False,
+        projection_manifest_blobs=manifests,
+        projection_registry_bytes=registry_candidate,
+        obligation_state_out=obligations,
+    )
+    _raise_legacy_settlement_validation(errors)
+    if len(obligations) != 1:
+        _legacy_settlement_fail(
+            "WI-LEDGER-LEGACY-SETTLEMENT-INCOMPLETE",
+            "existing reducer did not return one obligation state",
+        )
+    obligation_state = obligations[0]
+    open_rows = tuple(obligation_state.open_revise) + tuple(obligation_state.open_launches)
+    open_ids = [row.run_id for row in open_rows]
+    requested_ids = [row["targetRunId"] for row in request["settlements"]]
+    if len(requested_ids) != len(set(requested_ids)) or set(requested_ids) != set(open_ids):
+        _legacy_settlement_fail(
+            "WI-LEDGER-LEGACY-SETTLEMENT-INCOMPLETE",
+            "settlement rows must exactly cover reducer-reported obligations",
+        )
+    result = {
+        "schemaVersion": 1,
+        "operationId": request["operationId"],
+        "profileId": request["profileId"],
+        "profileVersion": request["profileVersion"],
+        "applied": False,
+        "replay": False,
+        "legacyRunIds": [event["runId"] for event in events],
+        "openObligations": open_ids,
+        "ledgerBeforeSha256": _sha256_bytes(ledger_bytes),
+    }
+    return result, {
+        **plan,
+        "manifests": manifests,
+        "registryCandidate": registry_candidate,
+        "obligationRows": {row.run_id: row for row in open_rows},
+    }
+
+
+def _legacy_settlement_replay(root: Path, request_bytes: bytes) -> dict | None:
+    root = Path(root).resolve()
+    request = _legacy_settlement_request(request_bytes)
+    _legacy_settlement_evidence(root, request)
+    manifests_path, registry_path, receipts_path = _projection_paths(root)
+    receipt_path = receipts_path / f"{request['operationId']}.json"
+    if not receipt_path.exists():
+        return None
+    if not receipt_path.is_file() or _lifecycle_path_has_reparse(receipt_path):
+        _legacy_settlement_fail(
+            "WI-LEDGER-COMPAT-REPLAY-MISMATCH", "settlement receipt is unsafe"
+        )
+    receipt = _projection_object(receipt_path.read_bytes(), "legacy settlement receipt")
+    item = _work_items_root(root) / "active" / request["workItem"]
+    ledger = item / "agent-runs.jsonl"
+    manifest_path = manifests_path / receipt.get("manifestName", "")
+    checks = (
+        receipt.get("schemaVersion") == 1,
+        receipt.get("status") == "settled",
+        receipt.get("operationId") == request["operationId"],
+        receipt.get("requestSha256") == _sha256_bytes(request_bytes),
+        ledger.is_file(),
+        isinstance(receipt.get("ledgerAfterSha256"), str),
+        isinstance(receipt.get("ledgerBeforeByteLength"), int),
+        registry_path.is_file(),
+        manifest_path.is_file(),
+    )
+    if not all(checks):
+        _legacy_settlement_fail(
+            "WI-LEDGER-COMPAT-REPLAY-MISMATCH",
+            "settlement receipt identity differs from the replay request",
+        )
+    ledger_bytes = ledger.read_bytes()
+    before_length = receipt["ledgerBeforeByteLength"]
+    if (
+        _sha256_bytes(ledger_bytes) != receipt["ledgerAfterSha256"]
+        or _sha256_bytes(ledger_bytes[:before_length]) != receipt.get("ledgerBeforeSha256")
+        or _sha256_bytes(registry_path.read_bytes()) != receipt.get("registryAfterSha256")
+        or _sha256_bytes(manifest_path.read_bytes()) != receipt.get("manifestSha256")
+    ):
+        _legacy_settlement_fail(
+            "WI-LEDGER-COMPAT-REPLAY-MISMATCH",
+            "settlement replay post-image differs from its receipt",
+        )
+    result = receipt.get("result")
+    if not isinstance(result, dict):
+        _legacy_settlement_fail(
+            "WI-LEDGER-COMPAT-REPLAY-MISMATCH",
+            "settlement receipt result is unavailable",
+        )
+    return {**result, "applied": True, "replay": True}
+
+
+def _legacy_settlement_events(plan: dict) -> list[dict]:
+    request = plan["request"]
+    result: list[dict] = []
+    for settlement in request["settlements"]:
+        if settlement["disposition"] == "preserve-open":
+            continue
+        target = plan["obligationRows"][settlement["targetRunId"]]
+        evidence = [
+            {
+                "kind": "manual-check",
+                "ref": f"{target.run_id} {target.raw_line_sha256} current-evidence",
+            }
+        ]
+        evidence.extend(
+            {
+                "kind": "artifact",
+                "ref": proof["path"],
+                "result": proof["sha256"],
+            }
+            for proof in settlement["evidence"]
+        )
+        run_id = "legacy-settlement-" + _sha256_bytes(
+            f"{request['operationId']}\0{target.run_id}".encode("utf-8")
+        )[:32]
+        result.append(
+            {
+                "schemaVersion": 2,
+                "runId": run_id,
+                "workItem": plan["item"].name,
+                "role": "lead",
+                "executionRole": "main",
+                "status": "completed",
+                "gate": "none",
+                "scope": ["ledger-recovery:closure-invalidation"],
+                "eventKind": "closure-invalidation",
+                "invalidatesRunId": target.run_id,
+                "invalidatesEventSha256": target.raw_line_sha256,
+                "evidence": evidence,
+                "startedAt": request["recordedAt"],
+                "updatedAt": request["recordedAt"],
+            }
+        )
+    return result
+
+
+def _legacy_settlement_validate_after_image(
+    root: Path,
+    result: dict,
+    plan: dict,
+) -> tuple[bytes, dict, bytes, dict[str, bytes], bytes, list[dict]]:
+    settlement_events = _legacy_settlement_events(plan)
+    suffix = b"".join(_projection_json(event) + b"\n" for event in settlement_events)
+    candidate_ledger = plan["ledgerBytes"] + suffix
+    final_manifest, final_manifest_bytes, entry_id, _events = (
+        _legacy_settlement_manifest(
+            Path(root).resolve(),
+            plan["item"],
+            candidate_ledger,
+            _projection_json(plan["request"]),
+            plan["request"],
+            legacy_line_count=len(result["legacyRunIds"]),
+        )
+    )
+    manifests, registry_candidate = _legacy_settlement_projection_candidate(
+        Path(root).resolve(),
+        final_manifest,
+        final_manifest_bytes,
+        entry_id,
+        plan["request"],
+        candidate_ledger,
+    )
+    candidate_path = plan["ledger"].with_suffix(".jsonl.tmp")
+    if candidate_path.exists() or _lifecycle_path_has_reparse(candidate_path):
+        _legacy_settlement_fail(
+            "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+            "settlement candidate path is not empty",
+        )
+    try:
+        _atomic_write(candidate_path, candidate_ledger)
+        validator = _load_agent_run_ledger().load_validator()
+        obligations: list[object] = []
+        errors = validator.validate_work_item(
+            plan["item"],
+            ledger_path=candidate_path,
+            strict_revise=False,
+            validate_status_file=False,
+            projection_manifest_blobs=manifests,
+            projection_registry_bytes=registry_candidate,
+            obligation_state_out=obligations,
+        )
+        _raise_legacy_settlement_validation(errors)
+        if len(obligations) != 1:
+            _legacy_settlement_fail(
+                "WI-LEDGER-LEGACY-SETTLEMENT-INCOMPLETE",
+                "after-image reducer did not return one obligation state",
+            )
+        expected_open = [
+            row["targetRunId"]
+            for row in plan["request"]["settlements"]
+            if row["disposition"] == "preserve-open"
+        ]
+        actual_open = [row.run_id for row in obligations[0].open_revise]
+        actual_open.extend(row.run_id for row in obligations[0].open_launches)
+        if set(actual_open) != set(expected_open) or len(actual_open) != len(expected_open):
+            _legacy_settlement_fail(
+                "WI-LEDGER-LEGACY-SETTLEMENT-INCOMPLETE",
+                "after-image obligations differ from explicit dispositions",
+            )
+    finally:
+        candidate_path.unlink(missing_ok=True)
+    return (
+        candidate_ledger,
+        final_manifest,
+        final_manifest_bytes,
+        manifests,
+        registry_candidate,
+        settlement_events,
+    )
+
+
+def _restore_legacy_settlement_snapshot(
+    snapshots: Mapping[Path, bytes | None], created_directories: tuple[Path, ...]
+) -> None:
+    for path, before in reversed(tuple(snapshots.items())):
+        if before is None:
+            if path.exists():
+                if not path.is_file() or _lifecycle_path_has_reparse(path):
+                    raise OSError(f"unsafe rollback target: {path}")
+                path.unlink()
+        else:
+            _atomic_write(path, before)
+    for directory in reversed(created_directories):
+        if directory.exists() and not any(directory.iterdir()):
+            directory.rmdir()
+
+
+def _settle_legacy_ledger_locked(
+    root: Path, request_bytes: bytes, *, inject_failure: str | None = None
+) -> dict:
+    if inject_failure not in {
+        None, "after-manifest", "after-registry", "after-ledger", "after-receipt"
+    }:
+        _legacy_settlement_fail(
+            "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+            "unknown settlement failure boundary",
+        )
+    replay = _legacy_settlement_replay(root, request_bytes)
+    if replay is not None:
+        return replay
+    result, plan = _preflight_legacy_ledger_settlement(root, request_bytes)
+    (
+        candidate_ledger,
+        final_manifest,
+        final_manifest_bytes,
+        _manifests,
+        registry_candidate,
+        settlement_events,
+    ) = _legacy_settlement_validate_after_image(root, result, plan)
+    manifests_path, registry_path, receipts_path = _projection_paths(root)
+    manifest_path = manifests_path / f"{final_manifest['manifestId']}.json"
+    receipt_path = receipts_path / f"{plan['request']['operationId']}.json"
+    participant_paths = (manifest_path, registry_path, plan["ledger"], receipt_path)
+    snapshots = {
+        path: path.read_bytes() if path.exists() and path.is_file() else None
+        for path in participant_paths
+    }
+    created_directories = tuple(
+        path for path in (manifests_path, receipts_path) if not path.exists()
+    )
+    final_result = {
+        **result,
+        "applied": True,
+        "replay": False,
+        "ledgerAfterSha256": _sha256_bytes(candidate_ledger),
+        "settlementRunIds": [event["runId"] for event in settlement_events],
+    }
+    receipt = {
+        "schemaVersion": 1,
+        "status": "settled",
+        "operationId": plan["request"]["operationId"],
+        "recordedAt": plan["request"]["recordedAt"],
+        "requestSha256": _sha256_bytes(request_bytes),
+        "workItem": plan["item"].relative_to(Path(root).resolve()).as_posix(),
+        "ledgerPath": plan["ledger"].relative_to(Path(root).resolve()).as_posix(),
+        "ledgerBeforeSha256": _sha256_bytes(plan["ledgerBytes"]),
+        "ledgerBeforeByteLength": len(plan["ledgerBytes"]),
+        "ledgerAfterSha256": _sha256_bytes(candidate_ledger),
+        "manifestName": manifest_path.name,
+        "manifestSha256": _sha256_bytes(final_manifest_bytes),
+        "registryBeforeSha256": _sha256_bytes(snapshots[registry_path] or b""),
+        "registryAfterSha256": _sha256_bytes(registry_candidate),
+        "settlements": plan["request"]["settlements"],
+        "result": final_result,
+    }
+    receipt_bytes = _projection_json(receipt) + b"\n"
+    try:
+        _projection_create_or_exact(
+            manifest_path,
+            final_manifest_bytes,
+            "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+        )
+        if inject_failure == "after-manifest":
+            raise OSError("injected failure after manifest")
+        _atomic_write(registry_path, registry_candidate)
+        if inject_failure == "after-registry":
+            raise OSError("injected failure after registry")
+        _atomic_write(plan["ledger"], candidate_ledger)
+        if inject_failure == "after-ledger":
+            raise OSError("injected failure after ledger")
+        _projection_create_or_exact(
+            receipt_path,
+            receipt_bytes,
+            "WI-LEDGER-COMPAT-REPLAY-MISMATCH",
+        )
+        if inject_failure == "after-receipt":
+            raise OSError("injected failure after receipt")
+        if (
+            plan["ledger"].read_bytes() != candidate_ledger
+            or registry_path.read_bytes() != registry_candidate
+            or manifest_path.read_bytes() != final_manifest_bytes
+            or receipt_path.read_bytes() != receipt_bytes
+        ):
+            raise OSError("settlement participant readback differs")
+    except BaseException as exc:
+        try:
+            _restore_legacy_settlement_snapshot(snapshots, created_directories)
+        except BaseException as rollback_exc:
+            raise LifecycleError(
+                "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+                f"settlement commit and rollback failed: {rollback_exc}",
+            ) from exc
+        raise LifecycleError(
+            "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+            "settlement commit failed; every participant restored to its exact preimage",
+        ) from exc
+    return final_result
+
+
+_settle_legacy_ledger_transaction = _lifecycle_participant(
+    _settle_legacy_ledger_locked
+)
+
+
+def _legacy_settlement_receipt_exists(root: Path, request_bytes: bytes) -> bool:
+    request = _legacy_settlement_request(request_bytes)
+    _manifests, _registry, receipts = _projection_paths(Path(root).resolve())
+    return (receipts / f"{request['operationId']}.json").exists()
+
+
+def settle_legacy_ledger(
+    root: Path,
+    request_bytes: bytes,
+    *,
+    apply_admitted: bool = False,
+    inject_failure: str | None = None,
+) -> dict:
+    if apply_admitted:
+        if not _legacy_settlement_receipt_exists(root, request_bytes):
+            _legacy_settlement_target(root, request_bytes)
+        return _settle_legacy_ledger_transaction(
+            root, request_bytes, inject_failure=inject_failure
+        )
+    if inject_failure is not None:
+        _legacy_settlement_fail(
+            "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+            "failure injection is apply-only",
+        )
+    replay = _legacy_settlement_replay(root, request_bytes)
+    if replay is not None:
+        return replay
+    result, _plan = _preflight_legacy_ledger_settlement(root, request_bytes)
+    return result
 
 
 def _projection_active_records(records: list[tuple[dict, bytes]]) -> dict[str, tuple[dict, bytes]]:
@@ -16183,6 +16861,10 @@ def build_parser() -> argparse.ArgumentParser:
     revoke_legacy.add_argument("--expected-ledger-sha256", required=True)
     revoke_legacy.add_argument("--operation-id", required=True)
     revoke_legacy.add_argument("--recorded-at", required=True)
+    settle_legacy = sub.add_parser("settle-legacy-ledger")
+    _add_root(settle_legacy)
+    settle_legacy.add_argument("--request-file", required=True)
+    settle_legacy.add_argument("--apply-admitted", action="store_true")
     projection_apply = sub.add_parser("apply-legacy-ledger-projection")
     _add_root(projection_apply)
     projection_apply.add_argument("--manifest-file", required=True)
@@ -16558,6 +17240,20 @@ def main(argv: list[str]) -> int:
             print(
                 "WI-LEDGER-MIGRATION-REVOKED "
                 f"operation={result['operationId']} after={result['afterLedgerSha256']}"
+            )
+        elif args.command == "settle-legacy-ledger":
+            result = settle_legacy_ledger(
+                root,
+                _read_arg_file(args.request_file),
+                apply_admitted=args.apply_admitted,
+            )
+            print(
+                json.dumps(
+                    result,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
             )
         elif args.command == "apply-legacy-ledger-projection":
             v2_values = (

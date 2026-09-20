@@ -371,6 +371,7 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
                 self.assertEqual(lifecycle_help.returncode, 0, lifecycle_help.stderr)
                 self.assertIn("convert-legacy-candidate", lifecycle_help.stdout)
                 self.assertIn("retire-legacy-backlog", lifecycle_help.stdout)
+                self.assertIn("settle-legacy-ledger", lifecycle_help.stdout)
                 for suffix in (".py", ".sh"):
                     self.assertEqual(
                         list(installed.rglob(f"{OBSOLETE_MARKER}{suffix}")),

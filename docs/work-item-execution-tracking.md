@@ -269,6 +269,54 @@ The `manual-check` evidence must contain the exact target run ID and exact raw-l
 
 Appending the disposition does not activate compatibility. Before an active compatibility receipt exists, the raw target errors remain. Only the active receipt-gated effective-view reader may suppress errors for that exact target, keep all authority axes false, and expose the ordered `disposition_notices` through the public read model. Every other row remains under unchanged validation.
 
+## Settle one identity-bearing string-1.0 legacy ledger
+
+Use this owner operation only for an active ledger whose complete frozen
+population matches the closed `identity-ledger-v1-string` profile. The request
+binds the complete ledger digest and must list every obligation reported by the
+existing reducer exactly once. `preserve-open` takes an empty evidence list and
+continues to block close; `satisfied-by-current-evidence` names one or more
+existing repository-relative artifacts and their exact SHA-256 digests.
+
+```json
+{
+  "schemaVersion": 1,
+  "operationId": "bounded-id",
+  "recordedAt": "2026-09-20T12:00:00Z",
+  "workItem": "active-item-slug",
+  "expectedLedgerSha256": "<sha256>",
+  "profileId": "identity-ledger-v1-string",
+  "profileVersion": 1,
+  "settlements": [
+    {
+      "targetRunId": "legacy-run-id",
+      "disposition": "satisfied-by-current-evidence",
+      "evidence": [{"path": "work-items/active/active-item-slug/evidence.md", "sha256": "<sha256>"}]
+    }
+  ]
+}
+```
+
+Preflight is the safe default and writes nothing:
+
+```powershell
+python -B scripts/mutate-work-item.py settle-legacy-ledger --root . --request-file <request.json>
+```
+
+After reviewing the reported identities and obligations, apply the same request
+with the positive mutation marker:
+
+```powershell
+python -B scripts/mutate-work-item.py settle-legacy-ledger --root . --request-file <request.json> --apply-admitted
+```
+
+The original ledger remains an exact prefix. The owner appends only current
+closure-invalidation records for `satisfied-by-current-evidence`, validates the
+complete after-image, and commits the projection manifest, registry, ledger
+suffix, and receipt under the lifecycle lock. Exact replay is a byte-identical
+no-op. There is no public reverse command; failures during apply restore every
+participant to its exact preimage.
+
 ## Migrate one legacy obligation
 
 This is the sole operator procedure for exactly two closed normalizations of a

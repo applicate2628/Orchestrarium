@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-20
+
+- **Identity-bearing string-1.0 ledgers have one owner-supported settlement route.** `mutate-work-item.py settle-legacy-ledger` is preflight-only by default, admits only the closed manifest-bound profile, obtains exact open obligations from the existing reducer, and requires an explicit disposition for each. Apply preserves the complete legacy byte prefix and run identities, appends only current evidence-bound closure-invalidations, and commits manifest, registry, ledger suffix, and receipt as one lifecycle-locked operation with exact replay and failure restoration. H1 remains a two-member contract; current-schema and noncanonical admission behavior are unchanged. **Why it matters:** authentic legacy identities and genuine review obligations can reach the ordinary close/archive/receipt/README path without rewriting history or fabricating PASS, timestamps, or execution provenance.
+
 ## 2026-09-19
 
 - **First publication to an empty remote scans the complete local history.** A successful empty remote-ref inventory is now the existing empty exclusion set, so a nonempty initial commit produces the current version-3, remote/destination/source/tip-bound receipt. Failed, timed-out, malformed, and peeled-only inventories remain refusals; full history finding detection and push-gate receipt binding are unchanged.

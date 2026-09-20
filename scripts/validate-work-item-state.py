@@ -1285,7 +1285,10 @@ class RuntimeLedgerRowV1:
     raw_line_sha256: str
     raw_body_sha256: str
     projected_event_sha256: str
-    epoch: Literal["raw", "sealed-prefix", "strict-suffix", "disposed-suffix", "transferred"]
+    epoch: Literal[
+        "raw", "manifest-profile", "sealed-prefix", "strict-suffix",
+        "disposed-suffix", "transferred",
+    ]
     authority: LedgerAuthorityV1
 
 
@@ -1378,8 +1381,25 @@ def _runtime_rows_from_projection(
             row.raw_line_sha256,
             row.raw_line_sha256,
             hashlib.sha256(_canonical_projection_bytes(row.event)).hexdigest(),
-            "transferred" if row.transformation == "transferred" else epoch,
-            _NO_LEDGER_AUTHORITY,
+            (
+                "transferred"
+                if row.transformation == "transferred"
+                else "manifest-profile"
+                if row.transformation == "manifest-projected"
+                and row.event.get("schemaVersion") == "1.0"
+                else epoch
+            ),
+            LedgerAuthorityV1(
+                False,
+                False,
+                bool(
+                    row.transformation == "manifest-projected"
+                    and row.event.get("schemaVersion") == "1.0"
+                    and row.event.get("gate") == "REVISE"
+                ),
+                False,
+                False,
+            ),
         )
         for row in rows
     )
@@ -2080,11 +2100,14 @@ def _derive_authority_masks(
         else:
             individually_current = current_ok
         revise = bool(
-            (current_ok or row.epoch in {"sealed-prefix", "transferred"})
-            and event.get("schemaVersion") == 2
-            and event.get("gate") == "REVISE"
-            and isinstance(event.get("runId"), str)
-            and len(positions.get(event.get("runId"), ())) == 1
+            row.authority.revise_target_eligible
+            or (
+                (current_ok or row.epoch in {"sealed-prefix", "transferred"})
+                and event.get("schemaVersion") == 2
+                and event.get("gate") == "REVISE"
+                and isinstance(event.get("runId"), str)
+                and len(positions.get(event.get("runId"), ())) == 1
+            )
         )
         closer = bool(
             individually_current
@@ -2123,7 +2146,9 @@ def derive_event_validity(
     current: list[bool] = []
     for row in rows:
         event = row.event
-        if row.epoch in {"sealed-prefix", "disposed-suffix", "transferred"} or (
+        if row.epoch in {
+            "manifest-profile", "sealed-prefix", "disposed-suffix", "transferred"
+        } or (
             validate_schema_version is not None
             and event.get("schemaVersion") != validate_schema_version
         ):
@@ -2683,6 +2708,7 @@ LEGACY_PROJECTION_PROFILE_REGISTRY = {
     ("canonical-v0-shape", 1),
     ("attempt-pair-v0", 1),
     ("review-summary-v0", 1),
+    ("identity-ledger-v1-string", 1),
 }
 LEGACY_PROJECTION_IDS = {
     "profile": "WI-LEDGER-MIGRATION-PROFILE-UNSUPPORTED",
@@ -4166,6 +4192,54 @@ def _projection_profile_key(profile_id: object, profile_version: object, errors:
 
 def _profile_projection(profile: tuple[str, int], raws: list[dict], item: Path, entry: dict, errors: list[str]) -> list[dict] | None:
     profile_id, _ = profile
+    if profile_id == "identity-ledger-v1-string":
+        required = {
+            "schemaVersion", "runId", "workItem", "role", "executionRole",
+            "status", "gate", "scope", "evidence", "startedAt", "updatedAt",
+        }
+        if not raws:
+            fail(errors, "WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED: identity ledger is empty")
+            return None
+        run_ids: set[str] = set()
+        projected: list[dict] = []
+        for ordinal, raw in enumerate(raws, start=1):
+            label = f"identity-ledger-v1-string raw event {ordinal}"
+            if not _strict_shape(raw, required, ALLOWED_FIELDS, errors, label):
+                fail(
+                    errors,
+                    f"WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED: {label} shape is unsupported",
+                )
+                return None
+            run_id = raw.get("runId")
+            scalar_fields = (
+                "workItem", "role", "executionRole", "status", "gate",
+                "scope", "startedAt", "updatedAt",
+            )
+            if (
+                raw.get("schemaVersion") != "1.0"
+                or not isinstance(run_id, str)
+                or not run_id.strip()
+                or len(run_id) < MIN_LENGTHS["runId"]
+                or run_id in run_ids
+                or any(
+                    not isinstance(raw.get(field), str) or not raw[field].strip()
+                    for field in scalar_fields
+                )
+                or not isinstance(raw.get("evidence"), list)
+                or (
+                    "artifact" in raw
+                    and raw.get("artifact") is not None
+                    and not isinstance(raw.get("artifact"), str)
+                )
+            ):
+                fail(
+                    errors,
+                    f"WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED: {label} fields are unsupported",
+                )
+                return None
+            run_ids.add(run_id)
+            projected.append(copy.deepcopy(raw))
+        return projected
     if profile_id == "canonical-v0-shape":
         if len(raws) != 1:
             _projection_fail(errors, "topology", "canonical-v0-shape requires exactly one raw line")
@@ -6211,19 +6285,37 @@ def resolve_closure_invalidations(
         if target_pos in inactive or target.get("eventKind") == "closure-invalidation":
             fail(errors, f"{recovery_id}: ledger-recovery:topology forbids duplicate, chain, cycle, or correction target {target_id}")
             continue
-        if target.get("schemaVersion") != 2 or target.get("eventKind") == "launch" or not isinstance(target.get("closesRunIds"), list):
+        legacy_revise = bool(
+            not validity[target_pos].current_schema_valid
+            and validity[target_pos].authority.revise_target_eligible
+            and target.get("schemaVersion") == "1.0"
+            and target.get("gate") == "REVISE"
+        )
+        if not legacy_revise and (
+            target.get("schemaVersion") != 2
+            or target.get("eventKind") == "launch"
+            or not isinstance(target.get("closesRunIds"), list)
+        ):
             fail(errors, f"{recovery_id}: ledger-recovery:target-ineligible {target_id}")
             continue
         target_individually_valid = (
-            validity[target_pos].authority.closer_eligible
-            if active_context and target_row.epoch == "sealed-prefix"
-            else validity[target_pos].current_schema_valid
+            legacy_revise
+            or (
+                validity[target_pos].authority.closer_eligible
+                if active_context and target_row.epoch == "sealed-prefix"
+                else validity[target_pos].current_schema_valid
+            )
         )
         if not target_individually_valid:
             fail(errors, f"{recovery_id}: ledger-recovery:target-per-event-invalid {target_id}")
             continue
         if recovery.get("invalidatesEventSha256") != target_row.raw_body_sha256:
             fail(errors, f"{recovery_id}: ledger-recovery:target-digest-mismatch {target_id}")
+            continue
+
+        if legacy_revise:
+            inactive.add(target_pos)
+            tel["recovery-accepted"] = tel.get("recovery-accepted", 0) + 1
             continue
 
         # Reuse the one C1-C5 evaluator: adding the candidate target to its
