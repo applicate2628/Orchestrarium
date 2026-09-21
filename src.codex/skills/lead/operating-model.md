@@ -195,7 +195,7 @@ Resolve the template and evidence triggers first. Each listed role is a candidat
 - Require `plan.md` before implementation or review only when the selected route admits a Plan stage.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
 - Update `status.md` after accepted artifacts, interruptions, or stage changes so work can resume without relying on chat memory.
-- Keep `status.md` explicit about the next concrete action and any open obligations that still block closeout.
+- Keep `status.md` explicit about the next concrete action and any open obligations that still block closeout. For each unresolved blocked action, record the exact action, current blocking reason, concrete resume condition, and next step. After a relevant condition changes, and again before completion, reassess the affected action from current evidence; an old denial without that reassessment is not current blockage evidence, and reassessment grants no permission, bypass, retry, deletion, or other mutation authority.
 - If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery.
 - Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
 - On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.

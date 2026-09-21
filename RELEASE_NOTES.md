@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-21
+
+- **Cleanup blockers are explicitly reassessed from current conditions.** Lead records each unresolved blocked action, current reason, resume condition, and next step in the existing `status.md`. When a relevant condition changes, and again before completion, cleanup reassesses the same target; an earlier denial alone is not current evidence. Reassessment does not grant permission, bypass a refusal, or authorize retry, deletion, or another mutation, so unchanged or still-ungranted actions remain blocked. **Why it matters:** recovery and closeout cannot rely on stale denial evidence while existing safety and approval boundaries remain unchanged.
+
 ## 2026-09-20
 
 - **Identity-bearing string-1.0 ledgers have one owner-supported settlement route.** `mutate-work-item.py settle-legacy-ledger` is preflight-only by default, admits only the closed manifest-bound profile, obtains exact open obligations from the existing reducer, and requires an explicit disposition for each. Apply preserves the complete legacy byte prefix and run identities, appends only current evidence-bound closure-invalidations, and commits manifest, registry, ledger suffix, and receipt as one lifecycle-locked operation with exact replay and failure restoration. H1 remains a two-member contract; current-schema and noncanonical admission behavior are unchanged. **Why it matters:** authentic legacy identities and genuine review obligations can reach the ordinary close/archive/receipt/README path without rewriting history or fabricating PASS, timestamps, or execution provenance.
