@@ -235,6 +235,17 @@ STOCK_FFB8_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
     ("external-role-taxonomy.v1.json", "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce"),
     (TRANSPORT_PROJECTION_MANIFEST, "2e57f75fad4a63fb93057a8036ca5cbbdbb3417c94efb3894d14d33982dd5635"),
 )
+STOCK_16CE_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
+    ("provider_prompt.py", "0a4d8cc3634d72cd833d7b5504a57c28348989c52958d0099aae72ed0ca68e99"),
+    ("process_supervision/process_runner.py", "36bdeedfe7198e7febae57ab628a0c11ce57d42154a8cf04f6358571fe26a2f2"),
+    ("invoke-codex-prompt.py", "04fbc5fae33e623f0b10f783b6753947e4d8a5e62ab06bc058b9df776b76f79b"),
+    ("invoke-claude-prompt.py", "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3"),
+    ("invoke-kimi-prompt.py", "480af94ce089d5a6340e92d00239a5762c9c1374375a8c12c921afdcfcaa6e47"),
+    ("invoke-grok-prompt.py", "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559"),
+    ("external-prompt-governance.md", "c1a0080fffeac5da9bf2011c8ba8a8d4cafed337f238bfe8bf9fcc168693a039"),
+    ("external-role-taxonomy.v1.json", "469ad1b8bf93b56f0323456413961ca7e01dd9a1890a66d766e564bc03d489b8"),
+    (TRANSPORT_PROJECTION_MANIFEST, "3fda6b196a00e4ce3ce7d9921f4dab016f13d7ff3c7522a3d3a3ec00b0d9436d"),
+)
 ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS = {
     "8521b638": STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "7872d36d": STOCK_7872_CLAUDE_TRANSPORT_PROJECTION_SHA256,
@@ -246,6 +257,7 @@ ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS = {
     "1a56f81f": STOCK_1A56_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "7192c914": STOCK_7192_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "ffb8451f": STOCK_FFB8_CLAUDE_TRANSPORT_PROJECTION_SHA256,
+    "16ce6f69": STOCK_16CE_CLAUDE_TRANSPORT_PROJECTION_SHA256,
 }
 E7_LEGACY_PROVIDER_PROMPT_SHA256 = (
     "825bc6db49408c5975627fba95c95ca479fe45c508e5be71d06c5e6f6c4b8121"
@@ -325,6 +337,7 @@ STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
     {
         "33998c6a60b442c09957d3edef914daa02d718eafa5f881473ce017fb29a4bd9",
         "f3d56fa8d361acf65d6624242c7cc61007bb8332fe6531dabc7766db940a9c5b",
+        "63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a",
     }
 )
 ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
@@ -334,6 +347,12 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
     "architecture-reviewer": frozenset(
         {"19b179fe14a2bb6135e46dd7435265e7483d0bf6d5ec97b55520e39f3cbb1b4d"}
     ),
+    "external-reviewer": frozenset(
+        {"4623816c87f9d1b017472011601951eab8bc8e4ceeea2d13911e29a876c853e8"}
+    ),
+    "external-worker": frozenset(
+        {"ca74db54391a1994c30a2da6d80021261556db9f75ac89ec8878ee1a5c50f32c"}
+    ),
     "graphics-engineer": frozenset(
         {"e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d"}
     ),
@@ -341,7 +360,10 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
         {"d1a5bff367e42891951371faa2d66274cb34f0eb7b9c86c214376e75833f6841"}
     ),
     "init-project": frozenset(
-        {"c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c"}
+        {
+            "c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c",
+            "21dc5adc3f4ccb8e646546cd0d3ccf979c37d4e4e8dcefcc9620122f500dadb4",
+        }
     ),
     "manual-repo-transfer": frozenset(
         {
@@ -366,6 +388,7 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
 }
 GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
     {
+        "95eadefb2069546027bbaa59497212a42e9177cce80ad729a869f64f93784635",
         "e09377e4cf15c446e2ff19ab160a09835ac6683d51e54a89585625dc1de935ca",
         "fd28049deb001bf088b0033e2dcc82ffc372e8257dd8aaf1bc6384d49be328b3",
         "8088b25e70702f2c77d811bcd0c74e339474a7429a2e997f2df7662c6d75db0f",
@@ -2948,27 +2971,50 @@ _READ_ONLY_ROLES = frozenset({
 })
 _BOUNDED_WRITE_ROLES = frozenset({"default", "worker", "backend-engineer", "platform-engineer", "knowledge-archivist", "mechanical-worker", "scientific-software-engineer"})
 _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
+    "algorithm-scientist": frozenset({
+        "1bc7c60b30f1bb360a502ee955e41513a80d3e3f9e222e5a673817a7e421c8bd",
+    }),
+    "architect": frozenset({
+        "bcdd83abcb3e5d99e0dd0963d622b475ea11d450bb16f1af1bc93855891ff4fb",
+    }),
+    "architecture-reviewer": frozenset({
+        "239a91ef35b54cc640372132b51662bcbe0da88dded68ff53d339621689df8c3",
+    }),
+    "computational-scientist": frozenset({
+        "7ddcfb3afe6d9032d03d3da6468662a961819ceacf5252caccccfc69744cc9d3",
+    }),
+    "default": frozenset({
+        "b38bb7c4a05f93bd54a11c9a06d2bbdae9bed353db4fdd2f42b4abb9fd3ba3e1",
+    }),
     "worker": frozenset({
         "2d950ebfa4e9cc7293ee32cbc71ad3910fa6938a80a339bbbc3434ecc6c4d860",
         "960f0c617b4b5856585fa3f3afac7e0ef9fb99bfc1977b74fe6dd99626b2a57d",
+        "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475",
     }),
     "platform-engineer": frozenset({
         "2f62aaf20edd4b30838db3e728d6a907e8f6826620d2eede78c02a1cd0b7a214",
         "ceb30fcd546bef82045f7b3c3b48e39f98ae83ebbea17a6c5210c2b46cb2140d",
+        "e5d44b7fafc7ec8ab3c69b4086bdda5e5430974334f90fc407b5bb78ace8a4cf",
     }),
     "security-engineer": frozenset({
         "aeb2800e4e498ad7d3a63951608e780eb730ef2bd744ff679fee5c697f5d837a",
         "54117decdfcf9bff576e23d31a1dc6aa2d2f4fd0d498820f9c1244b6742f78f9",
+        "ceb53c8db3d77f75beea76a9cc27120d7623a60661cca3dac92b01a35ce06a0c",
+    }),
+    "security-reviewer": frozenset({
+        "0f9b75713128885b8db86b32a9ecb3e756b0022add169a89fc10d615745445f1",
     }),
     "mechanical-scout": frozenset({
         "4521ff3194ed13831214f94ad228c7aa0eba97b6d40bec56e990b3490fdcc672",
         "1d2d6c4fb6463710f8e6cd1bda1738f8230cd7483b9f342f7f0e500e5ac5bb67",
         "7d9c28aeb4471ea63fe733dde320fec3bfa60dcb11cb85404ff2aed2fc6658b5",
+        "d384fa021005f10b4b3faf48818a4963ab314689b986a6fbed25b5ad13e66df1",
     }),
     "mechanical-worker": frozenset({
         "8c126a95d35301bd493e3e2f89e4061781aaf28ca4444a3d4a67b1868c4c7568",
         "ccf7633f55389ce826cd848692277b764a559ee0b7bc81402d5657b908165869",
         "6ab77b24305af7c7b8bf8b8661b2abe1a4fa628974eee9da096419deebea39b8",
+        "e91942ce296a53b586737250bd10b51965663aa559908ae02ea7547454d83305",
     }),
 }
 _STOCK_NATIVE_ROLE_REGISTRATION_PRIORS = {

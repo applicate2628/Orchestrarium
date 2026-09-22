@@ -4,7 +4,7 @@
   "files": {
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "0a4d8cc3634d72cd833d7b5504a57c28348989c52958d0099aae72ed0ca68e99",
+      "sha256": "e05c20e08c54168b6aee636fa2c047b4a1a822d2a9765d9a867977dc129a000c",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {

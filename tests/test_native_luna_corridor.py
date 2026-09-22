@@ -29,21 +29,21 @@ TRUST_BOUNDARY = (
     "credentials, or external actions."
 )
 PROTECTED_EXISTING_ROLE_DIGESTS = {
-    "algorithm-scientist": "1bc7c60b30f1bb360a502ee955e41513a80d3e3f9e222e5a673817a7e421c8bd",
+    "algorithm-scientist": "cd2bbbaf5f4173f07bfe18cea39d90dd0cc341630b77b5dac0d82d9f92b57d7e",
     "analyst": "422cd2cb2cc5bd6e23a0e97cfabf5353d99db31d44196696d6e8cb73aa7eb95a",
-    "architect": "bcdd83abcb3e5d99e0dd0963d622b475ea11d450bb16f1af1bc93855891ff4fb",
-    "architecture-reviewer": "239a91ef35b54cc640372132b51662bcbe0da88dded68ff53d339621689df8c3",
+    "architect": "71f3d9e27019de2e133d8947a33cdb69ab38261824fab36bcb18c7f7f3ff0792",
+    "architecture-reviewer": "5e404f6643d8992dd7cd4a40e8a5d3ae4f7f388381907aa230b6b0fa15ac458a",
     "backend-engineer": "4c6e06300e8c906130c900bd8a1738d17c2115ca647b77a259b94531f5f8769a",
-    "computational-scientist": "7ddcfb3afe6d9032d03d3da6468662a961819ceacf5252caccccfc69744cc9d3",
-    "default": "b38bb7c4a05f93bd54a11c9a06d2bbdae9bed353db4fdd2f42b4abb9fd3ba3e1",
+    "computational-scientist": "4169e5ac3442e542b0249879595b6974b78e0924b377613b5b427a6488171901",
+    "default": "90e5b43a727a1f6c42ed3bee05e033a2cd83eef102d9030301227f99b79c8d53",
     "explorer": "282f68e0e509fa2d9eb2bf77e841f69809f67fc19d3cb74eee3e93247673e5db",
     "knowledge-archivist": "0672b994f41d3a5d69ba2f8d719d19cb90e9d7fe6ed720c9daa09009ec4f2349",
     "planner": "0531687c0a106c0f44d4c0bb5c5e4b98c2618c99387bbbc443eb108b4eed930f",
-    "platform-engineer": "e5d44b7fafc7ec8ab3c69b4086bdda5e5430974334f90fc407b5bb78ace8a4cf",
+    "platform-engineer": "3e4c199ba984cbfba080249ad28c645ffbf78a08daf8519e0aa058e7f92aaa40",
     "qa-engineer": "65a5dd03a4196a99d00c72c81aa98e1470eeac0c6d9b453a3147c836c146ca9b",
-    "security-engineer": "ceb53c8db3d77f75beea76a9cc27120d7623a60661cca3dac92b01a35ce06a0c",
-    "security-reviewer": "0f9b75713128885b8db86b32a9ecb3e756b0022add169a89fc10d615745445f1",
-    "worker": "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475",
+    "security-engineer": "6e53fa663da8eed31ab4012354ee9bebf24f16ecb9cdaa517a7f196dcfd1969e",
+    "security-reviewer": "f22614caec4561e5cb0833e6264081b42c46570936fe1d2b62e8534c17ee214d",
+    "worker": "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815",
 }
 STOCK_FAST_POLICY_SHA256 = "dcab8e4da55b05475f9b9c507a3a9a97679a0c7b72006ff7ffca4b95ccd13451"
 STOCK_FAST_MANIFEST_SHA256 = "842b1b29fae7d41a0b2422d8711652b3e6d7c720406c3ce3fc13259518f82115"
@@ -1231,7 +1231,7 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
     assert policy["profiles"]["luna-high"] == {
         "modelTier": "mechanical",
         "effort": "high",
-        "codexModel": "gpt-5.6-luna",
+        "codexModel": "gpt-6-luna",
     }
     assert {
         name: policy["taskClasses"][name]
@@ -1270,7 +1270,7 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
     luna_profiles = {
         name
         for name, profile in policy["profiles"].items()
-        if profile["codexModel"] == "gpt-5.6-luna"
+        if profile["codexModel"] == "gpt-6-luna"
     }
     luna_consumers = {
         role_name
@@ -1294,7 +1294,7 @@ def test_luna_policy_and_dispatch_are_speed_neutral() -> None:
     assert policy["profiles"]["luna-high"] == {
         "modelTier": "mechanical",
         "effort": "high",
-        "codexModel": "gpt-5.6-luna",
+        "codexModel": "gpt-6-luna",
     }
     assert not {"luna-low", "luna-medium"}.intersection(policy["profiles"])
     for task_name in ("micro", "mechanical-read", "mechanical"):
@@ -1322,7 +1322,7 @@ def test_luna_policy_and_dispatch_are_speed_neutral() -> None:
         "executionContract",
     }
     assert decision["requestedProfile"] == "luna-high"
-    assert decision["requestedModel"] == "gpt-5.6-luna"
+    assert decision["requestedModel"] == "gpt-6-luna"
     assert decision["requestedEffort"] == "high"
     assert decision["fallback"] == "none"
     serialized = json.dumps({"policy": policy, "decision": decision}).casefold()
@@ -1496,7 +1496,7 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
         assert role == {
             "name": role_name,
             "description": role["description"],
-            "model": "gpt-5.6-luna",
+            "model": "gpt-6-luna",
             "model_reasoning_effort": "high",
             "sandbox_mode": sandbox,
             "developer_instructions": role["developer_instructions"],
@@ -1845,7 +1845,7 @@ def test_resolve_role_dispatch_policy_only() -> None:
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
         "requestedProfile": "luna-high",
-        "requestedModel": "gpt-5.6-luna",
+        "requestedModel": "gpt-6-luna",
         "requestedEffort": "high",
         "sandbox": "read-only",
         "fallback": "none",
@@ -1858,7 +1858,7 @@ def test_resolve_role_dispatch_policy_only() -> None:
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
         "requestedProfile": "luna-high",
-        "requestedModel": "gpt-5.6-luna",
+        "requestedModel": "gpt-6-luna",
         "requestedEffort": "high",
         "sandbox": "read-only",
         "fallback": "none",

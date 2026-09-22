@@ -292,7 +292,7 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
 @pytest.mark.parametrize(
     ("provider", "flags", "model", "effort"),
     (
-        ("codex", [], "gpt-5.6-sol", "xhigh"),
+        ("codex", [], "gpt-6-sol", "xhigh"),
         ("claude", [], "opus", "xhigh"),
         (
             "codex",
@@ -404,7 +404,7 @@ def test_default_profile_reaches_fake_provider_with_explicit_model_and_effort(
     assert result.returncode == 0, result.stderr
     received = json.loads(capture.read_text(encoding="utf-8"))
     expected = (
-        ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=xhigh"]
+        ["--model", "gpt-6-sol", "-c", "model_reasoning_effort=xhigh"]
         if provider == "codex"
         else [
             "-p",

@@ -326,7 +326,7 @@ def test_resolver_exposes_componentwise_role_policy_without_changing_agents_mode
     # The new role policy is additive. Existing external-provider/profile
     # semantics remain under agents-mode and retain their shipped values.
     values = resolved["values"]
-    assert values["externalCodexProfile"] == "gpt-5.6-sol-xhigh"
+    assert values["externalCodexProfile"] == "gpt-6-sol-xhigh"
     assert values["externalClaudeProfile"] == "opus-xhigh"
     assert values["externalPriorityProfiles"]["balanced"][
         "worker.default-implementation"
@@ -1162,7 +1162,7 @@ def test_global_codex_linked_agents_multihop_windows_reparse_chain_is_identity_b
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
         "requestedProfile": "luna-high",
-        "requestedModel": "gpt-5.6-luna",
+        "requestedModel": "gpt-6-luna",
         "requestedEffort": "high",
         "sandbox": "read-only",
         "fallback": "none",

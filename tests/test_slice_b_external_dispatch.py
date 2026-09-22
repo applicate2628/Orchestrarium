@@ -137,7 +137,7 @@ def test_legacy_resolution_unchanged_and_auto_excludes_new_providers() -> None:
         "435c3646a5ff9c36bc5b4483d1a04ae7fb8f8ffde51dc5795e2c2918d22f7956"
     )
     assert hashlib.sha256(presets_path.read_bytes()).hexdigest() == (
-        "221a9b4fef1cdc0bef6109dc0f4305a0344fb6b0553057ce80c628df65122077"
+        "80f23e84686d9cefc4e9916098c088f83a992848b67b5dcdf26409cdcf5a8ae3"
     )
     array_lines = "\n".join(
         line
@@ -317,7 +317,7 @@ def test_external_dispatch_denies_unsupported_provider_and_native_is_unchanged()
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
         "requestedProfile": "luna-high",
-        "requestedModel": "gpt-5.6-luna",
+        "requestedModel": "gpt-6-luna",
         "requestedEffort": "high",
         "sandbox": "read-only",
         "fallback": "none",
@@ -391,7 +391,7 @@ def test_advisory_consultant_uses_skill_only_ranking_without_entering_native_rol
     )
     assert luna["status"] == "native-required"
     assert luna["requestedProfile"] == "luna-high"
-    assert luna["requestedModel"] == "gpt-5.6-luna"
+    assert luna["requestedModel"] == "gpt-6-luna"
     assert luna["requestedEffort"] == "high"
     assert luna["fallback"] == "none"
 

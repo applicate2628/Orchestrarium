@@ -62,10 +62,11 @@ externalCodexWorkdirMode: neutral  # allowed: neutral | project; default: neutra
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project; default: neutral
 externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
 # externalCodexProfile notes: matches Claude opus-xhigh as the shipped best-effort default; `default` inherits externalModelMode;
-# `gpt-5.6-sol-xhigh` pins model = gpt-5.6-sol, reasoning_effort = xhigh; `gpt-5.6-sol-max` pins model = gpt-5.6-sol, reasoning_effort = max,
-# for higher-complexity/hard lanes (NOT gpt-5.6-sol-ultra — ultra spawns subagents itself and must never be shipped on a subagent lane);
-# `gpt-5.6-terra` pins model = gpt-5.6-terra, reasoning_effort = high and is the balanced mid-tier — a distinct model
-# (not an effort suffix on gpt-5.6-sol), a genuine cheaper-and-faster-than-gpt-5.6-sol-xhigh reasoning lane, materially
+# `gpt-6-sol-xhigh` pins model = gpt-6-sol, reasoning_effort = xhigh; `gpt-6-sol-max` pins model = gpt-6-sol, reasoning_effort = max,
+# for higher-complexity/hard lanes (NOT gpt-6-sol-ultra — ultra spawns subagents itself and must never be shipped on a subagent lane);
+# explicit `gpt-5.6-sol-xhigh` and `gpt-5.6-sol-max` values retain their named model and effort for 1.x compatibility;
+# `gpt-5.6-terra` pins model = gpt-5.6-terra, reasoning_effort = high and is a balanced reasoning option — a distinct model
+# (not an effort suffix on gpt-5.6-sol); compare cost per verified result by task, model, and effort rather than assuming a static price or speed advantage; it remains materially
 # more capable than a volume tier. Verify against the installed runtime before reporting it as used; its output stays
 # review-gated like any external lane (it is a real second-choice reasoning model, not a bounded mechanical-overflow path)
-externalCodexProfile: gpt-5.6-sol-xhigh  # allowed: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-5.6-sol-xhigh
+externalCodexProfile: gpt-6-sol-xhigh  # allowed: default | gpt-6-sol-xhigh | gpt-6-sol-max | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-6-sol-xhigh

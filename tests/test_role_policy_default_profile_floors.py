@@ -175,9 +175,9 @@ def test_scientific_role_discovery_exposes_named_default_and_astra_range() -> No
     } <= discovered
     assert {
         ("gpt-5.6-terra", "high", "capability-unknown"),
-        ("gpt-5.6-sol", "high", "capability-unknown"),
-        ("gpt-5.6-sol", "xhigh", "capability-unknown"),
-        ("gpt-5.6-sol", "max", "capability-unknown"),
+        ("gpt-6-sol", "high", "capability-unknown"),
+        ("gpt-6-sol", "xhigh", "capability-unknown"),
+        ("gpt-6-sol", "max", "capability-unknown"),
     } <= discovered
     assert all(option["useCriteria"] for option in description["options"])
     assert description["profession"]["skill"] == "$scientific-software-engineer"

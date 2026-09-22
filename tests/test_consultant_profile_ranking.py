@@ -54,7 +54,7 @@ def test_omitted_consultant_choice_uses_frontier_high_and_reports_model_tier() -
     assert description["roleKind"] == "skill-only"
     assert description["mutationClass"] == "read-only"
     assert description["defaultProfile"] == "frontier-high"
-    assert description["defaultModel"] == "gpt-5.6-sol"
+    assert description["defaultModel"] == "gpt-6-sol"
     assert description["defaultEffort"] == "high"
     assert description["profession"]["skill"] == "$consultant"
     assert all("modelTier" in option for option in description["options"])
@@ -64,12 +64,12 @@ def test_omitted_consultant_choice_uses_frontier_high_and_reports_model_tier() -
     assert decision["status"] == "resolved"
     assert decision["modelTier"] == "frontier"
     assert decision["resolvedProfile"] == "frontier-high"
-    assert decision["resolvedModel"] == "gpt-5.6-sol"
+    assert decision["resolvedModel"] == "gpt-6-sol"
     assert decision["resolvedEffort"] == "high"
     assert decision["invocation"] == {
         "mode": "generic-explicit-profile",
         "forkTurns": "none",
-        "model": "gpt-5.6-sol",
+        "model": "gpt-6-sol",
         "reasoningEffort": "high",
         "professionSkill": "$consultant",
         "promptPreamble": description["profession"]["instructions"],
@@ -87,18 +87,18 @@ def test_explicit_consultant_choice_wins_but_partial_and_unapproved_max_deny() -
     )
     xhigh = _resolve(
         description,
-        requested_model="gpt-5.6-sol",
+        requested_model="gpt-6-sol",
         requested_effort="xhigh",
     )
     partial = _resolve(description, requested_model="gpt-5.6-terra")
     unapproved_max = _resolve(
         description,
-        requested_model="gpt-5.6-sol",
+        requested_model="gpt-6-sol",
         requested_effort="max",
     )
     approved_max = _resolve(
         description,
-        requested_model="gpt-5.6-sol",
+        requested_model="gpt-6-sol",
         requested_effort="max",
         user_approved_max=True,
     )

@@ -2942,7 +2942,7 @@ def resolved_profile(
         return [], "kimi-code/k3", kimi_effort
     if not flags:
         flags = (
-            ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=xhigh"]
+            ["--model", "gpt-6-sol", "-c", "model_reasoning_effort=xhigh"]
             if provider == "codex"
             else [
                 "-p",
@@ -2971,7 +2971,7 @@ def resolved_profile(
         raise
     if not model or not effort:
         example = (
-            "--model gpt-5.6-sol -c model_reasoning_effort=xhigh"
+            "--model gpt-6-sol -c model_reasoning_effort=xhigh"
             if provider == "codex"
             else "-p --output-format text --model opus --effort xhigh"
         )

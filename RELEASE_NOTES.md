@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-22
+
+- **Codex defaults and native Sol/Luna roles now use GPT-6 while explicit GPT-5.6 choices remain literal.** Sol-backed native roles and the shipped external Sol default move to `gpt-6-sol`, and the bounded mechanical corridor moves to `gpt-6-luna`; existing effort floors, max approval, role authority, Terra, and Astra behavior are unchanged. New `gpt-6-sol-xhigh` and `gpt-6-sol-max` profile values coexist with the retained `gpt-5.6-sol-xhigh` and `gpt-5.6-sol-max` compatibility values for the remainder of 1.x, so existing version-named configs are not silently rewritten. OpenAI's launch announcement lists both models in Codex and API prices of $2/$10 per million input/output tokens for Sol and $0.10/$0.50 for Luna; those launch-time API list prices do not promise Codex plan quotas, capacity, billing treatment, or future pricing.
+
 ## 2026-09-21
 
 - **Cleanup blockers are explicitly reassessed from current conditions.** Lead records each unresolved blocked action, current reason, resume condition, and next step in the existing `status.md`. When a relevant condition changes, and again before completion, cleanup reassesses the same target; an earlier denial alone is not current evidence. Reassessment does not grant permission, bypass a refusal, or authorize retry, deletion, or another mutation, so unchanged or still-ungranted actions remain blocked. **Why it matters:** recovery and closeout cannot rely on stale denial evidence while existing safety and approval boundaries remain unchanged.

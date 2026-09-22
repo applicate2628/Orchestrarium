@@ -30,7 +30,7 @@ description: "External worker: run eligible worker roles externally."
 - Luna mechanical dispatch is native-only. External-worker never realizes or falls back for it; the native caller consumes `RoleDispatchPolicyV1` from the installed `AGENTS.md`.
 - Do not honor `reserve` for worker-side lanes. It is a supplemental read-only candidate only in `advisory.*` and `review.*` profile orders after primary `claude`/`codex`, and `reserveResolver` must not turn it into a worker transport, primary-Claude retry, or implementation/editing fallback.
 - Keep explicit-only and unavailable providers out of shipped and repo-local `auto` profiles.
-- Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
+- Never select `gpt-6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
 - Use file-based prompt delivery for substantive task prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
 - If the selected Claude CLI path fails for a worker artifact, do not convert that same primary `claude` run to the secret-backed wrapper. Treat Claude as unavailable or reroute honestly.
 - This adapter is a direct external launch contract. Do not spawn it as an internal specialist or helper; the orchestrator must launch the selected external provider directly or fail closed.

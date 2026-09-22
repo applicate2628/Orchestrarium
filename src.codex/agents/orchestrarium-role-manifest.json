@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "packRevision": "1.x-native-role-policy-v1",
-  "policySha256": "a6c251e23b17459ec298e8896884d769cf5d42795f18996225553c6cb7679f9b",
+  "policySha256": "3caa3ae0cad7b0be8c15b22ef8f61bb52965f18f364e0a189a8d81fecb7a0c58",
   "roles": {
     "algorithm-scientist": {
       "relativePath": "algorithm-scientist.toml",
-      "sha256": "1bc7c60b30f1bb360a502ee955e41513a80d3e3f9e222e5a673817a7e421c8bd"
+      "sha256": "cd2bbbaf5f4173f07bfe18cea39d90dd0cc341630b77b5dac0d82d9f92b57d7e"
     },
     "analyst": {
       "relativePath": "analyst.toml",
@@ -13,11 +13,11 @@
     },
     "architect": {
       "relativePath": "architect.toml",
-      "sha256": "bcdd83abcb3e5d99e0dd0963d622b475ea11d450bb16f1af1bc93855891ff4fb"
+      "sha256": "71f3d9e27019de2e133d8947a33cdb69ab38261824fab36bcb18c7f7f3ff0792"
     },
     "architecture-reviewer": {
       "relativePath": "architecture-reviewer.toml",
-      "sha256": "239a91ef35b54cc640372132b51662bcbe0da88dded68ff53d339621689df8c3"
+      "sha256": "5e404f6643d8992dd7cd4a40e8a5d3ae4f7f388381907aa230b6b0fa15ac458a"
     },
     "backend-engineer": {
       "relativePath": "backend-engineer.toml",
@@ -25,11 +25,11 @@
     },
     "computational-scientist": {
       "relativePath": "computational-scientist.toml",
-      "sha256": "7ddcfb3afe6d9032d03d3da6468662a961819ceacf5252caccccfc69744cc9d3"
+      "sha256": "4169e5ac3442e542b0249879595b6974b78e0924b377613b5b427a6488171901"
     },
     "default": {
       "relativePath": "default.toml",
-      "sha256": "b38bb7c4a05f93bd54a11c9a06d2bbdae9bed353db4fdd2f42b4abb9fd3ba3e1"
+      "sha256": "90e5b43a727a1f6c42ed3bee05e033a2cd83eef102d9030301227f99b79c8d53"
     },
     "explorer": {
       "relativePath": "explorer.toml",
@@ -41,11 +41,11 @@
     },
     "mechanical-scout": {
       "relativePath": "mechanical-scout.toml",
-      "sha256": "d384fa021005f10b4b3faf48818a4963ab314689b986a6fbed25b5ad13e66df1"
+      "sha256": "99aac652b8849fc02cfd86b4c88dd10f820c3b3ce100e9f05f7b4ec6b0a01ca0"
     },
     "mechanical-worker": {
       "relativePath": "mechanical-worker.toml",
-      "sha256": "e91942ce296a53b586737250bd10b51965663aa559908ae02ea7547454d83305"
+      "sha256": "56535f1711da312516426767f7f32ef3070f9e6e6e9afcd622fe08e3ecdbeea5"
     },
     "planner": {
       "relativePath": "planner.toml",
@@ -53,7 +53,7 @@
     },
     "platform-engineer": {
       "relativePath": "platform-engineer.toml",
-      "sha256": "e5d44b7fafc7ec8ab3c69b4086bdda5e5430974334f90fc407b5bb78ace8a4cf"
+      "sha256": "3e4c199ba984cbfba080249ad28c645ffbf78a08daf8519e0aa058e7f92aaa40"
     },
     "qa-engineer": {
       "relativePath": "qa-engineer.toml",
@@ -61,11 +61,11 @@
     },
     "security-engineer": {
       "relativePath": "security-engineer.toml",
-      "sha256": "ceb53c8db3d77f75beea76a9cc27120d7623a60661cca3dac92b01a35ce06a0c"
+      "sha256": "6e53fa663da8eed31ab4012354ee9bebf24f16ecb9cdaa517a7f196dcfd1969e"
     },
     "security-reviewer": {
       "relativePath": "security-reviewer.toml",
-      "sha256": "0f9b75713128885b8db86b32a9ecb3e756b0022add169a89fc10d615745445f1"
+      "sha256": "f22614caec4561e5cb0833e6264081b42c46570936fe1d2b62e8534c17ee214d"
     },
     "scientific-software-engineer": {
       "relativePath": "scientific-software-engineer.toml",
@@ -73,7 +73,7 @@
     },
     "worker": {
       "relativePath": "worker.toml",
-      "sha256": "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475"
+      "sha256": "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815"
     }
   }
 }

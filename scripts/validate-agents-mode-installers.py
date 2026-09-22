@@ -264,6 +264,8 @@ def validate_overlay(
     case: InstallerCase,
     overlay: Path,
     schema_data: dict[str, Any],
+    *,
+    expected_codex_profile: str = "gpt-6-sol-xhigh",
 ) -> None:
     if not overlay.is_file():
         raise InstallerRegressionError(f"{case.name} did not create {overlay}")
@@ -290,9 +292,10 @@ def validate_overlay(
     if counts != expected_counts:
         raise InstallerRegressionError(f"{case.name} opinion counts drifted")
 
-    if scalars.get("externalCodexProfile") != "gpt-5.6-sol-xhigh":
+    if scalars.get("externalCodexProfile") != expected_codex_profile:
         raise InstallerRegressionError(
-            f"{case.name} missing shared externalCodexProfile default (gpt-5.6-sol-xhigh)"
+            f"{case.name} externalCodexProfile drifted "
+            f"(expected {expected_codex_profile})"
         )
 
     custom = profiles.get("custom")
@@ -371,6 +374,30 @@ def run_regression(root: Path) -> None:
             / "codex-fresh-project",
         )
         validate_codex_native_role_install(codex_fresh_project, root)
+
+        codex_explicit_old_project = scratch / "codex-explicit-old-profile-project"
+        codex_explicit_old_project.mkdir(parents=True, exist_ok=True)
+        explicit_old_overlay = codex_explicit_old_project / codex_case.overlay
+        explicit_old_overlay.parent.mkdir(parents=True, exist_ok=True)
+        explicit_old_overlay.write_text(
+            STALE_OVERLAY + "externalCodexProfile: gpt-5.6-sol-max\n",
+            encoding="utf-8",
+        )
+        run_installer(
+            root,
+            codex_case,
+            Path(".scratch")
+            / "agents-mode-installer-regression"
+            / scratch.name
+            / "codex-explicit-old-profile-project",
+        )
+        validate_overlay(
+            codex_case,
+            explicit_old_overlay,
+            schema_data,
+            expected_codex_profile="gpt-5.6-sol-max",
+        )
+        validate_codex_native_role_install(codex_explicit_old_project, root)
 
         codex_global_home = scratch / "codex-python-global-home"
         codex_global_home.mkdir(parents=True, exist_ok=True)

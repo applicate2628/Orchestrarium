@@ -1622,7 +1622,7 @@ def _resolve_role_dispatch_in_layout(
     if (
         contract["role"] not in _MECHANICAL_ROLES
         or contract["taskClass"] not in _MECHANICAL_TASK_CLASSES
-        or contract["model"] != "gpt-5.6-luna"
+            or contract["model"] != "gpt-6-luna"
     ):
         return _role_dispatch_decision(
             status="denied",

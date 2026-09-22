@@ -25,7 +25,7 @@ description: "External worker: run eligible worker roles externally."
 - Honor the contract-resolved `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`; this role does not reimplement their resolution.
 - Resolve config, provider, model/profile, workdir, fallback, and transport under the shared external-dispatch contract; do not reproduce its resolution logic here.
 - Do not honor `reserve` for worker-side lanes. It is a supplemental read-only candidate only in `advisory.*` and `review.*` profile orders after primary `claude`/`codex`, and `reserveResolver` must not turn it into a worker transport, primary-Claude retry, or implementation/editing fallback.
-- Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
+- Never select `gpt-6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
 - Use file-based prompt delivery for substantive task prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
 - If the selected primary Claude path fails for worker-side work, report Claude unavailable or reroute honestly instead of converting the same run to the secret-backed wrapper.
 - This adapter is a direct external launch contract. Do not spawn it as an internal Claude agent/helper host for another provider.

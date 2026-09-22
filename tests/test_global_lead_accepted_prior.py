@@ -129,6 +129,34 @@ CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS = {
         "scripts/validate-work-item-state.py",
     ),
 }
+GPT6_STOCK_PRIOR_REVISION = "3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa"
+GPT6_STOCK_SKILL_PRIORS = (
+    pytest.param(
+        "consultant",
+        "63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a",
+        id="consultant",
+    ),
+    pytest.param(
+        "external-reviewer",
+        "4623816c87f9d1b017472011601951eab8bc8e4ceeea2d13911e29a876c853e8",
+        id="external-reviewer",
+    ),
+    pytest.param(
+        "external-worker",
+        "ca74db54391a1994c30a2da6d80021261556db9f75ac89ec8878ee1a5c50f32c",
+        id="external-worker",
+    ),
+    pytest.param(
+        "init-project",
+        "21dc5adc3f4ccb8e646546cd0d3ccf979c37d4e4e8dcefcc9620122f500dadb4",
+        id="init-project",
+    ),
+    pytest.param(
+        "lead",
+        "95eadefb2069546027bbaa59497212a42e9177cce80ad729a869f64f93784635",
+        id="lead",
+    ),
+)
 PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS = {
     "external-dispatch.md": ("8f92dc73", "src.codex/skills/lead/external-dispatch.md"),
     "scripts/provider_prompt.py": ("8f92dc73", "scripts/provider_prompt.py"),
@@ -894,6 +922,25 @@ def _assert_exact_stock_skill_is_accepted_and_drift_refused(
         installer._preflight_canonical_skills(
             ROOT / "src.codex" / "skills", drift_root, root=ROOT
         )
+
+
+@pytest.mark.parametrize(("name", "expected_prior"), GPT6_STOCK_SKILL_PRIORS)
+def test_gpt6_exact_stock_skill_upgrades_and_one_byte_drift_is_rejected(
+    tmp_path: Path, name: str, expected_prior: str
+) -> None:
+    installer = _load_installer()
+    historical = (
+        _seed_revision_staged_lead(
+            GPT6_STOCK_PRIOR_REVISION, tmp_path / "historical" / "lead"
+        )
+        if name == "lead"
+        else _extract_additional_stock_skill(
+            name, GPT6_STOCK_PRIOR_REVISION, tmp_path / "historical"
+        )
+    )
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
+        installer, tmp_path, name, expected_prior, historical
+    )
 
 
 def _copy_current_staged_lead(installer, destination: Path) -> Path:

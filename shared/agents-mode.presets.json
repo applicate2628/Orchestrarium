@@ -35,7 +35,7 @@
         "externalCodexWorkdirMode": "neutral",
         "externalClaudeWorkdirMode": "neutral",
         "externalModelMode": "runtime-default",
-        "externalCodexProfile": "gpt-5.6-sol-xhigh",
+        "externalCodexProfile": "gpt-6-sol-xhigh",
         "externalClaudeProfile": "opus-xhigh"
       }
     },
@@ -101,7 +101,7 @@
         "externalCodexWorkdirMode": "neutral",
         "externalClaudeWorkdirMode": "neutral",
         "externalModelMode": "pinned-top-pro",
-        "externalCodexProfile": "gpt-5.6-sol-xhigh",
+        "externalCodexProfile": "gpt-6-sol-xhigh",
         "externalClaudeProfile": "opus-max"
       }
     },
@@ -123,7 +123,7 @@
         "externalCodexWorkdirMode": "neutral",
         "externalClaudeWorkdirMode": "neutral",
         "externalModelMode": "pinned-top-pro",
-        "externalCodexProfile": "gpt-5.6-sol-xhigh",
+        "externalCodexProfile": "gpt-6-sol-xhigh",
         "externalClaudeProfile": "opus-max"
       }
     },

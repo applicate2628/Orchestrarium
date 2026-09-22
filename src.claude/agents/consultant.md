@@ -100,7 +100,7 @@ reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper |
 externalPriorityProfiles: {...}  # structured profile map; default seed ships balanced and quality-first
 externalOpinionCounts: {...}  # structured lane-count map; default seed keeps documented lanes at 1
 externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-externalCodexProfile: {value}  # allowed: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-5.6-sol-xhigh
+externalCodexProfile: {value}  # allowed: default | gpt-6-sol-xhigh | gpt-6-sol-max | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-6-sol-xhigh
 ```
 
 `consultantMode` continues to govern consultant behavior. `reserve` is a symbolic supplemental advisory/review profile candidate that may be reached after primary `claude`/`codex`; it is independent of primary `claude` and is not a retry, fallback, or transport swap for a failed Claude CLI run. `reserveResolver` binds that symbolic candidate to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`; `wrapper:<command>` must be a PATH-resolved command or repo-relative wrapper path. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default, and `externalCodexProfile: default` inherits `externalModelMode` when Codex is selected or auto-resolved. Shipped `auto` stays on the Codex/Claude pair. Kimi is explicit-only for policy-admitted read-only research/review, independently verified and nonauthorizing; Grok remains unavailable in 1.x. `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
@@ -162,7 +162,7 @@ Check the selected provider first:
 - Claude path: `claude`
 - Kimi path: approved `invoke-kimi-prompt` wrapper from `contracts/external-dispatch.md`; the wrapper owns all Kimi provider argv
 
-Before provider-specific transport, classify the advisory as `planning`, `review`, or `critical-design`, call the installed `describe_ordinary_native_role_options`, then call `resolve_ordinary_native_dispatch` with the nonempty approved scope and caller rationale. Disabled mode performs neither call. An omitted model and effort selects the policy-owned `frontier-high` candidate (`gpt-5.6-sol`, `high`); a complete explicit admissible pair wins; a partial pair fails; and `max` still requires explicit user approval. The default candidate is not a minimum effort and does not authorize forcing `xhigh`.
+Before provider-specific transport, classify the advisory as `planning`, `review`, or `critical-design`, call the installed `describe_ordinary_native_role_options`, then call `resolve_ordinary_native_dispatch` with the nonempty approved scope and caller rationale. Disabled mode performs neither call. An omitted model and effort selects the policy-owned `frontier-high` candidate (`gpt-6-sol`, `high`); a complete explicit admissible pair wins; a partial pair fails; and `max` still requires explicit user approval. The default candidate is not a minimum effort and does not authorize forcing `xhigh`.
 
 - `internal` mode consumes the resolved generic skill-only invocation. Exclude the orchestrator's actual model from the usable options; if that leaves no different-model option, return the existing unavailable advisory.
 - External Codex passes `resolvedModel` and `resolvedEffort` to the existing wrapper as complete model/effort flags.
@@ -180,7 +180,7 @@ echo "<full prompt body>" |
 # Or with prompt already in a file:
 bash .claude/agents/scripts/invoke-codex-prompt.sh advisory-design-adr --prompt-file path/to/prompt.md --terminal-receipt <absolute-caller-owned-receipt>
 # Override codex flags after `--`:
-bash .claude/agents/scripts/invoke-codex-prompt.sh worker-task --terminal-receipt <absolute-caller-owned-receipt> -- -c model_reasoning_effort=xhigh --model gpt-5.6-sol
+bash .claude/agents/scripts/invoke-codex-prompt.sh worker-task --terminal-receipt <absolute-caller-owned-receipt> -- -c model_reasoning_effort=xhigh --model gpt-6-sol
 ```
 
 ```powershell
