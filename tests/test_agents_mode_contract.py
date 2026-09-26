@@ -33,12 +33,13 @@ class AgentsModeContractTest(unittest.TestCase):
         # Shipped default is the best-effort profile (symmetric to externalClaudeProfile: opus-xhigh).
         self.assertEqual(codex_profile["default"], "gpt-6-sol-xhigh")
         # GPT-6 Sol is the active family; explicit GPT-5.6 Sol selections remain literal 1.x
-        # compatibility values. The alternate cheaper profile is GPT-5.6 Terra (the balanced
-        # mid-tier, a distinct model). Keep this list in sync with the schema-owned enum.
+        # compatibility values. Terra remains an explicit distinct-model option.
+        # Keep this list in sync with the schema-owned enum.
         self.assertEqual(
             codex_profile["allowed"],
             [
                 "default",
+                "gpt-6-sol-high",
                 "gpt-6-sol-xhigh",
                 "gpt-6-sol-max",
                 "gpt-5.6-sol-xhigh",
@@ -50,7 +51,7 @@ class AgentsModeContractTest(unittest.TestCase):
 
         # Per-preset assignments must correspond to each preset's intent:
         #   best-effort presets → gpt-6-sol-xhigh
-        #   speed preset → gpt-5.6-terra (lightest remaining Codex profile; volume tier retired)
+        #   speed preset → gpt-6-sol-high
         #   balanced everyday presets → default (inherit externalModelMode)
         expected_per_preset = {
             "default": "gpt-6-sol-xhigh",
@@ -58,7 +59,7 @@ class AgentsModeContractTest(unittest.TestCase):
             "external-aggressive": "default",
             "correctness-first": "gpt-6-sol-xhigh",
             "power-mode": "gpt-6-sol-xhigh",
-            "max-speed": "gpt-5.6-terra",
+            "max-speed": "gpt-6-sol-high",
         }
         for preset in presets["presetOrder"]:
             with self.subTest(preset=preset):

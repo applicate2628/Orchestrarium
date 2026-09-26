@@ -210,7 +210,7 @@ The orchestrator (the main conversation, as Lead) **prefers** external roles by 
 - `externalOpinionCounts` — raise specific lanes above `1` when the orchestrator should collect multiple independent external opinions
 - `parallelMode` is the general fan-out rule for any helper lane; `externalOpinionCounts` and brigade semantics remain the external-specific overlay on top
 - `externalModelMode: runtime-default | pinned-top-pro` — shared production model policy; `runtime-default` keeps provider runtime selection, while `pinned-top-pro` asks each production provider for its strongest documented native path with one named same-provider fallback on retryable provider exhaustion
-- `externalCodexProfile: default | gpt-6-sol-xhigh | gpt-6-sol-max | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra` — shared Codex-specific profile override.
+- `externalCodexProfile: default | gpt-6-sol-high | gpt-6-sol-xhigh | gpt-6-sol-max | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra` — shared Codex-specific profile override.
   `default` inherits `externalModelMode`; `gpt-6-sol-xhigh` (shipped default) and `gpt-6-sol-max` request the named GPT-6 Sol effort; explicit `gpt-5.6-sol-xhigh` and `gpt-5.6-sol-max` values retain their named model and effort through 1.x; `gpt-5.6-terra` remains the balanced mid-tier reasoning lane at `high`
 - `reserve` in `externalPriorityProfiles` — advisory/review-only supplemental candidate bound by `reserveResolver`; it is independent of primary `claude`, not a scalar provider key, and not available to worker or mutating routes
 - `externalClaudeProfile: sonnet-high | opus-xhigh | opus-max | fable-xhigh` — Codex-line only.

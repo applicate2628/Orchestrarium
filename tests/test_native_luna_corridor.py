@@ -30,20 +30,70 @@ TRUST_BOUNDARY = (
 )
 PROTECTED_EXISTING_ROLE_DIGESTS = {
     "algorithm-scientist": "cd2bbbaf5f4173f07bfe18cea39d90dd0cc341630b77b5dac0d82d9f92b57d7e",
-    "analyst": "422cd2cb2cc5bd6e23a0e97cfabf5353d99db31d44196696d6e8cb73aa7eb95a",
     "architect": "71f3d9e27019de2e133d8947a33cdb69ab38261824fab36bcb18c7f7f3ff0792",
     "architecture-reviewer": "5e404f6643d8992dd7cd4a40e8a5d3ae4f7f388381907aa230b6b0fa15ac458a",
-    "backend-engineer": "4c6e06300e8c906130c900bd8a1738d17c2115ca647b77a259b94531f5f8769a",
     "computational-scientist": "4169e5ac3442e542b0249879595b6974b78e0924b377613b5b427a6488171901",
     "default": "90e5b43a727a1f6c42ed3bee05e033a2cd83eef102d9030301227f99b79c8d53",
-    "explorer": "282f68e0e509fa2d9eb2bf77e841f69809f67fc19d3cb74eee3e93247673e5db",
-    "knowledge-archivist": "0672b994f41d3a5d69ba2f8d719d19cb90e9d7fe6ed720c9daa09009ec4f2349",
-    "planner": "0531687c0a106c0f44d4c0bb5c5e4b98c2618c99387bbbc443eb108b4eed930f",
     "platform-engineer": "3e4c199ba984cbfba080249ad28c645ffbf78a08daf8519e0aa058e7f92aaa40",
-    "qa-engineer": "65a5dd03a4196a99d00c72c81aa98e1470eeac0c6d9b453a3147c836c146ca9b",
     "security-engineer": "6e53fa663da8eed31ab4012354ee9bebf24f16ecb9cdaa517a7f196dcfd1969e",
     "security-reviewer": "f22614caec4561e5cb0833e6264081b42c46570936fe1d2b62e8534c17ee214d",
     "worker": "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815",
+}
+SOL_MIGRATED_ROLE_METADATA = {
+    "explorer": (
+        "Read-heavy codebase exploration agent.",
+        "read-only",
+        (
+            "Read-only evidence-gathering overlay under the universal AGENTS.md rules.",
+            "Stay in exploration mode, gather factual findings efficiently, and return clear pointers.",
+            "Do not edit or drift into implementation unless explicitly requested.",
+        ),
+    ),
+    "analyst": (
+        "Evidence-first repository and system analyst.",
+        "read-only",
+        (
+            "Treat AGENTS.md as the base contract and activate $analyst for the assigned subtask.",
+            "Gather factual evidence, preserve uncertainty, and return one bounded analysis artifact.",
+            "Do not edit implementation files unless the parent explicitly assigns implementation.",
+        ),
+    ),
+    "planner": (
+        "Ordered implementation and delivery planner.",
+        "read-only",
+        (
+            "Treat AGENTS.md as the base contract and activate $planner for the assigned subtask.",
+            "Produce ordered phases, acceptance criteria, and rollback notes from accepted evidence.",
+            "Do not implement the plan or widen the approved scope.",
+        ),
+    ),
+    "backend-engineer": (
+        "Backend and service implementation specialist.",
+        "workspace-write",
+        (
+            "Treat AGENTS.md as the base contract and activate $backend-engineer.",
+            "Implement only the approved backend slice and return concrete verification evidence.",
+            "Preserve surrounding contracts and ownership boundaries.",
+        ),
+    ),
+    "qa-engineer": (
+        "Test strategy, regression, and delivery gate specialist.",
+        "read-only",
+        (
+            "Treat AGENTS.md as the base contract and activate $qa-engineer.",
+            "Verify the admitted implementation against its acceptance criteria and likely regressions.",
+            "Return PASS, REVISE, or BLOCKED with fresh evidence and do not implement fixes.",
+        ),
+    ),
+    "knowledge-archivist": (
+        "Canonical documentation and lifecycle registry specialist.",
+        "workspace-write",
+        (
+            "Treat AGENTS.md as the base contract and activate $knowledge-archivist.",
+            "Own only the assigned canonical records, lifecycle mechanics, links, and derived indexes.",
+            "Preserve immutable archives and return one bounded artifact.",
+        ),
+    ),
 }
 STOCK_FAST_POLICY_SHA256 = "dcab8e4da55b05475f9b9c507a3a9a97679a0c7b72006ff7ffca4b95ccd13451"
 STOCK_FAST_MANIFEST_SHA256 = "842b1b29fae7d41a0b2422d8711652b3e6d7c720406c3ce3fc13259518f82115"
@@ -1278,7 +1328,7 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
         if luna_profiles.intersection(role["allowedProfiles"])
     }
     assert luna_consumers == {"mechanical-scout", "mechanical-worker"}
-    assert policy["roles"]["explorer"]["defaultProfile"] == "balanced-high"
+    assert policy["roles"]["explorer"]["defaultProfile"] == "frontier-high"
     assert not luna_profiles.intersection(
         policy["roles"]["explorer"]["allowedProfiles"]
     )
@@ -1516,6 +1566,22 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
         assert hashlib.sha256(
             (AGENTS_SOURCE / f"{role_name}.toml").read_bytes()
         ).hexdigest() == expected_digest
+
+
+def test_sol_migrated_roles_keep_independent_nonmodel_contract() -> None:
+    """The manifest checks bytes; this baseline guards unchanged role authority."""
+    for name, (description, sandbox, role_lines) in SOL_MIGRATED_ROLE_METADATA.items():
+        role = tomllib.loads((AGENTS_SOURCE / f"{name}.toml").read_text(encoding="utf-8"))
+        assert set(role) == {
+            "name", "description", "model", "model_reasoning_effort",
+            "sandbox_mode", "developer_instructions",
+        }
+        assert role["name"] == name
+        assert role["description"] == description
+        assert role["sandbox_mode"] == sandbox
+        assert role["developer_instructions"] == "\n".join(
+            (*role_lines, TRUST_BOUNDARY, "")
+        )
 
 
 def test_installer_migrates_only_the_exact_stock_fast_policy_manifest_pair(

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "packRevision": "1.x-native-role-policy-v1",
-  "policySha256": "3caa3ae0cad7b0be8c15b22ef8f61bb52965f18f364e0a189a8d81fecb7a0c58",
+  "policySha256": "4e9064e012f9bb858f8eb74fdb27b057cc11eb4bca40e3945b1ccd815c5bfb2d",
   "roles": {
     "algorithm-scientist": {
       "relativePath": "algorithm-scientist.toml",
@@ -9,7 +9,7 @@
     },
     "analyst": {
       "relativePath": "analyst.toml",
-      "sha256": "422cd2cb2cc5bd6e23a0e97cfabf5353d99db31d44196696d6e8cb73aa7eb95a"
+      "sha256": "0f26fae798309c1b69f3fe5077196e3e5895211bc661f7575aa683fd01e2225b"
     },
     "architect": {
       "relativePath": "architect.toml",
@@ -21,7 +21,7 @@
     },
     "backend-engineer": {
       "relativePath": "backend-engineer.toml",
-      "sha256": "4c6e06300e8c906130c900bd8a1738d17c2115ca647b77a259b94531f5f8769a"
+      "sha256": "38d99e26339cb0942eb66d4062e0de33f085c5b39f445cc358ac217b03010589"
     },
     "computational-scientist": {
       "relativePath": "computational-scientist.toml",
@@ -33,11 +33,11 @@
     },
     "explorer": {
       "relativePath": "explorer.toml",
-      "sha256": "282f68e0e509fa2d9eb2bf77e841f69809f67fc19d3cb74eee3e93247673e5db"
+      "sha256": "a98b89ec3c513f8242459adda45808612645ed5f5cb07b9da8839fe66b670e89"
     },
     "knowledge-archivist": {
       "relativePath": "knowledge-archivist.toml",
-      "sha256": "0672b994f41d3a5d69ba2f8d719d19cb90e9d7fe6ed720c9daa09009ec4f2349"
+      "sha256": "8f69d0f67010b77b71c81b77ad74119300ad245061c4363cbcfd2f1d0fab510c"
     },
     "mechanical-scout": {
       "relativePath": "mechanical-scout.toml",
@@ -49,7 +49,7 @@
     },
     "planner": {
       "relativePath": "planner.toml",
-      "sha256": "0531687c0a106c0f44d4c0bb5c5e4b98c2618c99387bbbc443eb108b4eed930f"
+      "sha256": "dcde16fa86661eee94b21618fb6320026185ddb425541b15239b4c7d232c4faa"
     },
     "platform-engineer": {
       "relativePath": "platform-engineer.toml",
@@ -57,7 +57,7 @@
     },
     "qa-engineer": {
       "relativePath": "qa-engineer.toml",
-      "sha256": "65a5dd03a4196a99d00c72c81aa98e1470eeac0c6d9b453a3147c836c146ca9b"
+      "sha256": "3e964408acb6fe3ea1ba8a43158927e83b6d23bb121dd34b6b843863caf4a9fd"
     },
     "security-engineer": {
       "relativePath": "security-engineer.toml",

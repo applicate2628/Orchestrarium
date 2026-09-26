@@ -86,7 +86,7 @@ At init time, the helper may either write the selected preset immediately or ent
 | `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review `2`, others `1` | advisory+review `2`, others `1` | all `1` |
 | workdir modes | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
-| `externalCodexProfile` | `gpt-6-sol-xhigh` | `default` | `default` | `gpt-6-sol-xhigh` | `gpt-6-sol-xhigh` | `gpt-5.6-terra` |
+| `externalCodexProfile` | `gpt-6-sol-xhigh` | `default` | `default` | `gpt-6-sol-xhigh` | `gpt-6-sol-xhigh` | `gpt-6-sol-high` |
 | `externalClaudeProfile` (Codex-line only) | `opus-xhigh` | `sonnet-high` | `sonnet-high` | `opus-max` | `opus-max` | `sonnet-high` |
 
 `correctness-first` and `power-mode` lane-specific opinion counts:
@@ -333,6 +333,7 @@ Notes:
 | Value | Meaning | Effective Codex behavior |
 |---|---|---|
 | `default` | Inherit the shared model policy | When the resolved provider is Codex, apply `externalModelMode` unchanged. Balance-oriented presets may choose this value deliberately; omitted-key and first-write values instead use `gpt-6-sol-xhigh`. Every Sol selection made by the inherited policy now uses GPT-6. |
+| `gpt-6-sol-high` | Explicit Sol profile for the speed preset | When the resolved provider is Codex, request model `gpt-6-sol` with `model_reasoning_effort = "high"` regardless of `externalModelMode`. |
 | `gpt-6-sol-xhigh` | Shipped explicit Sol profile | When the resolved provider is Codex, request model `gpt-6-sol` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`. |
 | `gpt-6-sol-max` | Explicit higher-effort Codex request for higher-complexity/hard lanes | When the resolved provider is Codex, request model `gpt-6-sol` with `model_reasoning_effort = "max"`. Max remains approval-gated. This is NOT `gpt-6-sol-ultra` — no `ultra` route is shipped on a subagent lane. |
 | `gpt-5.6-sol-xhigh` | Retained explicit GPT-5.6 compatibility profile | Preserve the literal request for model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"`; do not normalize it to GPT-6. |
@@ -379,6 +380,7 @@ Guardrails:
 | Situation | Rule |
 |---|---|
 | `externalCodexProfile: default` and Codex is the chosen provider | Inherit `externalModelMode`; under `runtime-default`, do not pin a model, and under `pinned-top-pro`, use the documented top Codex path. |
+| `externalCodexProfile: gpt-6-sol-high` and Codex is the chosen provider | Request model `gpt-6-sol` with `model_reasoning_effort = "high"`. If unsupported or ambiguous, disclose the shortfall instead of silently falling back. |
 | `externalCodexProfile: gpt-6-sol-xhigh` and Codex is the chosen provider | Request model `gpt-6-sol` with `model_reasoning_effort = "xhigh"`. If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
 | `externalCodexProfile: gpt-6-sol-max` and Codex is the chosen provider | Request model `gpt-6-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes; max remains approval-gated. If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
 | `externalCodexProfile: gpt-5.6-sol-xhigh` or `gpt-5.6-sol-max` and Codex is the chosen provider | Preserve the explicit versioned request for model `gpt-5.6-sol` with the named effort. Do not normalize it to GPT-6; these compatibility tokens remain supported for the remainder of 1.x. |

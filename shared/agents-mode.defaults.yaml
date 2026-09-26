@@ -69,4 +69,4 @@ externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro;
 # (not an effort suffix on gpt-5.6-sol); compare cost per verified result by task, model, and effort rather than assuming a static price or speed advantage; it remains materially
 # more capable than a volume tier. Verify against the installed runtime before reporting it as used; its output stays
 # review-gated like any external lane (it is a real second-choice reasoning model, not a bounded mechanical-overflow path)
-externalCodexProfile: gpt-6-sol-xhigh  # allowed: default | gpt-6-sol-xhigh | gpt-6-sol-max | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-6-sol-xhigh
+externalCodexProfile: gpt-6-sol-xhigh  # allowed: default | gpt-6-sol-high | gpt-6-sol-xhigh | gpt-6-sol-max | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-6-sol-xhigh

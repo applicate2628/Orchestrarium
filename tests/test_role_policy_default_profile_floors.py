@@ -227,11 +227,11 @@ def test_ordinary_resolver_keeps_named_default_but_explicit_tuple_uses_generic_s
     assert explicit["fallback"] == "none"
 
 
-def test_analyst_exploration_admits_medium_without_changing_named_default() -> None:
+def test_analyst_exploration_preserves_explicit_terra_with_sol_default() -> None:
     host = {
         "explicitModelControl": True,
         "explicitReasoningEffortControl": True,
-        "reportedModels": ["gpt-5.6-terra"],
+        "reportedModels": ["gpt-5.6-terra", "gpt-6-sol"],
         "reportedEfforts": ["medium", "high"],
         "reportedAgentTypes": ["analyst"],
     }
@@ -249,8 +249,8 @@ def test_analyst_exploration_admits_medium_without_changing_named_default() -> N
 
     assert description["status"] == "available"
     assert description["mutationClass"] == "read-only"
-    assert description["defaultProfile"] == "balanced-high"
-    assert description["defaultModel"] == "gpt-5.6-terra"
+    assert description["defaultProfile"] == "frontier-high"
+    assert description["defaultModel"] == "gpt-6-sol"
     assert description["defaultEffort"] == "high"
     assert [
         (option["profile"], option["model"], option["effort"])
@@ -258,6 +258,7 @@ def test_analyst_exploration_admits_medium_without_changing_named_default() -> N
     ] == [
         ("balanced-medium", "gpt-5.6-terra", "medium"),
         ("balanced-high", "gpt-5.6-terra", "high"),
+        ("frontier-high", "gpt-6-sol", "high"),
     ]
 
     default = RESOLVER.resolve_ordinary_native_dispatch(
@@ -273,8 +274,8 @@ def test_analyst_exploration_admits_medium_without_changing_named_default() -> N
         approved_execution_scope=scope,
     )
 
-    assert default["resolvedProfile"] == "balanced-high"
-    assert default["resolvedModel"] == "gpt-5.6-terra"
+    assert default["resolvedProfile"] == "frontier-high"
+    assert default["resolvedModel"] == "gpt-6-sol"
     assert default["resolvedEffort"] == "high"
     assert default["invocation"] == {
         "mode": "named-role-default",
@@ -443,12 +444,12 @@ def test_skill_only_catalog_resolves_default_and_explicit_choices_without_agent_
     )
 
     assert description["roleKind"] == "skill-only"
-    assert description["defaultProfile"] == "balanced-high"
+    assert description["defaultProfile"] == "frontier-high"
     assert description["profession"]["skill"] == "$frontend-engineer"
     assert len(description["profession"]["skillSha256"]) == 64
-    assert default["resolvedModel"] == "gpt-5.6-terra"
+    assert default["resolvedModel"] == "gpt-6-sol"
     assert default["resolvedEffort"] == "high"
-    assert default["invocation"]["model"] == "gpt-5.6-terra"
+    assert default["invocation"]["model"] == "gpt-6-sol"
     assert default["invocation"]["reasoningEffort"] == "high"
     assert default["invocation"]["forkTurns"] == "none"
     assert "agentType" not in default["invocation"]
@@ -485,7 +486,7 @@ def test_every_skill_only_role_is_task_eligible_and_uses_current_skill_metadata(
             assert not (ROOT / "src.codex" / "agents" / f"{role_name}.toml").exists()
 
 
-def test_knowledge_archivist_is_admitted_to_engineering_without_default_change() -> None:
+def test_knowledge_archivist_keeps_medium_effort_with_sol_default() -> None:
     description = RESOLVER.describe_ordinary_native_role_options(
         "knowledge-archivist",
         "engineering",
@@ -501,12 +502,43 @@ def test_knowledge_archivist_is_admitted_to_engineering_without_default_change()
         approved_execution_scope=_scientific_scope(),
     )
 
-    assert description["defaultProfile"] == "balanced-medium"
+    assert description["defaultProfile"] == "frontier-medium"
     assert description["defaultAgentTypeCapability"] == "reported"
     assert decision["status"] == "resolved"
-    assert decision["resolvedModel"] == "gpt-5.6-terra"
+    assert decision["resolvedModel"] == "gpt-6-sol"
     assert decision["resolvedEffort"] == "medium"
     assert decision["invocation"]["agentType"] == "knowledge-archivist"
+
+
+def test_every_former_terra_default_is_sol_without_removing_explicit_terra() -> None:
+    policy, _ = RESOLVER.load_role_policy(ROOT)
+    roles = {**policy["roles"], **policy["skillOnlyRoles"]}
+    sol_defaults = {
+        "explorer", "analyst", "planner", "backend-engineer", "qa-engineer",
+        "knowledge-archivist", "product-analyst", "ux-designer",
+        "frontend-engineer", "qt-ui-engineer", "model-view-engineer",
+        "data-engineer", "graphics-engineer", "visualization-engineer",
+        "accessibility-reviewer", "ux-reviewer", "ui-test-engineer",
+    }
+    assert len(sol_defaults) == 17
+    for name in sol_defaults:
+        role = roles[name]
+        profile = policy["profiles"][role["defaultProfile"]]
+        assert profile["codexModel"] == "gpt-6-sol", name
+        assert profile["effort"] == (
+            "medium" if name == "knowledge-archivist" else "high"
+        ), name
+    assert not {
+        name for name, role in roles.items()
+        if policy["profiles"][role["defaultProfile"]]["codexModel"]
+        == "gpt-5.6-terra"
+    }
+    assert policy["profiles"]["balanced-medium"]["codexModel"] == "gpt-5.6-terra"
+    assert policy["profiles"]["balanced-high"]["codexModel"] == "gpt-5.6-terra"
+    for name in sol_defaults:
+        assert "balanced-high" in roles[name]["allowedProfiles"]
+        if name == "knowledge-archivist":
+            assert "balanced-medium" in roles[name]["allowedProfiles"]
 
 
 def test_native_named_default_denies_only_when_reported_agent_types_exclude_it() -> None:
