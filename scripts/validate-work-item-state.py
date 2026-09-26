@@ -5917,6 +5917,54 @@ def validate_archived_ledger_obligations(
     typed_closure_validity = _validity_from_boolean_events(
         runtime_rows, closure_validity
     )
+    # Numeric V1 remains historical, except as the exact target of a later V2
+    # closure relation in this immutable archive. No other authority is gained.
+    positions_by_run_id: dict[str, list[int]] = {}
+    for position, event in enumerate(effective_events):
+        run_id = event.get("runId")
+        if isinstance(run_id, str):
+            positions_by_run_id.setdefault(run_id.casefold(), []).append(position)
+    target_positions: set[int] = set()
+    for closer_position, closer in enumerate(effective_events):
+        if (
+            type(closer.get("schemaVersion")) is not int
+            or closer["schemaVersion"] != 2
+            or closer.get("gate") not in CLOSURE_GATES
+            or not isinstance(closer.get("closesRunIds"), list)
+        ):
+            continue
+        for target_id in closer["closesRunIds"]:
+            if not isinstance(target_id, str):
+                continue
+            positions = positions_by_run_id.get(target_id.casefold(), [])
+            if (
+                len(positions) == 1
+                and effective_events[positions[0]].get("runId") == target_id
+                and positions[0] < closer_position
+            ):
+                target_positions.add(positions[0])
+    archived_validity = list(typed_closure_validity)
+    for position in sorted(target_positions):
+        event = effective_events[position]
+        row = effective_rows[position]
+        if (
+            row.transformation != "raw"
+            or runtime_rows[position].epoch != "raw"
+            or type(event.get("schemaVersion")) is not int
+            or event["schemaVersion"] != 1
+            or event.get("gate") != "REVISE"
+            or event.get("workItem") != item.name
+            or hashlib.sha256(_canonical_projection_bytes(event)).hexdigest()
+            != row.raw_event_sha256
+        ):
+            continue
+        target_errors: list[str] = []
+        if not _validate_event(event, item, set(), target_errors) or target_errors:
+            continue
+        archived_validity[position] = LedgerEventValidityV1(
+            False, LedgerAuthorityV1(False, False, True, False, False)
+        )
+    typed_closure_validity = tuple(archived_validity)
     inactive = resolve_closure_invalidations(
         runtime_rows,
         typed_closure_validity,

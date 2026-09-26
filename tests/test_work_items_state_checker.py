@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -1255,6 +1256,170 @@ def test_archive_scan_keeps_skipped_legacy_positions_for_v2_closure_targets(tmp_
 
     assert result.returncode == 1
     assert "does not reference an earlier event (C1)" not in result.stdout
+
+
+def _numeric_v1_archive_case(root: Path, *events: dict) -> Path:
+    item = root / "work-items" / "archive" / "2026-07" / "numeric-v1-closure"
+    (item / "reviews").mkdir(parents=True)
+    (item / "reviews" / "security.md").write_text("REVISE then PASS\n", encoding="utf-8")
+    (item / "reviews" / "other.md").write_text("different angle\n", encoding="utf-8")
+    (item / "agent-runs.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8",
+    )
+    return item
+
+
+def _numeric_v1_revise(**updates: object) -> dict:
+    return ledger_event(
+        schemaVersion=1, runId="run-numeric-v1-revise", workItem="numeric-v1-closure",
+        role="security-reviewer", executionRole="external-reviewer",
+        status="completed", gate="REVISE", artifact="reviews/security.md",
+        **updates,
+    )
+
+
+def _numeric_v2_pass(**updates: object) -> dict:
+    return ledger_event(
+        schemaVersion=2, runId="run-numeric-v2-pass", workItem="numeric-v1-closure",
+        role="security-reviewer", executionRole="internal",
+        status="completed", gate="PASS", artifact="reviews/security.md",
+        lane="security-review",
+        closesRunIds=["run-numeric-v1-revise"],
+        evidence=[{"kind": "review", "ref": "independent recheck"}],
+        **updates,
+    )
+
+
+def test_archived_numeric_v1_revise_is_only_a_linked_v2_target(tmp_path: Path, monkeypatch) -> None:
+    validator = load_validator_module()
+    original_reducer = validator.resolve_closure_invalidations
+    observed_validity = []
+
+    def observe_reducer(rows, validity, errors, telemetry=None, *, context=None):
+        observed_validity.append(validity[0])
+        return original_reducer(rows, validity, errors, telemetry, context=context)
+
+    monkeypatch.setattr(validator, "resolve_closure_invalidations", observe_reducer)
+    linked = _numeric_v1_archive_case(
+        tmp_path / "linked", _numeric_v1_revise(), _numeric_v2_pass(),
+    )
+    before = (linked / "agent-runs.jsonl").read_bytes()
+
+    errors, open_revise, open_launches = validator.validate_archived_ledger_obligations(linked)
+
+    assert errors == []
+    assert open_revise == [] and open_launches == []
+    assert (linked / "agent-runs.jsonl").read_bytes() == before
+    linked_mask = observed_validity[-1]
+    assert linked_mask.current_schema_valid is False
+    assert (
+        linked_mask.authority.launch_eligible,
+        linked_mask.authority.terminal_eligible,
+        linked_mask.authority.revise_target_eligible,
+        linked_mask.authority.closer_eligible,
+        linked_mask.authority.artifact_evidence_eligible,
+    ) == (False, False, True, False, False)
+
+    unlinked = _numeric_v1_archive_case(tmp_path / "unlinked", _numeric_v1_revise())
+    assert validator.validate_archived_ledger_obligations(unlinked) == ([], [], [])
+    unlinked_mask = observed_validity[-1]
+    assert unlinked_mask.current_schema_valid is False
+    assert not any(vars(unlinked_mask.authority).values())
+    active_errors: list[str] = []
+    validator.validate_closure(
+        [_numeric_v1_revise(), _numeric_v2_pass()], active_errors,
+        event_validity=[False, True],
+    )
+    assert any("(C2)" in error for error in active_errors)
+
+
+def test_archived_numeric_v1_revise_rejects_invalid_targets_and_order(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    target = _numeric_v1_revise()
+    closer = _numeric_v2_pass()
+    cases = (
+        ("later", (closer, target), "(C1)"),
+        ("non-revise", ({**target, "gate": "none"}, closer), "(C2)"),
+        ("wrong-item", ({**target, "workItem": "different-item"}, closer), "(C2)"),
+        ("wrong-epoch", ({**target, "schemaVersion": True}, closer), "(C2)"),
+        ("invalid-shape", ({**target, "status": "not-a-status"}, closer), "(C2)"),
+        ("duplicate-id", (target, {**target}, closer), "(C2)"),
+        ("casefold-duplicate", (target, {**target, "runId": target["runId"].upper()}, closer), "(C2)"),
+        ("case-mismatch-link", (target, {**closer, "closesRunIds": [target["runId"].upper()]}), "(C1)"),
+    )
+    for name, events, expected in cases:
+        item = _numeric_v1_archive_case(tmp_path / name, *events)
+        errors, _open_revise, _open_launches = validator.validate_archived_ledger_obligations(item)
+        assert any(expected in error for error in errors), (name, errors)
+
+
+def test_archived_numeric_v1_revise_projected_row_is_not_a_raw_target(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    validator = load_validator_module()
+    item = _numeric_v1_archive_case(
+        tmp_path, _numeric_v1_revise(), _numeric_v2_pass(),
+    )
+    original = validator._project_manifest_rows
+
+    def projected(rows, work_item, ledger, ledger_bytes):
+        effective, counters, errors = original(rows, work_item, ledger, ledger_bytes)
+        return (
+            tuple(
+                replace(row, transformation="manifest-profile")
+                if row.event.get("schemaVersion") == 1 else row
+                for row in effective
+            ),
+            counters,
+            errors,
+        )
+
+    monkeypatch.setattr(validator, "_project_manifest_rows", projected)
+    errors, _open_revise, _open_launches = validator.validate_archived_ledger_obligations(item)
+    assert any("(C2)" in error for error in errors), errors
+
+
+def test_archived_numeric_v1_revise_exposes_later_closure_gates(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    target = _numeric_v1_revise()
+    wrong_artifact = ledger_event(
+        schemaVersion=2, runId="run-wrong-artifact", workItem="numeric-v1-closure",
+        role="security-reviewer", executionRole="internal", status="completed", gate="PASS",
+        artifact="reviews/other.md", lane="security-review", closesRunIds=[target["runId"]],
+        evidence=[{"kind": "review", "ref": "independent recheck"}],
+    )
+    user_waiver = ledger_event(
+        schemaVersion=2, runId="run-user-waiver", workItem="numeric-v1-closure",
+        role="lead", executionRole="main", status="completed", gate="WAIVED:user",
+        closesRunIds=[target["runId"]],
+        evidence=[{"kind": "manual-check", "ref": "operator waives run-numeric-v1-revise"}],
+    )
+    for name, closer, expected in (
+        ("c3", wrong_artifact, "(C3)"), ("c5", user_waiver, "(C5)"),
+    ):
+        item = _numeric_v1_archive_case(tmp_path / name, target, closer)
+        errors, _open_revise, _open_launches = validator.validate_archived_ledger_obligations(item)
+        assert any(expected in error for error in errors), (name, errors)
+        assert not any("(C2)" in error for error in errors), (name, errors)
+
+
+def test_archived_numeric_v1_revise_rejects_invalid_duplicate_closer(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    target = _numeric_v1_revise()
+    closer = _numeric_v2_pass()
+    invalid = _numeric_v1_archive_case(
+        tmp_path / "invalid", target, {**closer, "status": "cancelled"},
+    )
+    errors, _open_revise, _open_launches = validator.validate_archived_ledger_obligations(invalid)
+    assert errors
+    assert not any("(C2)" in error for error in errors), errors
+
+    duplicate = _numeric_v1_archive_case(
+        tmp_path / "duplicate", target, closer,
+        {**closer, "runId": "run-second-waiver"},
+    )
+    errors, _open_revise, _open_launches = validator.validate_archived_ledger_obligations(duplicate)
+    assert any("(C2 unique discharge)" in error for error in errors), errors
 
 
 def test_done_predicate_twin_not_drifted():

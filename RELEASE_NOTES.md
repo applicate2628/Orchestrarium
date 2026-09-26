@@ -2,9 +2,13 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-27
+
+- **Historical archived review targets now have narrow reader compatibility.** A later Version 2 closing event may explicitly reference an earlier, individually valid raw numeric Version 1 `REVISE` event in the same immutable archived ledger. The archive reader grants only target eligibility for that exact link; the existing closure checks still decide whether the closer has authority, while unrelated historical rows and active validation stay unchanged. **Why it matters:** periodic archive checks can assess historical closure evidence without rewriting archived events or adding an operator command. The source reader passed focused independent tests and both historical archive reads; the same-host installed readers passed bounded receiving checks. The overall periodic checker still fails on separate current-item obligations; live session reload and other repositories were not verified.
+
 ## 2026-09-26
 
-- **Already-fixed flat bugs gain an owner-managed archive route without closing their active parent.** The `archive-fixed-bug` command requires explicit `--apply`, strict UTC terminal evidence, and safe incoming-link repair. It preserves bug identity and logical references, moves the record to the monthly bug archive, refreshes the derived index, and records a hash-bound receipt for settlement and exact replay. **Why it matters:** an already-`fixed` current bug no longer has to be reopened, hand-moved, or left blocking its parent's eventual close. Source documentation describes the accepted contract; installed runtime and receiving behavior remain a separate verification gate.
+- **Already-fixed flat bugs gain an owner-managed archive route without closing their active parent.** The `archive-fixed-bug` command requires explicit `--apply`, strict UTC terminal evidence, and safe incoming-link repair. It preserves bug identity and logical references, moves the record to the monthly bug archive, refreshes the derived index, and records a hash-bound receipt for settlement and exact replay. **Why it matters:** an already-`fixed` current bug no longer has to be reopened, hand-moved, or left blocking its parent's eventual close. Both same-host installed scripts passed ten selected synthetic checks each; live session reload and behavior in other repositories remain unverified.
 - **Ordinary Terra defaults now select GPT-6 Sol.** Six native roles and eleven skill-only roles use Sol at their existing effort (high, or medium for knowledge-archivist); `max-speed` requests Sol/high. Explicit Terra profiles and existing user configurations keep their literal choices. Native role authority, Luna's mechanical corridor, and max-effort approval are unchanged.
 
 ## 2026-09-22

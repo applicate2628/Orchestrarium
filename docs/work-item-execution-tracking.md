@@ -122,6 +122,12 @@ python .\scripts\validate-work-item-state.py --work-item work-items\active\<slug
 
 Validation fails for duplicate run IDs, running agents, missing ledger files, missing evidence for `PASS`, missing accepted artifacts, artifact paths that escape the work item, and inconsistent `BLOCKED` or `REVISE` gates.
 
+### Archived-ledger compatibility
+
+This compatibility is limited to validation of an already archived work item's immutable ledger. When a later Version 2 (V2) closing event explicitly names an earlier run through `closesRunIds`, the archive reader treats that target as eligible for closure even if its raw, unprojected event uses numeric `schemaVersion: 1`. The target must have literal `gate: REVISE`, belong to that archived work item, have a `runId` unique case-insensitively in the complete ledger, and pass the existing Version 1 (V1) per-event validator in isolation. The target must precede its closer, and the link must use its exact `runId` spelling. A missing, duplicate, malformed, projected, migrated, non-`REVISE`, or otherwise invalid target gets no compatibility authority.
+
+This grants only the closure-target eligibility bit for that explicit relationship. It does not convert V1 to V2, make unrelated historical V1 `REVISE` events open obligations, validate an invalid V2 closer, or alter active-item validation. The common C1–C5 closure checks still decide order, unique discharge, reviewer/role/artifact/lane authority, and protected waivers; their existing errors remain visible. The reader writes no archive bytes and adds no command, manifest, or sidecar. A clean archived-reader result does not establish that other current-item obligations in the periodic checker are closed.
+
 ## Check All Active Work Items
 
 Run the periodic checker at handoff boundaries, before publication review, or when resuming after interruption.
@@ -606,6 +612,8 @@ fields.
 - `JSONL`: JSON Lines; one JSON object per line, used here for append-only ledger events.
 - `PASS`: gate state meaning a scoped artifact passed the relevant checks.
 - `REVISE`: gate state meaning the artifact must return to the same role for bounded correction.
+- `V1` / `V2`: Version 1 / Version 2 of the execution-ledger event schema.
+- `C1`–`C5`: existing closure-relation checks for target order and eligibility, unique discharge, closing authority, and protected waivers.
 - `stale running agent`: a ledger event still marked `running` after the configured age threshold.
 - `status.md`: human-readable task-memory recovery summary.
 - `validate-work-item-state.*`: helper script family that validates one work-item ledger and its referenced artifacts.
