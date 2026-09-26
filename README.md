@@ -75,8 +75,12 @@ the workflow does not infer timestamps, status, or archival targets. Before
 closing a work-item, `bug-dispositions.json` must cover exactly all current
 bugs whose parsed `context` equals its slug. The lifecycle owner applies each
 `terminalize` or `preserve-current` row, archives the item, writes a bound
-receipt, and refreshes the derived README as one rollback-safe operation. Two
-owner-managed legacy transitions handle the old directory-shaped backlog:
+receipt, and refreshes the derived README as one rollback-safe operation.
+An already-`fixed` current flat bug can instead be archived while its parent
+stays active through the lifecycle owner's explicit-apply `archive-fixed-bug`
+command, with incoming physical-link repair and a bound receipt; see
+[the operator contract](docs/work-item-execution-tracking.md#archive-an-already-fixed-flat-bug-while-its-parent-stays-active).
+Two owner-managed legacy transitions handle the old directory-shaped backlog:
 `convert-legacy-candidate` creates one visible flat candidate while preserving
 every accepted source text and digest as an appendix, and
 `retire-legacy-backlog` records an explicit product rejection directly in the

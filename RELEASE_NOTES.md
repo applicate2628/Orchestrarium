@@ -4,6 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-09-26
 
+- **Already-fixed flat bugs gain an owner-managed archive route without closing their active parent.** The `archive-fixed-bug` command requires explicit `--apply`, strict UTC terminal evidence, and safe incoming-link repair. It preserves bug identity and logical references, moves the record to the monthly bug archive, refreshes the derived index, and records a hash-bound receipt for settlement and exact replay. **Why it matters:** an already-`fixed` current bug no longer has to be reopened, hand-moved, or left blocking its parent's eventual close. Source documentation describes the accepted contract; installed runtime and receiving behavior remain a separate verification gate.
 - **Ordinary Terra defaults now select GPT-6 Sol.** Six native roles and eleven skill-only roles use Sol at their existing effort (high, or medium for knowledge-archivist); `max-speed` requests Sol/high. Explicit Terra profiles and existing user configurations keep their literal choices. Native role authority, Luna's mechanical corridor, and max-effort approval are unchanged.
 
 ## 2026-09-22

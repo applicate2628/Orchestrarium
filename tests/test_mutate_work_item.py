@@ -222,6 +222,253 @@ def seed_context_bug(root: Path, item_slug: str, bug_slug: str) -> Path:
     return target
 
 
+def seed_fixed_bug_with_active_parent(module, root: Path, slug: str) -> tuple[Path, Path]:
+    parent_slug = "fixed-bug-parent"
+    seed_active(module, root, parent_slug)
+    bug = seed_context_bug(root, parent_slug, slug)
+    bug.write_text(
+        bug.read_text(encoding="utf-8").replace("- status: open", "- status: fixed"),
+        encoding="utf-8",
+    )
+    parent_status = root / "work-items" / "active" / parent_slug / "status.md"
+    parent_status.write_bytes(
+        parent_status.read_bytes()
+        + f"Related: bug:{slug}\n[physical](../../bugs/{slug}.md#proof)\n".encode()
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    return bug, parent_status
+
+
+def test_archive_fixed_bug_active_parent_links_receipt_and_exact_replay(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-09-26-fixed-bug"
+    instant = "2026-09-26T12:00:00Z"
+    resolution = "The reported filesystem defect is fixed."
+    evidence = "Focused test receipt: 9 of 9 passing."
+    bug, status = seed_fixed_bug_with_active_parent(module, root, slug)
+    bug_before = bug.read_bytes()
+    status_before = status.read_bytes()
+    ledger = status.parent / "agent-runs.jsonl"
+    ledger_before = ledger.read_bytes() if ledger.exists() else None
+    expected_href = f"../../bugs/archive/2026-09/{slug}.md#proof"
+    command = (
+        "archive-fixed-bug", "--root", str(root), "--slug", slug,
+        "--terminal-instant", instant, "--resolution", resolution,
+        "--evidence", evidence, "--apply",
+    )
+
+    result = run_cli(*command)
+
+    assert result.returncode == 0, result.stdout
+    assert "WI-FIXED-BUG-ARCHIVE-COMMITTED" in result.stdout
+    archive = root / "work-items" / "bugs" / "archive" / "2026-09" / f"{slug}.md"
+    receipt_path = archive.with_name(f"{slug}.fixed-archive-receipt.json")
+    readme = root / "work-items" / "README.md"
+    assert not bug.exists()
+    assert archive.is_file()
+    fields = module._parse_fields(archive.read_text(encoding="utf-8"))
+    assert fields["id"] == slug
+    assert fields["status"] == "fixed"
+    assert fields["context"] == "fixed-bug-parent"
+    assert fields["terminal-at"] == instant
+    assert fields["resolution"] == resolution
+    assert fields["evidence"] == evidence
+    assert status.parent.is_dir()
+    assert (ledger.read_bytes() if ledger.exists() else None) == ledger_before
+    assert f"bug:{slug}".encode() in status.read_bytes()
+    assert f"[{ 'physical' }]({expected_href})".encode() in status.read_bytes()
+    assert f"../../bugs/{slug}.md#proof".encode() in status_before
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert set(receipt) == {
+        "schemaVersion", "owner", "kind", "status", "operationId",
+        "sourceReference", "sourcePath", "archivePath", "terminalInstant",
+        "sourceBeforeSha256", "archivedBugSha256", "links", "readmeSha256",
+    }
+    assert receipt["owner"] == "mutate-work-item:fixed-bug-archive-v1"
+    assert receipt["kind"] == "fixed-bug-archive-v1"
+    assert receipt["status"] == "settled"
+    assert receipt["sourceBeforeSha256"] == hashlib.sha256(bug_before).hexdigest()
+    assert receipt["archivedBugSha256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert receipt["readmeSha256"] == hashlib.sha256(readme.read_bytes()).hexdigest()
+    assert receipt["links"] == [{
+        "path": status.relative_to(root).as_posix(),
+        "beforeSha256": hashlib.sha256(status_before).hexdigest(),
+        "afterSha256": hashlib.sha256(status.read_bytes()).hexdigest(),
+    }]
+    before_replay = (archive.read_bytes(), status.read_bytes(), receipt_path.read_bytes(), readme.read_bytes())
+    replay = run_cli(*command)
+    assert replay.returncode == 0, replay.stdout
+    assert (archive.read_bytes(), status.read_bytes(), receipt_path.read_bytes(), readme.read_bytes()) == before_replay
+
+
+def test_archive_fixed_bug_requires_positive_apply_and_preserves_state(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-09-26-no-apply"
+    bug, status = seed_fixed_bug_with_active_parent(module, root, slug)
+    before = (bug.read_bytes(), status.read_bytes())
+
+    result = run_cli(
+        "archive-fixed-bug", "--root", str(root), "--slug", slug,
+        "--terminal-instant", "2026-09-26T12:00:00Z",
+        "--resolution", "Fixed.", "--evidence", "Test receipt.",
+    )
+
+    assert result.returncode == 1
+    assert "WI-FIXED-BUG-APPLY-REQUIRED" in result.stdout
+    assert (bug.read_bytes(), status.read_bytes()) == before
+
+
+def test_archive_fixed_bug_preserves_existing_evidence_and_rejects_conflicts(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-09-26-existing-evidence"
+    instant = "2026-10-01T00:00:00Z"
+    bug, _status = seed_fixed_bug_with_active_parent(module, root, slug)
+    with bug.open("ab") as stream:
+        stream.write(b"- terminal-at: 2026-10-01T00:00:00Z\n- resolution: Fixed.\n- evidence: Verified.\n")
+    preserved = bug.read_bytes()
+    with unittest.TestCase().assertRaises(module.LifecycleError) as conflict:
+        module.archive_fixed_bug(root, slug, instant, "Different.", "Verified.")
+    assert conflict.exception.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+    assert bug.read_bytes() == preserved
+
+    receipt = module.archive_fixed_bug(root, slug, instant, "Fixed.", "Verified.")
+
+    archive = root / receipt["archivePath"]
+    assert archive.read_bytes() == preserved
+    assert archive.parent.name == "2026-10"
+
+
+def test_archive_fixed_bug_rejects_immutable_physical_link_and_collision(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-09-26-unsafe-link"
+    bug, status = seed_fixed_bug_with_active_parent(module, root, slug)
+    historical = root / "work-items" / "archive" / "2026-08" / "old" / "notes.md"
+    write(historical, f"[old](../../../bugs/{slug}.md)\n")
+    before = (bug.read_bytes(), status.read_bytes(), historical.read_bytes())
+    with unittest.TestCase().assertRaises(module.LifecycleError) as unsafe:
+        module.archive_fixed_bug(root, slug, "2026-09-26T12:00:00Z", "Fixed.", "Verified.")
+    assert unsafe.exception.failure_id == "WI-FIXED-BUG-LINK-INVENTORY"
+    assert (bug.read_bytes(), status.read_bytes(), historical.read_bytes()) == before
+
+    historical.unlink()
+    archive = root / "work-items" / "bugs" / "archive" / "2026-09" / f"{slug}.md"
+    write(archive, "unrelated archive identity\n")
+    with unittest.TestCase().assertRaises(module.LifecycleError) as collision:
+        module.archive_fixed_bug(root, slug, "2026-09-26T12:00:00Z", "Fixed.", "Verified.")
+    assert collision.exception.failure_id == "WI-CATEGORY-DUAL-LOCATION"
+    assert (bug.read_bytes(), status.read_bytes()) == before[:2]
+    assert archive.read_text(encoding="utf-8") == "unrelated archive identity\n"
+
+
+def test_archive_fixed_bug_precommit_restores_and_postcommit_recovers(tmp_path: Path) -> None:
+    module = load_module()
+    instant = "2026-09-26T12:00:00Z"
+    for phase in ("F1", "F3"):
+        root = tmp_path / phase
+        slug = f"2026-09-26-{phase.lower()}-recovery"
+        bug, status = seed_fixed_bug_with_active_parent(module, root, slug)
+        readme = root / "work-items" / "README.md"
+        before = (bug.read_bytes(), status.read_bytes(), readme.read_bytes())
+        with unittest.TestCase().assertRaises(module.LifecycleError) as injected:
+            module.archive_fixed_bug(
+                root, slug, instant, "Fixed.", "Verified.", inject_failure_at=phase,
+            )
+        assert injected.exception.failure_id == (
+            "WI-FIXED-BUG-ROLLBACK-INDETERMINATE" if phase == "F1"
+            else "WI-FIXED-BUG-ROLLFORWARD-INDETERMINATE"
+        )
+
+        module._recover_all_transitions(root)
+
+        archive = root / "work-items" / "bugs" / "archive" / "2026-09" / f"{slug}.md"
+        receipt = archive.with_name(f"{slug}.fixed-archive-receipt.json")
+        if phase == "F1":
+            assert (bug.read_bytes(), status.read_bytes(), readme.read_bytes()) == before
+            assert not archive.exists() and not receipt.exists()
+        else:
+            assert not bug.exists()
+            assert archive.is_file() and receipt.is_file()
+            assert f"../../bugs/archive/2026-09/{slug}.md#proof".encode() in status.read_bytes()
+            assert module._verify_fixed_bug_archive_settlement(root, receipt)["status"] == "settled"
+        intents = root / ".scratch" / "work-items-lifecycle-transitions"
+        assert not list(intents.glob("*.json"))
+
+
+def test_archive_fixed_bug_readme_failure_recovers_after_move(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-09-26-readme-failure"
+    bug, _status = seed_fixed_bug_with_active_parent(module, root, slug)
+    archive = root / "work-items" / "bugs" / "archive" / "2026-09" / f"{slug}.md"
+    original_refresh = module._safe_refresh_readme
+    with patch.object(module, "_safe_refresh_readme", side_effect=module.LifecycleError("WI-README-STALE", "injected")):
+        with unittest.TestCase().assertRaises(module.LifecycleError) as failure:
+            module.archive_fixed_bug(root, slug, "2026-09-26T12:00:00Z", "Fixed.", "Verified.")
+    assert failure.exception.failure_id == "WI-FIXED-BUG-ROLLFORWARD-INDETERMINATE"
+    assert not bug.exists() and archive.is_file()
+    assert module._safe_refresh_readme is original_refresh
+    module._recover_all_transitions(root)
+    receipt = archive.with_name(f"{slug}.fixed-archive-receipt.json")
+    assert module._verify_fixed_bug_archive_settlement(root, receipt)["status"] == "settled"
+
+
+def test_archive_fixed_bug_recovery_errors_name_fixed_archive_not_supersession(tmp_path: Path) -> None:
+    module = load_module()
+    for phase, target_kind in (("F1", "link"), ("F3", "archive")):
+        root = tmp_path / phase
+        slug = f"2026-09-26-{phase.lower()}-diagnostic"
+        _bug, status = seed_fixed_bug_with_active_parent(module, root, slug)
+        with unittest.TestCase().assertRaises(module.LifecycleError):
+            module.archive_fixed_bug(
+                root, slug, "2026-09-26T12:00:00Z", "Fixed.", "Verified.",
+                inject_failure_at=phase,
+            )
+        archive = root / "work-items" / "bugs" / "archive" / "2026-09" / f"{slug}.md"
+        target = status if target_kind == "link" else archive
+        target_before_drift = target.read_bytes()
+        target.write_bytes(b"foreign mutation\n")
+
+        with unittest.TestCase().assertRaises(module.LifecycleError) as failed_recovery:
+            module._recover_all_transitions(root)
+
+        assert failed_recovery.exception.failure_id == (
+            "WI-FIXED-BUG-ROLLBACK-INDETERMINATE" if phase == "F1"
+            else "WI-FIXED-BUG-ROLLFORWARD-INDETERMINATE"
+        )
+        assert "fixed-bug archive" in str(failed_recovery.exception)
+        assert "supersession" not in str(failed_recovery.exception)
+        assert target.read_bytes() == b"foreign mutation\n"
+        target.write_bytes(target_before_drift)
+        module._recover_all_transitions(root)
+        assert not list((root / ".scratch" / "work-items-lifecycle-transitions").glob("*.json"))
+
+    root = tmp_path / "F3-readme"
+    slug = "2026-09-26-readme-diagnostic"
+    bug, _status = seed_fixed_bug_with_active_parent(module, root, slug)
+    with unittest.TestCase().assertRaises(module.LifecycleError):
+        module.archive_fixed_bug(
+            root, slug, "2026-09-26T12:00:00Z", "Fixed.", "Verified.",
+            inject_failure_at="F3",
+        )
+    archive = root / "work-items" / "bugs" / "archive" / "2026-09" / f"{slug}.md"
+    archive_before = archive.read_bytes()
+    assert not bug.exists()
+    with patch.object(module, "_safe_refresh_readme", return_value="0" * 64):
+        with unittest.TestCase().assertRaises(module.LifecycleError) as readme_mismatch:
+            module._recover_all_transitions(root)
+
+    assert readme_mismatch.exception.failure_id == "WI-FIXED-BUG-ROLLFORWARD-INDETERMINATE"
+    assert str(readme_mismatch.exception) == "fixed-bug archive README afterimage differs"
+    assert archive.read_bytes() == archive_before
+    assert not archive.with_name(f"{slug}.fixed-archive-receipt.json").exists()
+    module._recover_all_transitions(root)
+    assert not list((root / ".scratch" / "work-items-lifecycle-transitions").glob("*.json"))
+
+
 def write_bug_dispositions(
     root: Path,
     item_slug: str,
@@ -1455,6 +1702,37 @@ def _supersede_current_bug_cli_fixture(
         binding_file,
         successor,
     )
+
+
+def test_shared_bug_recovery_preserves_supersession_error_text(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-09-10-supersession-diagnostic"
+    operation_id = "supersession-diagnostic"
+    argv, source, binding_file, successor = _supersede_current_bug_cli_fixture(
+        module, root, slug, operation_id,
+    )
+    with unittest.TestCase().assertRaises(module.LifecycleError):
+        module.supersede_current_bug(
+            root, slug, successor, binding_file.read_bytes(),
+            argv[argv.index("--terminal-instant") + 1],
+            (root / "input" / "incoming-links.json").read_bytes(),
+            hashlib.sha256(source.read_bytes()).hexdigest(),
+            hashlib.sha256((root / "work-items" / "README.md").read_bytes()).hexdigest(),
+            operation_id, inject_failure_at="B1",
+        )
+    source_before_drift = source.read_bytes()
+    source.write_bytes(b"foreign mutation\n")
+
+    with unittest.TestCase().assertRaises(module.LifecycleError) as failed_recovery:
+        module._recover_all_transitions(root)
+
+    assert failed_recovery.exception.failure_id == "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE"
+    assert str(failed_recovery.exception) == "bug supersession rollback identity differs"
+    assert source.read_bytes() == b"foreign mutation\n"
+    source.write_bytes(source_before_drift)
+    module._recover_all_transitions(root)
+    assert not list((root / ".scratch" / "work-items-lifecycle-transitions").glob("*.json"))
 
 
 def test_supersede_current_bug_cli_projects_failure_output_without_caller_content(
@@ -8691,6 +8969,7 @@ class LifecycleTransactionTests(unittest.TestCase):
             "revoke_legacy_ledger_obligation",
             "archive_with_successor",
             "supersede_current_bug",
+            "archive_fixed_bug",
             "build_migration_inventory",
             "write_migration_inventory",
             "migrate_legacy",

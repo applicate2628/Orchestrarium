@@ -426,6 +426,35 @@ exact-context bug row when the repository has any.
 }
 ```
 
+### Archive an already-fixed flat bug while its parent stays active
+
+When one current `work-items/bugs/<bug-slug>.md` already has parsed
+`status: fixed` and names an existing active parent, use the lifecycle owner's
+separate fixed-bug route; do not change it back to `open`, hand-move it, or close
+the parent just to archive the bug:
+
+```powershell
+python scripts/mutate-work-item.py --root . archive-fixed-bug --slug <bug-slug> --terminal-instant <strict-UTC> --resolution <single-line-text> --evidence <single-line-text> --apply
+```
+
+`--apply` is required positive mutation intent; without it the command writes
+nothing. Supply real, nonempty, single-line resolution and evidence and a strict
+UTC `YYYY-MM-DDTHH:MM:SSZ` instant. Matching existing terminal fields are
+preserved; conflicting or duplicate fields fail before mutation. The recorded
+instant selects `work-items/bugs/archive/YYYY-MM/`, not the bug slug's date or
+wall clock. The bug keeps its id, `fixed` status, and context; its parent remains
+active. The owner inventories incoming links, leaves logical `bug:<slug>`
+references unchanged, and rewrites recognized mutable physical Markdown links
+to the archived path. An unsafe or immutable physical consumer fails closed.
+It refreshes `work-items/README.md` and writes a sibling
+`<bug-slug>.fixed-archive-receipt.json` binding the source/archive identity,
+terminal instant, source and archived hashes, each changed link's before/after
+hashes, and README hash. Identical replay validates that settlement without a
+second move; drift or interrupted transition uses the owner's recovery path.
+This operation does not consume the parent's `bug-dispositions.json`; ordinary
+`close`, `terminalize-v1`, and successor supersession keep their separate
+admission and receipt contracts.
+
 ### Archive with a backlog successor
 
 Use this after accepted terminal evidence, exact `bug-dispositions.json`, and

@@ -51,6 +51,14 @@ unknown; it is otherwise outside the built-in item lifecycle. Close and reopen
 continue to move only the owning work-item records, and README remains a
 derived view rather than a topology source.
 
+The owner-local `archive-fixed-bug` route uses the existing built-in `bugs/`
+and `bugs/archive/YYYY-MM/` roots. It does not add an auxiliary root or change
+this schema: with explicit `--apply` and strict UTC terminal evidence, the
+lifecycle owner archives one already-`fixed` bug while its parent stays active,
+repairs mutable incoming physical links, and binds the move, link images, and
+README in a settlement receipt. See the operator command in
+`docs/work-item-execution-tracking.md`.
+
 If no contract exists, the prior built-in-root-only behavior is preserved for
 compatibility. If a contract is malformed, has an unknown schema or version,
 declares an unsafe, reserved, linked, reparse, unconfined, or non-directory

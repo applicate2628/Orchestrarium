@@ -23,6 +23,7 @@ import stat
 import sys
 import tempfile
 import threading
+import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -5616,6 +5617,19 @@ BUG_SUPERSESSION_RECEIPT_FIELDS = {
     "incomingLinksInventorySha256", "links", "readmeSha256",
     "requestExpectedBugSha256", "requestExpectedReadmeSha256",
 }
+FIXED_BUG_ARCHIVE_OWNER = "mutate-work-item:fixed-bug-archive-v1"
+FIXED_BUG_ARCHIVE_KIND = "fixed-bug-archive-v1"
+FIXED_BUG_ARCHIVE_INTENT_FIELDS = {
+    "schemaVersion", "owner", "kind", "status", "operationId", "terminalInstant",
+    "sourcePath", "archivePath", "receiptPath", "expectedReadmeSha256",
+    "finalReadmeSha256", "sourceBefore", "sourceAfter", "receiptBefore",
+    "receiptAfter", "links",
+}
+FIXED_BUG_ARCHIVE_RECEIPT_FIELDS = {
+    "schemaVersion", "owner", "kind", "status", "operationId",
+    "sourceReference", "sourcePath", "archivePath", "terminalInstant",
+    "sourceBeforeSha256", "archivedBugSha256", "links", "readmeSha256",
+}
 BUG_SUPERSESSION_INVENTORY_FIELDS = {
     "schemaVersion", "owner", "operationId", "sourceReference", "sourceBugSha256",
     "successorBindingSha256", "links",
@@ -6267,7 +6281,7 @@ def _prepare_bug_supersession_links(
     return plans
 
 
-def _precompute_bug_supersession_readme_sha256(
+def _precompute_single_bug_readme_sha256(
     root: Path,
     source: Path,
     archive: Path,
@@ -6277,7 +6291,7 @@ def _precompute_bug_supersession_readme_sha256(
     work_items = _work_items_root(root)
     repository = work_items.parent
     static_guide = _static_guide(work_items / "README.md")
-    with tempfile.TemporaryDirectory(prefix="bug-supersession-readme-") as directory:
+    with tempfile.TemporaryDirectory(prefix="single-bug-readme-") as directory:
         shadow_root = Path(directory)
         shadow_work_items = shadow_root / "work-items"
         shutil.copytree(work_items, shadow_work_items, symlinks=True)
@@ -6521,7 +6535,7 @@ def supersede_current_bug(
         successor=successor_reference,
     )
     _validate_flat_terminal(CATEGORIES["bug"], source_after)
-    final_readme_sha256 = _precompute_bug_supersession_readme_sha256(
+    final_readme_sha256 = _precompute_single_bug_readme_sha256(
         root, source, archive, source_after, links
     )
     source_path = source.relative_to(repository).as_posix()
@@ -6581,46 +6595,230 @@ def supersede_current_bug(
         ],
     }
     _verify_captured_file(successor_snapshot, "WI-BUG-SUCCESSOR-BINDING")
-    _verify_captured_file(source_snapshot, "WI-BUG-DISPOSITIONS-DRIFT")
-    _verify_captured_file(readme_snapshot, "WI-BUG-DISPOSITIONS-DRIFT")
+    return _apply_single_bug_transition(
+        root, source_snapshot, readme_snapshot, source, archive, source_after,
+        links, intent_path, intent, inject_failure_at=inject_failure_at,
+    )
+
+
+def _single_bug_failure_id(intent: dict, phase: str) -> str:
+    prefix = (
+        "WI-FIXED-BUG" if intent["kind"] == FIXED_BUG_ARCHIVE_KIND
+        else "WI-BUG-SUPERSESSION"
+    )
+    return f"{prefix}-{phase}-INDETERMINATE"
+
+
+def _single_bug_transition_label(intent: dict) -> str:
+    return "fixed-bug archive" if intent["kind"] == FIXED_BUG_ARCHIVE_KIND else "bug supersession"
+
+
+def _apply_single_bug_transition(
+    root: Path,
+    source_snapshot: CapturedFileSnapshot,
+    readme_snapshot: CapturedFileSnapshot,
+    source: Path,
+    archive: Path,
+    source_after: bytes,
+    links: list[dict],
+    intent_path: Path,
+    intent: dict,
+    *,
+    inject_failure_at: str | None,
+) -> dict:
+    rollback_id = _single_bug_failure_id(intent, "ROLLBACK")
+    forward_id = _single_bug_failure_id(intent, "ROLLFORWARD")
+    failpoint = "F" if intent["kind"] == FIXED_BUG_ARCHIVE_KIND else "B"
+    preflight_id = (
+        "WI-BUG-DISPOSITIONS-DRIFT" if intent["kind"] == BUG_SUPERSESSION_KIND
+        else "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+    )
+    readme_preflight_id = (
+        "WI-BUG-DISPOSITIONS-DRIFT" if intent["kind"] == BUG_SUPERSESSION_KIND
+        else "WI-README-STALE"
+    )
+    _verify_captured_file(source_snapshot, preflight_id)
+    _verify_captured_file(readme_snapshot, readme_preflight_id)
+    for row in links:
+        if _read_lifecycle_image(row["path"], row["before"], failure_id=rollback_id) != row["before"]:
+            raise LifecycleError(rollback_id, f"bug link drifted: {row['pathRelative']}")
     _atomic_write(intent_path, _migration_receipt_bytes(intent))
     _transition_fsync_directory(intent_path.parent)
-    if inject_failure_at == "B0":
-        raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE", "injected B0"
-        )
+    if inject_failure_at == f"{failpoint}0":
+        raise LifecycleError(rollback_id, f"injected {failpoint}0")
     for row in links:
-        if _read_lifecycle_image(
-            row["path"],
-            row["before"],
-            failure_id="WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
-        ) != row["before"]:
-            raise LifecycleError(
-                "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
-                f"bug supersession link drifted: {row['pathRelative']}",
-            )
+        if _read_lifecycle_image(row["path"], row["before"], failure_id=rollback_id) != row["before"]:
+            raise LifecycleError(rollback_id, f"bug link drifted: {row['pathRelative']}")
         _atomic_write(row["path"], row["after"])
-    if inject_failure_at == "B1":
-        raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE", "injected B1"
-        )
-    _verify_captured_file(source_snapshot, "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE")
+    if inject_failure_at == f"{failpoint}1":
+        raise LifecycleError(rollback_id, f"injected {failpoint}1")
+    _verify_captured_file(source_snapshot, rollback_id)
     _atomic_write(source, source_after)
-    if inject_failure_at == "B2":
-        raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE", "injected B2"
-        )
+    if inject_failure_at == f"{failpoint}2":
+        raise LifecycleError(rollback_id, f"injected {failpoint}2")
     archive.parent.mkdir(parents=True, exist_ok=True)
     os.replace(source, archive)
-    if inject_failure_at == "B3":
-        raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE", "injected B3"
-        )
-    return _recover_bug_supersession_transition(
-        root,
-        intent_path,
-        intent,
-        inject_failure_at=inject_failure_at,
+    if inject_failure_at == f"{failpoint}3":
+        raise LifecycleError(forward_id, f"injected {failpoint}3")
+    return _recover_single_bug_transition(
+        root, intent_path, intent, inject_failure_at=inject_failure_at,
+    )
+
+
+def _fixed_bug_terminal_image(
+    source: bytes, slug: str, terminal_instant: str, resolution: str, evidence: str,
+    root: Path,
+) -> bytes:
+    for label, value in (("resolution", resolution), ("evidence", evidence)):
+        if not value or len(value) > 4096 or any(character in value for character in "\r\n\x00"):
+            raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", f"{label} must be one bounded line")
+    try:
+        text = source.decode("utf-8")
+    except UnicodeError as exc:
+        raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", "bug record must be UTF-8") from exc
+    occurrences = _authoritative_field_occurrences(text)
+    by_name: dict[str, list[str]] = {}
+    for _line, name, value, _raw in occurrences:
+        by_name.setdefault(name, []).append(value)
+    for name in ("id", "context", "status", "terminal-at", "resolution", "evidence"):
+        if len(by_name.get(name, [])) > 1:
+            raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", f"duplicate bug {name} field")
+    if by_name.get("id") != [slug] or by_name.get("status") != ["fixed"]:
+        raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", "bug identity or fixed status differs")
+    context = by_name.get("context", [""])[0]
+    if not SLUG_RE.fullmatch(context):
+        raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", "bug context is not a work-item slug")
+    parent = _work_items_root(root) / "active" / context
+    if _category_locations(root, CATEGORIES["work-item"], context) != [parent]:
+        raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", "bug parent is not uniquely active")
+    required = {"terminal-at": terminal_instant, "resolution": resolution, "evidence": evidence}
+    for name, value in required.items():
+        if name in by_name and by_name[name] != [value]:
+            raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", f"bug {name} conflicts with request")
+    additions = [f"- {name}: {value}\n" for name, value in required.items() if name not in by_name]
+    after = source + ((b"\n" if source and not source.endswith(b"\n") else b"") + "".join(additions).encode("utf-8") if additions else b"")
+    if _validate_flat_terminal(CATEGORIES["bug"], after) != terminal_instant:
+        raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", "bug terminal instant differs")
+    return after
+
+
+def _fixed_bug_link_plans(root: Path, source: Path, archive: Path, slug: str) -> list[dict]:
+    references = _incoming_link_result(
+        root, {source}, f"bug:{slug}", strict_consumer_reads=True,
+    )["references"]
+    repository = _work_items_root(root).parent
+    physical_paths: set[str] = set()
+    for row in references:
+        if row["kind"] != "physical":
+            continue
+        if "archive" in PurePosixPath(row["consumer"]).parts:
+            raise LifecycleError("WI-FIXED-BUG-LINK-INVENTORY", "immutable archived consumer has a physical bug link")
+        physical_paths.add(row["consumer"])
+    plans: list[dict] = []
+    for relative in sorted(physical_paths):
+        consumer = _work_items_root(root) / relative
+        snapshot = _capture_file_snapshot(consumer, failure_id="WI-FIXED-BUG-LINK-INVENTORY")
+        text = snapshot.data.decode("utf-8")
+        replacements: list[tuple[int, int, str]] = []
+        for link in _markdown_local_links(text):
+            if _markdown_href_resolves(consumer.parent, link.href, source):
+                parts = _local_markdown_href_parts(link.href)
+                if parts is None:
+                    raise LifecycleError("WI-FIXED-BUG-LINK-INVENTORY", f"unclassifiable link: {relative}")
+                href = os.path.relpath(archive, consumer.parent).replace(os.sep, "/") + parts[1]
+                replacements.append((link.href_start, link.href_end, href))
+        if not replacements:
+            raise LifecycleError("WI-FIXED-BUG-LINK-INVENTORY", f"physical link has no safe rewrite: {relative}")
+        for start, end, href in reversed(replacements):
+            text = text[:start] + href + text[end:]
+        after = text.encode("utf-8")
+        plans.append({
+            "path": consumer,
+            "pathRelative": consumer.relative_to(repository).as_posix(),
+            "before": snapshot.data,
+            "after": after,
+            "beforeSha256": _sha256_bytes(snapshot.data),
+            "afterSha256": _sha256_bytes(after),
+        })
+    return plans
+
+
+def archive_fixed_bug(
+    root: Path, slug: str, terminal_instant: str, resolution: str, evidence: str,
+    *, inject_failure_at: str | None = None,
+) -> dict:
+    _validate_slug(slug)
+    month = archive_month(terminal_instant)
+    work_items = _work_items_root(root)
+    repository = work_items.parent
+    source = work_items / "bugs" / f"{slug}.md"
+    archive = work_items / "bugs" / "archive" / month / f"{slug}.md"
+    receipt = archive.with_name(f"{slug}.fixed-archive-receipt.json")
+    _recover_all_transitions(root)
+    locations = _category_locations(root, CATEGORIES["bug"], slug)
+    if locations == [archive] and receipt.is_file():
+        settled = _verify_fixed_bug_archive_settlement(root, receipt)
+        fields = _parse_fields(archive.read_text(encoding="utf-8"))
+        if (settled["terminalInstant"], fields.get("resolution"), fields.get("evidence")) != (
+            terminal_instant, resolution, evidence,
+        ):
+            raise LifecycleError("WI-FIXED-BUG-SETTLEMENT-MISMATCH", "fixed bug replay request differs")
+        return settled
+    if locations != [source] or archive.exists() or receipt.exists():
+        failure_id = "WI-CATEGORY-DUAL-LOCATION" if locations else "WI-REFERENCE-MISSING"
+        raise LifecycleError(failure_id, "fixed bug source is not uniquely current")
+    source_snapshot = _capture_file_snapshot(source, failure_id="WI-CATEGORY-TERMINAL-EVIDENCE-MISSING")
+    source_after = _fixed_bug_terminal_image(
+        source_snapshot.data, slug, terminal_instant, resolution, evidence, root,
+    )
+    links = _fixed_bug_link_plans(root, source, archive, slug)
+    readme_snapshot = _capture_file_snapshot(work_items / "README.md", failure_id="WI-README-STALE")
+    final_readme_sha256 = _precompute_single_bug_readme_sha256(
+        root, source, archive, source_after, links,
+    )
+    operation_id = f"fixed-bug-{uuid.uuid4().hex}"
+    intent_path = _transition_intent_path(root, operation_id)
+    if os.path.lexists(intent_path):
+        raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "fixed bug intent identity collides")
+    source_path = source.relative_to(repository).as_posix()
+    archive_path = archive.relative_to(repository).as_posix()
+    receipt_path = receipt.relative_to(repository).as_posix()
+    receipt_payload = {
+        "schemaVersion": 1, "owner": FIXED_BUG_ARCHIVE_OWNER,
+        "kind": FIXED_BUG_ARCHIVE_KIND, "status": "settled",
+        "operationId": operation_id, "sourceReference": f"bug:{slug}",
+        "sourcePath": source_path, "archivePath": archive_path,
+        "terminalInstant": terminal_instant,
+        "sourceBeforeSha256": _sha256_bytes(source_snapshot.data),
+        "archivedBugSha256": _sha256_bytes(source_after),
+        "links": [
+            {"path": row["pathRelative"], "beforeSha256": row["beforeSha256"],
+             "afterSha256": row["afterSha256"]}
+            for row in links
+        ],
+        "readmeSha256": final_readme_sha256,
+    }
+    intent = {
+        "schemaVersion": 1, "owner": FIXED_BUG_ARCHIVE_OWNER,
+        "kind": FIXED_BUG_ARCHIVE_KIND, "status": "intent",
+        "operationId": operation_id, "terminalInstant": terminal_instant,
+        "sourcePath": source_path, "archivePath": archive_path,
+        "receiptPath": receipt_path,
+        "expectedReadmeSha256": _sha256_bytes(readme_snapshot.data),
+        "finalReadmeSha256": final_readme_sha256,
+        "sourceBefore": _b64(source_snapshot.data), "sourceAfter": _b64(source_after),
+        "receiptBefore": None,
+        "receiptAfter": _b64(_migration_receipt_bytes(receipt_payload)),
+        "links": [
+            {"path": row["pathRelative"], "before": _b64(row["before"]),
+             "after": _b64(row["after"]), "beforeSha256": row["beforeSha256"],
+             "afterSha256": row["afterSha256"]}
+            for row in links
+        ],
+    }
+    return _apply_single_bug_transition(
+        root, source_snapshot, readme_snapshot, source, archive, source_after,
+        links, intent_path, intent, inject_failure_at=inject_failure_at,
     )
 
 
@@ -6833,6 +7031,88 @@ def _verify_bug_supersession_settlement(
     return payload
 
 
+def _verify_fixed_bug_archive_settlement(
+    root: Path, receipt_path: Path, expected_bytes: bytes | None = None,
+) -> dict:
+    failure_id = "WI-FIXED-BUG-SETTLEMENT-MISMATCH"
+    receipt_path = _require_lifecycle_mutation_path(root, receipt_path, failure_id=failure_id)
+    payload, receipt_bytes = _ledger_location_proof_object(
+        receipt_path, failure_id=failure_id, unreadable="fixed bug receipt is unreadable",
+    )
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != FIXED_BUG_ARCHIVE_RECEIPT_FIELDS
+        or payload.get("schemaVersion") != 1
+        or payload.get("owner") != FIXED_BUG_ARCHIVE_OWNER
+        or payload.get("kind") != FIXED_BUG_ARCHIVE_KIND
+        or payload.get("status") != "settled"
+        or not isinstance(payload.get("links"), list)
+        or any(not isinstance(payload.get(key), str)
+               for key in FIXED_BUG_ARCHIVE_RECEIPT_FIELDS - {"schemaVersion", "links"})
+    ):
+        raise LifecycleError(failure_id, "fixed bug receipt shape differs")
+    try:
+        category, slug = _canonical_category(payload["sourceReference"])
+        month = archive_month(payload["terminalInstant"])
+    except LifecycleError as exc:
+        raise LifecycleError(failure_id, "fixed bug receipt identity differs") from exc
+    repository = _work_items_root(root).parent
+    source = repository / "work-items" / "bugs" / f"{slug}.md"
+    archive = repository / "work-items" / "bugs" / "archive" / month / f"{slug}.md"
+    receipt = archive.with_name(f"{slug}.fixed-archive-receipt.json")
+    if (
+        category.name != "bug"
+        or payload["sourcePath"] != source.relative_to(repository).as_posix()
+        or payload["archivePath"] != archive.relative_to(repository).as_posix()
+        or receipt_path.resolve() != receipt.resolve()
+        or _category_locations(root, CATEGORIES["bug"], slug) != [archive]
+        or any(not SHA256_RE.fullmatch(payload[key]) for key in (
+            "sourceBeforeSha256", "archivedBugSha256", "readmeSha256"
+        ))
+    ):
+        raise LifecycleError(failure_id, "fixed bug receipt binding differs")
+    archived = _capture_file_snapshot(archive, failure_id=failure_id)
+    try:
+        fields = _parse_fields(archived.data.decode("utf-8"))
+    except UnicodeError as exc:
+        raise LifecycleError(failure_id, "archived bug is not UTF-8") from exc
+    if (
+        _sha256_bytes(archived.data) != payload["archivedBugSha256"]
+        or fields.get("id") != slug
+        or fields.get("status") != "fixed"
+        or fields.get("terminal-at") != payload["terminalInstant"]
+        or not fields.get("context")
+        or not fields.get("resolution")
+        or not fields.get("evidence")
+    ):
+        raise LifecycleError(failure_id, "archived fixed bug differs")
+    paths: list[str] = []
+    for row in payload["links"]:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"path", "beforeSha256", "afterSha256"}
+            or not isinstance(row.get("path"), str)
+            or not isinstance(row.get("beforeSha256"), str)
+            or not isinstance(row.get("afterSha256"), str)
+            or not SHA256_RE.fullmatch(row["beforeSha256"])
+            or not SHA256_RE.fullmatch(row["afterSha256"])
+        ):
+            raise LifecycleError(failure_id, "fixed bug receipt link row differs")
+        paths.append(row["path"])
+        consumer = _intent_path(root, row["path"])
+        if _ledger_location_regular_sha256(consumer, failure_id=failure_id) != row["afterSha256"]:
+            raise LifecycleError(failure_id, f"fixed bug settled link differs: {row['path']}")
+    if (
+        paths != sorted(paths) or len(paths) != len(set(paths))
+        or _ledger_location_regular_sha256(
+            _work_items_root(root) / "README.md", failure_id=failure_id,
+        ) != payload["readmeSha256"]
+        or (expected_bytes is not None and receipt_bytes != expected_bytes)
+    ):
+        raise LifecycleError(failure_id, "fixed bug settled bytes differ")
+    return payload
+
+
 def _bug_supersession_intent_links(root: Path, intent: dict) -> list[dict]:
     result: list[dict] = []
     for row in intent["links"]:
@@ -6841,7 +7121,7 @@ def _bug_supersession_intent_links(root: Path, intent: dict) -> list[dict]:
         if before is None or after is None:
             raise LifecycleError(
                 "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-                "bug supersession intent link image is absent",
+                f"{_single_bug_transition_label(intent)} intent link image is absent",
             )
         result.append(
             {
@@ -6856,13 +7136,14 @@ def _bug_supersession_intent_links(root: Path, intent: dict) -> list[dict]:
     return result
 
 
-def _recover_bug_supersession_transition(
+def _recover_single_bug_transition(
     root: Path,
     intent_path: Path,
     intent: dict,
     *,
     inject_failure_at: str | None = None,
 ) -> dict | None:
+    label = _single_bug_transition_label(intent)
     source = _intent_path(root, intent["sourcePath"])
     archive = _intent_path(root, intent["archivePath"])
     receipt = _intent_path(root, intent["receiptPath"])
@@ -6873,10 +7154,13 @@ def _recover_bug_supersession_transition(
     if source_before is None or source_after is None or receipt_after is None:
         raise LifecycleError(
             "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-            "bug supersession intent image is absent",
+            f"{label} intent image is absent",
         )
     links = _bug_supersession_intent_links(root, intent)
-    failure_id = "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE"
+    rollback_id = _single_bug_failure_id(intent, "ROLLBACK")
+    forward_id = _single_bug_failure_id(intent, "ROLLFORWARD")
+    failpoint = "F" if intent["kind"] == FIXED_BUG_ARCHIVE_KIND else "B"
+    failure_id = rollback_id
     current_source = _read_lifecycle_image(
         source,
         source_before,
@@ -6888,8 +7172,8 @@ def _recover_bug_supersession_transition(
     if source_exists:
         if archive_exists or current_source not in {source_before, source_after}:
             raise LifecycleError(
-                "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
-                "bug supersession rollback identity differs",
+                rollback_id,
+                f"{label} rollback identity differs",
             )
         for row in links:
             if _read_lifecycle_image(
@@ -6901,8 +7185,8 @@ def _recover_bug_supersession_transition(
                 row["before"], row["after"]
             }:
                 raise LifecycleError(
-                    "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
-                    f"bug supersession rollback link differs: {row['pathRelative']}",
+                    rollback_id,
+                    f"{label} rollback link differs: {row['pathRelative']}",
                 )
         current_receipt = _read_lifecycle_image(
             receipt,
@@ -6913,8 +7197,8 @@ def _recover_bug_supersession_transition(
         )
         if current_receipt not in {receipt_before, receipt_after}:
             raise LifecycleError(
-                "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
-                "bug supersession rollback receipt differs",
+                rollback_id,
+                f"{label} rollback receipt differs",
             )
         for row in links:
             _atomic_write(row["path"], row["before"])
@@ -6925,22 +7209,22 @@ def _recover_bug_supersession_transition(
             _atomic_write(receipt, receipt_before)
         intent_path.unlink()
         return None
-    failure_id = "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE"
+    failure_id = forward_id
     if not archive_exists:
         raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
-            "bug supersession commit identity is absent",
+            forward_id,
+            f"{label} commit identity is absent",
         )
     if _read_lifecycle_image(archive, source_after, failure_id=failure_id) != source_after:
         raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
-            "bug supersession archive image differs",
+            forward_id,
+            f"{label} archive image differs",
         )
     for row in links:
         if _read_lifecycle_image(row["path"], row["after"], failure_id=failure_id) != row["after"]:
             raise LifecycleError(
-                "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
-                f"bug supersession roll-forward link differs: {row['pathRelative']}",
+                forward_id,
+                f"{label} roll-forward link differs: {row['pathRelative']}",
             )
     current_receipt = _read_lifecycle_image(
         receipt,
@@ -6951,35 +7235,43 @@ def _recover_bug_supersession_transition(
     )
     if current_receipt not in {receipt_before, receipt_after}:
         raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
-            "bug supersession roll-forward receipt differs",
+                forward_id,
+            f"{label} roll-forward receipt differs",
         )
-    readme_sha256 = _safe_refresh_readme(root)
+    try:
+        readme_sha256 = _safe_refresh_readme(root)
+    except (LifecycleError, OSError) as exc:
+        if intent["kind"] == FIXED_BUG_ARCHIVE_KIND:
+            raise LifecycleError(forward_id, "fixed bug README refresh failed") from exc
+        raise
     if readme_sha256 != intent["finalReadmeSha256"]:
         raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
-            "bug supersession README afterimage differs",
+            forward_id,
+            f"{label} README afterimage differs",
         )
-    if inject_failure_at == "B4":
+    if inject_failure_at == f"{failpoint}4":
         raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE", "injected B4"
+            forward_id, f"injected {failpoint}4"
         )
     if current_receipt is None:
         _atomic_write(receipt, receipt_after)
         _transition_fsync_directory(receipt.parent)
-    if inject_failure_at == "B5":
+    if inject_failure_at == f"{failpoint}5":
         raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE", "injected B5"
+            forward_id, f"injected {failpoint}5"
         )
-    settled = _verify_bug_supersession_settlement(root, receipt, receipt_after)
-    if inject_failure_at == "B6":
+    if intent["kind"] == FIXED_BUG_ARCHIVE_KIND:
+        settled = _verify_fixed_bug_archive_settlement(root, receipt, receipt_after)
+    else:
+        settled = _verify_bug_supersession_settlement(root, receipt, receipt_after)
+    if inject_failure_at == f"{failpoint}6":
         raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE", "injected B6"
+            forward_id, f"injected {failpoint}6"
         )
     intent_path.unlink()
-    if inject_failure_at == "B7":
+    if inject_failure_at == f"{failpoint}7":
         raise LifecycleError(
-            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE", "injected B7"
+            forward_id, f"injected {failpoint}7"
         )
     return settled
 
@@ -7028,6 +7320,14 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
         and payload.get("kind") == BUG_SUPERSESSION_KIND
         and isinstance(payload.get("links"), list)
     )
+    is_fixed_bug_archive = (
+        isinstance(payload, dict)
+        and set(payload) == FIXED_BUG_ARCHIVE_INTENT_FIELDS
+        and payload.get("schemaVersion") == 1
+        and payload.get("owner") == FIXED_BUG_ARCHIVE_OWNER
+        and payload.get("kind") == FIXED_BUG_ARCHIVE_KIND
+        and isinstance(payload.get("links"), list)
+    )
     is_ledger_h1_relocation = (
         isinstance(payload, dict)
         and set(payload) == LEDGER_H1_RELOCATION_INTENT_FIELDS
@@ -7042,21 +7342,23 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
             or is_v2
             or is_legacy_v2
             or is_bug_supersession
+            or is_fixed_bug_archive
             or is_ledger_h1_relocation
         )
         or payload.get("status") != "intent"
         or (
-            not (is_bug_supersession or is_ledger_h1_relocation)
+            not (is_bug_supersession or is_fixed_bug_archive or is_ledger_h1_relocation)
             and not isinstance(payload.get("bugs"), list)
         )
     ):
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition intent shape differs")
-    if is_bug_supersession:
+    if is_bug_supersession or is_fixed_bug_archive:
+        label = _single_bug_transition_label(payload)
         for key in ("sourcePath", "archivePath", "receiptPath"):
             if not isinstance(payload[key], str):
                 raise LifecycleError(
                     "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-                    "bug supersession intent path differs",
+                    f"{label} intent path differs",
                 )
             _intent_path(root, payload[key])
         paths: list[str] = []
@@ -7074,14 +7376,14 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
             ):
                 raise LifecycleError(
                     "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-                    "bug supersession intent link differs",
+                    f"{label} intent link differs",
                 )
             paths.append(row["path"])
             _intent_path(root, row["path"])
         if paths != sorted(paths) or len(paths) != len(set(paths)):
             raise LifecycleError(
                 "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-                "bug supersession intent links are not sorted and unique",
+                f"{label} intent links are not sorted and unique",
             )
         return payload
     if is_ledger_h1_relocation:
@@ -8117,8 +8419,8 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
             intent_path,
             intent,
         )
-    if intent.get("kind") == BUG_SUPERSESSION_KIND:
-        return _recover_bug_supersession_transition(
+    if intent.get("kind") in {BUG_SUPERSESSION_KIND, FIXED_BUG_ARCHIVE_KIND}:
+        return _recover_single_bug_transition(
             root,
             intent_path,
             intent,
@@ -16931,6 +17233,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=tuple(f"B{i}" for i in range(8)),
         help=argparse.SUPPRESS,
     )
+    fixed_bug = sub.add_parser("archive-fixed-bug")
+    _add_root(fixed_bug)
+    fixed_bug.add_argument("--slug", required=True)
+    fixed_bug.add_argument("--terminal-instant", required=True)
+    fixed_bug.add_argument("--resolution", required=True)
+    fixed_bug.add_argument("--evidence", required=True)
+    fixed_bug.add_argument("--apply", action="store_true")
     trial = sub.add_parser("trial")
     _add_root(trial)
     trial.add_argument("--fixture", required=True)
@@ -17404,6 +17713,18 @@ def main(argv: list[str]) -> int:
                 "WI-BUG-SUPERSESSION-COMMITTED "
                 f"operation={result['operationId']} readme={result['readmeSha256']}"
             )
+        elif args.command == "archive-fixed-bug":
+            if not args.apply:
+                raise LifecycleError(
+                    "WI-FIXED-BUG-APPLY-REQUIRED", "archive-fixed-bug requires explicit --apply",
+                )
+            result = archive_fixed_bug(
+                root, args.slug, args.terminal_instant, args.resolution, args.evidence,
+            )
+            print(
+                "WI-FIXED-BUG-ARCHIVE-COMMITTED "
+                f"operation={result['operationId']} readme={result['readmeSha256']}"
+            )
         elif args.command == "trial":
             first, second = run_trial(root, Path(args.fixture))
             print("TRIAL: PASS")
@@ -17462,6 +17783,7 @@ LIFECYCLE_PUBLIC_APIS = (
     "revoke_legacy_ledger_obligation",
     "archive_with_successor",
     "supersede_current_bug",
+    "archive_fixed_bug",
     "build_migration_inventory",
     "write_migration_inventory",
     "migrate_legacy",
