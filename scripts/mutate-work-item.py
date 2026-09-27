@@ -5562,6 +5562,25 @@ def revoke_legacy_ledger_obligation(
 
 TRANSITION_OWNER = "mutate-work-item:archive-with-successor-v1"
 TRANSFER_TRANSITION_OWNER = "mutate-work-item:archive-with-successor-v2"
+SUCCESSOR_IMPORT_OWNER = "mutate-work-item:import-active-successor-v1"
+SUCCESSOR_IMPORT_KIND = "active-successor-import-v1"
+SUCCESSOR_IMPORT_RECEIPT = "active-successor-import-receipt.json"
+SUCCESSOR_IMPORT_INTENT_FIELDS = {
+    "schemaVersion", "owner", "kind", "status", "operationId",
+    "preflightDigest", "sourcePath", "archivePath", "successorPath",
+    "sourceHoldPath", "successorStagePath", "receiptPath", "plan",
+    "statusData", "images",
+}
+SUCCESSOR_IMPORT_PLAN_FIELDS = {
+    "schemaVersion", "owner", "operationId", "predecessor", "successor",
+    "sourceTreeSha256", "archiveTreeSha256", "archiveReceiptSha256",
+    "archiveFiles", "fileBindings", "ledgerArchivePrefix", "statusSha256",
+    "compatibilityIndex", "links", "readme", "canonicalInputs",
+}
+SUCCESSOR_IMPORT_RECEIPT_FIELDS = SUCCESSOR_IMPORT_PLAN_FIELDS | {
+    "state", "preflightDigest", "dispositionsSha256",
+    "successorTreeSha256ExcludingReceipt", "receiptPath",
+}
 TRANSITION_INTENT_FIELDS = {
     "schemaVersion", "owner", "status", "operationId", "slug", "terminalInstant",
     "activePath", "archivePath", "successorPath", "expectedLedgerSha256",
@@ -7336,6 +7355,16 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
         and payload.get("kind") == LEDGER_H1_RELOCATION_KIND
         and isinstance(payload.get("members"), list)
     )
+    is_successor_import = (
+        isinstance(payload, dict)
+        and set(payload) == SUCCESSOR_IMPORT_INTENT_FIELDS
+        and payload.get("schemaVersion") == 1
+        and payload.get("owner") == SUCCESSOR_IMPORT_OWNER
+        and payload.get("kind") == SUCCESSOR_IMPORT_KIND
+    )
+    if is_successor_import:
+        _validate_successor_import_intent(root, path, payload, snapshot.data)
+        return payload
     if (
         not (
             is_v1
@@ -8419,6 +8448,8 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
             intent_path,
             intent,
         )
+    if intent.get("kind") == SUCCESSOR_IMPORT_KIND:
+        return _recover_successor_import(root, intent_path, intent)
     if intent.get("kind") in {BUG_SUPERSESSION_KIND, FIXED_BUG_ARCHIVE_KIND}:
         return _recover_single_bug_transition(
             root,
@@ -16987,6 +17018,1014 @@ def write_legacy_ledger_irrecoverable_disposition(root: Path, disposition_bytes:
     return _write_legacy_ledger_irrecoverable_disposition_transaction(root, disposition_bytes)
 
 
+def _successor_import_tree(root: Path) -> list[tuple[str, bytes]]:
+    """Capture every ordinary leaf without following a source or archive alias."""
+
+    failure = "WI-SUCCESSOR-IMPORT-UNSAFE-INPUT"
+    _lifecycle_reject_unreduced_reparse(root, failure_id=failure, message="unsafe tree root")
+    try:
+        if not stat.S_ISDIR(root.lstat().st_mode):
+            raise OSError("tree root is not a directory")
+    except OSError as exc:
+        raise LifecycleError(failure, "tree root is unavailable") from exc
+    pending = [root]
+    files: list[tuple[str, bytes]] = []
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as iterator:
+                children = sorted(iterator, key=lambda entry: entry.name)
+        except OSError as exc:
+            raise LifecycleError(failure, "tree cannot be enumerated") from exc
+        for entry in children:
+            path = Path(entry.path)
+            try:
+                info = entry.stat(follow_symlinks=False)
+                unsafe = entry.is_symlink() or bool(
+                    getattr(info, "st_file_attributes", 0)
+                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                )
+            except OSError as exc:
+                raise LifecycleError(failure, "tree entry cannot be inspected") from exc
+            if unsafe:
+                raise LifecycleError(failure, "tree contains a link or reparse entry")
+            if stat.S_ISDIR(info.st_mode):
+                pending.append(path)
+            elif stat.S_ISREG(info.st_mode):
+                snapshot = _capture_file_snapshot(
+                    path, failure_id=failure,
+                    maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+                    require_single_link=True,
+                )
+                files.append((path.relative_to(root).as_posix(), snapshot.data))
+            else:
+                raise LifecycleError(failure, "tree contains a nonordinary entry")
+    return sorted(files)
+
+
+def _successor_import_tree_digest(files: Iterable[tuple[str, bytes]]) -> str:
+    digest = hashlib.sha256()
+    for path, data in files:
+        name = path.encode("utf-8")
+        digest.update(len(name).to_bytes(8, "big"))
+        digest.update(name)
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+    return digest.hexdigest()
+
+
+def _successor_import_index(
+    work_items: Path, old: str, new: str, disposition: dict,
+) -> tuple[dict, bytes]:
+    failure = "WI-SUCCESSOR-LINK-UNMAPPED"
+    path = work_items / "index.md"
+    before = _capture_file_snapshot(
+        path, failure_id=failure, maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+        require_single_link=True,
+    ).data
+    try:
+        text = before.decode("utf-8")
+    except UnicodeError as exc:
+        raise LifecycleError(failure, "compatibility index is not UTF-8") from exc
+    row_before = disposition.get("indexRowBefore")
+    row_after = disposition.get("indexRowAfter")
+    if not all(isinstance(row, str) and row.endswith("\n") for row in (row_before, row_after)):
+        raise LifecycleError(failure, "one complete index row disposition is required")
+    rows = text.splitlines(keepends=True)
+    old_status = work_items / "active" / old / "status.md"
+    new_status = work_items / "active" / new / "status.md"
+    old_active = work_items / "active" / old
+    old_rows = [
+        row for row in rows
+        if any(_markdown_href_resolves(path.parent, link.href, old_status)
+               for link in _markdown_local_links(row))
+    ]
+    if len(old_rows) != 1 or old_rows[0] != row_before or rows.count(row_before) != 1:
+        raise LifecycleError(failure, "index old-active row is absent or ambiguous")
+    old_root = old_active.resolve()
+    old_targets = [
+        target
+        for row in rows for link in _markdown_local_links(row)
+        if (parts := _local_markdown_href_parts(link.href)) is not None
+        for target in ((path.parent / parts[0]).resolve(),)
+        if target == old_root or old_root in target.parents
+    ]
+    if old_targets != [old_status.resolve()]:
+        raise LifecycleError(failure, "index contains another old-active link")
+    after_links = list(_markdown_local_links(row_after))
+    visible_row = row_after
+    for link in reversed(after_links):
+        visible_row = visible_row[:link.href_start] + visible_row[link.href_end:]
+    def names_visible_slug(slug: str) -> bool:
+        return re.search(
+            rf"(?<![A-Za-z0-9_.-]){re.escape(slug)}(?![A-Za-z0-9_.-])",
+            visible_row,
+        ) is not None
+
+    if not names_visible_slug(new) or names_visible_slug(old) or sum(
+        _markdown_href_resolves(path.parent, link.href, new_status) for link in after_links
+    ) != 1 or any(
+        (path.parent / parts[0]).resolve() == old_active.resolve()
+        or old_active.resolve() in (path.parent / parts[0]).resolve().parents
+        for link in after_links
+        if (parts := _local_markdown_href_parts(link.href)) is not None
+    ):
+        raise LifecycleError(failure, "replacement index row does not name the successor status")
+    after = text.replace(row_before, row_after, 1).encode("utf-8")
+    return {
+        "path": "work-items/index.md",
+        "beforeSha256": _sha256_bytes(before),
+        "afterSha256": _sha256_bytes(after),
+        "afterBase64": _b64(after),
+        "targetPath": f"work-items/active/{new}/status.md",
+    }, after
+
+
+def _successor_import_links(
+    root: Path, work_items: Path, source: Path, new: str,
+    bindings: list[dict], dispositions: dict,
+) -> list[dict]:
+    failure = "WI-SUCCESSOR-LINK-UNMAPPED"
+    reference = f"work-item:{source.name}"
+    try:
+        observed = _incoming_link_result(
+            root, [source], reference, strict_consumer_reads=True,
+        )["references"]
+    except LifecycleError as exc:
+        raise LifecycleError(failure, "incoming-link scan could not classify consumers") from exc
+    supplied = dispositions.get("references")
+    if not isinstance(supplied, list) or any(not isinstance(row, dict) for row in supplied):
+        raise LifecycleError(failure, "incoming references require an exact disposition list")
+    if any(
+        not all(isinstance(row.get(field), str) for field in ("consumer", "kind", "value"))
+        for row in supplied
+    ):
+        raise LifecycleError(failure, "incoming references require string identities")
+    for row in supplied:
+        required = (
+            {"consumer", "kind", "value", "target"}
+            if row["kind"] == "physical"
+            else {"consumer", "kind", "value", "meaning"}
+        )
+        choice = row.get("target") if row["kind"] == "physical" else row.get("meaning")
+        if row["kind"] not in {"physical", "logical"} or set(row) != required or not isinstance(choice, str):
+            raise LifecycleError(failure, "incoming reference disposition has invalid shape")
+    def key(row: dict) -> tuple:
+        return row.get("consumer"), row.get("kind"), row.get("value")
+    observed_keys = [key(row) for row in observed]
+    supplied_keys = [key(row) for row in supplied]
+    if Counter(observed_keys) != Counter(supplied_keys) or len(set(supplied_keys)) != len(supplied_keys):
+        raise LifecycleError(failure, "incoming-reference dispositions are incomplete or ambiguous")
+    allowed_targets = {row["targetPath"] for row in bindings}
+    allowed_targets.add(f"work-items/active/{new}/status.md")
+    plans: list[dict] = []
+    for consumer_name in sorted({row["consumer"] for row in supplied}):
+        relative = PurePosixPath(consumer_name)
+        if (not consumer_name or relative.is_absolute() or ".." in relative.parts
+                or relative.parts[0] == "archive" or ":" in consumer_name
+                or "\\" in consumer_name):
+            raise LifecycleError(failure, "incoming consumer is not a mutable work-item file")
+        consumer = work_items.joinpath(*relative.parts)
+        before = _capture_file_snapshot(
+            consumer, failure_id=failure,
+            maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+            require_single_link=True,
+        ).data
+        try:
+            text = before.decode("utf-8")
+        except UnicodeError as exc:
+            raise LifecycleError(failure, "incoming consumer is not UTF-8") from exc
+        replacements: list[tuple[int, int, str]] = []
+        for row in (item for item in supplied if item["consumer"] == consumer_name):
+            if row["kind"] == "logical":
+                if row.get("meaning") not in {"historical-predecessor", "current-successor"} or row["value"] != reference:
+                    raise LifecycleError(failure, "logical reference has no reviewed meaning")
+                if row["meaning"] == "current-successor":
+                    if text.count(reference) != 1:
+                        raise LifecycleError(failure, "current logical reference is ambiguous")
+                continue
+            if row["kind"] != "physical" or row.get("target") not in allowed_targets:
+                raise LifecycleError(failure, "physical reference has no bound target")
+            matches = [link for link in _markdown_local_links(text) if link.href == row["value"]]
+            if len(matches) != 1:
+                raise LifecycleError(failure, "physical reference occurrence is ambiguous")
+            target = work_items.parent.joinpath(*PurePosixPath(row["target"]).parts)
+            suffix = _local_markdown_href_parts(row["value"])
+            if suffix is None:
+                raise LifecycleError(failure, "physical reference is not local")
+            new_href = _relative_link(consumer.parent, target) + suffix[1]
+            replacements.append((matches[0].href_start, matches[0].href_end, new_href))
+        for start, end, new_href in sorted(replacements, reverse=True):
+            text = text[:start] + new_href + text[end:]
+        if any(
+            row["kind"] == "logical" and row["meaning"] == "current-successor"
+            for row in supplied if row["consumer"] == consumer_name
+        ):
+            text = text.replace(reference, f"work-item:{new}", 1)
+        after = text.encode("utf-8")
+        plans.append({
+            "consumer": f"work-items/{consumer_name}",
+            "beforeSha256": _sha256_bytes(before),
+            "afterSha256": _sha256_bytes(after),
+            "afterBase64": _b64(after),
+            "references": sorted(
+                (row for row in supplied if row["consumer"] == consumer_name),
+                key=lambda row: (row["kind"], row["value"]),
+            ),
+        })
+    return plans
+
+
+def _successor_import_shadow_readme(
+    root: Path, work_items: Path, source: Path, new: str, status_data: bytes,
+    static_guide: str, links: list[dict], index_after: bytes,
+) -> tuple[bytes, list[dict]]:
+    planned_inputs: dict[str, bytes] = {}
+    with tempfile.TemporaryDirectory(prefix="work-items-successor-readme-") as directory:
+        shadow_root = Path(directory)
+        shadow_work_items = shadow_root / "work-items"
+        try:
+            shutil.copytree(work_items, shadow_work_items, symlinks=True)
+            shutil.rmtree(shadow_work_items / source.relative_to(work_items))
+            shadow_status = shadow_work_items / "active" / new / "status.md"
+            shadow_status.parent.mkdir(parents=True)
+            shadow_status.write_bytes(status_data)
+            (shadow_work_items / "index.md").write_bytes(index_after)
+            for link in links:
+                relative = PurePosixPath(link["consumer"]).relative_to("work-items")
+                after = base64.b64decode(link["afterBase64"], validate=True)
+                shadow_work_items.joinpath(*relative.parts).write_bytes(after)
+                planned_inputs[relative.as_posix()] = after
+            transaction_token = _CURRENT_LIFECYCLE_TRANSACTION.set(None)
+            composer_token = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.set(None)
+            try:
+                rendered = render_readme_bytes(
+                    shadow_root, static_guide_override=static_guide,
+                )
+                entries = collect_readme_entries(shadow_root)
+                sources = sorted({
+                    path.relative_to(shadow_work_items).as_posix()
+                    for entry in entries for path in entry.source_paths
+                })
+            finally:
+                _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(composer_token)
+                _CURRENT_LIFECYCLE_TRANSACTION.reset(transaction_token)
+        except (LifecycleError, OSError) as exc:
+            raise LifecycleError(
+                "WI-SUCCESSOR-READMODEL-INVALID", "unique-location shadow cannot render"
+            ) from exc
+    snapshot = []
+    for relative in sources:
+        if relative == f"active/{new}/status.md":
+            data = status_data
+        elif relative in planned_inputs:
+            data = planned_inputs[relative]
+        else:
+            data = _capture_file_snapshot(
+                work_items.joinpath(*PurePosixPath(relative).parts),
+                failure_id="WI-SUCCESSOR-READMODEL-INVALID",
+                maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+                require_single_link=True,
+            ).data
+        snapshot.append({"path": f"work-items/{relative}", "sha256": _sha256_bytes(data)})
+    return rendered, snapshot
+
+
+def preflight_import_active_successor(
+    root: Path, predecessor_slug: str, successor_slug: str, status_data: bytes,
+    dispositions: dict, operation_id: str,
+) -> dict:
+    """Bind one exceptional dual-location import; never write to the candidate."""
+
+    _validate_slug(predecessor_slug)
+    _validate_slug(successor_slug)
+    if predecessor_slug.casefold() == successor_slug.casefold() or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", operation_id or ""
+    ):
+        raise LifecycleError("WI-SUCCESSOR-IDENTITY-CONFLICT", "distinct identity and bounded operation ID required")
+    if not isinstance(dispositions, dict) or set(dispositions) != {
+        "indexRowBefore", "indexRowAfter", "references",
+    }:
+        raise LifecycleError("WI-SUCCESSOR-LINK-UNMAPPED", "link dispositions have invalid shape")
+    _validate_active_status_bytes(status_data)
+    occurrences = _authoritative_field_occurrences(status_data.decode("utf-8"))
+    fields = _parse_fields(status_data.decode("utf-8"))
+    if (fields.get("template") != "staged" or fields.get("status") != "active"
+            or fields.get("reopens") != predecessor_slug
+            or sum(name == "reopens" for _, name, _, _ in occurrences) != 1):
+        raise LifecycleError("WI-CATEGORY-STATUS-INVALID", "successor status must be staged, active and reopen the predecessor")
+    work_items = _work_items_root(root)
+    predecessor = CATEGORIES["work-item"]
+    locations = _category_locations(root, predecessor, predecessor_slug)
+    active = work_items / "active" / predecessor_slug
+    archives = [path for path in locations if path.parent.parent == work_items / "archive"]
+    def occupied(path: Path) -> bool:
+        try:
+            path.lstat()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            raise LifecycleError("WI-SUCCESSOR-IDENTITY-CONFLICT", "identity location cannot be inspected") from exc
+
+    archive_root = work_items / "archive"
+    months = [path for path in archive_root.iterdir() if path.is_dir()] if archive_root.is_dir() else []
+    def occupied_locations(slug: str) -> set[Path]:
+        candidates = [work_items / "backlog" / f"{slug}.md", work_items / "active" / slug]
+        candidates.extend(month / slug for month in months)
+        return {path for path in candidates if occupied(path)}
+
+    if (len(locations) != 2 or active not in locations or len(archives) != 1
+            or occupied_locations(predecessor_slug) != {active, archives[0]}
+            or occupied_locations(successor_slug)):
+        raise LifecycleError("WI-SUCCESSOR-IDENTITY-CONFLICT", "predecessor dual pair or empty successor identity is absent")
+    archive = archives[0]
+    source_files = _successor_import_tree(active)
+    archive_files = _successor_import_tree(archive)
+    source_map = dict(source_files)
+    archive_map = dict(archive_files)
+    if (not source_files or "status.md" not in source_map
+            or "agent-runs.jsonl" not in source_map
+            or "agent-runs.jsonl" not in archive_map
+            or "bug-dispositions-receipt.json" not in archive_map):
+        raise LifecycleError("WI-SUCCESSOR-IMPORT-UNSAFE-INPUT", "source or archive lacks required leaves")
+    _status_entry(root, active)
+    ledger = source_map["agent-runs.jsonl"]
+    archived_ledger = archive_map["agent-runs.jsonl"]
+    if (not ledger or not ledger.endswith(b"\n") or not archived_ledger.startswith(ledger)):
+        raise LifecycleError("WI-SUCCESSOR-LEDGER-DIVERGENCE", "source ledger is not an exact archived prefix")
+    errors, _events, _runtime = _validator_module().validate_archived_ledger_obligations(archive)
+    if errors:
+        raise LifecycleError("WI-SUCCESSOR-LEDGER-DIVERGENCE", "; ".join(errors))
+    bindings = []
+    for relative, data in source_files:
+        if relative == "agent-runs.jsonl":
+            kind = "archive-ledger-prefix"
+            target = archive / relative
+        elif relative != "status.md" and relative in archive_map and archive_map[relative] == data:
+            kind = "archive-equal"
+            target = archive / relative
+        else:
+            kind = "successor-copy"
+            target = work_items / "active" / successor_slug / "imported-source" / relative
+        bindings.append({
+            "sourceRelativePath": relative,
+            "sourceSha256": _sha256_bytes(data),
+            "kind": kind,
+            "targetPath": f"work-items/{target.relative_to(work_items).as_posix()}",
+        })
+    index, index_after = _successor_import_index(
+        work_items, predecessor_slug, successor_slug, dispositions,
+    )
+    links = _successor_import_links(
+        root, work_items, active, successor_slug, bindings, dispositions,
+    )
+    readme_path = work_items / "README.md"
+    readme_before = _capture_file_snapshot(
+        readme_path, failure_id="WI-README-MARKERS",
+        maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+        require_single_link=True,
+    ).data
+    static_guide = _static_guide(readme_path)
+    readme_after, canonical_inputs = _successor_import_shadow_readme(
+        root, work_items, active, successor_slug, status_data, static_guide,
+        links, index_after,
+    )
+    if (readme_after.count(f"active/{successor_slug}/status.md".encode()) < 1
+            or readme_after.count(f"archive/{archive.parent.name}/{predecessor_slug}/closure.md".encode()) != 1):
+        raise LifecycleError("WI-SUCCESSOR-READMODEL-INVALID", "shadow does not contain one successor and predecessor archive")
+    readme = {
+        "path": "work-items/README.md",
+        "beforeSha256": _sha256_bytes(readme_before),
+        "afterSha256": _sha256_bytes(readme_after),
+        "afterBase64": _b64(readme_after),
+    }
+    wire = {
+        "schemaVersion": 1,
+        "owner": "mutate-work-item:import-active-successor-preflight-v1",
+        "operationId": operation_id,
+        "predecessor": predecessor_slug,
+        "successor": successor_slug,
+        "sourceTreeSha256": _successor_import_tree_digest(source_files),
+        "archiveTreeSha256": _successor_import_tree_digest(archive_files),
+        "archiveReceiptSha256": _sha256_bytes(archive_map["bug-dispositions-receipt.json"]),
+        "archiveFiles": [
+            {"path": relative, "sha256": _sha256_bytes(data)}
+            for relative, data in archive_files
+        ],
+        "fileBindings": bindings,
+        "ledgerArchivePrefix": {
+            "byteCount": len(ledger), "lineCount": len(ledger.splitlines()),
+            "prefixSha256": _sha256_bytes(ledger),
+            "archiveLedgerSha256": _sha256_bytes(archived_ledger),
+        },
+        "statusSha256": _sha256_bytes(status_data),
+        "compatibilityIndex": index,
+        "links": links,
+        "readme": readme,
+        "canonicalInputs": canonical_inputs,
+    }
+    canonical = (json.dumps(wire, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    return {
+        **wire, "digest": _sha256_bytes(canonical), "canonicalBytes": canonical,
+        "compatibilityIndex": {**index, "afterBytes": index_after},
+        "readme": {**readme, "afterBytes": readme_after},
+    }
+
+
+def _successor_import_plan_bytes(plan: dict) -> bytes:
+    return (json.dumps(plan, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def _successor_import_stage_paths(operation_id: str) -> tuple[str, str]:
+    base = f".scratch/work-items-lifecycle-successor-imports/{operation_id}"
+    return f"{base}/source", f"{base}/successor"
+
+
+def _validate_successor_import_intent(
+    root: Path, path: Path, intent: dict, raw: bytes,
+) -> None:
+    failure = "WI-SUCCESSOR-IMPORT-RECOVERY"
+    operation = intent.get("operationId")
+    plan = intent.get("plan")
+    if (
+        intent.get("status") != "intent"
+        or not isinstance(operation, str)
+        or not isinstance(plan, dict)
+        or raw != _migration_receipt_bytes(intent)
+        or path.absolute() != _transition_intent_path(root, operation).absolute()
+    ):
+        raise LifecycleError(failure, "successor import intent shape or identity differs")
+    if (
+        plan.get("schemaVersion") != 1
+        or set(plan) != SUCCESSOR_IMPORT_PLAN_FIELDS
+        or plan.get("owner") != "mutate-work-item:import-active-successor-preflight-v1"
+        or plan.get("operationId") != operation
+        or not isinstance(plan.get("predecessor"), str)
+        or not isinstance(plan.get("successor"), str)
+        or not isinstance(intent.get("preflightDigest"), str)
+        or _sha256_bytes(_successor_import_plan_bytes(plan)) != intent["preflightDigest"]
+    ):
+        raise LifecycleError(failure, f"operation={operation} phase=intent plan digest differs")
+    old, new = plan["predecessor"], plan["successor"]
+    _validate_slug(old)
+    _validate_slug(new)
+    hold, stage = _successor_import_stage_paths(operation)
+    archive_parts = PurePosixPath(intent.get("archivePath", "")).parts
+    if (
+        intent.get("sourcePath") != f"work-items/active/{old}"
+        or intent.get("successorPath") != f"work-items/active/{new}"
+        or len(archive_parts) != 4
+        or archive_parts[:2] != ("work-items", "archive")
+        or not re.fullmatch(r"\d{4}-\d{2}", archive_parts[2])
+        or archive_parts[3] != old
+        or intent.get("sourceHoldPath") != hold
+        or intent.get("successorStagePath") != stage
+        or intent.get("receiptPath") != f"work-items/active/{new}/{SUCCESSOR_IMPORT_RECEIPT}"
+    ):
+        raise LifecycleError(failure, f"operation={operation} phase=intent paths differ")
+    try:
+        status_data = base64.b64decode(intent["statusData"], validate=True)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LifecycleError(failure, f"operation={operation} phase=intent status differs") from exc
+    if _sha256_bytes(status_data) != plan.get("statusSha256"):
+        raise LifecycleError(failure, f"operation={operation} phase=intent status hash differs")
+    expected_images = {}
+    for row in (*plan.get("links", []), plan.get("compatibilityIndex"), plan.get("readme")):
+        if not isinstance(row, dict):
+            raise LifecycleError(failure, f"operation={operation} phase=intent image plan differs")
+        name = row.get("consumer", row.get("path"))
+        if not isinstance(name, str) or name in expected_images:
+            raise LifecycleError(failure, f"operation={operation} phase=intent image path differs")
+        expected_images[name] = row
+    images = intent.get("images")
+    if not isinstance(images, list) or [row.get("path") for row in images if isinstance(row, dict)] != sorted(expected_images):
+        raise LifecycleError(failure, f"operation={operation} phase=intent image set differs")
+    for image in images:
+        if not isinstance(image, dict) or set(image) != {
+            "path", "beforeBase64", "afterBase64", "beforeSha256", "afterSha256",
+        }:
+            raise LifecycleError(failure, f"operation={operation} phase=intent image shape differs")
+        name = image["path"]
+        planned = expected_images.get(name)
+        if planned is None or not name.startswith("work-items/") or "\\" in name:
+            raise LifecycleError(failure, f"operation={operation} phase=intent image is outside work-items")
+        physical = _intent_path(root, name)
+        parts = PurePosixPath(name).parts
+        if (
+            ".." in parts or "archive" in parts or
+            parts[:3] in {("work-items", "active", old), ("work-items", "active", new)}
+        ):
+            raise LifecycleError(failure, f"operation={operation} phase=intent image is immutable")
+        if physical != _intent_path(root, planned.get("consumer", planned.get("path"))):
+            raise LifecycleError(failure, f"operation={operation} phase=intent image target differs")
+        try:
+            before = base64.b64decode(image["beforeBase64"], validate=True)
+            after = base64.b64decode(image["afterBase64"], validate=True)
+        except (TypeError, ValueError) as exc:
+            raise LifecycleError(failure, f"operation={operation} phase=intent image encoding differs") from exc
+        if (
+            _sha256_bytes(before) != image["beforeSha256"]
+            or _sha256_bytes(after) != image["afterSha256"]
+            or image["beforeSha256"] != planned.get("beforeSha256")
+            or image["afterSha256"] != planned.get("afterSha256")
+            or image["afterBase64"] != planned.get("afterBase64")
+        ):
+            raise LifecycleError(failure, f"operation={operation} phase=intent image hash differs")
+    for name in (
+        "sourcePath", "archivePath", "successorPath", "sourceHoldPath",
+        "successorStagePath", "receiptPath",
+    ):
+        _intent_path(root, intent[name])
+
+
+def _successor_import_source_bytes(path: Path, plan: dict, failure: str) -> dict[str, bytes]:
+    try:
+        files = _successor_import_tree(path)
+    except LifecycleError as exc:
+        raise LifecycleError(failure, "source tree cannot be captured") from exc
+    expected = {row["sourceRelativePath"]: row["sourceSha256"] for row in plan["fileBindings"]}
+    if (
+        len(expected) != len(plan["fileBindings"])
+        or {name: _sha256_bytes(data) for name, data in files} != expected
+        or _successor_import_tree_digest(files) != plan["sourceTreeSha256"]
+    ):
+        raise LifecycleError(failure, "source tree differs from bound preflight")
+    return dict(files)
+
+
+def _successor_import_archive_bytes(path: Path, plan: dict, failure: str) -> dict[str, bytes]:
+    try:
+        files = _successor_import_tree(path)
+    except LifecycleError as exc:
+        raise LifecycleError(failure, "archive tree cannot be captured") from exc
+    expected = {row["path"]: row["sha256"] for row in plan["archiveFiles"]}
+    if (
+        len(expected) != len(plan["archiveFiles"])
+        or {name: _sha256_bytes(data) for name, data in files} != expected
+        or _successor_import_tree_digest(files) != plan["archiveTreeSha256"]
+        or _sha256_bytes(dict(files)["bug-dispositions-receipt.json"]) != plan["archiveReceiptSha256"]
+    ):
+        raise LifecycleError(failure, "archive tree differs from bound preflight")
+    return dict(files)
+
+
+def _successor_import_successor_files(
+    plan: dict, status_data: bytes, source_files: dict[str, bytes],
+) -> dict[str, bytes]:
+    expected = {"status.md": status_data}
+    for row in plan["fileBindings"]:
+        if row["kind"] == "successor-copy":
+            expected[f"imported-source/{row['sourceRelativePath']}"] = source_files[row["sourceRelativePath"]]
+    return expected
+
+
+def _successor_import_check_stage(
+    path: Path, expected: dict[str, bytes], *, complete: bool,
+) -> None:
+    failure = "WI-SUCCESSOR-IMPORT-RECOVERY"
+    if not path.exists():
+        if complete:
+            raise LifecycleError(failure, f"stage is absent: {path.name}")
+        return
+    try:
+        observed = dict(_successor_import_tree(path))
+    except LifecycleError as exc:
+        raise LifecycleError(failure, f"stage is unsafe: {path.name}") from exc
+    if any(name not in expected or data != expected[name] for name, data in observed.items()):
+        raise LifecycleError(failure, f"stage bytes differ: {path.name}")
+    if complete and set(observed) != set(expected):
+        raise LifecycleError(failure, f"stage is incomplete: {path.name}")
+
+
+def _successor_import_images(root: Path, plan: dict) -> list[dict]:
+    images = []
+    for row in (*plan["links"], plan["compatibilityIndex"], plan["readme"]):
+        name = row.get("consumer", row.get("path"))
+        path = _intent_path(root, name)
+        before = _capture_file_snapshot(
+            path, failure_id="WI-SUCCESSOR-IMPORT-DRIFT",
+            maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP, require_single_link=True,
+        ).data
+        after = base64.b64decode(row["afterBase64"], validate=True)
+        if _sha256_bytes(before) != row["beforeSha256"] or _sha256_bytes(after) != row["afterSha256"]:
+            raise LifecycleError("WI-SUCCESSOR-IMPORT-DRIFT", f"bound image changed: {name}")
+        images.append({
+            "path": name, "beforeBase64": _b64(before), "afterBase64": _b64(after),
+            "beforeSha256": row["beforeSha256"], "afterSha256": row["afterSha256"],
+        })
+    return sorted(images, key=lambda row: row["path"])
+
+
+def _successor_import_receipt(
+    plan: dict, digest: str, dispositions: dict, successor_tree_sha256: str,
+) -> dict:
+    return {
+        **plan,
+        "owner": SUCCESSOR_IMPORT_OWNER,
+        "state": "committed",
+        "preflightDigest": digest,
+        "dispositionsSha256": _sha256_bytes(_successor_import_plan_bytes(dispositions)),
+        "successorTreeSha256ExcludingReceipt": successor_tree_sha256,
+        "receiptPath": f"work-items/active/{plan['successor']}/{SUCCESSOR_IMPORT_RECEIPT}",
+    }
+
+
+def _successor_import_reconstruct_source(root: Path, receipt: dict) -> dict[str, bytes]:
+    failure = "WI-SUCCESSOR-IMPORT-RECOVERY"
+    source: dict[str, bytes] = {}
+    for row in receipt["fileBindings"]:
+        target = _intent_path(root, row["targetPath"])
+        try:
+            data = _capture_file_snapshot(
+                target, failure_id=failure,
+                maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP, require_single_link=True,
+            ).data
+        except LifecycleError as exc:
+            raise LifecycleError(failure, f"settled binding is absent: {row['sourceRelativePath']}") from exc
+        if row["kind"] == "archive-ledger-prefix":
+            byte_count = receipt["ledgerArchivePrefix"]["byteCount"]
+            data = data[:byte_count]
+        if _sha256_bytes(data) != row["sourceSha256"]:
+            raise LifecycleError(failure, f"settled binding differs: {row['sourceRelativePath']}")
+        source[row["sourceRelativePath"]] = data
+    if (
+        len(source) != len(receipt["fileBindings"])
+        or _successor_import_tree_digest(sorted(source.items())) != receipt["sourceTreeSha256"]
+    ):
+        raise LifecycleError(failure, "settled source map is incomplete")
+    return source
+
+
+def _verify_successor_import_settlement(
+    root: Path, receipt_path: Path,
+    *, operation_id: str | None = None, digest: str | None = None,
+    predecessor: str | None = None, successor: str | None = None,
+    status_data: bytes | None = None, dispositions: dict | None = None,
+) -> dict:
+    failure = "WI-SUCCESSOR-IMPORT-RECOVERY"
+    try:
+        raw = _capture_file_snapshot(
+            receipt_path, failure_id=failure,
+            maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP, require_single_link=True,
+        ).data
+        receipt = json.loads(raw.decode("utf-8"))
+    except (LifecycleError, OSError, UnicodeError, ValueError) as exc:
+        raise LifecycleError(failure, "successor receipt cannot be read") from exc
+    if (
+        not isinstance(receipt, dict)
+        or set(receipt) != SUCCESSOR_IMPORT_RECEIPT_FIELDS
+        or raw != _migration_receipt_bytes(receipt)
+        or receipt.get("schemaVersion") != 1
+        or receipt.get("owner") != SUCCESSOR_IMPORT_OWNER
+        or receipt.get("state") != "committed"
+        or receipt.get("receiptPath") != receipt_path.relative_to(_work_items_root(root).parent).as_posix()
+    ):
+        raise LifecycleError(failure, "successor receipt shape or location differs")
+    preflight_wire = {key: receipt[key] for key in SUCCESSOR_IMPORT_PLAN_FIELDS}
+    preflight_wire["owner"] = "mutate-work-item:import-active-successor-preflight-v1"
+    if _sha256_bytes(_successor_import_plan_bytes(preflight_wire)) != receipt["preflightDigest"]:
+        raise LifecycleError(failure, "successor receipt preflight binding differs")
+    if (
+        (operation_id is not None and receipt.get("operationId") != operation_id)
+        or (digest is not None and receipt.get("preflightDigest") != digest)
+        or (predecessor is not None and receipt.get("predecessor") != predecessor)
+        or (successor is not None and receipt.get("successor") != successor)
+        or (status_data is not None and receipt.get("statusSha256") != _sha256_bytes(status_data))
+        or (
+            dispositions is not None
+            and receipt.get("dispositionsSha256")
+            != _sha256_bytes(_successor_import_plan_bytes(dispositions))
+        )
+    ):
+        raise LifecycleError("WI-SUCCESSOR-IDENTITY-CONFLICT", "settled replay inputs differ")
+    work_items = _work_items_root(root)
+    old, new = receipt["predecessor"], receipt["successor"]
+    archive = work_items / "archive"
+    archives = [path for path in archive.glob(f"*/{old}") if path.is_dir()]
+    if len(archives) != 1 or (work_items / "active" / old).exists():
+        raise LifecycleError(failure, "settled predecessor identity differs")
+    _successor_import_archive_bytes(archives[0], receipt, failure)
+    active = work_items / "active" / new
+    if not active.is_dir() or (active / "agent-runs.jsonl").exists():
+        raise LifecycleError(failure, "settled successor identity differs")
+    files = dict(_successor_import_tree(active))
+    if SUCCESSOR_IMPORT_RECEIPT not in files or files[SUCCESSOR_IMPORT_RECEIPT] != raw:
+        raise LifecycleError(failure, "settled successor receipt is not in its tree")
+    files.pop(SUCCESSOR_IMPORT_RECEIPT)
+    if _successor_import_tree_digest(sorted(files.items())) != receipt.get("successorTreeSha256ExcludingReceipt"):
+        raise LifecycleError(failure, "settled successor tree differs")
+    _successor_import_reconstruct_source(root, receipt)
+    for row in (*receipt["links"], receipt["compatibilityIndex"], receipt["readme"]):
+        path = _intent_path(root, row.get("consumer", row.get("path")))
+        observed = _capture_file_snapshot(
+            path, failure_id=failure,
+            maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP, require_single_link=True,
+        ).data
+        if _sha256_bytes(observed) != row["afterSha256"]:
+            raise LifecycleError(failure, f"settled consumer differs: {path.name}")
+    index_target = _intent_path(root, receipt["compatibilityIndex"]["targetPath"])
+    if not index_target.is_file() or index_target != active / "status.md":
+        raise LifecycleError("WI-SUCCESSOR-LINK-UNMAPPED", "settled index target differs")
+    for consumer in receipt["links"]:
+        for row in consumer["references"]:
+            if row["kind"] == "physical" and not _intent_path(root, row["target"]).is_file():
+                raise LifecycleError("WI-SUCCESSOR-LINK-UNMAPPED", "settled physical target is absent")
+    check_readme(root)
+    if (
+        resolve_category(root, f"work-item:{old}") != archives[0]
+        or resolve_category(root, f"work-item:{new}") != active
+    ):
+        raise LifecycleError(failure, "settled category readback differs")
+    return receipt
+
+
+def _successor_import_release_stage_parent(stage_root: Path) -> None:
+    parent = stage_root.parent
+    if not parent.exists():
+        return
+    _lifecycle_reject_unreduced_reparse(
+        parent, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY",
+        message="successor staging parent is unsafe",
+    )
+    try:
+        parent.rmdir()
+    except OSError as exc:
+        if any(parent.iterdir()):
+            return
+        raise LifecycleError(
+            "WI-SUCCESSOR-IMPORT-RECOVERY", "empty successor staging parent remains"
+        ) from exc
+
+
+@_lifecycle_participant
+def _recover_successor_import(root: Path, intent_path: Path, intent: dict) -> dict | None:
+    operation = intent["operationId"]
+    failure = "WI-SUCCESSOR-IMPORT-RECOVERY"
+    try:
+        repository = _work_items_root(root).parent
+        source = _intent_path(repository, intent["sourcePath"])
+        archive = _intent_path(repository, intent["archivePath"])
+        successor = _intent_path(repository, intent["successorPath"])
+        hold = _intent_path(repository, intent["sourceHoldPath"])
+        stage = _intent_path(repository, intent["successorStagePath"])
+        stage_root = hold.parent
+        receipt_path = _intent_path(repository, intent["receiptPath"])
+        plan = intent["plan"]
+        status_data = base64.b64decode(intent["statusData"], validate=True)
+        if stage_root.exists():
+            if not stage_root.is_dir() or _lifecycle_path_has_reparse(stage_root):
+                raise LifecycleError(failure, "stage root is unsafe")
+            with os.scandir(stage_root) as entries:
+                if {entry.name for entry in entries} - {"source", "successor"}:
+                    raise LifecycleError(failure, "stage root has an unowned member")
+        _successor_import_archive_bytes(archive, plan, failure)
+        if receipt_path.exists():
+            settled = _verify_successor_import_settlement(
+                repository, receipt_path,
+                operation_id=operation, digest=intent["preflightDigest"],
+                predecessor=plan["predecessor"], successor=plan["successor"],
+                status_data=status_data,
+            )
+            original = _successor_import_reconstruct_source(repository, settled)
+            expected_successor = _successor_import_successor_files(plan, status_data, original)
+            _successor_import_check_stage(hold, original, complete=False)
+            _successor_import_check_stage(stage, expected_successor, complete=False)
+            if stage_root.exists():
+                _remove_scratch_tree(stage_root)
+            _successor_import_release_stage_parent(stage_root)
+            intent_path.unlink()
+            return settled
+        source_here = source.is_dir()
+        hold_here = hold.is_dir()
+        if source_here == hold_here:
+            raise LifecycleError(failure, "source and held custody are missing or duplicated")
+        source_files = _successor_import_source_bytes(
+            source if source_here else hold, plan, failure,
+        )
+        expected_successor = _successor_import_successor_files(
+            plan, status_data, source_files,
+        )
+        _successor_import_check_stage(stage, expected_successor, complete=False)
+        if successor.exists():
+            if source_here:
+                raise LifecycleError(failure, "successor exists before source custody")
+            _successor_import_check_stage(successor, expected_successor, complete=True)
+        current_images = []
+        for image in intent["images"]:
+            path = _intent_path(repository, image["path"])
+            before = base64.b64decode(image["beforeBase64"], validate=True)
+            after = base64.b64decode(image["afterBase64"], validate=True)
+            current = _read_lifecycle_image(
+                path, before, after, failure_id=failure, require_single_link=True,
+            )
+            if current not in {before, after}:
+                raise LifecycleError(failure, f"consumer image differs: {image['path']}")
+            current_images.append((path, before, current))
+        for path, before, current in current_images:
+            if current != before:
+                _atomic_write(path, before)
+        if successor.exists():
+            _remove_scratch_tree(successor)
+        if stage.exists():
+            _remove_scratch_tree(stage)
+        if hold_here:
+            source.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(hold, source)
+        if stage_root.exists():
+            _remove_scratch_tree(stage_root)
+        _successor_import_release_stage_parent(stage_root)
+        intent_path.unlink()
+        _successor_import_source_bytes(source, plan, failure)
+        return None
+    except BaseException as exc:
+        raise LifecycleError(
+            failure,
+            f"operation={operation} phase=recovery: {exc}",
+        ) from exc
+
+
+def apply_import_active_successor(
+    root: Path, predecessor_slug: str, successor_slug: str, status_data: bytes,
+    dispositions: dict, operation_id: str, preflight_digest: str,
+    *, inject_failure_at: str | None = None,
+) -> dict:
+    """Settle one preflight-bound dual work-item identity through owner custody."""
+
+    work_items = _work_items_root(root)
+    repository = work_items.parent
+    _validate_slug(predecessor_slug)
+    _validate_slug(successor_slug)
+    intent_path = _transition_intent_path(repository, operation_id)
+    successor = work_items / "active" / successor_slug
+    receipt_path = successor / SUCCESSOR_IMPORT_RECEIPT
+    if intent_path.exists():
+        raise LifecycleError(
+            "WI-SUCCESSOR-IMPORT-RECOVERY",
+            f"operation={operation_id} phase=pending-intent: recover-transition is required",
+        )
+    if receipt_path.exists():
+        _verify_successor_import_settlement(
+            repository, receipt_path,
+            operation_id=operation_id, digest=preflight_digest,
+            predecessor=predecessor_slug, successor=successor_slug,
+            status_data=status_data, dispositions=dispositions,
+        )
+        return {
+            "state": "committed", "alreadySettled": True,
+            "receiptPath": receipt_path.relative_to(repository).as_posix(),
+        }
+    if successor.exists():
+        raise LifecycleError("WI-SUCCESSOR-IDENTITY-CONFLICT", "successor is occupied without an exact receipt")
+    if not isinstance(preflight_digest, str) or SHA256_RE.fullmatch(preflight_digest) is None:
+        raise LifecycleError("WI-SUCCESSOR-IMPORT-DRIFT", "matching preflight digest is required")
+    try:
+        plan_result = preflight_import_active_successor(
+            repository, predecessor_slug, successor_slug, status_data,
+            dispositions, operation_id,
+        )
+    except LifecycleError as exc:
+        if exc.failure_id == "WI-SUCCESSOR-IDENTITY-CONFLICT":
+            raise
+        raise LifecycleError("WI-SUCCESSOR-IMPORT-DRIFT", f"preflight input changed: {exc.failure_id}") from exc
+    if plan_result["digest"] != preflight_digest:
+        raise LifecycleError("WI-SUCCESSOR-IMPORT-DRIFT", "preflight digest differs")
+    plan = json.loads(plan_result["canonicalBytes"])
+    locations = _category_locations(repository, CATEGORIES["work-item"], predecessor_slug)
+    archives = [path for path in locations if path.parent.parent == work_items / "archive"]
+    if len(archives) != 1:
+        raise LifecycleError("WI-SUCCESSOR-IDENTITY-CONFLICT", "archived predecessor is not unique")
+    archive = archives[0]
+    source = work_items / "active" / predecessor_slug
+    source_files = _successor_import_source_bytes(source, plan, "WI-SUCCESSOR-IMPORT-DRIFT")
+    _successor_import_archive_bytes(archive, plan, "WI-SUCCESSOR-IMPORT-DRIFT")
+    expected_successor = _successor_import_successor_files(plan, status_data, source_files)
+    images = _successor_import_images(repository, plan)
+    hold_relative, stage_relative = _successor_import_stage_paths(operation_id)
+    hold = _intent_path(repository, hold_relative)
+    stage = _intent_path(repository, stage_relative)
+    stage_root = hold.parent
+    if stage_root.exists():
+        raise LifecycleError("WI-SUCCESSOR-IMPORT-RECOVERY", "operation staging already exists")
+    intent = {
+        "schemaVersion": 1, "owner": SUCCESSOR_IMPORT_OWNER,
+        "kind": SUCCESSOR_IMPORT_KIND, "status": "intent",
+        "operationId": operation_id, "preflightDigest": preflight_digest,
+        "sourcePath": source.relative_to(repository).as_posix(),
+        "archivePath": archive.relative_to(repository).as_posix(),
+        "successorPath": successor.relative_to(repository).as_posix(),
+        "sourceHoldPath": hold_relative, "successorStagePath": stage_relative,
+        "receiptPath": receipt_path.relative_to(repository).as_posix(),
+        "plan": plan, "statusData": _b64(status_data), "images": images,
+    }
+    intent_bytes = _migration_receipt_bytes(intent)
+    if len(intent_bytes) > TRANSITION_INTENT_FILE_BYTE_CAP:
+        raise LifecycleError("WI-SUCCESSOR-IMPORT-DRIFT", "preflight plan exceeds intent byte limit")
+    intent_path = _require_lifecycle_mutation_path(
+        repository, intent_path, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY",
+    )
+    _atomic_write(intent_path, intent_bytes)
+    _transition_fsync_directory(intent_path.parent)
+    phase = "stage-successor"
+    try:
+        for relative, data in sorted(expected_successor.items()):
+            target = _require_lifecycle_mutation_path(
+                repository, stage.joinpath(*PurePosixPath(relative).parts),
+                failure_id="WI-SUCCESSOR-IMPORT-RECOVERY",
+            )
+            _atomic_write(target, data)
+        _successor_import_check_stage(stage, expected_successor, complete=True)
+        if inject_failure_at == "before-source-hold":
+            raise LifecycleError("WI-SUCCESSOR-IMPORT-RECOVERY", "injected before-source-hold")
+        phase = "revalidate-before-publish"
+        rebound = preflight_import_active_successor(
+            repository, predecessor_slug, successor_slug, status_data,
+            dispositions, operation_id,
+        )
+        if rebound["digest"] != preflight_digest:
+            raise LifecycleError("WI-SUCCESSOR-IMPORT-DRIFT", "bound inputs changed before publish")
+        phase = "source-hold"
+        os.replace(source, hold)
+        if inject_failure_at == "after-source-hold":
+            raise LifecycleError("WI-SUCCESSOR-IMPORT-RECOVERY", "injected after-source-hold")
+        phase = "successor-publish"
+        os.replace(stage, successor)
+        if inject_failure_at == "after-successor-publish":
+            raise LifecycleError("WI-SUCCESSOR-IMPORT-RECOVERY", "injected after-successor-publish")
+        phase = "links-publish"
+        for image in images:
+            if image["path"] == "work-items/README.md":
+                continue
+            path = _intent_path(repository, image["path"])
+            before = base64.b64decode(image["beforeBase64"], validate=True)
+            after = base64.b64decode(image["afterBase64"], validate=True)
+            if _read_lifecycle_image(path, before, failure_id="WI-SUCCESSOR-IMPORT-DRIFT") != before:
+                raise LifecycleError("WI-SUCCESSOR-IMPORT-DRIFT", f"consumer drifted: {image['path']}")
+            _atomic_write(path, after)
+        if inject_failure_at == "after-links-publish":
+            raise LifecycleError("WI-SUCCESSOR-IMPORT-RECOVERY", "injected after-links-publish")
+        phase = "readme-publish"
+        readme = next(row for row in images if row["path"] == "work-items/README.md")
+        readme_path = _intent_path(repository, readme["path"])
+        before = base64.b64decode(readme["beforeBase64"], validate=True)
+        after = base64.b64decode(readme["afterBase64"], validate=True)
+        if _read_lifecycle_image(readme_path, before, failure_id="WI-SUCCESSOR-IMPORT-DRIFT") != before:
+            raise LifecycleError("WI-SUCCESSOR-IMPORT-DRIFT", "README drifted before publish")
+        _atomic_write(readme_path, after)
+        check_readme(repository)
+        if inject_failure_at == "after-readme-publish":
+            raise LifecycleError("WI-SUCCESSOR-IMPORT-RECOVERY", "injected after-readme-publish")
+        phase = "receipt-publish"
+        successor_tree = _successor_import_tree(successor)
+        if dict(successor_tree) != expected_successor:
+            raise LifecycleError("WI-SUCCESSOR-IMPORT-RECOVERY", "successor staged bytes differ")
+        receipt = _successor_import_receipt(
+            plan, preflight_digest, dispositions,
+            _successor_import_tree_digest(successor_tree),
+        )
+        _atomic_write(receipt_path, _migration_receipt_bytes(receipt))
+        _transition_fsync_directory(receipt_path.parent)
+        if inject_failure_at == "after-receipt-publish":
+            raise LifecycleError("WI-SUCCESSOR-IMPORT-RECOVERY", "injected after-receipt-publish")
+        phase = "settlement-verify"
+        _verify_successor_import_settlement(
+            repository, receipt_path, operation_id=operation_id,
+            digest=preflight_digest, predecessor=predecessor_slug,
+            successor=successor_slug, status_data=status_data,
+            dispositions=dispositions,
+        )
+        phase = "cleanup"
+        _recover_successor_import(repository, intent_path, intent)
+        return {
+            "state": "committed", "alreadySettled": False,
+            "receiptPath": receipt_path.relative_to(repository).as_posix(),
+        }
+    except BaseException as exc:
+        if isinstance(exc, LifecycleError) and exc.failure_id in {
+            "WI-SUCCESSOR-IMPORT-RECOVERY", "WI-SUCCESSOR-IMPORT-DRIFT",
+            "WI-SUCCESSOR-LINK-UNMAPPED",
+        }:
+            if exc.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY":
+                raise LifecycleError(
+                    exc.failure_id,
+                    f"operation={operation_id} phase={inject_failure_at or phase}: {exc}",
+                ) from exc
+            raise
+        raise LifecycleError(
+            "WI-SUCCESSOR-IMPORT-RECOVERY",
+            f"operation={operation_id} phase={phase}: {exc}",
+        ) from exc
+
+
+def _successor_import_json_pairs(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise LifecycleError("WI-SUCCESSOR-LINK-UNMAPPED", "link dispositions repeat a JSON key")
+        result[key] = value
+    return result
+
+
 def _read_arg_file(path: str) -> bytes:
     return Path(path).read_bytes()
 
@@ -17203,6 +18242,15 @@ def build_parser() -> argparse.ArgumentParser:
     historical_disposition = sub.add_parser("write-historical-artifact-disposition")
     _add_root(historical_disposition)
     historical_disposition.add_argument("--disposition-file", required=True)
+    successor_import = sub.add_parser("import-active-successor")
+    _add_root(successor_import)
+    successor_import.add_argument("--predecessor-slug", required=True)
+    successor_import.add_argument("--successor-slug", required=True)
+    successor_import.add_argument("--status-file", required=True)
+    successor_import.add_argument("--links-file", required=True)
+    successor_import.add_argument("--operation-id", required=True)
+    successor_import.add_argument("--apply", action="store_true")
+    successor_import.add_argument("--preflight-digest")
     archive_successor = sub.add_parser("archive-with-successor")
     _add_root(archive_successor)
     archive_successor.add_argument("--slug", required=True)
@@ -17725,6 +18773,41 @@ def main(argv: list[str]) -> int:
                 "WI-FIXED-BUG-ARCHIVE-COMMITTED "
                 f"operation={result['operationId']} readme={result['readmeSha256']}"
             )
+        elif args.command == "import-active-successor":
+            if args.apply:
+                if not args.preflight_digest:
+                    raise LifecycleError(
+                        "WI-SUCCESSOR-IMPORT-DRIFT",
+                        "apply requires the matching preflight digest",
+                    )
+            elif args.preflight_digest:
+                raise LifecycleError(
+                    "WI-SUCCESSOR-IMPORT-APPLY-UNAVAILABLE",
+                    "preflight digest is reserved for an admitted apply operation",
+                )
+            dispositions = json.loads(
+                _read_arg_file(args.links_file), object_pairs_hook=_successor_import_json_pairs,
+            )
+            if args.apply:
+                result = apply_import_active_successor(
+                    root, args.predecessor_slug, args.successor_slug,
+                    _read_arg_file(args.status_file), dispositions,
+                    args.operation_id, args.preflight_digest,
+                )
+                print(json.dumps(result, sort_keys=True))
+                return 0
+            result = preflight_import_active_successor(
+                root, args.predecessor_slug, args.successor_slug,
+                _read_arg_file(args.status_file), dispositions, args.operation_id,
+            )
+            wire = {
+                key: value for key, value in result.items() if key != "canonicalBytes"
+            }
+            for field in ("compatibilityIndex", "readme"):
+                wire[field] = {
+                    key: value for key, value in wire[field].items() if key != "afterBytes"
+                }
+            print(json.dumps(wire, sort_keys=True))
         elif args.command == "trial":
             first, second = run_trial(root, Path(args.fixture))
             print("TRIAL: PASS")
@@ -17775,6 +18858,8 @@ LIFECYCLE_PUBLIC_APIS = (
     "update_status",
     "close_item",
     "reopen_item",
+    "preflight_import_active_successor",
+    "apply_import_active_successor",
     "audit_categories",
     "audit",
     "write_current_identity_normalization_inventory",

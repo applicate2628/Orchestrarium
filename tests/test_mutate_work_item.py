@@ -1001,6 +1001,665 @@ def tree_file_bytes(root: Path) -> dict[str, bytes]:
     }
 
 
+def _active_successor_preflight_fixture(root: Path, *, leaf_count: int = 30) -> dict:
+    module = load_module()
+    old, new = "front-old", "front-new"
+    work_items = root / "work-items"
+    archive = work_items / "archive" / "2026-09" / old
+    source = work_items / "active" / old
+    archive.mkdir(parents=True)
+    source.mkdir(parents=True)
+    equal_count = leaf_count - 8
+    for ordinal in range(equal_count):
+        name = f"shared-{ordinal:02d}.md"
+        data = f"historical evidence {ordinal}\n".encode()
+        (archive / name).write_bytes(data)
+        (source / name).write_bytes(data)
+    archived_rows = []
+    admission = json.loads(module._staged_admission_ledger_bytes(old, staged_status(old).encode()))
+    for ordinal in range(29):
+        row = dict(admission, runId=f"{old}-run-{ordinal:02d}")
+        archived_rows.append((json.dumps(row, sort_keys=True) + "\n").encode())
+    (archive / "agent-runs.jsonl").write_bytes(b"".join(archived_rows))
+    (source / "agent-runs.jsonl").write_bytes(b"".join(archived_rows[:25]))
+    write(archive / "status.md", "status: completed\n")
+    write(archive / "closure.md", closure("2026-09-20T03:41:38Z"))
+    write(archive / "bug-dispositions-receipt.json", '{"state":"committed"}\n')
+    for name in (
+        "architecture-adversarial-reverify.md", "design.md", "performance-review.md",
+        "performance.md", "qa-reverify.md", "recovery-index-audit.md",
+    ):
+        write(source / name, f"later source evidence: {name}\n")
+    write(source / "status.md", quick_status("A2 installed receiving remains open."))
+    index_before = f"- [Front current](active/{old}/status.md)\n"
+    index_after = f"- [{new} current](active/{new}/status.md)\n"
+    (work_items / "index.md").write_bytes(
+        ("# Compatibility\n" + index_before + "\nOther row.\n").encode()
+    )
+    write(
+        work_items / "README.md",
+        module._default_static_guide() + module.README_BEGIN + "\n" + module.README_END + "\n",
+    )
+    status = staged_status(old).replace(
+        "Next action: Verify successor identity.",
+        "Next action: Complete the open A2 installed receiving gate.",
+    ).encode()
+    dispositions = {
+        "indexRowBefore": index_before,
+        "indexRowAfter": index_after,
+        "references": [],
+    }
+    return {
+        "module": module, "old": old, "new": new, "source": source,
+        "archive": archive, "status": status, "dispositions": dispositions,
+    }
+
+
+def test_import_active_successor_preflight_binds_all_bytes_without_writes(tmp_path: Path) -> None:
+    root = tmp_path / "case"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    before = tree_file_bytes(root / "work-items")
+    assert hasattr(module, "preflight_import_active_successor")
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], "front-import-1",
+    )
+    bindings = plan["fileBindings"]
+    assert len(bindings) == 30
+    assert {row["sourceRelativePath"] for row in bindings} == {
+        path.relative_to(fixture["source"]).as_posix()
+        for path in fixture["source"].rglob("*") if path.is_file()
+    }
+    assert {row["sourceSha256"] for row in bindings} == {
+        hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in fixture["source"].rglob("*") if path.is_file()
+    }
+    assert [row["kind"] for row in bindings].count("archive-equal") == 22
+    assert [row["kind"] for row in bindings].count("archive-ledger-prefix") == 1
+    assert [row["kind"] for row in bindings].count("successor-copy") == 7
+    assert plan["ledgerArchivePrefix"]["lineCount"] == 25
+    assert plan["ledgerArchivePrefix"]["byteCount"] == len(
+        (fixture["source"] / "agent-runs.jsonl").read_bytes()
+    )
+    assert next(row for row in bindings if row["sourceRelativePath"] == "status.md")["targetPath"].endswith(
+        "/imported-source/status.md"
+    )
+    assert not (root / "work-items" / "active" / fixture["new"] / "agent-runs.jsonl").exists()
+    assert tree_file_bytes(root / "work-items") == before
+    alternate_root = tmp_path / "different-leaf-count"
+    alternate = _active_successor_preflight_fixture(alternate_root, leaf_count=11)
+    alternate_plan = alternate["module"].preflight_import_active_successor(
+        alternate_root, alternate["old"], alternate["new"], alternate["status"],
+        alternate["dispositions"], "front-import-2",
+    )
+    assert len(alternate_plan["fileBindings"]) == 11
+    assert [row["kind"] for row in alternate_plan["fileBindings"]].count("archive-equal") == 3
+
+
+def test_import_active_successor_preflight_binds_index_and_dual_readme(tmp_path: Path) -> None:
+    root = tmp_path / "case"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    work_items = root / "work-items"
+    before = tree_file_bytes(work_items)
+    try:
+        module.render_readme_bytes(root)
+    except module.LifecycleError as error:
+        assert error.failure_id == "WI-CATEGORY-DUAL-LOCATION"
+    else:
+        raise AssertionError("ordinary renderer admitted the dual input")
+    consumer = work_items / "backlog" / "consumer.md"
+    write(consumer, (
+        f"status: candidate\n[Current](../active/{fixture['old']}/status.md)\n"
+        f"Relation: work-item:{fixture['old']}\n"
+    ))
+    before = tree_file_bytes(work_items)
+    fixture["dispositions"]["references"] = [{
+        "consumer": "backlog/consumer.md", "kind": "physical",
+        "value": f"../active/{fixture['old']}/status.md",
+        "target": f"work-items/active/{fixture['new']}/status.md",
+    }, {
+        "consumer": "backlog/consumer.md", "kind": "logical",
+        "value": f"work-item:{fixture['old']}",
+        "meaning": "current-successor",
+    }]
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], "front-import-1",
+    )
+    assert plan["compatibilityIndex"]["beforeSha256"] == hashlib.sha256(
+        (work_items / "index.md").read_bytes()
+    ).hexdigest()
+    assert plan["compatibilityIndex"]["afterBytes"].endswith(
+        b"\nOther row.\n"
+    )
+    assert plan["readme"]["beforeSha256"] == hashlib.sha256(
+        (work_items / "README.md").read_bytes()
+    ).hexdigest()
+    assert b"active/front-new/status.md" in plan["readme"]["afterBytes"]
+    assert b"archive/2026-09/front-old/closure.md" in plan["readme"]["afterBytes"]
+    assert b"work-item:front-new" in base64.b64decode(plan["links"][0]["afterBase64"])
+    assert plan["digest"] == hashlib.sha256(plan["canonicalBytes"]).hexdigest()
+    assert tree_file_bytes(work_items) == before
+    assert module.preflight_import_active_successor(
+        work_items, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], "front-import-1",
+    )["digest"] == plan["digest"]
+    status_input = tmp_path / "successor-status.md"
+    links_input = tmp_path / "successor-links.json"
+    status_input.write_bytes(fixture["status"])
+    links_input.write_bytes(json.dumps(fixture["dispositions"]).encode())
+    argv = (
+        "import-active-successor", "--root", str(root),
+        "--predecessor-slug", fixture["old"],
+        "--successor-slug", fixture["new"],
+        "--status-file", str(status_input),
+        "--links-file", str(links_input),
+        "--operation-id", "front-import-1",
+    )
+    result = run_cli(*argv)
+    assert result.returncode == 0, result.stdout
+    assert json.loads(result.stdout)["digest"] == plan["digest"]
+    assert tree_file_bytes(work_items) == before
+
+
+def test_import_active_successor_preflight_rejects_unsafe_inputs(tmp_path: Path) -> None:
+    cases = (
+        ("ledger", "WI-SUCCESSOR-LEDGER-DIVERGENCE"),
+        ("occupied", "WI-SUCCESSOR-IDENTITY-CONFLICT"),
+        ("index", "WI-SUCCESSOR-LINK-UNMAPPED"),
+        ("readme", "WI-README-MARKERS"),
+        ("unclassified", "WI-SUCCESSOR-LINK-UNMAPPED"),
+        ("hardlink", "WI-SUCCESSOR-IMPORT-UNSAFE-INPUT"),
+        ("index_extra", "WI-SUCCESSOR-LINK-UNMAPPED"),
+        ("third", "WI-SUCCESSOR-IDENTITY-CONFLICT"),
+        ("projection", "WI-SUCCESSOR-LEDGER-DIVERGENCE"),
+        ("escape", "WI-SUCCESSOR-LINK-UNMAPPED"),
+        ("shadow", "WI-SUCCESSOR-READMODEL-INVALID"),
+        ("occupied_file", "WI-SUCCESSOR-IDENTITY-CONFLICT"),
+        ("third_file", "WI-SUCCESSOR-IDENTITY-CONFLICT"),
+        ("malformed_disposition", "WI-SUCCESSOR-LINK-UNMAPPED"),
+    )
+    for case, failure_id in cases:
+        root = tmp_path / case
+        fixture = _active_successor_preflight_fixture(root)
+        work_items = root / "work-items"
+        if case == "ledger":
+            with (fixture["source"] / "agent-runs.jsonl").open("ab") as stream:
+                stream.write(b"not a prefix\n")
+        elif case == "occupied":
+            write(work_items / "active" / fixture["new"] / "status.md", "status: active\n")
+        elif case == "index":
+            (work_items / "index.md").write_bytes(b"# No current row\n")
+        elif case == "readme":
+            (work_items / "README.md").write_bytes(b"# No markers\n")
+        elif case == "unclassified":
+            write(work_items / "backlog" / "consumer.md",
+                  f"status: candidate\n[Current](../active/{fixture['old']}/status.md)\n")
+        elif case == "hardlink":
+            os.link(fixture["source"] / "design.md", fixture["source"] / "linked.md")
+        elif case == "index_extra":
+            with (work_items / "index.md").open("ab") as stream:
+                stream.write(f"- [Old evidence](active/{fixture['old']}/design.md)\n".encode())
+        elif case == "third":
+            write(work_items / "backlog" / f"{fixture['old']}.md", "status: candidate\n")
+        elif case == "projection":
+            ledger = fixture["archive"] / "agent-runs.jsonl"
+            rows = ledger.read_bytes().splitlines(keepends=True)
+            rows[-1] = b"{invalid json}\n"
+            ledger.write_bytes(b"".join(rows))
+        elif case == "escape":
+            fixture["dispositions"]["indexRowAfter"] = (
+                f"- [{fixture['new']} current](../outside/status.md)\n"
+            )
+        elif case == "shadow":
+            fixture["status"] += b"Roadmap: missing-roadmap\n"
+        elif case == "occupied_file":
+            write(work_items / "active" / fixture["new"], "occupied\n")
+        elif case == "third_file":
+            write(work_items / "archive" / "2026-10" / fixture["old"], "occupied\n")
+        elif case == "malformed_disposition":
+            write(work_items / "backlog" / "consumer.md",
+                  f"status: candidate\n[Current](../active/{fixture['old']}/status.md)\n")
+            fixture["dispositions"]["references"] = [{
+                "consumer": "backlog/consumer.md", "kind": "physical",
+                "value": f"../active/{fixture['old']}/status.md",
+                "target": [f"work-items/active/{fixture['new']}/status.md"],
+            }]
+        before = tree_file_bytes(work_items)
+        try:
+            fixture["module"].preflight_import_active_successor(
+                root, fixture["old"], fixture["new"], fixture["status"],
+                fixture["dispositions"], "front-import-1",
+            )
+        except fixture["module"].LifecycleError as error:
+            assert error.failure_id == failure_id, case
+        else:
+            raise AssertionError(f"unsafe {case} input was admitted")
+        assert tree_file_bytes(work_items) == before, case
+
+
+def test_import_active_successor_preflight_keeps_valid_source_status_as_evidence(tmp_path: Path) -> None:
+    root = tmp_path / "case"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    source_status = fixture["source"] / "status.md"
+    before = tree_file_bytes(root / "work-items")
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], "front-import-status",
+    )
+    binding = next(row for row in plan["fileBindings"] if row["sourceRelativePath"] == "status.md")
+    assert binding["kind"] == "successor-copy"
+    assert binding["targetPath"] == "work-items/active/front-new/imported-source/status.md"
+    assert tree_file_bytes(root / "work-items") == before
+
+    source_status.write_bytes((fixture["archive"] / "status.md").read_bytes())
+    before = tree_file_bytes(root / "work-items")
+    try:
+        module.preflight_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"],
+            fixture["dispositions"], "front-import-status",
+        )
+    except module.LifecycleError as error:
+        assert error.failure_id == "WI-CATEGORY-TERMINAL-IN-CURRENT"
+    else:
+        raise AssertionError("terminal source status was admitted as current")
+    assert tree_file_bytes(root / "work-items") == before
+
+
+def test_import_active_successor_preflight_projects_planned_consumer_bytes(tmp_path: Path) -> None:
+    root = tmp_path / "case"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    work_items = root / "work-items"
+    consumer = work_items / "backlog" / "consumer.md"
+    write(consumer, (
+        f"status: candidate\n[Current](../active/{fixture['old']}/status.md)\n"
+        f"Relation: work-item:{fixture['old']}\n"
+    ))
+    fixture["dispositions"]["references"] = [{
+        "consumer": "backlog/consumer.md", "kind": "physical",
+        "value": f"../active/{fixture['old']}/status.md",
+        "target": f"work-items/active/{fixture['new']}/status.md",
+    }, {
+        "consumer": "backlog/consumer.md", "kind": "logical",
+        "value": f"work-item:{fixture['old']}", "meaning": "current-successor",
+    }]
+    before = tree_file_bytes(work_items)
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], "front-import-links",
+    )
+    after_consumer = base64.b64decode(plan["links"][0]["afterBase64"])
+    with tempfile.TemporaryDirectory() as directory:
+        shadow_root = Path(directory)
+        shadow_work_items = shadow_root / "work-items"
+        shutil.copytree(work_items, shadow_work_items)
+        shutil.rmtree(shadow_work_items / "active" / fixture["old"])
+        shadow_status = shadow_work_items / "active" / fixture["new"] / "status.md"
+        shadow_status.parent.mkdir(parents=True)
+        shadow_status.write_bytes(fixture["status"])
+        (shadow_work_items / "backlog" / "consumer.md").write_bytes(after_consumer)
+        expected = module.render_readme_bytes(
+            shadow_root, static_guide_override=module._static_guide(work_items / "README.md"),
+        )
+    assert plan["readme"]["afterBytes"] == expected
+    assert next(row for row in plan["canonicalInputs"]
+                if row["path"] == "work-items/backlog/consumer.md")["sha256"] == (
+                    hashlib.sha256(after_consumer).hexdigest()
+                )
+    assert tree_file_bytes(work_items) == before
+
+
+def test_import_active_successor_preflight_rejects_old_visible_index_label(tmp_path: Path) -> None:
+    root = tmp_path / "case"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    fixture["dispositions"]["indexRowAfter"] = (
+        f"- [{fixture['old']} current](active/{fixture['new']}/status.md)\n"
+    )
+    before = tree_file_bytes(root / "work-items")
+    try:
+        module.preflight_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"],
+            fixture["dispositions"], "front-import-index",
+        )
+    except module.LifecycleError as error:
+        assert error.failure_id == "WI-SUCCESSOR-LINK-UNMAPPED"
+    else:
+        raise AssertionError("old visible index label was admitted")
+    assert tree_file_bytes(root / "work-items") == before
+
+
+def test_import_active_successor_apply_preserves_archive_and_run_authority(tmp_path: Path) -> None:
+    root = tmp_path / "candidate"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], "front-apply-1",
+    )
+    source_before = tree_file_bytes(fixture["source"])
+    archive_before = tree_file_bytes(fixture["archive"])
+    assert hasattr(module, "apply_import_active_successor")
+    result = module.apply_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], "front-apply-1", plan["digest"],
+    )
+    successor = root / "work-items" / "active" / fixture["new"]
+    receipt = root / result["receiptPath"]
+    persisted = json.loads(receipt.read_bytes())
+    assert result["state"] == "committed" and result["alreadySettled"] is False
+    assert persisted["operationId"] == "front-apply-1"
+    assert persisted["preflightDigest"] == plan["digest"]
+    assert persisted["sourceTreeSha256"] == plan["sourceTreeSha256"]
+    assert persisted["archiveTreeSha256"] == plan["archiveTreeSha256"]
+    assert persisted["ledgerArchivePrefix"] == plan["ledgerArchivePrefix"]
+    assert persisted["fileBindings"] == plan["fileBindings"]
+    assert tree_file_bytes(fixture["archive"]) == archive_before
+    assert not fixture["source"].exists()
+    assert module.resolve_category(root, f"work-item:{fixture['old']}") == fixture["archive"]
+    assert module.resolve_category(root, f"work-item:{fixture['new']}") == successor
+    assert (successor / "status.md").read_bytes() == fixture["status"]
+    assert not (successor / "agent-runs.jsonl").exists()
+    assert not (successor / "imported-source" / "agent-runs.jsonl").exists()
+    for binding in plan["fileBindings"]:
+        original = source_before[binding["sourceRelativePath"]]
+        target = root / binding["targetPath"]
+        if binding["kind"] == "archive-ledger-prefix":
+            assert target.read_bytes().startswith(original)
+        else:
+            assert target.read_bytes() == original
+    assert (successor / "imported-source" / "status.md").read_bytes() == source_before["status.md"]
+    assert (root / "work-items" / "README.md").read_bytes() == plan["readme"]["afterBytes"]
+    module.check_readme(root)
+    assert receipt.parent == successor
+    assert not module._transition_intent_path(root, "front-apply-1").exists()
+    assert not (root / ".scratch" / "work-items-lifecycle-successor-imports").exists()
+
+
+def test_import_active_successor_apply_maps_index_links_and_readme(tmp_path: Path) -> None:
+    root = tmp_path / "candidate"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    work_items = root / "work-items"
+    consumer = work_items / "backlog" / "consumer.md"
+    write(consumer, (
+        f"status: candidate\n[Current](../active/{fixture['old']}/status.md)\n"
+        f"Relation: work-item:{fixture['old']}\n"
+    ))
+    fixture["dispositions"]["references"] = [{
+        "consumer": "backlog/consumer.md", "kind": "physical",
+        "value": f"../active/{fixture['old']}/status.md",
+        "target": f"work-items/active/{fixture['new']}/status.md",
+    }, {
+        "consumer": "backlog/consumer.md", "kind": "logical",
+        "value": f"work-item:{fixture['old']}", "meaning": "current-successor",
+    }]
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], "front-apply-links",
+    )
+    archive_before = tree_file_bytes(fixture["archive"])
+    index_before = (work_items / "index.md").read_bytes()
+    status_input = tmp_path / "status.md"
+    links_input = tmp_path / "links.json"
+    status_input.write_bytes(fixture["status"])
+    links_input.write_bytes(json.dumps(fixture["dispositions"]).encode())
+    result = run_cli(
+        "import-active-successor", "--root", str(root),
+        "--predecessor-slug", fixture["old"],
+        "--successor-slug", fixture["new"],
+        "--status-file", str(status_input), "--links-file", str(links_input),
+        "--operation-id", "front-apply-links", "--apply",
+        "--preflight-digest", plan["digest"],
+    )
+    assert result.returncode == 0, result.stdout
+    applied = json.loads(result.stdout)
+    assert applied["state"] == "committed" and applied["alreadySettled"] is False
+    assert tree_file_bytes(fixture["archive"]) == archive_before
+    assert consumer.read_bytes() == base64.b64decode(plan["links"][0]["afterBase64"])
+    assert b"work-item:front-new" in consumer.read_bytes()
+    assert (work_items / "index.md").read_bytes() == plan["compatibilityIndex"]["afterBytes"]
+    assert (work_items / "index.md").read_bytes().replace(
+        fixture["dispositions"]["indexRowAfter"].encode(),
+        fixture["dispositions"]["indexRowBefore"].encode(),
+    ) == index_before
+    assert (consumer.parent / f"../active/{fixture['new']}/status.md").resolve().is_file()
+    assert (work_items / "README.md").read_bytes() == plan["readme"]["afterBytes"]
+    module.check_readme(root)
+    replay = module.apply_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], "front-apply-links", plan["digest"],
+    )
+    assert replay["state"] == "committed" and replay["alreadySettled"] is True
+    try:
+        module.apply_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"] + b"changed\n",
+            fixture["dispositions"], "front-apply-links", plan["digest"],
+        )
+    except module.LifecycleError as error:
+        assert error.failure_id == "WI-SUCCESSOR-IDENTITY-CONFLICT"
+    else:
+        raise AssertionError("changed replay was accepted")
+
+
+def test_import_active_successor_fault_recovery_and_replay(tmp_path: Path) -> None:
+    checkpoints = (
+        "before-source-hold", "after-source-hold", "after-successor-publish",
+        "after-links-publish", "after-readme-publish", "after-receipt-publish",
+    )
+    for checkpoint in checkpoints:
+        root = tmp_path / checkpoint
+        fixture = _active_successor_preflight_fixture(root)
+        module = fixture["module"]
+        operation = "front-fault-1"
+        plan = module.preflight_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"],
+            fixture["dispositions"], operation,
+        )
+        before = tree_file_bytes(root / "work-items")
+        assert hasattr(module, "apply_import_active_successor")
+        try:
+            module.apply_import_active_successor(
+                root, fixture["old"], fixture["new"], fixture["status"],
+                fixture["dispositions"], operation, plan["digest"],
+                inject_failure_at=checkpoint,
+            )
+        except module.LifecycleError as error:
+            assert error.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY", checkpoint
+            assert operation in str(error) and checkpoint in str(error)
+        else:
+            raise AssertionError(f"fault {checkpoint} reported success")
+        intent_path = module._transition_intent_path(root, operation)
+        if intent_path.exists():
+            intent = module._load_transition_intent(root, intent_path)
+            assert intent["operationId"] == operation
+            if checkpoint == "after-receipt-publish":
+                pending_before = tree_file_bytes(root)
+                try:
+                    module.apply_import_active_successor(
+                        root, fixture["old"], fixture["new"], fixture["status"],
+                        fixture["dispositions"], operation, plan["digest"],
+                    )
+                except module.LifecycleError as error:
+                    assert error.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY"
+                    assert operation in str(error)
+                else:
+                    raise AssertionError("pending committed intent replay reported success")
+                assert tree_file_bytes(root) == pending_before
+                assert intent_path.is_file()
+            if checkpoint == "after-source-hold":
+                with module.LifecycleTransaction(root):
+                    try:
+                        module._recover_transition(root, intent_path)
+                    except module.LifecycleError as error:
+                        assert error.failure_id == "WI-LIFECYCLE-LOCK-HELD"
+                    else:
+                        raise AssertionError("successor recovery bypassed the lifecycle lock")
+            module._recover_transition(root, intent_path)
+        successor = root / "work-items" / "active" / fixture["new"]
+        if checkpoint == "after-receipt-publish":
+            assert successor.is_dir() and not fixture["source"].exists()
+            replay = module.apply_import_active_successor(
+                root, fixture["old"], fixture["new"], fixture["status"],
+                fixture["dispositions"], operation, plan["digest"],
+            )
+            assert replay["alreadySettled"] is True
+            module.check_readme(root)
+        else:
+            assert tree_file_bytes(root / "work-items") == before, checkpoint
+            assert fixture["source"].is_dir() and not successor.exists()
+        assert not intent_path.exists(), checkpoint
+
+    corrupt_root = tmp_path / "corrupt-held-source"
+    corrupt_fixture = _active_successor_preflight_fixture(corrupt_root)
+    corrupt_module = corrupt_fixture["module"]
+    corrupt_plan = corrupt_module.preflight_import_active_successor(
+        corrupt_root, corrupt_fixture["old"], corrupt_fixture["new"],
+        corrupt_fixture["status"], corrupt_fixture["dispositions"], "front-corrupt-1",
+    )
+    try:
+        corrupt_module.apply_import_active_successor(
+            corrupt_root, corrupt_fixture["old"], corrupt_fixture["new"],
+            corrupt_fixture["status"], corrupt_fixture["dispositions"],
+            "front-corrupt-1", corrupt_plan["digest"],
+            inject_failure_at="after-source-hold",
+        )
+    except corrupt_module.LifecycleError as error:
+        assert error.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY"
+    else:
+        raise AssertionError("held-source interruption reported success")
+    corrupt_intent_path = corrupt_module._transition_intent_path(corrupt_root, "front-corrupt-1")
+    corrupt_intent = corrupt_module._load_transition_intent(corrupt_root, corrupt_intent_path)
+    held_design = corrupt_root / corrupt_intent["sourceHoldPath"] / "design.md"
+    held_design.write_bytes(b"corrupt held source\n")
+    corrupted_before = tree_file_bytes(corrupt_root)
+    try:
+        corrupt_module._recover_transition(corrupt_root, corrupt_intent_path)
+    except corrupt_module.LifecycleError as error:
+        assert error.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY"
+        assert "front-corrupt-1" in str(error)
+    else:
+        raise AssertionError("corrupt staging was silently recovered")
+    assert tree_file_bytes(corrupt_root) == corrupted_before
+    assert corrupt_intent_path.is_file()
+
+    for surface in ("source", "archive", "consumer", "index", "readme", "digest"):
+        root = tmp_path / f"drift-{surface}"
+        fixture = _active_successor_preflight_fixture(root)
+        module = fixture["module"]
+        if surface == "consumer":
+            write(root / "work-items" / "backlog" / "consumer.md",
+                  f"status: candidate\n[Current](../active/{fixture['old']}/status.md)\n")
+            fixture["dispositions"]["references"] = [{
+                "consumer": "backlog/consumer.md", "kind": "physical",
+                "value": f"../active/{fixture['old']}/status.md",
+                "target": f"work-items/active/{fixture['new']}/status.md",
+            }]
+        plan = module.preflight_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"],
+            fixture["dispositions"], "front-drift-1",
+        )
+        if surface == "source":
+            with (fixture["source"] / "design.md").open("ab") as stream:
+                stream.write(b"drift\n")
+        elif surface == "archive":
+            with (fixture["archive"] / "design.md").open("ab") as stream:
+                stream.write(b"drift\n")
+        elif surface == "index":
+            with (root / "work-items" / "index.md").open("ab") as stream:
+                stream.write(b"drift\n")
+        elif surface == "consumer":
+            with (root / "work-items" / "backlog" / "consumer.md").open("ab") as stream:
+                stream.write(b"drift\n")
+        elif surface == "readme":
+            with (root / "work-items" / "README.md").open("ab") as stream:
+                stream.write(b"drift\n")
+        before = tree_file_bytes(root / "work-items")
+        try:
+            module.apply_import_active_successor(
+                root, fixture["old"], fixture["new"], fixture["status"],
+                fixture["dispositions"], "front-drift-1",
+                ("0" * 64 if surface == "digest" else plan["digest"]),
+            )
+        except module.LifecycleError as error:
+            assert error.failure_id == "WI-SUCCESSOR-IMPORT-DRIFT", surface
+        else:
+            raise AssertionError(f"drifted {surface} input was applied")
+        assert tree_file_bytes(root / "work-items") == before, surface
+        assert not module._transition_intent_path(root, "front-drift-1").exists()
+
+
+def test_import_active_successor_fault_post_receipt_corrupt_hold_replay_refuses(tmp_path: Path) -> None:
+    root = tmp_path / "candidate"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    operation = "front-post-receipt-corrupt"
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], operation,
+    )
+    try:
+        module.apply_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"],
+            fixture["dispositions"], operation, plan["digest"],
+            inject_failure_at="after-receipt-publish",
+        )
+    except module.LifecycleError as error:
+        assert error.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY"
+    else:
+        raise AssertionError("post-receipt interruption reported success")
+    intent_path = module._transition_intent_path(root, operation)
+    intent = module._load_transition_intent(root, intent_path)
+    held_design = root / intent["sourceHoldPath"] / "design.md"
+    held_design.write_bytes(b"corrupt after receipt\n")
+    pending_before = tree_file_bytes(root)
+    try:
+        module.apply_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"],
+            fixture["dispositions"], operation, plan["digest"],
+        )
+    except module.LifecycleError as error:
+        assert error.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY"
+        assert operation in str(error)
+    else:
+        raise AssertionError("corrupt held source was replayed as settled")
+    assert tree_file_bytes(root) == pending_before
+    assert intent_path.is_file() and held_design.read_bytes() == b"corrupt after receipt\n"
+
+
+def test_import_active_successor_fault_corrupt_receipt_refuses_replay(tmp_path: Path) -> None:
+    root = tmp_path / "candidate"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], "front-receipt-1",
+    )
+    applied = module.apply_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], "front-receipt-1", plan["digest"],
+    )
+    receipt_path = root / applied["receiptPath"]
+    corrupted = json.loads(receipt_path.read_bytes())
+    corrupted.pop("fileBindings")
+    receipt_path.write_bytes((json.dumps(corrupted, indent=2, sort_keys=True) + "\n").encode())
+    before = tree_file_bytes(root / "work-items")
+    try:
+        module.apply_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"],
+            fixture["dispositions"], "front-receipt-1", plan["digest"],
+        )
+    except module.LifecycleError as error:
+        assert error.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY"
+    else:
+        raise AssertionError("corrupt committed receipt was replayed")
+    assert tree_file_bytes(root / "work-items") == before
+
+
 def test_close_requires_exact_bug_disposition_manifest(tmp_path: Path) -> None:
     module = load_module()
     root = tmp_path / "repo"
@@ -8961,6 +9620,8 @@ class LifecycleTransactionTests(unittest.TestCase):
             "update_status",
             "close_item",
             "reopen_item",
+            "preflight_import_active_successor",
+            "apply_import_active_successor",
             "audit_categories",
             "audit",
             "write_current_identity_normalization_inventory",

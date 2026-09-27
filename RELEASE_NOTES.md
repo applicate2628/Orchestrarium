@@ -4,6 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-09-28
 
+- **The lifecycle owner can import a later active copy as a distinct successor without rewriting its archived predecessor.** `import-active-successor` defaults to a no-write, byte-bound preflight; explicit apply requires its matching digest, preserves the archived receipt and historical ledger authority, moves the active source into successor evidence, updates only reviewed links/index/README, and records a replayable receipt with owner recovery on interrupted publication. **Why it matters:** a same-slug archived/current worktree conflict has an auditable migration route instead of manual moves or false closure. Synthetic source tests and independent QA/architecture gates passed; no real P/W import or installed-product receiving was performed.
 - **Ordinary Version 2 ledgers gain a narrow invalid-current recovery path.** `dispose-invalid-current` can bind an exact ledger and physical event to mark a malformed bare `BLOCKED` terminal as nonauthorizing without rewriting history or settling its launch. The validator and public ledger reader share the same effective view; forged or drifted targets fail, while H1 and C3 behavior remains separate. Source-only focused, adjacent, and independent QA/architecture checks passed; no real receiving ledger was changed.
 
 ## 2026-09-27
