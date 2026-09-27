@@ -1689,11 +1689,13 @@ def command_dispose_invalid_current(args: argparse.Namespace) -> int:
         print(f"FAIL: missing work item: {item}")
         return 1
     validator = load_validator()
-    try:
-        manifest_bytes = args.ledger_manifest.read_bytes()
-    except OSError as exc:
-        print(f"FAIL: WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: {exc}")
-        return 1
+    manifest_bytes = None
+    if args.ledger_manifest is not None:
+        try:
+            manifest_bytes = args.ledger_manifest.read_bytes()
+        except OSError as exc:
+            print(f"FAIL: WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: {exc}")
+            return 1
     decoded, _malformed = _read_ledger(item, validator)
     existing = [event for event in decoded if event.get("runId") == args.run_id]
     existing_disposition = existing[0] if len(existing) == 1 else None
@@ -1735,6 +1737,7 @@ def command_dispose_invalid_current(args: argparse.Namespace) -> int:
             expected,
             event,
             ledger_manifest_bytes=manifest_bytes,
+            expected_ledger_sha256=args.expected_ledger_sha256,
         )
 
     def is_replay(previous: bytes) -> bool:
@@ -1748,6 +1751,7 @@ def command_dispose_invalid_current(args: argparse.Namespace) -> int:
                 previous,
                 event,
                 ledger_manifest_bytes=manifest_bytes,
+                expected_ledger_sha256=args.expected_ledger_sha256,
             )
         )
 
@@ -1950,7 +1954,9 @@ def build_parser() -> argparse.ArgumentParser:
     disposition.add_argument("--target-run-id", required=True)
     disposition.add_argument("--target-raw-line-ordinal", type=int, required=True)
     disposition.add_argument("--target-event-sha256", required=True)
-    disposition.add_argument("--ledger-manifest", type=Path, required=True)
+    disposition_binding = disposition.add_mutually_exclusive_group(required=True)
+    disposition_binding.add_argument("--ledger-manifest", type=Path)
+    disposition_binding.add_argument("--expected-ledger-sha256")
     disposition.add_argument("--evidence", action="append", required=True)
     disposition.add_argument("--started-at")
     disposition.add_argument("--updated-at")

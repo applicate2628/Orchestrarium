@@ -261,9 +261,9 @@ After a later append, rollback fails with
 prefixed by `WI-LEDGER-NONCANONICAL-`. A readback-indeterminate result requires
 inspection or exact replay; it never authorizes an ad hoc ledger rewrite.
 
-## Dispose one invalid-current suffix row
+## Dispose one invalid-current row
 
-Use this only after the user admits one exact current-schema-invalid suffix row. This mode is separate from `recover-invalid-closure`: an individually valid relation-invalid closer continues to use that existing command, while `dispose-invalid-current` preserves one invalid target's exact bytes and makes no closure, gate, launch, terminal, `PASS`, or evidence authority claim.
+Use this only after the user admits one exact current-schema-invalid row. This mode is separate from `recover-invalid-closure`: an individually valid relation-invalid closer continues to use that existing command, while `dispose-invalid-current` preserves one invalid target's exact bytes and makes no closure, gate, launch, terminal, `PASS`, or evidence authority claim.
 
 Bind the target through the supplied Version 2 ledger manifest's exact sealed prefix. Its physical raw-line ordinal must be strictly greater than the manifest's `prefixLineCount`; the ordinal, `runId`, and SHA-256 must identify one unique suffix row. Hash the exact physical raw line including its terminal `LF`; do not parse and reserialize it.
 
@@ -271,9 +271,17 @@ Bind the target through the supplied Version 2 ledger manifest's exact sealed pr
 python -B scripts/agent-run-ledger.py --work-item work-items/active/<slug> dispose-invalid-current --run-id <new-disposition-run-id> --target-run-id <invalid-run-id> --target-raw-line-ordinal <positive-physical-line-ordinal> --target-event-sha256 <64-lowercase-hex> --ledger-manifest <ledger-manifest-v2.json> --evidence "manual-check:<invalid-run-id> <64-lowercase-hex-raw-line-sha256> <reason>"
 ```
 
-The `manual-check` evidence must contain the exact target run ID and exact raw-line digest as standalone whitespace-delimited tokens. Forms such as `target=<id>` or `sha256=<digest>` do not satisfy that binding. The target must remain invalid under the unchanged current event validator. An exact replay is a no-op; a reused disposition `runId`, conflicting disposition, identity mismatch, target inside the sealed prefix, or target that is now valid fails closed. `RESULT: PASS dispose-invalid-current` proves only the append transaction and exact readback and names the target ordinal, run ID, and raw-line digest; it does not claim `fsync`, crash durability, compatibility activation, or suppression.
+For an ordinary unprojected, all-Version-2 ledger with no live H1 compatibility participants, select the separate whole-ledger binding instead of `--ledger-manifest`:
 
-Appending the disposition does not activate compatibility. Before an active compatibility receipt exists, the raw target errors remain. Only the active receipt-gated effective-view reader may suppress errors for that exact target, keep all authority axes false, and expose the ordered `disposition_notices` through the public read model. Every other row remains under unchanged validation.
+```powershell
+python -B scripts/agent-run-ledger.py --work-item work-items/active/<slug> dispose-invalid-current --run-id <new-disposition-run-id> --target-run-id <invalid-run-id> --target-raw-line-ordinal <positive-physical-line-ordinal> --target-event-sha256 <64-lowercase-hex-physical-line-sha256> --expected-ledger-sha256 <64-lowercase-hex-whole-ledger-sha256> --evidence "manual-check:<invalid-run-id> <64-lowercase-hex-physical-line-sha256> <reason>"
+```
+
+The ordinary raw-V2 branch admits only a `completed` terminal whose isolated current-schema errors are exactly `invalid gate 'BLOCKED'` plus `BLOCKED gate requires blocked status` for bare `BLOCKED`, or exactly the status error for an accepted qualified `BLOCKED:<reason>` gate. Malformed or duplicate-key lines, non-V2 ledgers, control rows, valid targets, additional target errors, conflicting dispositions, and preimage digest drift refuse the append. An exact replay retains the existing bytes. Its effective reader skips only the disposed terminal's diagnostics and authority; the linked launch and all other obligations remain open.
+
+The `manual-check` evidence must contain the exact target run ID and exact raw-line digest as standalone whitespace-delimited tokens. Forms such as `target=<id>` or `sha256=<digest>` do not satisfy that binding. The target must remain invalid under the unchanged current event validator. An exact replay is a no-op; a reused disposition `runId`, conflicting disposition, identity mismatch, H1 target inside the sealed prefix, or target that is now valid fails closed. `RESULT: PASS dispose-invalid-current` proves only the append transaction and exact readback; it does not claim `fsync` or crash durability.
+
+For H1, appending the disposition does not activate compatibility. Before an active compatibility receipt exists, the raw target errors remain. Only the active receipt-gated effective-view reader may suppress errors for that exact target, keep all authority axes false, and expose the ordered `disposition_notices` through the public read model. Every other row remains under unchanged validation. Ordinary raw V2 requires no H1 activation; the exported `load_effective_ledger_view` used by the work-items checker and `validate_work_item` consume the same disposition-effective ordinary context.
 
 ## Settle one identity-bearing string-1.0 legacy ledger
 

@@ -276,6 +276,35 @@ def test_transfer_receiving_contract_enforces_one_ordered_cleanup_chain() -> Non
         assert "does not run cleanup again" in text
 
 
+def test_action_local_blockers_and_final_transfer_classification() -> None:
+    operating_model = (ROOT / "shared/references/subagent-operating-model.md").read_text(
+        encoding="utf-8"
+    )
+    assert "bind each prerequisite to the exact action it prevents" in operating_model
+    assert "independently ready admitted work continues" in operating_model
+
+    for relative in (
+        "src.codex/skills/lead/SKILL.md",
+        "src.claude/skills/lead/SKILL.md",
+    ):
+        lead = (ROOT / relative).read_text(encoding="utf-8")
+        assert "grouped gate is not a global stop" in lead
+        assert "independently ready admitted action" in lead
+
+    cleanup = REFERENCE.read_text(encoding="utf-8")
+    assert "selected work-item and owned bug-inbox obligations" in cleanup
+    assert "byte-verified ZIP is only a provisional recovery snapshot" in cleanup
+    assert "explicit direct transfer without cleanup" in cleanup
+
+    for relative in (
+        "src.codex/skills/manual-repo-transfer/SKILL.md",
+        "src.claude/skills/manual-repo-transfer/SKILL.md",
+    ):
+        transfer = (ROOT / relative).read_text(encoding="utf-8")
+        assert "provisional recovery snapshot, not final handoff" in transfer
+        assert "direct transfer without cleanup" in transfer
+
+
 def test_turn_anchor_emits_direct_root_no_self_residue_invariant() -> None:
     result = subprocess.run(
         [sys.executable, str(TURN_ANCHOR)],

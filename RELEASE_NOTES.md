@@ -2,8 +2,13 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-28
+
+- **Ordinary Version 2 ledgers gain a narrow invalid-current recovery path.** `dispose-invalid-current` can bind an exact ledger and physical event to mark a malformed bare `BLOCKED` terminal as nonauthorizing without rewriting history or settling its launch. The validator and public ledger reader share the same effective view; forged or drifted targets fail, while H1 and C3 behavior remains separate. Source-only focused, adjacent, and independent QA/architecture checks passed; no real receiving ledger was changed.
+
 ## 2026-09-27
 
+- **Lead blockers and transfer handoff are classified against the exact admitted action.** A grouped prerequisite now blocks only its dependent action, so an independently ready functional slice continues. For an admitted cleanup-and-transfer target, a byte-verified ZIP remains a provisional recovery snapshot while selected work-item or owned bug-inbox obligations are open; an explicit direct transfer without cleanup may still preserve unfinished work. **Why it matters:** a valid recovery archive no longer masks an incomplete final handoff, and one hard environment gate no longer stops unrelated ready work. This is rule guidance, not a new host-enforced final-message check.
 - **Historical archived review targets now have narrow reader compatibility.** A later Version 2 closing event may explicitly reference an earlier, individually valid raw numeric Version 1 `REVISE` event in the same immutable archived ledger. The archive reader grants only target eligibility for that exact link; the existing closure checks still decide whether the closer has authority, while unrelated historical rows and active validation stay unchanged. **Why it matters:** periodic archive checks can assess historical closure evidence without rewriting archived events or adding an operator command. The source reader passed focused independent tests and both historical archive reads; the same-host installed readers passed bounded receiving checks. The overall periodic checker still fails on separate current-item obligations; live session reload and other repositories were not verified.
 
 ## 2026-09-26

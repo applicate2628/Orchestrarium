@@ -322,6 +322,7 @@ When an accepted artifact asserts a root cause, a fix verification, or `diagnosi
 - If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
 - For stop-after-current-run intent, persist the stop across turns, allow only the in-flight run to finish, then stop before any new action.
 - Do not stop at one completed sub-batch when a known admitted-scope next action already exists; keep the task open and continue until a real gate or explicit user reprioritization intervenes.
+- Apply the shared action-local blocker rule before closeout: a grouped gate is not a global stop; name the exact action each prerequisite prevents and continue any independently ready admitted action whose own gates pass.
 
 ## Session lifecycle rule
 
@@ -392,6 +393,7 @@ When an accepted artifact asserts a root cause, a fix verification, or `diagnosi
 - Require external human or CI gates whenever team policy demands them.
 - When an independently verified scope is accepted, Lead creates a timely local Git commit checkpoint if the scope is coherent and separable, staging only that scope. Any open gate blocks its dependent changes; unrelated ready work and eligible checkpoints continue. The checkpoint preserves evidence and is neither completion nor publication. Human review, leak checking, and explicit publication authority still govern push and release.
 - Do not declare closeout while required follow-up inside the current admitted scope remains open; either continue, park it explicitly, or escalate the unresolved scope to the user.
+- For a cleanup-and-transfer completion target, classify final handoff against the shared repository-cleanup rule; ZIP integrity alone does not close selected work-item or owned bug-inbox obligations.
 
 Detailed routing, stage gates, and artifact guidance live in [operating-model.md](operating-model.md).
 

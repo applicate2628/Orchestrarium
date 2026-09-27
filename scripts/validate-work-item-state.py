@@ -1287,7 +1287,7 @@ class RuntimeLedgerRowV1:
     projected_event_sha256: str
     epoch: Literal[
         "raw", "manifest-profile", "sealed-prefix", "strict-suffix",
-        "disposed-suffix", "transferred",
+        "disposed-suffix", "disposed-raw", "transferred",
     ]
     authority: LedgerAuthorityV1
 
@@ -2147,7 +2147,7 @@ def derive_event_validity(
     for row in rows:
         event = row.event
         if row.epoch in {
-            "manifest-profile", "sealed-prefix", "disposed-suffix", "transferred"
+            "manifest-profile", "sealed-prefix", "disposed-suffix", "disposed-raw", "transferred"
         } or (
             validate_schema_version is not None
             and event.get("schemaVersion") != validate_schema_version
@@ -2964,6 +2964,8 @@ def _invalid_current_disposition_target(
     disposition_position: int,
     disposition_event: Mapping[str, object],
     errors: list[str],
+    *,
+    raw_v2: bool = False,
 ) -> int | None:
     """Return one exact invalid non-control suffix target for writer and reader."""
 
@@ -2986,7 +2988,9 @@ def _invalid_current_disposition_target(
     run_positions = [
         position
         for position, row in enumerate(rows)
-        if row.event.get("runId") == target_run_id
+        if isinstance(target_run_id, str)
+        and isinstance(row.event.get("runId"), str)
+        and row.event["runId"].casefold() == target_run_id.casefold()
     ]
     if (
         target.epoch not in {"strict-suffix", "raw"}
@@ -3016,6 +3020,26 @@ def _invalid_current_disposition_target(
     if not target_errors:
         fail(errors, f"{failure_id}: target is current-schema valid")
         return None
+    if raw_v2:
+        run_id = event.get("runId")
+        expected_status_error = f"{run_id}: BLOCKED gate requires blocked status"
+        expected_errors = (
+            [f"{run_id}: invalid gate 'BLOCKED'", expected_status_error]
+            if event.get("gate") == "BLOCKED"
+            else [expected_status_error]
+            if isinstance(event.get("gate"), str)
+            and event["gate"] in GATE_VALUES
+            and event["gate"].startswith("BLOCKED:")
+            else []
+        )
+        if (
+            event.get("schemaVersion") != 2
+            or event.get("eventKind") != "terminal"
+            or event.get("status") != "completed"
+            or target_errors != expected_errors
+        ):
+            fail(errors, f"{failure_id}: raw V2 target has unrelated per-event errors")
+            return None
     return target_position
 
 
@@ -3079,28 +3103,67 @@ def validate_invalid_current_disposition_candidate(
     ledger_bytes: bytes,
     disposition_event: Mapping[str, object],
     *,
-    ledger_manifest_bytes: bytes,
+    ledger_manifest_bytes: bytes | None = None,
+    expected_ledger_sha256: str | None = None,
 ) -> tuple[str, ...]:
-    """Validate one preactivation append or exact replay without granting authority."""
+    """Validate one H1 suffix or ordinary raw-V2 append/replay without authority."""
 
     errors: list[str] = []
-    selected = _suffix_manifest_entry(item, ledger_manifest_bytes, errors)
-    if selected is None or not isinstance(ledger_bytes, bytes):
+    if (ledger_manifest_bytes is None) == (expected_ledger_sha256 is None):
+        fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: select exactly one ledger binding")
         return tuple(errors)
-    entry, ledger_path = selected
-    boundary = entry["prefixByteLength"]
-    prefix = ledger_bytes[:boundary]
-    if (
-        len(prefix) != boundary
-        or not prefix.endswith(b"\n")
-        or len(prefix.splitlines(keepends=True)) != entry["prefixLineCount"]
-        or hashlib.sha256(prefix).hexdigest() != entry["prefixSha256"]
-    ):
-        fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: sealed prefix differs")
+    if not isinstance(ledger_bytes, bytes):
+        fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: ledger is not bytes")
         return tuple(errors)
-    rows = _ledger_h1_runtime_rows(
-        ledger_path, ledger_bytes, entry["prefixLineCount"], item, errors
-    )
+    raw_v2 = expected_ledger_sha256 is not None
+    if raw_v2:
+        root = repo_root_for(item)
+        if (
+            not isinstance(expected_ledger_sha256, str)
+            or SHA256_RE.fullmatch(expected_ledger_sha256) is None
+            or root is None
+            or _ledger_h1_live_participants_exist(root)
+        ):
+            fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: ordinary raw V2 binding is invalid")
+            return tuple(errors)
+        ledger_path = f"{item.relative_to(root).as_posix()}/agent-runs.jsonl"
+        prefix_line_count = 0
+    else:
+        assert ledger_manifest_bytes is not None
+        selected = _suffix_manifest_entry(item, ledger_manifest_bytes, errors)
+        if selected is None:
+            return tuple(errors)
+        entry, ledger_path = selected
+        prefix_line_count = entry["prefixLineCount"]
+        boundary = entry["prefixByteLength"]
+        prefix = ledger_bytes[:boundary]
+        if (
+            len(prefix) != boundary
+            or not prefix.endswith(b"\n")
+            or len(prefix.splitlines(keepends=True)) != prefix_line_count
+            or hashlib.sha256(prefix).hexdigest() != entry["prefixSha256"]
+        ):
+            fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: sealed prefix differs")
+            return tuple(errors)
+    rows = _ledger_h1_runtime_rows(ledger_path, ledger_bytes, prefix_line_count, item, errors)
+    if raw_v2 and errors:
+        return tuple(errors)
+    if raw_v2:
+        if not rows or any(row.event.get("schemaVersion") != 2 for row in rows):
+            fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: ordinary ledger must be entirely V2")
+            return tuple(errors)
+        exact_rows = [
+            position for position, row in enumerate(rows)
+            if dict(row.event) == dict(disposition_event)
+        ]
+        if len(exact_rows) > 1 or (exact_rows and exact_rows[0] != len(rows) - 1):
+            fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-CONFLICT: disposition is not the final exact row")
+            return tuple(errors)
+        physical = ledger_bytes.splitlines(keepends=True)
+        original = b"".join(physical[:-1]) if exact_rows else ledger_bytes
+        if hashlib.sha256(original).hexdigest() != expected_ledger_sha256:
+            fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: whole-ledger digest differs")
+            return tuple(errors)
     disposition_errors: list[str] = []
     _validate_event(dict(disposition_event), item, set(), disposition_errors)
     if disposition_errors:
@@ -3139,10 +3202,11 @@ def validate_invalid_current_disposition_candidate(
     _invalid_current_disposition_target(
         rows,
         item,
-        entry["prefixLineCount"],
+        prefix_line_count,
         disposition_position,
         disposition_event,
         errors,
+        raw_v2=raw_v2,
     )
     return tuple(errors)
 
@@ -3152,6 +3216,8 @@ def _apply_active_suffix_dispositions(
     item: Path,
     ledger_path: str,
     prefix_line_count: int,
+    *,
+    raw_v2: bool = False,
 ) -> tuple[
     tuple[RuntimeLedgerRowV1, ...],
     tuple[SuffixDispositionNoticeV1, ...],
@@ -3187,6 +3253,7 @@ def _apply_active_suffix_dispositions(
             disposition_position,
             event,
             errors,
+            raw_v2=raw_v2,
         )
         if target_position is None:
             continue
@@ -3206,7 +3273,7 @@ def _apply_active_suffix_dispositions(
             target.raw_line_sha256,
             target.raw_body_sha256,
             target.projected_event_sha256,
-            "disposed-suffix",
+            "disposed-raw" if raw_v2 else "disposed-suffix",
             _NO_LEDGER_AUTHORITY,
         )
         notices.append(
@@ -3997,6 +4064,31 @@ def _classify_ledger_h1_selection(
     return "ordinary-nonmember", None
 
 
+def _ordinary_raw_v2_effective_context(
+    item: Path, selected_ledger_path: str, raw: bytes
+) -> LedgerValidationContextV1:
+    """Read one ordinary ledger's physical bytes and apply only eligible raw-V2 dispositions."""
+
+    diagnostics: list[str] = []
+    rows = _ledger_h1_runtime_rows(selected_ledger_path, raw, None, item, diagnostics)
+    if not diagnostics and any(
+        row.event.get("invalidationMode") == _INVALID_CURRENT_DISPOSITION_MODE
+        for row in rows
+    ):
+        if any(row.event.get("schemaVersion") != 2 for row in rows):
+            fail(diagnostics, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: ordinary ledger must be entirely V2")
+        else:
+            rows, _notices, disposition_errors = _apply_active_suffix_dispositions(
+                rows, item, selected_ledger_path, 0, raw_v2=True
+            )
+            diagnostics.extend(disposition_errors)
+    return LedgerValidationContextV1(
+        selected_ledger_path, rows, None,
+        LedgerCompatibilityObservationV1("inactive", (), tuple(diagnostics)),
+        (), (), object(),
+    )
+
+
 def load_effective_ledger_view(
     root: Path,
     item: Path,
@@ -4077,13 +4169,7 @@ def load_effective_ledger_view(
             LedgerCompatibilityObservationV1("inactive", (), (diagnostic,)),
             (), (), token,
         )
-    parse_errors: list[str] = []
-    rows = _ledger_h1_runtime_rows(selected_ledger_path, raw, None, item, parse_errors)
-    return LedgerValidationContextV1(
-        selected_ledger_path, rows, None,
-        LedgerCompatibilityObservationV1("inactive", (), tuple(parse_errors)),
-        (), (), token,
-    )
+    return _ordinary_raw_v2_effective_context(item, selected_ledger_path, raw)
 
 
 def _is_link_or_reparse(path: Path) -> bool:
@@ -6693,6 +6779,27 @@ def validate_work_item(
     effective_rows = inherited_rows + native_effective_rows
     effective_events = _row_events(effective_rows)
     runtime_rows = _runtime_rows_from_projection(effective_rows)
+    if any(
+        row.event.get("invalidationMode") == _INVALID_CURRENT_DISPOSITION_MODE
+        for row in native_effective_rows
+    ):
+        if (
+            inherited_rows
+            or any(row.transformation != "raw" for row in native_effective_rows)
+            or len(native_effective_rows) != len(events)
+        ):
+            fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: ordinary ledger must be unprojected raw V2")
+        else:
+            root_relative = (
+                selected_ledger.absolute().relative_to(root.absolute()).as_posix()
+                if root is not None else str(selected_ledger)
+            )
+            raw_context = _ordinary_raw_v2_effective_context(
+                item, root_relative, ledger_bytes
+            )
+            errors.extend(raw_context.observation.diagnostics)
+            if not raw_context.observation.diagnostics:
+                runtime_rows = raw_context.rows
     active_positions, event_validity, open_revise, open_launches = (
         _reduce_effective_current_state(
             runtime_rows,

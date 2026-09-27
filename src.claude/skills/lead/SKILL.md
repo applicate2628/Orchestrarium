@@ -332,6 +332,8 @@ Periodic controls (drift detection between gates) are in [operating-model.md](..
 - For stop-after-current-run intent, persist the stop across turns, allow only the in-flight run to finish, then stop before any new action.
 - Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
 - Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
+- Apply the shared action-local blocker rule before closeout: a grouped gate is not a global stop; name the exact action each prerequisite prevents and continue any independently ready admitted action whose own gates pass.
+- For a cleanup-and-transfer completion target, classify final handoff against the shared repository-cleanup rule; ZIP integrity alone does not close selected work-item or owned bug-inbox obligations.
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
 - When an independently verified scope is accepted, Lead creates a timely local Git commit checkpoint if the scope is coherent and separable, staging only that scope. Any open gate blocks its dependent changes; unrelated ready work and eligible checkpoints continue. The checkpoint preserves evidence and is neither completion nor publication. Human review, leak checking, and explicit publication authority still govern push and release.
 

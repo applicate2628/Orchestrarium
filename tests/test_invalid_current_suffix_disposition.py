@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -102,6 +104,292 @@ def fixture(module, root: Path):
 
 
 class InvalidCurrentSuffixDispositionTests(unittest.TestCase):
+    def test_raw_v2_refuses_casefold_colliding_target_and_keeps_sibling_diagnostic(self):
+        validator = load_validator()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            item = root / "work-items" / "active" / "reader-a"
+            item.mkdir(parents=True)
+            target = {
+                "schemaVersion": 2, "runId": "Target-Case", "workItem": "reader-a",
+                "role": "qa-engineer", "executionRole": "internal",
+                "status": "completed", "gate": "BLOCKED", "scope": ["synthetic"],
+                "eventKind": "terminal", "launchRunId": "synthetic-launch",
+                "startedAt": "2026-09-08T02:00:00Z",
+                "updatedAt": "2026-09-08T02:00:01Z",
+            }
+            sibling = {
+                **target, "runId": "target-case", "gate": "none",
+                "eventKind": "standalone",
+            }
+            sibling.pop("launchRunId")
+            target_line = canonical(target) + b"\n"
+            before = target_line + canonical(sibling) + b"\n"
+            recovery = disposition(1, target_line, target_run_id="Target-Case")
+            candidate = before + canonical(recovery) + b"\n"
+            errors = validator.validate_invalid_current_disposition_candidate(
+                item, candidate, recovery, expected_ledger_sha256=digest(before),
+            )
+            self.assertTrue(any("runId identity differs" in error for error in errors), errors)
+
+            ledger = item / "agent-runs.jsonl"
+            ledger.write_bytes(candidate)
+            selected = "work-items/active/reader-a/agent-runs.jsonl"
+            context = validator.load_effective_ledger_view(root, item, selected)
+            reader_errors = list(context.observation.diagnostics)
+            validator._reduce_effective_current_state(
+                context.rows, item, reader_errors, None, context=context
+            )
+            work_item_errors = validator.validate_work_item(
+                item, validate_status_file=False, strict_revise=False
+            )
+            for observed in (reader_errors, work_item_errors):
+                self.assertTrue(any("duplicate runId: target-case" in error for error in observed), observed)
+
+    def test_raw_v2_public_loader_and_validator_converge_across_growth_and_forgery(self):
+        validator = load_validator()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            item = root / "work-items" / "active" / "reader-a"
+            item.mkdir(parents=True)
+            launch = {
+                "schemaVersion": 2, "runId": "synthetic-launch", "workItem": "reader-a",
+                "role": "qa-engineer", "executionRole": "internal",
+                "status": "running", "gate": "none", "scope": ["synthetic"],
+                "eventKind": "launch", "startedAt": "2026-09-08T02:00:00Z",
+                "updatedAt": "2026-09-08T02:00:00Z",
+            }
+            target = {
+                **launch, "runId": "synthetic-terminal", "status": "completed",
+                "gate": "BLOCKED", "eventKind": "terminal",
+                "launchRunId": "synthetic-launch",
+                "updatedAt": "2026-09-08T02:00:01Z",
+            }
+            unrelated = {
+                **launch, "runId": "unrelated-row", "status": "completed",
+                "eventKind": "standalone", "unrelatedField": True,
+            }
+            target_line = canonical(target) + b"\n"
+            before = canonical(launch) + b"\n" + target_line + canonical(unrelated) + b"\n"
+            ledger = item / "agent-runs.jsonl"
+            ledger.write_bytes(before)
+            selected = "work-items/active/reader-a/agent-runs.jsonl"
+
+            def snapshot():
+                context = validator.load_effective_ledger_view(root, item, selected)
+                reader_errors = list(context.observation.diagnostics)
+                _active, validity, _revise, launches = validator._reduce_effective_current_state(
+                    context.rows, item, reader_errors, None, context=context
+                )
+                work_item_errors = validator.validate_work_item(
+                    item, validate_status_file=False, strict_revise=False
+                )
+                return context, reader_errors, work_item_errors, validity, launches
+
+            baseline = snapshot()
+            for observed in (baseline[1], baseline[2]):
+                self.assertTrue(any("invalid gate 'BLOCKED'" in error for error in observed), observed)
+                self.assertIn("unexpected field: unrelatedField", observed)
+
+            recovery = disposition(2, target_line, target_run_id="synthetic-terminal")
+            command = [
+                sys.executable, "-B", str(WRITER), "--work-item", str(item),
+                "dispose-invalid-current", "--run-id", str(recovery["runId"]),
+                "--target-run-id", "synthetic-terminal",
+                "--target-raw-line-ordinal", "2",
+                "--target-event-sha256", digest(target_line),
+                "--expected-ledger-sha256", digest(before),
+                "--evidence", "manual-check:" + recovery["evidence"][0]["ref"],
+                "--started-at", str(recovery["startedAt"]),
+                "--updated-at", str(recovery["updatedAt"]),
+            ]
+            applied = subprocess.run(command, capture_output=True, text=True, check=False)
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            disposed = ledger.read_bytes()
+            later_valid = {**launch, "runId": "later-valid-row", "status": "completed", "eventKind": "standalone"}
+            for stage, raw in (
+                ("disposed", disposed),
+                ("later-append", disposed + canonical(later_valid) + b"\n"),
+            ):
+                with self.subTest(stage=stage):
+                    ledger.write_bytes(raw)
+                    context, reader_errors, work_item_errors, validity, launches = snapshot()
+                    self.assertIsNone(context.view)
+                    self.assertEqual(context.rows[1].epoch, "disposed-raw")
+                    self.assertEqual(context.rows[1].authority, validator._NO_LEDGER_AUTHORITY)
+                    self.assertEqual(validity[1].authority, validator._NO_LEDGER_AUTHORITY)
+                    self.assertIn("synthetic-launch", {row["runId"] for row in launches})
+                    for observed in (reader_errors, work_item_errors):
+                        self.assertFalse(any("synthetic-terminal:" in error for error in observed), observed)
+                        self.assertIn("unexpected field: unrelatedField", observed)
+
+            forged = {**recovery, "invalidatesEventSha256": "0" * 64}
+            forged["evidence"] = [{
+                "kind": "manual-check", "ref": f"synthetic-terminal {'0' * 64} approved",
+            }]
+            ledger.write_bytes(before + canonical(forged) + b"\n")
+            context, reader_errors, work_item_errors, _validity, _launches = snapshot()
+            for observed in (reader_errors, work_item_errors):
+                self.assertTrue(any("DISPOSITION-TARGET" in error for error in observed), observed)
+                self.assertTrue(any("synthetic-terminal: invalid gate 'BLOCKED'" in error for error in observed), observed)
+
+    def test_raw_v2_completed_blocked_terminal_appends_nonauthorizing_disposition(self):
+        validator = load_validator()
+        with tempfile.TemporaryDirectory() as td:
+            item = Path(td) / "work-items" / "active" / "reader-a"
+            item.mkdir(parents=True)
+            launch = {
+                "schemaVersion": 2,
+                "runId": "synthetic-launch",
+                "workItem": "reader-a",
+                "role": "qa-engineer",
+                "executionRole": "internal",
+                "status": "running",
+                "gate": "none",
+                "scope": ["synthetic launch"],
+                "eventKind": "launch",
+                "startedAt": "2026-09-08T02:00:00Z",
+                "updatedAt": "2026-09-08T02:00:00Z",
+            }
+            target = {
+                **launch,
+                "runId": "synthetic-invalid-terminal",
+                "status": "completed",
+                "gate": "BLOCKED",
+                "eventKind": "terminal",
+                "launchRunId": "synthetic-launch",
+                "updatedAt": "2026-09-08T02:00:01Z",
+            }
+            isolated_errors: list[str] = []
+            validator._validate_event(target, item, set(), isolated_errors)
+            self.assertEqual(
+                isolated_errors,
+                [
+                    "synthetic-invalid-terminal: invalid gate 'BLOCKED'",
+                    "synthetic-invalid-terminal: BLOCKED gate requires blocked status",
+                ],
+            )
+            launch_line = canonical(launch) + b"\n"
+            target_line = canonical(target) + b"\n"
+            before = launch_line + target_line
+            ledger = item / "agent-runs.jsonl"
+            ledger.write_bytes(before)
+            baseline = validator.validate_work_item(
+                item, validate_status_file=False, strict_revise=False
+            )
+            for error in isolated_errors:
+                self.assertIn(error, baseline)
+            expected_sha = hashlib.sha256(before).hexdigest()
+            target_sha = hashlib.sha256(target_line).hexdigest()
+            command = [
+                sys.executable, "-B", str(WRITER), "--work-item", str(item),
+                "dispose-invalid-current", "--run-id", "synthetic-disposition",
+                "--target-run-id", "synthetic-invalid-terminal",
+                "--target-raw-line-ordinal", "2",
+                "--target-event-sha256", target_sha,
+                "--expected-ledger-sha256", expected_sha,
+                "--evidence", f"manual-check:synthetic-invalid-terminal {target_sha} approved",
+                "--started-at", "2026-09-08T02:01:00Z",
+                "--updated-at", "2026-09-08T02:01:00Z",
+            ]
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            after = ledger.read_bytes()
+            self.assertTrue(after.startswith(before))
+            self.assertEqual(len(after.splitlines()), 3)
+            errors = validator.validate_work_item(
+                item, validate_status_file=False, strict_revise=False
+            )
+            for error in isolated_errors:
+                self.assertNotIn(error, errors)
+            strict_errors = validator.validate_work_item(
+                item, validate_status_file=False, strict_revise=True
+            )
+            self.assertTrue(
+                any("unsettled launch: synthetic-launch" in error for error in strict_errors),
+                strict_errors,
+            )
+            replay = subprocess.run(command, capture_output=True, text=True, check=False)
+            self.assertEqual(replay.returncode, 0, replay.stdout + replay.stderr)
+            self.assertEqual(ledger.read_bytes(), after)
+            drift = subprocess.run(
+                [*command[:command.index("--expected-ledger-sha256") + 1], "0" * 64,
+                 *command[command.index("--evidence"):]],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(drift.returncode, 1, drift.stdout + drift.stderr)
+            self.assertEqual(ledger.read_bytes(), after)
+
+    def test_raw_v2_qualification_and_unrelated_errors_share_one_target_predicate(self):
+        validator = load_validator()
+        with tempfile.TemporaryDirectory() as td:
+            item = Path(td) / "work-items" / "active" / "reader-a"
+            item.mkdir(parents=True)
+            target = {
+                "schemaVersion": 2,
+                "runId": "qualified-invalid-terminal",
+                "workItem": "reader-a",
+                "role": "qa-engineer",
+                "executionRole": "internal",
+                "status": "completed",
+                "gate": "BLOCKED:prerequisite",
+                "scope": ["synthetic qualified terminal"],
+                "eventKind": "terminal",
+                "launchRunId": "synthetic-launch",
+                "startedAt": "2026-09-08T02:00:00Z",
+                "updatedAt": "2026-09-08T02:00:01Z",
+            }
+            target_line = canonical(target) + b"\n"
+            recovery = disposition(1, target_line, target_run_id="qualified-invalid-terminal")
+
+            def candidate_errors(event: dict[str, object]) -> tuple[str, ...]:
+                line = canonical(event) + b"\n"
+                bound = {**recovery, "invalidatesEventSha256": digest(line)}
+                bound["evidence"] = [{
+                    "kind": "manual-check",
+                    "ref": f"qualified-invalid-terminal {digest(line)} approved",
+                }]
+                return validator.validate_invalid_current_disposition_candidate(
+                    item, line + canonical(bound) + b"\n", bound,
+                    expected_ledger_sha256=digest(line),
+                )
+
+            isolated: list[str] = []
+            validator._validate_event(target, item, set(), isolated)
+            self.assertEqual(
+                isolated,
+                ["qualified-invalid-terminal: BLOCKED gate requires blocked status"],
+            )
+            self.assertEqual(candidate_errors(target), ())
+            unrelated = {**target, "unexpectedField": True}
+            self.assertTrue(any("unrelated per-event errors" in error for error in candidate_errors(unrelated)))
+            valid = {**target, "status": "blocked"}
+            self.assertTrue(any("current-schema valid" in error for error in candidate_errors(valid)))
+            control = {**target, "eventKind": "launch"}
+            self.assertTrue(any("control/lifecycle kind" in error for error in candidate_errors(control)))
+            non_v2 = {**target, "schemaVersion": 1}
+            self.assertTrue(any("entirely V2" in error for error in candidate_errors(non_v2)))
+            malformed = b'{"schemaVersion":2,"schemaVersion":2}\n'
+            malformed_errors = validator.validate_invalid_current_disposition_candidate(
+                item, malformed, recovery, expected_ledger_sha256=digest(malformed)
+            )
+            self.assertTrue(any("duplicate" in error for error in malformed_errors), malformed_errors)
+
+            wrong_ordinal = {**recovery, "invalidatesRawLineOrdinal": 2}
+            self.assertTrue(any("target ordinal" in error for error in
+                validator.validate_invalid_current_disposition_candidate(
+                    item, target_line + canonical(wrong_ordinal) + b"\n",
+                    wrong_ordinal, expected_ledger_sha256=digest(target_line),
+                )
+            ))
+            first = target_line + canonical(recovery) + b"\n"
+            second = {**recovery, "runId": "second-disposition"}
+            conflict_errors = validator.validate_invalid_current_disposition_candidate(
+                item, first + canonical(second) + b"\n", second,
+                expected_ledger_sha256=digest(first),
+            )
+            self.assertTrue(any("DISPOSITION-CONFLICT" in error for error in conflict_errors), conflict_errors)
+
     def test_current_terminal_relation_diagnostics_do_not_reinterpret_sealed_prefix(self):
         module = load_validator()
         launch_event = {

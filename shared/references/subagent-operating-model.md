@@ -53,6 +53,7 @@ The lead assigns a task like this:
 14. **Classify change impact before routing.** Use `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting` to decide how strongly the lead should route and gate the work; `breaking-or-cross-cutting` must force stronger routing, re-review of affected downstream artifacts, and integration ownership when needed.
 15. **Treat the core role map as canonical, not exhaustive.** The role index names the core team only. The lead may choose a narrower installed specialist outside the core team when it is a better fit for the scoped work, and may choose a repo-local specialist only when the current repo/workspace defines or clearly implies it. Using such a specialist does not add it to the canonical team map automatically.
 16. **Preserve durable task memory when the selected template requires recovery.** Keep only that template's required artifacts in repo-local storage so interrupted work can resume without relying on session memory.
+17. **Keep blockers action-local.** Before calling an admitted task blocked, bind each prerequisite to the exact action it prevents and recheck the ready set. A grouped gate is not a global stop: independently ready admitted work continues when its own inputs, safety gates, and resource isolation pass. An optional environment campaign does not become a prerequisite for a separate functional slice without an evidenced dependency.
 
 ---
 

@@ -56,6 +56,8 @@ Transfer mode has one order:
 
 Any cleanup, lifecycle, Git, recovery, or tool-state mutation invalidates prior inventory. The transfer owner supplies the final inventory, bundle, verification, and post-transfer evidence; the coordinator only projects it.
 
+For a user-admitted cleanup-and-transfer completion target, post-transfer classification compares the existing cleanup gate and selected work-item and owned bug-inbox obligations with that target. If any of those obligations remain open, an intact, byte-verified ZIP is only a provisional recovery snapshot, not final handoff; report the exact unfinished obligations and resume point. This does not forbid an explicit direct transfer without cleanup: that narrower request may preserve and copy unfinished work, with its unfinished state stated plainly, and does not claim the cleanup-and-transfer target was completed.
+
 ## Terms and Abbreviations
 
 - **Coordinator**: a workflow that scans, classifies, routes authorized owner work, and rechecks evidence.
