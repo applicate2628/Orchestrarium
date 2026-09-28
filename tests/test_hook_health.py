@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -604,6 +605,71 @@ def test_app_server_cleanup_cancellation_and_terminate_timeout(
         codex_home=tmp_path / "home", query_cwd=tmp_path,
     ) == []
     assert timed.terminated and timed.killed and timed.wait_calls == 2
+
+
+def test_app_server_waits_for_stderr_reader_before_closing_pipe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    process = _FakeAppServer('{"id":1,"result":{}}\n{"id":2,"result":{"data":[]}}\n')
+    read_started = threading.Event()
+    read_finished = threading.Event()
+
+    class SlowStderr(io.BytesIO):
+        closed_during_read = False
+
+        def read(self, size=-1):
+            read_started.set()
+            read_finished.wait(timeout=0.3)
+            read_finished.set()
+            return b""
+
+        def close(self):
+            self.closed_during_read = not read_finished.is_set()
+            read_finished.set()
+            super().close()
+
+    class GatedStdout(io.BytesIO):
+        def readline(self, size=-1):
+            assert read_started.wait(timeout=1)
+            return super().readline(size)
+
+    process.stderr = SlowStderr()
+    process.stdout = GatedStdout(process.stdout.getvalue())
+    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: process)
+
+    assert CHECKER._codex_hooks_list(
+        codex_command=[str(Path(sys.executable).resolve())],
+        codex_home=tmp_path / "home", query_cwd=tmp_path,
+    ) == []
+    assert not process.stderr.closed_during_read
+
+
+def test_app_server_stderr_reader_failure_rejects_trust_result_without_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    process = _FakeAppServer('{"id":1,"result":{}}\n{"id":2,"result":{"data":[]}}\n')
+    read_attempted = threading.Event()
+
+    class FailingStderr(io.BytesIO):
+        def read(self, size=-1):
+            read_attempted.set()
+            raise OSError("synthetic sensitive provider detail")
+
+    class GatedStdout(io.BytesIO):
+        def readline(self, size=-1):
+            assert read_attempted.wait(timeout=1)
+            return super().readline(size)
+
+    process.stderr = FailingStderr()
+    process.stdout = GatedStdout(process.stdout.getvalue())
+    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: process)
+
+    with pytest.raises(ValueError, match="CODEX_HOOK_LIST_BOUNDS") as failure:
+        CHECKER._codex_hooks_list(
+            codex_command=[str(Path(sys.executable).resolve())],
+            codex_home=tmp_path / "home", query_cwd=tmp_path,
+        )
+    assert "synthetic sensitive provider detail" not in str(failure.value)
 
 
 def test_inventory_probe_uses_exact_scope_and_excludes_sentinels(

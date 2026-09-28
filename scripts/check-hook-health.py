@@ -520,8 +520,11 @@ def _codex_hooks_list(
         def drain_stderr() -> None:
             # Drain to prevent child blockage; diagnostics intentionally discard
             # provider text so credentials and machine-local state cannot leak.
-            while process.stderr.read(8192):
-                pass
+            try:
+                while process.stderr.read(8192):
+                    pass
+            except (OSError, ValueError):
+                record_reader_error(ValueError("stderr intake failed"))
 
         readers = [
             threading.Thread(target=read_stdout, daemon=True),
@@ -538,7 +541,7 @@ def _codex_hooks_list(
                 except queue.Empty:
                     reader_error = None
                 if reader_error is not None:
-                    raise ValueError("FAIL CODEX_HOOK_LIST_BOUNDS: stdout intake rejected") from reader_error
+                    raise ValueError("FAIL CODEX_HOOK_LIST_BOUNDS: app-server intake rejected") from reader_error
                 try:
                     message = messages.get(timeout=min(0.05, max(0.001, deadline - time.monotonic())))
                 except queue.Empty:
@@ -574,7 +577,7 @@ def _codex_hooks_list(
         except queue.Empty:
             reader_error = None
         if reader_error is not None:
-            raise ValueError("FAIL CODEX_HOOK_LIST_BOUNDS: stdout intake rejected") from reader_error
+            raise ValueError("FAIL CODEX_HOOK_LIST_BOUNDS: app-server intake rejected") from reader_error
     except (ChildProcessError, OSError, subprocess.TimeoutExpired) as exc:
         raise ValueError("FAIL CODEX_HOOK_LIST_UNAVAILABLE: app-server query failed") from exc
     finally:
@@ -594,6 +597,9 @@ def _codex_hooks_list(
                     process.wait(timeout=5)
                 except (OSError, subprocess.TimeoutExpired):
                     pass
+        for reader in readers:
+            reader.join(timeout=5)
+        if process is not None:
             for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
                     try:
@@ -602,6 +608,14 @@ def _codex_hooks_list(
                         pass
         for reader in readers:
             reader.join(timeout=5)
+        if any(reader.is_alive() for reader in readers):
+            record_reader_error(ValueError("app-server reader did not settle"))
+    try:
+        reader_error = reader_errors.get_nowait()
+    except queue.Empty:
+        reader_error = None
+    if reader_error is not None:
+        raise ValueError("FAIL CODEX_HOOK_LIST_BOUNDS: app-server intake rejected") from reader_error
     if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
         raise ValueError("FAIL CODEX_HOOK_LIST_MALFORMED: hooks/list response is missing")
     data = response["result"].get("data")
