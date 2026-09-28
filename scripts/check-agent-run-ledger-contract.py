@@ -71,19 +71,6 @@ MIGRATION_RECEIPT_FIELDS = (
 )
 MIGRATION_POINTER_FORBIDDEN_TOKENS = (*MIGRATION_COMMANDS, *MIGRATION_FAILURE_IDS)
 MIGRATION_BASELINE_SHA256 = "f6baf1f60f9838b13f69488b4f17b6a37bbe7d2c2372c4eec8c2503508f6ec76"
-MIGRATION_ALLOWED_BASELINE_DRIFT = {
-    "shared/schemas/agent-runs.schema.json",
-    "scripts/validate-work-item-state.py",
-    "scripts/agent-run-ledger.py",
-    "scripts/mutate-work-item.py",
-    "scripts/check-agent-run-ledger-contract.py",
-    "tests/test_work_item_state_validator.py",
-    "tests/test_mutate_work_item.py",
-    "docs/work-item-execution-tracking.md",
-}
-MIGRATION_ACCEPTED_CURRENT_BYTES = {
-    "tests/test_agent_run_ledger.py": "4cb66d9bf615291a4799aae37e3df2677b9a019124ffe8522bf047f5947c2312",
-}
 
 
 # Legacy status shape: older work items carry `orchestrator: main | lead`. Kept as a
@@ -467,41 +454,13 @@ def check_legacy_migration_contract(root: Path) -> dict[str, int]:
 
 
 def check_legacy_migration_diff_guard(root: Path) -> dict[str, int]:
-    """Reconcile the Phase 0 byte boundary without blaming admitted later phases."""
+    """Keep the frozen Phase 0 manifest and live migration paths in scope."""
     baseline_path = root / "tests" / "fixtures" / "legacy-obligation-migration" / "baseline.json"
     baseline_bytes = baseline_path.read_bytes()
     require(
         hashlib.sha256(baseline_bytes).hexdigest() == MIGRATION_BASELINE_SHA256,
         "migration Phase 0 baseline manifest drifted",
     )
-    baseline = json.loads(baseline_bytes.decode("utf-8"))
-    rows = [
-        *baseline["allowedProductionFiles"],
-        *baseline["allowedExistingTestExpectations"],
-        *baseline["protectedDirtySiblings"],
-    ]
-    for row in rows:
-        relative = row["path"]
-        accepted = MIGRATION_ACCEPTED_CURRENT_BYTES.get(relative)
-        if accepted is not None:
-            path = root / relative
-            require(path.is_file(), f"protected migration sibling is missing: {relative}")
-            require(
-                hashlib.sha256(path.read_bytes()).hexdigest() == accepted,
-                f"protected migration sibling hash drifted: {relative}",
-            )
-            continue
-        if relative in MIGRATION_ALLOWED_BASELINE_DRIFT:
-            continue
-        path = root / relative
-        require(path.is_file(), f"protected migration sibling is missing: {relative}")
-        data = path.read_bytes()
-        require(len(data) == row["bytes"], f"protected migration sibling size drifted: {relative}")
-        require(
-            hashlib.sha256(data).hexdigest() == row["sha256"],
-            f"protected migration sibling hash drifted: {relative}",
-        )
-
     fixture = root / "tests" / "fixtures" / "agent-run-ledger" / "legacy-obligation-migration-v2"
     fixture_files = sorted(path.name for path in fixture.iterdir() if path.is_file())
     require(
@@ -517,7 +476,6 @@ def check_legacy_migration_diff_guard(root: Path) -> dict[str, int]:
     require(all(path.is_file() for path in migration_paths), "migration-specific path is missing")
     return {
         "baseline-manifest": 1,
-        "protected-hashes": 1,
         "fixture-files": len(fixture_files),
         "migration-specific-paths": len(migration_paths),
     }

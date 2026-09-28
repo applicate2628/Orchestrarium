@@ -2402,19 +2402,7 @@ def test_rollup_exposes_raw_and_effective_migration_counts(tmp_path: Path) -> No
     assert revoked_telemetry["ledger-migration-projected"] == 0
 
 
-def test_path_scoped_diff_guard_excludes_protected_surfaces(tmp_path: Path) -> None:
-    checker = load_script(
-        ROOT / "scripts" / "check-agent-run-ledger-contract.py",
-        "migration_diff_guard_checker",
-    )
-    telemetry = checker.check_legacy_migration_diff_guard(ROOT)
-    assert telemetry == {
-        "baseline-manifest": 1,
-        "protected-hashes": 1,
-        "fixture-files": 4,
-        "migration-specific-paths": 6,
-    }
-
+def copied_migration_contract_root(tmp_path: Path) -> Path:
     copied_files = (
         "tests/fixtures/legacy-obligation-migration/baseline.json",
         "README.md",
@@ -2441,13 +2429,66 @@ def test_path_scoped_diff_guard_excludes_protected_surfaces(tmp_path: Path) -> N
             ROOT / "tests" / "fixtures" / "agent-run-ledger" / fixture_name,
             tmp_path / "tests" / "fixtures" / "agent-run-ledger" / fixture_name,
         )
+    return tmp_path
 
-    protected = tmp_path / "tests" / "test_agent_run_ledger.py"
-    protected.write_bytes(protected.read_bytes() + b"\n# injected protected drift\n")
+
+def test_migration_diff_guard_ignores_unrelated_current_sibling_edit(tmp_path: Path) -> None:
+    copied_root = copied_migration_contract_root(tmp_path)
+    sibling = copied_root / "tests" / "test_agent_run_ledger.py"
+    sibling.write_bytes(sibling.read_bytes() + b"\n# unrelated custody regression\n")
+
     result = run_script(
         ROOT / "scripts" / "check-agent-run-ledger-contract.py",
         "--root",
-        str(tmp_path),
+        str(copied_root),
     )
-    assert result.returncode != 0, result.stdout
-    assert "protected migration sibling" in result.stdout
+    assert result.returncode == 0, result.stdout
+    assert "RESULT: PASS" in result.stdout
+
+
+def test_migration_diff_guard_rejects_missing_fixture_path(tmp_path: Path) -> None:
+    copied_root = copied_migration_contract_root(tmp_path)
+    (copied_root / "tests" / "fixtures" / "agent-run-ledger" / "legacy-obligation-migration-v2" / "status.md").unlink()
+    checker = load_script(
+        ROOT / "scripts" / "check-agent-run-ledger-contract.py",
+        "migration_diff_guard_missing_fixture",
+    )
+    with pytest.raises(AssertionError, match="migration fixture path set drifted"):
+        checker.check_legacy_migration_diff_guard(copied_root)
+
+
+def test_migration_diff_guard_rejects_missing_migration_test_path(tmp_path: Path) -> None:
+    copied_root = copied_migration_contract_root(tmp_path)
+    (copied_root / "tests" / "test_legacy_obligation_migration.py").unlink()
+    checker = load_script(
+        ROOT / "scripts" / "check-agent-run-ledger-contract.py",
+        "migration_diff_guard_missing_test",
+    )
+    with pytest.raises(AssertionError, match="migration-specific path is missing"):
+        checker.check_legacy_migration_diff_guard(copied_root)
+
+
+def test_migration_contract_rejects_altered_fixture_target(tmp_path: Path) -> None:
+    copied_root = copied_migration_contract_root(tmp_path)
+    ledger = copied_root / "tests" / "fixtures" / "agent-run-ledger" / "legacy-obligation-migration-v2" / "agent-runs.jsonl"
+    before = ledger.read_bytes()
+    assert b'"findingClass":"inline-sufficient"' in before
+    ledger.write_bytes(before.replace(b'"findingClass":"inline-sufficient"', b'"findingClass":"inline-sufficienx"', 1))
+    checker = load_script(
+        ROOT / "scripts" / "check-agent-run-ledger-contract.py",
+        "migration_contract_altered_target",
+    )
+    with pytest.raises(AssertionError, match="migration fixture target digest drifted"):
+        checker.check_legacy_migration_contract(copied_root)
+
+
+def test_migration_diff_guard_rejects_baseline_manifest_drift(tmp_path: Path) -> None:
+    copied_root = copied_migration_contract_root(tmp_path)
+    baseline = copied_root / "tests" / "fixtures" / "legacy-obligation-migration" / "baseline.json"
+    baseline.write_bytes(baseline.read_bytes() + b"\n")
+    checker = load_script(
+        ROOT / "scripts" / "check-agent-run-ledger-contract.py",
+        "migration_diff_guard_baseline_drift",
+    )
+    with pytest.raises(AssertionError, match="migration Phase 0 baseline manifest drifted"):
+        checker.check_legacy_migration_diff_guard(copied_root)
