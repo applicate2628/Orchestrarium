@@ -130,6 +130,28 @@ class TestWorkflowEconomyContract(unittest.TestCase):
     def _assert_retired_rule_absent(self, relative: str, text: str, retired: str) -> None:
         self.assertTrue(retired not in text, f"{relative} retains retired rule: {retired!r}")
 
+    def test_codex_lead_routes_settled_demanding_decision_no_solve_before_next_dispatch(self) -> None:
+        checkpoint = self._section(
+            "src.codex/skills/lead/SKILL.md", "- **Settled no-solve checkpoint.**", "- **Capacity discovery.**"
+        )
+        for marker in (
+            "second settled no-solve",
+            "same frozen genuinely demanding decision",
+            "hypotheses, methods, observed results, and unresolved claim",
+            "execution from judgment",
+            "task-specific domain owner and policy/host-admitted task class",
+            "astra-high",
+            "astra-xhigh",
+            "If the decision remains genuinely demanding and no materially different sufficient Sol approach with a falsifier is evidenced, MUST request an explicit Astra profile for the next launch.",
+            "original acceptance oracle",
+            "quota",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, checkpoint)
+        for hardcoded_domain in ("model/math", "computational-scientist", "critical-design"):
+            with self.subTest(hardcoded_domain=hardcoded_domain):
+                self.assertNotIn(hardcoded_domain, checkpoint)
+
     def test_role_alignment_keeps_coordination_and_architecture_evidence_triggered(self) -> None:
         # Source-contract proof only; independent review owns behavioral-obedience evidence.
         selected_item_rule = (
