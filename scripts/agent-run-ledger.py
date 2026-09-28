@@ -6,6 +6,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -150,6 +151,7 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
             getattr(args, "event_kind", None),
             getattr(args, "launch_run_id", None),
             getattr(args, "closes", None),
+            getattr(args, "reviewed_role", None),
             getattr(args, "artifact_revision", None),
             getattr(args, "lane", None),
             getattr(args, "effort", None),
@@ -182,6 +184,7 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
 
     optional_fields = {
         "assignedRole": args.assigned_role,
+        "reviewedRole": getattr(args, "reviewed_role", None),
         "provider": args.provider,
         "model": args.model,
         "promptFile": args.prompt_file,
@@ -1386,7 +1389,7 @@ def command_init(args: argparse.Namespace) -> int:
 
 
 def _append_event_transaction(
-    item: Path, validator: Any, event_factory: Any
+    item: Path, validator: Any, event_factory: Any, on_abort: Any = None
 ) -> bool:
     """Append one validator-approved event, or report an idempotent no-op.
 
@@ -1419,16 +1422,17 @@ def _append_event_transaction(
             "No automatic takeover — verify the holder pid is dead, remove the lock file, retry."
         )
 
+    candidate = ledger_path.with_suffix(".jsonl.tmp")
     try:
-        previous = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else ""
+        previous_bytes = ledger_path.read_bytes() if ledger_path.exists() else b""
+        previous = previous_bytes.decode("utf-8")
         event = event_factory(previous)
         if event is None:
             return False
-        prefix = "" if not previous or previous.endswith("\n") else "\n"
+        prefix = b"" if not previous_bytes or previous_bytes.endswith(b"\n") else b"\n"
         line = serialize_event(event)
-        candidate = ledger_path.with_suffix(".jsonl.tmp")
-        with candidate.open("w", encoding="utf-8", newline="") as fh:
-            fh.write(f"{previous}{prefix}{line}\n")
+        with candidate.open("wb") as fh:
+            fh.write(previous_bytes + prefix + line.encode("utf-8") + b"\n")
             fh.flush()
 
         # strict_revise=False: the helper RECORDS events (including REVISE verdicts
@@ -1441,11 +1445,124 @@ def _append_event_transaction(
             print(f"RESULT: FAIL ({len(errors)} errors)", file=sys.stderr)
             raise ValueError("; ".join(errors))
         os.replace(candidate, ledger_path)
+    except BaseException:
+        candidate.unlink(missing_ok=True)
+        if on_abort is not None:
+            on_abort()
+        raise
     finally:
         os.close(lock_fd)
         lock_path.unlink(missing_ok=True)
 
     return True
+
+
+def _git_custody_value(root: Path, *arguments: str) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", *arguments],
+            text=True, stderr=subprocess.PIPE, timeout=10,
+        ).strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError("WI-LEDGER-CUSTODY-SOURCE-DRIFT: Git worktree identity unavailable") from exc
+
+
+def _ordinary_custody_source(root: Path, artifact: str) -> bytes:
+    try:
+        path = (root / artifact).resolve(strict=True)
+        if root not in path.parents:
+            raise ValueError("WI-LEDGER-CUSTODY-SOURCE-DRIFT: source path escapes worktree")
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("WI-LEDGER-CUSTODY-SOURCE-DRIFT: source is not an ordinary file")
+        return path.read_bytes()
+    except OSError as exc:
+        raise ValueError("WI-LEDGER-CUSTODY-SOURCE-DRIFT: source artifact unavailable") from exc
+
+
+def _capture_review_custody(
+    item: Path, args: argparse.Namespace, validator: Any,
+    previous: str, event: dict[str, Any], owned: dict[str, Path],
+) -> dict[str, Any]:
+    digest = args.expected_reviewed_sha256
+    expected_ledger = args.expected_ledger_sha256
+    target_digest = args.target_raw_line_sha256
+    if any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value, re.ASCII) is None
+           for value in (digest, expected_ledger, target_digest)):
+        raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: expected digests must be lowercase SHA-256")
+    if hashlib.sha256(previous.encode("utf-8")).hexdigest() != expected_ledger:
+        raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: ledger digest changed")
+    parse_errors: list[str] = []
+    metadata: list[dict[str, Any]] = []
+    events = validator.load_jsonl(item / "agent-runs.jsonl", parse_errors, metadata, previous.encode("utf-8"))
+    if parse_errors:
+        raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: ledger is not parseable")
+    closes = event.get("closesRunIds")
+    if not isinstance(closes, list) or len(closes) != 1 or not isinstance(closes[0], str):
+        raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: custody requires one target")
+    target_id = closes[0]
+    matches = [index for index, row in enumerate(events)
+               if isinstance(row.get("runId"), str) and row["runId"].casefold() == target_id.casefold()]
+    if len(matches) != 1:
+        raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: target missing or non-unique")
+    target_index = matches[0]
+    target = events[target_index]
+    if (
+        target.get("runId") != target_id or target.get("gate") != "REVISE"
+        or metadata[target_index]["sha256"] != target_digest
+        or any(target_id in row.get("closesRunIds", []) for row in events if isinstance(row.get("closesRunIds"), list))
+        or target.get("artifact") != event.get("artifact")
+        or (target.get("lane") is not None and target.get("lane") != event.get("lane"))
+        or event.get("artifactRevision") != digest
+    ):
+        raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: target, artifact, lane, or digest binding changed")
+    artifact = event["artifact"]
+    if not validator._safe_repo_relative(artifact) or Path(artifact).is_absolute() or not artifact or artifact == ".":
+        raise ValueError("WI-LEDGER-CUSTODY-SOURCE-DRIFT: source artifact key is unsafe")
+    parent_root = validator.repo_root_for(item)
+    source_root = args.source_worktree
+    if parent_root is None or source_root is None or not source_root.is_dir():
+        raise ValueError("WI-LEDGER-CUSTODY-SOURCE-DRIFT: source root unavailable")
+    source_root = source_root.resolve()
+    if Path(_git_custody_value(source_root, "--show-toplevel")).resolve() != source_root:
+        raise ValueError("WI-LEDGER-CUSTODY-SOURCE-DRIFT: source is not a worktree root")
+    source_git_dir = Path(_git_custody_value(source_root, "--absolute-git-dir"))
+    source_common = Path(_git_custody_value(source_root, "--path-format=absolute", "--git-common-dir"))
+    parent_common = Path(_git_custody_value(parent_root, "--path-format=absolute", "--git-common-dir"))
+    if (
+        source_root == parent_root.resolve() or source_common.resolve() != parent_common.resolve()
+        or source_git_dir.parent.name != "worktrees"
+        or source_git_dir.name != args.expected_source_worktree_id
+    ):
+        raise ValueError("WI-LEDGER-CUSTODY-SOURCE-DRIFT: linked worktree identity differs")
+    head = _git_custody_value(source_root, "HEAD")
+    source_bytes = _ordinary_custody_source(source_root, artifact)
+    if hashlib.sha256(source_bytes).hexdigest() != digest or _git_custody_value(source_root, "HEAD") != head:
+        raise ValueError("WI-LEDGER-CUSTODY-SOURCE-DRIFT: approved source bytes or HEAD changed")
+    directory = item / "review-artifact-custody"
+    snapshot = directory / digest
+    directory.mkdir(exist_ok=True)
+    directory_stat = directory.lstat()
+    if not stat.S_ISDIR(directory_stat.st_mode) or directory.is_symlink() or directory.is_junction():
+        raise ValueError("WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH: snapshot directory is linked or invalid")
+    try:
+        fd = os.open(snapshot, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        if not validator._ordinary_custody_snapshot(item, f"review-artifact-custody/{digest}", digest):
+            raise ValueError("WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH: existing snapshot conflicts")
+    else:
+        owned["snapshot"] = snapshot
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(source_bytes)
+            stream.flush()
+    event["reviewArtifactCustody"] = {
+        "kind": "linked-worktree-review-v1", "targetRunId": target_id,
+        "targetRawLineSha256": target_digest,
+        "sourceWorktreeId": args.expected_source_worktree_id, "sourceHead": head,
+        "sourceArtifact": artifact, "snapshot": f"review-artifact-custody/{digest}",
+        "reviewedSha256": digest,
+    }
+    return event
 
 
 def command_append(args: argparse.Namespace) -> int:
@@ -1459,7 +1576,32 @@ def command_append(args: argparse.Namespace) -> int:
     validator = load_validator()
     try:
         event = build_event(args, validator)
-        _append_event_transaction(item, validator, lambda _previous: event)
+        custody_requested = any(getattr(args, name, None) is not None for name in (
+            "source_worktree", "expected_source_worktree_id", "expected_reviewed_sha256",
+            "expected_ledger_sha256", "target_raw_line_sha256",
+        ))
+        if custody_requested:
+            if any(getattr(args, name, None) is None for name in (
+                "source_worktree", "expected_source_worktree_id", "expected_reviewed_sha256",
+                "expected_ledger_sha256", "target_raw_line_sha256",
+            )):
+                raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: all custody inputs are required")
+            owned: dict[str, Path] = {}
+            def abort_custody() -> None:
+                snapshot = owned.get("snapshot")
+                if snapshot is not None:
+                    snapshot.unlink(missing_ok=True)
+                    try:
+                        snapshot.parent.rmdir()
+                    except OSError:
+                        pass
+            _append_event_transaction(
+                item, validator,
+                lambda previous: _capture_review_custody(item, args, validator, previous, event, owned),
+                on_abort=abort_custody,
+            )
+        else:
+            _append_event_transaction(item, validator, lambda _previous: event)
     except (ValueError, LedgerWriteLockError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
@@ -1861,6 +2003,12 @@ def build_parser() -> argparse.ArgumentParser:
     append.add_argument("--role", required=True, help="Actual role that produced the event.")
     append.add_argument("--execution-role", required=True, help="Execution role accepted by validate-work-item-state.py.")
     append.add_argument("--assigned-role", help="Assigned or replaced internal role, when applicable.")
+    append.add_argument("--reviewed-role", choices=["lead"], help="Lead/main role reviewed by a truthful QA/internal PASS closer.")
+    append.add_argument("--source-worktree", type=Path, help="Linked source worktree root for review artifact custody.")
+    append.add_argument("--expected-source-worktree-id", help="Reviewer-frozen linked worktree administration identity.")
+    append.add_argument("--expected-reviewed-sha256", help="Reviewer-approved artifact SHA-256, fixed before source capture.")
+    append.add_argument("--expected-ledger-sha256", help="Expected complete parent ledger SHA-256 for custody append.")
+    append.add_argument("--target-raw-line-sha256", help="Expected physical target JSONL line SHA-256, excluding terminator.")
     append.add_argument("--provider", help="Requested or resolved external provider, when applicable.")
     append.add_argument("--model", help="Model or profile used, when known.")
     append.add_argument("--status", required=True, help="Agent run status.")

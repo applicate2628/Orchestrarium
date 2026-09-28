@@ -202,6 +202,33 @@ class ClosureFixture(unittest.TestCase):
         errors = self._validate([revise, weak])
         self.assertTrue(any("effort" in e and "(C3" in e for e in errors), errors)
 
+    def test_c3_lead_main_requires_truthful_qa_reviewed_role(self) -> None:
+        target = _event(
+            "run-lead-main-revise", role="lead", executionRole="main",
+            gate="REVISE", status="revise", artifact="design.md",
+            lane="qa", effort="medium", provider="codex",
+        )
+        closer = _event(
+            "run-qa-lead-closer", role="qa-engineer", executionRole="internal",
+            gate="PASS", artifact="design.md", lane="qa", effort="medium",
+            provider="codex", reviewedRole="lead",
+            closesRunIds=[target["runId"]],
+            evidence=[{"kind": "review", "ref": "qa re-verification"}],
+        )
+        self.assertEqual(self._validate([target, closer]), [])
+        for changes in (
+            {"reviewedRole": None},
+            {"assignedRole": "lead", "reviewedRole": None},
+            {"assignedRole": "lead"},
+            {"role": "lead", "executionRole": "main"},
+            {"role": "architecture-reviewer"},
+        ):
+            candidate = {**closer, **changes}
+            if candidate.get("reviewedRole") is None:
+                candidate.pop("reviewedRole", None)
+            errors = self._validate([target, candidate])
+            self.assertTrue(any("C3-reviewed-role-fail" in error for error in errors), errors)
+
     # ---------- typed waiver ----------
 
     def test_waiver_shape_and_protected_boundary(self) -> None:

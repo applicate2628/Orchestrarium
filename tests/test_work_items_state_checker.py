@@ -1017,6 +1017,90 @@ def test_archive_review_pointer_closes_only_its_named_revise(tmp_path: Path) -> 
     assert ledger.read_bytes() == before
 
 
+def test_terminal_archive_preserves_old_lead_review_relation_only_after_close(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    slug = "archived-lead-review-history"
+    artifact = "profession-review.md"
+    target = ledger_event(
+        schemaVersion=2, runId="run-lead-review-revise", workItem=slug,
+        role="lead", executionRole="main", status="revise", gate="REVISE",
+        artifact=artifact, lane="profession-review", effort="medium", provider="codex",
+        startedAt="2026-09-09T10:00:00Z", updatedAt="2026-09-09T10:00:00Z",
+    )
+    closer = ledger_event(
+        schemaVersion=2, runId="run-qa-reverified-lead", workItem=slug,
+        role="qa-engineer", executionRole="internal", assignedRole="lead",
+        status="completed", gate="PASS", artifact=artifact,
+        lane="profession-review", effort="medium", provider="codex",
+        closesRunIds=[target["runId"]],
+        evidence=[{"kind": "review", "ref": artifact}],
+        startedAt="2026-09-09T10:05:00Z", updatedAt="2026-09-09T10:05:00Z",
+    )
+    raw_ledger = "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in (target, closer)).encode("utf-8")
+
+    current = tmp_path / "current" / "work-items" / "active" / slug
+    preclose = tmp_path / "preclose" / "work-items" / "archive" / "2026-09" / slug
+    terminal = tmp_path / "terminal" / "work-items" / "archive" / "2026-09" / slug
+    for item in (current, preclose, terminal):
+        item.mkdir(parents=True)
+        (item / artifact).write_text("reviewed evidence\n", encoding="utf-8")
+        (item / "agent-runs.jsonl").write_bytes(raw_ledger)
+    (current / "status.md").write_text(valid_status(), encoding="utf-8")
+    (terminal / "closure.md").write_text(
+        "Outcome: completed.\nClosed: 2026-09-10T13:48:21Z\n"
+        "Evidence: profession-review.md.\nResidual risk: none.\n", encoding="utf-8",
+    )
+
+    try:
+        validator.validate_closure(
+            [target, closer], [], event_validity=[True, True],
+            _archived_preclose_v2_rows=frozenset({1, 2}),
+        )
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("public validate_closure accepted caller-selected archive authority")
+
+    current_errors = validator.validate_work_item(current)
+    assert any("C3-reviewed-role-fail" in error for error in current_errors), current_errors
+    assert any("open REVISE obligation" in error for error in current_errors), current_errors
+    preclose_errors, preclose_open, _ = validator.validate_archived_ledger_obligations(preclose)
+    assert preclose_errors or preclose_open
+    assert any("WI-LEDGER-ARCHIVE-CLOSURE-EVIDENCE: missing" in error for error in preclose_errors), preclose_errors
+    terminal_errors, terminal_open, terminal_launches = validator.validate_archived_ledger_obligations(terminal)
+    assert terminal_errors == [] and terminal_open == [] and terminal_launches == []
+    assert all((item / "agent-runs.jsonl").read_bytes() == raw_ledger for item in (current, preclose, terminal))
+
+    direct_errors: list[str] = []
+    validator.validate_closure([target, closer], direct_errors, event_validity=[True, True])
+    assert any("C3-reviewed-role-fail" in error for error in direct_errors), direct_errors
+
+    late = tmp_path / "late" / "work-items" / "archive" / "2026-09" / slug
+    shutil.copytree(terminal, late)
+    late_closer = {**closer, "updatedAt": "2026-09-11T10:05:00Z"}
+    (late / "agent-runs.jsonl").write_text(
+        "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in (target, late_closer)),
+        encoding="utf-8",
+    )
+    late_errors, late_open, _ = validator.validate_archived_ledger_obligations(late)
+    assert any("C3-reviewed-role-fail" in error for error in late_errors), late_errors
+    assert late_open
+
+    invalid_close = tmp_path / "invalid" / "work-items" / "archive" / "2026-09" / slug
+    shutil.copytree(terminal, invalid_close)
+    (invalid_close / "closure.md").write_text("Closed: 2026-13-10T13:48:21Z\n", encoding="utf-8")
+    invalid_errors, invalid_open, _ = validator.validate_archived_ledger_obligations(invalid_close)
+    assert any("WI-LEDGER-ARCHIVE-CLOSURE-EVIDENCE: invalid" in error for error in invalid_errors), invalid_errors
+    assert any("C3-reviewed-role-fail" in error for error in invalid_errors), invalid_errors
+    assert invalid_open
+
+    wrong_month = tmp_path / "wrong-month" / "work-items" / "archive" / "2026-08" / slug
+    shutil.copytree(terminal, wrong_month)
+    month_errors, month_open, _ = validator.validate_archived_ledger_obligations(wrong_month)
+    assert any("WI-LEDGER-ARCHIVE-CLOSURE-EVIDENCE: month" in error for error in month_errors), month_errors
+    assert month_open
+
+
 def test_archive_review_pointer_compatibility_is_strictly_bounded(tmp_path: Path) -> None:
     validator = load_validator_module()
     item = tmp_path / "work-items" / "archive" / "2026-07" / "bounded-review-pointer"

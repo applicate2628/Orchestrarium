@@ -54,6 +54,22 @@
       "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role). Current recovery state — Task, Current step, Last result, Next action, and staged lifecycle fields — is owned by status.md, not executionRole; its older 'orchestration: light|full-lead' scalar remains legacy-compatible. Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
     },
     "assignedRole": { "type": "string" },
+    "reviewedRole": { "const": "lead" },
+    "reviewArtifactCustody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "targetRunId", "targetRawLineSha256", "sourceWorktreeId", "sourceHead", "sourceArtifact", "snapshot", "reviewedSha256"],
+      "properties": {
+        "kind": { "const": "linked-worktree-review-v1" },
+        "targetRunId": { "type": "string", "minLength": 8 },
+        "targetRawLineSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sourceWorktreeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+        "sourceHead": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+        "sourceArtifact": { "type": "string", "minLength": 1 },
+        "snapshot": { "type": "string", "pattern": "^review-artifact-custody/[0-9a-f]{64}$" },
+        "reviewedSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
     "provider": { "type": "string" },
     "model": { "type": "string" },
     "launchFlags": {

@@ -108,6 +108,16 @@ This flag fragment supplements an otherwise valid native PASS append; use the ac
 
 Unrelated professions, subjects, scopes, and invalid report relations still fail.
 
+## Close A Lead/Main QA Finding
+
+For a `role=lead`, `executionRole=main` REVISE, the independent closer keeps its actual `role=qa-engineer`, `executionRole=internal`, and truthful `assignedRole` (if any). Its PASS names exactly one earlier target with `--closes <run-id>` and sets `--reviewed-role lead`. `assignedRole=lead` is not authority for this case, even alongside `reviewedRole`; Lead/main cannot close its own finding. Matching artifact, lane, and declared-effort checks still apply. Other reviewer professions retain their existing C3 rule.
+
+## Preserve A Linked-Worktree Review Artifact
+
+When a parent work item must close a review of bytes in a distinct linked worktree, the independent reviewer first records the full approved artifact SHA-256, source worktree administration ID, artifact key, and verdict. The parent writer then uses ordinary `append` with `--source-worktree`, `--expected-source-worktree-id`, `--expected-reviewed-sha256`, `--expected-ledger-sha256`, and `--target-raw-line-sha256`, along with the exact target `--closes`, matching `--artifact` and `--lane`, and `--artifact-revision` equal to the approved SHA-256. All five custody inputs are required together. An ordinary append without them remains a local-artifact append, not a W-byte transfer.
+
+Under its ledger lock, the writer verifies the exact open target and parent ledger, checks the linked worktree identity and current HEAD, captures only bytes matching the reviewer's pre-supplied digest, and creates or verifies `review-artifact-custody/<digest>` under the parent. The typed V2 `reviewArtifactCustody` row binds the target's raw-line hash and the snapshot; the validator hashes that local snapshot during replay and never substitutes an archived same-name file or requires the source worktree to remain mounted. Source paths may resolve through an in-worktree link, but may not escape that worktree. The parent snapshot itself must be an ordinary non-link file. Stale inputs, changed W bytes, and conflicting snapshots fail without a closer. The independent reviewer still owns the PASS verdict; custody alone grants none. Deploy matching writer, schema, and validator before a typed append; older closed-schema readers cannot replay it afterward.
+
 ## Validate One Work Item
 
 Run this before stage closeout or archive movement.

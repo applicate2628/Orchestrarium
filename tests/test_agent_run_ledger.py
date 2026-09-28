@@ -30,6 +30,182 @@ def run_validator(work_item: Path) -> subprocess.CompletedProcess:
     )
 
 
+def custody_fixture(tmp_path: Path) -> tuple[Path, Path, str, str, str]:
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    subprocess.run(["git", "init", "-q", str(parent)], check=True)
+    subprocess.run(["git", "-C", str(parent), "config", "user.name", "Fixture"], check=True)
+    subprocess.run(["git", "-C", str(parent), "config", "user.email", "fixture@example.invalid"], check=True)
+    (parent / "seed.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(parent), "add", "seed.txt"], check=True)
+    subprocess.run(["git", "-C", str(parent), "commit", "-qm", "seed"], check=True)
+    source = tmp_path / "source"
+    subprocess.run(["git", "-C", str(parent), "worktree", "add", "-q", "-b", "source", str(source)], check=True)
+    item = prepare_valid_work_item(parent)
+    key = "work-items/active/front/review.md"
+    source_artifact = source / key
+    source_artifact.parent.mkdir(parents=True)
+    source_artifact.write_bytes(b"reviewer-approved W bytes\n")
+    decoy = parent / "work-items" / "archive" / "2026-09" / "front" / "review.md"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_bytes(b"different P archive bytes\n")
+    target = {
+        "schemaVersion": 2, "runId": "run-custody-target-001", "workItem": item.name,
+        "role": "architecture-reviewer", "executionRole": "internal", "status": "revise",
+        "gate": "REVISE", "scope": ["review"], "artifact": key, "lane": "architecture",
+        "effort": "medium", "provider": "codex", "startedAt": "2026-09-28T00:00:00Z",
+        "updatedAt": "2026-09-28T00:00:00Z",
+    }
+    raw = json.dumps(target, separators=(",", ":")).encode("utf-8")
+    (item / "agent-runs.jsonl").write_bytes(raw + b"\n")
+    worktree_id = Path(subprocess.check_output(
+        ["git", "-C", str(source), "rev-parse", "--absolute-git-dir"], text=True,
+    ).strip()).name
+    return item, source, key, hashlib.sha256(raw).hexdigest(), worktree_id
+
+
+def custody_append(item: Path, source: Path, key: str, target_sha: str, worktree_id: str,
+                   approved_sha: str, *, effort: str = "medium",
+                   target_id: str = "run-custody-target-001",
+                   closer_id: str = "run-custody-closer-001") -> subprocess.CompletedProcess:
+    return run_ledger(
+        item, "append", "--run-id", closer_id, "--role", "architecture-reviewer",
+        "--execution-role", "internal", "--status", "completed", "--gate", "PASS",
+        "--scope", "review", "--artifact", key, "--event-kind", "standalone",
+        "--closes", target_id, "--artifact-revision", approved_sha,
+        "--lane", "architecture", "--effort", effort, "--provider", "codex",
+        "--evidence", "review:independent review", "--source-worktree", str(source),
+        "--expected-source-worktree-id", worktree_id,
+        "--expected-reviewed-sha256", approved_sha,
+        "--expected-ledger-sha256", hashlib.sha256((item / "agent-runs.jsonl").read_bytes()).hexdigest(),
+        "--target-raw-line-sha256", target_sha,
+    )
+
+
+def test_custody_uses_approved_w_bytes_not_parent_archive(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved = (source / key).read_bytes()
+    approved_sha = hashlib.sha256(approved).hexdigest()
+    before = (item / "agent-runs.jsonl").read_bytes()
+    result = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert result.returncode == 0, result.stderr
+    events = [json.loads(line) for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    custody = events[-1]["reviewArtifactCustody"]
+    assert (item / custody["snapshot"]).read_bytes() == approved
+    assert events[-1]["artifact"] == key
+    assert (item / "agent-runs.jsonl").read_bytes().startswith(before)
+    assert run_validator(item).returncode == 0
+
+
+def test_custody_two_targets_reuse_one_exact_snapshot(tmp_path: Path) -> None:
+    item, source, key, first_sha, worktree_id = custody_fixture(tmp_path)
+    ledger = item / "agent-runs.jsonl"
+    first = json.loads(ledger.read_text(encoding="utf-8"))
+    second = {**first, "runId": "run-custody-target-002"}
+    second_raw = json.dumps(second, separators=(",", ":")).encode("utf-8")
+    ledger.write_bytes(ledger.read_bytes() + second_raw + b"\n")
+    prefix = ledger.read_bytes()
+    approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()
+    first_result = custody_append(item, source, key, first_sha, worktree_id, approved_sha)
+    assert first_result.returncode == 0, first_result.stderr
+    second_result = custody_append(
+        item, source, key, hashlib.sha256(second_raw).hexdigest(), worktree_id,
+        approved_sha, target_id=second["runId"], closer_id="run-custody-closer-002",
+    )
+    assert second_result.returncode == 0, second_result.stderr
+    assert ledger.read_bytes().startswith(prefix)
+    events = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    assert [row["reviewArtifactCustody"]["targetRunId"] for row in events[2:]] == [first["runId"], second["runId"]]
+    assert events[2]["reviewArtifactCustody"]["snapshot"] == events[3]["reviewArtifactCustody"]["snapshot"]
+    assert len(list((item / "review-artifact-custody").iterdir())) == 1
+    assert run_validator(item).returncode == 0
+    (source / key).unlink()
+    assert run_validator(item).returncode == 0
+
+
+def test_custody_refuses_dirty_w_drift_at_unchanged_head(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()
+    before = (item / "agent-runs.jsonl").read_bytes()
+    (source / key).write_bytes(b"different dirty W bytes\n")
+    result = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert result.returncode != 0
+    assert "WI-LEDGER-CUSTODY-SOURCE-DRIFT" in result.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert not (item / "review-artifact-custody").exists()
+
+
+def test_custody_rejects_stale_target_and_wrong_source_identity(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()
+    before = (item / "agent-runs.jsonl").read_bytes()
+    stale = custody_append(item, source, key, "0" * 64, worktree_id, approved_sha)
+    assert stale.returncode != 0 and "WI-LEDGER-CUSTODY-STALE-TARGET" in stale.stderr
+    wrong_source = custody_append(item, source, key, target_sha, "other-worktree", approved_sha)
+    assert wrong_source.returncode != 0 and "WI-LEDGER-CUSTODY-SOURCE-DRIFT" in wrong_source.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert not (item / "review-artifact-custody").exists()
+
+
+def test_custody_rejects_escaping_source_link_even_with_approved_bytes(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved = (source / key).read_bytes()
+    approved_sha = hashlib.sha256(approved).hexdigest()
+    external = tmp_path / "external-review.md"
+    external.write_bytes(approved)
+    (source / key).unlink()
+    try:
+        (source / key).symlink_to(external)
+    except OSError:
+        pytest.skip("host does not permit synthetic file symlink creation")
+    before = (item / "agent-runs.jsonl").read_bytes()
+    result = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert result.returncode != 0 and "WI-LEDGER-CUSTODY-SOURCE-DRIFT" in result.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert not (item / "review-artifact-custody").exists()
+
+
+def test_custody_accepts_in_worktree_link_with_approved_bytes(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved = (source / key).read_bytes()
+    approved_sha = hashlib.sha256(approved).hexdigest()
+    linked_target = source / "review-bytes.md"
+    linked_target.write_bytes(approved)
+    (source / key).unlink()
+    try:
+        (source / key).symlink_to(linked_target)
+    except OSError:
+        pytest.skip("host does not permit synthetic file symlink creation")
+    result = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert result.returncode == 0, result.stderr
+    assert run_validator(item).returncode == 0
+
+
+def test_custody_failed_candidate_cleans_only_new_snapshot(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()
+    before = (item / "agent-runs.jsonl").read_bytes()
+    result = custody_append(item, source, key, target_sha, worktree_id, approved_sha, effort="low")
+    assert result.returncode != 0 and "C3 same-provider tier" in result.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert not (item / "review-artifact-custody" / approved_sha).exists()
+
+
+def test_custody_snapshot_tamper_and_replay_fail_closed(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()
+    first = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert first.returncode == 0, first.stderr
+    ledger_after = (item / "agent-runs.jsonl").read_bytes()
+    repeated = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert repeated.returncode != 0 and "WI-LEDGER-CUSTODY-STALE-TARGET" in repeated.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == ledger_after
+    (item / "review-artifact-custody" / approved_sha).write_bytes(b"tampered\n")
+    validated = run_validator(item)
+    assert validated.returncode != 0
+    assert "WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH" in validated.stdout
+
+
 def load_ledger_module():
     spec = importlib.util.spec_from_file_location("agent_run_ledger", LEDGER)
     assert spec is not None and spec.loader is not None

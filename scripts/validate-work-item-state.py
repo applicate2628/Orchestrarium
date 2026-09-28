@@ -53,6 +53,8 @@ LEDGER_EVENT_FINDING_CLASS_INVALID = "LEDGER-EVENT-FINDING-CLASS-INVALID"
 LEDGER_EVENT_SCRATCH_EVIDENCE_INVALID = "LEDGER-EVENT-SCRATCH-EVIDENCE-INVALID"
 LEGACY_MIGRATION_V3_UNSUPPORTED = "WI-LEDGER-MIGRATION-V3-UNSUPPORTED"
 V2_ONLY_FIELDS = {
+    "reviewedRole",
+    "reviewArtifactCustody",
     "eventKind",
     "launchRunId",
     "closesRunIds",
@@ -119,6 +121,8 @@ ALLOWED_FIELDS = {
     "role",
     "executionRole",
     "assignedRole",
+    "reviewedRole",
+    "reviewArtifactCustody",
     "provider",
     "model",
     "status",
@@ -810,6 +814,21 @@ def _safe_repo_relative(value: str) -> bool:
         return False
     candidate = PurePosixPath(value)
     return not candidate.is_absolute() and value == candidate.as_posix() and ".." not in candidate.parts
+
+
+def _ordinary_custody_snapshot(item: Path, snapshot: str, digest: str) -> bool:
+    directory = item / "review-artifact-custody"
+    leaf = item / snapshot
+    try:
+        parent_stat = directory.lstat()
+        leaf_stat = leaf.lstat()
+        if not stat_module.S_ISDIR(parent_stat.st_mode) or not stat_module.S_ISREG(leaf_stat.st_mode):
+            return False
+        if directory.is_symlink() or directory.is_junction() or leaf.is_symlink() or leaf.is_junction():
+            return False
+        return hashlib.sha256(leaf.read_bytes()).hexdigest() == digest
+    except OSError:
+        return False
 
 
 _LEGACY_PROJECTION_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", re.ASCII)
@@ -1573,6 +1592,15 @@ def _validate_event(
     for key in ["assignedRole", "provider", "model", "promptFile", "notes"]:
         if key in event and not isinstance(event.get(key), str):
             fail(errors, f"{run_id}: {key} must be a string")
+    if "reviewedRole" in event and (
+        event["reviewedRole"] != "lead"
+        or event.get("gate") != "PASS"
+        or event.get("role") != "qa-engineer"
+        or event.get("executionRole") != "internal"
+        or not isinstance(event.get("closesRunIds"), list)
+        or len(event["closesRunIds"]) != 1
+    ):
+        fail(errors, f"{run_id}: reviewedRole requires one QA/internal Lead PASS relation (C3-reviewed-role-fail)")
     if event.get("status") not in STATUS_VALUES:
         fail(errors, f"{run_id}: invalid status {event.get('status')!r}")
     gate = event.get("gate")
@@ -1593,7 +1621,44 @@ def _validate_event(
     evidence = event.get("evidence")
 
     artifact_path = None
-    if artifact:
+    custody = event.get("reviewArtifactCustody")
+    if "reviewArtifactCustody" in event:
+        wanted = {
+            "kind", "targetRunId", "targetRawLineSha256", "sourceWorktreeId",
+            "sourceHead", "sourceArtifact", "snapshot", "reviewedSha256",
+        }
+        digest = custody.get("reviewedSha256") if isinstance(custody, dict) else None
+        snapshot = custody.get("snapshot") if isinstance(custody, dict) else None
+        valid_shape = (
+            isinstance(custody, dict) and set(custody) == wanted
+            and custody.get("kind") == "linked-worktree-review-v1"
+            and isinstance(custody.get("targetRunId"), str)
+            and len(custody["targetRunId"]) >= 8
+            and isinstance(custody.get("targetRawLineSha256"), str)
+            and SHA256_RE.fullmatch(custody["targetRawLineSha256"]) is not None
+            and isinstance(custody.get("sourceWorktreeId"), str)
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", custody["sourceWorktreeId"], re.ASCII) is not None
+            and isinstance(custody.get("sourceHead"), str)
+            and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", custody["sourceHead"], re.ASCII) is not None
+            and isinstance(custody.get("sourceArtifact"), str)
+            and _safe_repo_relative(custody["sourceArtifact"])
+            and not Path(custody["sourceArtifact"]).is_absolute()
+            and isinstance(digest, str) and SHA256_RE.fullmatch(digest) is not None
+            and snapshot == f"review-artifact-custody/{digest}"
+        )
+        if not valid_shape or (
+            gate != "PASS" or status != "completed"
+            or not isinstance(event.get("closesRunIds"), list)
+            or len(event["closesRunIds"]) != 1
+            or event.get("artifact") != custody.get("sourceArtifact")
+            or event.get("artifactRevision") != digest
+        ):
+            fail(errors, f"{run_id}: invalid reviewArtifactCustody binding (WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH)")
+        elif not _ordinary_custody_snapshot(item, snapshot, digest):
+            fail(errors, f"{run_id}: missing or altered review snapshot (WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH)")
+        else:
+            artifact_path = item / snapshot
+    elif artifact:
         artifact_path = resolve_work_item_path(item, artifact, "artifact", run_id, errors)
     elif "artifact" in event and not isinstance(artifact, str):
         fail(errors, f"{run_id}: artifact must be a string")
@@ -2234,6 +2299,7 @@ def _validate_closure_authority(
     *,
     validity: Sequence[LedgerEventValidityV1] | None = None,
     event_validity: Sequence[LedgerEventValidityV1] | Sequence[bool] | None = None,
+    _archived_preclose_v2_rows: frozenset[int] = frozenset(),
 ) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]]]:
     """Ledger-level REVISE-closure validation (decision 2026-07-16-review-verdict-closure,
     minimal slice). Returns (open_v2_revise_events, open_launch_events) — obligations never discharged/settled events (never discharged by a valid
@@ -2464,6 +2530,29 @@ def _validate_closure_authority(
                 continue
             # C3 (PASS closers): identity + authority + strength against the target.
             if gate == "PASS":
+                custody = event.get("reviewArtifactCustody")
+                if custody is not None and (
+                    event.get("terminalClass") is not None
+                    or target.get("role") in {"external-worker", "external-reviewer"}
+                    or not isinstance(custody, dict)
+                    or custody.get("targetRunId") != target_id
+                    or custody.get("targetRawLineSha256") != rows[entry[0]].raw_line_sha256
+                    or custody.get("sourceArtifact") != target.get("artifact")
+                    or len(closes) != 1
+                ):
+                    fail(errors, f"{rid}: custody does not bind exact target {target_id} (WI-LEDGER-CUSTODY-STALE-TARGET)")
+                    bump("WI-LEDGER-CUSTODY-STALE-TARGET")
+                    continue
+                if event.get("reviewedRole") is not None and not (
+                    target.get("role") == "lead" and target.get("executionRole") == "main"
+                ):
+                    fail(errors, f"{rid}: reviewedRole is reserved for Lead/main target (C3-reviewed-role-fail)")
+                    bump("C3-reviewed-role-fail")
+                    continue
+                if target.get("role") == "lead" and target.get("executionRole") == "main" and event.get("terminalClass") == "internal-authorizing":
+                    fail(errors, f"{rid}: Lead/main requires truthful QA reviewedRole=lead (C3-reviewed-role-fail)")
+                    bump("C3-reviewed-role-fail")
+                    continue
                 if event.get("terminalClass") == "internal-authorizing":
                     target_tuple = event.get("targetTuple")
                     evidence_id = event.get("externalEvidenceRunId")
@@ -2602,7 +2691,30 @@ def _validate_closure_authority(
                         continue
                 if not external_professional_close:
                     t_role = target.get("role")
-                    if event.get("role") != t_role and event.get("assignedRole") != t_role:
+                    if t_role == "lead" and target.get("executionRole") == "main":
+                        legacy_archive_closer = (
+                            rows[pos].raw_line_ordinal in _archived_preclose_v2_rows
+                            and rows[entry[0]].raw_line_ordinal in _archived_preclose_v2_rows
+                            and rows[pos].epoch == "raw"
+                            and rows[entry[0]].epoch == "raw"
+                            and "reviewedRole" not in event
+                        )
+                        if legacy_archive_closer:
+                            if event.get("role") != "lead" and event.get("assignedRole") != "lead":
+                                fail(errors, f"{rid}: closer lacks authority over {target_id} (C3-authority-fail)")
+                                bump("C3-authority-fail")
+                                continue
+                        elif (
+                            event.get("role") != "qa-engineer"
+                            or closer_exec != "internal"
+                            or event.get("reviewedRole") != "lead"
+                            or event.get("assignedRole") == "lead"
+                            or len(closes) != 1
+                        ):
+                            fail(errors, f"{rid}: Lead/main requires truthful QA reviewedRole=lead for {target_id} (C3-reviewed-role-fail)")
+                            bump("C3-reviewed-role-fail")
+                            continue
+                    elif event.get("role") != t_role and event.get("assignedRole") != t_role:
                         fail(errors, f"{rid}: closer lacks authority over {target_id} (role/assignedRole != {t_role!r}) (C3)")
                         bump("C3-authority-fail")
                         continue
@@ -6067,8 +6179,63 @@ def validate_archived_ledger_obligations(
     active_validity = tuple(
         typed_closure_validity[pos] for pos in active_positions
     )
-    open_revise, open_launches = validate_closure(
-        active_rows, errors, telemetry, validity=active_validity
+    # Only this read-only monthly-archive reader may preserve the old C3 meaning
+    # of raw V2 relations recorded before the lifecycle owner's terminal instant.
+    preclose_v2_rows: set[int] = set()
+    earlier_lead_revises: set[str] = set()
+    legacy_lead_candidate = False
+    for row in active_rows:
+        event = row.event
+        if row.epoch != "raw" or type(event.get("schemaVersion")) is not int or event["schemaVersion"] != 2:
+            continue
+        run_id = event.get("runId")
+        if event.get("role") == "lead" and event.get("executionRole") == "main" and event.get("gate") == "REVISE":
+            if isinstance(run_id, str):
+                earlier_lead_revises.add(run_id)
+        elif (
+            event.get("role") == "qa-engineer"
+            and event.get("executionRole") == "internal"
+            and event.get("assignedRole") == "lead"
+            and event.get("gate") == "PASS"
+            and "reviewedRole" not in event
+            and isinstance(event.get("closesRunIds"), list)
+            and any(target_id in earlier_lead_revises for target_id in event["closesRunIds"])
+        ):
+            legacy_lead_candidate = True
+    if legacy_lead_candidate:
+        lifecycle = load_lifecycle_owner()
+        try:
+            closure_bytes = (item / "closure.md").read_bytes()
+        except OSError:
+            fail(errors, "WI-LEDGER-ARCHIVE-CLOSURE-EVIDENCE: missing or unreadable closure.md")
+        else:
+            try:
+                closure_fields = lifecycle._parse_fields(closure_bytes.decode("utf-8"))
+                closed = closure_fields.get("closed", "")
+                lifecycle._validate_closure(closure_bytes, closed)
+                closed_at = lifecycle._strict_utc(closed)
+            except (UnicodeDecodeError, lifecycle.LifecycleError):
+                fail(errors, "WI-LEDGER-ARCHIVE-CLOSURE-EVIDENCE: invalid terminal closure.md")
+            else:
+                if closed[:7] != item.parent.name:
+                    fail(errors, "WI-LEDGER-ARCHIVE-CLOSURE-EVIDENCE: month differs from Closed")
+                else:
+                    for row in active_rows:
+                        event = row.event
+                        if row.epoch != "raw" or type(event.get("schemaVersion")) is not int or event["schemaVersion"] != 2:
+                            continue
+                        try:
+                            started_at = lifecycle._strict_utc(event["startedAt"])
+                            updated_at = lifecycle._strict_utc(event["updatedAt"])
+                        except (KeyError, TypeError, lifecycle.LifecycleError):
+                            continue
+                        if started_at <= closed_at and updated_at <= closed_at:
+                            preclose_v2_rows.add(row.raw_line_ordinal)
+    if active_rows and not _sealed_context_is_bound(active_rows, None, errors):
+        return errors, [], []
+    open_revise, open_launches = _validate_closure_authority(
+        active_rows, errors, telemetry, validity=active_validity,
+        _archived_preclose_v2_rows=frozenset(preclose_v2_rows),
     )
     if telemetry is not None:
         for name, value in {**migration_counters, **projection_counters}.items():
