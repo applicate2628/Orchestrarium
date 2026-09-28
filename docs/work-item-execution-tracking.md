@@ -293,6 +293,50 @@ The `manual-check` evidence must contain the exact target run ID and exact raw-l
 
 For H1, appending the disposition does not activate compatibility. Before an active compatibility receipt exists, the raw target errors remain. Only the active receipt-gated effective-view reader may suppress errors for that exact target, keep all authority axes false, and expose the ordered `disposition_notices` through the public read model. Every other row remains under unchanged validation. Ordinary raw V2 requires no H1 activation; the exported `load_effective_ledger_view` used by the work-items checker and `validate_work_item` consume the same disposition-effective ordinary context.
 
+## Recover one mixed current V1/V2 ledger
+
+Use the lifecycle owner only for an active, parseable, integer-Version-1/Version-2 ledger whose exact original lines must remain inspectable. This is one append-only batch, not `settle-legacy-ledger`, H1 activation, or the single-row `dispose-invalid-current` command. The request must explicitly cover every invalid current row; a valid-schema terminal with no valid earlier launch is also an explicit disposition target, even when no finding-class migration is needed. Unrelated diagnostics, overlapping targets, changed launch relations, duplicate case-insensitive run IDs, and Version 1/control targets refuse. A migrated unknown `findingClass` becomes protected `legacy-unclassified` at its original position; it remains a review target but gains no terminal, closer, artifact, or waiver authority. A disposed terminal has no authority on any axis. Neither control creates a launch or closes a review obligation.
+
+The two existing digest codecs are intentionally distinct. `eventBodySha256` for `migrate-invalid-finding-class` hashes the original JSONL line *without* its `LF` or `CRLF` terminator, matching the migration anchor. `physicalLineSha256` for `dispose-invalid-terminal` hashes the complete original physical line *including* its terminator, matching the disposition control. `expectedLedgerSha256` hashes the entire original ledger byte stream. Do not substitute one row digest for the other or parse and reserialize the input to compute them. The original must have complete nonblank newline-terminated lines.
+
+```json
+{
+  "schemaVersion": 1,
+  "operationId": "bounded-recovery-id",
+  "recordedAt": "2026-09-20T12:00:00Z",
+  "workItem": "work-items/active/active-item-slug",
+  "expectedLedgerSha256": "<whole-ledger-sha256>",
+  "targets": [
+    {
+      "action": "migrate-invalid-finding-class",
+      "rawLineOrdinal": 3,
+      "runId": "review-run-id",
+      "eventBodySha256": "<body-line-sha256>",
+      "launchRunId": "earlier-launch-run-id"
+    },
+    {
+      "action": "dispose-invalid-terminal",
+      "rawLineOrdinal": 5,
+      "runId": "invalid-terminal-run-id",
+      "physicalLineSha256": "<full-physical-line-sha256>",
+      "launchRunId": "recorded-launch-run-id"
+    }
+  ]
+}
+```
+
+First run the exact request without the positive apply marker. This acquires and releases the normal ledger-writer lock, rebinds digest, row identity and relation, validates one complete candidate with open work allowed, reports targets and obligations with `applied:false`, and leaves ledger, history, receipt, status, and selector bytes unchanged. It does not approve a receiving-machine apply or establish source-versus-installed parity; verify those separately on that machine.
+
+```powershell
+python -B scripts/mutate-work-item.py recover-mixed-current-ledger --root . --request-file <reviewed-request.json>
+```
+
+Only after the separately required review and gates, apply that same request with `--apply-admitted`. The owner publishes `agent-runs.history.<original-ledger-sha256>.jsonl` create-once from the exact old bytes, validates and atomically appends all typed controls under the existing writer lock, reads back the complete suffix, then creates `agent-runs.mixed.<operation-id>.receipt.json`. A handled pre-append failure reclaims only newly owned unchanged staging/history; pre-existing or changed files are preserved and reported. An interrupted pre-append attempt may replay only exact owned bytes. A committed exact suffix with a missing receipt is reconstructed without appending again. Partial suffix, changed history, drift, or ambiguous residue fail closed without truncation. Normal append remains available afterward; default strict close/audit still reject open `REVISE` and launch obligations.
+
+```powershell
+python -B scripts/mutate-work-item.py recover-mixed-current-ledger --root . --request-file <reviewed-request.json> --apply-admitted
+```
+
 ## Settle one identity-bearing string-1.0 legacy ledger
 
 Use this owner operation only for an active ledger whose complete frozen

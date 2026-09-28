@@ -1127,6 +1127,78 @@ def _publish_noncanonical_history_blob(
     _cleanup_owned_history_staging(history_path, staging)
 
 
+def publish_mixed_current_history_blob(
+    item: Path, expected_sha256: str, original_bytes: bytes
+) -> tuple[Path, bool, tuple[int, int, int, int]]:
+    """Publish exact current-ledger bytes using the existing create-once blob owner."""
+
+    if hashlib.sha256(original_bytes).hexdigest() != expected_sha256:
+        _noncanonical_fail("HISTORY-CONFLICT", "mixed history preimage digest differs")
+    history_path = item / f"agent-runs.history.{expected_sha256}.jsonl"
+    preexisting = _read_exact_history_blob(history_path, expected_sha256) is not None
+    staging = item / f".{history_path.name}.tmp"
+    staging_preexisting = staging.exists()
+    try:
+        _publish_noncanonical_history_blob(item, history_path, expected_sha256, original_bytes)
+    except Exception:
+        if not preexisting:
+            # Publication may have succeeded before its readback or private
+            # staging cleanup failed.  The writer still owns that new blob;
+            # never leave it orphaned merely because no return value escaped.
+            current = _noncanonical_read_owned_bytes(
+                item / "agent-runs.jsonl", failure_id="READBACK-INDETERMINATE"
+            )
+            if current == original_bytes:
+                published = _read_exact_history_blob(history_path, expected_sha256)
+                if published is not None:
+                    if published != original_bytes or (staging_preexisting and staging.exists()):
+                        _noncanonical_fail("HISTORY-CONFLICT", "new history cleanup identity is ambiguous")
+                    _cleanup_owned_history_staging(history_path, staging)
+                    identity = _noncanonical_file_identity(history_path.lstat())
+                    if not remove_exact_mixed_owned_file(history_path, original_bytes, identity):
+                        _noncanonical_fail("HISTORY-CONFLICT", "new history cleanup identity changed")
+                elif not staging_preexisting and staging.exists():
+                    identity = _noncanonical_file_identity(staging.lstat())
+                    if not remove_exact_mixed_owned_file(staging, original_bytes, identity):
+                        _noncanonical_fail("HISTORY-CONFLICT", "new history staging cleanup identity changed")
+        raise
+    metadata = history_path.lstat()
+    return history_path, not preexisting, _noncanonical_file_identity(metadata)
+
+
+def remove_exact_mixed_owned_file(
+    path: Path, expected: bytes, identity: tuple[int, int, int, int]
+) -> bool:
+    """Reclaim only a transaction-created ordinary file with identical identity and bytes."""
+
+    try:
+        descriptor, opened = _noncanonical_open_ordinary(path, writable=False)
+    except (LedgerNoncanonicalRecoveryError, FileNotFoundError):
+        return False
+    try:
+        if (
+            _noncanonical_file_identity(opened) != identity
+            or getattr(opened, "st_nlink", 1) != 1
+        ):
+            return False
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            actual = stream.read(len(expected) + 1)
+            after = os.fstat(stream.fileno())
+        if actual != expected or _noncanonical_file_identity(after) != identity:
+            return False
+        current = path.lstat()
+        if _noncanonical_file_identity(current) != identity:
+            return False
+        path.unlink()
+        return True
+    except OSError:
+        return False
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def _noncanonical_recovery_state(
     item: Path,
     expected_sha256: str,

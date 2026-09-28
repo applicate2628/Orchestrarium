@@ -14413,6 +14413,383 @@ def settle_legacy_ledger(
     return result
 
 
+def _mixed_recovery_fail(failure_id: str, message: str) -> None:
+    raise LifecycleError(f"WI-MIXED-LEDGER-{failure_id}", message)
+
+
+def _mixed_recovery_request(request_bytes: bytes) -> dict:
+    if not isinstance(request_bytes, bytes) or len(request_bytes) > 1_000_000:
+        _mixed_recovery_fail("REQUEST", "request is absent or exceeds the bounded size")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict:
+        result: dict = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate request key: {key}")
+            result[key] = value
+        return result
+
+    try:
+        request = json.loads(request_bytes.decode("utf-8"), object_pairs_hook=unique_object)
+    except (UnicodeDecodeError, ValueError) as exc:
+        _mixed_recovery_fail("REQUEST", f"request is not unique UTF-8 JSON: {exc}")
+    if not isinstance(request, dict) or set(request) != {
+        "schemaVersion", "operationId", "recordedAt", "workItem",
+        "expectedLedgerSha256", "targets",
+    } or request.get("schemaVersion") != 1:
+        _mixed_recovery_fail("REQUEST", "request fields or version differ")
+    operation_id = request.get("operationId")
+    recorded_at = request.get("recordedAt")
+    writer = _load_agent_run_ledger()
+    try:
+        writer._strict_migration_inputs(operation_id, recorded_at)
+    except (writer.LedgerMigrationError, TypeError, ValueError) as exc:
+        _mixed_recovery_fail("REQUEST", f"operation identity or UTC instant differs: {exc}")
+    work_item = request.get("workItem")
+    if not isinstance(work_item, str) or not re.fullmatch(
+        r"work-items/active/[A-Za-z0-9][A-Za-z0-9._-]*", work_item, re.ASCII
+    ):
+        _mixed_recovery_fail("REQUEST", "workItem must name one active relative record")
+    if not isinstance(request.get("expectedLedgerSha256"), str) or re.fullmatch(
+        r"[0-9a-f]{64}", request["expectedLedgerSha256"], re.ASCII
+    ) is None:
+        _mixed_recovery_fail("REQUEST", "expectedLedgerSha256 must be lowercase SHA-256")
+    targets = request.get("targets")
+    if not isinstance(targets, list) or not targets or len(targets) > 10_000:
+        _mixed_recovery_fail("REQUEST", "targets must be a bounded nonempty array")
+    seen_ordinals: set[int] = set()
+    seen_run_ids: set[str] = set()
+    for target in targets:
+        if not isinstance(target, dict):
+            _mixed_recovery_fail("REQUEST", "target is not an object")
+        action = target.get("action")
+        digest_field = {
+            "migrate-invalid-finding-class": "eventBodySha256",
+            "dispose-invalid-terminal": "physicalLineSha256",
+        }.get(action)
+        if digest_field is None or set(target) != {
+            "action", "rawLineOrdinal", "runId", digest_field, "launchRunId",
+        }:
+            _mixed_recovery_fail("REQUEST", "target action or digest codec differs")
+        ordinal = target.get("rawLineOrdinal")
+        run_id = target.get("runId")
+        launch_id = target.get("launchRunId")
+        digest = target.get(digest_field)
+        if (
+            type(ordinal) is not int or ordinal < 1 or ordinal in seen_ordinals
+            or not isinstance(run_id, str) or not run_id
+            or run_id.casefold() in seen_run_ids
+            or not isinstance(launch_id, str) or not launch_id
+            or not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest, re.ASCII) is None
+        ):
+            _mixed_recovery_fail("REQUEST", "target identity is invalid or repeated")
+        seen_ordinals.add(ordinal)
+        seen_run_ids.add(run_id.casefold())
+    return request
+
+
+def _mixed_recovery_controls(
+    item: Path, original: bytes, request: dict, writer: object, validator: object,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Classify each physical row once and build only existing typed controls."""
+
+    ledger = item / "agent-runs.jsonl"
+    physical = original.splitlines(keepends=True)
+    if not original.endswith(b"\n") or any(not line.strip() for line in physical):
+        _mixed_recovery_fail("HISTORY", "mixed recovery requires complete nonblank physical lines")
+    parse_errors: list[str] = []
+    metadata: list[dict[str, object]] = []
+    events = validator.load_jsonl(ledger, parse_errors, metadata, original)
+    if parse_errors or len(events) != len(physical) or len(metadata) != len(events):
+        _mixed_recovery_fail("HISTORY", "; ".join(parse_errors) or "physical row cardinality differs")
+    if any(event.get("schemaVersion") not in (1, 2) for event in events):
+        _mixed_recovery_fail("HISTORY", "history is not an integer V1/V2 ledger")
+    by_target = {target["rawLineOrdinal"]: target for target in request["targets"]}
+    by_run: dict[str, list[int]] = {}
+    for position, event in enumerate(events):
+        run_id = event.get("runId")
+        if isinstance(run_id, str):
+            by_run.setdefault(run_id.casefold(), []).append(position)
+    run_positions = {key: tuple(value) for key, value in by_run.items()}
+    seen: set[str] = set()
+    invalid_ordinals: set[int] = set()
+    for ordinal, event in enumerate(events, start=1):
+        row_errors: list[str] = []
+        validator.validate_event(event, item, seen, row_errors)
+        orphan = bool(
+            event.get("schemaVersion") == 2
+            and event.get("eventKind") == "terminal"
+            and event.get("status") == "completed"
+            and not validator.terminal_has_valid_earlier_launch(
+                events, ordinal - 1, item, run_positions
+            )
+        )
+        if row_errors or orphan:
+            invalid_ordinals.add(ordinal)
+        if ordinal in by_target:
+            target = by_target[ordinal]
+            if (
+                event.get("schemaVersion") != 2
+                or event.get("eventKind") != "terminal"
+                or event.get("runId") != target["runId"]
+                or event.get("launchRunId") != target["launchRunId"]
+                or any(field in event for field in (
+                    "migrationAction", "migratesRunId", "invalidationMode",
+                ))
+            ):
+                _mixed_recovery_fail("TARGET", f"target row {ordinal} is not an exact V2 terminal")
+            digest_field = (
+                "eventBodySha256" if target["action"] == "migrate-invalid-finding-class"
+                else "physicalLineSha256"
+            )
+            actual_digest = (
+                metadata[ordinal - 1]["sha256"] if digest_field == "eventBodySha256"
+                else _sha256_bytes(physical[ordinal - 1])
+            )
+            if target[digest_field] != actual_digest:
+                _mixed_recovery_fail("TARGET", f"target row {ordinal} {digest_field} differs")
+            if not row_errors and not orphan:
+                _mixed_recovery_fail("TARGET", f"target row {ordinal} has no invalid current relation")
+    if invalid_ordinals != set(by_target):
+        _mixed_recovery_fail("COVERAGE", "explicit targets do not cover exactly every invalid row")
+
+    controls: list[dict] = []
+    target_facts: list[dict] = []
+    for target in sorted(request["targets"], key=lambda row: row["rawLineOrdinal"]):
+        ordinal = target["rawLineOrdinal"]
+        event = events[ordinal - 1]
+        digest = target.get("eventBodySha256", target.get("physicalLineSha256"))
+        common = {
+            "schemaVersion": 2,
+            "runId": f"mixed-recovery-{request['operationId']}-{ordinal}",
+            "workItem": item.name,
+            "role": "lead", "executionRole": "main", "status": "completed",
+            "gate": "none", "startedAt": request["recordedAt"],
+            "updatedAt": request["recordedAt"],
+        }
+        if target["action"] == "migrate-invalid-finding-class":
+            replacement = {**event, "findingClass": "legacy-unclassified"}
+            controls.append({
+                **common,
+                "scope": ["ledger-migration:invalid-finding-class"],
+                "eventKind": "legacy-obligation-migration",
+                "migrationAction": "apply", "normalizationKind": "invalid-finding-class",
+                "migratesRunId": event["runId"],
+                "migratesEventSha256": digest,
+                "replacementEvent": replacement,
+                "evidence": [{"kind": "manual-check", "ref":
+                    f"invalid-finding-class {event['runId']} {digest} -> legacy-unclassified"}],
+            })
+            effective = replacement
+        else:
+            controls.append({
+                **common,
+                "scope": ["ledger-recovery:invalid-current-nonauthorizing"],
+                "eventKind": "closure-invalidation",
+                "invalidationMode": "invalid-current-nonauthorizing",
+                "invalidatesRawLineOrdinal": ordinal,
+                "invalidatesRunId": event["runId"],
+                "invalidatesEventSha256": digest,
+                "authorizing": False,
+                "evidence": [{"kind": "manual-check", "ref":
+                    f"approved exact target {event['runId']} {digest}"}],
+            })
+            effective = event
+        target_facts.append({**target, "beforeEvent": event,
+                             "afterEffectiveEvent": effective,
+                             "disposed": target["action"] == "dispose-invalid-terminal"})
+    return events, controls, target_facts
+
+
+def recover_mixed_current_ledger(
+    root: Path, request_bytes: bytes, *, apply_admitted: bool = False,
+    inject_failure: str | None = None,
+) -> dict:
+    """Lifecycle-owned exact-prefix mixed V1/V2 repair; no-apply is the default."""
+
+    request = _mixed_recovery_request(request_bytes)
+    if inject_failure not in {None, "post-history-publish", "crash-post-history"}:
+        _mixed_recovery_fail("REQUEST", "unsupported injection boundary")
+    if inject_failure is not None and not apply_admitted:
+        _mixed_recovery_fail("REQUEST", "failure injection is apply-only")
+    root = Path(root).resolve()
+    item = _active_migration_item(root, request["workItem"].split("/")[-1])
+    ledger = _require_lifecycle_mutation_path(
+        root, item / "agent-runs.jsonl", failure_id="WI-MIXED-LEDGER-DRIFT"
+    )
+    writer = _load_agent_run_ledger()
+    validator = writer.load_validator()
+    before_sha = request["expectedLedgerSha256"]
+    request_sha = _sha256_bytes(request_bytes)
+    history_path = item / f"agent-runs.history.{before_sha}.jsonl"
+    receipt_path = item / f"agent-runs.mixed.{request['operationId']}.receipt.json"
+    stage_path = ledger.with_suffix(".jsonl.tmp")
+    try:
+        with writer.ledger_write_lock(item):
+            current = writer._noncanonical_read_owned_bytes(ledger, failure_id="DRIFT")
+            current_is_original = _sha256_bytes(current) == before_sha
+            history = writer._read_exact_history_blob(history_path, before_sha)
+            if current_is_original:
+                original = current
+                if history is not None and history != original:
+                    _mixed_recovery_fail("HISTORY", "pre-existing history differs")
+            else:
+                if history is None:
+                    _mixed_recovery_fail("DRIFT", "changed ledger has no exact history blob")
+                original = history
+            events, controls, target_facts = _mixed_recovery_controls(
+                item, original, request, writer, validator
+            )
+            suffix = b"".join(
+                (writer.serialize_event(event) + "\n").encode("utf-8")
+                for event in controls
+            )
+            candidate = original + suffix
+            replay = not current_is_original
+            if replay and current != candidate:
+                _mixed_recovery_fail("DRIFT", "ledger is not the exact committed suffix")
+            if receipt_path.exists() and not replay:
+                _mixed_recovery_fail("RECEIPT", "receipt exists without committed ledger")
+            stage_preexisting = stage_path.exists()
+            stage_identity = writer._write_exact_staging_file(stage_path, candidate)
+            obligations: list = []
+            authority: list = []
+            validation_errors = validator.validate_work_item(
+                item, ledger_path=stage_path, strict_revise=False,
+                validate_status_file=False, obligation_state_out=obligations,
+                authority_state_out=authority,
+            )
+            if validation_errors or len(obligations) != 1 or len(authority) != 1:
+                if not stage_preexisting and not writer.remove_exact_mixed_owned_file(
+                    stage_path, candidate, stage_identity
+                ):
+                    _mixed_recovery_fail("RESIDUE", "invalid candidate and changed owned staging")
+                _mixed_recovery_fail("CANDIDATE", "; ".join(validation_errors) or "candidate reduction incomplete")
+            open_revise = [row.run_id for row in obligations[0].open_revise]
+            open_launches = [row.run_id for row in obligations[0].open_launches]
+            raw_revise = {str(event["runId"]) for event in events if event.get("schemaVersion") == 2 and event.get("gate") == "REVISE"}
+            raw_launches = {str(event["runId"]) for event in events if event.get("eventKind") == "launch"}
+            closed_revise = {
+                str(closed)
+                for ordinal, event in enumerate(events, start=1)
+                if authority[0].get(ordinal, validator._NO_LEDGER_AUTHORITY).closer_eligible
+                for closed in event.get("closesRunIds", ())
+            }
+            settled_launches = {
+                str(event["launchRunId"])
+                for ordinal, event in enumerate(events, start=1)
+                if authority[0].get(ordinal, validator._NO_LEDGER_AUTHORITY).terminal_eligible
+                and isinstance(event.get("launchRunId"), str)
+            }
+            if (
+                raw_revise != (set(open_revise) | (raw_revise & closed_revise))
+                or raw_launches != (set(open_launches) | (raw_launches & settled_launches))
+            ):
+                if not stage_preexisting and not writer.remove_exact_mixed_owned_file(stage_path, candidate, stage_identity):
+                    _mixed_recovery_fail("RESIDUE", "obligation mismatch and changed owned staging")
+                _mixed_recovery_fail("OBLIGATION", "raw review or launch identity was not conserved")
+            axis_names = (
+                "launchEligible", "terminalEligible", "reviseTargetEligible",
+                "closerEligible", "artifactEvidenceEligible",
+            )
+            for fact in target_facts:
+                mask = authority[0].get(fact["rawLineOrdinal"], validator._NO_LEDGER_AUTHORITY)
+                fact["beforeAuthority"] = dict.fromkeys(axis_names, False)
+                fact["afterAuthority"] = dict(zip(axis_names, (
+                    mask.launch_eligible, mask.terminal_eligible,
+                    mask.revise_target_eligible, mask.closer_eligible,
+                    mask.artifact_evidence_eligible,
+                )))
+            result = {
+                "applied": False, "replay": replay,
+                "operationId": request["operationId"],
+                "ledgerBeforeSha256": before_sha,
+                "ledgerAfterSha256": _sha256_bytes(candidate),
+                "historyPath": history_path.name,
+                "targets": target_facts,
+                "openReviseRunIds": open_revise,
+                "openLaunchRunIds": open_launches,
+                "settledReviseRunIds": sorted(raw_revise & closed_revise),
+                "settledLaunchRunIds": sorted(raw_launches & settled_launches),
+            }
+            receipt = {
+                "schemaVersion": 1, "operationId": request["operationId"],
+                "recordedAt": request["recordedAt"],
+                "requestSha256": request_sha,
+                "ledgerBeforeSha256": before_sha,
+                "ledgerBeforeByteLength": len(original),
+                "historyPath": history_path.name,
+                "historySha256": before_sha,
+                "ledgerAfterSha256": _sha256_bytes(candidate),
+                "ledgerAfterByteLength": len(candidate),
+                "targets": target_facts,
+                "openReviseRunIds": open_revise,
+                "openLaunchRunIds": open_launches,
+                "settledReviseRunIds": result["settledReviseRunIds"],
+                "settledLaunchRunIds": result["settledLaunchRunIds"],
+            }
+            receipt_bytes = json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+            if replay:
+                if history != original or current != candidate:
+                    _mixed_recovery_fail("REPLAY", "history or committed suffix differs")
+                if apply_admitted:
+                    _projection_create_or_exact(receipt_path, receipt_bytes, "WI-MIXED-LEDGER-RECEIPT")
+                if not stage_preexisting and not writer.remove_exact_mixed_owned_file(stage_path, candidate, stage_identity):
+                    _mixed_recovery_fail("RESIDUE", "replay owned staging changed")
+                return {**result, "applied": apply_admitted, "replay": True}
+            if not apply_admitted:
+                if not stage_preexisting and not writer.remove_exact_mixed_owned_file(stage_path, candidate, stage_identity):
+                    _mixed_recovery_fail("RESIDUE", "no-apply owned staging changed")
+                return result
+            history_created = False
+            history_identity = None
+            replaced = False
+            try:
+                published_path, history_created, history_identity = writer.publish_mixed_current_history_blob(
+                    item, before_sha, original
+                )
+                if published_path != history_path:
+                    _mixed_recovery_fail("HISTORY", "history path changed")
+                if inject_failure == "crash-post-history":
+                    raise KeyboardInterrupt("injected abrupt history interruption")
+                if inject_failure == "post-history-publish":
+                    _mixed_recovery_fail("INJECTED", "injected handled pre-append failure")
+                writer._replace_exact_staging_file(stage_path, ledger, candidate, stage_identity)
+                replaced = True
+                if writer._noncanonical_read_owned_bytes(ledger, failure_id="READBACK-INDETERMINATE") != candidate:
+                    _mixed_recovery_fail("READBACK", "committed suffix readback differs")
+                _projection_create_or_exact(receipt_path, receipt_bytes, "WI-MIXED-LEDGER-RECEIPT")
+                if receipt_path.read_bytes() != receipt_bytes:
+                    _mixed_recovery_fail("RECEIPT", "receipt readback differs")
+                return {**result, "applied": True, "replay": False}
+            except Exception as exc:
+                if replaced:
+                    _mixed_recovery_fail("COMMIT-INDETERMINATE", f"ledger changed; exact replay required: {exc}")
+                try:
+                    observed = writer._noncanonical_read_owned_bytes(
+                        ledger, failure_id="READBACK-INDETERMINATE"
+                    )
+                except writer.LedgerNoncanonicalRecoveryError:
+                    _mixed_recovery_fail("COMMIT-INDETERMINATE", "ledger cannot be read; preserve history for exact replay")
+                if observed != original:
+                    _mixed_recovery_fail("COMMIT-INDETERMINATE", "ledger may have changed; preserve history for exact replay")
+                clean = True
+                if not stage_preexisting:
+                    clean = writer.remove_exact_mixed_owned_file(stage_path, candidate, stage_identity) and clean
+                if not clean:
+                    _mixed_recovery_fail("RESIDUE", "handled failure left changed or ambiguous owned staging")
+                if history_created and history_identity is not None:
+                    clean = writer.remove_exact_mixed_owned_file(history_path, original, history_identity) and clean
+                if not clean:
+                    _mixed_recovery_fail("RESIDUE", "handled failure left changed or ambiguous owned residue")
+                if isinstance(exc, LifecycleError):
+                    raise
+                _mixed_recovery_fail("COMMIT", f"pre-append publication failed: {exc}")
+    except (writer.LedgerNoncanonicalRecoveryError, writer.LedgerWriteLockError) as exc:
+        _mixed_recovery_fail("WRITER", str(exc))
+
+
 def _projection_active_records(records: list[tuple[dict, bytes]]) -> dict[str, tuple[dict, bytes]]:
     """Reduce exact apply/revoke lines without granting the registry new authority."""
     active: dict[str, tuple[dict, bytes]] = {}
@@ -18206,6 +18583,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_root(settle_legacy)
     settle_legacy.add_argument("--request-file", required=True)
     settle_legacy.add_argument("--apply-admitted", action="store_true")
+    recover_mixed = sub.add_parser("recover-mixed-current-ledger")
+    _add_root(recover_mixed)
+    recover_mixed.add_argument("--request-file", required=True)
+    recover_mixed.add_argument("--apply-admitted", action="store_true")
     projection_apply = sub.add_parser("apply-legacy-ledger-projection")
     _add_root(projection_apply)
     projection_apply.add_argument("--manifest-file", required=True)
@@ -18612,6 +18993,12 @@ def main(argv: list[str]) -> int:
                     separators=(",", ":"),
                 )
             )
+        elif args.command == "recover-mixed-current-ledger":
+            result = recover_mixed_current_ledger(
+                root, _read_arg_file(args.request_file),
+                apply_admitted=args.apply_admitted,
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         elif args.command == "apply-legacy-ledger-projection":
             v2_values = (
                 args.ledger_manifest_path,

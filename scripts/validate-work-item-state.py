@@ -1306,7 +1306,7 @@ class RuntimeLedgerRowV1:
     projected_event_sha256: str
     epoch: Literal[
         "raw", "manifest-profile", "sealed-prefix", "strict-suffix",
-        "disposed-suffix", "disposed-raw", "transferred",
+        "disposed-suffix", "disposed-raw", "transferred", "migration-replaced",
     ]
     authority: LedgerAuthorityV1
 
@@ -1406,6 +1406,8 @@ def _runtime_rows_from_projection(
                 else "manifest-profile"
                 if row.transformation == "manifest-projected"
                 and row.event.get("schemaVersion") == "1.0"
+                else "migration-replaced"
+                if row.transformation == "migration-replaced"
                 else epoch
             ),
             LedgerAuthorityV1(
@@ -2133,6 +2135,7 @@ def _derive_authority_masks(
                 )
         eligible = bool(
             (current_ok or historical_ok)
+            and row.epoch != "migration-replaced"
             and isinstance(run_id, str)
             and run_id
             and len(positions.get(run_id, ())) == 1
@@ -2176,12 +2179,14 @@ def _derive_authority_masks(
         )
         closer = bool(
             individually_current
+            and row.epoch != "migration-replaced"
             and event.get("gate") in CLOSURE_GATES
             and isinstance(event.get("closesRunIds"), list)
             and event.get("closesRunIds")
         )
         artifact = bool(
-            individually_current and ("artifact" in event or "evidence" in event)
+            individually_current and row.epoch != "migration-replaced"
+            and ("artifact" in event or "evidence" in event)
         )
         masks.append(
             LedgerAuthorityV1(
@@ -2788,27 +2793,37 @@ def validate_closure(
     )
 
 
-def migration_terminal_launch_relation_error(events: list[dict], target_pos: int, item: Path) -> str | None:
+def migration_terminal_launch_relation_error(
+    events: Sequence[Mapping[str, object]], target_pos: int, item: Path,
+    relation_index: tuple[Mapping[str, list[int]], Mapping[str, list[int]]] | None = None,
+) -> str | None:
     """Return the exact terminal/launch relation failure for a migration target."""
     target = events[target_pos]
     launch_id = target.get("launchRunId")
     if not isinstance(launch_id, str):
         return "migration target has no launchRunId"
-    launches = [
-        (pos, event) for pos, event in enumerate(events[:target_pos])
-        if event.get("runId") == launch_id
-    ]
-    if len(launches) != 1 or launches[0][1].get("eventKind") != "launch":
+    if relation_index is None:
+        positions: dict[str, list[int]] = {}
+        terminals_by_launch: dict[str, list[int]] = {}
+        for pos, event in enumerate(events):
+            run_id = event.get("runId")
+            if isinstance(run_id, str):
+                positions.setdefault(run_id, []).append(pos)
+            if event.get("eventKind") == "terminal" and isinstance(event.get("launchRunId"), str):
+                terminals_by_launch.setdefault(event["launchRunId"], []).append(pos)
+        relation_index = positions, terminals_by_launch
+    positions, terminals_by_launch = relation_index
+    launches = positions.get(launch_id, ())
+    if (
+        len(launches) != 1 or launches[0] >= target_pos
+        or events[launches[0]].get("eventKind") != "launch"
+    ):
         return "migration target does not reference one earlier launch"
     launch_errors: list[str] = []
-    validate_event(launches[0][1], item, set(), launch_errors)
+    validate_event(dict(events[launches[0]]), item, set(), launch_errors)
     if launch_errors:
         return "migration target launch is not individually valid"
-    terminals = [
-        pos for pos, event in enumerate(events)
-        if event.get("eventKind") == "terminal" and event.get("launchRunId") == launch_id
-    ]
-    if terminals != [target_pos]:
+    if terminals_by_launch.get(launch_id, ()) != [target_pos]:
         return "migration target launch has duplicate or mismatched terminal"
     return None
 
@@ -3069,6 +3084,25 @@ _INVALID_CURRENT_DISPOSITION_NOTICE = (
 )
 
 
+def terminal_has_valid_earlier_launch(
+    events: Sequence[Mapping[str, object]], target_position: int, item: Path,
+    run_positions: Mapping[str, tuple[int, ...]],
+) -> bool:
+    """Test one indexed physical relation, including the launch's own validity."""
+
+    target = events[target_position]
+    launch_id = target.get("launchRunId")
+    matches = run_positions.get(launch_id.casefold(), ()) if isinstance(launch_id, str) else ()
+    if len(matches) != 1 or matches[0] >= target_position:
+        return False
+    launch = events[matches[0]]
+    if launch.get("runId") != launch_id or launch.get("eventKind") != "launch":
+        return False
+    launch_errors: list[str] = []
+    validate_event(dict(launch), item, set(), launch_errors)
+    return not launch_errors
+
+
 def _invalid_current_disposition_target(
     rows: Sequence[RuntimeLedgerRowV1],
     item: Path,
@@ -3078,6 +3112,10 @@ def _invalid_current_disposition_target(
     errors: list[str],
     *,
     raw_v2: bool = False,
+    ordinal_positions: Mapping[int, int] | None = None,
+    run_positions: Mapping[str, tuple[int, ...]] | None = None,
+    relation_events: Sequence[Mapping[str, object]] | None = None,
+    allow_orphan: bool = False,
 ) -> int | None:
     """Return one exact invalid non-control suffix target for writer and reader."""
 
@@ -3085,30 +3123,33 @@ def _invalid_current_disposition_target(
     ordinal = disposition_event.get("invalidatesRawLineOrdinal")
     target_run_id = disposition_event.get("invalidatesRunId")
     target_sha256 = disposition_event.get("invalidatesEventSha256")
+    if ordinal_positions is None:
+        ordinal_positions = {row.raw_line_ordinal: pos for pos, row in enumerate(rows)}
+    if run_positions is None:
+        by_run: dict[str, list[int]] = {}
+        for pos, row in enumerate(rows):
+            run_id = row.event.get("runId")
+            if isinstance(run_id, str):
+                by_run.setdefault(run_id.casefold(), []).append(pos)
+        run_positions = {key: tuple(value) for key, value in by_run.items()}
+    target_position = ordinal_positions.get(ordinal) if type(ordinal) is int else None
     if (
         type(ordinal) is not int
         or ordinal <= prefix_line_count
         or ordinal < 1
-        or ordinal > len(rows)
-        or ordinal - 1 >= disposition_position
+        or target_position is None
+        or target_position >= disposition_position
     ):
         fail(errors, f"{failure_id}: target ordinal is outside the earlier strict suffix")
         return None
-    target_position = ordinal - 1
     target = rows[target_position]
     event = target.event
-    run_positions = [
-        position
-        for position, row in enumerate(rows)
-        if isinstance(target_run_id, str)
-        and isinstance(row.event.get("runId"), str)
-        and row.event["runId"].casefold() == target_run_id.casefold()
-    ]
+    matching_runs = run_positions.get(target_run_id.casefold(), ()) if isinstance(target_run_id, str) else ()
     if (
         target.epoch not in {"strict-suffix", "raw"}
         or target.raw_line_sha256 != target_sha256
         or event.get("runId") != target_run_id
-        or len(run_positions) != 1
+        or len(matching_runs) != 1
     ):
         fail(errors, f"{failure_id}: target ordinal/hash/runId identity differs")
         return None
@@ -3129,7 +3170,17 @@ def _invalid_current_disposition_target(
         return None
     target_errors: list[str] = []
     _validate_event(dict(event), item, set(), target_errors)
-    if not target_errors:
+    orphan = bool(
+        allow_orphan
+        and relation_events is not None
+        and event.get("schemaVersion") == 2
+        and event.get("eventKind") == "terminal"
+        and event.get("status") == "completed"
+        and not terminal_has_valid_earlier_launch(
+            relation_events, target_position, item, run_positions
+        )
+    )
+    if not target_errors and not orphan:
         fail(errors, f"{failure_id}: target is current-schema valid")
         return None
     if raw_v2:
@@ -3148,7 +3199,7 @@ def _invalid_current_disposition_target(
             event.get("schemaVersion") != 2
             or event.get("eventKind") != "terminal"
             or event.get("status") != "completed"
-            or target_errors != expected_errors
+            or (target_errors != expected_errors and not (orphan and not target_errors))
         ):
             fail(errors, f"{failure_id}: raw V2 target has unrelated per-event errors")
             return None
@@ -3330,6 +3381,7 @@ def _apply_active_suffix_dispositions(
     prefix_line_count: int,
     *,
     raw_v2: bool = False,
+    allow_orphan: bool = False,
 ) -> tuple[
     tuple[RuntimeLedgerRowV1, ...],
     tuple[SuffixDispositionNoticeV1, ...],
@@ -3337,14 +3389,20 @@ def _apply_active_suffix_dispositions(
 ]:
     errors: list[str] = []
     targets: dict[int, tuple[int, Mapping[str, object]]] = {}
+    ordinal_positions = {row.raw_line_ordinal: pos for pos, row in enumerate(rows)}
+    by_run: dict[str, list[int]] = {}
+    for pos, row in enumerate(rows):
+        run_id = row.event.get("runId")
+        if isinstance(run_id, str):
+            by_run.setdefault(run_id.casefold(), []).append(pos)
+    run_positions = {key: tuple(value) for key, value in by_run.items()}
+    relation_events = tuple(row.event for row in rows)
     for disposition_position, row in enumerate(rows):
         event = row.event
         if event.get("invalidationMode") != _INVALID_CURRENT_DISPOSITION_MODE:
             continue
         disposition_run_id = event.get("runId")
-        if sum(
-            other.event.get("runId") == disposition_run_id for other in rows
-        ) != 1:
+        if not isinstance(disposition_run_id, str) or len(run_positions.get(disposition_run_id.casefold(), ())) != 1:
             fail(
                 errors,
                 "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-CONFLICT: disposition runId is not unique",
@@ -3366,6 +3424,10 @@ def _apply_active_suffix_dispositions(
             event,
             errors,
             raw_v2=raw_v2,
+            ordinal_positions=ordinal_positions,
+            run_positions=run_positions,
+            relation_events=relation_events,
+            allow_orphan=allow_orphan,
         )
         if target_position is None:
             continue
@@ -4176,24 +4238,66 @@ def _classify_ledger_h1_selection(
     return "ordinary-nonmember", None
 
 
-def _ordinary_raw_v2_effective_context(
-    item: Path, selected_ledger_path: str, raw: bytes
-) -> LedgerValidationContextV1:
-    """Read one ordinary ledger's physical bytes and apply only eligible raw-V2 dispositions."""
+def _ordinary_current_disposition_rows(
+    rows: tuple[LedgerProjectionRowV1, ...], item: Path, ledger_path: str,
+    ledger_bytes: bytes,
+) -> tuple[tuple[RuntimeLedgerRowV1, ...], tuple[str, ...]]:
+    """Apply disjoint physical-identity controls after shape and class projection."""
 
-    diagnostics: list[str] = []
-    rows = _ledger_h1_runtime_rows(selected_ledger_path, raw, None, item, diagnostics)
-    if not diagnostics and any(
+    runtime_rows = _runtime_rows_from_projection(rows)
+    if not any(
         row.event.get("invalidationMode") == _INVALID_CURRENT_DISPOSITION_MODE
         for row in rows
     ):
-        if any(row.event.get("schemaVersion") != 2 for row in rows):
-            fail(diagnostics, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: ordinary ledger must be entirely V2")
-        else:
-            rows, _notices, disposition_errors = _apply_active_suffix_dispositions(
-                rows, item, selected_ledger_path, 0, raw_v2=True
-            )
-            diagnostics.extend(disposition_errors)
+        return runtime_rows, ()
+    if any(
+        row.event.get("schemaVersion") not in (1, 2)
+        or row.transformation not in {"raw", "migration-replaced"}
+        for row in rows
+    ):
+        return runtime_rows, ("WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: ordinary ledger has ineligible projection",)
+    physical_hashes = {
+        ordinal: hashlib.sha256(line).hexdigest()
+        for ordinal, line in enumerate(ledger_bytes.splitlines(keepends=True), start=1)
+    }
+    runtime_rows = tuple(
+        RuntimeLedgerRowV1(
+            row.event, row.raw_line_ordinal,
+            physical_hashes.get(row.raw_line_ordinal, ""),
+            row.raw_body_sha256, row.projected_event_sha256,
+            row.epoch, row.authority,
+        )
+        for row in runtime_rows
+    )
+    effective, _notices, errors = _apply_active_suffix_dispositions(
+        runtime_rows, item, ledger_path, 0, raw_v2=True,
+        allow_orphan=any(row.event.get("schemaVersion") == 1 for row in rows),
+    )
+    return effective, errors
+
+
+def _ordinary_raw_v2_effective_context(
+    item: Path, selected_ledger_path: str, raw: bytes
+) -> LedgerValidationContextV1:
+    """Read one ordinary ledger through the same typed control composition."""
+
+    diagnostics: list[str] = []
+    metadata: list[dict[str, object]] = []
+    selected = item / "agent-runs.jsonl"
+    events = load_jsonl(selected, diagnostics, metadata, raw)
+    projection_rows = _ledger_projection_rows(events, metadata, diagnostics)
+    shape_rows, _shape_counters, shape_errors = _project_manifest_rows(
+        projection_rows, item, selected, raw
+    )
+    diagnostics.extend(shape_errors)
+    migrated_rows, _migration_counters, migration_errors = _project_migration_rows(
+        shape_rows, item
+    )
+    diagnostics.extend(migration_errors)
+    rows, disposition_errors = _ordinary_current_disposition_rows(
+        migrated_rows, item, selected_ledger_path, raw
+    )
+    diagnostics.extend(disposition_errors)
     return LedgerValidationContextV1(
         selected_ledger_path, rows, None,
         LedgerCompatibilityObservationV1("inactive", (), tuple(diagnostics)),
@@ -6303,10 +6407,13 @@ def project_legacy_obligation_migrations(
 
     errors: list[str] = []
     positions: dict[str, list[int]] = {}
+    terminals_by_launch: dict[str, list[int]] = {}
     for pos, event in enumerate(events):
         run_id = event.get("runId")
         if isinstance(run_id, str):
             positions.setdefault(run_id, []).append(pos)
+        if event.get("eventKind") == "terminal" and isinstance(event.get("launchRunId"), str):
+            terminals_by_launch.setdefault(event["launchRunId"], []).append(pos)
 
     active: dict[int, dict] = {}
     applies: dict[str, tuple[int, dict]] = {}
@@ -6387,9 +6494,9 @@ def project_legacy_obligation_migrations(
             if candidate_errors:
                 errors.append(f"{anchor.get('runId')}: migration target retains another invalid diagnostic")
                 continue
-            relation_events = list(events)
-            relation_events[target_pos] = normalized
-            relation_error = migration_terminal_launch_relation_error(relation_events, target_pos, item)
+            relation_error = migration_terminal_launch_relation_error(
+                events, target_pos, item, (positions, terminals_by_launch)
+            )
             if relation_error is not None:
                 errors.append(f"{anchor.get('runId')}: {relation_error}")
                 continue
@@ -6721,6 +6828,7 @@ def validate_work_item(
     projection_registry_bytes: bytes | None = None,
     compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
     obligation_state_out: list[WorkItemObligationStateV1] | None = None,
+    authority_state_out: list[dict[int, LedgerAuthorityV1]] | None = None,
 ) -> list[str]:
     """ledger_path: candidate-validation seam — validate THIS file instead of the live
     ledger (the atomic-write flow validates its temp candidate before os.replace).
@@ -6945,28 +7053,20 @@ def validate_work_item(
     inherited_rows = _inherited_transfer_rows(item, errors)
     effective_rows = inherited_rows + native_effective_rows
     effective_events = _row_events(effective_rows)
-    runtime_rows = _runtime_rows_from_projection(effective_rows)
-    if any(
+    root_relative = (
+        selected_ledger.absolute().relative_to(root.absolute()).as_posix()
+        if root is not None else str(selected_ledger)
+    )
+    native_runtime_rows, disposition_errors = _ordinary_current_disposition_rows(
+        native_effective_rows, item, root_relative, ledger_bytes
+    )
+    errors.extend(disposition_errors)
+    if inherited_rows and any(
         row.event.get("invalidationMode") == _INVALID_CURRENT_DISPOSITION_MODE
         for row in native_effective_rows
     ):
-        if (
-            inherited_rows
-            or any(row.transformation != "raw" for row in native_effective_rows)
-            or len(native_effective_rows) != len(events)
-        ):
-            fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: ordinary ledger must be unprojected raw V2")
-        else:
-            root_relative = (
-                selected_ledger.absolute().relative_to(root.absolute()).as_posix()
-                if root is not None else str(selected_ledger)
-            )
-            raw_context = _ordinary_raw_v2_effective_context(
-                item, root_relative, ledger_bytes
-            )
-            errors.extend(raw_context.observation.diagnostics)
-            if not raw_context.observation.diagnostics:
-                runtime_rows = raw_context.rows
+        fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: inherited rows cannot share recovery")
+    runtime_rows = _runtime_rows_from_projection(inherited_rows) + native_runtime_rows
     active_positions, event_validity, open_revise, open_launches = (
         _reduce_effective_current_state(
             runtime_rows,
@@ -6976,6 +7076,11 @@ def validate_work_item(
             context=None,
         )
     )
+    if authority_state_out is not None:
+        authority_state_out.append({
+            row.raw_line_ordinal: validity.authority
+            for row, validity in zip(runtime_rows, event_validity)
+        })
     _capture_obligation_state(
         obligation_state_out, effective_rows, open_revise, open_launches
     )
