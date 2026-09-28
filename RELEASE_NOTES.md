@@ -2,6 +2,11 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-29
+
+- **Mixed current V1/V2 work-item ledgers have an append-only recovery route.** `recover-mixed-current-ledger` binds exact physical rows, preserves the original bytes in create-once history, appends only typed nonauthorizing controls, and restores ordinary append while leaving unresolved review obligations and strict close intact. Focused and adjacent source checks passed; the reported receiving-machine ledger has not been probed or changed.
+- **Archived retained scratch has an opt-in, per-entry release route.** The lifecycle owner requires accepted canonical evidence and an exact no-follow inventory, publishes a create-once receipt before removal, and resumes exact interrupted settlement; absent receipts retain the old behavior. Focused and adjacent source checks passed. No historical archive bytes or real retained root were changed, and this does not authorize bulk scratch cleanup or receiver acceptance.
+
 ## 2026-09-28
 
 - **Codex hook-health trust checks now fail if the app-server standard-error reader fails.** The checker waits for its output readers after the app-server shutdown attempt and before closing their pipes; a standard-error read error becomes a bounded, redacted health failure instead of an unhandled daemon-thread exception alongside a clean `PASS`. **Why it matters:** operators no longer mistake a crashed diagnostic reader for a fully clean installed-hook verification. Focused source tests and one source-driven installed-like health smoke passed; the installed checker itself was not updated in this lane.

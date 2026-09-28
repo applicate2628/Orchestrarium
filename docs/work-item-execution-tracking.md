@@ -653,6 +653,45 @@ same operator-authorized missing-evidence repair to every supported flat
 category, including roadmaps, using that category's own UTC/detail/evidence
 fields.
 
+## Release one archived retained scratch entry
+
+An archived ledger entry with `scratchEvidence.disposition: retain` remains
+required by ordinary close replay. Release is an opt-in post-close operation
+for exactly one terminal `runId` and `entryId`; it does not authorize a batch
+cleanup or change existing archive bytes. First independently accept a
+same-item canonical artifact and a concrete evidence or reproduction rationale.
+Copy the exact artifact into the archived item as an additive file. Derive
+`--expected-event-sha256` from the terminal ledger line's stored bytes after
+removing its line ending, without parsing and reserializing the event.
+
+```powershell
+python scripts/mutate-work-item.py release-retained-scratch --root <repository> --slug <archived-slug> --terminal-run-id <run-id> --expected-event-sha256 <raw-line-sha256> --entry-id <entry-id> --artifact <item-relative-artifact> --rationale "<specific accepted evidence or reproduction>" --apply
+```
+
+Absent `--apply`, the command refuses without creating a receipt or removing
+scratch. It inventories the exact selected ordinary file or directory without
+following symbolic links, then creates one item-scoped receipt under
+`retained-scratch-releases/` before renaming or unlinking the source. Each
+surviving tombstone entry must still match its receipt row; retry the same
+command after an interruption. A complete, exactly matching private receipt
+stage left before final publication is removed on retry. If final and stage
+are the sole two hard links to the same complete, valid receipt, both release
+retry and archived close replay unlink only the stage before strict receipt
+readback. A partial, mismatched, extra-linked, or unclassifiable stage is
+preserved and blocks release pending owner review.
+A valid receipt lets archived close replay
+settle an unchanged partial tombstone or accept final absence. Missing or
+changed artifact, receipt, survivor, or relied-on archived target fails closed.
+
+An in-root link target may be removed only under the operator's independently
+accepted artifact/reproduction rationale. A repository target outside that root
+must either be an ordinary file or link-free directory inside the same archive,
+or an ordinary file whose exact bytes equal the canonical artifact. The latter
+is bound as artifact custody and no longer requires the old target path on
+receiver replay. Other targets stay retained. Receiver or rollback software
+without this receipt reader must not consume a released archive; release of one
+declared root never grants a whole-repository cleanup `PASS`.
+
 ## Operator Rules
 
 - Do not trust a subagent report without a matching ledger event and independent verification evidence.

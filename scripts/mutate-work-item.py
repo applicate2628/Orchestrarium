@@ -821,6 +821,7 @@ class ScratchDisposition:
     proof: dict | None
     canonical_pointer: Path
     snapshot: object | None
+    release_receipt: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -3744,6 +3745,318 @@ def _scratch_namespace_entries(owner_root: Path) -> tuple[set[Path], set[Path]]:
     return set(inspection.originals), set(inspection.tombstones)
 
 
+def _release_receipt_path(item: Path, run_id: str, entry_id: str) -> Path:
+    identity = _sha256_bytes(f"{run_id}\0{entry_id}".encode("utf-8"))
+    return item / "retained-scratch-releases" / f"{identity}.json"
+
+
+def _release_event_binding(item: Path, run_id: str, entry_id: str) -> tuple[str, dict]:
+    matches: list[tuple[str, dict]] = []
+    for raw_line in (item / "agent-runs.jsonl").read_bytes().splitlines():
+        try:
+            event = json.loads(raw_line)
+        except (ValueError, TypeError) as exc:
+            raise LifecycleError("WI-LEDGER-UNSETTLED", "archived ledger is malformed") from exc
+        if isinstance(event, dict) and event.get("runId") == run_id:
+            matches.append((_sha256_bytes(raw_line), event))
+    if len(matches) != 1 or matches[0][1].get("eventKind") != "terminal":
+        raise LifecycleError("WI-SCRATCH-RELEASE-IDENTITY", "one exact terminal event is required")
+    entries = matches[0][1].get("scratchEvidence", [])
+    selected = [entry for entry in entries if isinstance(entry, dict) and entry.get("entryId") == entry_id]
+    if len(selected) != 1 or selected[0].get("disposition") != "retain":
+        raise LifecycleError("WI-SCRATCH-RELEASE-IDENTITY", "one exact retained entry is required")
+    return matches[0][0], selected[0]
+
+
+def _release_artifact_snapshot(item: Path, artifact: str) -> str:
+    relative = PurePosixPath(artifact)
+    if (
+        not artifact or relative.is_absolute() or Path(artifact).drive or "\\" in artifact
+        or any(part in {"", ".", ".."} for part in relative.parts)
+        or relative.parts[0] == "retained-scratch-releases"
+    ):
+        raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "canonical artifact path is unsafe")
+    path = item.joinpath(*relative.parts)
+    _lifecycle_reject_unreduced_reparse(
+        path, failure_id="WI-SCRATCH-RELEASE-EVIDENCE",
+        message="canonical artifact crosses a link or reparse point",
+    )
+    if not path.is_file():
+        raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "canonical artifact is missing")
+    return _sha256_bytes(_capture_file_snapshot(
+        path, failure_id="WI-SCRATCH-RELEASE-EVIDENCE", require_single_link=True,
+    ).data)
+
+
+def _release_inventory(
+    root: Path, source: Path, original: Path, *, verify_link_targets: bool,
+) -> tuple[dict[str, str], ...]:
+    classifier = _scratch_classifier_module()
+    try:
+        return classifier.snapshot_release_tree(
+            Path(os.path.abspath(source)), Path(os.path.abspath(root)),
+            original_root=Path(os.path.abspath(original)),
+            verify_link_targets=verify_link_targets,
+        )
+    except (OSError, classifier.OwnedTreeClassificationError) as exc:
+        raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", str(exc)) from exc
+
+
+def _assign_release_target_custody(
+    root: Path, item: Path, rows: tuple[dict, ...], artifact_sha256: str,
+) -> tuple[dict, ...]:
+    assigned: list[dict] = []
+    for row in rows:
+        bound = dict(row)
+        if row["kind"] == "symlink":
+            if row["targetClass"] == "inside-root":
+                bound["targetCustody"] = "accepted-rationale"
+            else:
+                target = root / Path(row["targetPath"])
+                if item in target.parents:
+                    bound["targetCustody"] = "archive-target"
+                elif row["targetKind"] == "file" and row["targetSha256"] == artifact_sha256:
+                    bound["targetCustody"] = "artifact"
+                else:
+                    raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "repository link target lacks durable custody")
+        assigned.append(bound)
+    return tuple(assigned)
+
+
+def _verify_release_targets(
+    root: Path, item: Path, source: Path, rows: tuple[dict, ...], artifact_sha256: str,
+) -> None:
+    classifier = _scratch_classifier_module()
+    saved = {row["path"]: row for row in rows}
+    for row in rows:
+        if row["kind"] != "symlink":
+            continue
+        target = root / Path(row["targetPath"])
+        inside = target == source or source in target.parents
+        if ("inside-root" if inside else "repository") != row["targetClass"]:
+            raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "link target class differs from source root")
+        if inside:
+            if row["targetCustody"] != "accepted-rationale":
+                raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "inside-root target custody differs")
+            relative = target.relative_to(source).as_posix()
+            target_row = saved.get(relative)
+            if target_row is None or target_row["kind"] != row["targetKind"]:
+                raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "inside-root target is absent from release inventory")
+            if row["targetKind"] == "file":
+                digest = target_row["sha256"]
+            else:
+                prefix = "" if relative == "." else f"{relative}/"
+                subtree = []
+                for candidate in rows:
+                    path = candidate["path"]
+                    if path == relative or (prefix and path.startswith(prefix)) or relative == ".":
+                        if candidate["kind"] == "symlink":
+                            raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "inside-root target directory contains a link")
+                        subtree.append({
+                            **candidate,
+                            "path": "." if path == relative else path[len(prefix):],
+                        })
+                digest = _sha256_bytes(json.dumps(
+                    sorted(subtree, key=lambda candidate: candidate["path"]),
+                    sort_keys=True, separators=(",", ":"),
+                ).encode("utf-8"))
+            if digest != row["targetSha256"]:
+                raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "inside-root target digest differs from release inventory")
+            continue
+        if row["targetCustody"] == "artifact":
+            if row["targetKind"] != "file" or row["targetSha256"] != artifact_sha256:
+                raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "promoted target differs from artifact")
+            continue
+        if row["targetCustody"] != "archive-target" or target == item or item not in target.parents:
+            raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "repository link target lacks archive custody")
+        _lifecycle_reject_unreduced_reparse(
+            target, failure_id="WI-SCRATCH-RELEASE-EVIDENCE",
+            message="repository link target crosses a link or reparse point",
+        )
+        try:
+            kind, digest = classifier.release_target_digest(target, root)
+        except (OSError, classifier.OwnedTreeClassificationError) as exc:
+            raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "retained repository target is unsafe") from exc
+        if kind != row["targetKind"] or digest != row["targetSha256"]:
+            raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "retained repository target changed")
+
+
+def _valid_release_inventory_rows(rows: object) -> bool:
+    if not isinstance(rows, list) or not rows or len(rows) > _scratch_classifier_module().MAX_OWNED_TREE_ENTRIES:
+        return False
+    seen: set[str] = set()
+    kinds: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+            return False
+        path = row["path"]
+        parts = PurePosixPath(path).parts
+        if (
+            path in seen or "\\" in path or Path(path).drive or (path != "." and (
+                not parts or PurePosixPath(path).is_absolute()
+                or PurePosixPath(path).as_posix() != path
+                or any(part in {"", ".", ".."} for part in parts)
+            ))
+        ):
+            return False
+        seen.add(path)
+        kind = row.get("kind")
+        if kind == "directory":
+            if set(row) != {"path", "kind"}:
+                return False
+        elif kind == "file":
+            if set(row) != {"path", "kind", "sha256"} or not isinstance(row.get("sha256"), str) or SHA256_RE.fullmatch(row["sha256"]) is None:
+                return False
+        elif kind == "symlink":
+            if (
+                path == "." or set(row) != {"path", "kind", "rawTargetSha256", "targetPath", "targetClass", "targetKind", "targetSha256", "targetCustody"}
+                or any(not isinstance(row.get(key), str) or SHA256_RE.fullmatch(row[key]) is None for key in ("rawTargetSha256", "targetSha256"))
+                or row.get("targetClass") not in {"inside-root", "repository"}
+                or row.get("targetKind") not in {"file", "directory"}
+                or row.get("targetCustody") not in {"accepted-rationale", "archive-target", "artifact"}
+                or not isinstance(row.get("targetPath"), str)
+            ):
+                return False
+            target_path = PurePosixPath(row["targetPath"])
+            if (
+                target_path.is_absolute() or Path(row["targetPath"]).drive
+                or "\\" in row["targetPath"]
+                or target_path.as_posix() != row["targetPath"]
+                or any(part in {"", ".", ".."} for part in target_path.parts)
+            ):
+                return False
+        else:
+            return False
+        kinds[path] = kind
+    if rows[0]["path"] != "." or kinds["."] not in {"file", "directory"}:
+        return False
+    if kinds["."] == "file" and len(rows) != 1:
+        return False
+    return all(path == "." or kinds.get(str(PurePosixPath(path).parent)) == "directory" or (
+        PurePosixPath(path).parent == PurePosixPath(".") and kinds["."] == "directory"
+    ) for path in seen)
+
+
+def _release_receipt(
+    root: Path, item: Path, run_id: str, entry_id: str, entry: dict,
+) -> dict | None:
+    path = _release_receipt_path(item, run_id, entry_id)
+    _lifecycle_reject_unreduced_reparse(
+        path, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
+        message="release receipt crosses a link or reparse point",
+    )
+    if not path.exists():
+        return None
+    stage_prefix = f".{path.name}."
+    try:
+        with os.scandir(path.parent) as entries:
+            stages = sorted(
+                (Path(candidate.path) for candidate in entries
+                 if candidate.name.startswith(stage_prefix) and candidate.name.endswith(".tmp")),
+                key=lambda candidate: candidate.name,
+            )
+    except OSError as exc:
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt staging cannot be inspected") from exc
+    reconciliation_stage: Path | None = None
+    if stages:
+        if len(stages) != 1:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt has ambiguous staging")
+        reconciliation_stage = stages[0]
+        _lifecycle_reject_unreduced_reparse(
+            reconciliation_stage, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
+            message="release receipt staging path is unsafe",
+        )
+        try:
+            final_info = path.lstat()
+            stage_info = reconciliation_stage.lstat()
+        except OSError as exc:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt pair cannot be inspected") from exc
+        if not (
+            stat.S_ISREG(final_info.st_mode) and stat.S_ISREG(stage_info.st_mode)
+            and final_info.st_nlink == stage_info.st_nlink == 2
+            and (final_info.st_dev, final_info.st_ino)
+            == (stage_info.st_dev, stage_info.st_ino)
+        ):
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt stage is not its sole hard link")
+        raw = _capture_file_snapshot(
+            path, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
+        ).data
+        if _capture_file_snapshot(
+            reconciliation_stage, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
+        ).data != raw:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt stage bytes differ")
+    else:
+        raw = _capture_file_snapshot(
+            path, failure_id="WI-SCRATCH-RELEASE-RECEIPT", require_single_link=True,
+        ).data
+    try:
+        receipt = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt is malformed") from exc
+    event_hash, bound_entry = _release_event_binding(item, run_id, entry_id)
+    expected_keys = {
+        "schemaVersion", "archive", "runId", "entryId", "eventSha256", "entrySha256",
+        "sourcePath", "artifact", "artifactSha256", "rationale", "inventory", "inventorySha256",
+    }
+    if not isinstance(receipt, dict) or set(receipt) != expected_keys:
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt shape differs")
+    rows = receipt["inventory"]
+    try:
+        valid_rows = _valid_release_inventory_rows(rows)
+        digest = _sha256_bytes(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode("utf-8")) if valid_rows else ""
+    except (TypeError, ValueError, KeyError):
+        valid_rows, digest = False, ""
+    if not valid_rows or digest != receipt["inventorySha256"]:
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release inventory is malformed")
+    archive_relative = item.relative_to(root).as_posix()
+    entry_hash = _sha256_bytes(json.dumps(bound_entry, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    if (
+        receipt["schemaVersion"] != 1 or receipt["archive"] != archive_relative
+        or receipt["runId"] != run_id or receipt["entryId"] != entry_id
+        or receipt["eventSha256"] != event_hash or receipt["entrySha256"] != entry_hash
+        or receipt["sourcePath"] != entry["path"]
+        or not isinstance(receipt["rationale"], str) or not receipt["rationale"].strip()
+        or not isinstance(receipt["artifact"], str)
+        or receipt["artifactSha256"] != _release_artifact_snapshot(item, receipt["artifact"])
+    ):
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release identity or evidence differs")
+    _verify_release_targets(root, item, root / Path(entry["path"]), tuple(rows), receipt["artifactSha256"])
+    if reconciliation_stage is not None:
+        try:
+            rebound_final = path.lstat()
+            rebound_stage = reconciliation_stage.lstat()
+            if not (
+                rebound_final.st_nlink == rebound_stage.st_nlink == 2
+                and (rebound_final.st_dev, rebound_final.st_ino)
+                == (rebound_stage.st_dev, rebound_stage.st_ino)
+                == (final_info.st_dev, final_info.st_ino)
+            ):
+                raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt pair changed before settlement")
+            reconciliation_stage.unlink()
+        except OSError as exc:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt stage cannot be settled") from exc
+        if _capture_file_snapshot(
+            path, failure_id="WI-SCRATCH-RELEASE-RECEIPT", require_single_link=True,
+        ).data != raw:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt changed after stage settlement")
+    return receipt
+
+
+def _release_rows_match(actual: tuple[dict, ...], expected: tuple[dict, ...], *, subset: bool) -> bool:
+    original = {row["path"]: row for row in expected}
+    if not subset and len(actual) != len(expected):
+        return False
+    for row in actual:
+        reference = original.get(row["path"])
+        if reference is None:
+            return False
+        if row["kind"] == "symlink":
+            reference = {key: value for key, value in reference.items() if key not in {"targetSha256", "targetKind", "targetCustody"}}
+        if row != reference:
+            return False
+    return True
+
+
 def _scratch_disposition_plan(
     root: Path,
     item: Path,
@@ -3751,6 +4064,7 @@ def _scratch_disposition_plan(
     archived: bool,
     retention_paths: frozenset[Path] = frozenset(),
 ) -> tuple[ScratchDisposition, ...]:
+    root = Path(os.path.abspath(root))
     ledger = item / "agent-runs.jsonl"
     owner_root = root / ".scratch" / "work-items" / item.name
     classifier = _scratch_classifier_module()
@@ -3815,7 +4129,11 @@ def _scratch_disposition_plan(
                 "WI-SCRATCH-DISPOSITION-CONFLICT",
                 f"both original and tombstone exist for {entry['path']}",
             )
-        if entry["disposition"] == "retain" and (tombstone_exists or not original_exists):
+        release_receipt = (
+            _release_receipt(root, item, run_id, entry["entryId"], entry)
+            if archived and entry["disposition"] == "retain" else None
+        )
+        if entry["disposition"] == "retain" and release_receipt is None and (tombstone_exists or not original_exists):
             raise LifecycleError(
                 "WI-SCRATCH-RETAINED-EVIDENCE-MISSING",
                 f"retained scratch evidence is missing or tombstoned: {entry['path']}",
@@ -3841,7 +4159,16 @@ def _scratch_disposition_plan(
                 "WI-SCRATCH-POINTER-OUTSIDE-ITEM",
                 "; ".join(pointer_errors) or "missing canonical pointer",
             )
-        if entry["disposition"] == "retain":
+        if release_receipt is not None:
+            expected_rows = tuple(release_receipt["inventory"])
+            if original_exists or tombstone_exists:
+                source = tombstone if tombstone_exists else original
+                actual_rows = _release_inventory(root, source, original, verify_link_targets=False)
+                if not _release_rows_match(actual_rows, expected_rows, subset=tombstone_exists):
+                    raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release source differs from bound inventory")
+            snapshot = None
+            proof = None
+        elif entry["disposition"] == "retain":
             try:
                 retained = classifier.inspect_root_no_follow(original)
             except classifier.OwnedTreeClassificationError as exc:
@@ -3866,10 +4193,11 @@ def _scratch_disposition_plan(
             ScratchDisposition(
                 original=original,
                 tombstone=tombstone,
-                disposition=entry["disposition"],
+                disposition="release" if release_receipt is not None else entry["disposition"],
                 proof=proof,
                 canonical_pointer=pointer,
                 snapshot=snapshot,
+                release_receipt=release_receipt,
             )
         )
 
@@ -3917,10 +4245,97 @@ def _remove_scratch_tree(tree_root: Path) -> None:
         directory.rmdir()
 
 
+def _settle_released_scratch(
+    root: Path, plan: ScratchDisposition, *, inject_failure_at: str | None = None,
+) -> None:
+    """Resume one receipt-bound removal; never walk a symbolic-link target."""
+    root = Path(os.path.abspath(root))
+    receipt = plan.release_receipt
+    assert receipt is not None
+    item = root / Path(receipt["archive"])
+    _event_hash, entry = _release_event_binding(item, receipt["runId"], receipt["entryId"])
+    checked = _release_receipt(root, item, receipt["runId"], receipt["entryId"], entry)
+    if checked != receipt:
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt changed after preflight")
+    classifier = _scratch_classifier_module()
+    original = classifier.inspect_root_no_follow(plan.original)
+    tombstone = classifier.inspect_root_no_follow(plan.tombstone)
+    if original.exists and tombstone.exists:
+        raise LifecycleError("WI-SCRATCH-DISPOSITION-CONFLICT", "both release source and tombstone exist")
+    if not original.exists and not tombstone.exists:
+        return
+    expected = tuple(receipt["inventory"])
+    source = plan.tombstone if tombstone.exists else plan.original
+    actual = _release_inventory(root, source, plan.original, verify_link_targets=False)
+    if not _release_rows_match(actual, expected, subset=tombstone.exists):
+        raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release source differs before removal")
+    if original.exists:
+        rebound = classifier.inspect_root_no_follow(plan.original)
+        if rebound != original or rebound.is_link_or_reparse:
+            raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release root identity changed before rename")
+        os.replace(plan.original, plan.tombstone)
+        if inject_failure_at == "after-rename":
+            raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "injected after-rename")
+    actual = _release_inventory(root, plan.tombstone, plan.original, verify_link_targets=False)
+    if not _release_rows_match(actual, expected, subset=True):
+        raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release tombstone differs after rename")
+    remaining = {row["path"] for row in actual}
+    file_unlinked = False
+    link_unlinked = False
+    for row in sorted(expected, key=lambda candidate: (candidate["kind"] != "symlink", -len(PurePosixPath(candidate["path"]).parts), candidate["path"])):
+        relative = row["path"]
+        if relative not in remaining or row["kind"] == "directory":
+            continue
+        target = plan.tombstone if relative == "." else plan.tombstone / Path(relative)
+        logical = plan.original if relative == "." else plan.original / Path(relative)
+        _lifecycle_reject_unreduced_reparse(
+            target.parent, failure_id="WI-SCRATCH-RELEASE-DRIFT",
+            message="release descendant parent became a link or reparse point",
+        )
+        before = classifier.inspect_root_no_follow(target)
+        current = _release_inventory(root, target, logical, verify_link_targets=False)
+        expected_leaf = {key: value for key, value in row.items() if key not in {"targetSha256", "targetClass", "targetKind", "targetCustody"}}
+        expected_leaf["path"] = "."
+        if len(current) != 1 or {
+            key: value for key, value in current[0].items() if key != "targetClass"
+        } != expected_leaf:
+            raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release descendant changed before unlink")
+        after = classifier.inspect_root_no_follow(target)
+        if after != before or (row["kind"] == "symlink") != after.is_link_or_reparse:
+            raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release descendant identity changed before unlink")
+        target.unlink()
+        if row["kind"] == "symlink" and not link_unlinked:
+            link_unlinked = True
+            if inject_failure_at == "after-first-link-unlink":
+                raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "injected after-first-link-unlink")
+        if row["kind"] == "file" and not file_unlinked:
+            file_unlinked = True
+            if inject_failure_at == "after-first-file-unlink":
+                raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "injected after-first-file-unlink")
+    for row in sorted(expected, key=lambda candidate: (-len(PurePosixPath(candidate["path"]).parts), candidate["path"])):
+        if row["kind"] != "directory" or row["path"] not in remaining:
+            continue
+        target = plan.tombstone if row["path"] == "." else plan.tombstone / Path(row["path"])
+        inspection = classifier.inspect_root_no_follow(target)
+        if not inspection.exists or inspection.is_link_or_reparse or not inspection.is_directory:
+            raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release directory changed before removal")
+        target.rmdir()
+    if inject_failure_at == "after-final-removal":
+        raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "injected after-final-removal")
+
+
 def _settle_scratch_dispositions(root: Path, plans: tuple[ScratchDisposition, ...]) -> None:
     classifier = _scratch_classifier_module()
     for plan in plans:
         if plan.disposition == "retain":
+            continue
+        if plan.disposition == "release":
+            try:
+                _settle_released_scratch(root, plan)
+            except LifecycleError:
+                raise
+            except (OSError, classifier.OwnedTreeClassificationError) as exc:
+                raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", str(exc)) from exc
             continue
         try:
             original_state = classifier.inspect_root_no_follow(plan.original)
@@ -3965,6 +4380,149 @@ def _settle_scratch_dispositions(root: Path, plans: tuple[ScratchDisposition, ..
                 "WI-SCRATCH-DISPOSITION-PENDING",
                 f"archived item retains retryable scratch disposition: {exc}",
             ) from exc
+
+
+def release_retained_scratch(
+    root: Path,
+    slug: str,
+    *,
+    terminal_run_id: str,
+    expected_event_sha256: str,
+    entry_id: str,
+    artifact: str,
+    rationale: str,
+    apply: bool = False,
+    inject_failure_at: str | None = None,
+) -> Path:
+    """Opt-in post-close release of one exact ledger-declared retained root."""
+    if not apply:
+        raise LifecycleError("WI-SCRATCH-RELEASE-APPLY-REQUIRED", "release requires explicit apply")
+    _validate_slug(slug)
+    root = Path(os.path.abspath(root))
+    locations = _category_locations(root, CATEGORIES["work-item"], slug)
+    if len(locations) != 1 or "archive" not in locations[0].parts:
+        raise LifecycleError("WI-SCRATCH-RELEASE-IDENTITY", "one exact archived item is required")
+    item = locations[0]
+    _archived_work_item_entry(item)
+    event_hash, entry = _release_event_binding(item, terminal_run_id, entry_id)
+    if expected_event_sha256 != event_hash:
+        raise LifecycleError("WI-SCRATCH-RELEASE-IDENTITY", "terminal event digest differs")
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "accepted-evidence rationale is required")
+    artifact_hash = _release_artifact_snapshot(item, artifact)
+    path = _release_receipt_path(item, terminal_run_id, entry_id)
+    existing = _release_receipt(root, item, terminal_run_id, entry_id, entry)
+    if existing is None:
+        plans = _scratch_disposition_plan(root, item, archived=True)
+        selected = [plan for plan in plans if plan.original == root / Path(entry["path"])]
+        if len(selected) != 1 or selected[0].disposition != "retain":
+            raise LifecycleError("WI-SCRATCH-RELEASE-IDENTITY", "selected retained root is unavailable")
+        source = selected[0].original
+        inspection = _scratch_classifier_module().inspect_root_no_follow(source)
+        if not inspection.exists or inspection.is_link_or_reparse or not (
+            inspection.is_directory or inspection.is_regular_file
+        ):
+            raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "selected root is not ordinary")
+        rows = _assign_release_target_custody(
+            root, item, _release_inventory(root, source, source, verify_link_targets=True), artifact_hash,
+        )
+        _verify_release_targets(root, item, source, rows, artifact_hash)
+        entry_hash = _sha256_bytes(json.dumps(entry, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        inventory = list(rows)
+        receipt = {
+            "schemaVersion": 1,
+            "archive": item.relative_to(root).as_posix(),
+            "runId": terminal_run_id,
+            "entryId": entry_id,
+            "eventSha256": event_hash,
+            "entrySha256": entry_hash,
+            "sourcePath": entry["path"],
+            "artifact": artifact,
+            "artifactSha256": artifact_hash,
+            "rationale": rationale,
+            "inventory": inventory,
+            "inventorySha256": _sha256_bytes(json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode("utf-8")),
+        }
+        _lifecycle_reject_unreduced_reparse(
+            path.parent, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
+            message="release receipt parent crosses a link or reparse point",
+        )
+        try:
+            receipt_bytes = (
+                json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+        except (OSError, TypeError, ValueError, UnicodeError) as exc:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt cannot be serialized") from exc
+        path.parent.mkdir(exist_ok=True)
+        stage_prefix = f".{path.name}."
+        try:
+            with os.scandir(path.parent) as entries:
+                prior_stages = sorted(
+                    (Path(entry.path) for entry in entries
+                     if entry.name.startswith(stage_prefix) and entry.name.endswith(".tmp")),
+                    key=lambda candidate: candidate.name,
+                )
+            for stage in prior_stages:
+                _lifecycle_reject_unreduced_reparse(
+                    stage, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
+                    message="release receipt staging path is unsafe",
+                )
+                staged = _capture_file_snapshot(
+                    stage, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
+                    require_single_link=True,
+                ).data
+                if staged != receipt_bytes:
+                    raise LifecycleError(
+                        "WI-SCRATCH-RELEASE-RECEIPT",
+                        "unsettled release receipt staging bytes require review",
+                    )
+                stage.unlink()
+        except OSError as exc:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt staging cannot be settled") from exc
+        temporary: Path | None = None
+        try:
+            descriptor, name = tempfile.mkstemp(
+                prefix=f".{path.name}.", suffix=".tmp", dir=path.parent,
+            )
+            temporary = Path(name)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(receipt_bytes)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.link(temporary, path)
+        except FileExistsError as exc:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt already exists") from exc
+        except OSError as exc:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "atomic create-once release receipt is unavailable") from exc
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError as exc:
+                    raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt staging residue remains") from exc
+        if _capture_file_snapshot(
+            path, failure_id="WI-SCRATCH-RELEASE-RECEIPT", require_single_link=True,
+        ).data != receipt_bytes:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt readback differs")
+        existing = _release_receipt(root, item, terminal_run_id, entry_id, entry)
+    elif (
+        existing["artifact"] != artifact or existing["artifactSha256"] != artifact_hash
+        or existing["rationale"] != rationale
+    ):
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "replay request differs from release receipt")
+    if inject_failure_at == "after-receipt":
+        raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "injected after-receipt")
+    plans = _scratch_disposition_plan(root, item, archived=True)
+    selected = [plan for plan in plans if plan.original == root / Path(entry["path"])]
+    if len(selected) != 1 or selected[0].disposition != "release":
+        raise LifecycleError("WI-SCRATCH-RELEASE-IDENTITY", "selected receipt did not bind one root")
+    try:
+        _settle_released_scratch(root, selected[0], inject_failure_at=inject_failure_at)
+    except LifecycleError:
+        raise
+    except (OSError, _scratch_classifier_module().OwnedTreeClassificationError) as exc:
+        raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", str(exc)) from exc
+    return path
 
 
 def _validate_item_before_close(item: Path) -> None:
@@ -18669,6 +19227,15 @@ def build_parser() -> argparse.ArgumentParser:
     fixed_bug.add_argument("--resolution", required=True)
     fixed_bug.add_argument("--evidence", required=True)
     fixed_bug.add_argument("--apply", action="store_true")
+    release = sub.add_parser("release-retained-scratch")
+    _add_root(release)
+    release.add_argument("--slug", required=True)
+    release.add_argument("--terminal-run-id", required=True)
+    release.add_argument("--expected-event-sha256", required=True)
+    release.add_argument("--entry-id", required=True)
+    release.add_argument("--artifact", required=True)
+    release.add_argument("--rationale", required=True)
+    release.add_argument("--apply", action="store_true")
     trial = sub.add_parser("trial")
     _add_root(trial)
     trial.add_argument("--fixture", required=True)
@@ -19160,6 +19727,14 @@ def main(argv: list[str]) -> int:
                 "WI-FIXED-BUG-ARCHIVE-COMMITTED "
                 f"operation={result['operationId']} readme={result['readmeSha256']}"
             )
+        elif args.command == "release-retained-scratch":
+            result = release_retained_scratch(
+                root, args.slug, terminal_run_id=args.terminal_run_id,
+                expected_event_sha256=args.expected_event_sha256,
+                entry_id=args.entry_id, artifact=args.artifact,
+                rationale=args.rationale, apply=args.apply,
+            )
+            print(f"WI-SCRATCH-RELEASE-SETTLED receipt={result.relative_to(Path(os.path.abspath(root))).as_posix()}")
         elif args.command == "import-active-successor":
             if args.apply:
                 if not args.preflight_digest:
