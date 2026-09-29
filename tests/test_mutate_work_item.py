@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import copy
 import hashlib
 import importlib.util
 import io
@@ -97,6 +98,35 @@ def write_root_contract(root: Path, auxiliary_roots: dict[str, dict[str, str]]) 
         )
         + "\n",
     )
+
+
+def expanded_root_contract(auxiliary_names: tuple[str, ...]) -> dict[str, object]:
+    return {
+        "schema": "work-items-root-contract",
+        "version": 2,
+        "rootFiles": ["README.md", "root-contract.json"],
+        "lifecycleRoots": [
+            {"path": "active", "kind": "active-items"},
+            {"path": "archive", "kind": "archived-items"},
+        ],
+        "registries": [
+            {"path": "backlog", "kind": "flat-markdown"},
+            *(
+                {"path": name, "kind": "flat-markdown-with-month-archive"}
+                for name in ("bugs", "decisions", "epics")
+            ),
+            {"path": "lessons", "kind": "flat-markdown"},
+            {"path": "roadmaps", "kind": "flat-markdown-with-month-archive"},
+        ],
+        "auxiliaryRoots": [
+            {"path": name, "kind": "flat-json"} for name in auxiliary_names
+        ],
+        "activeItemSubdirectories": ["notes"],
+        "archiveRootFiles": ["README.md"],
+        "historicalItemDirectoryExceptions": [
+            "archive/2026-01/old-item/retained-evidence"
+        ],
+    }
 
 
 def quick_status(task: str = "Complete bounded repair.") -> str:
@@ -6409,6 +6439,155 @@ def test_root_contract_topology_is_shared_by_audit_close_reopen_and_refresh(
     assert successor == root / "work-items" / "active" / "contract-topology-successor"
     assert (root / "work-items" / "README.md").read_bytes() == first_readme
     assert all((root / "work-items" / name / "receipt.json").is_file() for name in declared)
+
+
+def test_expanded_root_contract_uses_generic_auxiliary_roots_across_lifecycle(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    declared = ("alpha-receipts", "zeta-receipts")
+    contract = expanded_root_contract(declared)
+    write(root / "work-items" / "root-contract.json", json.dumps(contract) + "\n")
+    for name in declared:
+        write(root / "work-items" / name / "receipt.json", "{}\n")
+
+    slug = "expanded-topology"
+    seed_active(module, root, slug)
+    module.audit_categories(root)
+    instant = "2026-09-01T00:00:00Z"
+    write_empty_bug_dispositions(root, slug, instant)
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+    successor = module.reopen_item(
+        root, slug, "expanded-topology-successor", staged_status(slug).encode()
+    )
+    module.audit(root)
+    before_refresh = (root / "work-items" / "README.md").read_bytes()
+    module.refresh_readme(root)
+
+    assert archived == root / "work-items" / "archive" / "2026-09" / slug
+    assert successor == root / "work-items" / "active" / "expanded-topology-successor"
+    assert (root / "work-items" / "README.md").read_bytes() == before_refresh
+    assert all((root / "work-items" / name / "receipt.json").is_file() for name in declared)
+
+
+def test_expanded_root_contract_accepts_pinned_reader_shape(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    contract = expanded_root_contract(("repair-receipts", "status-repair-receipts"))
+    contract["rootFiles"] = [
+        "README.md", "active-pipeline.md", "index.md", "root-contract.json",
+        "semantic-readiness.json",
+    ]
+    contract["activeItemSubdirectories"] = ["constraints"]
+    write(root / "work-items" / "root-contract.json", json.dumps(contract) + "\n")
+    for name in ("repair-receipts", "status-repair-receipts"):
+        write(root / "work-items" / name / "receipt.json", "{}\n")
+
+    topology = module._resolve_project_topology(root)
+    module.audit_categories(root)
+
+    assert topology.auxiliary_roots == frozenset(
+        {"repair-receipts", "status-repair-receipts"}
+    )
+
+
+def test_expanded_root_contract_rejects_invalid_envelopes_before_mutation(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    base = expanded_root_contract(("alpha-receipts", "zeta-receipts"))
+    cases: dict[str, dict[str, object]] = {}
+
+    def changed(name: str, field: str, value: object) -> None:
+        contract = copy.deepcopy(base)
+        contract[field] = value
+        cases[name] = contract
+
+    changed("extra-key", "unexpected", [])
+    missing = copy.deepcopy(base)
+    del missing["rootFiles"]
+    cases["missing-key"] = missing
+    changed("boolean-version", "version", True)
+    changed("wrong-auxiliary-shape", "auxiliaryRoots", {"alpha-receipts": {"kind": "flat-json"}})
+    changed("unknown-nested-key", "auxiliaryRoots", [{"path": "alpha-receipts", "kind": "flat-json", "other": 1}])
+    changed("unhashable-kind", "auxiliaryRoots", [{"path": "alpha-receipts", "kind": []}])
+    changed("unsorted-auxiliary", "auxiliaryRoots", list(reversed(base["auxiliaryRoots"])))
+    changed("duplicate-auxiliary", "auxiliaryRoots", [base["auxiliaryRoots"][0]] * 2)
+    changed("wrong-auxiliary-kind", "auxiliaryRoots", [{"path": "alpha-receipts", "kind": "flat-markdown"}])
+    changed("duplicate-across-sections", "auxiliaryRoots", [{"path": "backlog", "kind": "flat-json"}])
+    changed("renamed-active", "lifecycleRoots", [{"path": "ongoing", "kind": "active-items"}, {"path": "archive", "kind": "archived-items"}])
+    changed("missing-archive", "lifecycleRoots", [{"path": "active", "kind": "active-items"}])
+    changed("unsupported-registry", "registries", [{"path": "other", "kind": "flat-markdown"}])
+    changed("direct-slash", "rootFiles", ["README.md", "nested/root-contract.json", "root-contract.json"])
+    changed("dot-segment", "activeItemSubdirectories", ["."])
+    changed("empty-segment", "historicalItemDirectoryExceptions", ["archive//item/notes"])
+    changed("traversal", "historicalItemDirectoryExceptions", ["archive/2026-01/../notes"])
+    changed("backslash", "archiveRootFiles", ["back\\slash"])
+    changed("drive-colon", "archiveRootFiles", ["C:drive"])
+    changed("rooted", "archiveRootFiles", ["/rooted"])
+    changed("shallow-exception", "historicalItemDirectoryExceptions", ["archive/2026-01/item"])
+    changed("root-file-collision", "rootFiles", ["ALPHA-receipts", "README.md", "root-contract.json"])
+
+    for name, contract in cases.items():
+        root = tmp_path / name
+        write(root / "work-items" / "root-contract.json", json.dumps(contract) + "\n")
+        try:
+            module._resolve_project_topology(root)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID", name
+        else:
+            raise AssertionError(f"invalid expanded contract passed: {name}")
+        assert not (root / "work-items" / "README.md").exists(), name
+        assert not (root / "work-items" / "active").exists(), name
+
+
+def test_expanded_root_contract_reuses_auxiliary_file_and_link_guards(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for shape in ("file", "link"):
+        root = tmp_path / shape
+        contract = expanded_root_contract(("receipts",))
+        write(root / "work-items" / "root-contract.json", json.dumps(contract) + "\n")
+        auxiliary = root / "work-items" / "receipts"
+        if shape == "file":
+            write(auxiliary, "not a directory\n")
+        else:
+            target = tmp_path / "link-target"
+            target.mkdir(exist_ok=True)
+            try:
+                os.symlink(target, auxiliary, target_is_directory=True)
+            except OSError as exc:
+                if os.name == "nt":
+                    import pytest
+
+                    pytest.skip(f"symlink creation unavailable: {exc}")
+                raise
+        try:
+            module._resolve_project_topology(root)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID", shape
+        else:
+            raise AssertionError(f"expanded contract admitted auxiliary {shape}")
+
+
+def test_expanded_root_contract_rejects_nested_duplicate_json_key(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    contract = json.dumps(expanded_root_contract(("receipts",)))
+    contract = contract.replace(
+        '"path": "receipts", "kind": "flat-json"',
+        '"path": "receipts", "kind": "flat-json", "kind": "flat-json"',
+    )
+    write(root / "work-items" / "root-contract.json", contract + "\n")
+
+    try:
+        module._resolve_project_topology(root)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID"
+    else:
+        raise AssertionError("expanded contract admitted nested duplicate JSON key")
 
 
 def test_root_contract_has_one_shared_documentation_owner_and_pack_pointers(

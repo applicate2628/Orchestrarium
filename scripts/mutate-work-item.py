@@ -964,6 +964,87 @@ def _root_contract_json_object(pairs: list[tuple[str, object]]) -> dict[str, obj
     return value
 
 
+def _expanded_root_contract_auxiliary_roots(contract: dict[str, object]) -> dict[str, dict[str, str]]:
+    """Validate the expanded v2 envelope without granting its metadata lifecycle authority."""
+
+    def valid_path(value: object, *, direct: bool = False) -> bool:
+        if not isinstance(value, str) or not value or "\\" in value or ":" in value:
+            return False
+        parts = value.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            return False
+        return not direct or len(parts) == 1
+
+    def ordered_paths(
+        value: object, field: str, *, direct: bool, kinds: set[str] | None = None
+    ) -> list[str]:
+        if not isinstance(value, list):
+            raise LifecycleError(ROOT_CONTRACT_FAILURE, f"root contract {field} must be an array")
+        paths: list[str] = []
+        for entry in value:
+            path = entry
+            if kinds is not None:
+                if (
+                    not isinstance(entry, dict)
+                    or set(entry) != {"path", "kind"}
+                    or not isinstance(entry.get("kind"), str)
+                    or entry["kind"] not in kinds
+                ):
+                    raise LifecycleError(ROOT_CONTRACT_FAILURE, f"root contract {field} entry is invalid")
+                path = entry["path"]
+            if not valid_path(path, direct=direct):
+                raise LifecycleError(ROOT_CONTRACT_FAILURE, f"root contract {field} path is invalid")
+            paths.append(path)
+        try:
+            encoded = [path.encode("utf-8") for path in paths]
+        except UnicodeEncodeError as exc:
+            raise LifecycleError(ROOT_CONTRACT_FAILURE, f"root contract {field} path is not UTF-8") from exc
+        if encoded != sorted(set(encoded)):
+            raise LifecycleError(
+                ROOT_CONTRACT_FAILURE, f"root contract {field} paths must be ordered and unique"
+            )
+        return paths
+
+    root_files = ordered_paths(contract["rootFiles"], "rootFiles", direct=True)
+    if ROOT_CONTRACT_FILE not in root_files:
+        raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract rootFiles omits the contract file")
+    lifecycle = ordered_paths(
+        contract["lifecycleRoots"], "lifecycleRoots", direct=True,
+        kinds={"active-items", "archived-items"},
+    )
+    lifecycle_entries = contract["lifecycleRoots"]
+    if lifecycle != ["active", "archive"] or [entry["kind"] for entry in lifecycle_entries] != [
+        "active-items", "archived-items"
+    ]:
+        raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract lifecycle roots do not match local roots")
+    registries = ordered_paths(
+        contract["registries"], "registries", direct=True,
+        kinds={"flat-markdown", "flat-markdown-with-month-archive"},
+    )
+    supported_registries = {"backlog"} | {
+        category.current_root for category in CATEGORIES.values() if category.current_kind == "flat"
+    }
+    if set(registries) != supported_registries:
+        raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract registries do not match local roots")
+    auxiliary = ordered_paths(
+        contract["auxiliaryRoots"], "auxiliaryRoots", direct=True, kinds={"flat-json"}
+    )
+    if len(set(lifecycle + registries + auxiliary)) != len(lifecycle + registries + auxiliary):
+        raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract root path is declared twice")
+    ordered_paths(contract["activeItemSubdirectories"], "activeItemSubdirectories", direct=True)
+    ordered_paths(contract["archiveRootFiles"], "archiveRootFiles", direct=True)
+    historical = ordered_paths(
+        contract["historicalItemDirectoryExceptions"],
+        "historicalItemDirectoryExceptions", direct=False,
+    )
+    if any(len(path.split("/")) < 4 or not path.startswith("archive/") for path in historical):
+        raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract historical exception path is invalid")
+    root_file_names = {name.casefold() for name in root_files}
+    if any(name.casefold() in root_file_names for name in auxiliary):
+        raise LifecycleError(ROOT_CONTRACT_FAILURE, "auxiliary root collides with a declared root file")
+    return {entry["path"]: {"kind": entry["kind"]} for entry in contract["auxiliaryRoots"]}
+
+
 @dataclass(frozen=True)
 class ProjectTopology:
     work_items: Path
@@ -1076,12 +1157,21 @@ def _resolve_project_topology(
         raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract must be valid UTF-8 JSON") from exc
     if (
         not isinstance(contract, dict)
-        or set(contract) != {"schema", "version", "auxiliaryRoots"}
         or contract.get("schema") != ROOT_CONTRACT_SCHEMA
         or type(contract.get("version")) is not int
         or contract.get("version") != ROOT_CONTRACT_VERSION
-        or not isinstance(contract.get("auxiliaryRoots"), dict)
     ):
+        raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract schema is invalid")
+    narrow_keys = {"schema", "version", "auxiliaryRoots"}
+    expanded_keys = narrow_keys | {
+        "rootFiles", "lifecycleRoots", "registries", "activeItemSubdirectories",
+        "archiveRootFiles", "historicalItemDirectoryExceptions",
+    }
+    if set(contract) == narrow_keys and isinstance(contract["auxiliaryRoots"], dict):
+        auxiliary_definitions = contract["auxiliaryRoots"]
+    elif set(contract) == expanded_keys:
+        auxiliary_definitions = _expanded_root_contract_auxiliary_roots(contract)
+    else:
         raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract schema is invalid")
     topology = ProjectTopology(
         work_items=work_items,
@@ -1089,7 +1179,7 @@ def _resolve_project_topology(
         root_contract_present=True,
     ).with_read_model_roots()
     auxiliary_roots: set[str] = set()
-    for name, definition in contract["auxiliaryRoots"].items():
+    for name, definition in auxiliary_definitions.items():
         if not isinstance(name, str) or SLUG_RE.fullmatch(name) is None:
             raise LifecycleError(ROOT_CONTRACT_FAILURE, "auxiliary root name is not a bare root")
         if name in topology.reserved_roots:
