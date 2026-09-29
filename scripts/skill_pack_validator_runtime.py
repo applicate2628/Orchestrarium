@@ -745,6 +745,33 @@ class Validator:
                 f"(expected {expected}, actual {actual})"
             )
 
+    def check_common_skill_body_parity(
+        self, name: str, codex_file: str, claude_file: str
+    ) -> None:
+        sources = (codex_file, claude_file)
+        if self.layout.standalone:
+            local = sources[0 if self.layout.provider == "codex" else 1]
+            path = self.path(local)
+            if path.is_file() and skill_frontmatter_valid(path, name):
+                self.ok(
+                    f"common-skill {name} local skill valid; "
+                    "cross-provider parity not applicable"
+                )
+            else:
+                self.fail(f"common-skill {name} local skill missing or frontmatter invalid")
+            return
+        for source in sources:
+            if not self.is_file(source):
+                self.fail(
+                    f"common-skill {name} cross-provider body parity "
+                    f"(file missing: {source})"
+                )
+                return
+        digests = tuple(common_skill_body_sha256(self.path(source).read_bytes()) for source in sources)
+        (self.ok if digests[0] == digests[1] else self.fail)(
+            f"common-skill {name} cross-provider body parity"
+        )
+
     def _run_python(
         self,
         script: Path,
@@ -1347,11 +1374,11 @@ def _direct(
             _verdict(
                 validator,
                 name in common_skill_pin_names,
-                f"common-skill {name} has an applicable provider-local body pin",
-                f"common-skill body pins missing: {name}",
+                f"common-skill {name} has an applicable body check",
+                f"common-skill body checks missing: {name}",
             )
         for name in sorted(common_skill_pin_names - live_names):
-            validator.fail(f"common-skill body pins extra: {name}")
+            validator.fail(f"common-skill body checks extra: {name}")
         return
     if kind == "layering_codex":
         owned = codex_owned_skill_names(layout.agents_text, utility_skills)
@@ -1664,7 +1691,11 @@ def validate_pack(
         common_skill_pin_names = frozenset(
             action[1]
             for action in applicable_actions
-            if len(action) >= 2 and action[0] == "check_common_skill_body_pin"
+            if len(action) >= 2
+            and action[0] in {
+                "check_common_skill_body_pin",
+                "check_common_skill_body_parity",
+            }
         )
         for action in applicable_actions:
             operation, *args = action

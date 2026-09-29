@@ -1023,6 +1023,8 @@ def _common_pin_actions(names: tuple[str, ...], candidate: Path) -> tuple[tuple[
     (
         ("matching", 0, None),
         ("missing", 1, "missing: windows-gui-manual-testing"),
+        ("missing-manual", 1, "missing: manual-repo-transfer"),
+        ("parity", 0, None),
         ("extra", 1, "extra: synthetic-common"),
         ("non-applicable-extra", 0, None),
     ),
@@ -1041,9 +1043,19 @@ def test_common_pin_completeness_uses_exact_applicable_action_names(
     candidate = tmp_path / "SKILL.md"
     candidate.write_bytes(b"---\nname: fixture\ndescription: fixture\n---\nbody\n")
     applicable_names = names
+    parity_actions: tuple[tuple[str, ...], ...] = ()
     scoped_actions: tuple[tuple[str, object], ...] = ()
     if mutation == "missing":
         applicable_names = tuple(name for name in names if name != "windows-gui-manual-testing")
+    elif mutation in ("missing-manual", "parity"):
+        applicable_names = tuple(name for name in names if name != "manual-repo-transfer")
+        if mutation == "parity":
+            parity_actions = ((
+                "check_common_skill_body_parity",
+                "manual-repo-transfer",
+                "src.codex/skills/manual-repo-transfer/SKILL.md",
+                "src.claude/skills/manual-repo-transfer/SKILL.md",
+            ),)
     elif mutation == "extra":
         applicable_names = (*names, "synthetic-common")
     elif mutation == "non-applicable-extra":
@@ -1060,6 +1072,7 @@ def test_common_pin_completeness_uses_exact_applicable_action_names(
         actions=(
             ("direct", "common_pin_completeness", "common pin completeness"),
             *_common_pin_actions(applicable_names, candidate),
+            *parity_actions,
             *scoped_actions,
         ),
         maintainer_only_shared_reference_names=frozenset(),
@@ -1072,6 +1085,154 @@ def test_common_pin_completeness_uses_exact_applicable_action_names(
     output = capsys.readouterr().out
     if expected_fragment is not None:
         assert expected_fragment in output
+
+
+@pytest.mark.parametrize("changed_pack", (None, "src.codex", "src.claude", "frontmatter", "missing-claude"))
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_manual_transfer_current_body_parity_in_monorepo(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    changed_pack: str | None,
+    provider: str,
+) -> None:
+    """Catches either unilateral body edit without pinning a source snapshot."""
+    runtime = _load(RUNTIME, f"manual_parity_{provider}_{changed_pack}")
+    assert callable(getattr(runtime.Validator, "check_common_skill_body_parity", None))
+    root = tmp_path / "repo"
+    for relative in (
+        "shared/AGENTS.shared.md",
+        "src.codex/AGENTS.codex.md",
+        "src.codex/skills/manual-repo-transfer/SKILL.md",
+        "src.claude/skills/manual-repo-transfer/SKILL.md",
+    ):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, target)
+    (root / "src.codex/skills/lead/scripts").mkdir(parents=True)
+    (root / "src.claude/agents/scripts").mkdir(parents=True)
+    if changed_pack in ("src.codex", "src.claude"):
+        skill = root / changed_pack / "skills/manual-repo-transfer/SKILL.md"
+        skill.write_bytes(skill.read_bytes() + b"\nfixture body drift\n")
+    elif changed_pack == "frontmatter":
+        skill = root / "src.codex/skills/manual-repo-transfer/SKILL.md"
+        content = skill.read_text(encoding="utf-8")
+        assert "description:" in content
+        skill.write_text(content.replace("description:", "description: fixture ", 1), encoding="utf-8")
+    elif changed_pack == "missing-claude":
+        (root / "src.claude/skills/manual-repo-transfer/SKILL.md").unlink()
+    action = (
+        "check_common_skill_body_parity",
+        "manual-repo-transfer",
+        "src.codex/skills/manual-repo-transfer/SKILL.md",
+        "src.claude/skills/manual-repo-transfer/SKILL.md",
+    )
+    script = root / ("src.codex/skills/lead/scripts" if provider == "codex" else "src.claude/agents/scripts") / "validate-skill-pack.py"
+    result = runtime.validate_pack(
+        script=script,
+        provider=provider,
+        actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=root,
+    )
+    assert result.errors == (1 if changed_pack in ("src.codex", "src.claude", "missing-claude") else 0)
+    assert "cross-provider body parity" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("mutation", ("valid", "missing", "invalid-frontmatter"))
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_manual_transfer_standalone_checks_local_skill_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], provider: str, mutation: str
+) -> None:
+    """Catches a monorepo-only lookup imposed on an installed provider."""
+    runtime = _load(RUNTIME, f"manual_standalone_{provider}")
+    assert callable(getattr(runtime.Validator, "check_common_skill_body_parity", None))
+    target, script = _materialize_installed_pack(tmp_path, provider)
+    local = target / (
+        ".agents/skills/manual-repo-transfer/SKILL.md"
+        if provider == "codex"
+        else ".claude/skills/manual-repo-transfer/SKILL.md"
+    )
+    if mutation == "missing":
+        local.unlink()
+    elif mutation == "invalid-frontmatter":
+        local.write_bytes(b"---\nname: wrong\ndescription: fixture\n---\nbody\n")
+    action = (
+        "check_common_skill_body_parity",
+        "manual-repo-transfer",
+        "src.codex/skills/manual-repo-transfer/SKILL.md",
+        "src.claude/skills/manual-repo-transfer/SKILL.md",
+    )
+    result = runtime.validate_pack(
+        script=script,
+        provider=provider,
+        actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=target,
+    )
+    assert result.errors == (0 if mutation == "valid" else 1)
+    output = capsys.readouterr().out
+    if mutation == "valid":
+        assert "cross-provider parity not applicable" in output
+    else:
+        assert "local skill missing or frontmatter invalid" in output
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+@pytest.mark.parametrize("mutation", ("prose", "required-heading"))
+def test_shared_blueprint_checks_contract_without_whole_file_snapshot(
+    tmp_path: Path,
+    provider: str,
+    mutation: str,
+) -> None:
+    """Catches a lost required section while permitting non-contract prose edits."""
+    runtime = _load(RUNTIME, f"blueprint_contract_{provider}_{mutation}")
+    provider_module = _load(
+        VALIDATORS[0 if provider == "codex" else 1],
+        f"blueprint_actions_{provider}_{mutation}",
+    )
+    root = tmp_path / "repo"
+    for relative in (
+        "shared/AGENTS.shared.md",
+        "src.codex/AGENTS.codex.md",
+        "shared/references/subagent-operating-model.md",
+    ):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, target)
+    (root / "src.codex/skills/lead/scripts").mkdir(parents=True)
+    (root / "src.claude/agents/scripts").mkdir(parents=True)
+    blueprint = root / "shared/references/subagent-operating-model.md"
+    content = blueprint.read_text(encoding="utf-8")
+    if mutation == "prose":
+        content += "\nFixture-only explanatory prose.\n"
+    else:
+        assert "## 8. Gates: what each stage must prove" in content
+        content = content.replace("## 8. Gates: what each stage must prove", "## 8. Gates", 1)
+    blueprint.write_text(content, encoding="utf-8")
+    script = root / ("src.codex/skills/lead/scripts" if provider == "codex" else "src.claude/agents/scripts") / "validate-skill-pack.py"
+    layout = runtime.detect_layout(script, provider, root)
+    actions = tuple(
+        action
+        for action in runtime._applicable_actions(provider_module.ACTIONS, layout)
+        if len(action) >= 2
+        and action[1] == "@ROOT/shared/references/subagent-operating-model.md"
+        and action[0] in {"check_exact_h2_inventory", "check_normalized_sha256"}
+    )
+    result = runtime.validate_pack(
+        script=script,
+        provider=provider,
+        actions=actions,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=root,
+    )
+    assert result.checks == 1
+    assert result.errors == (1 if mutation == "required-heading" else 0)
 
 
 def test_layering_codex_derives_common_names_from_the_spine(tmp_path: Path) -> None:

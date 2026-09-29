@@ -420,10 +420,6 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   '120',
   'Claude addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
-  '@ROOT/shared/references/subagent-operating-model.md',
-  'bf19b22233d550dbdbcd012a69ef729eae265549956c7c1cf1c1d7c7675b1b12',
-  'shared subagent-operating-model matches the current canonical normalized fingerprint'),
- ('check_normalized_sha256',
   '@ROOT/references-claude/subagent-operating-model.md',
   '2b4f4fdf49d36bd80270e4292ce30cf84b4650751b6a93493dd0e335c24ed404',
   'Claude addendum matches the current canonical normalized fingerprint'),
@@ -476,9 +472,9 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'implementation-to-theory',
   '2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78',
   'src.claude/skills/implementation-to-theory/SKILL.md'),
- ('check_common_skill_body_pin',
+ ('check_common_skill_body_parity',
   'manual-repo-transfer',
-  '38d4c980d74adb1ff09c0e77eeecae08079d5af9a48fd2ace5c4a329bf223061',
+  'src.codex/skills/manual-repo-transfer/SKILL.md',
   'src.claude/skills/manual-repo-transfer/SKILL.md'),
  ('check_common_skill_body_pin',
   'repo-cleanup',
@@ -1361,7 +1357,7 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:42]
-    + _DECLARED_ACTIONS[114:258]
+    + _DECLARED_ACTIONS[113:257]
     + _APAT_SHARED_ACTIONS
 )
 
@@ -1376,13 +1372,13 @@ ACTIONS = (
     ),
     (
         "dev_repo",
-        _DECLARED_ACTIONS[42:114]
-        + _DECLARED_ACTIONS[271:275]
-        + _DECLARED_ACTIONS[276:281]
-        + _DECLARED_ACTIONS[282:288]
-        + _DECLARED_ACTIONS[295:310]
-        # Declaration 309 reads the source-only root README, absent when installed.
-        + _DECLARED_ACTIONS[310:311]
+        _DECLARED_ACTIONS[42:113]
+        + _DECLARED_ACTIONS[270:274]
+        + _DECLARED_ACTIONS[275:280]
+        + _DECLARED_ACTIONS[281:287]
+        + _DECLARED_ACTIONS[294:309]
+        # Declaration 308 reads the source-only root README, absent when installed.
+        + _DECLARED_ACTIONS[309:310]
         + tuple(
             action for action in _ALL_ACTIONS
             if _is_source_only_maintainer_action(action)
@@ -1393,10 +1389,10 @@ ACTIONS = (
     ),
     (
         "dev_repo_nonstandalone",
-        _DECLARED_ACTIONS[258:271]
-        + _DECLARED_ACTIONS[275:276]
-        + _DECLARED_ACTIONS[281:282]
-        + _DECLARED_ACTIONS[288:295],
+        _DECLARED_ACTIONS[257:270]
+        + _DECLARED_ACTIONS[274:275]
+        + _DECLARED_ACTIONS[280:281]
+        + _DECLARED_ACTIONS[287:294],
     ),
     ("installed", _INSTALLED_ACTIONS + _APAT_ARCHITECT_INSTALLED_ACTIONS),
 )

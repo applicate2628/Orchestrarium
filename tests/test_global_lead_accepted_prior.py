@@ -1981,6 +1981,16 @@ def test_receipted_lead_refuses_tree_drift(tmp_path: Path, drift: str) -> None:
         installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
 
 
+def test_receipted_lead_refuses_installed_only_hook_health_drift(tmp_path: Path) -> None:
+    installer, source, anchor, skills, _receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    installed = skills / "lead" / "scripts" / "check-hook-health.py"
+    assert installed.is_file()
+    installed.write_bytes(installed.read_bytes() + b"\n# fixture-only drift\n")
+    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_RECEIPT_DRIFT"):
+        installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+
+
 @pytest.mark.parametrize("invalid", [
     b"{", b"{}\n", b'{"schema":"wrong","treeSha256":"' + b"0" * 64 + b'"}\n',
     b'{"schema":"orchestrarium.canonical-lead-install.v1","treeSha256":"' + b"A" * 64 + b'"}\n',

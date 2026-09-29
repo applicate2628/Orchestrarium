@@ -431,10 +431,6 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   '120',
   'Codex addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
-  '@ROOT/shared/references/subagent-operating-model.md',
-  'bf19b22233d550dbdbcd012a69ef729eae265549956c7c1cf1c1d7c7675b1b12',
-  'shared subagent-operating-model matches the current canonical normalized fingerprint'),
- ('check_normalized_sha256',
   '@ROOT/references-codex/subagent-operating-model.md',
   '75a7ccf68a35407604dcf1ec63b0da59955c8f05b22e2a4280e0ea4f55b1fd56',
   'Codex addendum matches the current canonical normalized fingerprint'),
@@ -773,10 +769,10 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'implementation-to-theory',
   '2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78',
   '@ROOT/src.codex/skills/implementation-to-theory/SKILL.md'),
- ('check_common_skill_body_pin',
+ ('check_common_skill_body_parity',
   'manual-repo-transfer',
-  '38d4c980d74adb1ff09c0e77eeecae08079d5af9a48fd2ace5c4a329bf223061',
-  '@ROOT/src.codex/skills/manual-repo-transfer/SKILL.md'),
+  'src.codex/skills/manual-repo-transfer/SKILL.md',
+  'src.claude/skills/manual-repo-transfer/SKILL.md'),
  ('check_common_skill_body_pin',
   'repo-cleanup',
   'a7dea2d7d38b25fd6fc0c85026206feffbb9697c555dd372b84c416b1c966252',
@@ -1611,15 +1607,6 @@ _UI_CONTINUITY_DEV_ACTIONS = (
     ),
 )
 
-_CODEX_HOOK_HEALTH_DEV_ACTIONS = (
-    (
-        "check_normalized_sha256",
-        "@ROOT/scripts/check-hook-health.py",
-        "1ce4ce47e923c1dc92ea6ecae3ff79872b77217eae75d4d58b0f47a53b6bf2bb",
-        "CODEX-HOOK-HEALTH-SIDECAR-DRIFT: root helper source matches its pinned payload",
-    ),
-)
-
 _SOURCE_ONLY_MAINTAINER_PREFIXES = (
     "@ROOT/README.md",
     "@ROOT/shared/schemas/agent-runs.schema.json",
@@ -1655,10 +1642,10 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 # assertion may never leak into the installed-pack action set as an index moves.
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:35]
-    + _DECLARED_ACTIONS[142:306]
-    + _DECLARED_ACTIONS[324:331]
-    # Include declaration 373 so its @ROOT/docs prefix routes it to dev_repo.
-    + _DECLARED_ACTIONS[368:375]
+    + _DECLARED_ACTIONS[141:305]
+    + _DECLARED_ACTIONS[323:330]
+    # Include declaration 372 so its @ROOT/docs prefix routes it to dev_repo.
+    + _DECLARED_ACTIONS[367:374]
     + _APAT_ACTIONS
 )
 
@@ -1675,28 +1662,27 @@ ACTIONS = (
         _DECLARED_ACTIONS[35:51]
         + _DECLARED_ACTIONS[58:76]
         + _DECLARED_ACTIONS[86:122]
-        + _DECLARED_ACTIONS[129:142]
-        + _DECLARED_ACTIONS[320:323]
-        + _DECLARED_ACTIONS[331:336]
-        + _DECLARED_ACTIONS[337:344]
-        + _DECLARED_ACTIONS[353:368]
+        + _DECLARED_ACTIONS[129:141]
+        + _DECLARED_ACTIONS[319:322]
+        + _DECLARED_ACTIONS[330:335]
+        + _DECLARED_ACTIONS[336:343]
+        + _DECLARED_ACTIONS[352:367]
         + tuple(
             action for action in _ALL_ACTIONS
             if _is_source_only_maintainer_action(action)
         )
         + _APAT_DEV_ACTIONS
-        + _UI_CONTINUITY_DEV_ACTIONS
-        + _CODEX_HOOK_HEALTH_DEV_ACTIONS,
+        + _UI_CONTINUITY_DEV_ACTIONS,
     ),
     (
         "dev_repo_nonstandalone",
         _DECLARED_ACTIONS[51:58]
         + _DECLARED_ACTIONS[76:86]
         + _DECLARED_ACTIONS[122:129]
-        + _DECLARED_ACTIONS[306:320]
-        + _DECLARED_ACTIONS[323:324]
-        + _DECLARED_ACTIONS[336:337]
-        + _DECLARED_ACTIONS[344:353],
+        + _DECLARED_ACTIONS[305:319]
+        + _DECLARED_ACTIONS[322:323]
+        + _DECLARED_ACTIONS[335:336]
+        + _DECLARED_ACTIONS[343:352],
     ),
     ("installed", _INSTALLED_ACTIONS),
 )
