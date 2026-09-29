@@ -2047,6 +2047,22 @@ def test_e7_six_tree_upgrade_rolls_back_after_middle_replacement(
         if skill.is_dir() and (ROOT / "src.codex" / "skills" / skill.name).is_dir()
     }
     assert installer.E7_CANONICAL_SKILL_TREE_SHA256 == e7_current_skill_priors
+    # This test owns skill-tree rollback, not admission of unrelated e7 native
+    # roles. Keep the e7 skill trees intact and align only role files whose e7
+    # bytes have no current accepted-prior route.
+    for name in (
+        "analyst",
+        "backend-engineer",
+        "explorer",
+        "knowledge-archivist",
+        "planner",
+        "qa-engineer",
+    ):
+        installed_role = target / ".codex" / "agents" / f"{name}.toml"
+        old_role = snapshot / "src.codex" / "agents" / f"{name}.toml"
+        current_role = ROOT / "src.codex" / "agents" / f"{name}.toml"
+        assert installed_role.read_bytes() == old_role.read_bytes()
+        installed_role.write_bytes(current_role.read_bytes())
     original = installer._CreateOnlyMutablePath.replace_exact_tree
     calls = 0
 
