@@ -567,6 +567,11 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     modes.add_argument("--target", "-Target")
     parser.add_argument("--force", "-Force", action="store_true")
     parser.add_argument(
+        "--replace-unreceipted-lead-sha256",
+        metavar="SHA256",
+        help="Global Codex/Claude only: adopt one unreceipted Lead tree with this exact observed SHA-256 digest",
+    )
+    parser.add_argument(
         "--migrate-legacy-skill",
         action="append",
         default=[],
@@ -3504,11 +3509,64 @@ class _CanonicalSkillPlan:
     accepted_prior_files: tuple[tuple[Path, str], ...] = ()
 
 
+_LEAD_RECEIPT_NAME = ".orchestrarium-lead-receipt.v1.json"
+_LEAD_RECEIPT_SCHEMA = "orchestrarium.canonical-lead-install.v1"
+
+
+def _lead_receipt_bytes(digest: str) -> bytes:
+    return (json.dumps({"schema": _LEAD_RECEIPT_SCHEMA, "treeSha256": digest},
+                       separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def _read_lead_receipt(path: Path) -> tuple[bytes, tuple[int, int, int, int], str] | None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata):
+        raise ValueError("E_CANONICAL_LEAD_RECEIPT_INVALID")
+    try:
+        payload = path.read_bytes()
+        if len(payload) > 256:
+            raise ValueError("oversized receipt")
+        def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result = dict(pairs)
+            if len(result) != len(pairs):
+                raise ValueError("duplicate receipt key")
+            return result
+        record = json.loads(payload.decode("utf-8"), object_pairs_hook=unique_pairs)
+        if (not isinstance(record, dict)
+            or set(record) != {"schema", "treeSha256"}
+            or record["schema"] != _LEAD_RECEIPT_SCHEMA
+            or not isinstance(record["treeSha256"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", record["treeSha256"]) is None
+            or payload != (json.dumps(record, separators=(",", ":")) + "\n").encode("utf-8")):
+            raise ValueError("receipt shape")
+    except (UnicodeError, ValueError) as exc:
+        raise ValueError("E_CANONICAL_LEAD_RECEIPT_INVALID") from exc
+    identity = (metadata.st_dev, metadata.st_ino, metadata.st_mode,
+                getattr(metadata, "st_file_attributes", 0))
+    current = path.lstat()
+    if (current.st_dev, current.st_ino, current.st_mode, current.st_size, current.st_mtime_ns) != (
+        metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_size, metadata.st_mtime_ns
+    ):
+        raise ValueError("E_CANONICAL_LEAD_RECEIPT_INVALID")
+    return payload, identity, record["treeSha256"]
+
+
+@dataclass(frozen=True)
+class _LeadReceiptPlan:
+    observed: tuple[bytes, tuple[int, int, int, int], str] | None
+    source_digest: str
+    source_lead: Path
+
+
 @dataclass(frozen=True)
 class _CanonicalSkillsPlan:
     stage: _CanonicalLeadStage
     skills: tuple[_CanonicalSkillPlan, ...]
     transport_stage: _ClaudeTransportProjectionStage | None
+    lead_receipt: _LeadReceiptPlan | None = None
 
 
 def _is_exact_stock_luna_profile_prior_pair(
@@ -3542,6 +3600,8 @@ def _preflight_canonical_skills(
     *,
     root: Path,
     claude_transport_root: Path | None = None,
+    global_install: bool = False,
+    replace_unreceipted_lead_sha256: str | None = None,
 ) -> _CanonicalSkillsPlan:
     """Bind the complete affected set before the transaction applies any member."""
 
@@ -3561,6 +3621,11 @@ def _preflight_canonical_skills(
         ):
             raise ValueError("E_CANONICAL_LEAD_STAGE_INVALID: staged evidence drift")
 
+        if replace_unreceipted_lead_sha256 is not None and not global_install:
+            raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH")
+        receipt = _read_lead_receipt(target / _LEAD_RECEIPT_NAME) if global_install else None
+        if replace_unreceipted_lead_sha256 is not None and receipt is not None:
+            raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH")
         planned: list[_CanonicalSkillPlan] = []
         for skill in skills:
             materialized = stage.path if skill.name == "lead" else skill
@@ -3608,6 +3673,9 @@ def _preflight_canonical_skills(
             )
             if observed is None and exists:
                 raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {skill.name}")
+            if skill.name == "lead" and receipt is not None:
+                if observed is None or (observed != current and receipt[2] != observed):
+                    raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT")
             accepted_prior_files = (
                 _STOCK_LUNA_PROFILE_PRIOR_PAIR
                 if skill.name == "lead"
@@ -3616,11 +3684,27 @@ def _preflight_canonical_skills(
                 and _is_exact_stock_luna_profile_prior_pair(installed, stage)
                 else ()
             )
+            adopting = (
+                skill.name == "lead"
+                and global_install
+                and observed is not None
+                and observed != current
+                and observed not in accepted_priors
+                and not accepted_prior_files
+                and receipt is None
+            )
+            if skill.name == "lead" and replace_unreceipted_lead_sha256 is not None:
+                if not adopting or replace_unreceipted_lead_sha256 != observed:
+                    raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH")
+            if adopting and replace_unreceipted_lead_sha256 is None:
+                raise ValueError(f"E_CANONICAL_LEAD_ADOPTION_REQUIRED: {observed}")
             if (
                 observed is not None
                 and observed != current
                 and observed not in accepted_priors
                 and not accepted_prior_files
+                and not (skill.name == "lead" and receipt is not None)
+                and not adopting
             ):
                 raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {skill.name}")
             planned.append(
@@ -3629,7 +3713,7 @@ def _preflight_canonical_skills(
                     materialized,
                     current,
                     observed,
-                    observed if observed in accepted_priors and not accepted_prior_files else None,
+                    observed if (observed != current and (observed in accepted_priors or (skill.name == "lead" and (receipt is not None or adopting))) and not accepted_prior_files) else None,
                     ignore_runtime_cache,
                     accepted_prior_files,
                 )
@@ -3643,7 +3727,10 @@ def _preflight_canonical_skills(
                 claude_transport_root,
             )
 
-        return _CanonicalSkillsPlan(stage, tuple(planned), transport_stage)
+        return _CanonicalSkillsPlan(
+            stage, tuple(planned), transport_stage,
+            _LeadReceiptPlan(receipt, stage.digest, lead_source) if global_install else None,
+        )
     except BaseException:
         shutil.rmtree(stage.path, ignore_errors=True)
         raise
@@ -3675,6 +3762,17 @@ def _assert_canonical_skills_plan_current(
         )
         if current != skill.source_digest or observed != skill.installed_digest:
             raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: preflight drift {skill.name}")
+    if plan.lead_receipt is not None:
+        if _read_lead_receipt(target / _LEAD_RECEIPT_NAME) != plan.lead_receipt.observed:
+            raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT: preflight drift")
+        restaged = _stage_canonical_lead_tree(
+            root, plan.lead_receipt.source_lead, target / "lead" / "scripts"
+        )
+        try:
+            if restaged.digest != plan.lead_receipt.source_digest:
+                raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT: source preflight drift")
+        finally:
+            shutil.rmtree(restaged.path, ignore_errors=True)
     if plan.transport_stage is not None:
         assert claude_transport_root is not None
         current_transport = _stage_claude_transport_projection(
@@ -3748,6 +3846,18 @@ def _apply_canonical_skills_plan(
             lead.source,
             ignore_runtime_cache=lead.ignore_runtime_cache,
         )
+
+    if plan.lead_receipt is not None and not owner.dry_run:
+        if _tree_sha256(target / "lead", ignore_runtime_cache=True) != plan.lead_receipt.source_digest:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: lead receipt source")
+    if plan.lead_receipt is not None:
+        payload = _lead_receipt_bytes(plan.lead_receipt.source_digest)
+        prior_receipt = plan.lead_receipt.observed
+        relative = target_relative / _LEAD_RECEIPT_NAME
+        if prior_receipt is None:
+            owner.create_file(relative, payload)
+        elif prior_receipt[0] != payload:
+            owner.replace_exact_file(relative, hashlib.sha256(prior_receipt[0]).hexdigest(), payload)
 
     if plan.transport_stage is not None and not owner.dry_run:
         _validate_committed_transport_projection(
@@ -5421,6 +5531,9 @@ def _verify_files(
 
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
+    if args.replace_unreceipted_lead_sha256 is not None and not args.global_install:
+        print("FAIL: E_CANONICAL_LEAD_ADOPTION_MISMATCH", file=sys.stderr)
+        return 1
     if args.migrate_legacy_skill and (
         provider != "codex" or not args.global_install
     ):
@@ -5593,6 +5706,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 canonical_skills_target,
                 root=root,
                 claude_transport_root=target_tree / "scripts",
+                global_install=mode == "global",
+                replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
             )
             if (
                 args.dry_run
@@ -5612,6 +5727,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 source_tree,
                 canonical_skills_target,
                 root=root,
+                global_install=mode == "global",
+                replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
             )
             legacy_codex_skill_migrations = (
                 _validate_legacy_codex_skill_requests(
@@ -5628,6 +5745,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 codex_agents_target,
                 target / "config.toml",
             )
+        if args.dry_run and args.replace_unreceipted_lead_sha256 is not None:
+            print("  [dry-run] unreceipted Lead prior "
+                  f"{args.replace_unreceipted_lead_sha256}: 2 replacements")
         transaction_paths = _installer_mutation_paths(
             provider=provider,
             source=source,

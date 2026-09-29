@@ -53,6 +53,8 @@ Installed Codex now follows the same compact-entrypoint pattern that Claude alre
 
 Maintainer note: this repository is the installer/source monorepo, not automatically a repo-local Codex install target. When working inside `Orchestrarium/`, it is valid to rely on the global Codex skill/contract install under `$HOME/.agents/` together with Codex configuration and runtime metadata under `$HOME/.codex/`. A missing local `.agents/` tree in this monorepo does not by itself mean the Codex runtime is misconfigured; create `.agents/` here only by running the installers intentionally.
 
+Global Codex and Claude upgrades share an installer-owned receipt beside the canonical Lead skill under `$HOME/.agents/skills/`. A clean receipted Lead upgrades normally; a pre-receipt unlisted tree requires the global-only, exact-digest `--replace-unreceipted-lead-sha256` choice after a read-only `--dry-run`. See [INSTALL.md](INSTALL.md) for the paired-backup and downgrade limit.
+
 Installed governance now requires a cited repository-orientation record before the first run, build, or mutation in an unfamiliar repository or subtree. The record names scope, live/archive status, canonical workflow, protected surfaces, and `file:line` evidence; names, file counts, recency, and layout never prove liveness. The production Claude Code and Codex installers also register a warn-only, fail-open process audit that detects a skipped or conflicting record without scanning repository prose or inferring canon from deprecation words.
 
 Cross-provider execution is available through two routing adapters:
