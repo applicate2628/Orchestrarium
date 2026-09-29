@@ -5,7 +5,9 @@ import importlib.util
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -103,6 +105,66 @@ def satisfied_fixture(root: Path, *, operation_id: str = "legacy-settlement-001"
     )
     request_value["operationId"] = operation_id
     return ledger, ledger_bytes, canonical(request_value)
+
+
+def archived_settlement_fixture(root: Path) -> tuple[object, object, Path]:
+    owner = load_owner()
+    slug = "legacy-item"
+    instant = "2026-09-20T12:00:00Z"
+    candidate = root / "candidate.md"
+    root.mkdir()
+    candidate.write_bytes(
+        b"Task: Settle legacy ledger.\nNext action: Start.\nupdated: 2026-09-20T11:00:00Z\n"
+    )
+    owner.create_candidate(root, slug, candidate.read_bytes())
+    item = owner.start_item(root, slug, quick_status())
+    evidence_bytes = b"current evidence\n"
+    (item / "evidence.md").write_bytes(evidence_bytes)
+    events = [legacy_event(index) for index in range(1, 26)]
+    events[6] = legacy_event(7, gate="REVISE", status="revise")
+    ledger_bytes = b"".join(canonical(event) + b"\n" for event in events)
+    (item / "agent-runs.jsonl").write_bytes(ledger_bytes)
+    (item / "bug-dispositions.json").write_bytes(canonical({
+        "schemaVersion": 1, "workItem": slug, "closedAt": instant, "bugs": [],
+    }) + b"\n")
+    request = settlement_request(ledger_bytes, [{
+        "targetRunId": "legacy-run-0007",
+        "disposition": "satisfied-by-current-evidence",
+        "evidence": [{
+            "path": "work-items/active/legacy-item/evidence.md",
+            "sha256": digest(evidence_bytes),
+        }],
+    }])
+    owner.settle_legacy_ledger(root, request, apply_admitted=True)
+    archived = owner.close_item(root, slug, closure(instant), instant)
+    return owner, owner._load_agent_run_ledger().load_validator(), archived
+
+
+def apply_archive_projection(
+    owner: object, root: Path, archived: Path, *, only_target: bool = False
+) -> Path:
+    manifests = root / "work-items" / "legacy-ledger-projection-manifests"
+    active_manifests = list(manifests.glob("*.json"))
+    assert len(active_manifests) == 1
+    active_manifest = active_manifests[0]
+    payload = json.loads(active_manifest.read_bytes())
+    payload["manifestId"] = "archive-projection-001"
+    entry = payload["entries"][0]
+    entry["workItem"] = archived.relative_to(root).as_posix()
+    entry["ledgerPath"] = (archived / "agent-runs.jsonl").relative_to(root).as_posix()
+    entry["ledgerSha256"] = digest((archived / "agent-runs.jsonl").read_bytes())
+    if only_target:
+        for field in (
+            "rawLineOrdinals", "rawLineSha256", "projectedEvents", "projectedEventSha256"
+        ):
+            entry[field] = [entry[field][6]]
+    registry = root / "work-items" / "legacy-ledger-projections.jsonl"
+    owner.apply_legacy_ledger_projection(
+        root, canonical(payload), entry["entryId"], entry["rawLineOrdinals"][0],
+        digest(registry.read_bytes()), "archive-projection-apply-001",
+        "2026-09-20T12:00:02Z",
+    )
+    return manifests / "archive-projection-001.json"
 
 
 def quick_status() -> bytes:
@@ -394,6 +456,95 @@ def test_zero_open_obligations_flow_through_ordinary_close_receipt_and_readme(
     assert (archived / "bug-dispositions-receipt.json").is_file()
     readme = (root / "work-items" / "README.md").read_text(encoding="utf-8")
     assert "archive/2026-09/legacy-item" in readme
+
+
+def test_archived_owner_settlement_legacy_revise_is_exact_invalidation_target(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    root = tmp_path / "repo"
+    owner, validator, archived = archived_settlement_fixture(root)
+    archive_before = tree_bytes(archived)
+    observed = []
+    original = validator.resolve_closure_invalidations
+
+    def observe(rows, validity, errors, telemetry=None, *, context=None):
+        observed.append((rows, validity))
+        return original(rows, validity, errors, telemetry, context=context)
+
+    monkeypatch.setattr(validator, "resolve_closure_invalidations", observe)
+    errors, _open_revise, _open_launches = validator.validate_archived_ledger_obligations(archived)
+    target = next(index for index, row in enumerate(observed[-1][0]) if row.event.get("runId") == "legacy-run-0007")
+    assert observed[-1][0][target].epoch == "raw"
+    assert not observed[-1][1][target].authority.revise_target_eligible
+    assert any("ledger-recovery:target-ineligible legacy-run-0007" in error for error in errors)
+    assert tree_bytes(archived) == archive_before
+
+    apply_archive_projection(owner, root, archived)
+    errors, open_revise, open_launches = validator.validate_archived_ledger_obligations(archived)
+    rows, validity = observed[-1]
+    assert rows[target].epoch == "manifest-profile"
+    assert validity[target].current_schema_valid is False
+    assert tuple(vars(validity[target].authority).values()) == (False, False, True, False, False)
+    assert errors == []
+    assert open_revise == [] and open_launches == []
+    assert tree_bytes(archived) == archive_before
+
+    wrong_digest = dict(rows[-1].event)
+    wrong_digest["invalidatesEventSha256"] = "0" * 64
+    altered_rows = (*rows[:-1], replace(rows[-1], event=MappingProxyType(wrong_digest)))
+    digest_errors: list[str] = []
+    validator.resolve_closure_invalidations(altered_rows, validity, digest_errors)
+    assert any("ledger-recovery:target-digest-mismatch" in error for error in digest_errors)
+
+    order_errors: list[str] = []
+    validator.resolve_closure_invalidations(
+        (rows[-1], *rows[:-1]), (validity[-1], *validity[:-1]), order_errors,
+    )
+    assert any("ledger-recovery:target-identity" in error for error in order_errors)
+
+
+@pytest.mark.parametrize("projection", ["absent", "manifest-drift"])
+def test_archived_legacy_revise_without_valid_archive_projection_stays_ineligible(
+    tmp_path: Path, monkeypatch, projection: str,
+) -> None:
+    root = tmp_path / "repo"
+    owner, validator, archived = archived_settlement_fixture(root)
+    archive_before = tree_bytes(archived)
+    if projection == "manifest-drift":
+        manifest = apply_archive_projection(owner, root, archived)
+        manifest.write_bytes(manifest.read_bytes() + b" ")
+    observed = []
+    original = validator.resolve_closure_invalidations
+
+    def observe(rows, validity, errors, telemetry=None, *, context=None):
+        observed.append((rows, validity))
+        return original(rows, validity, errors, telemetry, context=context)
+
+    monkeypatch.setattr(validator, "resolve_closure_invalidations", observe)
+    errors, _open_revise, _open_launches = validator.validate_archived_ledger_obligations(archived)
+
+    target = next(index for index, row in enumerate(observed[-1][0]) if row.event.get("runId") == "legacy-run-0007")
+    assert observed[-1][0][target].epoch == "raw"
+    assert observed[-1][1][target].current_schema_valid is False
+    assert not any(vars(observed[-1][1][target].authority).values())
+    assert any("ledger-recovery:target-ineligible" in error for error in errors)
+    if projection == "manifest-drift":
+        assert any("manifest digest mismatch" in error for error in errors)
+    assert tree_bytes(archived) == archive_before
+
+
+def test_archive_projection_rejects_unprojected_raw_siblings(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    owner, validator, archived = archived_settlement_fixture(root)
+    before = tree_bytes(root)
+
+    with pytest.raises(owner.LifecycleError) as raised:
+        apply_archive_projection(owner, root, archived, only_target=True)
+
+    assert raised.value.failure_id == "WI-LEDGER-MIGRATION-CANDIDATE-INVALID"
+    errors, _open_revise, _open_launches = validator.validate_archived_ledger_obligations(archived)
+    assert any("ledger-recovery:target-ineligible" in error for error in errors)
+    assert tree_bytes(root) == before
 
 
 def test_cli_is_preflight_by_default_and_applies_only_with_explicit_marker(

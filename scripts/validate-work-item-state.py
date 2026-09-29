@@ -6219,6 +6219,12 @@ def validate_archived_ledger_obligations(
     typed_closure_validity = _validity_from_boolean_events(
         runtime_rows, closure_validity
     )
+    archived_validity = list(typed_closure_validity)
+    for position, row in enumerate(runtime_rows):
+        if row.epoch == "manifest-profile" and row.authority.revise_target_eligible:
+            archived_validity[position] = LedgerEventValidityV1(
+                False, LedgerAuthorityV1(False, False, True, False, False)
+            )
     # Numeric V1 remains historical, except as the exact target of a later V2
     # closure relation in this immutable archive. No other authority is gained.
     positions_by_run_id: dict[str, list[int]] = {}
@@ -6245,7 +6251,6 @@ def validate_archived_ledger_obligations(
                 and positions[0] < closer_position
             ):
                 target_positions.add(positions[0])
-    archived_validity = list(typed_closure_validity)
     for position in sorted(target_positions):
         event = effective_events[position]
         row = effective_rows[position]
