@@ -8612,6 +8612,36 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
             "b" * 64, interpreter,
         )
 
+    def test_frozen_bootstrap_injects_held_windows_job_module(self) -> None:
+        import base64
+
+        module = self._module("windows_job_bootstrap")
+        source = {
+            "hook_common": b"",
+            "classifier": b"def find_machine_paths(*args, **kwargs): return []\n",
+            "posix_helper": b"",
+            "windows_job": b"WINDOWS_JOB_SENTINEL = True\n",
+            "scanner": (
+                b"assert __injected_windows_job_module__.__name__ == "
+                b"'_orchestrarium_windows_job_v1'\n"
+                b"assert __injected_windows_job_module__.WINDOWS_JOB_SENTINEL\n"
+                b"print('WINDOWS_JOB_INJECTED')\n"
+            ),
+        }
+        payload = json.dumps({
+            name: base64.b64encode(value).decode("ascii")
+            for name, value in source.items()
+        }).encode("ascii")
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", module._SCAN_BOOTSTRAP,
+             "--gate-git-executable", sys.executable],
+            input=payload,
+            capture_output=True,
+            timeout=10.0,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
+        self.assertEqual(result.stdout.strip(), b"WINDOWS_JOB_INJECTED")
+
     def test_frozen_bootstrap_injects_held_posix_helper_and_reaches_range_main(
         self,
     ) -> None:
@@ -8623,7 +8653,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
         try:
             self.assertEqual(
                 tuple(node.role for node in closure.nodes),
-                ("gate", "hook_common", "classifier", "posix_helper", "scanner"),
+                ("gate", "hook_common", "classifier", "posix_helper", "windows_job", "scanner"),
             )
             payload = module._closure_payload(closure)
             with temporary_repository_workdir() as repository_workdir:
@@ -8822,6 +8852,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                 REPO_ROOT / "scripts" / "process_supervision" /
                 "posix_process_group.py"
             ).read_bytes(),
+            "windows_job": b"WINDOWS_JOB_SENTINEL = True\n",
         }
         original_file = module.__file__
         with tempfile.TemporaryDirectory() as td:
@@ -8843,12 +8874,14 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                         else script_dir / "process_supervision" /
                         "posix_process_group.py"
                     )
+                    windows_job = posix_helper.with_name("windows_job.py")
                     posix_helper.parent.mkdir(parents=True, exist_ok=True)
                     gate.write_bytes(sources["gate"])
                     scanner.write_bytes(sources["scanner"])
                     common.write_bytes(sources["common"])
                     classifier.write_bytes(sources["classifier"])
                     posix_helper.write_bytes(sources["posix_helper"])
+                    windows_job.write_bytes(sources["windows_job"])
                     module.__file__ = str(gate)
                     fds, closure = module._capture_source_closure()
                     try:
@@ -8857,7 +8890,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                                 tuple(node.role for node in closure.nodes),
                                 (
                                     "gate", "hook_common", "classifier",
-                                    "posix_helper", "scanner",
+                                    "posix_helper", "windows_job", "scanner",
                                 ),
                             )
                         self.assertEqual(
@@ -8883,6 +8916,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                         "hook_common": common,
                         "classifier": classifier,
                         "posix_helper": posix_helper,
+                        "windows_job": windows_job,
                         "scanner": scanner,
                     }
                     role_sources = {
@@ -8890,6 +8924,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                         "hook_common": sources["common"],
                         "classifier": sources["classifier"],
                         "posix_helper": sources["posix_helper"],
+                        "windows_job": sources["windows_job"],
                         "scanner": sources["scanner"],
                     }
                     for role, target in role_paths.items():
@@ -9689,6 +9724,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                 REPO_ROOT / "scripts" / "process_supervision" /
                 "posix_process_group.py"
             ).read_bytes(),
+            "windows_job": b"WINDOWS_JOB_SENTINEL = True\n",
         }
         original_file = module.__file__
         scratch = REPO_ROOT / ".scratch"
@@ -9714,6 +9750,9 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                             "posix_process_group.py"
                         ),
                     }
+                    paths["windows_job"] = paths["posix_helper"].with_name(
+                        "windows_job.py"
+                    )
                     for role, path in paths.items():
                         path.parent.mkdir(parents=True, exist_ok=True)
                         path.write_bytes(sources[role])
@@ -9724,7 +9763,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                             tuple(node.role for node in closure.nodes),
                             (
                                 "gate", "hook_common", "classifier",
-                                "posix_helper", "scanner",
+                                "posix_helper", "windows_job", "scanner",
                             ),
                         )
                         for index, component in enumerate(closure.components):

@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,34 @@ def _isolated_validator():
 
 
 class AgentsModeInstallerRegressionTest(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows ReadOnly unlink behavior")
+    def test_owned_readonly_file_is_removed_with_its_fixture(self) -> None:
+        validator = _isolated_validator()
+        fixture_id = uuid.UUID("66666666-6666-4666-8666-666666666666")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            owned = root / ".scratch" / "agents-mode-installer-regression" / fixture_id.hex
+            created = False
+
+            def seed_readonly(_root, _case, relative_target):
+                nonlocal created
+                if created:
+                    return
+                created = True
+                readonly = root / relative_target / ".codex/.tmp/plugins-clone/.git/objects/pack/probe.idx"
+                readonly.parent.mkdir(parents=True)
+                readonly.write_bytes(b"index")
+                readonly.chmod(stat.S_IREAD)
+                self.assertTrue(
+                    readonly.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
+                )
+
+            validator.run_installer = seed_readonly
+            with patch.object(validator.uuid, "uuid4", return_value=fixture_id):
+                validator.run_regression(root)
+            self.assertTrue(created)
+            self.assertFalse(owned.exists())
+
     def test_owned_uuid_fixture_is_removed_without_touching_sibling(self) -> None:
         validator = _isolated_validator()
         fixture_id = uuid.UUID("11111111-1111-4111-8111-111111111111")

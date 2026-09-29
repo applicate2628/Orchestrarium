@@ -95,6 +95,7 @@ RUNTIME_HELPERS = (
     "mutate-work-item.py",
     "provider_prompt.py",
     "process_supervision/posix_process_group.py",
+    "process_supervision/windows_job.py",
     "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
     "invoke-claude-prompt.py",

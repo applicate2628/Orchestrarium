@@ -50,6 +50,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -1196,28 +1197,503 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                 )
 
 
+@unittest.skipIf(_git() is None, "needs git on PATH")
 class TestPublicationSafetyWindowsRangeContainment(unittest.TestCase):
-    def test_windows_range_refuses_before_repository_or_git_work(self) -> None:
-        module = _load_canonical_scanner("_scanner_windows_range_containment")
-        for extra in ((), ("--range-source", "a" * 40)):
-            with self.subTest(extra=extra):
-                stderr = io.StringIO()
-                with (
-                    mock.patch.object(module, "os", SimpleNamespace(name="nt")),
-                    mock.patch.object(module, "_repo_root") as repo_root,
-                    mock.patch.object(module, "_scan_range") as scan_range,
-                    mock.patch.object(module, "_run_range_git") as range_git,
-                    contextlib.redirect_stderr(stderr),
+    def test_windows_range_and_explicit_source_emit_nonempty_v3_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            origin = root / "origin.git"
+            repo = root / "repo"
+            subprocess.run([_git(), "init", "-q", "--bare", str(origin)], check=True)
+            subprocess.run([_git(), "init", "-q", "-b", "main", str(repo)], check=True)
+            for key, value in (("user.email", "t@t"), ("user.name", "t")):
+                subprocess.run([_git(), "-C", str(repo), "config", key, value], check=True)
+            (repo / "clean.txt").write_text("clean content\n", encoding="utf-8")
+            subprocess.run([_git(), "-C", str(repo), "add", "clean.txt"], check=True)
+            subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "clean"], check=True)
+            subprocess.run([_git(), "-C", str(repo), "remote", "add", "origin", str(origin)], check=True)
+            tip = subprocess.run(
+                [_git(), "-C", str(repo), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+
+            for extra, source in (((), "main"), (("--range-source", tip), tip)):
+                with self.subTest(extra=extra):
+                    result = subprocess.run(
+                        [sys.executable, str(CANONICAL_SCANNER), "--range", "origin", "main", *extra],
+                        cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("clean (range, receipt=v3, commits=1,", result.stdout)
+                    self.assertIn("messages=complete", result.stdout)
+                    self.assertIn("history=complete", result.stdout)
+                    self.assertIn(
+                        f"remote=origin, dst=main, src={source}, tip={tip}", result.stdout
+                    )
+
+
+@unittest.skipUnless(os.name == "nt", "Windows Job ownership regression")
+class TestPublicationSafetyWindowsJobOwnership(unittest.TestCase):
+    def test_sync_owned_child_never_selects_foreign_reused_parent_pid(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_foreign_pid")
+        foreign_pid = 2_147_483_000  # Synthetic only; termination is intercepted.
+        owned_pid: list[int] = []
+        termination_attempts: list[int] = []
+        snapshots = 0
+        real_popen = module.subprocess.Popen
+
+        def record_owned_spawn(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            owned_pid.append(process.pid)
+            return process
+
+        def reused_parent_snapshot():
+            nonlocal snapshots
+            snapshots += 1
+            if snapshots == 1:
+                self.assertEqual(len(owned_pid), 1)
+                return ((owned_pid[0], 0), (foreign_pid, owned_pid[0]))
+            return ()
+
+        with (
+            mock.patch.object(module.subprocess, "Popen", side_effect=record_owned_spawn),
+            mock.patch.object(
+                module, "_windows_process_rows", side_effect=reused_parent_snapshot,
+                create=True,
+            ),
+            mock.patch.object(
+                module, "_windows_terminate_pid",
+                side_effect=lambda pid, _timeout: termination_attempts.append(pid),
+                create=True,
+            ),
+        ):
+            result = module._run_owned_process(
+                [sys.executable, "-c", "print('owned')"], timeout=2.0
+            )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), b"owned")
+        self.assertNotIn(foreign_pid, termination_attempts)
+
+    def test_async_selection_refuses_failed_job_launch(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_job_launch_failure")
+
+        class FailingJobOwner:
+            @staticmethod
+            def launch(**_kwargs):
+                raise OSError("injected creation-time Job assignment failure")
+
+        async def select():
+            return await module._read_git_lines_bounded(
+                (sys.executable, "-c", "print('healthy')"),
+                byte_cap=1024,
+                line_cap=256,
+                deadline=asyncio.get_running_loop().time() + 2.0,
+                accepted_codes=frozenset({0}),
+            )
+
+        with mock.patch.object(module, "WindowsJobOwnerV1", FailingJobOwner, create=True):
+            outcome = asyncio.run(select())
+
+        self.assertIsInstance(outcome, module.Refusal)
+        self.assertEqual(outcome.failure_id, "PS-MSG-SPAWN")
+
+    def test_async_binary_batch_preserves_exact_payload_and_reaps_job(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_binary_batch")
+        oid = "1" * 40
+        payload = b"a\0b\nc"
+        child = (
+            "import sys;"
+            "oid=sys.stdin.buffer.readline().strip();"
+            "payload=b'a\\x00b\\nc';"
+            "sys.stdout.buffer.write(oid+b' blob '+str(len(payload)).encode()"
+            "+b'\\n'+payload+b'\\n');"
+            "sys.stdout.buffer.flush();"
+            "sys.stdin.buffer.read()"
+        )
+
+        async def exercise():
+            reader = module._AsyncGitObjectReader(
+                argv=(sys.executable, "-u", "-c", child),
+                request_timeout=2.0, settle_timeout=2.0,
+            )
+            self.assertIsNone(await reader.start())
+            object_result = await reader.read(oid, "blob")
+            finalization = await reader.finalize()
+            return object_result, finalization, reader.reap_certificate
+
+        result, finalization, certificate = asyncio.run(exercise())
+        self.assertIsInstance(result, module.ObjectReadSuccess)
+        self.assertEqual(result.raw, payload)
+        self.assertIsNone(finalization)
+        self.assertIsNotNone(certificate)
+        self.assertTrue(certificate.complete)
+
+    def test_async_selection_drains_large_binary_pipe_with_backpressure(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_pipe_backpressure")
+        line = b"x" * 127
+        child = (
+            "import sys;"
+            "sys.stdout.buffer.write((b'x'*127+b'\\n')*4096);"
+            "sys.stdout.buffer.flush()"
+        )
+
+        async def exercise():
+            result = await module._read_git_lines_bounded(
+                (sys.executable, "-u", "-c", child),
+                byte_cap=600_000, line_cap=128,
+                deadline=asyncio.get_running_loop().time() + 5.0,
+                accepted_codes=frozenset({0}),
+            )
+            pending = {
+                task for task in asyncio.all_tasks()
+                if task is not asyncio.current_task() and not task.done()
+            }
+            return result, pending
+
+        result, pending = asyncio.run(exercise())
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(result[0], 0)
+        self.assertEqual(len(result[1]), 4096)
+        self.assertEqual(result[1][0], line)
+        self.assertEqual(result[1][-1], line)
+        self.assertEqual(pending, set())
+
+    def test_async_selection_cancel_settles_owned_job_without_pending_tasks(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_selection_cancel")
+        owners = []
+        real_launch = module.WindowsJobOwnerV1.launch
+
+        def capture_launch(**kwargs):
+            owner = real_launch(**kwargs)
+            owners.append(owner)
+            return owner
+
+        with tempfile.TemporaryDirectory() as td:
+            ready = Path(td) / "ready"
+            child = (
+                "import pathlib,sys,time;"
+                "pathlib.Path(sys.argv[1]).write_text('ready',encoding='ascii');"
+                "time.sleep(60)"
+            )
+
+            async def exercise():
+                task = asyncio.create_task(module._read_git_lines_bounded(
+                    (sys.executable, "-u", "-c", child, str(ready)),
+                    byte_cap=1024, line_cap=256,
+                    deadline=asyncio.get_running_loop().time() + 5.0,
+                    accepted_codes=frozenset({0}),
+                ))
+                deadline = asyncio.get_running_loop().time() + 2.0
+                while not ready.is_file():
+                    self.assertLess(asyncio.get_running_loop().time(), deadline)
+                    await asyncio.sleep(0.01)
+                task.cancel()
+                outcome = await task
+                pending = {
+                    other for other in asyncio.all_tasks()
+                    if other is not asyncio.current_task() and not other.done()
+                }
+                return outcome, pending
+
+            try:
+                with mock.patch.object(
+                    module.WindowsJobOwnerV1, "launch", side_effect=capture_launch
                 ):
-                    result = module.main(["--range", "origin", "main", *extra])
-                self.assertEqual(result, 2)
-                self.assertIn(
-                    "id=PS-INPUT-REFUSAL reason=windows-range-unsupported phase=input",
-                    stderr.getvalue(),
-                )
-                repo_root.assert_not_called()
-                scan_range.assert_not_called()
-                range_git.assert_not_called()
+                    outcome, pending = asyncio.run(exercise())
+            finally:
+                for owner in owners:
+                    owner.close()
+
+        self.assertIsInstance(outcome, module.Refusal)
+        self.assertEqual(outcome.reason, "cancelled")
+        self.assertEqual(pending, set())
+        self.assertEqual(len(owners), 1)
+        closure = owners[0].settle(time.monotonic(), terminate=False)
+        self.assertTrue(closure.complete)
+        self.assertTrue(closure.active_zero)
+        self.assertTrue(closure.handles_closed)
+
+    def test_sync_stream_constructor_failure_closes_transferred_fd(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_sync_fd_failure")
+        owners = []
+        transferred = []
+        real_launch = module.WindowsJobOwnerV1.launch
+
+        def capture_launch(**kwargs):
+            owner = real_launch(**kwargs)
+            owners.append(owner)
+            real_take = owner.take_stdout_fd
+
+            def take_stdout():
+                fd = real_take()
+                transferred.append(fd)
+                return fd
+
+            owner.take_stdout_fd = take_stdout
+            return owner
+
+        try:
+            with (
+                mock.patch.object(module.WindowsJobOwnerV1, "launch", side_effect=capture_launch),
+                mock.patch.object(module.os, "fdopen", side_effect=OSError("injected fdopen")),
+            ):
+                with self.assertRaises(OSError):
+                    module._run_owned_process(
+                        [sys.executable, "-c", "pass"], timeout=2.0
+                    )
+            self.assertEqual(len(transferred), 1)
+            with self.assertRaises(OSError):
+                os.fstat(transferred[0])
+            self.assertTrue(owners[0].settle(time.monotonic()).complete)
+        finally:
+            for fd in transferred:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    def test_async_bridge_constructor_failure_closes_all_transferred_fds(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_async_fd_failure")
+        owners = []
+        transferred = []
+        real_launch = module.WindowsJobOwnerV1.launch
+        real_bridge = module._WindowsAsyncPipeReader
+        initial_workers = {
+            thread.ident for thread in threading.enumerate()
+            if thread.name == "publication-pipe-read"
+        }
+
+        def capture_launch(**kwargs):
+            owner = real_launch(**kwargs)
+            owners.append(owner)
+            for name in ("stdout", "stderr"):
+                real_take = getattr(owner, f"take_{name}_fd")
+
+                def take(real_take=real_take):
+                    fd = real_take()
+                    transferred.append(fd)
+                    return fd
+
+                setattr(owner, f"take_{name}_fd", take)
+            return owner
+
+        def bridge_then_fail(fd, loop):
+            if len(transferred) == 1:
+                return real_bridge(fd, loop)
+            raise OSError("injected second bridge constructor failure")
+
+        async def start():
+            return await module._create_windows_owned_async_process(
+                (sys.executable, "-c", "pass"),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+        try:
+            with (
+                mock.patch.object(module.WindowsJobOwnerV1, "launch", side_effect=capture_launch),
+                mock.patch.object(module, "_WindowsAsyncPipeReader", side_effect=bridge_then_fail),
+            ):
+                with self.assertRaises(OSError):
+                    asyncio.run(start())
+            self.assertEqual(len(transferred), 2)
+            for fd in transferred:
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+            self.assertTrue(owners[0].settle(time.monotonic()).complete)
+            remaining_workers = {
+                thread.ident for thread in threading.enumerate()
+                if thread.name == "publication-pipe-read"
+            }
+            self.assertEqual(remaining_workers, initial_workers)
+        finally:
+            for fd in transferred:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    def test_double_cancel_during_launch_closes_eventual_job(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_double_cancel_launch")
+        started = threading.Event()
+        release = threading.Event()
+        returned = threading.Event()
+
+        class SyntheticJob:
+            pid = 1234
+
+            def __init__(self) -> None:
+                self.owned_child_active = True
+                self.handles_closed = False
+                self.close_calls = 0
+
+            def close(self):
+                self.close_calls += 1
+                self.owned_child_active = False
+                self.handles_closed = True
+
+        job = SyntheticJob()
+
+        def blocked_launch(**_kwargs):
+            started.set()
+            if not release.wait(2.0):
+                raise TimeoutError("synthetic launch was not released")
+            returned.set()
+            return job
+
+        async def exercise():
+            loop = asyncio.get_running_loop()
+            task = asyncio.create_task(module._create_windows_owned_async_process(
+                (sys.executable, "-c", "pass"),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            ))
+
+            def cancel_while_launch_runs():
+                if started.wait(2.0):
+                    loop.call_soon_threadsafe(task.cancel)
+                    loop.call_soon_threadsafe(task.cancel)
+                release.set()
+
+            canceller = threading.Thread(target=cancel_while_launch_runs)
+            canceller.start()
+            try:
+                try:
+                    return "returned", await task
+                except asyncio.CancelledError:
+                    return "cancelled", None
+            finally:
+                release.set()
+                canceller.join(1.0)
+
+        try:
+            with mock.patch.object(
+                module.WindowsJobOwnerV1, "launch", side_effect=blocked_launch
+            ):
+                outcome, process = asyncio.run(exercise())
+            self.assertTrue(started.is_set())
+            self.assertTrue(returned.is_set())
+            if outcome == "returned":
+                self.assertIsNotNone(process)
+                self.assertIs(process.job, job)
+                job.close()
+            else:
+                self.assertEqual(outcome, "cancelled")
+            self.assertEqual(job.close_calls, 1)
+            self.assertTrue(job.handles_closed)
+            self.assertFalse(job.owned_child_active)
+        finally:
+            release.set()
+            if job.owned_child_active:
+                job.close()
+
+    def test_reader_bridge_close_wakes_undelivered_callback_ack(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_undelivered_pipe_ack")
+        read_fd, write_fd = os.pipe()
+        queued = threading.Event()
+        callbacks = []
+
+        class StalledLoop:
+            def call_soon_threadsafe(self, callback, *args):
+                callbacks.append((callback, args))
+                queued.set()
+
+        bridge = None
+
+        async def exercise():
+            nonlocal bridge
+            bridge = module._WindowsAsyncPipeReader(read_fd, StalledLoop())
+            os.write(write_fd, b"x")
+            self.assertTrue(await asyncio.to_thread(queued.wait, 2.0))
+            return bridge.close(time.monotonic() + 0.1)
+
+        try:
+            closed = asyncio.run(exercise())
+            self.assertTrue(closed)
+            self.assertFalse(bridge._thread.is_alive())
+        finally:
+            if callbacks:
+                callbacks[0][1][-1].set()
+            if bridge is not None:
+                bridge._thread.join(1.0)
+            for fd in (read_fd, write_fd):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    def test_double_cancel_during_settlement_still_closes_pipe_bridge(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_double_cancel_settle")
+        started = threading.Event()
+        release = threading.Event()
+        returned = threading.Event()
+
+        class SyntheticJob:
+            pid = 1234
+
+            settled = False
+
+            def poll(self):
+                return 0
+
+            def settle(self, _deadline, *, terminate):
+                self.terminate_requested = terminate
+                started.set()
+                if not release.wait(2.0):
+                    raise TimeoutError("synthetic settlement was not released")
+                self.settled = True
+                returned.set()
+                return SimpleNamespace(complete=True, direct_exit_code=0)
+
+        class SyntheticBridge:
+            closed = False
+
+            def close(self, _deadline):
+                self.closed = True
+                return True
+
+        job = SyntheticJob()
+        bridge = SyntheticBridge()
+        process = module._WindowsOwnedAsyncProcess(job, [bridge], None, None, None)
+
+        async def exercise():
+            loop = asyncio.get_running_loop()
+            task = asyncio.create_task(module._settle_owned_async_process(
+                process, None, None, timeout_seconds=1.0,
+            ))
+
+            def cancel_while_settlement_runs():
+                if started.wait(2.0):
+                    loop.call_soon_threadsafe(task.cancel)
+                    loop.call_soon_threadsafe(task.cancel)
+                release.set()
+
+            canceller = threading.Thread(target=cancel_while_settlement_runs)
+            canceller.start()
+            try:
+                try:
+                    return "returned", await task
+                except asyncio.CancelledError:
+                    return "cancelled", None
+            finally:
+                release.set()
+                canceller.join(1.0)
+
+        try:
+            outcome, result = asyncio.run(exercise())
+            self.assertIn(outcome, {"returned", "cancelled"})
+            if outcome == "returned":
+                self.assertTrue(result)
+            self.assertTrue(started.is_set())
+            self.assertTrue(returned.is_set())
+            self.assertTrue(job.terminate_requested)
+            self.assertTrue(job.settled)
+            self.assertTrue(bridge.closed)
+        finally:
+            release.set()
 
 
 @unittest.skipIf(_git() is None, "needs git on PATH")

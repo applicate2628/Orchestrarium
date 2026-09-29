@@ -11,6 +11,7 @@ import importlib.util
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -126,6 +127,84 @@ def _load_posix_process_group_module():
 _POSIX_PROCESS_GROUP = _load_posix_process_group_module()
 PosixProcessGroupError = _POSIX_PROCESS_GROUP.PosixProcessGroupError
 PosixProcessGroupOwnerV1 = _POSIX_PROCESS_GROUP.PosixProcessGroupOwnerV1
+
+
+def _load_windows_job_module():
+    module_name = "_orchestrarium_windows_job_v1"
+    injected = globals().get("__injected_windows_job_module__")
+    if injected is not None:
+        if (
+            getattr(injected, "__name__", None) != module_name
+            or getattr(injected, "__file__", None)
+            != "<closure>/process_supervision/windows_job.py"
+            or sys.modules.get(module_name) is not injected
+        ):
+            raise RuntimeError("Windows Job injected contract mismatch")
+        module = injected
+    else:
+        script = Path(__file__)
+        if str(script).startswith("<closure>/"):
+            raise RuntimeError("Windows Job held module unavailable")
+        script = script.resolve()
+        candidates = [script.parent / "process_supervision" / "windows_job.py"]
+        if script.parent.name == "scripts" and script.parent.parent.name == "universal-hooks":
+            candidates.append(script.parents[2] / "process_supervision" / "windows_job.py")
+        elif (
+            script.parents[0].name == "scripts"
+            and script.parents[1].name == "lead"
+            and script.parents[2].name == "skills"
+            and script.parents[3].name == "src.codex"
+        ):
+            candidates.append(script.parents[4] / "scripts" / "process_supervision" / "windows_job.py")
+        elif (
+            script.parents[0].name == "scripts"
+            and script.parents[1].name == "agents"
+            and script.parents[2].name == "src.claude"
+        ):
+            candidates.append(script.parents[3] / "scripts" / "process_supervision" / "windows_job.py")
+        available = tuple(path for path in candidates if path.is_file())
+        if len(available) != 1:
+            raise RuntimeError("Windows Job helper unavailable or ambiguous")
+        existing = sys.modules.get(module_name)
+        if existing is not None:
+            module = existing
+        else:
+            spec = importlib.util.spec_from_file_location(module_name, available[0])
+            if spec is None or spec.loader is None:
+                raise RuntimeError("Windows Job helper unavailable or ambiguous")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                sys.modules.pop(module_name, None)
+                raise
+    try:
+        marker = module.WINDOWS_JOB_MODULE_CONTRACT_V1
+        owner_type = module.WindowsJobOwnerV1
+        error_type = module.WindowsJobError
+        contract = module.windows_job_module_contract_v1()
+    except (AttributeError, TypeError):
+        raise RuntimeError("Windows Job module contract mismatch") from None
+    if (
+        marker != "orchestrarium.windows-job.module.v1"
+        or contract != (marker, owner_type, error_type)
+        or not isinstance(owner_type, type)
+        or not isinstance(error_type, type)
+        or not issubclass(error_type, RuntimeError)
+    ):
+        raise RuntimeError("Windows Job module contract mismatch")
+    return module
+
+
+if os.name == "nt":
+    _WINDOWS_JOB = _load_windows_job_module()
+    WindowsJobOwnerV1 = _WINDOWS_JOB.WindowsJobOwnerV1
+    WindowsJobError = _WINDOWS_JOB.WindowsJobError
+    _WINDOWS_JOB_COORDINATOR = _WINDOWS_JOB.WindowsInheritanceCoordinatorV1()
+else:
+    class WindowsJobError(RuntimeError):
+        """Non-Windows type placeholder for platform-neutral exception clauses."""
 
 
 _SCANNER_EXEMPT_PATHS = frozenset({
@@ -628,138 +707,83 @@ def _run_git(
     )
 
 
-def _owned_process_group_kwargs() -> dict[str, object]:
-    """Create one independently addressable process tree for a bounded child."""
-    return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+def _windows_job_argv(argv: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    executable = shutil.which(argv[0])
+    if executable is None or not os.path.isabs(executable):
+        raise OSError("owned executable is unavailable")
+    return (executable, *argv[1:])
 
 
-def _windows_process_rows() -> tuple[tuple[int, int], ...] | None:
-    """Return one Toolhelp process snapshot without launching another process."""
-    import ctypes
-    from ctypes import wintypes
-
-    class PROCESSENTRY32W(ctypes.Structure):
-        _fields_ = (
-            ("dwSize", wintypes.DWORD),
-            ("cntUsage", wintypes.DWORD),
-            ("th32ProcessID", wintypes.DWORD),
-            ("th32DefaultHeapID", ctypes.c_size_t),
-            ("th32ModuleID", wintypes.DWORD),
-            ("cntThreads", wintypes.DWORD),
-            ("th32ParentProcessID", wintypes.DWORD),
-            ("pcPriClassBase", wintypes.LONG),
-            ("dwFlags", wintypes.DWORD),
-            ("szExeFile", wintypes.WCHAR * 260),
-        )
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
-    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-    kernel32.Process32FirstW.argtypes = (
-        wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)
+def _run_windows_owned_process(
+    argv: list[str], *, text: bool, timeout: float | None,
+    env: dict[str, str] | None,
+) -> subprocess.CompletedProcess:
+    if timeout is None or timeout < 0:
+        raise ValueError("Windows owned process requires a finite timeout")
+    resolved = _windows_job_argv(argv)
+    job = WindowsJobOwnerV1.launch(
+        executable=resolved[0], argv=resolved, cwd=os.getcwd(),
+        environment=env, stdin="null", stdout="pipe", stderr="pipe",
+        coordinator=_WINDOWS_JOB_COORDINATOR,
     )
-    kernel32.Process32FirstW.restype = wintypes.BOOL
-    kernel32.Process32NextW.argtypes = (
-        wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)
-    )
-    kernel32.Process32NextW.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
-    invalid_handle = ctypes.c_void_p(-1).value
-    if snapshot == invalid_handle:
-        return None
-    rows: list[tuple[int, int]] = []
+    streams: list[object] = []
+    workers: list[threading.Thread] = []
+    chunks: dict[str, list[bytes]] = {"stdout": [], "stderr": []}
+    read_errors: list[BaseException] = []
+    settled = False
     try:
-        entry = PROCESSENTRY32W()
-        entry.dwSize = ctypes.sizeof(entry)
-        if not kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
-            return None
-        while True:
-            rows.append((int(entry.th32ProcessID), int(entry.th32ParentProcessID)))
-            if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
-                break
+        for name in ("stdout", "stderr"):
+            fd = getattr(job, f"take_{name}_fd")()
+            if fd is None:
+                raise RuntimeError("owned Job output pipe unavailable")
+            stream = None
+            try:
+                stream = os.fdopen(fd, "rb", buffering=0)
+                streams.append(stream)
+            except BaseException:
+                if stream is None:
+                    os.close(fd)
+                else:
+                    stream.close()
+                raise
+
+            def drain(source=stream, target=name):
+                try:
+                    while data := source.read(_READ_CHUNK_BYTES):
+                        chunks[target].append(data)
+                except BaseException as exc:
+                    read_errors.append(exc)
+
+            worker = threading.Thread(target=drain, name=f"publication-{name}")
+            worker.start()
+            workers.append(worker)
+        deadline = time.monotonic() + timeout
+        exit_code = job.wait(deadline)
+        expired = exit_code is None
+        cleanup_deadline = time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS
+        closure = job.settle(cleanup_deadline, terminate=True)
+        settled = True
+        for worker in workers:
+            worker.join(max(0.0, cleanup_deadline - time.monotonic()))
+        if not closure.complete or any(worker.is_alive() for worker in workers) or read_errors:
+            raise RuntimeError("owned Job did not settle")
+        stdout = b"".join(chunks["stdout"])
+        stderr = b"".join(chunks["stderr"])
+        if text:
+            stdout = stdout.decode("utf-8", "replace")
+            stderr = stderr.decode("utf-8", "replace")
+        if expired:
+            raise subprocess.TimeoutExpired(argv, timeout, output=stdout, stderr=stderr)
+        return subprocess.CompletedProcess(argv, exit_code, stdout, stderr)
     finally:
-        kernel32.CloseHandle(snapshot)
-    return tuple(rows)
-
-
-def _windows_terminate_pid(pid: int, timeout: float) -> None:
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenProcess.argtypes = (
-        wintypes.DWORD, wintypes.BOOL, wintypes.DWORD
-    )
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
-    kernel32.TerminateProcess.restype = wintypes.BOOL
-    kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
-    kernel32.WaitForSingleObject.restype = wintypes.DWORD
-    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    handle = kernel32.OpenProcess(0x0001 | 0x00100000, False, pid)
-    if not handle:
-        return
-    try:
-        kernel32.TerminateProcess(handle, 1)
-        milliseconds = max(1, min(0xFFFFFFFE, int(timeout * 1000)))
-        kernel32.WaitForSingleObject(handle, milliseconds)
-    finally:
-        kernel32.CloseHandle(handle)
-
-
-class _OwnedProcessSettlement:
-    """One owner for terminate, direct-reap ordering, and group-empty proof."""
-
-    def __init__(self, pid: int) -> None:
-        self.pid = pid
-        self._known_windows_pids = {pid}
-
-    def _windows_live_members(self) -> set[int] | None:
-        rows = _windows_process_rows()
-        if rows is None:
-            return None
-        changed = True
-        while changed:
-            changed = False
-            for child_pid, parent_pid in rows:
-                if (
-                    parent_pid in self._known_windows_pids
-                    and child_pid not in self._known_windows_pids
-                ):
-                    self._known_windows_pids.add(child_pid)
-                    changed = True
-        return {
-            process_pid
-            for process_pid, _parent_pid in rows
-            if process_pid in self._known_windows_pids
-        }
-
-    def terminate(self, deadline: float) -> bool:
-        live = self._windows_live_members()
-        if live is None:
-            return False
-        for process_pid in sorted(live, reverse=True):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return False
-            _windows_terminate_pid(process_pid, min(0.1, remaining))
-        return True
-
-    def verify_empty(self, deadline: float) -> bool:
-        while True:
-            live = self._windows_live_members()
-            if live is None:
-                return False
-            if not live:
-                return True
-            if time.monotonic() >= deadline:
-                return False
-            if not self.terminate(deadline):
-                return False
-            time.sleep(0.01)
+        if not settled:
+            closure = job.close()
+            if not closure.complete:
+                raise RuntimeError("owned Job did not settle")
+        for stream in streams:
+            stream.close()
+        for worker in workers:
+            worker.join(_PROCESS_TREE_CLEANUP_SECONDS)
 
 
 def _run_owned_process(
@@ -770,14 +794,12 @@ def _run_owned_process(
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a bounded process and settle its whole owned tree on timeout."""
+    if os.name == "nt":
+        return _run_windows_owned_process(argv, text=text, timeout=timeout, env=env)
     process_group_owner: PosixProcessGroupOwnerV1 | None = None
     try:
-        process_kwargs: dict[str, object]
-        if os.name == "nt":
-            process_kwargs = _owned_process_group_kwargs()
-        else:
-            process_group_owner = PosixProcessGroupOwnerV1.acquire()
-            process_kwargs = process_group_owner.popen_kwargs
+        process_group_owner = PosixProcessGroupOwnerV1.acquire()
+        process_kwargs = process_group_owner.popen_kwargs
         process = subprocess.Popen(
             argv,
             stdin=subprocess.DEVNULL,
@@ -789,8 +811,7 @@ def _run_owned_process(
             env=env,
             **process_kwargs,
         )
-        if process_group_owner is not None:
-            process_group_owner.bind_process_group(process.pid)
+        process_group_owner.bind_process_group(process.pid)
     except BaseException:
         if process_group_owner is not None:
             try:
@@ -809,40 +830,20 @@ def _run_owned_process(
         pending_error = exc
         stdout, stderr = None, None
     cleanup_deadline = time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS
-    if os.name == "nt":
-        settlement = _OwnedProcessSettlement(process.pid)
-        termination_started = settlement.terminate(cleanup_deadline)
-        if process.poll() is None:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
+    try:
+        closure = process_group_owner.settle(
+            _PROCESS_TREE_CLEANUP_SECONDS,
+            direct_process=process,
+        )
+        group_settled = closure.complete
+    except PosixProcessGroupError:
+        group_settled = False
+    if group_settled:
         try:
             remaining = max(0.0, cleanup_deadline - time.monotonic())
             stdout, stderr = process.communicate(timeout=remaining)
-        except subprocess.TimeoutExpired:
-            termination_started = False
-        group_settled = (
-            termination_started
-            and process.poll() is not None
-            and settlement.verify_empty(cleanup_deadline)
-        )
-    else:
-        assert process_group_owner is not None
-        try:
-            closure = process_group_owner.settle(
-                _PROCESS_TREE_CLEANUP_SECONDS,
-                direct_process=process,
-            )
-            group_settled = closure.complete
-        except PosixProcessGroupError:
+        except (subprocess.TimeoutExpired, OSError, ValueError):
             group_settled = False
-        if group_settled:
-            try:
-                remaining = max(0.0, cleanup_deadline - time.monotonic())
-                stdout, stderr = process.communicate(timeout=remaining)
-            except (subprocess.TimeoutExpired, OSError, ValueError):
-                group_settled = False
     if not group_settled:
         raise RuntimeError("owned process group did not settle")
     if pending_error is not None:
@@ -911,29 +912,266 @@ class _AsyncioDirectProcessObservation:
         return self._returncode
 
 
+class _WindowsAsyncPipeReader:
+    """Bounded thread-to-StreamReader bridge for a native anonymous pipe."""
+
+    def __init__(self, fd: int, loop: asyncio.AbstractEventLoop) -> None:
+        self.fd = fd
+        self.loop = loop
+        self.reader = asyncio.StreamReader(limit=_READ_CHUNK_BYTES)
+        self.reader.set_transport(self)
+        self._can_read = threading.Event()
+        self._can_read.set()
+        self._closed = False
+        self._fd_closed = False
+        self._ack_lock = threading.Lock()
+        self._pending_ack: threading.Event | None = None
+        self._thread = threading.Thread(target=self._pump, name="publication-pipe-read")
+        self._thread.start()
+
+    def pause_reading(self) -> None:
+        self._can_read.clear()
+
+    def resume_reading(self) -> None:
+        self._can_read.set()
+
+    def _deliver(self, data: bytes | None, error: OSError | None,
+                 acknowledged: threading.Event) -> None:
+        try:
+            if self._closed:
+                return
+            if error is not None:
+                self.reader.set_exception(error)
+            elif data:
+                self.reader.feed_data(data)
+            else:
+                self.reader.feed_eof()
+        finally:
+            acknowledged.set()
+
+    def _pump(self) -> None:
+        while not self._closed:
+            self._can_read.wait()
+            if self._closed:
+                break
+            try:
+                data, error = os.read(self.fd, _READ_CHUNK_BYTES), None
+            except OSError as exc:
+                data, error = None, exc
+            acknowledged = threading.Event()
+            with self._ack_lock:
+                if self._closed:
+                    break
+                self._pending_ack = acknowledged
+            try:
+                self.loop.call_soon_threadsafe(self._deliver, data, error, acknowledged)
+            except RuntimeError:
+                with self._ack_lock:
+                    self._pending_ack = None
+                break
+            acknowledged.wait()
+            with self._ack_lock:
+                if self._pending_ack is acknowledged:
+                    self._pending_ack = None
+            if not data:
+                break
+
+    def close(self, deadline: float) -> bool:
+        with self._ack_lock:
+            self._closed = True
+            pending_ack = self._pending_ack
+        if pending_ack is not None:
+            pending_ack.set()
+        self._can_read.set()
+        self._thread.join(max(0.0, deadline - time.monotonic()))
+        if not self._fd_closed:
+            try:
+                os.close(self.fd)
+            except OSError:
+                return False
+            self._fd_closed = True
+        return not self._thread.is_alive()
+
+
+class _WindowsAsyncPipeWriter:
+    def __init__(self, fd: int) -> None:
+        self.fd = fd
+        self._pending: bytes | None = None
+        self._task: asyncio.Task[None] | None = None
+        self._closed = False
+        self._fd_closed = False
+
+    def write(self, data: bytes) -> None:
+        if self._closed or self._pending is not None or (
+            self._task is not None and not self._task.done()
+        ):
+            raise OSError("owned Job input pipe is unavailable")
+        self._pending = bytes(data)
+
+    def _write_all(self, data: bytes) -> None:
+        view = memoryview(data)
+        while view:
+            written = os.write(self.fd, view)
+            if written <= 0:
+                raise OSError("owned Job input pipe short write")
+            view = view[written:]
+
+    async def drain(self) -> None:
+        if self._pending is not None:
+            data, self._pending = self._pending, None
+            self._task = asyncio.create_task(asyncio.to_thread(self._write_all, data))
+        if self._task is not None:
+            await asyncio.shield(self._task)
+
+    def close(self) -> None:
+        self._closed = True
+        self._pending = None
+
+    def is_closing(self) -> bool:
+        return self._closed
+
+    async def wait_closed(self) -> None:
+        try:
+            if self._task is not None:
+                await asyncio.shield(self._task)
+        finally:
+            if not self._fd_closed and (
+                self._task is None or self._task.done()
+            ):
+                os.close(self.fd)
+                self._fd_closed = True
+
+
+class _WindowsOwnedAsyncProcess:
+    """Async byte-pipe view of one creation-time Job-owned process."""
+
+    def __init__(self, job, bridges: list[_WindowsAsyncPipeReader],
+                 stdin, stdout, stderr) -> None:
+        self.job = job
+        self.pid = job.pid
+        self.stdin = stdin
+        self.stdout = stdout
+        self.stderr = stderr
+        self._bridges = bridges
+
+    @property
+    def returncode(self) -> int | None:
+        return self.job.poll()
+
+    async def wait(self) -> int:
+        while True:
+            code = self.job.poll()
+            if code is not None:
+                return code
+            await asyncio.sleep(0.01)
+
+    def terminate(self) -> None:
+        if not self.job.terminate_job():
+            raise WindowsJobError("WJOB-JOB-TERMINATE", "settlement")
+
+    def kill(self) -> None:
+        self.terminate()
+
+    async def close_io(self) -> bool:
+        deadline = time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS
+        closed = True
+        if self.stdin is not None:
+            self.stdin.close()
+            try:
+                await asyncio.wait_for(
+                    self.stdin.wait_closed(),
+                    timeout=max(0.001, deadline - time.monotonic()),
+                )
+            except (OSError, asyncio.TimeoutError):
+                closed = False
+        for bridge in self._bridges:
+            if not bridge.close(deadline):
+                closed = False
+        return closed
+
+
+async def _create_windows_owned_async_process(argv: tuple[str, ...], **kwargs):
+    resolved = _windows_job_argv(argv)
+    modes = {}
+    for name in ("stdin", "stdout", "stderr"):
+        value = kwargs.get(name, asyncio.subprocess.DEVNULL)
+        if value == asyncio.subprocess.PIPE:
+            modes[name] = "pipe"
+        elif value == asyncio.subprocess.DEVNULL:
+            modes[name] = "null"
+        else:
+            raise ValueError("unsupported owned Job stream policy")
+    job = WindowsJobOwnerV1.launch(
+        executable=resolved[0], argv=resolved, cwd=kwargs.get("cwd", os.getcwd()),
+        environment=kwargs.get("env"), coordinator=_WINDOWS_JOB_COORDINATOR,
+        **modes,
+    )
+    loop = asyncio.get_running_loop()
+    bridges: list[_WindowsAsyncPipeReader] = []
+    pending_bridge: _WindowsAsyncPipeReader | None = None
+    stdin = stdout = stderr = None
+    try:
+        for name in ("stdout", "stderr"):
+            if modes[name] == "null":
+                continue
+            fd = getattr(job, f"take_{name}_fd")()
+            if fd is None:
+                raise RuntimeError("owned Job output pipe unavailable")
+            try:
+                bridge = _WindowsAsyncPipeReader(fd, loop)
+            except BaseException:
+                os.close(fd)
+                raise
+            pending_bridge = bridge
+            bridges.append(bridge)
+            pending_bridge = None
+            if name == "stdout":
+                stdout = bridge.reader
+            else:
+                stderr = bridge.reader
+        if modes["stdin"] == "pipe":
+            fd = job.take_stdin_fd()
+            if fd is None:
+                raise RuntimeError("owned Job input pipe unavailable")
+            try:
+                stdin = _WindowsAsyncPipeWriter(fd)
+            except BaseException:
+                os.close(fd)
+                raise
+        return _WindowsOwnedAsyncProcess(job, bridges, stdin, stdout, stderr)
+    except BaseException:
+        job.close()
+        if stdin is not None:
+            stdin.close()
+            await stdin.wait_closed()
+        if pending_bridge is not None:
+            pending_bridge.close(time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS)
+        for bridge in bridges:
+            bridge.close(time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS)
+        raise
+
+
 async def _create_owned_async_process(
     argv: tuple[str, ...],
     **kwargs,
 ) -> tuple[
-    asyncio.subprocess.Process,
+    asyncio.subprocess.Process | _WindowsOwnedAsyncProcess,
     PosixProcessGroupOwnerV1 | None,
     _AsyncioDirectProcessObservation | None,
 ]:
+    if os.name == "nt":
+        process = await _create_windows_owned_async_process(argv, **kwargs)
+        return process, None, None
     process_group_owner: PosixProcessGroupOwnerV1 | None = None
     direct_observation: _AsyncioDirectProcessObservation | None = None
-    process_kwargs: dict[str, object]
-    if os.name == "nt":
-        process_kwargs = _owned_process_group_kwargs()
-    else:
-        process_group_owner = await _acquire_posix_process_group_owner()
-        process_kwargs = process_group_owner.popen_kwargs
+    process_group_owner = await _acquire_posix_process_group_owner()
+    process_kwargs = process_group_owner.popen_kwargs
     try:
         process = await asyncio.create_subprocess_exec(
             *argv, **kwargs, **process_kwargs
         )
-        if process_group_owner is not None:
-            process_group_owner.bind_process_group(process.pid)
-            direct_observation = _AsyncioDirectProcessObservation(process)
+        process_group_owner.bind_process_group(process.pid)
+        direct_observation = _AsyncioDirectProcessObservation(process)
         return process, process_group_owner, direct_observation
     except BaseException:
         if process_group_owner is not None:
@@ -979,34 +1217,49 @@ async def _wait_owned_async_direct(
 
 
 async def _settle_owned_async_process(
-    process: asyncio.subprocess.Process,
+    process: asyncio.subprocess.Process | _WindowsOwnedAsyncProcess,
     process_group_owner: PosixProcessGroupOwnerV1 | None,
     direct_observation: _AsyncioDirectProcessObservation | None,
     timeout_seconds: float = _PROCESS_TREE_CLEANUP_SECONDS,
     *,
     drain_readers: tuple[asyncio.StreamReader | None, ...] = (),
+    close_io: bool = True,
 ) -> bool:
     cleanup_deadline = time.monotonic() + timeout_seconds
     if os.name == "nt":
-        settlement = _OwnedProcessSettlement(process.pid)
-        termination_started = await asyncio.to_thread(
-            settlement.terminate, cleanup_deadline
-        )
-        if process.returncode is None:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
+        if not isinstance(process, _WindowsOwnedAsyncProcess):
+            return False
         try:
-            remaining = max(0.0, cleanup_deadline - time.monotonic())
-            await asyncio.wait_for(process.wait(), timeout=remaining)
-        except Exception:
-            return False
-        if not termination_started or process.returncode is None:
-            return False
-        return await asyncio.to_thread(
-            settlement.verify_empty, cleanup_deadline
-        )
+            closure = process.job.settle(cleanup_deadline, terminate=True)
+        except WindowsJobError:
+            process.job.close()
+            closure = None
+
+        async def finish_io() -> bool:
+            drained = True
+            try:
+                for reader in drain_readers:
+                    if not await _drain_owned_async_reader(reader, cleanup_deadline):
+                        drained = False
+            finally:
+                io_closed = await process.close_io() if close_io else True
+            return bool(
+                closure is not None and closure.complete
+                and closure.direct_exit_code == process.returncode
+                and drained and io_closed
+            )
+
+        finish_task = asyncio.create_task(finish_io())
+        cancelled: asyncio.CancelledError | None = None
+        while True:
+            try:
+                complete = await asyncio.shield(finish_task)
+                break
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+        if cancelled is not None:
+            raise cancelled
+        return complete
 
     if process_group_owner is None or direct_observation is None:
         return False
@@ -1616,7 +1869,7 @@ async def _read_git_lines_bounded(
             stderr=asyncio.subprocess.DEVNULL,
             env=env,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, WindowsJobError):
         return _refusal("PS-MSG-SPAWN", "selection")
     if process.stdout is None:
         if not await _settle_owned_async_process(
@@ -2064,7 +2317,7 @@ async def _read_git_oid_lines_bounded(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, WindowsJobError):
         return _refusal("PS-MSG-SPAWN", "selection")
     if process.stdout is None:
         if not await _settle_owned_async_process(
@@ -2415,7 +2668,7 @@ class _AsyncGitObjectReader:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError, WindowsJobError):
             self._state = ReaderState.SPAWN_FAILED
             return _refusal("PS-MSG-SPAWN", "spawn")
         if self._process.stdin is None or self._process.stdout is None:
@@ -2555,29 +2808,6 @@ class _AsyncGitObjectReader:
             self._poisoned = True
             return _refusal("PS-MSG-READ", "pipe")
 
-    async def _wait_step(self, deadline: float, errors: list[str], phase: str) -> bool:
-        process = self._process
-        if process is None:
-            return True
-        try:
-            if os.name == "nt":
-                await self._within(process.wait(), deadline)
-            else:
-                if self._direct_observation is None:
-                    errors.append(phase)
-                    return False
-                await self._within(
-                    asyncio.shield(self._direct_observation.task), deadline
-                )
-            return process.returncode is not None
-        except asyncio.TimeoutError:
-            return False
-        except Exception:
-            terminal = process.returncode is not None
-            if not terminal:
-                errors.append(phase)
-            return terminal
-
     async def _discard_stdout(self, deadline: float) -> tuple[bool, bool]:
         """Drain fixed chunks to EOF without retaining child output."""
         process = self._process
@@ -2641,29 +2871,15 @@ class _AsyncGitObjectReader:
             if process.stdout is not None
             else None
         )
-        terminate_failed = False
-        if os.name == "nt":
-            terminal = await self._wait_step(deadline, errors, "wait")
-            if not terminal:
-                try:
-                    process.terminate()
-                except Exception:
-                    terminate_failed = True
-                terminal = await self._wait_step(
-                    deadline, errors, "terminate-wait"
-                )
-            if not terminal:
-                errors.append("terminate-wait")
         terminal = await _settle_owned_async_process(
             process,
             self._process_group_owner,
             self._direct_observation,
             self._settle_timeout,
+            close_io=os.name != "nt",
         )
         if not terminal:
             errors.append("group-settle")
-            if terminate_failed:
-                errors.append("terminate")
         child = ChildObservation(
             child_identity,
             process.returncode,
@@ -2694,6 +2910,9 @@ class _AsyncGitObjectReader:
                 stdout = TransportObservation(
                     "owned", "unobserved", False, "stdout-drain", loop.time()
                 )
+        if isinstance(process, _WindowsOwnedAsyncProcess):
+            if not await process.close_io():
+                errors.append("pipe-close")
         if child.terminal_observed and stdin.observed and stdout.observed:
             return _ReaderFinalizerResult(None, child, stdin, stdout, tuple(errors))
         self._state = ReaderState.REAP_PENDING
@@ -3691,12 +3910,6 @@ def main(argv: list[str] | None = None) -> int:
         _parser().error("unexpected extra path argument")
     if args.range_source is not None and not args.range:
         _parser().error("--range-source requires --range")
-    # Temporary containment until Windows range children are owned by a Job.
-    if args.range and os.name == "nt":
-        return _emit_outcome(ScanOutcome(
-            "refusal", "range",
-            refusal=_refusal("PS-INPUT-REFUSAL", "windows-range-unsupported"),
-        ))
     script = Path(__file__).resolve()
     try:
         repo_root = _repo_root()

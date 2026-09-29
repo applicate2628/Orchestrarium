@@ -138,6 +138,60 @@ def test_suspended_target_cannot_write_first_marker_before_job_verification(tmp_
     assert port.events == ["process.supervision.windows.job-verified.v1"]
 
 
+def test_windows_environment_block_limit_is_checked_before_launch() -> None:
+    """The generic byte cap must not admit a Windows block over 32767 units."""
+    runner = _load_runner()
+    request = _request(runner, (sys.executable, str(CHILD), "identity"))
+    # "A=" + value + double NUL = 32768 UTF-16 code units, below the generic byte cap.
+    request = runner.dataclasses.replace(
+        request,
+        environment=(runner.EnvironmentRowV1("A", "x" * 32764),),
+    )
+    with pytest.raises(runner.ProcessSupervisionError) as captured:
+        runner.validate_process_request(request)
+    assert captured.value.failure_id == "PSV1-REQUEST-INVALID"
+    assert captured.value.terminal_stage == "request-validation"
+
+
+def test_stdout_fd_transfer_failure_closes_taken_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed lifecycle handoff must not orphan the native binary descriptor."""
+    runner = _load_runner()
+    captured_fds: list[int] = []
+    owner_type = runner._WINDOWS_JOB.WindowsJobProcessV1
+    original_take = owner_type.take_stdout_fd
+    original_transfer = runner.RunLifecycleV1.transfer_resource
+
+    def record_take(self):
+        fd = original_take(self)
+        if fd is not None:
+            captured_fds.append(fd)
+        return fd
+
+    def fail_stdout_transfer(self, name, action, *, state):
+        if name.endswith(":stdout_parent"):
+            raise RuntimeError("injected stdout handoff failure")
+        return original_transfer(self, name, action, state=state)
+
+    monkeypatch.setattr(owner_type, "take_stdout_fd", record_take)
+    monkeypatch.setattr(runner.RunLifecycleV1, "transfer_resource", fail_stdout_transfer)
+    try:
+        with pytest.raises(RuntimeError, match="injected stdout handoff failure"):
+            runner.ProcessRunnerV1().run(
+                _request(runner, (sys.executable, str(CHILD), "identity"))
+            )
+        assert captured_fds
+        with pytest.raises(OSError):
+            os.fstat(captured_fds[-1])
+    finally:
+        for fd in captured_fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
 @pytest.mark.parametrize("resume_value", (0, 2, 0xFFFFFFFE, 0xFFFFFFFF))
 def test_resume_thread_non_one_never_runs_target(tmp_path: Path, resume_value: int) -> None:
     """GUARD-RESUME-COUNT-ONE: every non-one value terminates the suspended Job."""

@@ -14,6 +14,7 @@ import dataclasses
 import errno
 import hashlib
 import hmac
+import importlib.util
 import json
 import math
 import os
@@ -1825,6 +1826,11 @@ def _validate_environment(rows: Sequence[EnvironmentRowV1]) -> None:
         total += len(name_bytes) + 1 + len(value_bytes) + 1
     if total > MAX_ENVIRONMENT_BYTES:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+    if os.name == "nt":
+        ordered = sorted(rows, key=lambda row: row.name.casefold())
+        block = "\0".join(f"{row.name}={row.value}" for row in ordered) + "\0\0"
+        if len(block.encode("utf-16-le")) // 2 > MAX_WINDOWS_ENVIRONMENT_UNITS:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
 
 
 def _validate_request_shape_before_executable_acquisition(
@@ -2056,64 +2062,43 @@ def _request_failure(
     )
 
 
-class WindowsInheritanceCoordinatorV1:
-    def __init__(self) -> None:
-        self.lock = threading.Lock()
-        self._poisoned = False
+def _load_windows_job_module() -> Any:
+    module_name = "_orchestrarium_windows_job_v1"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing
+    module_path = Path(__file__).resolve().parent / "windows_job.py"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Windows Job owner unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    if module.windows_job_module_contract_v1() != (
+        module.WINDOWS_JOB_MODULE_CONTRACT_V1,
+        module.WindowsJobOwnerV1,
+        module.WindowsJobError,
+    ):
+        sys.modules.pop(module_name, None)
+        raise RuntimeError("Windows Job owner contract mismatch")
+    return module
 
-    @property
-    def poisoned(self) -> bool:
-        return self._poisoned
 
-    def poison(self) -> None:
-        self._poisoned = True
+_WINDOWS_JOB = _load_windows_job_module()
+WindowsInheritanceCoordinatorV1 = _WINDOWS_JOB.WindowsInheritanceCoordinatorV1
 
 
 if os.name == "nt":
     from ctypes import wintypes
-
-    ULONG_PTR = wintypes.WPARAM
-    SIZE_T = ctypes.c_size_t
-
-    class SECURITY_ATTRIBUTES(ctypes.Structure):
-        _fields_ = [
-            ("nLength", wintypes.DWORD),
-            ("lpSecurityDescriptor", ctypes.c_void_p),
-            ("bInheritHandle", wintypes.BOOL),
-        ]
-
-    class STARTUPINFOW(ctypes.Structure):
-        _fields_ = [
-            ("cb", wintypes.DWORD),
-            ("lpReserved", wintypes.LPWSTR),
-            ("lpDesktop", wintypes.LPWSTR),
-            ("lpTitle", wintypes.LPWSTR),
-            ("dwX", wintypes.DWORD),
-            ("dwY", wintypes.DWORD),
-            ("dwXSize", wintypes.DWORD),
-            ("dwYSize", wintypes.DWORD),
-            ("dwXCountChars", wintypes.DWORD),
-            ("dwYCountChars", wintypes.DWORD),
-            ("dwFillAttribute", wintypes.DWORD),
-            ("dwFlags", wintypes.DWORD),
-            ("wShowWindow", wintypes.WORD),
-            ("cbReserved2", wintypes.WORD),
-            ("lpReserved2", ctypes.POINTER(ctypes.c_ubyte)),
-            ("hStdInput", wintypes.HANDLE),
-            ("hStdOutput", wintypes.HANDLE),
-            ("hStdError", wintypes.HANDLE),
-        ]
-
-    class STARTUPINFOEXW(ctypes.Structure):
-        _fields_ = [("StartupInfo", STARTUPINFOW), ("lpAttributeList", ctypes.c_void_p)]
-
-    class PROCESS_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("hProcess", wintypes.HANDLE),
-            ("hThread", wintypes.HANDLE),
-            ("dwProcessId", wintypes.DWORD),
-            ("dwThreadId", wintypes.DWORD),
-        ]
+    STARTUPINFOW = _WINDOWS_JOB.STARTUPINFOW
+    STARTUPINFOEXW = _WINDOWS_JOB.STARTUPINFOEXW
+    PROCESS_INFORMATION = _WINDOWS_JOB.PROCESS_INFORMATION
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION = _WINDOWS_JOB.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = _WINDOWS_JOB.JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
 
     class BY_HANDLE_FILE_INFORMATION(ctypes.Structure):
         _fields_ = [
@@ -2129,46 +2114,6 @@ if os.name == "nt":
             ("nFileIndexLow", wintypes.DWORD),
         ]
 
-    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("PerProcessUserTimeLimit", ctypes.c_longlong),
-            ("PerJobUserTimeLimit", ctypes.c_longlong),
-            ("LimitFlags", wintypes.DWORD),
-            ("MinimumWorkingSetSize", SIZE_T),
-            ("MaximumWorkingSetSize", SIZE_T),
-            ("ActiveProcessLimit", wintypes.DWORD),
-            ("Affinity", ULONG_PTR),
-            ("PriorityClass", wintypes.DWORD),
-            ("SchedulingClass", wintypes.DWORD),
-        ]
-
-    class IO_COUNTERS(ctypes.Structure):
-        _fields_ = [(name, ctypes.c_ulonglong) for name in (
-            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
-            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
-        )]
-
-    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
-            ("IoInfo", IO_COUNTERS),
-            ("ProcessMemoryLimit", SIZE_T),
-            ("JobMemoryLimit", SIZE_T),
-            ("PeakProcessMemoryUsed", SIZE_T),
-            ("PeakJobMemoryUsed", SIZE_T),
-        ]
-
-    class JOBOBJECT_BASIC_ACCOUNTING_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("TotalUserTime", ctypes.c_longlong),
-            ("TotalKernelTime", ctypes.c_longlong),
-            ("ThisPeriodTotalUserTime", ctypes.c_longlong),
-            ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
-            ("TotalPageFaultCount", wintypes.DWORD),
-            ("TotalProcesses", wintypes.DWORD),
-            ("ActiveProcesses", wintypes.DWORD),
-            ("TotalTerminatedProcesses", wintypes.DWORD),
-        ]
 
 
 def windows_abi_layout() -> dict[str, int]:
@@ -2183,74 +2128,14 @@ def windows_abi_layout() -> dict[str, int]:
     }
 
 
-class _WindowsKernelV1:
-    WAIT_OBJECT_0 = 0
-    WAIT_TIMEOUT = 258
-    INFINITE = 0xFFFFFFFF
-    HANDLE_FLAG_INHERIT = 1
-    STARTF_USESTDHANDLES = 0x100
-    CREATE_SUSPENDED = 0x4
-    CREATE_UNICODE_ENVIRONMENT = 0x400
-    EXTENDED_STARTUPINFO_PRESENT = 0x80000
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-    PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
-    PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002000D
-    STILL_ACTIVE = 259
-    GENERIC_READ = 0x80000000
-    FILE_READ_ATTRIBUTES = 0x00000080
-    FILE_SHARE_READ = 0x00000001
-    FILE_SHARE_WRITE = 0x00000002
-    OPEN_EXISTING = 3
-    FILE_ATTRIBUTE_NORMAL = 0x00000080
-    FILE_ATTRIBUTE_DIRECTORY = 0x00000010
-    FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
-    FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
-    FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
-    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-
-    def __init__(self) -> None:
-        self.k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        self._bind()
+class _WindowsKernelV1(_WINDOWS_JOB.WindowsKernelV1):
+    """Add executable-path identity operations to the shared Job kernel ABI."""
 
     def _bind(self) -> None:
+        super()._bind()
         k = self.k32
-        k.CreatePipe.argtypes = [ctypes.POINTER(wintypes.HANDLE), ctypes.POINTER(wintypes.HANDLE), ctypes.POINTER(SECURITY_ATTRIBUTES), wintypes.DWORD]
-        k.CreatePipe.restype = wintypes.BOOL
-        k.SetHandleInformation.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD]
-        k.SetHandleInformation.restype = wintypes.BOOL
-        k.CloseHandle.argtypes = [wintypes.HANDLE]
-        k.CloseHandle.restype = wintypes.BOOL
-        k.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
-        k.CreateJobObjectW.restype = wintypes.HANDLE
-        k.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
-        k.SetInformationJobObject.restype = wintypes.BOOL
-        k.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
-        k.QueryInformationJobObject.restype = wintypes.BOOL
-        k.InitializeProcThreadAttributeList.argtypes = [ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(SIZE_T)]
-        k.InitializeProcThreadAttributeList.restype = wintypes.BOOL
-        k.UpdateProcThreadAttribute.argtypes = [ctypes.c_void_p, wintypes.DWORD, SIZE_T, ctypes.c_void_p, SIZE_T, ctypes.c_void_p, ctypes.c_void_p]
-        k.UpdateProcThreadAttribute.restype = wintypes.BOOL
-        k.DeleteProcThreadAttributeList.argtypes = [ctypes.c_void_p]
-        k.DeleteProcThreadAttributeList.restype = None
-        k.CreateProcessW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, ctypes.c_void_p, ctypes.c_void_p, wintypes.BOOL, wintypes.DWORD, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.POINTER(STARTUPINFOW), ctypes.POINTER(PROCESS_INFORMATION)]
-        k.CreateProcessW.restype = wintypes.BOOL
-        k.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-        k.CreateFileW.restype = wintypes.HANDLE
         k.GetFileInformationByHandle.argtypes = [wintypes.HANDLE, ctypes.POINTER(BY_HANDLE_FILE_INFORMATION)]
         k.GetFileInformationByHandle.restype = wintypes.BOOL
-        k.IsProcessInJob.argtypes = [wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
-        k.IsProcessInJob.restype = wintypes.BOOL
-        k.ResumeThread.argtypes = [wintypes.HANDLE]
-        k.ResumeThread.restype = wintypes.DWORD
-        k.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
-        k.TerminateJobObject.restype = wintypes.BOOL
-        k.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-        k.WaitForSingleObject.restype = wintypes.DWORD
-        k.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-        k.GetExitCodeProcess.restype = wintypes.BOOL
-
-    def close(self, handle: int | None) -> bool:
-        return not handle or bool(self.k32.CloseHandle(handle))
 
     def open_guarded_path(self, path: Path, *, directory: bool) -> int:
         desired = self.FILE_READ_ATTRIBUTES if directory else self.GENERIC_READ
@@ -2524,14 +2409,6 @@ def _convert_windows_handle_to_fd(
         lifecycle.mark_resource_uncertain(resource_name)
         raise
     return descriptor
-
-def _windows_environment_block(request: ProcessRequestV1) -> ctypes.Array[Any]:
-    rows = sorted(request.environment, key=lambda row: row.name.casefold())
-    text = "\0".join(f"{row.name}={row.value}" for row in rows) + "\0\0"
-    if len(text) > MAX_WINDOWS_ENVIRONMENT_UNITS:
-        raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-    return ctypes.create_unicode_buffer(text)
-
 
 class _DialogueLineRouterV1:
     def __init__(self) -> None:
@@ -2914,8 +2791,6 @@ class _WindowsBackendV1:
             "stdin_child", "stdin_parent", "stdout_child", "stdout_parent",
             "stderr_child", "stderr_parent", "job", "process", "thread",
         )}
-        attr_buffer: ctypes.Array[Any] | None = None
-        attr_initialized = False
         capture = BoundedCaptureV1(
             request.capture_policy, request.capture_sink_binding
         )
@@ -2936,8 +2811,23 @@ class _WindowsBackendV1:
         exit_code: int | None = None
         reader_threads: list[threading.Thread] = []
         writer_thread: threading.Thread | None = None
-        process_created = False
-        job_terminate_failed = False
+        job_process: Any | None = None
+        helper: Any | None = None
+
+        def record_job_closure(closure: Any) -> None:
+            nonlocal direct_reaped, exit_code, settlement, job_handle_closed
+            nonlocal primary_thread_closed, failure_id, stage
+            direct_reaped = closure.direct_reaped
+            if exit_code is None:
+                exit_code = closure.direct_exit_code
+            settlement = "EMPTY" if closure.active_zero else "AMBIGUOUS"
+            job_handle_closed = closure.handles_closed
+            primary_thread_closed = closure.handles_closed
+            if closure.issues:
+                issues.extend(closure.issues)
+            if not closure.complete or (closure.job_terminated and failure_id is None):
+                if failure_id is None:
+                    failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
 
         def register_handle(name: str, handle: int) -> None:
             handles[name] = handle
@@ -2947,7 +2837,12 @@ class _WindowsBackendV1:
                 current = handles.get(name)
                 if current is None:
                     return
-                closed = self.api.close(current)
+                if job_process is not None:
+                    before_close = len(job_process._issues)
+                    job_process._close_handle(name)
+                    closed = len(job_process._issues) == before_close
+                else:
+                    closed = self.api.close(current)
                 handles[name] = None
                 if not closed:
                     raise OSError("CloseHandle failed")
@@ -2975,27 +2870,17 @@ class _WindowsBackendV1:
                 job_handle_closed = True
 
         def terminate_job() -> bool:
-            if handles["job"]:
-                return bool(k.TerminateJobObject(handles["job"], 1))
+            if job_process is not None:
+                return job_process.terminate_job()
             return True
 
         def last_close_after_terminate_failure() -> None:
-            nonlocal failure_id, stage, settlement, job_terminate_failed
-            job_terminate_failed = True
+            nonlocal failure_id, stage, settlement
             failure_id = "PSV1-JOB-TERMINATE"
             stage = "tree-settlement"
             settlement = "AMBIGUOUS"
-            if handles["job"]:
-                accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
-                returned = wintypes.DWORD()
-                k.QueryInformationJobObject(
-                    handles["job"],
-                    1,
-                    ctypes.byref(accounting),
-                    ctypes.sizeof(accounting),
-                    ctypes.byref(returned),
-                )
-                close_handle("job")
+            if job_process is not None:
+                job_process._close_handle("job")
 
         def cleanup_windows_backend(remaining: float) -> None:
             before = len(issues)
@@ -3012,6 +2897,10 @@ class _WindowsBackendV1:
                     issues.append("PSV1-RESOURCE-CLOSE")
                 else:
                     lifecycle.release_worker(f"{worker_prefix}{name}")
+            if job_process is not None:
+                closure = job_process.close()
+                if not closure.complete:
+                    issues.extend(closure.issues or ("PSV1-TREE-SETTLEMENT",))
             for name in (
                 "thread",
                 "process",
@@ -3023,13 +2912,6 @@ class _WindowsBackendV1:
                 "stderr_parent",
             ):
                 close_handle(name)
-            if attr_initialized and attr_buffer is not None:
-                try:
-                    k.DeleteProcThreadAttributeList(
-                        ctypes.cast(attr_buffer, ctypes.c_void_p)
-                    )
-                except BaseException:
-                    issues.append("PSV1-RESOURCE-CLOSE")
             close_handle("job")
             if len(issues) != before:
                 raise OSError("windows backend cleanup incomplete")
@@ -3039,158 +2921,72 @@ class _WindowsBackendV1:
         try:
             if self.coordinator.poisoned:
                 raise ProcessSupervisionError("PSV1-INHERITANCE-POISONED", "handle-preparation")
-            sa = SECURITY_ATTRIBUTES(ctypes.sizeof(SECURITY_ATTRIBUTES), None, False)
-            pairs = (
-                ("stdin_child", "stdin_parent"),
-                ("stdout_parent", "stdout_child"),
-                ("stderr_parent", "stderr_child"),
-            )
-            for read_name, write_name in pairs:
-                read = wintypes.HANDLE()
-                write = wintypes.HANDLE()
-                if not k.CreatePipe(ctypes.byref(read), ctypes.byref(write), ctypes.byref(sa), 0):
-                    raise ProcessSupervisionError("PSV1-HANDLE-INHERITANCE", "handle-preparation")
-                register_handle(read_name, read.value)
-                register_handle(write_name, write.value)
-            job = k.CreateJobObjectW(None, None)
-            if not job:
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            register_handle("job", job)
-            limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-            limits.BasicLimitInformation.LimitFlags = self.api.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            if not k.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            size = SIZE_T()
-            k.InitializeProcThreadAttributeList(None, 2, 0, ctypes.byref(size))
-            if not size.value:
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            attr_buffer = ctypes.create_string_buffer(size.value)
-            attr_pointer = ctypes.cast(attr_buffer, ctypes.c_void_p)
-            if not k.InitializeProcThreadAttributeList(attr_pointer, 2, 0, ctypes.byref(size)):
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            attr_initialized = True
-            job_value = wintypes.HANDLE(job)
-            if not k.UpdateProcThreadAttribute(
-                attr_pointer, 0, self.api.PROC_THREAD_ATTRIBUTE_JOB_LIST,
-                ctypes.byref(job_value), ctypes.sizeof(job_value), None, None,
-            ):
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            child_handles = (wintypes.HANDLE * 3)(
-                handles["stdin_child"], handles["stdout_child"], handles["stderr_child"]
-            )
-            if not k.UpdateProcThreadAttribute(
-                attr_pointer, 0, self.api.PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                child_handles, ctypes.sizeof(child_handles), None, None,
-            ):
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            startup = STARTUPINFOEXW()
-            startup.StartupInfo.cb = ctypes.sizeof(startup)
-            startup.StartupInfo.dwFlags = self.api.STARTF_USESTDHANDLES
-            startup.StartupInfo.hStdInput = handles["stdin_child"]
-            startup.StartupInfo.hStdOutput = handles["stdout_child"]
-            startup.StartupInfo.hStdError = handles["stderr_child"]
-            startup.lpAttributeList = attr_pointer
-            info = PROCESS_INFORMATION()
-            command = ctypes.create_unicode_buffer(serialize_msvcrt_argv(request.argv))
-            environment = _windows_environment_block(request)
-            child_names = ("stdin_child", "stdout_child", "stderr_child")
-            with self.coordinator.lock:
-                if self.coordinator.poisoned:
-                    raise ProcessSupervisionError("PSV1-INHERITANCE-POISONED", "handle-preparation")
-                enabled: list[str] = []
-                try:
-                    for name in child_names:
-                        if not k.SetHandleInformation(handles[name], self.api.HANDLE_FLAG_INHERIT, self.api.HANDLE_FLAG_INHERIT):
-                            raise ProcessSupervisionError("PSV1-HANDLE-INHERITANCE", "handle-preparation")
-                        enabled.append(name)
-                    create_owner = WindowsCreateOwnerV1(
-                        self.admission_owner,
-                        request,
-                        lambda: k.CreateProcessW(
-                            str(request.resolved_executable), command, None, None, True,
-                            self.api.CREATE_SUSPENDED | self.api.CREATE_UNICODE_ENVIRONMENT | self.api.EXTENDED_STARTUPINFO_PRESENT,
-                            environment, validated_cwd.canonical_absolute, ctypes.byref(startup.StartupInfo), ctypes.byref(info),
-                        ),
-                        executable_launch_owner,
-                    )
-                    created = (
-                        create_owner.create_internal_probe(
-                            lifecycle,
-                            internal_probe_admission,
-                            executable_launch_owner,
-                        )
-                        if internal_probe_admission is not None
-                        else create_owner.create_task(
-                            lifecycle, request, admission
-                        )
-                    )
-                    if not created:
-                        raise ProcessSupervisionError("PSV1-PROCESS-CREATE", "process-create")
-                    register_handle("process", info.hProcess)
-                    register_handle("thread", info.hThread)
-                    process_created = True
-                    if not lifecycle.close_resource(
-                        executable_launch_owner.resource_name,
-                        time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
-                    ):
-                        raise ProcessSupervisionError(
-                            "PSV1-RESOURCE-CLOSE", "resource-cleanup"
-                        )
-                finally:
-                    restoration_ok = True
-                    for name in enabled:
-                        if not k.SetHandleInformation(handles[name], self.api.HANDLE_FLAG_INHERIT, 0):
-                            restoration_ok = False
-                    if not restoration_ok:
-                        self.coordinator.poison()
-                        if process_created:
-                            if not terminate_job():
-                                last_close_after_terminate_failure()
-                        failure_id = "PSV1-INHERITANCE-POISONED"
-                        stage = "handle-preparation"
-            for name in child_names:
-                close_handle(name)
-            if failure_id:
-                raise ProcessSupervisionError(failure_id, stage)
-            in_job = wintypes.BOOL()
-            if not k.IsProcessInJob(handles["process"], handles["job"], ctypes.byref(in_job)) or not in_job.value:
-                raise ProcessSupervisionError("PSV1-TREE-VERIFICATION", "tree-verification")
-            ownership_confirmed = True
-            if request.diagnostic_port is not None:
-                request.diagnostic_port.emit(
-                    "process.supervision.windows.job-verified.v1",
-                    {"ownershipConfirmed": True},
+            helper = _WINDOWS_JOB
+            def admitted_create(create_once: Callable[[], bool]) -> bool:
+                create_owner = WindowsCreateOwnerV1(
+                    self.admission_owner, request, create_once, executable_launch_owner
                 )
-            resume = k.ResumeThread(handles["thread"])
-            if resume != 1:
-                raise ProcessSupervisionError("PSV1-PROCESS-RESUME", "process-resume")
-            close_handle("thread")
-            def convert_parent(name: str, flags: int) -> tuple[int, str]:
-                handle = handles[name]
-                assert handle is not None
-                resource_name = f"{handle_prefix}{name}"
-                try:
-                    descriptor = _convert_windows_handle_to_fd(
-                        handle,
-                        flags,
-                        lifecycle,
-                        resource_name,
-                        converter=msvcrt.open_osfhandle,
-                        handle_closer=self.api.close,
+                created = (
+                    create_owner.create_internal_probe(
+                        lifecycle, internal_probe_admission, executable_launch_owner
                     )
-                    return descriptor, resource_name
-                finally:
-                    handles[name] = None
+                    if internal_probe_admission is not None
+                    else create_owner.create_task(lifecycle, request, admission)
+                )
+                if created and not lifecycle.close_resource(
+                    executable_launch_owner.resource_name,
+                    time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
+                ):
+                    raise ProcessSupervisionError("PSV1-RESOURCE-CLOSE", "resource-cleanup")
+                return bool(created)
 
-            stdin_fd, stdin_resource = convert_parent(
-                "stdin_parent", os.O_WRONLY | os.O_BINARY
+            def before_resume() -> None:
+                if request.diagnostic_port is not None:
+                    request.diagnostic_port.emit(
+                        "process.supervision.windows.job-verified.v1",
+                        {"ownershipConfirmed": True},
+                    )
+
+            job_process = helper.WindowsJobOwnerV1.launch(
+                executable=str(request.resolved_executable),
+                argv=request.argv,
+                cwd=validated_cwd.canonical_absolute,
+                environment=_environment_mapping(request),
+                create_gate=admitted_create,
+                before_resume=before_resume,
+                coordinator=self.coordinator,
+                api=self.api,
             )
-            stdout_fd, stdout_resource = convert_parent(
-                "stdout_parent", os.O_RDONLY | os.O_BINARY
-            )
-            stderr_fd, stderr_resource = convert_parent(
-                "stderr_parent", os.O_RDONLY | os.O_BINARY
-            )
+            handles = job_process._handles
+            ownership_confirmed = True
+            for name in handles:
+                register_handle(name, handles[name])
+            primary_thread_closed = handles["thread"] is None
+            def take_parent(name: str) -> tuple[int, str]:
+                resource_name = f"{handle_prefix}{name}_parent"
+                descriptor = getattr(job_process, f"take_{name}_fd")()
+                if descriptor is None:
+                    raise ProcessSupervisionError("PSV1-DESCRIPTOR-OWNERSHIP", "handle-preparation")
+                try:
+                    lifecycle.transfer_resource(
+                        resource_name,
+                        lambda _remaining, fd=descriptor: os.close(fd),
+                        state="FD_OWNED",
+                    )
+                except BaseException:
+                    try:
+                        os.close(descriptor)
+                    except OSError as close_error:
+                        lifecycle.mark_resource_uncertain(resource_name)
+                        raise ProcessSupervisionError(
+                            "PSV1-DESCRIPTOR-OWNERSHIP", "resource-cleanup"
+                        ) from close_error
+                    raise
+                return descriptor, resource_name
+
+            stdin_fd, stdin_resource = take_parent("stdin")
+            stdout_fd, stdout_resource = take_parent("stdout")
+            stderr_fd, stderr_resource = take_parent("stderr")
             dialogue_lines = _DialogueLineRouterV1() if dialogue is not None else None
             for fd, name, resource_name in (
                 (stdout_fd, "stdout", stdout_resource),
@@ -3316,27 +3112,8 @@ class _WindowsBackendV1:
                     lifecycle.release_worker(f"{worker_prefix}stdin")
             if any(thread.is_alive() for thread in reader_threads) or (writer_thread and writer_thread.is_alive()):
                 issues.append("PSV1-RESOURCE-CLOSE")
-            if not job_terminate_failed and handles["job"]:
-                accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
-                returned = wintypes.DWORD()
-                settle_until = phase_deadline()
-                while True:
-                    if not k.QueryInformationJobObject(handles["job"], 1, ctypes.byref(accounting), ctypes.sizeof(accounting), ctypes.byref(returned)):
-                        settlement = "AMBIGUOUS"
-                        if failure_id is None:
-                            failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
-                        break
-                    if accounting.ActiveProcesses == 0:
-                        settlement = "EMPTY"
-                        break
-                    if time.monotonic() >= settle_until:
-                        settlement = "NONEMPTY"
-                        if not terminate_job():
-                            last_close_after_terminate_failure()
-                        if failure_id is None:
-                            failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
-                        break
-                    time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
+            if job_process is not None:
+                record_job_closure(job_process.settle(phase_deadline()))
         except ProcessSupervisionError as exc:
             if failure_id is None:
                 failure_id, stage = exc.failure_id, exc.terminal_stage
@@ -3345,35 +3122,32 @@ class _WindowsBackendV1:
                 and exc.terminal_stage == "deadline"
             ):
                 timed_out = True
-            if not terminate_job():
-                last_close_after_terminate_failure()
-            if handles["process"]:
-                k.WaitForSingleObject(
-                    handles["process"],
-                    max(0, int((phase_deadline() - time.monotonic()) * 1000)),
-                )
-                direct_reaped = True
-            if handles["job"]:
-                accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
-                returned = wintypes.DWORD()
-                settle_until = phase_deadline()
-                while time.monotonic() <= settle_until:
-                    if not k.QueryInformationJobObject(
-                        handles["job"],
-                        1,
-                        ctypes.byref(accounting),
-                        ctypes.sizeof(accounting),
-                        ctypes.byref(returned),
-                    ):
-                        break
-                    if accounting.ActiveProcesses == 0:
-                        settlement = "EMPTY"
-                        break
-                    time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
-        except BaseException:
-            if not terminate_job():
-                last_close_after_terminate_failure()
-            raise
+            closure = getattr(exc, "windows_job_closure", None)
+            if closure is not None:
+                record_job_closure(closure)
+            elif job_process is not None:
+                record_job_closure(job_process.settle(phase_deadline(), terminate=True))
+        except BaseException as exc:
+            if helper is not None and isinstance(exc, helper.WindowsJobError):
+                mapping = {
+                    "WJOB-STDIO": "PSV1-HANDLE-INHERITANCE",
+                    "WJOB-INHERITANCE": "PSV1-HANDLE-INHERITANCE",
+                    "WJOB-INHERITANCE-POISONED": "PSV1-INHERITANCE-POISONED",
+                    "WJOB-PROCESS-CREATE": "PSV1-PROCESS-CREATE",
+                    "WJOB-MEMBERSHIP": "PSV1-TREE-VERIFICATION",
+                    "WJOB-RESUME": "PSV1-PROCESS-RESUME",
+                    "WJOB-JOB-TERMINATE": "PSV1-JOB-TERMINATE",
+                    "WJOB-HANDLE-CLOSE": "PSV1-RESOURCE-CLOSE",
+                }
+                failure_id = mapping.get(exc.failure_id, "PSV1-ATTRIBUTE-LIST")
+                stage = exc.stage if exc.stage in TERMINAL_STAGES else "handle-preparation"
+                closure = getattr(exc, "windows_job_closure", None)
+                if closure is not None:
+                    record_job_closure(closure)
+            else:
+                if job_process is not None:
+                    job_process.close()
+                raise
         if internal_probe:
             if not lifecycle.close_resource(backend_resource_name, phase_deadline()):
                 issues.append("PSV1-RESOURCE-CLOSE")

@@ -1873,6 +1873,27 @@ def test_production_installer_runtime_inventory_owns_canonical_engine() -> None:
     assert RUNTIME.name in installer.RUNTIME_HELPERS
 
 
+def test_installer_copies_windows_job_owner_from_canonical_runtime(
+    tmp_path: Path,
+) -> None:
+    installer = _load(
+        ROOT / "scripts/production_installer.py",
+        "windows_job_owner_installer_test",
+    )
+    root = tmp_path / "source"
+    source = root / "scripts/process_supervision/windows_job.py"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"WINDOWS_JOB_SENTINEL = True\n")
+    target = tmp_path / "installed/process_supervision/windows_job.py"
+
+    destinations = installer._runtime_file_destinations(root, target.parents[1])
+    assert (source, target) in destinations
+    installer._install_runtime_files(
+        root, target.parents[1], False, destinations=((source, target),)
+    )
+    assert target.read_bytes() == b"WINDOWS_JOB_SENTINEL = True\n"
+
+
 @pytest.mark.parametrize(
     "launcher",
     (

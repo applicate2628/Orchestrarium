@@ -2165,11 +2165,16 @@ posix_helper=types.ModuleType(posix_helper_name)
 posix_helper.__file__="<closure>/process_supervision/posix_process_group.py"
 sys.modules[posix_helper_name]=posix_helper
 exec(compile(sources["posix_helper"],posix_helper.__file__,"exec"),posix_helper.__dict__,posix_helper.__dict__)
+windows_job_name="_orchestrarium_windows_job_v1"
+windows_job=types.ModuleType(windows_job_name)
+windows_job.__file__="<closure>/process_supervision/windows_job.py"
+sys.modules[windows_job_name]=windows_job
+exec(compile(sources["windows_job"],windows_job.__file__,"exec"),windows_job.__dict__,windows_job.__dict__)
 if len(sys.argv)<3 or sys.argv[1]!="--gate-git-executable":
     raise RuntimeError("git executable contract")
 git_executable=sys.argv[2]
 scanner_path="<closure>/check-publication-safety.py"
-scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable,"__injected_posix_process_group_module__":posix_helper}
+scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable,"__injected_posix_process_group_module__":posix_helper,"__injected_windows_job_module__":windows_job}
 sys.argv=[scanner_path,*sys.argv[3:]]
 exec(compile(sources["scanner"],scanner_path,"exec"),scanner,scanner)
 '''
@@ -2419,6 +2424,7 @@ def _capture_source_closure() -> tuple[tuple[int, ...], CanonicalSourceClosure]:
         ("hook_common", parent / "hook_common.py"),
         ("classifier", parent.parent / "hooks" / "check-machine-local-path.py"),
         ("posix_helper", posix_helper),
+        ("windows_job", posix_helper.with_name("windows_job.py")),
         ("scanner", parent / "check-publication-safety.py"),
     )
     fds: list[int] = []

@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import uuid
@@ -422,7 +423,28 @@ def run_regression(root: Path) -> None:
         raise
     finally:
         try:
-            shutil.rmtree(scratch)
+            def retry_owned_readonly_unlink(func, path, error):
+                candidate = Path(os.path.abspath(path))
+                try:
+                    relative = candidate.relative_to(scratch)
+                    metadata = candidate.lstat()
+                except (OSError, ValueError):
+                    raise error
+                attributes = getattr(metadata, "st_file_attributes", 0)
+                if (
+                    os.name != "nt"
+                    or func is not os.unlink
+                    or not isinstance(error, PermissionError)
+                    or not relative.parts
+                    or not stat.S_ISREG(metadata.st_mode)
+                    or not attributes & stat.FILE_ATTRIBUTE_READONLY
+                    or attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                ):
+                    raise error
+                os.chmod(candidate, metadata.st_mode | stat.S_IWRITE)
+                func(candidate)
+
+            shutil.rmtree(scratch, onexc=retry_owned_readonly_unlink)
             if scratch.exists() or scratch.is_symlink():
                 raise OSError("owned UUID fixture remains after cleanup")
         except OSError as cleanup_error:
