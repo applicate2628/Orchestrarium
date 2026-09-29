@@ -4019,7 +4019,9 @@ def compose_gate_result(preflight: PreflightResult) -> int:
                 remediation = (
                     "Cannot verify historical publication permission within "
                     "bounded transcript history; summaries cannot authorize "
-                    "publication."
+                    "publication. Ask the user to send a fresh "
+                    "`[approve-publication]` in their latest genuine user "
+                    "message before retrying one generic push."
                 )
             scope = _denial_scope(failure_id)
             reason = f"{failure_id}: {scope}. {remediation}"

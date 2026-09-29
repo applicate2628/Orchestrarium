@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-30
+
+- **Bounded publication-history denials now give operators a recovery step.** When the push gate cannot verify earlier permission because transcript history or recovery hit a limit, its denial asks for a fresh `[approve-publication]` in the user's latest genuine message before retrying one generic push. This tells the operator how to resume without treating a summary as approval; the push remains denied until the existing human-approval and leak-check gates pass.
+
 ## 2026-09-29
 
 - **Windows scans use Job-owned Git children (source hotfix).** The scanner now binds Windows children to a Job at launch and settles through its retained handle, replacing PID/ParentProcessId-only termination. The temporary `--range` refusal is removed in source; non-Windows behavior, leak checks, and human publication approval remain unchanged. Installation and publication are not claimed by this source change.

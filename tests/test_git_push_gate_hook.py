@@ -6771,6 +6771,27 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
                 )
                 self.assertNotIn("Retry from a readable current session transcript", output)
 
+    def test_expired_generic_approval_with_limited_history_requests_fresh_latest_message(self) -> None:
+        with synthetic_transcript([
+            user("push [approve-publication]"),
+            user("continue"),
+        ]) as path:
+            envelope = self._base_envelope()
+            envelope["transcript_path"] = str(path)
+            output = self._run_envelope(
+                CANONICAL_HOOK,
+                envelope,
+                history_byte_cap=1,
+                recovery_byte_cap=1,
+            )
+        self.assertIn('"permissionDecision": "deny"', output)
+        self.assertIn("PRG-TRANSCRIPT-UNAVAILABLE", output)
+        self.assertIn(
+            "current-turn=found; history=limit; recovery=limit", output
+        )
+        self.assertIn("fresh `[approve-publication]`", output)
+        self.assertIn("latest genuine user message", output)
+
     def test_unknown_transcript_status_remains_a_deny_without_limit_remediation(self) -> None:
         for script in (CANONICAL_HOOK, *HOOKS):
             with self.subTest(script=script):
