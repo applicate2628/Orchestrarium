@@ -177,28 +177,60 @@ BUGFIX_INVOCATION_REGEX = re.compile(r"agents-bugfix", re.IGNORECASE)
 EXEMPT_PATH_SEGMENTS = ("/.reports/", "/.scratch/", "/.plans/", "/work-items/", "/docs/")
 
 
+_PATCH_FILE_HEADER = re.compile(r"^\*\*\* (?:Add|Update|Delete|Move) File: (.+)$")
+_PATCH_MOVE_HEADER = re.compile(r"^\*\*\* Move to: (.+)$")
+
+
+def _apply_patch_targets(tool_input: dict) -> list[str] | None:
+    """Extract every affected path from a framed patch; unknown shapes stay guarded."""
+    carriers = [tool_input.get(key) for key in ("command", "patch") if key in tool_input]
+    if len(carriers) != 1 or not isinstance(carriers[0], str):
+        return None
+    lines = carriers[0].splitlines()
+    if len(lines) < 3 or lines[0] != "*** Begin Patch" or lines[-1] != "*** End Patch":
+        return None
+
+    targets: list[str] = []
+    in_file = False
+    for line in lines[1:-1]:
+        file_header = _PATCH_FILE_HEADER.fullmatch(line)
+        move_header = _PATCH_MOVE_HEADER.fullmatch(line)
+        if file_header or move_header:
+            if move_header and not in_file:
+                return None
+            target = (file_header or move_header).group(1)
+            if not target or target != target.strip():
+                return None
+            targets.append(target)
+            in_file = True
+        elif not in_file or not (line.startswith(("@@", "+", "-", " ")) or line == "*** End of File"):
+            return None
+    return targets or None
+
+
+def _exempt_path(raw: str) -> bool:
+    norm = "/" + raw.replace("\\", "/").strip("/")
+    if any(part in (".", "..") for part in norm.split("/")):
+        return False
+    if norm.rsplit("/", 1)[-1].lower().endswith(".md"):
+        return True
+    return any(seg in norm for seg in EXEMPT_PATH_SEGMENTS)
+
+
 def _exempt_write_target(envelope: dict) -> bool:
-    """True when the tool writes to a non-code artifact path (report / scratch /
-    plan / task-memory / docs) or authors a skill DEFINITION (a SKILL.md file).
-    Reads file_path / notebook_path / path from the envelope's tool_input and
-    fails CLOSED to False on any non-dict / missing key, so a real code edit is
-    never accidentally exempted. (apply_patch, which carries its paths inside a
-    patch body rather than file_path, is not exempted here -- it stays fully
-    guarded.)"""
+    """Exempt only known non-code targets, including every target in a patch."""
     tool_input = envelope.get("tool_input")
     if not isinstance(tool_input, dict):
         return False
+    if envelope.get("tool_name") == "apply_patch":
+        targets = _apply_patch_targets(tool_input)
+        return targets is not None and all(
+            target.lower().endswith(".md") and _exempt_path(target) for target in targets
+        )
     raw = tool_input.get("file_path") or tool_input.get("notebook_path") or tool_input.get("path") or ""
     if not isinstance(raw, str) or not raw:
         return False
-    norm = "/" + raw.replace("\\", "/").strip("/")
-    # A SKILL.md write authors a skill DEFINITION (prose / instructions), never the
-    # CODE fix this guard targets. Exempt it by basename so it holds under any skills
-    # root (~/.claude/skills, a plugin's skills dir, a repo's skills/). Skill SCRIPTS
-    # (skills/<name>/scripts/*.py) carry a different basename and stay fully guarded.
-    if norm.rsplit("/", 1)[-1] == "SKILL.md":
-        return True
-    return any(seg in norm for seg in EXEMPT_PATH_SEGMENTS)
+    return _exempt_path(raw)
 
 
 def main() -> int:

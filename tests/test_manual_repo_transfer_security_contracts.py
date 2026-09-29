@@ -1107,7 +1107,7 @@ class IoBoundaryTests(unittest.TestCase):
             output = Path(temp) / "inventory.json"
             stderr = io.StringIO()
             with (
-                mock.patch.object(module, "MAX_JSON_BYTES", len(encoded) + 1),
+                mock.patch.object(module, "MAX_INVENTORY_JSON_BYTES", len(encoded) + 1),
                 mock.patch.object(module, "bind_repository", return_value=module.BoundRepository(root, GIT_EXECUTABLE, "0" * 64)),
                 mock.patch.object(module, "build_inventory", return_value=inventory),
                 contextlib.redirect_stderr(stderr),
@@ -1117,13 +1117,13 @@ class IoBoundaryTests(unittest.TestCase):
             output.unlink()
             stderr = io.StringIO()
             with (
-                mock.patch.object(module, "MAX_JSON_BYTES", len(encoded)),
+                mock.patch.object(module, "MAX_INVENTORY_JSON_BYTES", len(encoded)),
                 mock.patch.object(module, "bind_repository", return_value=module.BoundRepository(root, GIT_EXECUTABLE, "0" * 64)),
                 mock.patch.object(module, "build_inventory", return_value=inventory),
                 contextlib.redirect_stderr(stderr),
             ):
                 self.assertEqual(2, module.main(["inventory", "--repo", str(root), "--git-executable", str(GIT_EXECUTABLE), "--output", str(output)]))
-            self.assertIn("inventory output exceeds JSON limit", stderr.getvalue())
+            self.assertEqual(f"inventory exceeds {len(encoded)}-byte limit\n", stderr.getvalue())
             self.assertFalse(output.exists())
 
     def test_nfkc_hostile_path_segments_are_rejected_directly_and_in_archives(self) -> None:
@@ -1353,14 +1353,14 @@ class IoBoundaryTests(unittest.TestCase):
             self.assertGreater(len(module.canonical_json(inventory)), 64)
             stderr = io.StringIO()
             with (
-                mock.patch.object(module, "MAX_JSON_BYTES", 64),
+                mock.patch.object(module, "MAX_INVENTORY_JSON_BYTES", 64),
                 mock.patch.object(module, "bind_repository", return_value=module.BoundRepository(root, GIT_EXECUTABLE, "0" * 64)),
                 mock.patch.object(module, "build_inventory", return_value=inventory),
                 contextlib.redirect_stderr(stderr),
             ):
                 result = module.main(["inventory", "--repo", str(root), "--git-executable", str(GIT_EXECUTABLE), "--output", str(output)])
             self.assertEqual(2, result)
-            self.assertIn("inventory output exceeds JSON limit", stderr.getvalue())
+            self.assertEqual("inventory exceeds 64-byte limit\n", stderr.getvalue())
             self.assertFalse(output.exists())
 
     def test_trusted_verify_uses_one_zipfile_instance_for_all_archive_reads(self) -> None:

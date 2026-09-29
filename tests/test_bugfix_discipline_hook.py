@@ -340,7 +340,7 @@ class TestBugfixExemptPaths(unittest.TestCase):
     def test_skill_md_absolute_skills_root_exempt(self) -> None:
         # The reported false-positive precedent: a new skill authored under the global skills root.
         self.assert_exempt(
-            {"file_path": r"C:\Users\dev\.claude\skills\vak-dissertation-review\SKILL.md", "content": "x"},
+            {"file_path": r"C:\Users\<you>\.claude\skills\vak-dissertation-review\SKILL.md", "content": "x"},
             exempt=True,
         )
 
@@ -364,6 +364,77 @@ class TestBugfixExemptPaths(unittest.TestCase):
     def test_mydocs_substring_is_not_exempt(self) -> None:
         # 'mydocs' is NOT the '/docs/' path segment -> the file stays guarded.
         self.assert_exempt({"file_path": "src/mydocs/x.py", "content": "x"}, exempt=False)
+
+    def test_apply_patch_docs_only_is_exempt(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/guide.md\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=True, tool_name="apply_patch")
+
+    def test_apply_patch_markdown_report_outside_docs_is_exempt(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: bug-inbox/report.md\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=True, tool_name="apply_patch")
+
+    def test_write_markdown_report_outside_docs_is_exempt(self) -> None:
+        self.assert_exempt({"file_path": "bug-inbox/report.md", "content": "x"}, exempt=True)
+
+    def test_apply_patch_work_item_only_is_exempt(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Add File: work-items/active/x/status.md\n+Status: active\n*** End Patch"},
+                           exempt=True, tool_name="apply_patch")
+
+    def test_apply_patch_patch_field_docs_only_is_exempt(self) -> None:
+        self.assert_exempt({"patch": "*** Begin Patch\n*** Delete File: docs/old.md\n*** End Patch"},
+                           exempt=True, tool_name="apply_patch")
+
+    def test_apply_patch_mixed_docs_and_code_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/guide.md\n@@\n-old\n+new\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_mixed_markdown_report_and_code_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: bug-inbox/report.md\n@@\n-old\n+new\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_code_in_every_exempt_directory_still_denies(self) -> None:
+        for directory in ("docs", "work-items", ".reports", ".plans", ".scratch"):
+            with self.subTest(directory=directory):
+                self.assert_exempt({"command": f"*** Begin Patch\n*** Add File: {directory}/tool.py\n+print('x')\n*** End Patch"},
+                                   exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_mixed_markdown_and_code_inside_docs_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/guide.md\n@@\n-old\n+new\n*** Add File: docs/tool.py\n+print('x')\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_unknown_extension_inside_docs_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Add File: docs/data.txt\n+unknown\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_write_code_under_docs_retains_existing_exemption(self) -> None:
+        self.assert_exempt({"file_path": "docs/tool.py", "content": "x"}, exempt=True)
+
+    def test_apply_patch_move_from_code_to_docs_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: src/app.py\n*** Move to: docs/app.md\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_move_from_docs_to_code_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/guide.md\n*** Move to: src/app.py\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_traversal_out_of_docs_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/../src/app.py\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_unframed_docs_header_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Update File: docs/guide.md\n@@\n-old\n+new"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_malformed_docs_body_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/guide.md\nnot a patch hunk\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_ambiguous_carrier_still_denies(self) -> None:
+        patch = "*** Begin Patch\n*** Delete File: docs/old.md\n*** End Patch"
+        self.assert_exempt({"command": patch, "patch": patch}, exempt=False, tool_name="apply_patch")
+
+    def test_write_traversal_out_of_docs_still_denies(self) -> None:
+        self.assert_exempt({"file_path": "docs/../src/app.py", "content": "x"}, exempt=False)
 
 
 if __name__ == "__main__":

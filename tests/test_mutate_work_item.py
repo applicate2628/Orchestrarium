@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8694,6 +8695,398 @@ def _write_decision_v0_manifest(
     return target
 
 
+def test_migrate_legacy_v0_preserves_frozen_bytes_with_external_archive_evidence(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-08-01-superseded-v0"
+    source = root / "work-items" / "decisions" / f"{slug}.md"
+    source_bytes = _legacy_v0_decision_record(
+        status="superseded", identity_line=f"id: {slug}"
+    ).encode("utf-8")
+    source.parent.mkdir(parents=True)
+    source.write_bytes(source_bytes)
+    digest = hashlib.sha256(source_bytes).hexdigest().upper()
+    manifest = _write_decision_v0_manifest(
+        root, [{"path": source.name, "sha256": digest, "state": "admitted"}]
+    )
+    policy = root / "work-items" / "decisions" / (
+        "2026-08-18-current-decision-schema-versioned-read-compatibility.md"
+    )
+    policy_before = policy.read_bytes()
+    baseline_before = json.loads(manifest.read_text(encoding="utf-8"))["baselineSha256"]
+    archived_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    inventory = root / "incoming.json"
+    write(inventory, json.dumps({
+        "reference": f"decision:{slug}",
+        "expectedSourceSha256": digest,
+        "archivedAt": archived_at,
+        "rationale": "Accepted successor supersedes this historical decision.",
+        "evidence": "Synthetic successor relation and review receipt.",
+        "incomingLinks": [],
+    }))
+
+    archived = module.migrate_legacy(
+        root, f"decision:{slug}", incoming_links_inventory=inventory
+    )
+
+    assert archived == root / "work-items" / "decisions" / "archive" / archived_at[:7] / source.name
+    assert archived.read_bytes() == source_bytes
+    assert not source.exists()
+    assert policy.read_bytes() == policy_before
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["schemaVersion"] == 2
+    assert payload["baselineSha256"] == baseline_before
+    assert payload["entries"] == [{
+        "path": source.name, "sha256": digest, "state": "retired",
+        "archiveEvidence": {
+            "archivePath": f"decisions/archive/{archived_at[:7]}/{source.name}",
+            "archivedAt": archived_at,
+            "rationale": "Accepted successor supersedes this historical decision.",
+            "evidence": "Synthetic successor relation and review receipt.",
+        },
+    }]
+    module.audit_categories(root)
+
+
+def test_reopen_evidenced_archived_v0_uses_manifest_without_editing_archive(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-08-01-old-v0"
+    source = root / "work-items" / "decisions" / f"{slug}.md"
+    write(source, _legacy_v0_decision_record(status="superseded", identity_line=f"id: {slug}"))
+    frozen = source.read_bytes()
+    digest = hashlib.sha256(frozen).hexdigest().upper()
+    _write_decision_v0_manifest(root, [{"path": source.name, "sha256": digest, "state": "admitted"}])
+    instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    inventory = root / "incoming.json"
+    write(inventory, json.dumps({
+        "reference": f"decision:{slug}", "expectedSourceSha256": digest,
+        "archivedAt": instant, "rationale": "Superseded by successor.",
+        "evidence": "Synthetic accepted review.", "incomingLinks": [],
+    }))
+    archived = module.migrate_legacy(root, f"decision:{slug}", incoming_links_inventory=inventory)
+    assert module.migrate_legacy(root, f"decision:{slug}", incoming_links_inventory=inventory) == archived
+    successor_slug = "2026-09-01-successor"
+    successor_data = _current_decision_record(
+        successor_slug, status="accepted", body=f"Reopens: {slug}\n"
+    ).encode("utf-8")
+
+    successor = module.reopen_category_record(
+        root, f"decision:{slug}", successor_slug, successor_data
+    )
+
+    assert successor.read_bytes() == successor_data
+    assert archived.read_bytes() == frozen
+
+
+def test_migrate_legacy_v0_repairs_mutable_physical_link(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-08-01-linked-v0"
+    source = root / "work-items" / "decisions" / f"{slug}.md"
+    write(source, _legacy_v0_decision_record(status="superseded", identity_line=f"id: {slug}"))
+    frozen = source.read_bytes()
+    digest = hashlib.sha256(frozen).hexdigest().upper()
+    _write_decision_v0_manifest(root, [{"path": source.name, "sha256": digest, "state": "admitted"}])
+    consumer = root / "work-items" / "bugs" / "consumer.md"
+    original_link = f"../decisions/{source.name}"
+    write(consumer, f"[historical decision]({original_link})\n")
+    instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    inventory = root / "incoming.json"
+    write(inventory, json.dumps({
+        "reference": f"decision:{slug}", "expectedSourceSha256": digest,
+        "archivedAt": instant, "rationale": "Superseded.",
+        "evidence": "Synthetic review.",
+        "incomingLinks": [{
+            "consumer": "bugs/consumer.md", "kind": "physical", "value": original_link,
+        }],
+    }))
+
+    archived = module.migrate_legacy(root, f"decision:{slug}", incoming_links_inventory=inventory)
+
+    assert archived.read_bytes() == frozen
+    assert consumer.read_text(encoding="utf-8") == (
+        f"[historical decision](../decisions/archive/{instant[:7]}/{source.name})\n"
+    )
+
+
+def test_migrate_legacy_v0_rolls_back_after_readme_failure(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-08-01-rollback-v0"
+    source = root / "work-items" / "decisions" / f"{slug}.md"
+    write(source, _legacy_v0_decision_record(status="superseded", identity_line=f"id: {slug}"))
+    source_before = source.read_bytes()
+    digest = hashlib.sha256(source_before).hexdigest().upper()
+    manifest = _write_decision_v0_manifest(
+        root, [{"path": source.name, "sha256": digest, "state": "admitted"}]
+    )
+    consumer = root / "work-items" / "bugs" / "consumer.md"
+    original_link = f"../decisions/{source.name}"
+    write(consumer, f"[historical decision]({original_link})\n")
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    before = (manifest.read_bytes(), consumer.read_bytes(), (root / "work-items" / "README.md").read_bytes())
+    instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    inventory = root / "incoming.json"
+    write(inventory, json.dumps({
+        "reference": f"decision:{slug}", "expectedSourceSha256": digest,
+        "archivedAt": instant, "rationale": "Superseded.",
+        "evidence": "Synthetic review.",
+        "incomingLinks": [{
+            "consumer": "bugs/consumer.md", "kind": "physical", "value": original_link,
+        }],
+    }))
+    with patch.object(module, "refresh_readme", side_effect=module.LifecycleError("WI-README-STALE", "injected")):
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module.migrate_legacy(root, f"decision:{slug}", incoming_links_inventory=inventory)
+
+    assert caught.exception.failure_id == "WI-README-STALE"
+    assert source.read_bytes() == source_before
+    assert not (root / "work-items" / "decisions" / "archive" / instant[:7] / source.name).exists()
+    assert (manifest.read_bytes(), consumer.read_bytes(), (root / "work-items" / "README.md").read_bytes()) == before
+
+
+def test_migrate_legacy_v0_rejects_missing_evidence_drift_and_v1_retirement(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    slug = "2026-08-01-refused-v0"
+    instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cases = (
+        ("missing-manifest", "WI-DECISION-V0-MANIFEST-MISSING"),
+        ("source-drift", "WI-DECISION-V0-HASH-MISMATCH"),
+        ("missing-evidence", "WI-DECISION-V0-ARCHIVE-EVIDENCE"),
+        ("wrong-month", "WI-DECISION-V0-ARCHIVE-EVIDENCE"),
+        ("old-retirement", "WI-DECISION-V0-MANIFEST-INVALID"),
+    )
+    for name, failure_id in cases:
+        root = tmp_path / name
+        source = root / "work-items" / "decisions" / f"{slug}.md"
+        write(source, _legacy_v0_decision_record(status="superseded", identity_line=f"id: {slug}"))
+        frozen = source.read_bytes()
+        digest = hashlib.sha256(frozen).hexdigest().upper()
+        entries = [{"path": source.name, "sha256": digest, "state": "admitted"}]
+        if name == "old-retirement":
+            entries.insert(0, {"path": "2026-07-01-retired.md", "sha256": "A" * 64, "state": "retired"})
+        manifest = None if name == "missing-manifest" else _write_decision_v0_manifest(root, entries)
+        if name == "source-drift":
+            source.write_bytes(frozen + b"drift")
+        before_source = source.read_bytes()
+        before_manifest = manifest.read_bytes() if manifest else None
+        inventory = root / "incoming.json"
+        write(inventory, json.dumps({
+            "reference": f"decision:{slug}", "expectedSourceSha256": digest,
+            "archivedAt": "2026-13-01T00:00:00Z" if name == "wrong-month" else instant,
+            "rationale": "Superseded.",
+            "evidence": "" if name == "missing-evidence" else "Synthetic review.",
+            "incomingLinks": [],
+        }))
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module.migrate_legacy(root, f"decision:{slug}", incoming_links_inventory=inventory)
+        assert caught.exception.failure_id == failure_id, name
+        assert source.read_bytes() == before_source
+        assert (manifest.read_bytes() if manifest else None) == before_manifest
+        assert not (root / "work-items" / "decisions" / "archive").exists()
+
+
+def test_migrate_legacy_v0_rejects_archived_physical_consumer_without_move(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-08-01-immutable-link-v0"
+    source = root / "work-items" / "decisions" / f"{slug}.md"
+    write(source, _legacy_v0_decision_record(status="superseded", identity_line=f"id: {slug}"))
+    frozen = source.read_bytes()
+    digest = hashlib.sha256(frozen).hexdigest().upper()
+    manifest = _write_decision_v0_manifest(root, [{"path": source.name, "sha256": digest, "state": "admitted"}])
+    consumer = root / "work-items" / "decisions" / "archive" / "2026-08" / "old-consumer.md"
+    href = f"../../{source.name}"
+    write(consumer, f"[frozen history]({href})\n")
+    before = (manifest.read_bytes(), consumer.read_bytes())
+    instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    inventory = root / "incoming.json"
+    write(inventory, json.dumps({
+        "reference": f"decision:{slug}", "expectedSourceSha256": digest,
+        "archivedAt": instant, "rationale": "Superseded.",
+        "evidence": "Synthetic review.",
+        "incomingLinks": [{
+            "consumer": "decisions/archive/2026-08/old-consumer.md",
+            "kind": "physical", "value": href,
+        }],
+    }))
+    with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+        module.migrate_legacy(root, f"decision:{slug}", incoming_links_inventory=inventory)
+    assert caught.exception.failure_id == "WI-LEGACY-LINK-UNMAPPED"
+    assert source.read_bytes() == frozen
+    assert (manifest.read_bytes(), consumer.read_bytes()) == before
+
+
+def test_migrate_legacy_v0_compensates_failures_after_move_and_manifest(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for stage in ("manifest", "link"):
+        root = tmp_path / stage
+        slug = f"2026-08-01-{stage}-failure-v0"
+        source = root / "work-items" / "decisions" / f"{slug}.md"
+        write(source, _legacy_v0_decision_record(status="superseded", identity_line=f"id: {slug}"))
+        frozen = source.read_bytes()
+        digest = hashlib.sha256(frozen).hexdigest().upper()
+        manifest = _write_decision_v0_manifest(
+            root, [{"path": source.name, "sha256": digest, "state": "admitted"}]
+        )
+        consumer = root / "work-items" / "bugs" / "consumer.md"
+        href = f"../decisions/{source.name}"
+        write(consumer, f"[history]({href})\n")
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+        readme = root / "work-items" / "README.md"
+        before = (manifest.read_bytes(), consumer.read_bytes(), readme.read_bytes())
+        instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        inventory = root / "incoming.json"
+        write(inventory, json.dumps({
+            "reference": f"decision:{slug}", "expectedSourceSha256": digest,
+            "archivedAt": instant, "rationale": "Superseded.",
+            "evidence": "Synthetic review.",
+            "incomingLinks": [{"consumer": "bugs/consumer.md", "kind": "physical", "value": href}],
+        }))
+        fail_path = manifest if stage == "manifest" else consumer
+        original_atomic_write = module._atomic_write
+        failed = False
+
+        def fail_once(path, data):
+            nonlocal failed
+            if Path(path) == fail_path and not failed:
+                failed = True
+                raise OSError(f"injected {stage} failure")
+            return original_atomic_write(path, data)
+
+        with patch.object(module, "_atomic_write", side_effect=fail_once):
+            with unittest.TestCase().assertRaises(OSError):
+                module.migrate_legacy(root, f"decision:{slug}", incoming_links_inventory=inventory)
+        assert failed
+        assert source.read_bytes() == frozen
+        assert not (root / "work-items" / "decisions" / "archive" / instant[:7] / source.name).exists()
+        assert (manifest.read_bytes(), consumer.read_bytes(), readme.read_bytes()) == before
+
+
+def test_migrate_legacy_v0_removes_only_new_empty_archive_parents_on_failure(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-08-01-parent-cleanup-v0"
+    source = root / "work-items" / "decisions" / f"{slug}.md"
+    write(source, _legacy_v0_decision_record(status="superseded", identity_line=f"id: {slug}"))
+    frozen = source.read_bytes()
+    digest = hashlib.sha256(frozen).hexdigest().upper()
+    manifest = _write_decision_v0_manifest(root, [{"path": source.name, "sha256": digest, "state": "admitted"}])
+    manifest_before = manifest.read_bytes()
+    instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    inventory = root / "incoming.json"
+    write(inventory, json.dumps({
+        "reference": f"decision:{slug}", "expectedSourceSha256": digest,
+        "archivedAt": instant, "rationale": "Superseded.",
+        "evidence": "Synthetic review.", "incomingLinks": [],
+    }))
+    archive_root = root / "work-items" / "decisions" / "archive"
+    archive_month_path = archive_root / instant[:7]
+    original_mkdir = Path.mkdir
+
+    def fail_after_month_creation(path, mode=0o777, parents=False, exist_ok=False):
+        original_mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
+        if Path(path) == archive_month_path:
+            raise OSError("injected interruption immediately after archive parent creation")
+
+    with patch.object(Path, "mkdir", fail_after_month_creation):
+        with unittest.TestCase().assertRaises(OSError):
+            module.migrate_legacy(root, f"decision:{slug}", incoming_links_inventory=inventory)
+
+    assert source.read_bytes() == frozen
+    assert manifest.read_bytes() == manifest_before
+    assert not archive_month_path.exists()
+    assert not archive_root.exists()
+
+
+def test_migrate_legacy_v0_keeps_preexisting_empty_archive_parents_on_failure(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-08-01-existing-parent-v0"
+    source = root / "work-items" / "decisions" / f"{slug}.md"
+    write(source, _legacy_v0_decision_record(status="superseded", identity_line=f"id: {slug}"))
+    frozen = source.read_bytes()
+    digest = hashlib.sha256(frozen).hexdigest().upper()
+    manifest = _write_decision_v0_manifest(root, [{"path": source.name, "sha256": digest, "state": "admitted"}])
+    manifest_before = manifest.read_bytes()
+    instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    archive_month_path = root / "work-items" / "decisions" / "archive" / instant[:7]
+    archive_month_path.mkdir(parents=True)
+    inventory = root / "incoming.json"
+    write(inventory, json.dumps({
+        "reference": f"decision:{slug}", "expectedSourceSha256": digest,
+        "archivedAt": instant, "rationale": "Superseded.",
+        "evidence": "Synthetic review.", "incomingLinks": [],
+    }))
+    original_atomic_write = module._atomic_write
+    failed = False
+
+    def fail_manifest_once(path, data):
+        nonlocal failed
+        if Path(path) == manifest and not failed:
+            failed = True
+            raise OSError("injected manifest failure")
+        return original_atomic_write(path, data)
+
+    with patch.object(module, "_atomic_write", side_effect=fail_manifest_once):
+        with unittest.TestCase().assertRaises(OSError):
+            module.migrate_legacy(root, f"decision:{slug}", incoming_links_inventory=inventory)
+    assert failed
+    assert source.read_bytes() == frozen
+    assert manifest.read_bytes() == manifest_before
+    assert archive_month_path.is_dir()
+    assert not any(archive_month_path.iterdir())
+
+
+def test_decision_v0_v2_retirement_rejects_wrong_month_and_archive_hash(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-08-01-archive-bound-v0"
+    source = root / "work-items" / "decisions" / f"{slug}.md"
+    write(source, _legacy_v0_decision_record(status="superseded", identity_line=f"id: {slug}"))
+    digest = hashlib.sha256(source.read_bytes()).hexdigest().upper()
+    manifest = _write_decision_v0_manifest(root, [{"path": source.name, "sha256": digest, "state": "admitted"}])
+    instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    inventory = root / "incoming.json"
+    write(inventory, json.dumps({
+        "reference": f"decision:{slug}", "expectedSourceSha256": digest,
+        "archivedAt": instant, "rationale": "Superseded.",
+        "evidence": "Synthetic review.", "incomingLinks": [],
+    }))
+    archived = module.migrate_legacy(root, f"decision:{slug}", incoming_links_inventory=inventory)
+    frozen_manifest = manifest.read_bytes()
+    payload = json.loads(frozen_manifest)
+    payload["entries"][0]["archiveEvidence"]["archivePath"] = (
+        f"decisions/archive/2000-01/{source.name}"
+    )
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    with unittest.TestCase().assertRaises(module.LifecycleError) as wrong_month:
+        module.audit_categories(root)
+    assert wrong_month.exception.failure_id == "WI-DECISION-V0-MANIFEST-INVALID"
+    manifest.write_bytes(frozen_manifest)
+    archived.write_bytes(archived.read_bytes() + b"drift")
+    with unittest.TestCase().assertRaises(module.LifecycleError) as wrong_hash:
+        module.audit_categories(root)
+    assert wrong_hash.exception.failure_id == "WI-DECISION-V0-HASH-MISMATCH"
+
+
 def _legacy_h1_decision_record(
     *,
     mode: str = "plain",
@@ -9192,7 +9585,7 @@ def test_decision_v0_manifest_rejects_invalid_shape_anchor_and_duplicate_json(
 
     mutations = {
         "unknown-field": lambda payload: payload.update({"extra": True}),
-        "schema": lambda payload: payload.update({"schemaVersion": 2}),
+        "schema": lambda payload: payload.update({"schemaVersion": 3}),
         "traversal": lambda payload: payload["entries"][0].update({"path": "../legacy.md"}),
         "lower-hash": lambda payload: payload["entries"][0].update({"sha256": payload["entries"][0]["sha256"].lower()}),
         "state": lambda payload: payload["entries"][0].update({"state": "pending"}),
@@ -9228,7 +9621,7 @@ def test_decision_v0_manifest_rejects_invalid_shape_anchor_and_duplicate_json(
     assert caught.exception.failure_id == "WI-DECISION-V0-MANIFEST-INVALID"
 
 
-def test_decision_v0_manifest_is_repo_local_and_has_no_retirement_writer(
+def test_decision_v0_manifest_is_repo_local_and_preflight_read_only(
     tmp_path: Path,
 ) -> None:
     module = load_module()
@@ -9236,7 +9629,7 @@ def test_decision_v0_manifest_is_repo_local_and_has_no_retirement_writer(
         root = tmp_path / repo_name
         decision = root / "work-items" / "decisions" / f"{slug}.md"
         write(decision, _legacy_v0_decision_record(identity_line=f"id: {slug}"))
-        _write_decision_v0_manifest(
+        manifest = _write_decision_v0_manifest(
             root,
             [
                 {
@@ -9246,8 +9639,20 @@ def test_decision_v0_manifest_is_repo_local_and_has_no_retirement_writer(
                 }
             ],
         )
-        assert module.audit_categories(root) == (f"decisions/{slug}.md",)
-    assert not hasattr(module, "retire_decision_v0")
+        policy = root / "work-items" / "decisions" / (
+            "2026-08-18-current-decision-schema-versioned-read-compatibility.md"
+        )
+        protected = (decision, manifest, policy)
+        before = {
+            path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
+            for path in protected
+        }
+        with patch.object(module, "_atomic_write", side_effect=AssertionError("V0 preflight wrote")):
+            assert module.audit_categories(root) == (f"decisions/{slug}.md",)
+        assert {
+            path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
+            for path in protected
+        } == before
     source = Path(module.__file__).read_text(encoding="utf-8")
     assert "mcp-local-hub" not in source
     assert "F4AF62741FD4BEFC59AA3FEC95EDC88E995CD477B4551F53A2AFB403234A3A6F" not in source

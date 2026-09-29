@@ -1972,9 +1972,12 @@ def _verify_current_decision_compatibility_manifest(
         raise manifest_invalid(
             f"decision {profile.label} manifest has an invalid top-level shape"
         )
+    schema_version = payload["schemaVersion"]
     if (
-        type(payload["schemaVersion"]) is not int
-        or payload["schemaVersion"] != profile.manifest_schema_version
+        type(schema_version) is not int
+        or schema_version not in (
+            (1, 2) if profile.label == "V0" else (profile.manifest_schema_version,)
+        )
     ):
         raise manifest_invalid(
             f"decision {profile.label} manifest has an unsupported schemaVersion"
@@ -2007,15 +2010,22 @@ def _verify_current_decision_compatibility_manifest(
             f"decision {profile.label} manifest cutoverDate is invalid"
         )
 
-    entries: list[dict[str, str]] = []
+    entries: list[dict[str, object]] = []
     for index, raw_entry in enumerate(raw_entries):
-        if not isinstance(raw_entry, dict) or set(raw_entry) != {"path", "sha256", "state"}:
+        if not isinstance(raw_entry, dict):
+            raise manifest_invalid(
+                f"decision {profile.label} manifest entry {index} has invalid shape"
+            )
+        state = raw_entry.get("state")
+        expected_fields = {"path", "sha256", "state"}
+        if schema_version == 2 and state == "retired":
+            expected_fields.add("archiveEvidence")
+        if set(raw_entry) != expected_fields:
             raise manifest_invalid(
                 f"decision {profile.label} manifest entry {index} has invalid shape"
             )
         name = raw_entry["path"]
         digest = raw_entry["sha256"]
-        state = raw_entry["state"]
         if (
             not isinstance(name, str)
             or not name.endswith(".md")
@@ -2030,7 +2040,31 @@ def _verify_current_decision_compatibility_manifest(
             raise manifest_invalid(
                 f"decision {profile.label} manifest entry {index} is invalid"
             )
-        entries.append({"path": name, "sha256": digest, "state": state})
+        entry = {"path": name, "sha256": digest, "state": state}
+        if schema_version == 2 and state == "retired":
+            evidence = raw_entry["archiveEvidence"]
+            if not isinstance(evidence, dict) or set(evidence) != {
+                "archivePath", "archivedAt", "rationale", "evidence"
+            }:
+                raise manifest_invalid(f"decision V0 manifest entry {index} has invalid archive evidence")
+            archived_at = evidence["archivedAt"]
+            archive_path = evidence["archivePath"]
+            if (
+                not isinstance(archived_at, str)
+                or not isinstance(archive_path, str)
+                or archive_path != f"decisions/archive/{archived_at[:7]}/{name}"
+                or any(
+                    not isinstance(evidence[field], str) or not evidence[field].strip()
+                    for field in ("rationale", "evidence")
+                )
+            ):
+                raise manifest_invalid(f"decision V0 manifest entry {index} has invalid archive evidence")
+            try:
+                _strict_utc(archived_at)
+            except LifecycleError as exc:
+                raise manifest_invalid(f"decision V0 manifest entry {index} has invalid archive instant") from exc
+            entry["archiveEvidence"] = evidence
+        entries.append(entry)
     names = [entry["path"] for entry in entries]
     if names != sorted(names) or len(names) != len(set(names)):
         raise manifest_invalid(
@@ -2083,6 +2117,29 @@ def _verify_current_decision_compatibility_manifest(
         path = decisions / name
         selected = formats.get(name)
         if entry["state"] == "retired":
+            if schema_version == 2:
+                if selected is not None:
+                    raise LifecycleError(
+                        profile.retired_reappeared_failure_id,
+                        f"retired decisions/{name} reappeared as current",
+                    )
+                archive_relative = entry["archiveEvidence"]["archivePath"]
+                archive = work_items / Path(archive_relative)
+                try:
+                    archived = _capture_file_snapshot(
+                        archive, failure_id=profile.manifest_stale_failure_id
+                    ).data
+                except LifecycleError as exc:
+                    raise LifecycleError(
+                        profile.manifest_stale_failure_id,
+                        f"retired decisions/{name} archive is missing or unsafe",
+                    ) from exc
+                if hashlib.sha256(archived).hexdigest().upper() != entry["sha256"]:
+                    raise LifecycleError(
+                        profile.hash_mismatch_failure_id,
+                        f"retired decisions/{name} archive differs from its frozen SHA-256",
+                    )
+                continue
             if selected is None or selected == DECISION_FORMAT_V1:
                 continue
             raise LifecycleError(
@@ -7370,33 +7427,33 @@ def _fixed_bug_terminal_image(
     return after
 
 
-def _fixed_bug_link_plans(root: Path, source: Path, archive: Path, slug: str) -> list[dict]:
-    references = _incoming_link_result(
-        root, {source}, f"bug:{slug}", strict_consumer_reads=True,
-    )["references"]
+def _physical_archive_link_plans(
+    root: Path, source: Path, archive: Path, references: list[dict],
+    *, failure_id: str,
+) -> list[dict]:
     repository = _work_items_root(root).parent
     physical_paths: set[str] = set()
     for row in references:
         if row["kind"] != "physical":
             continue
         if "archive" in PurePosixPath(row["consumer"]).parts:
-            raise LifecycleError("WI-FIXED-BUG-LINK-INVENTORY", "immutable archived consumer has a physical bug link")
+            raise LifecycleError(failure_id, "immutable archived consumer has a physical link")
         physical_paths.add(row["consumer"])
     plans: list[dict] = []
     for relative in sorted(physical_paths):
         consumer = _work_items_root(root) / relative
-        snapshot = _capture_file_snapshot(consumer, failure_id="WI-FIXED-BUG-LINK-INVENTORY")
+        snapshot = _capture_file_snapshot(consumer, failure_id=failure_id)
         text = snapshot.data.decode("utf-8")
         replacements: list[tuple[int, int, str]] = []
         for link in _markdown_local_links(text):
             if _markdown_href_resolves(consumer.parent, link.href, source):
                 parts = _local_markdown_href_parts(link.href)
                 if parts is None:
-                    raise LifecycleError("WI-FIXED-BUG-LINK-INVENTORY", f"unclassifiable link: {relative}")
+                    raise LifecycleError(failure_id, f"unclassifiable link: {relative}")
                 href = os.path.relpath(archive, consumer.parent).replace(os.sep, "/") + parts[1]
                 replacements.append((link.href_start, link.href_end, href))
         if not replacements:
-            raise LifecycleError("WI-FIXED-BUG-LINK-INVENTORY", f"physical link has no safe rewrite: {relative}")
+            raise LifecycleError(failure_id, f"physical link has no safe rewrite: {relative}")
         for start, end, href in reversed(replacements):
             text = text[:start] + href + text[end:]
         after = text.encode("utf-8")
@@ -7409,6 +7466,15 @@ def _fixed_bug_link_plans(root: Path, source: Path, archive: Path, slug: str) ->
             "afterSha256": _sha256_bytes(after),
         })
     return plans
+
+
+def _fixed_bug_link_plans(root: Path, source: Path, archive: Path, slug: str) -> list[dict]:
+    references = _incoming_link_result(
+        root, {source}, f"bug:{slug}", strict_consumer_reads=True,
+    )["references"]
+    return _physical_archive_link_plans(
+        root, source, archive, references, failure_id="WI-FIXED-BUG-LINK-INVENTORY"
+    )
 
 
 def archive_fixed_bug(
@@ -10231,6 +10297,158 @@ def _move_terminal_category(root: Path, reference: str) -> Path:
     return target
 
 
+def _v0_archive_manifest_row(root: Path, name: str) -> dict | None:
+    """Return a validated frozen V0 row, including external archive evidence."""
+    _preflight_current_decision_v0(root)
+    manifest = _work_items_root(root) / DECISION_V0_MANIFEST
+    if not manifest.is_file():
+        return None
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    return next((row for row in payload["entries"] if row["path"] == name), None)
+
+
+def _v0_archive_input(inventory: dict, reference: str) -> dict:
+    required = {
+        "reference", "expectedSourceSha256", "archivedAt", "rationale",
+        "evidence", "incomingLinks",
+    }
+    if set(inventory) != required or inventory["reference"] != reference:
+        raise LifecycleError("WI-DECISION-V0-ARCHIVE-EVIDENCE", "V0 archive input has invalid shape")
+    if (
+        not isinstance(inventory["expectedSourceSha256"], str)
+        or re.fullmatch(r"[0-9A-F]{64}", inventory["expectedSourceSha256"]) is None
+        or not isinstance(inventory["archivedAt"], str)
+        or any(
+            not isinstance(inventory[field], str) or not inventory[field].strip()
+            for field in ("rationale", "evidence")
+        )
+        or not isinstance(inventory["incomingLinks"], list)
+    ):
+        raise LifecycleError("WI-DECISION-V0-ARCHIVE-EVIDENCE", "V0 archive input is incomplete")
+    try:
+        _strict_utc(inventory["archivedAt"])
+    except LifecycleError as exc:
+        raise LifecycleError("WI-DECISION-V0-ARCHIVE-EVIDENCE", "V0 archive instant is invalid") from exc
+    return inventory
+
+
+def _migrate_v0_decision(root: Path, reference: str, inventory: dict, source: Path | None) -> Path:
+    category, slug = _canonical_category(reference)
+    assert category.name == "decision"
+    work_items = _work_items_root(root)
+    manifest = work_items / DECISION_V0_MANIFEST
+    row = _v0_archive_manifest_row(root, f"{slug}.md")
+    if row is None:
+        raise LifecycleError("WI-DECISION-V0-UNADMITTED", "V0 archive source has no admitted manifest row")
+    evidence_input = _v0_archive_input(inventory, reference)
+    archive = work_items / "decisions" / "archive" / archive_month(evidence_input["archivedAt"]) / f"{slug}.md"
+    if source is None:
+        evidence = row.get("archiveEvidence")
+        if (
+            row["state"] != "retired" or not isinstance(evidence, dict)
+            or evidence["archivePath"] != archive.relative_to(work_items).as_posix()
+            or evidence["archivedAt"] != evidence_input["archivedAt"]
+            or evidence["rationale"] != evidence_input["rationale"]
+            or evidence["evidence"] != evidence_input["evidence"]
+            or row["sha256"] != evidence_input["expectedSourceSha256"]
+            or _category_locations(root, category, slug) != [archive]
+        ):
+            raise LifecycleError("WI-DECISION-V0-ARCHIVE-EVIDENCE", "V0 archive replay differs")
+        return archive
+    if row["state"] != "admitted":
+        raise LifecycleError("WI-DECISION-V0-UNADMITTED", "V0 source is not admitted")
+    current = _preflight_current_decision_v0(root).get(source.name)
+    if current is None or current.raw_status not in category.terminal_statuses:
+        raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", "V0 decision is not terminal")
+    source = _require_lifecycle_mutation_path(root, source, failure_id="WI-DECISION-V0-ARCHIVE-EVIDENCE")
+    archive = _require_lifecycle_mutation_path(root, archive, failure_id="WI-DECISION-V0-ARCHIVE-EVIDENCE")
+    manifest = _require_lifecycle_mutation_path(root, manifest, failure_id="WI-DECISION-V0-ARCHIVE-EVIDENCE")
+    if _category_locations(root, category, slug) != [source] or os.path.lexists(archive):
+        raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", "V0 archive target is not uniquely absent")
+    source_before = _capture_file_snapshot(source, failure_id="WI-DECISION-V0-HASH-MISMATCH").data
+    if _sha256_bytes(source_before).upper() != row["sha256"] or row["sha256"] != evidence_input["expectedSourceSha256"]:
+        raise LifecycleError("WI-DECISION-V0-HASH-MISMATCH", "V0 source hash differs from admission")
+    manifest_before = _capture_file_snapshot(manifest, failure_id="WI-DECISION-V0-MANIFEST-INVALID").data
+    payload = json.loads(manifest_before.decode("utf-8"))
+    if payload["schemaVersion"] == 1 and any(
+        entry["state"] == "retired" for entry in payload["entries"]
+    ):
+        raise LifecycleError("WI-DECISION-V0-MANIFEST-INVALID", "V1 retirement cannot be backfilled")
+    references = _incoming_link_result(
+        root, {source}, reference, strict_consumer_reads=True
+    )["references"]
+    if evidence_input["incomingLinks"] != references:
+        raise LifecycleError("WI-LEGACY-LINK-UNMAPPED", "V0 incoming-link inventory is stale")
+    links = _physical_archive_link_plans(
+        root, source, archive, references, failure_id="WI-LEGACY-LINK-UNMAPPED"
+    )
+    _preflight_readme_markers(root)
+    readme = work_items / "README.md"
+    readme_before = readme.read_bytes() if readme.is_file() else None
+    payload["schemaVersion"] = 2
+    updated_row = next(entry for entry in payload["entries"] if entry["path"] == source.name)
+    updated_row["state"] = "retired"
+    updated_row["archiveEvidence"] = {
+        "archivePath": archive.relative_to(work_items).as_posix(),
+        "archivedAt": evidence_input["archivedAt"],
+        "rationale": evidence_input["rationale"],
+        "evidence": evidence_input["evidence"],
+    }
+    manifest_after = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    archive_parent_existed = archive.parent.is_dir()
+    archive_root_existed = archive.parent.parent.is_dir()
+    readme_attempted = False
+    try:
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(source, archive)
+        _atomic_write(manifest, manifest_after)
+        for link in links:
+            _atomic_write(link["path"], link["after"])
+        readme_attempted = True
+        refresh_readme(root)
+        if archive.read_bytes() != source_before or manifest.read_bytes() != manifest_after:
+            raise LifecycleError("WI-DECISION-V0-ARCHIVE-EVIDENCE", "V0 archive readback differs")
+        if any(link["path"].read_bytes() != link["after"] for link in links):
+            raise LifecycleError("WI-LEGACY-LINK-UNMAPPED", "V0 link readback differs")
+        _preflight_current_decision_v0(root)
+        return archive
+    except Exception as exc:
+        try:
+            for link in reversed(links):
+                observed = link["path"].read_bytes()
+                if observed == link["after"]:
+                    _atomic_write(link["path"], link["before"])
+                elif observed != link["before"]:
+                    raise ValueError("V0 link rollback preimage changed")
+            observed_manifest = manifest.read_bytes()
+            if observed_manifest == manifest_after:
+                _atomic_write(manifest, manifest_before)
+            elif observed_manifest != manifest_before:
+                raise ValueError("V0 manifest rollback preimage changed")
+            if readme_before is None:
+                if readme_attempted and readme.exists():
+                    readme.unlink()
+            elif readme.read_bytes() != readme_before:
+                _atomic_write(readme, readme_before)
+            if archive.is_file() and not source.exists() and archive.read_bytes() == source_before:
+                os.replace(archive, source)
+            elif archive.exists() or not source.is_file() or source.read_bytes() != source_before:
+                raise ValueError("V0 source rollback location changed")
+            for directory, existed in (
+                (archive.parent, archive_parent_existed),
+                (archive.parent.parent, archive_root_existed),
+            ):
+                if not existed and directory.is_dir():
+                    if any(directory.iterdir()):
+                        raise ValueError("new V0 archive parent gained content")
+                    directory.rmdir()
+        except Exception as rollback_exc:
+            raise LifecycleError(
+                "WI-DECISION-V0-ROLLBACK-FAILED", "V0 archive compensation failed"
+            ) from rollback_exc
+        raise
+
+
 def migrate_legacy(
     root: Path, reference: str, *, incoming_links_inventory: Path | None
 ) -> Path:
@@ -10249,6 +10467,17 @@ def migrate_legacy(
         raise LifecycleError(
             "WI-LEGACY-LINK-UNMAPPED", "incoming-link inventory is not target-bound"
         )
+    if category.name == "decision":
+        locations = _category_locations(root, category, _slug)
+        if len(locations) > 1:
+            raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", f"duplicate slug: {reference}")
+        current = _work_items_root(root) / "decisions" / f"{_slug}.md"
+        admitted = _preflight_current_decision_v0(root)
+        if locations == [current] and current.name in admitted:
+            return _migrate_v0_decision(root, reference, inventory, current)
+        row = _v0_archive_manifest_row(root, current.name)
+        if locations and row is not None and row.get("archiveEvidence") is not None:
+            return _migrate_v0_decision(root, reference, inventory, None)
     return _move_terminal_category(root, reference)
 
 
@@ -13577,7 +13806,20 @@ def reopen_category_record(
     archived = resolve_category(root, archived_reference)
     if "archive" not in archived.parts:
         raise LifecycleError("WI-INVALID-TARGET", "reopen source must be archived")
-    _validate_flat_terminal(category, archived.read_bytes())
+    evidenced_v0 = False
+    if category.name == "decision":
+        row = _v0_archive_manifest_row(root, archived.name)
+        evidence = row.get("archiveEvidence") if row is not None else None
+        if isinstance(evidence, dict):
+            expected = _work_items_root(root) / Path(evidence["archivePath"])
+            if archived != expected.resolve():
+                raise LifecycleError("WI-DECISION-V0-ARCHIVE-EVIDENCE", "V0 reopen archive path differs")
+            record = _validate_current_decision_record(archived, archived_slug)
+            if record.format != DECISION_FORMAT_V0 or record.raw_status not in category.terminal_statuses:
+                raise LifecycleError("WI-DECISION-V0-ARCHIVE-EVIDENCE", "V0 reopen source is not terminal")
+            evidenced_v0 = True
+    if not evidenced_v0:
+        _validate_flat_terminal(category, archived.read_bytes())
     _validate_slug(successor_slug)
     if _category_locations(root, category, successor_slug):
         raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", "successor slug already exists")
