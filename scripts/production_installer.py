@@ -572,6 +572,13 @@ def _parser(provider: str) -> argparse.ArgumentParser:
         help="Global Codex/Claude only: adopt one unreceipted Lead tree with this exact observed SHA-256 digest",
     )
     parser.add_argument(
+        "--replace-unreceipted-skill-sha256",
+        action="append",
+        default=[],
+        metavar="NAME=SHA256",
+        help="Global Codex/Claude only: adopt one unreceipted non-Lead canonical skill with its exact observed SHA-256 digest",
+    )
+    parser.add_argument(
         "--migrate-legacy-skill",
         action="append",
         default=[],
@@ -3511,6 +3518,8 @@ class _CanonicalSkillPlan:
 
 _LEAD_RECEIPT_NAME = ".orchestrarium-lead-receipt.v1.json"
 _LEAD_RECEIPT_SCHEMA = "orchestrarium.canonical-lead-install.v1"
+_NONLEAD_RECEIPT_NAME = ".orchestrarium-nonlead-skills-receipt.v1.json"
+_NONLEAD_RECEIPT_SCHEMA = "orchestrarium.canonical-nonlead-skills-install.v1"
 
 
 def _lead_receipt_bytes(digest: str) -> bytes:
@@ -3554,6 +3563,72 @@ def _read_lead_receipt(path: Path) -> tuple[bytes, tuple[int, int, int, int], st
     return payload, identity, record["treeSha256"]
 
 
+def _nonlead_receipt_bytes(skills: dict[str, str]) -> bytes:
+    ordered = {name: skills[name] for name in sorted(skills)}
+    return (json.dumps({"schema": _NONLEAD_RECEIPT_SCHEMA, "skills": ordered},
+                       separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def _safe_nonlead_name(name: object) -> bool:
+    return (isinstance(name, str) and name != "lead"
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", name) is not None)
+
+
+@dataclass(frozen=True)
+class _NonLeadReceiptObservation:
+    payload: bytes
+    identity: tuple[int, int, int, int]
+    entries: tuple[tuple[str, str], ...]
+
+
+def _read_nonlead_receipt(path: Path) -> _NonLeadReceiptObservation | None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata):
+        raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID")
+    try:
+        payload = path.read_bytes()
+        if len(payload) > 65536:
+            raise ValueError("oversized receipt")
+        def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result = dict(pairs)
+            if len(result) != len(pairs):
+                raise ValueError("duplicate receipt key")
+            return result
+        record = json.loads(payload.decode("utf-8"), object_pairs_hook=unique_pairs)
+        if (not isinstance(record, dict) or set(record) != {"schema", "skills"}
+            or record["schema"] != _NONLEAD_RECEIPT_SCHEMA
+            or not isinstance(record["skills"], dict)
+            or any(not _safe_nonlead_name(name) or not isinstance(digest, str)
+                   or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                   for name, digest in record["skills"].items())
+            or payload != _nonlead_receipt_bytes(record["skills"])):
+            raise ValueError("receipt shape")
+        current = path.lstat()
+        if (current.st_dev, current.st_ino, current.st_mode, current.st_size, current.st_mtime_ns) != (
+            metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_size, metadata.st_mtime_ns
+        ):
+            raise ValueError("receipt identity")
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID") from exc
+    identity = (metadata.st_dev, metadata.st_ino, metadata.st_mode,
+                getattr(metadata, "st_file_attributes", 0))
+    return _NonLeadReceiptObservation(payload, identity, tuple(sorted(record["skills"].items())))
+
+
+def _parse_nonlead_grants(values: tuple[str, ...], source_names: frozenset[str]) -> dict[str, str]:
+    grants: dict[str, str] = {}
+    for value in values:
+        name, sep, digest = value.partition("=")
+        if (not sep or name not in source_names or not _safe_nonlead_name(name)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None or name in grants):
+            raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
+        grants[name] = digest
+    return grants
+
+
 @dataclass(frozen=True)
 class _LeadReceiptPlan:
     observed: tuple[bytes, tuple[int, int, int, int], str] | None
@@ -3567,6 +3642,9 @@ class _CanonicalSkillsPlan:
     skills: tuple[_CanonicalSkillPlan, ...]
     transport_stage: _ClaudeTransportProjectionStage | None
     lead_receipt: _LeadReceiptPlan | None = None
+    nonlead_receipt: _NonLeadReceiptObservation | None = None
+    nonlead_expected: tuple[tuple[str, str], ...] | None = None
+    nonlead_source: Path | None = None
 
 
 def _is_exact_stock_luna_profile_prior_pair(
@@ -3602,6 +3680,7 @@ def _preflight_canonical_skills(
     claude_transport_root: Path | None = None,
     global_install: bool = False,
     replace_unreceipted_lead_sha256: str | None = None,
+    replace_unreceipted_skill_sha256: tuple[str, ...] = (),
 ) -> _CanonicalSkillsPlan:
     """Bind the complete affected set before the transaction applies any member."""
 
@@ -3626,6 +3705,17 @@ def _preflight_canonical_skills(
         receipt = _read_lead_receipt(target / _LEAD_RECEIPT_NAME) if global_install else None
         if replace_unreceipted_lead_sha256 is not None and receipt is not None:
             raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH")
+        nonlead_names = frozenset(skill.name for skill in skills if skill.name != "lead")
+        if replace_unreceipted_skill_sha256 and not global_install:
+            raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
+        grants = _parse_nonlead_grants(replace_unreceipted_skill_sha256, nonlead_names)
+        nonlead_receipt = _read_nonlead_receipt(target / _NONLEAD_RECEIPT_NAME) if global_install else None
+        if nonlead_receipt is not None and grants:
+            raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
+        nonlead_prior_map = dict(nonlead_receipt.entries) if nonlead_receipt is not None else {}
+        if not nonlead_prior_map.keys() <= nonlead_names:
+            raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: removed source skill")
+        consumed_grants: set[str] = set()
         planned: list[_CanonicalSkillPlan] = []
         for skill in skills:
             materialized = stage.path if skill.name == "lead" else skill
@@ -3676,6 +3766,20 @@ def _preflight_canonical_skills(
             if skill.name == "lead" and receipt is not None:
                 if observed is None or (observed != current and receipt[2] != observed):
                     raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT")
+            nonlead_receipted = False
+            nonlead_adopted = False
+            if skill.name != "lead" and global_install:
+                if not _safe_nonlead_name(skill.name):
+                    raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: source name")
+                recorded = nonlead_prior_map.get(skill.name)
+                if nonlead_receipt is not None:
+                    if recorded is None and observed is not None:
+                        raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_INVALID: missing member {skill.name}")
+                    if recorded is not None and observed is None:
+                        raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: {skill.name}")
+                    if recorded is not None and recorded != observed and observed != current:
+                        raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: {skill.name}")
+                    nonlead_receipted = recorded is not None and recorded == observed
             accepted_prior_files = (
                 _STOCK_LUNA_PROFILE_PRIOR_PAIR
                 if skill.name == "lead"
@@ -3698,6 +3802,15 @@ def _preflight_canonical_skills(
                     raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH")
             if adopting and replace_unreceipted_lead_sha256 is None:
                 raise ValueError(f"E_CANONICAL_LEAD_ADOPTION_REQUIRED: {observed}")
+            if (skill.name != "lead" and global_install and nonlead_receipt is None
+                and observed is not None and observed != current
+                and observed not in accepted_priors):
+                if skill.name not in grants:
+                    raise ValueError(f"E_CANONICAL_SKILL_ADOPTION_REQUIRED: {skill.name}={observed}")
+                if grants[skill.name] != observed:
+                    raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
+                nonlead_adopted = True
+                consumed_grants.add(skill.name)
             if (
                 observed is not None
                 and observed != current
@@ -3705,6 +3818,8 @@ def _preflight_canonical_skills(
                 and not accepted_prior_files
                 and not (skill.name == "lead" and receipt is not None)
                 and not adopting
+                and not nonlead_receipted
+                and not nonlead_adopted
             ):
                 raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {skill.name}")
             planned.append(
@@ -3713,12 +3828,14 @@ def _preflight_canonical_skills(
                     materialized,
                     current,
                     observed,
-                    observed if (observed != current and (observed in accepted_priors or (skill.name == "lead" and (receipt is not None or adopting))) and not accepted_prior_files) else None,
+                    observed if (observed != current and (observed in accepted_priors or (skill.name == "lead" and (receipt is not None or adopting)) or nonlead_receipted or nonlead_adopted) and not accepted_prior_files) else None,
                     ignore_runtime_cache,
                     accepted_prior_files,
                 )
             )
 
+        if set(grants) != consumed_grants:
+            raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
         transport_stage: _ClaudeTransportProjectionStage | None = None
         if claude_transport_root is not None:
             transport_stage = _stage_claude_transport_projection(
@@ -3730,6 +3847,9 @@ def _preflight_canonical_skills(
         return _CanonicalSkillsPlan(
             stage, tuple(planned), transport_stage,
             _LeadReceiptPlan(receipt, stage.digest, lead_source) if global_install else None,
+            nonlead_receipt,
+            tuple((skill.name, skill.source_digest) for skill in planned if skill.name != "lead") if global_install else None,
+            source if global_install else None,
         )
     except BaseException:
         shutil.rmtree(stage.path, ignore_errors=True)
@@ -3773,6 +3893,14 @@ def _assert_canonical_skills_plan_current(
                 raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT: source preflight drift")
         finally:
             shutil.rmtree(restaged.path, ignore_errors=True)
+    if plan.nonlead_expected is not None:
+        assert plan.nonlead_source is not None
+        names = {path.name for path in plan.nonlead_source.iterdir()
+                 if path.name != "lead" and path.is_dir() and not path.is_symlink()}
+        if names != {name for name, _digest in plan.nonlead_expected}:
+            raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: source membership preflight drift")
+        if _read_nonlead_receipt(target / _NONLEAD_RECEIPT_NAME) != plan.nonlead_receipt:
+            raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: preflight drift")
     if plan.transport_stage is not None:
         assert claude_transport_root is not None
         current_transport = _stage_claude_transport_projection(
@@ -3858,6 +3986,19 @@ def _apply_canonical_skills_plan(
             owner.create_file(relative, payload)
         elif prior_receipt[0] != payload:
             owner.replace_exact_file(relative, hashlib.sha256(prior_receipt[0]).hexdigest(), payload)
+
+    if plan.nonlead_expected is not None:
+        if not owner.dry_run:
+            for name, digest in plan.nonlead_expected:
+                if _tree_sha256(target / name, ignore_runtime_cache=True) != digest:
+                    raise ValueError(f"E_MUTABLE_PATH_POSTCONDITION: non-Lead {name}")
+        payload = _nonlead_receipt_bytes(dict(plan.nonlead_expected))
+        relative = target_relative / _NONLEAD_RECEIPT_NAME
+        prior_receipt = plan.nonlead_receipt
+        if prior_receipt is None:
+            owner.create_file(relative, payload)
+        elif prior_receipt.payload != payload:
+            owner.replace_exact_file(relative, hashlib.sha256(prior_receipt.payload).hexdigest(), payload)
 
     if plan.transport_stage is not None and not owner.dry_run:
         _validate_committed_transport_projection(
@@ -5531,6 +5672,9 @@ def _verify_files(
 
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
+    if args.replace_unreceipted_skill_sha256 and not args.global_install:
+        print("FAIL: E_CANONICAL_SKILL_ADOPTION_MISMATCH", file=sys.stderr)
+        return 1
     if args.replace_unreceipted_lead_sha256 is not None and not args.global_install:
         print("FAIL: E_CANONICAL_LEAD_ADOPTION_MISMATCH", file=sys.stderr)
         return 1
@@ -5708,6 +5852,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 claude_transport_root=target_tree / "scripts",
                 global_install=mode == "global",
                 replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
+                replace_unreceipted_skill_sha256=tuple(args.replace_unreceipted_skill_sha256),
             )
             if (
                 args.dry_run
@@ -5729,6 +5874,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 root=root,
                 global_install=mode == "global",
                 replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
+                replace_unreceipted_skill_sha256=tuple(args.replace_unreceipted_skill_sha256),
             )
             legacy_codex_skill_migrations = (
                 _validate_legacy_codex_skill_requests(
@@ -5748,6 +5894,10 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         if args.dry_run and args.replace_unreceipted_lead_sha256 is not None:
             print("  [dry-run] unreceipted Lead prior "
                   f"{args.replace_unreceipted_lead_sha256}: 2 replacements")
+        if args.dry_run and args.replace_unreceipted_skill_sha256:
+            print("  [dry-run] unreceipted non-Lead priors "
+                  f"{', '.join(sorted(args.replace_unreceipted_skill_sha256))}: "
+                  f"{len(args.replace_unreceipted_skill_sha256) + 1} replacements")
         transaction_paths = _installer_mutation_paths(
             provider=provider,
             source=source,
