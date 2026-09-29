@@ -5404,6 +5404,7 @@ def close_item(
     month = archive_month(terminal_instant)
     _validate_closure(closure_data, terminal_instant)
     archived_closure_data = _stamp_schema_marker(closure_data, "closure.md")
+    root = Path(os.path.abspath(root))
     work_items = _work_items_root(root)
     locations = _category_locations(root, CATEGORIES["work-item"], slug)
     if len(locations) > 1:

@@ -713,6 +713,38 @@ def test_close_retention_receipt_preserves_unsorted_manifest_row_order(tmp_path:
     assert module.close_item(root, slug, closure_path.read_bytes(), instant) == archived
 
 
+def test_close_relative_root_rejects_undeclared_scratch_leaf(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-with-undeclared-leaf"
+    instant = "2026-08-11T10:01:30Z"
+    item, retained, _pointer, retained_before, _pointer_before, _manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant
+    )
+    undeclared = root / ".scratch" / "work-items" / slug / "run-002" / "extra.txt"
+    write(undeclared, "unclaimed evidence\n")
+    undeclared_before = undeclared.read_bytes()
+    closure_path = root / "closure.md"
+    closure_path.write_text(closure(instant), encoding="utf-8")
+    manifest_before = (item / "bug-dispositions.json").read_bytes()
+
+    result = subprocess.run(
+        [
+            sys.executable, str(SCRIPT), "close", "--root", ".", "--slug", slug,
+            "--closure-file", str(closure_path), "--terminal-instant", instant,
+        ],
+        cwd=root, text=True, capture_output=True, check=False,
+    )
+
+    assert result.returncode == 1
+    assert "WI-SCRATCH-OWNERSHIP-INCOMPLETE" in result.stdout
+    assert item.is_dir()
+    assert (item / "bug-dispositions.json").read_bytes() == manifest_before
+    assert module._payload_digest(retained)[1] == retained_before
+    assert undeclared.read_bytes() == undeclared_before
+    assert not (root / "work-items" / "archive" / "2026-08" / slug).exists()
+
+
 def test_retained_scratch_hash_drift_and_close_rollback_preserve_active_state(tmp_path: Path) -> None:
     module = load_module()
     instant = "2026-08-11T10:01:00Z"
