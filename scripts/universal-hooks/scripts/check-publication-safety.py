@@ -3691,6 +3691,12 @@ def main(argv: list[str] | None = None) -> int:
         _parser().error("unexpected extra path argument")
     if args.range_source is not None and not args.range:
         _parser().error("--range-source requires --range")
+    # Temporary containment until Windows range children are owned by a Job.
+    if args.range and os.name == "nt":
+        return _emit_outcome(ScanOutcome(
+            "refusal", "range",
+            refusal=_refusal("PS-INPUT-REFUSAL", "windows-range-unsupported"),
+        ))
     script = Path(__file__).resolve()
     try:
         repo_root = _repo_root()

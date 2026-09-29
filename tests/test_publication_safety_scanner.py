@@ -1196,6 +1196,30 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                 )
 
 
+class TestPublicationSafetyWindowsRangeContainment(unittest.TestCase):
+    def test_windows_range_refuses_before_repository_or_git_work(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_range_containment")
+        for extra in ((), ("--range-source", "a" * 40)):
+            with self.subTest(extra=extra):
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(module, "os", SimpleNamespace(name="nt")),
+                    mock.patch.object(module, "_repo_root") as repo_root,
+                    mock.patch.object(module, "_scan_range") as scan_range,
+                    mock.patch.object(module, "_run_range_git") as range_git,
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    result = module.main(["--range", "origin", "main", *extra])
+                self.assertEqual(result, 2)
+                self.assertIn(
+                    "id=PS-INPUT-REFUSAL reason=windows-range-unsupported phase=input",
+                    stderr.getvalue(),
+                )
+                repo_root.assert_not_called()
+                scan_range.assert_not_called()
+                range_git.assert_not_called()
+
+
 @unittest.skipIf(_git() is None, "needs git on PATH")
 class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
     """Regression tests for `--range <remote> <dst>` (2026-07-27,
