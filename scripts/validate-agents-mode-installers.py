@@ -345,6 +345,7 @@ def run_regression(root: Path) -> None:
     schema_data = load_json(root / "shared" / "agents-mode.schema.json")
     scratch = root / ".scratch" / "agents-mode-installer-regression" / uuid.uuid4().hex
     scratch.mkdir(parents=True, exist_ok=True)
+    validation_error: BaseException | None = None
     try:
         for case in INSTALLER_CASES:
             project_root = scratch / f"{case.name}-project"
@@ -416,8 +417,21 @@ def run_regression(root: Path) -> None:
         codex_global_fresh_home.mkdir(parents=True, exist_ok=True)
         run_python_codex_global_installer(root, codex_global_fresh_home)
         validate_codex_native_role_install(codex_global_fresh_home, root)
+    except BaseException as exc:
+        validation_error = exc
+        raise
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        try:
+            shutil.rmtree(scratch)
+            if scratch.exists() or scratch.is_symlink():
+                raise OSError("owned UUID fixture remains after cleanup")
+        except OSError as cleanup_error:
+            cleanup_detail = f"owned UUID fixture cleanup failed at {scratch}: {cleanup_error}"
+            if validation_error is not None:
+                raise InstallerRegressionError(
+                    f"{type(validation_error).__name__}: {validation_error}; {cleanup_detail}"
+                ) from validation_error
+            raise InstallerRegressionError(cleanup_detail) from cleanup_error
 
 
 def main() -> int:
