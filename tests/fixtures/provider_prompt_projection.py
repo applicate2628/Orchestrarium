@@ -8,6 +8,7 @@ from pathlib import Path
 _PROVIDER_PROMPT_RUNTIME_FILES = (
     Path("provider_prompt.py"),
     Path("process_supervision/process_runner.py"),
+    Path("process_supervision/windows_job.py"),
 )
 _PROVIDER_PROMPT_HOOK_FILES = (
     Path("universal-hooks/hooks/check-machine-local-path.py"),

@@ -266,7 +266,7 @@ def validate_overlay(
     overlay: Path,
     schema_data: dict[str, Any],
     *,
-    expected_codex_profile: str = "gpt-6-sol-xhigh",
+    expected_codex_profile: str = "gpt-6.1-sol-xhigh",
 ) -> None:
     if not overlay.is_file():
         raise InstallerRegressionError(f"{case.name} did not create {overlay}")

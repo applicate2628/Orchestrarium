@@ -2,6 +2,11 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-02
+
+- **Sol 6.1 becomes the default Sol family, including scientific software implementation.** Existing Sol role efforts are retained, while `scientific-software-engineer` moves from Astra medium to Sol 6.1 high. Bounded medium selection is admitted only through the existing role/task profile intersection; critical review, security, and recovery remain outside that medium corridor. Astra remains an explicit task-risk choice, and Luna's mechanical contract and max-effort approval stay unchanged. The decision uses dated public evidence, not new comparative model runs, and makes no guarantee about subscription-quota savings.
+- **Source, transport, and stock-install migration move together.** Native role configuration and manifest hashes, external Codex defaults/profiles, and the no-flags transport path must agree on Sol 6.1. Explicit older versioned profiles retain their literal model choices, and customized installations remain protected. Verification uses offline temporary installations and provider stubs; real provider availability and a user's installed client are separate, unclaimed results. See the [routing decision](docs/routing/sol-6-1-routing-proposal-2026-10-01.md).
+
 ## 2026-09-30
 
 - **Bounded publication-history denials now give operators a recovery step.** When the push gate cannot verify earlier permission because transcript history or recovery hit a limit, its denial asks for a fresh `[approve-publication]` in the user's latest genuine message before retrying one generic push. This tells the operator how to resume without treating a summary as approval; the push remains denied until the existing human-approval and leak-check gates pass.

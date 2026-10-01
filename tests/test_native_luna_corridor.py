@@ -1563,9 +1563,16 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
     assert "mechanical-worker" not in installer._READ_ONLY_ROLES
     assert "mechanical-worker" in installer._BOUNDED_WRITE_ROLES
     for role_name, expected_digest in PROTECTED_EXISTING_ROLE_DIGESTS.items():
-        assert hashlib.sha256(
-            (AGENTS_SOURCE / f"{role_name}.toml").read_bytes()
-        ).hexdigest() == expected_digest
+        # Preserve the frozen Sol 6 baseline: only the approved model-token
+        # migration may differ; effort, authority, sandbox and all other bytes
+        # must still match. Current model identity is asserted independently.
+        role_bytes = (AGENTS_SOURCE / f"{role_name}.toml").read_bytes()
+        assert tomllib.loads(role_bytes.decode("utf-8"))["model"] == "gpt-6.1-sol"
+        assert role_bytes.count(b'model = "gpt-6.1-sol"') == 1
+        prior_bytes = role_bytes.replace(
+            b'model = "gpt-6.1-sol"', b'model = "gpt-6-sol"', 1
+        )
+        assert hashlib.sha256(prior_bytes).hexdigest() == expected_digest
 
 
 def test_sol_migrated_roles_keep_independent_nonmodel_contract() -> None:

@@ -31,14 +31,17 @@ class AgentsModeContractTest(unittest.TestCase):
         codex_profile = scalars["externalCodexProfile"]
 
         # Shipped default is the best-effort profile (symmetric to externalClaudeProfile: opus-xhigh).
-        self.assertEqual(codex_profile["default"], "gpt-6-sol-xhigh")
-        # GPT-6 Sol is the active family; explicit GPT-5.6 Sol selections remain literal 1.x
+        self.assertEqual(codex_profile["default"], "gpt-6.1-sol-xhigh")
+        # GPT-6.1 Sol is active; explicit GPT-6/GPT-5.6 Sol selections remain literal 1.x
         # compatibility values. Terra remains an explicit distinct-model option.
         # Keep this list in sync with the schema-owned enum.
         self.assertEqual(
             codex_profile["allowed"],
             [
                 "default",
+                "gpt-6.1-sol-high",
+                "gpt-6.1-sol-xhigh",
+                "gpt-6.1-sol-max",
                 "gpt-6-sol-high",
                 "gpt-6-sol-xhigh",
                 "gpt-6-sol-max",
@@ -50,16 +53,16 @@ class AgentsModeContractTest(unittest.TestCase):
         self.assertNotIn("providers", codex_profile)
 
         # Per-preset assignments must correspond to each preset's intent:
-        #   best-effort presets → gpt-6-sol-xhigh
-        #   speed preset → gpt-6-sol-high
+        #   best-effort presets → gpt-6.1-sol-xhigh
+        #   speed preset → gpt-6.1-sol-high
         #   balanced everyday presets → default (inherit externalModelMode)
         expected_per_preset = {
-            "default": "gpt-6-sol-xhigh",
+            "default": "gpt-6.1-sol-xhigh",
             "absolute-balance": "default",
             "external-aggressive": "default",
-            "correctness-first": "gpt-6-sol-xhigh",
-            "power-mode": "gpt-6-sol-xhigh",
-            "max-speed": "gpt-6-sol-high",
+            "correctness-first": "gpt-6.1-sol-xhigh",
+            "power-mode": "gpt-6.1-sol-xhigh",
+            "max-speed": "gpt-6.1-sol-high",
         }
         for preset in presets["presetOrder"]:
             with self.subTest(preset=preset):
@@ -101,16 +104,16 @@ class AgentsModeContractTest(unittest.TestCase):
             ],
             "src.codex/skills/init-project/SKILL.md": [
                 "global legacy `~/.codex/.agents-mode`, then the shared cross-pack global",
-                "externalCodexProfile: gpt-6-sol-xhigh",
+                "externalCodexProfile: gpt-6.1-sol-xhigh",
             ],
             "src.claude/commands/agents-init-project.md": [
                 "global legacy `~/.claude/.agents-mode`, then the shared cross-pack global",
-                "externalCodexProfile: gpt-6-sol-xhigh",
+                "externalCodexProfile: gpt-6.1-sol-xhigh",
             ],
             "docs/agents-mode-reference.md": [
                 "Use `scripts/resolve-agents-mode.py --provider <provider> --json`",
-                "| Codex | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-6-sol-xhigh`",
-                "| Claude Code | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-6-sol-xhigh`",
+                "| Codex | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-6.1-sol-xhigh`",
+                "| Claude Code | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-6.1-sol-xhigh`",
             ],
         }
         for relative, snippets in expectations.items():
