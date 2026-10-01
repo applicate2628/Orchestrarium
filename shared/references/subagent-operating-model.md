@@ -264,6 +264,9 @@ Field meanings:
 
 **Ordinary profile admission.** Exact membership in task `admissibleProfiles` intersected with role `allowedProfiles`, followed by current host filtering, authorizes ordinary selection. `requiredEffort` is descriptive compatibility metadata, not an independent ordinal floor; effort labels are model-local and special corridors or explicit floors remain separate.
 
+The accepted Sol 6.1 routing uses `gpt-6.1-sol` for live Sol defaults. Existing high/xhigh choices stay fixed; scientific software implementation uses high and archival work keeps medium. Explicit `frontier-medium` is available through the ordinary native role/task selector for bounded exploration, planning, and implementation only with an accepted directly testable contract, required inputs, a clear oracle, and unchanged independent gates. Explorer stays high by default; justified ambiguous deep exploration may select xhigh. Review, critical design/security, and recovery do not gain medium admission. The global external Codex profile enum offers only high/xhigh/max Sol settings; it does not expose medium because raw operator selection is not the native role/task admission boundary. Astra is a direct explicit exception for difficult unknown-model research, conflicting assumptions, or costly latent error; no mandatory escalation ladder is imposed. Max still needs user approval. Unsupported exact model/effort must fail clearly with no silent fallback. Public evidence informs this policy; no unrun local comparative evaluation is claimed or required. See the [accepted decision and evidence](../../docs/routing/sol-6-1-routing-proposal-2026-10-01.md).
+
+
 ---
 
 ## 5. Shared system preamble for all subagents

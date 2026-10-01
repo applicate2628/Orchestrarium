@@ -2,6 +2,11 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-01
+
+- **Sol 6.1 becomes the default Sol family, including scientific software implementation.** Existing Sol role efforts are retained, while `scientific-software-engineer` moves from Astra medium to Sol 6.1 high. Bounded medium selection is admitted only through the existing role/task profile intersection; critical review, security, and recovery remain outside that medium corridor. Astra remains an explicit task-risk choice, and Luna's mechanical contract and max-effort approval stay unchanged. The decision uses dated public evidence, not new comparative model runs, and makes no guarantee about subscription-quota savings.
+- **Source, transport, and stock-install migration move together.** Native role configuration and manifest hashes, external Codex defaults/profiles, and the no-flags transport path must agree on Sol 6.1. Explicit older versioned profiles retain their literal model choices, and customized installations remain protected. Verification uses offline temporary installations and provider stubs; real provider availability and a user's installed client are separate, unclaimed results. See the [routing decision](docs/routing/sol-6-1-routing-proposal-2026-10-01.md).
+
 ## 2026-09-29
 
 - **Terminal legacy V0 decisions can be archived without rewriting their frozen bytes.** A V0-only lifecycle migration requires the accepted compatibility manifest, exact source hash, and external evidence for the current archive action. Its manifest version 2 records the archived path/time/evidence on the retired row while keeping the original baseline and policy anchor unchanged; earlier version-1 manifests remain readable. The owner repairs admitted mutable inbound links, restores before-images on ordinary failure, and checks the same evidence during archived replay and successor reopening. Other decision formats retain their existing terminal-evidence rules.
