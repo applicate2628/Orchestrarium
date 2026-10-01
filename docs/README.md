@@ -18,6 +18,9 @@ Current docs in this branch:
 - [routing-v1-operator-guide.md](routing-v1-operator-guide.md) for source-tested selector examples and the separate installation/admission gates
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
 - [lead-contract-routing-audit-2026-09-04.md](lead-contract-routing-audit-2026-09-04.md) for the provider-neutral Lead Host, optional CLI worker, and explicit fallback audit
+- [adaptive-model-routing-v2-audit-2026-09-04.md](adaptive-model-routing-v2-audit-2026-09-04.md) for the Version 2 adaptive Lead, registry, portfolio, diversity, and ledger-gap audit
+- [model-routing-v2/README.md](model-routing-v2/README.md) for the documentation-stage Version 2 core and operational contract bundles
+- [model-routing-v2/deep-review-operational-hardening.md](model-routing-v2/deep-review-operational-hardening.md) for Lead fencing, provider-neutral effort, data egress, budgets, write safety, process settlement, and cross-record validation findings
 - [new-session-guide.md](new-session-guide.md) for new-session orientation and source-first maintenance rules
 - [provider-runtime-layouts.md](provider-runtime-layouts.md) for cross-provider runtime path mapping
 - [work-item-execution-tracking.md](work-item-execution-tracking.md) for the execution ledger helper and periodic active work-item checker
