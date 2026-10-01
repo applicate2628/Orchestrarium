@@ -155,7 +155,7 @@ def test_scientific_role_discovery_exposes_named_default_and_astra_range() -> No
     )
 
     assert description["status"] == "available"
-    assert description["defaultProfile"] == "astra-medium"
+    assert description["defaultProfile"] == "frontier-high"
     assert description["defaultInvocation"] == {
         "mode": "named-role-default",
         "agentType": "scientific-software-engineer",
@@ -175,9 +175,9 @@ def test_scientific_role_discovery_exposes_named_default_and_astra_range() -> No
     } <= discovered
     assert {
         ("gpt-5.6-terra", "high", "capability-unknown"),
-        ("gpt-6-sol", "high", "capability-unknown"),
-        ("gpt-6-sol", "xhigh", "capability-unknown"),
-        ("gpt-6-sol", "max", "capability-unknown"),
+        ("gpt-6.1-sol", "high", "capability-unknown"),
+        ("gpt-6.1-sol", "xhigh", "capability-unknown"),
+        ("gpt-6.1-sol", "max", "capability-unknown"),
     } <= discovered
     assert all(option["useCriteria"] for option in description["options"])
     assert description["profession"]["skill"] == "$scientific-software-engineer"
@@ -212,7 +212,7 @@ def test_ordinary_resolver_keeps_named_default_but_explicit_tuple_uses_generic_s
         "agentType": "scientific-software-engineer",
     }
     assert default["requestedModel"] is None
-    assert default["resolvedEffort"] == "medium"
+    assert default["resolvedEffort"] == "high"
     assert explicit["invocation"]["model"] == "gpt-6-astra"
     assert explicit["invocation"]["reasoningEffort"] == "low"
     assert explicit["invocation"]["forkTurns"] == "none"
@@ -231,7 +231,7 @@ def test_analyst_exploration_preserves_explicit_terra_with_sol_default() -> None
     host = {
         "explicitModelControl": True,
         "explicitReasoningEffortControl": True,
-        "reportedModels": ["gpt-5.6-terra", "gpt-6-sol"],
+        "reportedModels": ["gpt-5.6-terra", "gpt-6.1-sol"],
         "reportedEfforts": ["medium", "high"],
         "reportedAgentTypes": ["analyst"],
     }
@@ -250,7 +250,7 @@ def test_analyst_exploration_preserves_explicit_terra_with_sol_default() -> None
     assert description["status"] == "available"
     assert description["mutationClass"] == "read-only"
     assert description["defaultProfile"] == "frontier-high"
-    assert description["defaultModel"] == "gpt-6-sol"
+    assert description["defaultModel"] == "gpt-6.1-sol"
     assert description["defaultEffort"] == "high"
     assert [
         (option["profile"], option["model"], option["effort"])
@@ -258,7 +258,8 @@ def test_analyst_exploration_preserves_explicit_terra_with_sol_default() -> None
     ] == [
         ("balanced-medium", "gpt-5.6-terra", "medium"),
         ("balanced-high", "gpt-5.6-terra", "high"),
-        ("frontier-high", "gpt-6-sol", "high"),
+        ("frontier-medium", "gpt-6.1-sol", "medium"),
+        ("frontier-high", "gpt-6.1-sol", "high"),
     ]
 
     default = RESOLVER.resolve_ordinary_native_dispatch(
@@ -275,7 +276,7 @@ def test_analyst_exploration_preserves_explicit_terra_with_sol_default() -> None
     )
 
     assert default["resolvedProfile"] == "frontier-high"
-    assert default["resolvedModel"] == "gpt-6-sol"
+    assert default["resolvedModel"] == "gpt-6.1-sol"
     assert default["resolvedEffort"] == "high"
     assert default["invocation"] == {
         "mode": "named-role-default",
@@ -447,9 +448,9 @@ def test_skill_only_catalog_resolves_default_and_explicit_choices_without_agent_
     assert description["defaultProfile"] == "frontier-high"
     assert description["profession"]["skill"] == "$frontend-engineer"
     assert len(description["profession"]["skillSha256"]) == 64
-    assert default["resolvedModel"] == "gpt-6-sol"
+    assert default["resolvedModel"] == "gpt-6.1-sol"
     assert default["resolvedEffort"] == "high"
-    assert default["invocation"]["model"] == "gpt-6-sol"
+    assert default["invocation"]["model"] == "gpt-6.1-sol"
     assert default["invocation"]["reasoningEffort"] == "high"
     assert default["invocation"]["forkTurns"] == "none"
     assert "agentType" not in default["invocation"]
@@ -505,7 +506,7 @@ def test_knowledge_archivist_keeps_medium_effort_with_sol_default() -> None:
     assert description["defaultProfile"] == "frontier-medium"
     assert description["defaultAgentTypeCapability"] == "reported"
     assert decision["status"] == "resolved"
-    assert decision["resolvedModel"] == "gpt-6-sol"
+    assert decision["resolvedModel"] == "gpt-6.1-sol"
     assert decision["resolvedEffort"] == "medium"
     assert decision["invocation"]["agentType"] == "knowledge-archivist"
 
@@ -524,7 +525,7 @@ def test_every_former_terra_default_is_sol_without_removing_explicit_terra() -> 
     for name in sol_defaults:
         role = roles[name]
         profile = policy["profiles"][role["defaultProfile"]]
-        assert profile["codexModel"] == "gpt-6-sol", name
+        assert profile["codexModel"] == "gpt-6.1-sol", name
         assert profile["effort"] == (
             "medium" if name == "knowledge-archivist" else "high"
         ), name

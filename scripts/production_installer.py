@@ -246,7 +246,19 @@ STOCK_16CE_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
     ("external-role-taxonomy.v1.json", "469ad1b8bf93b56f0323456413961ca7e01dd9a1890a66d766e564bc03d489b8"),
     (TRANSPORT_PROJECTION_MANIFEST, "3fda6b196a00e4ce3ce7d9921f4dab016f13d7ff3c7522a3d3a3ec00b0d9436d"),
 )
+STOCK_604D_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
+    ('provider_prompt.py', 'e05c20e08c54168b6aee636fa2c047b4a1a822d2a9765d9a867977dc129a000c'),
+    ('process_supervision/process_runner.py', '36bdeedfe7198e7febae57ab628a0c11ce57d42154a8cf04f6358571fe26a2f2'),
+    ('invoke-codex-prompt.py', '04fbc5fae33e623f0b10f783b6753947e4d8a5e62ab06bc058b9df776b76f79b'),
+    ('invoke-claude-prompt.py', '3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3'),
+    ('invoke-kimi-prompt.py', '480af94ce089d5a6340e92d00239a5762c9c1374375a8c12c921afdcfcaa6e47'),
+    ('invoke-grok-prompt.py', '1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559'),
+    ('external-prompt-governance.md', 'c1a0080fffeac5da9bf2011c8ba8a8d4cafed337f238bfe8bf9fcc168693a039'),
+    ('external-role-taxonomy.v1.json', '469ad1b8bf93b56f0323456413961ca7e01dd9a1890a66d766e564bc03d489b8'),
+    ('provider-prompt-projections.v1.json', '1d360e8996a826da43fece575c165111a6c38ace0d23c69665a0e5e7abdc6c76'),
+)
 ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS = {
+    "604d7d0b": STOCK_604D_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "8521b638": STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "7872d36d": STOCK_7872_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "8f92dc73": STOCK_8F92_CLAUDE_TRANSPORT_PROJECTION_SHA256,
@@ -341,6 +353,7 @@ STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
     }
 )
 ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
+    "consultant": frozenset({"1beebf6b349048182e254d01f1b2c755199f98f45f60fb21f7990d5f014814e3"}),
     "architect": frozenset(
         {"51612976f7fde46e3046222d607435b2fba5ef27ede636a06a80cb86c6fc7f5e"}
     ),
@@ -348,10 +361,10 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
         {"19b179fe14a2bb6135e46dd7435265e7483d0bf6d5ec97b55520e39f3cbb1b4d"}
     ),
     "external-reviewer": frozenset(
-        {"4623816c87f9d1b017472011601951eab8bc8e4ceeea2d13911e29a876c853e8"}
+        {"17234ecc797094a872e3b02844c6c4c369628c1e503ef26fa797ff74872673ed", "4623816c87f9d1b017472011601951eab8bc8e4ceeea2d13911e29a876c853e8"}
     ),
     "external-worker": frozenset(
-        {"ca74db54391a1994c30a2da6d80021261556db9f75ac89ec8878ee1a5c50f32c"}
+        {"fa5374735bc396314f283489e189a4d1f82a6716068cf3384c9244a2c3c04097", "ca74db54391a1994c30a2da6d80021261556db9f75ac89ec8878ee1a5c50f32c"}
     ),
     "graphics-engineer": frozenset(
         {"e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d"}
@@ -360,7 +373,7 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
         {"d1a5bff367e42891951371faa2d66274cb34f0eb7b9c86c214376e75833f6841"}
     ),
     "init-project": frozenset(
-        {
+        {"905f0866931702acbc064dee39e487b51828e06df9dce99ac9db55d252499f07",
             "c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c",
             "21dc5adc3f4ccb8e646546cd0d3ccf979c37d4e4e8dcefcc9620122f500dadb4",
         }
@@ -388,6 +401,7 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
 }
 GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
     {
+        "0627712baff8adf6423d8cb766e5effcfa8001196e077eaf5d1b4f17e5d97a85",
         "95eadefb2069546027bbaa59497212a42e9177cce80ad729a869f64f93784635",
         "e09377e4cf15c446e2ff19ab160a09835ac6683d51e54a89585625dc1de935ca",
         "fd28049deb001bf088b0033e2dcc82ffc372e8257dd8aaf1bc6384d49be328b3",
@@ -2983,37 +2997,67 @@ _READ_ONLY_ROLES = frozenset({
 })
 _BOUNDED_WRITE_ROLES = frozenset({"default", "worker", "backend-engineer", "platform-engineer", "knowledge-archivist", "mechanical-worker", "scientific-software-engineer"})
 _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
+    "qa-engineer": frozenset({
+        "3e964408acb6fe3ea1ba8a43158927e83b6d23bb121dd34b6b843863caf4a9fd",
+    }),
+    "backend-engineer": frozenset({
+        "38d99e26339cb0942eb66d4062e0de33f085c5b39f445cc358ac217b03010589",
+    }),
+    "explorer": frozenset({
+        "a98b89ec3c513f8242459adda45808612645ed5f5cb07b9da8839fe66b670e89",
+    }),
+    "analyst": frozenset({
+        "0f26fae798309c1b69f3fe5077196e3e5895211bc661f7575aa683fd01e2225b",
+    }),
+    "knowledge-archivist": frozenset({
+        "8f69d0f67010b77b71c81b77ad74119300ad245061c4363cbcfd2f1d0fab510c",
+    }),
+    "scientific-software-engineer": frozenset({
+        "b4ee95a146843dd06a4470b380d7d263fb5c149edf9b2204c0944090e0d4ba3b",
+    }),
+    "planner": frozenset({
+        "dcde16fa86661eee94b21618fb6320026185ddb425541b15239b4c7d232c4faa",
+    }),
     "algorithm-scientist": frozenset({
+        "cd2bbbaf5f4173f07bfe18cea39d90dd0cc341630b77b5dac0d82d9f92b57d7e",
         "1bc7c60b30f1bb360a502ee955e41513a80d3e3f9e222e5a673817a7e421c8bd",
     }),
     "architect": frozenset({
+        "71f3d9e27019de2e133d8947a33cdb69ab38261824fab36bcb18c7f7f3ff0792",
         "bcdd83abcb3e5d99e0dd0963d622b475ea11d450bb16f1af1bc93855891ff4fb",
     }),
     "architecture-reviewer": frozenset({
+        "5e404f6643d8992dd7cd4a40e8a5d3ae4f7f388381907aa230b6b0fa15ac458a",
         "239a91ef35b54cc640372132b51662bcbe0da88dded68ff53d339621689df8c3",
     }),
     "computational-scientist": frozenset({
+        "4169e5ac3442e542b0249879595b6974b78e0924b377613b5b427a6488171901",
         "7ddcfb3afe6d9032d03d3da6468662a961819ceacf5252caccccfc69744cc9d3",
     }),
     "default": frozenset({
+        "90e5b43a727a1f6c42ed3bee05e033a2cd83eef102d9030301227f99b79c8d53",
         "b38bb7c4a05f93bd54a11c9a06d2bbdae9bed353db4fdd2f42b4abb9fd3ba3e1",
     }),
     "worker": frozenset({
+        "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815",
         "2d950ebfa4e9cc7293ee32cbc71ad3910fa6938a80a339bbbc3434ecc6c4d860",
         "960f0c617b4b5856585fa3f3afac7e0ef9fb99bfc1977b74fe6dd99626b2a57d",
         "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475",
     }),
     "platform-engineer": frozenset({
+        "3e4c199ba984cbfba080249ad28c645ffbf78a08daf8519e0aa058e7f92aaa40",
         "2f62aaf20edd4b30838db3e728d6a907e8f6826620d2eede78c02a1cd0b7a214",
         "ceb30fcd546bef82045f7b3c3b48e39f98ae83ebbea17a6c5210c2b46cb2140d",
         "e5d44b7fafc7ec8ab3c69b4086bdda5e5430974334f90fc407b5bb78ace8a4cf",
     }),
     "security-engineer": frozenset({
+        "6e53fa663da8eed31ab4012354ee9bebf24f16ecb9cdaa517a7f196dcfd1969e",
         "aeb2800e4e498ad7d3a63951608e780eb730ef2bd744ff679fee5c697f5d837a",
         "54117decdfcf9bff576e23d31a1dc6aa2d2f4fd0d498820f9c1244b6742f78f9",
         "ceb53c8db3d77f75beea76a9cc27120d7623a60661cca3dac92b01a35ce06a0c",
     }),
     "security-reviewer": frozenset({
+        "f22614caec4561e5cb0833e6264081b42c46570936fe1d2b62e8534c17ee214d",
         "0f9b75713128885b8db86b32a9ecb3e756b0022add169a89fc10d615745445f1",
     }),
     "mechanical-scout": frozenset({

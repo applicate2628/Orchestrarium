@@ -1,0 +1,22 @@
+{
+  "planner.toml": "dcde16fa86661eee94b21618fb6320026185ddb425541b15239b4c7d232c4faa",
+  "platform-engineer.toml": "3e4c199ba984cbfba080249ad28c645ffbf78a08daf8519e0aa058e7f92aaa40",
+  "mechanical-scout.toml": "99aac652b8849fc02cfd86b4c88dd10f820c3b3ce100e9f05f7b4ec6b0a01ca0",
+  "scientific-software-engineer.toml": "b4ee95a146843dd06a4470b380d7d263fb5c149edf9b2204c0944090e0d4ba3b",
+  "knowledge-archivist.toml": "8f69d0f67010b77b71c81b77ad74119300ad245061c4363cbcfd2f1d0fab510c",
+  "default.toml": "90e5b43a727a1f6c42ed3bee05e033a2cd83eef102d9030301227f99b79c8d53",
+  "analyst.toml": "0f26fae798309c1b69f3fe5077196e3e5895211bc661f7575aa683fd01e2225b",
+  "algorithm-scientist.toml": "cd2bbbaf5f4173f07bfe18cea39d90dd0cc341630b77b5dac0d82d9f92b57d7e",
+  "mechanical-worker.toml": "56535f1711da312516426767f7f32ef3070f9e6e6e9afcd622fe08e3ecdbeea5",
+  "computational-scientist.toml": "4169e5ac3442e542b0249879595b6974b78e0924b377613b5b427a6488171901",
+  "worker.toml": "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815",
+  "explorer.toml": "a98b89ec3c513f8242459adda45808612645ed5f5cb07b9da8839fe66b670e89",
+  "backend-engineer.toml": "38d99e26339cb0942eb66d4062e0de33f085c5b39f445cc358ac217b03010589",
+  "security-engineer.toml": "6e53fa663da8eed31ab4012354ee9bebf24f16ecb9cdaa517a7f196dcfd1969e",
+  "qa-engineer.toml": "3e964408acb6fe3ea1ba8a43158927e83b6d23bb121dd34b6b843863caf4a9fd",
+  "architect.toml": "71f3d9e27019de2e133d8947a33cdb69ab38261824fab36bcb18c7f7f3ff0792",
+  "architecture-reviewer.toml": "5e404f6643d8992dd7cd4a40e8a5d3ae4f7f388381907aa230b6b0fa15ac458a",
+  "security-reviewer.toml": "f22614caec4561e5cb0833e6264081b42c46570936fe1d2b62e8534c17ee214d",
+  "role-routing-policy.v1.json": "4e9064e012f9bb858f8eb74fdb27b057cc11eb4bca40e3945b1ccd815c5bfb2d",
+  "orchestrarium-role-manifest.json": "fb83135a02a2d1764425469bc5d9b3ff6d9f11f0e0b8b395f49b94749e019d64"
+}
