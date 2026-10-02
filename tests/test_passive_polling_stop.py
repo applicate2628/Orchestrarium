@@ -96,34 +96,19 @@ class TestPassivePollingStop(unittest.TestCase):
 
     def assert_allowed(self, result: subprocess.CompletedProcess) -> None:
         self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
 
     def assert_passive_blocked(self, result: subprocess.CompletedProcess) -> None:
         payload = json.loads(result.stdout)
         self.assertEqual(payload["decision"], "block")
         self.assertIn("passive-polling Stop guard", payload["reason"])
 
-    def assert_reconciliation_blocked(self, result: subprocess.CompletedProcess) -> None:
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["decision"], "block")
-        reason = payload["reason"]
-        self.assertIn("root Stop reconciliation", reason)
-        self.assertIn("explicit task state already in the conversation", reason)
-        self.assertIn("standalone question with no active primary task", reason)
-        self.assertIn("every remaining authorized action is concretely blocked", reason)
-        self.assertIn("decision pauses only dependent work", reason)
-        self.assertIn("independent ready work remains", reason)
-        self.assertNotIn("blocked on a needed user decision", reason)
-        self.assertIn("If work remains, perform the next authorized action first", reason)
-        self.assertIn("A passed slice or proposed final is not completion", reason)
-        self.assertNotIn("passive-polling Stop guard", reason)
-        self.assertLessEqual(len(reason.split()), 75)
-
-    def test_last_assistant_message_without_polling_phrase_blocks_once(self) -> None:
+    def test_last_assistant_message_without_polling_phrase_allows_stop(self) -> None:
         result = self.run_hook(
             message="Verification finished; tests are listed below.",
             transcript_entries=[entry("user", "status?")],
         )
-        self.assert_reconciliation_blocked(result)
+        self.assert_allowed(result)
 
         reentry = self.run_hook(
             message="Verification finished; tests are listed below.",
@@ -132,13 +117,14 @@ class TestPassivePollingStop(unittest.TestCase):
         )
         self.assert_allowed(reentry)
 
-    def test_standalone_answer_and_explicit_pause_each_block_once_then_allow(self) -> None:
+    def test_standalone_answer_pause_and_nonpassive_pending_allow_stop(self) -> None:
         for message in (
             "The answer is 42.",
             "Paused as requested; no further action taken.",
+            "Implementation work remains; another local step is available.",
         ):
             with self.subTest(message=message):
-                self.assert_reconciliation_blocked(
+                self.assert_allowed(
                     self.run_hook(
                         message=message,
                         transcript_entries=[entry("user", "request")],
@@ -152,13 +138,13 @@ class TestPassivePollingStop(unittest.TestCase):
                     )
                 )
 
-    def test_nonpassive_handoff_and_override_text_do_not_bypass_reconciliation(self) -> None:
+    def test_nonpassive_handoff_and_override_text_allow_stop(self) -> None:
         for message in (
             "Let me know if you want more detail.",
             "Completed. [acknowledge-passive-stop]",
         ):
             with self.subTest(message=message):
-                self.assert_reconciliation_blocked(
+                self.assert_allowed(
                     self.run_hook(
                         message=message,
                         transcript_entries=[entry("user", "request")],
@@ -194,6 +180,14 @@ class TestPassivePollingStop(unittest.TestCase):
             transcript_entries=[entry("user", "status?")],
         )
         self.assert_passive_blocked(result)
+
+    def test_strong_phrase_from_subagent_allows_stop_without_probe(self) -> None:
+        result = self.run_hook(
+            message="Жду ответа бота",
+            transcript_entries=[entry("user", "status?")],
+            extra_envelope={"agent_id": "agent-1"},
+        )
+        self.assert_allowed(result)
 
     def test_dispatched_review_env_allows_stop_without_probe(self) -> None:
         result = self.run_hook(
@@ -286,12 +280,12 @@ class TestPassivePollingStop(unittest.TestCase):
         )
         self.assert_allowed(result)
 
-    def test_weak_waiting_for_alone_uses_generic_reconciliation(self) -> None:
+    def test_weak_waiting_for_alone_allows_stop(self) -> None:
         result = self.run_hook(
             message="waiting for",
             transcript_entries=[entry("user", "status?")],
         )
-        self.assert_reconciliation_blocked(result)
+        self.assert_allowed(result)
 
     def test_weak_waiting_for_review_approval_blocks_without_probe(self) -> None:
         result = self.run_hook(
@@ -300,12 +294,12 @@ class TestPassivePollingStop(unittest.TestCase):
         )
         self.assert_passive_blocked(result)
 
-    def test_nonpassive_user_handoff_english_blocks_once(self) -> None:
+    def test_nonpassive_user_handoff_english_allows_stop(self) -> None:
         result = self.run_hook(
             message="waiting for your response",
             transcript_entries=[entry("user", "status?")],
         )
-        self.assert_reconciliation_blocked(result)
+        self.assert_allowed(result)
 
     def test_bare_waiting_for_reply_from_bot_blocks_without_probe(self) -> None:
         result = self.run_hook(
@@ -314,12 +308,12 @@ class TestPassivePollingStop(unittest.TestCase):
         )
         self.assert_passive_blocked(result)
 
-    def test_nonpassive_user_handoff_russian_blocks_once(self) -> None:
+    def test_nonpassive_user_handoff_russian_allows_stop(self) -> None:
         result = self.run_hook(
             message="жду твоего подтверждения",
             transcript_entries=[entry("user", "status?")],
         )
-        self.assert_reconciliation_blocked(result)
+        self.assert_allowed(result)
 
     def test_user_handoff_waiting_for_your_review_allows_stop(self) -> None:
         # LOWER/OPTIONAL widening: "waiting for your review" is a legitimate
@@ -340,26 +334,26 @@ class TestPassivePollingStop(unittest.TestCase):
         )
         self.assert_passive_blocked(result)
 
-    def test_nonpassive_user_handoff_russian_ukazaniy_blocks_once(self) -> None:
+    def test_nonpassive_user_handoff_russian_ukazaniy_allows_stop(self) -> None:
         result = self.run_hook(
             message="жду указаний",
             transcript_entries=[entry("user", "status?")],
         )
-        self.assert_reconciliation_blocked(result)
+        self.assert_allowed(result)
 
-    def test_nonpassive_user_handoff_russian_komandy_blocks_once(self) -> None:
+    def test_nonpassive_user_handoff_russian_komandy_allows_stop(self) -> None:
         result = self.run_hook(
             message="жду команды",
             transcript_entries=[entry("user", "status?")],
         )
-        self.assert_reconciliation_blocked(result)
+        self.assert_allowed(result)
 
-    def test_nonpassive_user_handoff_russian_otmashki_blocks_once(self) -> None:
+    def test_nonpassive_user_handoff_russian_otmashki_allows_stop(self) -> None:
         result = self.run_hook(
             message="жду отмашки",
             transcript_entries=[entry("user", "status?")],
         )
-        self.assert_reconciliation_blocked(result)
+        self.assert_allowed(result)
 
     def test_reported_russian_failure_pattern_blocks_without_probe(self) -> None:
         result = self.run_hook(

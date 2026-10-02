@@ -22,8 +22,7 @@ ACTIVE_MODES = frozenset({"auto", "force"})
 REMINDER = (
     "[parallel and MCP momentum] Root Lead: if the user has not paused or parked "
     "new launches, recheck Ready before starting work; start useful compatible "
-    "independent lanes without waiting and refill released capacity. Lead owns "
-    "relevant MCP discovery and freshness for indexed results, and passes each "
+    "independent lanes without waiting and refill released capacity. Pass each "
     "lane only its needed tools and context. Keep leaves non-spawning; clean up "
     "owned stale processes, dead code, and disposable trash while preserving "
     "user or uncertain state. Advisory only: no decision, spawn, schedule, "

@@ -65,9 +65,8 @@ PACK_ONLY_SCRIPTS = {
         # Neutral Claude scalar-precedence support consumed by the delegation
         # reminder and MCP-force adapter; it is support, not a hook entrypoint.
         "agents_mode_runtime.py",
-        # Claude's root force-mode binding uses the universal classifier but is
-        # provider-specific because Codex intentionally retains warn-only MCP
-        # momentum.  The historical Claude hooks/ mirror is excluded below.
+        # Claude's root force-mode binding uses the universal classifier and
+        # has no Codex search-audit counterpart.
         "check-mcp-momentum.py",
         # Claude-line provider transport wrappers (no codex/canon analog).
         "invoke-claude-api.py",
@@ -134,7 +133,6 @@ REGISTERED_HOOK_STEMS_BY_PLATFORM = {
         "check-bugfix-discipline",
         "check-git-push-gate",
         "check-machine-local-path",
-        "check-mcp-momentum",
         "check-no-trash-in-repo",
         "check-parallel-mcp-momentum",
         "check-passive-polling-stop",

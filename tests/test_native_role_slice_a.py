@@ -40,6 +40,7 @@ import linked_runtime_subroots as runtime_subroots  # noqa: E402
 
 
 POST_MATERIALIZATION_WRITER_IDS = {
+    "lead-receipt",
     "claude-skill-projection",
     "runtime-outside",
     "ui-continuity",
@@ -53,6 +54,7 @@ POST_MATERIALIZATION_WRITER_IDS = {
     "retired-reclaim",
 }
 POST_MATERIALIZATION_ARTIFACT_CLASSES = {
+    "lead-receipt",
     "claude-skill-projection",
     "runtime-outside",
     "ui-continuity",
@@ -871,6 +873,88 @@ def test_legacy_config_and_role_migration_roll_back_together(
     assert observed == [(True, True)]
     assert config.read_bytes() == config_payload
     assert legacy.read_bytes() == LEGACY_LUNA_ROLE_BYTES
+
+
+def test_receipted_upgrade_retirement_preserves_targets_receipt_and_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", raising=False)
+    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env({}, ROOT)["CODEX_BIN"])
+    home = tmp_path / "h"
+    home.mkdir()
+    fresh = _run_global_installer("codex", home, install_hooks=True)
+    assert fresh.returncode == 0, fresh.stdout + fresh.stderr
+    skills = home / ".agents" / "skills"
+    lead = skills / "lead"
+    retired = lead / "hooks" / "check-mcp-momentum.py"
+    receipt = skills / installer._LEAD_RECEIPT_NAME
+    # Serialize the text fixture to the producer's LF bytes across Git checkouts.
+    stock = (
+        ROOT / "tests" / "fixtures" / "global-lead-priors" / "retired-codex-mcp-momentum.py.txt"
+    ).read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8")
+    assert hashlib.sha256(stock).hexdigest() == installer._CODEX_RETIRED_PS1[
+        "skills/lead/hooks/check-mcp-momentum.py"
+    ]
+    retired.write_bytes(stock)
+    receipt.write_bytes(installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
+    registration = home / ".codex" / "hooks.json"
+    config = json.loads(registration.read_bytes())
+    command = f"{Path(sys.executable).as_posix()} {retired.as_posix()}"
+    retained = {"type": "command", "command": command + " --retained-custom"}
+    mixed = {
+        "matcher": "Grep|Bash|PowerShell|shell_command|exec_command", "description": "retained-mixed",
+        "hooks": [{"type": "command", "command": command}, retained],
+    }
+    unrelated_target = home / "unrelated.py"
+    unrelated_target.write_bytes(b"print('unrelated')\n")
+    unrelated = {"matcher": "CustomTool", "hooks": [{
+        "type": "command", "command": f"{Path(sys.executable).as_posix()} {unrelated_target.as_posix()}",
+    }]}
+    config["description"] = "user metadata"
+    config["hooks"]["PreToolUse"].extend([mixed, unrelated])
+    registration.write_text(json.dumps(config), encoding="utf-8")
+
+    upgraded = _run_global_installer("codex", home, install_hooks=True)
+    assert upgraded.returncode == 0, upgraded.stdout + upgraded.stderr
+    assert retired.is_file(), "SYNC must not erase a retained registered target"
+    assert retired.read_bytes() == stock
+    assert json.loads(receipt.read_bytes())["treeSha256"] == installer._tree_sha256(lead, ignore_runtime_cache=True)
+    current = json.loads(registration.read_bytes())
+    assert current["description"] == "user metadata"
+    assert unrelated in current["hooks"]["PreToolUse"]
+    assert {**mixed, "hooks": [retained]} in current["hooks"]["PreToolUse"]
+
+    repeated = _run_global_installer("codex", home, install_hooks=True)
+    assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+    assert retired.read_bytes() == stock
+    assert json.loads(receipt.read_bytes())["treeSha256"] == installer._tree_sha256(lead, ignore_runtime_cache=True)
+    shared = _run_global_installer("claude", home, install_hooks=True)
+    assert shared.returncode == 0, shared.stdout + shared.stderr
+    assert retired.read_bytes() == stock
+    assert json.loads(receipt.read_bytes())["treeSha256"] == installer._tree_sha256(lead, ignore_runtime_cache=True)
+
+    current = json.loads(registration.read_bytes())
+    current["hooks"]["PreToolUse"] = [
+        group for group in current["hooks"]["PreToolUse"] if group.get("description") != "retained-mixed"
+    ]
+    registration.write_text(json.dumps(current), encoding="utf-8")
+    unreferenced = _run_global_installer("codex", home, install_hooks=True)
+    assert unreferenced.returncode == 0, unreferenced.stdout + unreferenced.stderr
+    assert not retired.exists()
+    assert json.loads(receipt.read_bytes())["treeSha256"] == installer._tree_sha256(lead, ignore_runtime_cache=True)
+    assert unrelated in json.loads(registration.read_bytes())["hooks"]["PreToolUse"]
+
+    retired.write_bytes(stock)
+    receipt.write_bytes(installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
+    before = _no_follow_inventory(home)
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    def fail_after_reclaim(*_args, **_kwargs):
+        assert not retired.exists(), "rollback control must run after actual reclamation"
+        raise RuntimeError("injected post-reclaim receipt finalization")
+    monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", fail_after_reclaim)
+    assert installer.install("codex", ["--global", "--force"]) == 1
+    assert _no_follow_inventory(home) == before
 
 
 def test_global_codex_and_claude_provider_paths_keep_role_registration_owned(
@@ -1711,6 +1795,17 @@ def test_post_materialization_writer_inventory_is_complete_and_fail_closed(
     installer._assert_canonical_lead_postwrite_free(
         canonical_lead, records, observed=records
     )
+    retirement = next(
+        record for record in codex_records if record.writer_id == "retired-reclaim"
+    )
+    ordinary_writer = next(
+        record for record in records if record.writer_id == "runtime-outside"
+    )
+    with pytest.raises(ValueError, match="^E_CANONICAL_LEAD_POSTWRITE"):
+        installer._assert_canonical_lead_postwrite_free(
+            canonical_lead,
+            (replace(ordinary_writer, destination=retirement.destination),),
+        )
 
     with pytest.raises(ValueError, match="^E_CANONICAL_LEAD_POSTWRITE"):
         installer._assert_canonical_lead_postwrite_free(
@@ -1752,6 +1847,7 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
     """The actual two-provider writer calls must echo every declared destination."""
 
     artifact_class = {
+        "lead-receipt": "lead-receipt",
         "claude-skill-projection": "claude-skill-projection",
         "runtime-outside": "runtime-outside",
         "ui-continuity": "ui-continuity",
@@ -1931,12 +2027,21 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_reclaim = installer._reclaim_retired
 
-    def reclaim(target_root, manifest, dry_run):
-        original_reclaim(target_root, manifest, dry_run)
+    def reclaim(target_root, manifest, dry_run, **kwargs):
+        result = original_reclaim(target_root, manifest, dry_run, **kwargs)
         for relative in sorted(manifest):
             emit("retired-reclaim", target_root / relative)
+        return result
 
     monkeypatch.setattr(installer, "_reclaim_retired", reclaim)
+
+    original_receipt = installer._finalize_canonical_lead_receipt
+
+    def receipt(plan, target, owner, reclaimed=()):
+        original_receipt(plan, target, owner, reclaimed)
+        emit("lead-receipt", target / installer._LEAD_RECEIPT_NAME)
+
+    monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", receipt)
 
     for provider in ("codex", "claude"):
         published = False

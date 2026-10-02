@@ -362,7 +362,7 @@ def test_malformed_envelope_fails_open_without_output(tmp_path: Path) -> None:
     assert result.stderr == ""
 
 
-def test_installer_registers_one_claude_script_identity_and_leaves_codex_path(
+def test_installer_registers_one_claude_script_identity_without_codex_audit(
     tmp_path: Path,
 ) -> None:
     claude_specs = {
@@ -378,9 +378,7 @@ def test_installer_registers_one_claude_script_identity_and_leaves_codex_path(
         "PreToolUse",
         "Grep|Bash|PowerShell|shell_command|exec_command",
     )
-    assert codex_specs["check-mcp-momentum"][0] == (
-        tmp_path / "hooks" / "check-mcp-momentum.py"
-    )
+    assert "check-mcp-momentum" not in codex_specs
     assert len([name for name in claude_specs if name == "check-mcp-momentum"]) == 1
 
 

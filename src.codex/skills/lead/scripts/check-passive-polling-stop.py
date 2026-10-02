@@ -14,8 +14,7 @@ Decision algorithm (fail-open on malformed envelopes and unreadable state):
   4. Detect passive polling with strong and weak phrase tiers.
   5. Within that passive branch, preserve the existing override, user-handoff,
      current-turn probe, and passive denial behavior.
-  6. For every other valid root Stop, emit one pre-final reconciliation block.
-     The host's stop_hook_active re-entry flag permits the following Stop.
+  6. For non-passive messages, exit 0 silently.
 """
 from __future__ import annotations
 
@@ -151,7 +150,7 @@ def main(config: StopRuntimeConfig) -> int:
                 return 0
             reason = _deny_reason()
         else:
-            reason = _reconciliation_reason()
+            return 0
 
         print(json.dumps({"decision": "block", "reason": reason}))
         return 0
@@ -248,19 +247,6 @@ def _deny_reason() -> str:
         "(2) include [acknowledge-passive-stop] if this is an intentional "
         "handoff to the user; (3) invoke a concrete probe such as Bash: gh pr "
         "view, Bash: date, or Read on an output/log/task file."
-    )
-
-
-def _reconciliation_reason() -> str:
-    return (
-        "root Stop reconciliation: before finalizing, reconcile explicit task "
-        "state already in the conversation. Choose one: standalone "
-        "question with no active primary task; user paused/cancelled/reprioritized; every "
-        "remaining authorized action is concretely blocked; task complete with evidence; or "
-        "work remains. On re-entry finalize first four. If work remains, "
-        "perform the next authorized action first. A needed user decision pauses "
-        "only dependent work; independent ready work remains. A passed slice or proposed "
-        "final is not completion."
     )
 
 

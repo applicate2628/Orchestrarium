@@ -23,7 +23,6 @@ EXPECTED_STATUS_MESSAGES = {
     "check-bugfix-discipline": "Check fix discipline",
     "check-git-push-gate": "Check publication safety",
     "check-machine-local-path": "Check local paths",
-    "check-mcp-momentum": "Check MCP tool use",
     "check-no-trash-in-repo": "Check cleanup",
     "check-parallel-mcp-momentum": "Parallel work and MCP",
     "check-passive-polling-stop": "Check task progress",

@@ -1,10 +1,10 @@
 """Payload-shape regression tests for warn-only PreToolUse audits.
 
 THE BUG THIS FILE GUARDS AGAINST (work-items/bugs/2026-07-26-mcp-reminder-uses-
-the-once-per-session-form-its-sibling-calls-broken.md): all six warn-only
+the-once-per-session-form-its-sibling-calls-broken.md): warn-only
 PreToolUse audits (`check-machine-local-path`, `check-no-trash-in-repo`,
-`check-stale-relation-residue`, `check-repository-orientation`, the universal
-`check-mcp-momentum`, and Claude `check-typed-routing`) FIRED CORRECTLY and delivered their
+`check-stale-relation-residue`, `check-repository-orientation`,
+and Claude `check-typed-routing`) FIRED CORRECTLY and delivered their
 warning to NOBODY -- a stderr-plus-exit-1 PreToolUse hook was measured to reach
 neither the model nor a reliably-checked operator channel on either Claude Code
 2.1.220 or Codex CLI 0.145.0. "The audit fired" was never the defect; DELIVERY
@@ -21,7 +21,7 @@ THE EVENT-NAME TRAP. Claude Code silently discards the entire
 `hookSpecificOutput` object when `hookEventName` does not match the event that
 actually fired (measured: "Hook returned incorrect event name: expected
 'PreToolUse' but got 'PostToolUse'"). A shared emitter that hardcodes
-`"PreToolUse"` would work today (every one of these six audits happens to be
+`"PreToolUse"` would work today (every one of these audits happens to be
 registered on PreToolUse) and silently break the moment any one of them is ever
 registered on a different event. `test_hook_event_name_is_read_from_envelope_
 not_hardcoded` below feeds each hook an envelope whose `hook_event_name` is
@@ -46,12 +46,11 @@ CLAUDE_HOOKS = REPO_ROOT / "src.claude" / "agents" / "hooks"
 UNIVERSAL_HOOKS = REPO_ROOT / "scripts" / "universal-hooks" / "hooks"
 CODEX_HOOKS = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 
-# The five audits mirrored across all three trees, plus the Claude-only sixth
+# The four audits mirrored across all three trees, plus the Claude-only fifth
 # (check-typed-routing has no Codex analogue -- there is no subagent-dispatch
 # tool on that line; see test_typed_routing_hook.py's own module docstring).
 SHARED_AUDIT_TREES = (CLAUDE_HOOKS, UNIVERSAL_HOOKS, CODEX_HOOKS)
 CLAUDE_ONLY_TREES = (CLAUDE_HOOKS,)
-MCP_AUDIT_TREES = (UNIVERSAL_HOOKS, CODEX_HOOKS)
 
 
 def run_hook(script: Path, envelope: object, *, env: dict | None = None) -> subprocess.CompletedProcess:
@@ -131,13 +130,6 @@ def _stale_relation_envelope(event: str | None) -> dict:
     return envelope
 
 
-def _mcp_momentum_envelope(event: str | None) -> dict:
-    envelope = {"tool_name": "Grep", "tool_input": {"pattern": "def parse_config"}}
-    if event is not None:
-        envelope["hook_event_name"] = event
-    return envelope
-
-
 def _typed_routing_envelope(event: str | None) -> dict:
     envelope = {
         "tool_name": "Agent",
@@ -159,15 +151,13 @@ SIMPLE_CASES = (
      "[stray-artifact AUDIT]", None),
     ("check-stale-relation-residue.py", SHARED_AUDIT_TREES, _stale_relation_envelope,
      "[stale-relation-residue AUDIT]", None),
-    ("check-mcp-momentum.py", MCP_AUDIT_TREES, _mcp_momentum_envelope,
-     "[mcp-momentum AUDIT]", None),
     ("check-typed-routing.py", CLAUDE_ONLY_TREES, _typed_routing_envelope,
      "[typed-routing AUDIT]", None),
 )
 
 
 class SimpleAuditPayloadShapeTests(unittest.TestCase):
-    """The five audits whose hit path needs only a tool_input/tool_name envelope."""
+    """The four audits whose hit path needs only a tool_input/tool_name envelope."""
 
     def test_default_event_name_is_pretooluse_when_envelope_omits_it(self) -> None:
         for name, trees, build, marker, env_kind in SIMPLE_CASES:

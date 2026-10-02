@@ -266,6 +266,152 @@ class TestInstallHypothesisHook(unittest.TestCase):
                 self.assertEqual(len(entries), 1)
                 self.assertEqual(entries[0]["matcher"], "Bash")
 
+    def test_retired_codex_audit_removes_only_exact_handler(self) -> None:
+        script = self.tmpdir / "hooks" / "check-mcp-momentum.py"
+        command = (
+            f"{PureWindowsPath(sys.executable).as_posix()} "
+            f"{PureWindowsPath(script).as_posix()}"
+        )
+        matcher = "Grep|Bash|PowerShell|shell_command|exec_command"
+        owned = {"type": "command", "command": command, "statusMessage": "Check MCP tool use"}
+        sibling = {"type": "command", "command": "echo custom-sibling", "timeout": 7}
+        near_match = {"type": "command", "command": command + " --custom"}
+        changed_matcher = {"matcher": "CustomTool", "hooks": [owned]}
+        changed_event = {"hooks": [owned]}
+        original = {
+            "metadata": {"keep": True},
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": matcher, "groupMetadata": "keep", "hooks": [owned, sibling, near_match]},
+                    changed_matcher,
+                ],
+                "Stop": [changed_event],
+            },
+        }
+        self.target.write_text(json.dumps(original), encoding="utf-8")
+        expected = {
+            **original,
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": matcher, "groupMetadata": "keep", "hooks": [sibling, near_match]},
+                    changed_matcher,
+                ],
+                "Stop": [changed_event],
+            },
+        }
+        options = (
+            "--remove", "--script-marker", "check-mcp-momentum", "--tool-matcher", matcher,
+        )
+        first = run_installer(
+            self.target, *options, platform="codex", host_os="windows", script_path=str(script),
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(load_json(self.target), expected)
+        before_second = self.target.read_bytes()
+        second = run_installer(
+            self.target, *options, platform="codex", host_os="windows", script_path=str(script),
+        )
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.target.read_bytes(), before_second)
+        self.assertIn("preserv", second.stdout.lower())
+
+    def test_retired_codex_audit_requires_complete_removal_identity(self) -> None:
+        original = {
+            "metadata": "keep",
+            "hooks": {"PreToolUse": [{
+                "matcher": "Grep|Bash|PowerShell|shell_command|exec_command",
+                "hooks": [{"type": "command", "command": "echo check-mcp-momentum.py"}],
+            }]},
+        }
+        self.target.write_text(json.dumps(original), encoding="utf-8")
+        before = self.target.read_bytes()
+        result = run_installer(
+            self.target, "--remove", "--script-marker", "check-mcp-momentum",
+            "--tool-matcher", "Grep|Bash|PowerShell|shell_command|exec_command",
+            platform="codex", host_os="windows", script_path="",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertIn("preserv", result.stdout.lower())
+
+    def test_retired_codex_audit_absent_identity_is_noop(self) -> None:
+        self.target.write_text('{"metadata":"keep"}\n', encoding="utf-8")
+        before = self.target.read_bytes()
+        result = run_installer(
+            self.target, "--remove", "--script-marker", "check-mcp-momentum",
+            "--tool-matcher", "Grep|Bash|PowerShell|shell_command|exec_command",
+            platform="codex", host_os="windows",
+            script_path=str(self.tmpdir / "absent" / "check-mcp-momentum.py"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
+
+    def test_exact_handler_mode_is_independent_of_script_marker(self) -> None:
+        script = self.tmpdir / "arbitrary-owner.py"
+        command = f"{PureWindowsPath(sys.executable).as_posix()} {PureWindowsPath(script).as_posix()}"
+        sibling = {"type": "command", "command": "echo user-sibling"}
+        foreign_group = {"matcher": "ForeignTool", "hooks": [{"type": "command", "command": "echo foreign"}]}
+        self.target.write_text(json.dumps({
+            "hooks": {"PreToolUse": [
+                {"matcher": "SyntheticTool", "hooks": [{"type": "command", "command": command}]},
+                {
+                    "matcher": "SyntheticTool", "metadata": "keep",
+                    "hooks": [{"type": "command", "command": command}, sibling],
+                },
+                foreign_group,
+            ]},
+        }), encoding="utf-8")
+        result = run_installer(
+            self.target, "--remove", "--script-marker", "arbitrary-owner",
+            "--tool-matcher", "SyntheticTool",
+            platform="codex", host_os="windows", script_path=str(script),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.target.exists(), "exact removal must preserve the custom sibling group")
+        self.assertEqual(load_json(self.target), {
+            "hooks": {"PreToolUse": [
+                {"matcher": "SyntheticTool", "hooks": []},
+                {"matcher": "SyntheticTool", "metadata": "keep", "hooks": [sibling]},
+                foreign_group,
+            ]},
+        })
+        before_second = self.target.read_bytes()
+        second = run_installer(
+            self.target, "--remove", "--script-marker", "arbitrary-owner",
+            "--tool-matcher", "SyntheticTool",
+            platform="codex", host_os="windows", script_path=str(script),
+        )
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.target.read_bytes(), before_second)
+
+    def test_exact_retirement_transaction_restores_registration_bytes(self) -> None:
+        spec = importlib.util.spec_from_file_location("retirement_transaction", REPO_ROOT / "scripts/production_installer.py")
+        assert spec and spec.loader
+        installer = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = installer
+        spec.loader.exec_module(installer)
+        script = self.tmpdir / "hooks" / "check-mcp-momentum.py"
+        command = f"{PureWindowsPath(sys.executable).as_posix()} {PureWindowsPath(script).as_posix()}"
+        matcher = "Grep|Bash|PowerShell|shell_command|exec_command"
+        sibling = {"type": "command", "command": "echo custom-sibling"}
+        self.target.write_text(json.dumps({
+            "metadata": "keep",
+            "hooks": {"PreToolUse": [{
+                "matcher": matcher, "hooks": [{"type": "command", "command": command}, sibling],
+            }]},
+        }) + "\n", encoding="utf-8")
+        before = self.target.read_bytes()
+        with self.assertRaisesRegex(RuntimeError, "injected verification failure"):
+            with installer._InstallTransaction([self.target], enabled=True):
+                result = run_installer(
+                    self.target, "--remove", "--script-marker", "check-mcp-momentum",
+                    "--tool-matcher", matcher, platform="codex", host_os="windows", script_path=str(script),
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(load_json(self.target)["hooks"]["PreToolUse"][0]["hooks"], [sibling])
+                raise RuntimeError("injected verification failure")
+        self.assertEqual(self.target.read_bytes(), before)
+
     def test_codex_windows_remove_works(self) -> None:
         # Removal must work the same way on Codex+Windows as on POSIX.
         existing_cmd = f"bash {SCRIPT_PATH}"

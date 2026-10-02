@@ -1,22 +1,22 @@
 # MCP Continuity
 
-Model Context Protocol (MCP) continuity means keeping relevant connected tools visible at three points where tool choice can drift: session start or compaction, the start of each user turn, and a code-navigation shell search.
+Model Context Protocol (MCP) continuity restores tool-discovery guidance at session start or compaction. Turn and parallel reminders carry workflow continuity; Claude also checks qualifying code-navigation searches.
 
 ## Shared semantic core
 
-One dependency-free policy module, `scripts/universal-hooks/scripts/mcp_continuity_policy.py`, owns the shared semantics for all three event adapters:
+One dependency-free policy module, `scripts/universal-hooks/scripts/mcp_continuity_policy.py`, owns startup discovery, turn continuity and the classifier used by Claude's provider-specific search adapter:
 
 | Event | Adapter | Shared behavior |
 | --- | --- | --- |
 | `SessionStart` | `mcp-usage-reminder.py` | Reintroduces the full MCP discovery and use guidance after a new session or compaction. |
-| `UserPromptSubmit` | `turn-anchor-reminder.py` | Adds a short checkpoint for active-task continuity and runtime discovery of relevant MCP tools before ad hoc repository search. |
-| `PreToolUse` | `check-mcp-momentum.py` | Classifies a qualifying code-navigation search before provider-specific advisory or force-mode enforcement. |
+| `UserPromptSubmit` | `turn-anchor-reminder.py` | Adds a short checkpoint for active-task continuation and delegation posture, without repeating tool-choice guidance. |
+| Claude `PreToolUse` | `agents/scripts/check-mcp-momentum.py` | Uses the shared search classifier for advisory or root force-mode enforcement. |
 
 The policy admits exactly `Grep`, `Bash`, `PowerShell`, `shell_command`, and `exec_command`. Shell-shaped inputs read `tool_input.command`; `exec_command` reads `tool_input.cmd` and accepts `command` as a compatibility shape. Shell text is untrusted data: the policy tokenizes it and never executes it.
 
 ## Stateful and indexed freshness
 
-The session reminder and turn anchor treat a repository, project, branch,
+The session guidance and standing tool-use rules treat a repository, project, branch,
 worktree, or indexed-input change as invalidating an earlier result from a
 connected stateful or indexed MCP. The agent must use that server's own
 status/freshness probe; if it reports stale or pending state, run its documented
@@ -52,7 +52,7 @@ The exact task-memory exemption is intentionally narrow. It does not create a ge
 ## Delivery and privacy boundary
 
 The shared classifier does not choose whether a provider advises or denies.
-Codex remains warn-only. Claude remains warn-only for `mcpMode: auto` and for
+Codex uses startup guidance and workflow reminders, without a search-audit registration. Claude remains warn-only for `mcpMode: auto` and for
 dispatched-agent envelopes, but a root Claude conversation in effective
 `mcpMode: force` denies each qualifying search and requires runtime tool
 discovery as the only availability source. Exact `[approve-mcp-fallback:v1]` in the

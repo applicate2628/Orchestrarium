@@ -488,9 +488,10 @@ CODEX_LEGACY_LUNA_DESCRIPTION = (
     "Exact inventories, hashes, formatting, and mechanical checks"
 )
 
-# SHA-256 fingerprints of the last production PowerShell files. Upgrade cleanup
+# SHA-256 fingerprints of retired production files. Upgrade cleanup
 # removes only an exact byte-for-byte pack copy; any edited file is preserved.
 _CODEX_RETIRED_PS1 = {
+    "skills/lead/hooks/check-mcp-momentum.py": "d5bfb3b4af404a5bce8ea4ac0974e9d4e6247a22997eac783ccdada4faf0f018",
     "skills/lead/scripts/validate-skill-pack.ps1": "7ddbd4ef206c66fdee7742f56463fbc2f4db6049f2630b3ec57a7f94cc65e02e",
     "skills/lead/scripts/turn-anchor-reminder.ps1": "edf6aef1861337d3cda0dc142c64bb28ed797c48670a379c4ca0a51a0f8d58d0",
     "skills/lead/scripts/mcp-usage-reminder.ps1": "62c9990f57ee7eccadcf1504a638ff6cbe4b61548405288d70ed192254b54d3d",
@@ -2374,6 +2375,32 @@ def _stage_canonical_lead_tree(
                 raise ValueError(
                     f"E_CANONICAL_LEAD_STAGE_INVALID: copy digest {relative}"
                 )
+        for retired_relative in _CODEX_RETIRED_PS1:
+            relative = Path(retired_relative).relative_to(Path("skills") / "lead")
+            carried = helper_target.parent / relative
+            try:
+                before = carried.lstat()
+            except FileNotFoundError:
+                continue
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or stat.S_ISLNK(before.st_mode)
+                or _is_reparse_metadata(before)
+            ):
+                raise ValueError(f"E_CANONICAL_LEAD_STAGE_INVALID: retired target type {relative}")
+            payload = carried.read_bytes()
+            after = carried.lstat()
+            if (before.st_dev, before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns) != (
+                after.st_dev, after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns
+            ):
+                raise ValueError(f"E_CANONICAL_LEAD_STAGE_INVALID: retired target drift {relative}")
+            target = staged / relative
+            if target.exists() or target.is_symlink():
+                raise ValueError(f"E_CANONICAL_LEAD_STAGE_INVALID: retired target collision {relative}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(payload)
+            if _file_sha256(target) != hashlib.sha256(payload).hexdigest():
+                raise ValueError(f"E_CANONICAL_LEAD_STAGE_INVALID: retired copy digest {relative}")
         manifest = _stage_tree_manifest(staged, ignore_runtime_cache=True)
         digest = _tree_sha256(staged, ignore_runtime_cache=True)
         if digest is None:
@@ -2411,6 +2438,7 @@ _POST_MATERIALIZATION_WRITER_CALLS = {
     "_normalize_agents_mode": ("agents-mode",),
     "_merge_claude_main_agent_settings": ("claude-main-settings",),
     "_reclaim_retired": ("retired-reclaim",),
+    "_finalize_canonical_lead_receipt": ("lead-receipt",),
 }
 _POST_MATERIALIZATION_NONWRITER_CALLS = frozenset(
     {
@@ -2431,6 +2459,7 @@ _POST_MATERIALIZATION_ARTIFACT_CLASS = {
     "agents-mode": "agents-mode",
     "claude-main-settings": "claude-main-settings",
     "retired-reclaim": "retired-reclaim",
+    "lead-receipt": "lead-receipt",
 }
 
 
@@ -2475,15 +2504,16 @@ def _post_materialization_writer_source_census() -> tuple[str, ...]:
         if not dry_run_boundaries:
             raise ValueError("post-publication boundary census")
         end = min(dry_run_boundaries)
+        declared_writers = set(_POST_MATERIALIZATION_WRITER_CALLS)
         observed_calls = {
             name
             for call in calls
-            if start < call.lineno < end
-            if isinstance(parents.get(id(call)), ast.Expr)
+            if start < call.lineno
+            if isinstance(parents.get(id(call)), (ast.Expr, ast.Assign, ast.AnnAssign))
             if (name := _post_materialization_call_name(call)) is not None
+            if call.lineno < end or name in declared_writers
         }
         observed_writers = observed_calls - _POST_MATERIALIZATION_NONWRITER_CALLS
-        declared_writers = set(_POST_MATERIALIZATION_WRITER_CALLS)
         if observed_writers != declared_writers:
             missing = sorted(declared_writers - observed_writers)
             unknown = sorted(observed_writers - declared_writers)
@@ -2556,6 +2586,7 @@ def _post_materialization_writer_destinations(
         for _runtime_source, destination in codex_post_tree_runtime:
             add("runtime-outside", destination)
 
+    add("lead-receipt", canonical_skills_target / _LEAD_RECEIPT_NAME)
     add("ui-continuity", agents_root / UI_CONTINUITY_CONTRACT_TARGET)
     if hooks_enabled:
         add("hook-registration", registration)
@@ -2568,6 +2599,12 @@ def _post_materialization_writer_destinations(
             )
 
     if provider == "codex":
+        if hooks_enabled:
+            current_hooks = _universal_hook_manifest_module().registered_hook_stems(provider)
+            for stem, directory, _event, _matcher in _HOOK_METADATA:
+                relative = Path("skills") / "lead" / directory / _HOOK_SCRIPT_OVERRIDES.get(stem, f"{stem}.py")
+                if stem not in current_hooks and relative.as_posix() in _CODEX_RETIRED_PS1:
+                    add("retired-reclaim", canonical_skills_target.parent / relative)
         add("native-config", target / "config.toml")
         add("native-config", target / CODEX_LEGACY_LUNA_ROLE)
         manifest = (
@@ -2597,7 +2634,7 @@ def _assert_canonical_lead_postwrite_free(
     *,
     observed: tuple[_PostMaterializationWriterDestination, ...] | None = None,
 ) -> None:
-    """Reject inventory/census drift and every late destination under lead."""
+    """Reject census drift and late Lead writes except catalogue-bound retirement."""
 
     declared_writer_ids = set(_post_materialization_writer_source_census())
     for record in records:
@@ -2608,10 +2645,18 @@ def _assert_canonical_lead_postwrite_free(
             )
         if record.writer_id not in declared_writer_ids:
             raise ValueError("E_CANONICAL_LEAD_POSTWRITE: undeclared writer")
+    catalogue_retirements = {
+        Path(relative).relative_to(Path("skills") / "lead")
+        for relative in _CODEX_RETIRED_PS1
+    }
     forbidden = [
         record.destination
         for record in records
         if _is_lexically_under(record.destination, canonical_lead)
+        and not (
+            record.writer_id in _POST_MATERIALIZATION_WRITER_CALLS["_reclaim_retired"]
+            and record.destination.relative_to(canonical_lead) in catalogue_retirements
+        )
     ]
     if forbidden:
         raise ValueError(
@@ -4020,18 +4065,6 @@ def _apply_canonical_skills_plan(
             ignore_runtime_cache=lead.ignore_runtime_cache,
         )
 
-    if plan.lead_receipt is not None and not owner.dry_run:
-        if _tree_sha256(target / "lead", ignore_runtime_cache=True) != plan.lead_receipt.source_digest:
-            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: lead receipt source")
-    if plan.lead_receipt is not None:
-        payload = _lead_receipt_bytes(plan.lead_receipt.source_digest)
-        prior_receipt = plan.lead_receipt.observed
-        relative = target_relative / _LEAD_RECEIPT_NAME
-        if prior_receipt is None:
-            owner.create_file(relative, payload)
-        elif prior_receipt[0] != payload:
-            owner.replace_exact_file(relative, hashlib.sha256(prior_receipt[0]).hexdigest(), payload)
-
     if plan.nonlead_expected is not None:
         if not owner.dry_run:
             for name, digest in plan.nonlead_expected:
@@ -5263,7 +5296,6 @@ _CODEX_HOOK_STATUS_MESSAGES = {
     "check-bugfix-discipline": "Check fix discipline",
     "check-git-push-gate": "Check publication safety",
     "check-machine-local-path": "Check local paths",
-    "check-mcp-momentum": "Check MCP tool use",
     "check-no-trash-in-repo": "Check cleanup",
     "check-parallel-mcp-momentum": "Parallel work and MCP",
     "check-passive-polling-stop": "Check task progress",
@@ -5508,7 +5540,17 @@ def _install_hooks(
         if proc.returncode:
             raise RuntimeError(f"hook target preflight failed for {script}")
     _checkpoint(root, installer, registration, provider, mode, "sync")
-    for marker, event in RETIRED_HOOK_SPECS:
+    retired_specs = [(marker, event, []) for marker, event in RETIRED_HOOK_SPECS]
+    if provider == "codex":
+        marker, directory, event, matcher = next(
+            spec for spec in _HOOK_METADATA if spec[0] == "check-mcp-momentum"
+        )
+        retired_specs.append((
+            marker,
+            event,
+            ["--script-path", str(installed_root / directory / f"{marker}.py"), "--tool-matcher", matcher],
+        ))
+    for marker, event, identity_arguments in retired_specs:
         proc = _run(
             [
                 *base,
@@ -5517,6 +5559,7 @@ def _install_hooks(
                 "--hook-event",
                 event,
                 "--remove",
+                *identity_arguments,
             ],
             root,
         )
@@ -5678,18 +5721,91 @@ def _checkpoint(
         raise RuntimeError(f"hook transaction checkpoint failed at {stage}")
 
 
-def _reclaim_retired(target_root: Path, manifest: dict[str, str], dry_run: bool) -> None:
+def _finalize_canonical_lead_receipt(
+    plan: _CanonicalSkillsPlan,
+    target: Path,
+    owner: _CreateOnlyMutablePath,
+    reclaimed: tuple[tuple[Path, str], ...] = (),
+) -> None:
+    """Publish the existing receipt only for the bound stage minus proven removals."""
+    if owner.dry_run:
+        return
+    lead = target / "lead"
+    expected = dict(plan.stage.manifest)
+    for removed, digest in reclaimed:
+        try:
+            relative = removed.relative_to(lead).as_posix()
+        except ValueError:
+            continue
+        if expected.get(relative) != digest:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: unbound Lead reclamation")
+        del expected[relative]
+    if _stage_tree_manifest(lead, ignore_runtime_cache=True) != tuple(sorted(expected.items())):
+        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final Lead manifest")
+    if plan.lead_receipt is not None:
+        digest = _tree_sha256(lead, ignore_runtime_cache=True)
+        if digest is None:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final Lead digest")
+        payload = _lead_receipt_bytes(digest)
+        prior_receipt = plan.lead_receipt.observed
+        relative = target.relative_to(owner.anchor) / _LEAD_RECEIPT_NAME
+        if prior_receipt is None:
+            owner.create_file(relative, payload)
+        elif prior_receipt[0] != payload:
+            owner.replace_exact_file(relative, hashlib.sha256(prior_receipt[0]).hexdigest(), payload)
+
+
+def _reclaim_retired(
+    target_root: Path,
+    manifest: dict[str, str],
+    dry_run: bool,
+    *,
+    registration: Path | None = None,
+    platform: str | None = None,
+    host_os: str | None = None,
+    hook_health=None,
+) -> tuple[tuple[Path, str], ...]:
+    reclaimed: list[tuple[Path, str]] = []
+    registered_targets: list[Path] = []
+    unresolved_targets = False
+    if registration is not None:
+        try:
+            if hook_health is None or platform is None or host_os is None:
+                raise ValueError("registration target inventory binding is incomplete")
+            for _event, _stem, argv, _matcher in hook_health._iter_owned_hooks(
+                hook_health._load(registration), None, platform, host_os
+            ):
+                target = hook_health._target_path(argv)
+                if target is None or not target.is_absolute():
+                    unresolved_targets = True
+                else:
+                    registered_targets.append(target.resolve())
+                    if len(argv) != 2:
+                        unresolved_targets = True
+        except (OSError, ValueError, RuntimeError):
+            unresolved_targets = True
     for relative, expected in manifest.items():
         path = target_root / Path(relative)
         if not path.is_file():
             continue
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual == expected:
+            if registration is not None and any(
+                hook_health._same_path(target, path.resolve()) for target in registered_targets
+            ):
+                print(f"  Preserving referenced retired pack file: {relative}")
+                continue
+            if unresolved_targets:
+                print(f"  Preserving retired pack file with unresolved registration target ownership: {relative}")
+                continue
             print(f"  Reclaiming unchanged retired pack file: {relative}")
             if not dry_run:
+                removed_entry = path.parent.resolve() / path.name
                 path.unlink()
+                reclaimed.append((removed_entry, actual))
         else:
             print(f"  Preserving customized retired pack file: {relative}")
+    return tuple(reclaimed)
 
 
 def _verify_files(
@@ -6092,76 +6208,72 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 # projection were bound before this transaction so a rejected
                 # canonical-skill collision never enters rollback settlement.
                 assert canonical_plan is not None
-                try:
-                    for authority in claude_link_authorities:
-                        _assert_global_claude_linked_subroot_authority(root, authority)
-                    _sync_tree(
-                        source / "agents",
-                        target_tree,
-                        args.dry_run,
-                        excluded_files=frozenset(
-                            Path("scripts") / name
-                            for name in TRANSPORT_PROJECTION_FILES
-                        ),
+                for authority in claude_link_authorities:
+                    _assert_global_claude_linked_subroot_authority(root, authority)
+                _sync_tree(
+                    source / "agents",
+                    target_tree,
+                    args.dry_run,
+                    excluded_files=frozenset(
+                        Path("scripts") / name
+                        for name in TRANSPORT_PROJECTION_FILES
+                    ),
+                )
+                for authority in claude_link_authorities:
+                    _assert_global_claude_linked_subroot_authority(root, authority)
+                _sync_tree(source / "commands", claude_commands_target, args.dry_run)
+                for authority in claude_link_authorities:
+                    _assert_global_claude_linked_subroot_authority(root, authority)
+                _reclaim_claude_namespace(
+                    source,
+                    claude_commands_target,
+                    claude_skills_projection_target,
+                    args.dry_run,
+                )
+                for authority in claude_link_authorities:
+                    _assert_global_claude_linked_subroot_authority(root, authority)
+                # The non-transport Claude runtime set must exist before the
+                # complete manifest-bound transport set claims its shared/scripts parents.
+                # Transaction snapshots therefore retain ownership of every
+                # mutable runtime leaf through any later failure.
+                claude_runtime_destinations = tuple(
+                    (source_path, destination)
+                    for source_path, destination in _runtime_file_destinations(
+                        root, target_tree / "scripts"
                     )
-                    for authority in claude_link_authorities:
-                        _assert_global_claude_linked_subroot_authority(root, authority)
-                    _sync_tree(source / "commands", claude_commands_target, args.dry_run)
-                    for authority in claude_link_authorities:
-                        _assert_global_claude_linked_subroot_authority(root, authority)
-                    _reclaim_claude_namespace(
-                        source,
-                        claude_commands_target,
-                        claude_skills_projection_target,
-                        args.dry_run,
-                    )
-                    for authority in claude_link_authorities:
-                        _assert_global_claude_linked_subroot_authority(root, authority)
-                    # The non-transport Claude runtime set must exist before the
-                    # complete manifest-bound transport set claims its shared/scripts parents.
-                    # Transaction snapshots therefore retain ownership of every
-                    # mutable runtime leaf through any later failure.
-                    claude_runtime_destinations = tuple(
-                        (source_path, destination)
-                        for source_path, destination in _runtime_file_destinations(
-                            root, target_tree / "scripts"
-                        )
-                        if not _is_transport_runtime_source(root, source_path)
-                        and source_path.name != TRANSPORT_PROJECTION_MANIFEST
-                    )
-                    _install_runtime_files(
-                        root,
-                        target_tree / "scripts",
-                        args.dry_run,
-                        destinations=claude_runtime_destinations,
-                    )
-                    for authority in claude_link_authorities:
-                        _assert_global_claude_linked_subroot_authority(root, authority)
-                    _apply_canonical_skills_plan(
-                        canonical_plan,
-                        canonical_skills_target,
-                        canonical_skills_owner,
-                        root=root,
-                        claude_transport_root=target_tree / "scripts",
-                        claude_transport_owner=claude_agents_owner,
-                    )
-                    for authority in claude_link_authorities:
-                        _assert_global_claude_linked_subroot_authority(root, authority)
-                    _apply_claude_skill_projection_plan(
-                        claude_skill_projection_plan,
-                        root / "src.codex" / "skills",
-                        claude_skills_projection_target,
-                        claude_skills_owner,
-                    )
-                    _assert_global_claude_linked_subroot_authority(
-                        root, claude_agents_authority
-                    )
-                    _assert_global_claude_linked_subroot_authority(
-                        root, claude_skills_authority
-                    )
-                finally:
-                    _discard_canonical_skills_plan(canonical_plan)
-                    canonical_plan = None
+                    if not _is_transport_runtime_source(root, source_path)
+                    and source_path.name != TRANSPORT_PROJECTION_MANIFEST
+                )
+                _install_runtime_files(
+                    root,
+                    target_tree / "scripts",
+                    args.dry_run,
+                    destinations=claude_runtime_destinations,
+                )
+                for authority in claude_link_authorities:
+                    _assert_global_claude_linked_subroot_authority(root, authority)
+                _apply_canonical_skills_plan(
+                    canonical_plan,
+                    canonical_skills_target,
+                    canonical_skills_owner,
+                    root=root,
+                    claude_transport_root=target_tree / "scripts",
+                    claude_transport_owner=claude_agents_owner,
+                )
+                for authority in claude_link_authorities:
+                    _assert_global_claude_linked_subroot_authority(root, authority)
+                _apply_claude_skill_projection_plan(
+                    claude_skill_projection_plan,
+                    root / "src.codex" / "skills",
+                    claude_skills_projection_target,
+                    claude_skills_owner,
+                )
+                _assert_global_claude_linked_subroot_authority(
+                    root, claude_agents_authority
+                )
+                _assert_global_claude_linked_subroot_authority(
+                    root, claude_skills_authority
+                )
             helper_target = (
                 skills_target / "lead" / "scripts"
                 if provider == "codex"
@@ -6243,28 +6355,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     root, provider, registration, installed_hook_root, mode
                 )
 
-            _reclaim_retired(
-                target if provider == "claude" else agents_root,
-                (
-                    {**_CLAUDE_RETIRED_PS1, **_CLAUDE_RETIRED_SH}
-                    if provider == "claude"
-                    else {}
-                ),
-                args.dry_run,
-            )
             if args.dry_run:
-                if provider == "codex" and mode == "global":
-                    assert home is not None
-                    assert canonical_plan is not None
-                    _install_codex_legacy_skill_compatibility(
-                        root,
-                        home,
-                        target,
-                        canonical_plan,
-                        canonical_skills_target,
-                        legacy_codex_skill_migrations,
-                        dry_run=True,
-                    )
                 if args.replace_kimi_enrollment:
                     assert home is not None
                     _replace_kimi_enrollment(
@@ -6281,75 +6372,72 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         dry_run=True,
                         offline_policy=args.kimi_offline_policy,
                     )
-                print("RESULT: DRY-RUN complete (no files modified).")
-                return 0
-
-            missing = _verify_files(
-                source_tree if provider == "codex" else source / "agents",
-                target_tree if provider == "codex" else target / "agents",
-                {
-                    marker
-                    for marker, *_rest in _hook_specs(
-                        provider, installed_hook_root
-                    )
-                },
-            )
-            if missing:
-                raise _InstallFailure(
-                    "E_INSTALL_VERIFY_FILES_MISSING",
-                    "verify",
-                    f"{len(missing)} missing: " + ", ".join(missing[:16]),
+            else:
+                missing = _verify_files(
+                    source_tree if provider == "codex" else source / "agents",
+                    target_tree if provider == "codex" else target / "agents",
+                    {
+                        marker
+                        for marker, *_rest in _hook_specs(
+                            provider, installed_hook_root
+                        )
+                    },
                 )
-            missing_common_runtime = [
-                target
-                for _source, target in _runtime_file_destinations(root, helper_target)
-                if not target.is_file()
-            ]
-            if missing_common_runtime:
-                raise _InstallFailure(
-                    "E_INSTALL_VERIFY_RUNTIME_MISSING",
-                    "verify",
-                    f"{len(missing_common_runtime)} missing: "
-                    + ", ".join(str(path) for path in missing_common_runtime[:16]),
-                )
-            if provider == "codex":
-                missing_runtime = [
-                    path
-                    for path in ((helper_target / "check-hook-health.py",)
-                                 + ((codex_hook_inventory,)
-                                    if hooks_enabled else ()))
-                    if not path.is_file()
-                ]
-                if missing_runtime:
+                if missing:
                     raise _InstallFailure(
-                        "E_INSTALL_VERIFY_HOOK_RUNTIME_MISSING",
+                        "E_INSTALL_VERIFY_FILES_MISSING",
                         "verify",
-                        f"{len(missing_runtime)} missing: "
-                        + ", ".join(str(path) for path in missing_runtime[:16]),
+                        f"{len(missing)} missing: " + ", ".join(missing[:16]),
                     )
-            if not mode_target.is_file() or not docs_target.is_file():
-                raise _InstallFailure(
-                    "E_INSTALL_VERIFY_CONTROL_FILES_MISSING",
-                    "verify",
-                    "documentation or agents-mode output missing",
-                )
-            if args.replace_kimi_enrollment:
-                assert home is not None
-                _replace_kimi_enrollment(
-                    home,
-                    target / "orchestrarium-runtime" / "kimi",
-                    dry_run=False,
-                    offline_policy=args.kimi_offline_policy,
-                )
-            elif args.enroll_kimi:
-                assert home is not None
-                _enroll_kimi_executable(
-                    home,
-                    target / "orchestrarium-runtime" / "kimi",
-                    dry_run=False,
-                    offline_policy=args.kimi_offline_policy,
-                )
-            transaction.commit()
+                missing_common_runtime = [
+                    target
+                    for _source, target in _runtime_file_destinations(root, helper_target)
+                    if not target.is_file()
+                ]
+                if missing_common_runtime:
+                    raise _InstallFailure(
+                        "E_INSTALL_VERIFY_RUNTIME_MISSING",
+                        "verify",
+                        f"{len(missing_common_runtime)} missing: "
+                        + ", ".join(str(path) for path in missing_common_runtime[:16]),
+                    )
+                if provider == "codex":
+                    missing_runtime = [
+                        path
+                        for path in ((helper_target / "check-hook-health.py",)
+                                     + ((codex_hook_inventory,)
+                                        if hooks_enabled else ()))
+                        if not path.is_file()
+                    ]
+                    if missing_runtime:
+                        raise _InstallFailure(
+                            "E_INSTALL_VERIFY_HOOK_RUNTIME_MISSING",
+                            "verify",
+                            f"{len(missing_runtime)} missing: "
+                            + ", ".join(str(path) for path in missing_runtime[:16]),
+                        )
+                if not mode_target.is_file() or not docs_target.is_file():
+                    raise _InstallFailure(
+                        "E_INSTALL_VERIFY_CONTROL_FILES_MISSING",
+                        "verify",
+                        "documentation or agents-mode output missing",
+                    )
+                if args.replace_kimi_enrollment:
+                    assert home is not None
+                    _replace_kimi_enrollment(
+                        home,
+                        target / "orchestrarium-runtime" / "kimi",
+                        dry_run=False,
+                        offline_policy=args.kimi_offline_policy,
+                    )
+                elif args.enroll_kimi:
+                    assert home is not None
+                    _enroll_kimi_executable(
+                        home,
+                        target / "orchestrarium-runtime" / "kimi",
+                        dry_run=False,
+                        offline_policy=args.kimi_offline_policy,
+                    )
             if provider == "codex" and mode == "global":
                 assert home is not None
                 assert canonical_plan is not None
@@ -6362,6 +6450,30 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     legacy_codex_skill_migrations,
                     dry_run=args.dry_run,
                 )
+            reclaimed = _reclaim_retired(
+                target if provider == "claude" else agents_root,
+                (
+                    {**_CLAUDE_RETIRED_PS1, **_CLAUDE_RETIRED_SH}
+                    if provider == "claude"
+                    else {
+                        "skills/lead/hooks/check-mcp-momentum.py":
+                        _CODEX_RETIRED_PS1["skills/lead/hooks/check-mcp-momentum.py"],
+                    } if hooks_enabled else {}
+                ),
+                args.dry_run,
+                registration=registration if provider == "codex" else None,
+                platform=provider,
+                host_os="windows" if os.name == "nt" else "posix",
+                hook_health=_hook_health_module(root) if provider == "codex" else None,
+            )
+            assert canonical_plan is not None
+            _finalize_canonical_lead_receipt(
+                canonical_plan, canonical_skills_target, canonical_skills_owner, reclaimed
+            )
+            if args.dry_run:
+                print("RESULT: DRY-RUN complete (no files modified).")
+                return 0
+            transaction.commit()
             print(
                 f"RESULT: OK - {provider.capitalize()} pack installed to {target}"
             )

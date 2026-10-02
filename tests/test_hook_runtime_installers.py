@@ -325,6 +325,17 @@ def test_installer_derives_touched_identities_from_before_after_hooks_json(
         assert canonical_script == ROOT / "scripts" / "check-hook-health.py"
     assert FakeHealth.generated
     assert not [call for call in invocations if "--codex-trust-mode" in call]
+    retirement_calls = [
+        call for call in invocations
+        if "--remove" in call and "check-mcp-momentum" in call
+    ]
+    assert len(retirement_calls) == 1
+    retirement = retirement_calls[0]
+    assert retirement[retirement.index("--hook-event") + 1] == "PreToolUse"
+    assert retirement[retirement.index("--script-path") + 1] == str(
+        installed_root / "hooks" / "check-mcp-momentum.py"
+    )
+    assert retirement[retirement.index("--tool-matcher") + 1] == "Grep|Bash|PowerShell|shell_command|exec_command"
     registration_calls = [
         call
         for call in invocations

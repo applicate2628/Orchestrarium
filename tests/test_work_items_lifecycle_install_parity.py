@@ -37,15 +37,14 @@ SHARED_STRUCTURAL_MARKERS = frozenset(
         "check-no-trash-in-repo",
         "check-stale-relation-residue",
         "check-repository-orientation",
-        "check-mcp-momentum",
     }
 )
 EXPECTED_MARKERS = {
     "codex": SHARED_STRUCTURAL_MARKERS | CODEX_REMINDER_MARKERS,
-    "claude": SHARED_STRUCTURAL_MARKERS | SHARED_REMINDER_MARKERS | {"check-typed-routing"},
+    "claude": SHARED_STRUCTURAL_MARKERS | SHARED_REMINDER_MARKERS | {"check-typed-routing", "check-mcp-momentum"},
 }
 EXPECTED_COUNTS = {
-    "codex": (8, 13),
+    "codex": (7, 12),
     "claude": (9, 13),
 }
 CURRENT_LIFECYCLE_SURFACES = (
@@ -265,8 +264,8 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
         )
 
         codex = (ROOT / "src.codex" / "AGENTS.codex.md").read_text(encoding="utf-8")
-        self.assertIn("ships eight structural hooks", codex)
-        self.assertIn("auto-installs all thirteen hook entries", codex)
+        self.assertIn("ships seven structural hooks", codex)
+        self.assertIn("auto-installs all twelve Codex hook entries", codex)
         self.assertIn("Physical location owns membership", codex)
 
         claude = (ROOT / "src.claude" / "CLAUDE.md").read_text(encoding="utf-8")

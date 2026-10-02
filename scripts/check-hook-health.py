@@ -947,10 +947,11 @@ def _command_argv(hook: dict[str, Any], platform: str, host_os: str) -> list[str
 
 def _iter_owned_hooks(
     data: dict[str, Any],
-    stems: set[str],
+    stems: set[str] | None,
     platform: str,
     host_os: str,
 ) -> Iterable[tuple[str, str, list[str], str | None]]:
+    """Select owned stems, or every registered command with None (read-only)."""
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
         raise ValueError("'hooks' key is not an object")
@@ -959,15 +960,21 @@ def _iter_owned_hooks(
             raise ValueError(f"hooks.{event} is not an array")
         for entry in entries:
             if not isinstance(entry, dict):
+                if stems is None:
+                    raise ValueError("registered hook group is not an object")
                 continue
             matcher = entry.get("matcher")
             if matcher is not None and not isinstance(matcher, str):
                 raise ValueError(f"hooks.{event} matcher is not a string")
             commands = entry.get("hooks")
             if not isinstance(commands, list):
+                if stems is None:
+                    raise ValueError("registered hook handlers are not an array")
                 continue
             for command_hook in commands:
                 if not isinstance(command_hook, dict):
+                    if stems is None:
+                        raise ValueError("registered command handler is not an object")
                     continue
                 # `_command_argv` enforces the exec shape this pack's own
                 # installer writes (Claude: `command` plus a string-array
@@ -997,6 +1004,8 @@ def _iter_owned_hooks(
                 try:
                     argv = _command_argv(command_hook, platform, host_os)
                 except ValueError:
+                    if stems is None:
+                        raise
                     raw = json.dumps(command_hook)
                     named_stems = sorted(stem for stem in stems if stem in raw)
                     if named_stems:
@@ -1005,6 +1014,9 @@ def _iter_owned_hooks(
                             "parsed as this pack's exec shape: "
                             + ", ".join(named_stems)
                         )
+                    continue
+                if stems is None:
+                    yield event, "", argv, matcher
                     continue
                 joined = "\0".join(argv)
                 matches = sorted(stem for stem in stems if stem in joined)

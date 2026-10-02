@@ -21,8 +21,7 @@ HOOK = (
 REMINDER = (
     "[parallel and MCP momentum] Root Lead: if the user has not paused or parked "
     "new launches, recheck Ready before starting work; start useful compatible "
-    "independent lanes without waiting and refill released capacity. Lead owns "
-    "relevant MCP discovery and freshness for indexed results, and passes each "
+    "independent lanes without waiting and refill released capacity. Pass each "
     "lane only its needed tools and context. Keep leaves non-spawning; clean up "
     "owned stale processes, dead code, and disposable trash while preserving "
     "user or uncertain state. Advisory only: no decision, spawn, schedule, "
@@ -120,6 +119,8 @@ def test_root_active_modes_emit_one_soft_additional_context(
         "while preserving user or uncertain state",
     ):
         assert requested_term in payload["hookSpecificOutput"]["additionalContext"]
+    for duplicate_tool_choice in ("MCP discovery", "freshness for indexed results"):
+        assert duplicate_tool_choice not in payload["hookSpecificOutput"]["additionalContext"]
     for blocking_field in (
         "permissionDecision",
         "permissionDecisionReason",

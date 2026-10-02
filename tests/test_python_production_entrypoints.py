@@ -340,6 +340,39 @@ def test_retired_cleanup_removes_only_exact_pack_bytes(
     assert target.read_bytes() == RETIRED_PASSIVE_POLLING_PS1 + b"\ncustom"
 
 
+def test_retired_cleanup_preserves_retained_custom_reference_and_unknown_target(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    relative = "skills/lead/hooks/check-mcp-momentum.py"
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True)
+    stock = b"synthetic retired audit\n"
+    target.write_bytes(stock)
+    manifest = {relative: hashlib.sha256(stock).hexdigest()}
+    registration = tmp_path / "hooks.json"
+    registration.write_text(json.dumps({
+        "metadata": "keep",
+        "hooks": {"PreToolUse": [{"hooks": [{
+            "type": "command",
+            "command": f"{Path(sys.executable).as_posix()} {target.as_posix()} --custom",
+        }]}]},
+    }), encoding="utf-8")
+    health = INSTALLER._hook_health_module(ROOT)
+    context = {"registration": registration, "platform": "codex", "host_os": "windows", "hook_health": health}
+    INSTALLER._reclaim_retired(tmp_path, manifest, False, **context)
+    assert target.read_bytes() == stock
+    assert "preserv" in capsys.readouterr().out.lower()
+
+    registration.write_text('{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"opaque-user-hook"}]}]}}', encoding="utf-8")
+    INSTALLER._reclaim_retired(tmp_path, manifest, False, **context)
+    assert target.read_bytes() == stock
+    assert "unresolved" in capsys.readouterr().out.lower()
+
+    registration.write_text('{"hooks":{}}', encoding="utf-8")
+    INSTALLER._reclaim_retired(tmp_path, manifest, False, **context)
+    assert not target.exists()
+
+
 def test_codex_production_entrypoint_creates_only_source_manifest_roles(
     tmp_path: Path,
 ) -> None:

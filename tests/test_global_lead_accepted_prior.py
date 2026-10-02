@@ -1928,6 +1928,7 @@ def test_receipted_lead_two_source_versions_upgrade(tmp_path: Path) -> None:
                     anchor, transaction, dry_run=False
                 )
                 installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+                installer._finalize_canonical_lead_receipt(plan, skills, owner)
                 transaction.commit()
             lead = next(skill for skill in plan.skills if skill.name == "lead")
             digest = installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
@@ -1962,6 +1963,7 @@ def _apply_receipted(installer, source: Path, anchor: Path, skills: Path,
         with installer._InstallTransaction([skills], enabled=not dry_run) as transaction:
             owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=dry_run)
             installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+            installer._finalize_canonical_lead_receipt(plan, skills, owner)
             transaction.commit()
     finally:
         installer._discard_canonical_skills_plan(plan)
@@ -2045,6 +2047,7 @@ def test_lead_receipt_transaction_failpoints(tmp_path: Path, monkeypatch, failpo
             with installer._InstallTransaction([skills], enabled=True) as transaction:
                 owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
                 installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+                installer._finalize_canonical_lead_receipt(plan, skills, owner)
                 transaction.commit()
     finally:
         installer._discard_canonical_skills_plan(plan)
@@ -2081,6 +2084,7 @@ def test_unreceipted_lead_adoption_is_digest_bound_global_only(tmp_path: Path) -
         with installer._InstallTransaction([skills], enabled=True) as transaction:
             owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
             installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+            installer._finalize_canonical_lead_receipt(plan, skills, owner)
             transaction.commit()
         assert json.loads(receipt.read_bytes())["treeSha256"] == installer._tree_sha256(
             skills / "lead", ignore_runtime_cache=True

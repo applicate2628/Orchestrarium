@@ -89,30 +89,37 @@ class StatefulMcpRefreshPolicyTests(unittest.TestCase):
             "Use another path only if refresh fails, the tool is unavailable, the user forbids it, or an explicit resource bound is exceeded; state why.",
             "Stateless or live tools need no refresh.",
         )
-        required_turn_context = (
-            "After repository, project, branch, worktree, or indexed-input changes, check status/freshness, sync/update/reindex stale state, confirm fresh, and retry.",
-            "reported project/index identity matches the selected root",
-            "report known omitted coverage",
-            "inspect its own supported entrypoint/help/version",
-            "not a per-call version check",
+        policy = load_policy(POLICY_PATHS[0], 0)
+        for marker in required_session_context:
+            self.assertIn(marker, policy.SESSION_START_CONTEXT)
+        for marker in (
+            "discover fitting runtime MCP/tools",
+            "status/freshness",
+            "sync/update/reindex",
+            "reported project/index identity",
             "match the qualified symbol plus declaring type/file",
-            "distinguish direct calls, callback/indirect reachability, and fuzzy suggestions",
-            "ambiguous/unmatched rows require source verification",
-            "Use fallback only if refresh fails, the tool is unavailable, the user forbids it, or an explicit resource bound is exceeded; state why and never use stale evidence.",
-        )
-        canonical_contexts = None
-        for index, path in enumerate(POLICY_PATHS):
+            "Use fallback only if refresh fails",
+        ):
+            self.assertNotIn(marker, policy.TURN_ANCHOR_CONTEXT)
+        for marker in (
+            "resume the current primary task",
+            "run useful independent ready work now",
+            "keep mandatory gates",
+            "settle every owned process/resource",
+            "preserve pre-existing user state",
+        ):
+            self.assertIn(marker, policy.TURN_ANCHOR_CONTEXT)
+
+    def test_policy_projections_match_canonical_freshness_contexts(self) -> None:
+        policy = load_policy(POLICY_PATHS[0], 0)
+        canonical_contexts = (policy.SESSION_START_CONTEXT, policy.TURN_ANCHOR_CONTEXT)
+        for index, path in enumerate(POLICY_PATHS[1:], start=1):
             with self.subTest(policy=path.relative_to(ROOT).as_posix()):
                 policy = load_policy(path, index)
-                contexts = (policy.SESSION_START_CONTEXT, policy.TURN_ANCHOR_CONTEXT)
-                if canonical_contexts is None:
-                    canonical_contexts = contexts
-                else:
-                    self.assertEqual(contexts, canonical_contexts)
-                for marker in required_session_context:
-                    self.assertIn(marker, policy.SESSION_START_CONTEXT)
-                for marker in required_turn_context:
-                    self.assertIn(marker, policy.TURN_ANCHOR_CONTEXT)
+                self.assertEqual(
+                    (policy.SESSION_START_CONTEXT, policy.TURN_ANCHOR_CONTEXT),
+                    canonical_contexts,
+                )
 
 
 if __name__ == "__main__":

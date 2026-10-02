@@ -225,6 +225,7 @@ def resolve_hook_target(
     platform: str,
     *,
     python_executable: str | None = None,
+    require_script: bool = True,
 ) -> HookTarget:
     """Resolve and validate the direct-Python hook process target."""
     requested_script = Path(script_path).expanduser()
@@ -235,7 +236,11 @@ def resolve_hook_target(
         python_executable if python_executable is not None else sys.executable,
         host_os,
     )
-    script = _absolute_file(str(requested_script), "hook Python target")
+    script = (
+        _absolute_file(str(requested_script), "hook Python target")
+        if require_script
+        else requested_script
+    )
     if script.suffix.lower() != ".py":
         raise ValueError(f"Python hook target must end in .py: {script}")
     target = HookTarget(str(executable), (str(script),))
@@ -478,8 +483,14 @@ def install(
     return changed
 
 
-def remove(data: dict[str, Any], hook_event: str, script_marker: str) -> bool:
-    """Remove ALL of our hook entries. Returns True if changed."""
+def remove(
+    data: dict[str, Any],
+    hook_event: str,
+    script_marker: str,
+    *,
+    expected_entry: dict[str, Any] | None = None,
+) -> bool:
+    """Remove owned entries, or exact handlers when a retirement identity is supplied."""
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
         return False
@@ -489,15 +500,37 @@ def remove(data: dict[str, Any], hook_event: str, script_marker: str) -> bool:
     indices = find_our_entry_indices(hook_entries, script_marker)
     if not indices:
         return False
+    changed = False
+    expected_handler = expected_entry["hooks"][0] if expected_entry is not None else None
     # Delete from the end so earlier indices stay valid.
     for idx in reversed(indices):
-        del hook_entries[idx]
-    # Clean up empty containers so the file does not gain ghost structure.
+        entry = hook_entries[idx]
+        if expected_entry is None:
+            del hook_entries[idx]
+            changed = True
+            continue
+        if entry.get("matcher") != expected_entry.get("matcher"):
+            continue
+        retained = [
+            handler
+            for handler in entry["hooks"]
+            if not (
+                isinstance(handler, dict)
+                and all(handler.get(key) == expected_handler.get(key) for key in ("type", "command", "args"))
+                and not set(handler).difference({"type", "command", "args", "statusMessage"})
+            )
+        ]
+        if len(retained) == len(entry["hooks"]):
+            continue
+        entry["hooks"] = retained
+        changed = True
+    # Marker-only removal may empty event containers. Exact removal retains
+    # valid empty groups: no runnable handler, but later native group slots stay stable.
     if not hook_entries:
         del hooks[hook_event]
     if not hooks:
         del data["hooks"]
-    return True
+    return changed
 
 
 def main() -> int:
@@ -618,7 +651,30 @@ def main() -> int:
 
         if args.remove:
             data = load_existing(target)
-            changed = remove(data, args.hook_event, args.script_marker)
+            expected_entry = None
+            if args.tool_matcher is not None:
+                if not args.script_path:
+                    sys.stdout.write(f"  Preserving {args.script_marker} registration: exact retirement identity is incomplete\n")
+                    return 0
+                hook_target = resolve_hook_target(
+                    args.script_path, args.host_os, args.platform, require_script=False
+                )
+                expected_entry = (
+                    build_codex_entry(hook_target, args.host_os, args.hook_event, args.tool_matcher)
+                    if args.platform == "codex"
+                    else build_generic_entry(hook_target, args.hook_event, args.tool_matcher)
+                )
+            changed = remove(
+                data, args.hook_event, args.script_marker, expected_entry=expected_entry
+            )
+            remaining_hooks = data.get("hooks")
+            remaining_entries = (
+                remaining_hooks.get(args.hook_event) if isinstance(remaining_hooks, dict) else None
+            )
+            if expected_entry is not None and isinstance(remaining_entries, list) and find_our_entry_indices(
+                remaining_entries, args.script_marker
+            ):
+                sys.stdout.write(f"  Preserving unmatched {args.script_marker} registration identities\n")
             action = "removed"
         else:
             if not args.script_path:
