@@ -10797,6 +10797,31 @@ def _markdown_href_resolves(base: Path, href: str, expected: Path) -> bool:
     return parts is not None and (base / parts[0]).resolve() == expected.resolve()
 
 
+def _incoming_attachment_kind(data: bytes) -> str | None:
+    """Identify admitted opaque formats; never validate or project native content."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if (
+        data.startswith(b"BM") and len(data) >= 18
+        and int.from_bytes(data[14:18], "little") in {12, 40, 52, 56, 64, 108, 124}
+    ):
+        return "bitmap"
+    if re.match(rb"%PDF-[12]\.[0-9](?:\s|$)", data):
+        return "pdf"
+    if data.startswith(b"PK\x03\x04"):
+        import io
+        import zipfile
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as package:
+                names = set(package.namelist())
+        except (zipfile.BadZipFile, UnicodeError, NotImplementedError):
+            return None
+        if {"[Content_Types].xml", "_rels/.rels", "word/document.xml"} <= names:
+            return "word-ooxml"
+    return None
+
+
 def _incoming_link_result(
     root: Path,
     owned_paths: Iterable[Path],
@@ -10851,6 +10876,8 @@ def _incoming_link_result(
             continue
         try:
             consumer_bytes = consumer.read_bytes()
+            if consumer.suffix.lower() not in {".md", ".json", ".jsonl"} and _incoming_attachment_kind(consumer_bytes) is not None:
+                continue
             text = consumer_bytes.decode("utf-8")
         except (OSError, UnicodeError) as exc:
             if strict_consumer_reads:

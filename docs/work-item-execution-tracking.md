@@ -511,9 +511,18 @@ UTC `YYYY-MM-DDTHH:MM:SSZ` instant. Matching existing terminal fields are
 preserved; conflicting or duplicate fields fail before mutation. The recorded
 instant selects `work-items/bugs/archive/YYYY-MM/`, not the bug slug's date or
 wall clock. The bug keeps its id, `fixed` status, and context; its parent remains
-active. The owner inventories incoming links, leaves logical `bug:<slug>`
-references unchanged, and rewrites recognized mutable physical Markdown links
-to the archived path. An unsafe or immutable physical consumer fails closed.
+active. The owner inventories lifecycle references in text and structured
+records, leaves logical `bug:<slug>` references unchanged, and rewrites
+recognized mutable physical Markdown links to the archived path. Mandatory
+Markdown/JSON/JSONL records keep their codec and validation obligations. Known
+Portable Network Graphics (PNG), bitmap, and Portable Document Format (PDF)
+attachments and Word Office Open XML packages are identified by content or
+package identity and preserved opaquely, including their metadata
+and native navigation; they are not lifecycle-reference consumers. Names alone
+cannot exclude ordinary UTF-8 text. Unknown or unreadable consumers retain each
+caller's strict or tolerant acquisition policy. Attachment identity asserts
+neither native validity nor reference freedom. An unsafe or immutable physical
+text consumer fails closed.
 It refreshes `work-items/README.md` and writes a sibling
 `<bug-slug>.fixed-archive-receipt.json` binding the source/archive identity,
 terminal instant, source and archived hashes, each changed link's before/after
