@@ -95,6 +95,131 @@ def _raw_mixed_request(item: Path) -> tuple[bytes, dict]:
     return raw, request
 
 
+def _neutral_terminal(launch: dict, **overrides) -> dict:
+    terminal = {
+        **launch, "runId": "neutral-terminal-001", "eventKind": "terminal",
+        "launchRunId": launch["runId"], "status": "completed", "gate": "none",
+        "startedAt": "2026-09-08T00:04:00Z", "updatedAt": "2026-09-08T00:04:00Z",
+    }
+    terminal.update(overrides)
+    return terminal
+
+
+def test_migrated_neutral_settlement_preserves_finding_and_authority(tmp_path: Path) -> None:
+    """A migrated finding cannot count as, or prevent, one neutral settlement."""
+    validator = load_validator()
+    item = tmp_path / "work-items" / "active" / "mixed-item"
+    _before, candidate, revise, _orphan = _mixed_candidate(item)
+    events = [json.loads(line) for line in candidate.splitlines()]
+    neutral = _neutral_terminal(events[1])
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_bytes(candidate + _line(neutral))
+    captured: list = []
+    assert validator.validate_work_item(
+        item, strict_revise=False, validate_status_file=False,
+        obligation_state_out=captured,
+    ) == []
+    assert [row.run_id for row in captured[0].open_revise] == [revise["runId"]]
+    context = validator.load_effective_ledger_view(
+        tmp_path, item, f"work-items/active/{item.name}/agent-runs.jsonl",
+    )
+    errors: list[str] = []
+    _active, validity, findings, launches = validator._reduce_effective_current_state(
+        context.rows, item, errors, None, context=context,
+    )
+    assert errors == []
+    assert launches == []
+    assert [event["runId"] for event in findings] == [revise["runId"]]
+    by_id = {row.event["runId"]: validity[pos].authority
+             for pos, row in enumerate(context.rows)}
+    assert by_id[revise["runId"]] == validator.LedgerAuthorityV1(False, False, True, False, False)
+    assert by_id[neutral["runId"]] == validator.LedgerAuthorityV1(False, True, False, False, False)
+    strict = validator.validate_work_item(item, validate_status_file=False)
+    assert any(f"open REVISE obligation: {revise['runId']}" in error for error in strict)
+    assert not any("unsettled launch" in error for error in strict)
+    assert ledger.read_bytes().startswith(candidate)
+
+
+@pytest.mark.parametrize("mutation", (
+    "pass", "revise", "cancelled", "finding", "authorizing", "metadata",
+    "duplicate", "before-migration",
+))
+def test_migrated_neutral_relation_rejects_other_terminals(tmp_path: Path, mutation: str) -> None:
+    """Only one neutral, later, exact-launch terminal can coexist with migration."""
+    validator = load_validator()
+    item = tmp_path / "work-items" / "active" / "mixed-item"
+    _before, candidate, _revise, _orphan = _mixed_candidate(item)
+    events = [json.loads(line) for line in candidate.splitlines()]
+    neutral = _neutral_terminal(events[1])
+    if mutation == "pass":
+        neutral.update(gate="PASS", artifact="implementation.md",
+                       evidence=[{"kind": "artifact", "ref": "implementation.md"}])
+    elif mutation == "revise":
+        neutral.update(gate="REVISE", findingClass="correctness", lane="qa", effort="high")
+    elif mutation == "cancelled":
+        neutral["status"] = "cancelled"
+    elif mutation == "finding":
+        neutral["findingClass"] = "correctness"
+    elif mutation == "authorizing":
+        neutral["authorizing"] = True
+    elif mutation == "metadata":
+        neutral["role"] = "architecture-reviewer"
+    events.append(neutral)
+    if mutation == "duplicate":
+        events.append({**neutral, "runId": "neutral-terminal-002"})
+    elif mutation == "before-migration":
+        events.insert(3, events.pop())
+    raw = b"".join(map(_line, events))
+    (item / "agent-runs.jsonl").write_bytes(raw)
+    errors = validator.validate_work_item(item, strict_revise=False, validate_status_file=False)
+    assert errors, mutation
+    assert any("migration target launch" in error for error in errors), errors
+    assert (item / "agent-runs.jsonl").read_bytes() == raw
+
+
+def test_migrated_neutral_revoke_restores_original_diagnostic(tmp_path: Path) -> None:
+    """Revocation remains valid but cannot turn invalid history into terminal authority."""
+    validator = load_validator()
+    item = tmp_path / "work-items" / "active" / "mixed-item"
+    _before, candidate, revise, _orphan = _mixed_candidate(item)
+    events = [json.loads(line) for line in candidate.splitlines()]
+    apply = events[3]
+    apply_sha = _sha(_line(apply).rstrip(b"\n"))
+    revoke = {
+        **{key: value for key, value in apply.items() if key not in {
+            "migratesRunId", "migratesEventSha256", "replacementEvent", "normalizationKind",
+        }},
+        "runId": "migration-revoke-001", "migrationAction": "revoke",
+        "revokesMigrationRunId": apply["runId"], "revokesMigrationEventSha256": apply_sha,
+        "evidence": [{"kind": "manual-check", "ref": f"revoke {apply['runId']} {apply_sha}"}],
+        "startedAt": "2026-09-08T00:05:00Z", "updatedAt": "2026-09-08T00:05:00Z",
+    }
+    raw = candidate + _line(_neutral_terminal(events[1])) + _line(revoke)
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_bytes(raw)
+    metadata: list[dict] = []
+    errors: list[str] = []
+    rows = validator.load_jsonl(ledger, errors, metadata)
+    effective, counters, projection_errors = validator.project_legacy_obligation_migrations(rows, metadata, item)
+    assert errors == projection_errors == []
+    assert counters["revoke"] == 1 and counters["projected"] == 0
+    assert next(row for row in effective if row["runId"] == revise["runId"]) == revise
+    context = validator.load_effective_ledger_view(
+        tmp_path, item, f"work-items/active/{item.name}/agent-runs.jsonl",
+    )
+    errors = []
+    _active, validity, _findings, launches = validator._reduce_effective_current_state(
+        context.rows, item, errors, None, context=context,
+    )
+    assert any("findingClass" in error for error in errors), errors
+    assert not any("duplicate terminal" in error for error in errors), errors
+    assert launches == []
+    by_id = {row.event["runId"]: validity[pos].authority for pos, row in enumerate(context.rows)}
+    assert by_id[revise["runId"]].terminal_eligible is False
+    assert by_id["neutral-terminal-001"].terminal_eligible is True
+    assert ledger.read_bytes() == raw
+
+
 def test_mixed_projection_preserves_authority_and_obligations(tmp_path: Path) -> None:
     """Removing the mixed projection or giving disposed terminals authority fails."""
     validator = load_validator()

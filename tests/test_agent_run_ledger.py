@@ -1427,6 +1427,72 @@ def test_settle_launch_derives_launch_identity_and_replays_exactly(tmp_path: Pat
     assert (item / "agent-runs.jsonl").read_bytes() == before
 
 
+def test_settle_migrated_launch_neutrally_replays_and_refuses_drift(tmp_path: Path):
+    """Physical migrated terminals cannot block settlement or authorize a new verdict."""
+    from tests.test_mixed_current_ledger_recovery import _mixed_candidate, _line, _sha
+
+    item = tmp_path / "work-items" / "active" / "mixed-item"
+    _before, candidate, _revise, _orphan = _mixed_candidate(item)
+    (item / "status.md").write_text(valid_status(), encoding="utf-8")
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_bytes(candidate)
+    settle = [
+        "settle-launch", "--launch-run-id", "review-launch-001",
+        "--run-id", "neutral-terminal-001", "--status", "completed", "--gate", "none",
+        "--started-at", "2026-09-08T00:04:00Z", "--updated-at", "2026-09-08T00:04:00Z",
+    ]
+    result = run_ledger(item, *settle)
+    assert result.returncode == 0, result.stderr
+    settled = ledger.read_bytes()
+    assert settled.startswith(candidate)
+    assert len(settled.splitlines()) == len(candidate.splitlines()) + 1
+    replay = run_ledger(item, *settle)
+    assert replay.returncode == 0 and "already-settled" in replay.stdout, replay.stderr
+    assert ledger.read_bytes() == settled
+    conflict = run_ledger(item, *settle, "--notes", "different outcome")
+    assert conflict.returncode != 0 and "WI-LEDGER-SETTLE-CONFLICT" in conflict.stderr
+    assert ledger.read_bytes() == settled
+    collision = {
+        "schemaVersion": 2, "runId": "neutral-terminal-001", "workItem": item.name,
+        "role": "lead", "executionRole": "main", "eventKind": "standalone",
+        "status": "completed", "gate": "none", "scope": ["unrelated result"],
+        "startedAt": "2026-09-08T00:05:00Z", "updatedAt": "2026-09-08T00:05:00Z",
+    }
+    for collision_id in ("neutral-terminal-001", "NEUTRAL-TERMINAL-001"):
+        collided = settled + _line({**collision, "runId": collision_id})
+        ledger.write_bytes(collided)
+        duplicate = run_ledger(item, *settle)
+        assert duplicate.returncode != 0, collision_id
+        assert ledger.read_bytes() == collided
+
+    rows = [json.loads(line) for line in candidate.splitlines()]
+    for mode in ("missing", "digest", "replacement", "revoked"):
+        changed = json.loads(json.dumps(rows))
+        if mode == "missing":
+            changed.pop(3)
+        elif mode == "digest":
+            changed[3]["migratesEventSha256"] = "0" * 64
+        elif mode == "replacement":
+            changed[3]["replacementEvent"]["lane"] = "different-lane"
+        else:
+            anchor = changed[3]
+            digest = _sha(_line(anchor).rstrip(b"\n"))
+            revoke = {key: value for key, value in anchor.items() if key not in {
+                "migratesRunId", "migratesEventSha256", "replacementEvent", "normalizationKind",
+            }}
+            revoke.update(runId="migration-revoke-001", migrationAction="revoke",
+                          revokesMigrationRunId=anchor["runId"], revokesMigrationEventSha256=digest,
+                          evidence=[{"kind": "manual-check", "ref": f"revoke {anchor['runId']} {digest}"}])
+            changed.append(revoke)
+        raw = b"".join(map(_line, changed))
+        ledger.write_bytes(raw)
+        refused = run_ledger(item, *settle)
+        assert refused.returncode != 0, mode
+        assert ledger.read_bytes() == raw, mode
+        assert not (item / "agent-runs.jsonl.tmp").exists()
+        assert not (item / "agent-runs.jsonl.lock").exists()
+
+
 @pytest.mark.parametrize(
     ("status", "gate", "needs_artifact"),
     (

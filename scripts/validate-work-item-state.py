@@ -2793,15 +2793,21 @@ def validate_closure(
     )
 
 
-def migration_terminal_launch_relation_error(
+def classify_migrated_launch_terminals(
     events: Sequence[Mapping[str, object]], target_pos: int, item: Path,
     relation_index: tuple[Mapping[str, list[int]], Mapping[str, list[int]]] | None = None,
-) -> str | None:
-    """Return the exact terminal/launch relation failure for a migration target."""
+    *, migration_pos: int | None = None,
+) -> tuple[tuple[int, ...], str | None]:
+    """Classify settlement positions for one already-bound migrated terminal.
+
+    The historical finding has no terminal authority. Only one later, neutral
+    terminal with the exact launch metadata may supply that authority instead.
+    Migration identity, digest and normalization are owned by the projector.
+    """
     target = events[target_pos]
     launch_id = target.get("launchRunId")
     if not isinstance(launch_id, str):
-        return "migration target has no launchRunId"
+        return (), "migration target has no launchRunId"
     if relation_index is None:
         positions: dict[str, list[int]] = {}
         terminals_by_launch: dict[str, list[int]] = {}
@@ -2818,14 +2824,55 @@ def migration_terminal_launch_relation_error(
         len(launches) != 1 or launches[0] >= target_pos
         or events[launches[0]].get("eventKind") != "launch"
     ):
-        return "migration target does not reference one earlier launch"
+        return (), "migration target does not reference one earlier launch"
     launch_errors: list[str] = []
     validate_event(dict(events[launches[0]]), item, set(), launch_errors)
     if launch_errors:
-        return "migration target launch is not individually valid"
-    if terminals_by_launch.get(launch_id, ()) != [target_pos]:
-        return "migration target launch has duplicate or mismatched terminal"
-    return None
+        return (), "migration target launch is not individually valid"
+    terminal_positions = terminals_by_launch.get(launch_id, ())
+    if terminal_positions == [target_pos]:
+        return (), None
+    failure = "migration target launch has duplicate or mismatched terminal"
+    if (
+        len(terminal_positions) != 2 or terminal_positions[0] != target_pos
+        or migration_pos is None or terminal_positions[1] <= migration_pos
+        or target.get("gate") != "REVISE"
+    ):
+        return (), failure
+    neutral_pos = terminal_positions[1]
+    neutral = events[neutral_pos]
+    launch = events[launches[0]]
+    neutral_errors: list[str] = []
+    other_run_ids = {
+        run_id.casefold()
+        for run_id, event_positions in positions.items()
+        if any(pos != neutral_pos for pos in event_positions)
+    }
+    validate_event(dict(neutral), item, other_run_ids, neutral_errors)
+    binding_fields = (
+        "workItem", "role", "executionRole", "assignedRole", "provider", "model",
+        "scope", "promptFile", "effort", "launchFlags",
+    )
+    if (
+        neutral_errors or neutral.get("schemaVersion") != 2
+        or neutral.get("status") != "completed" or neutral.get("gate") != "none"
+        or "findingClass" in neutral or neutral.get("closesRunIds", []) != []
+        or neutral.get("authorizing") is True
+        or any(neutral.get(key) != launch.get(key) for key in binding_fields)
+    ):
+        return (), failure
+    return (neutral_pos,), None
+
+
+def migration_terminal_launch_relation_error(
+    events: Sequence[Mapping[str, object]], target_pos: int, item: Path,
+    relation_index: tuple[Mapping[str, list[int]], Mapping[str, list[int]]] | None = None,
+    *, migration_pos: int | None = None,
+) -> str | None:
+    """Return the classifier's exact relation failure for a migration target."""
+    return classify_migrated_launch_terminals(
+        events, target_pos, item, relation_index, migration_pos=migration_pos,
+    )[1]
 
 
 LEGACY_PROJECTION_MANIFEST_DIR = "legacy-ledger-projection-manifests"
@@ -6401,9 +6448,12 @@ def validate_status(
 
 
 def project_legacy_obligation_migrations(
-    events: list[dict], raw_metadata: list[dict[str, object]], item: Path
+    events: list[dict], raw_metadata: list[dict[str, object]], item: Path,
+    *, active_migrations_out: dict[str, tuple[int, int]] | None = None,
 ) -> tuple[list[dict], dict[str, int], list[str]]:
     """Project valid V2 legacy-class anchors without mutating raw ledger history."""
+    if active_migrations_out is not None:
+        active_migrations_out.clear()
     counters = {"raw": len(events), "apply": 0, "revoke": 0, "projected": 0}
     if any(event.get("schemaVersion") == 3 for event in events) and any(
         event.get("eventKind") == LEGACY_MIGRATION_KIND for event in events
@@ -6421,6 +6471,7 @@ def project_legacy_obligation_migrations(
             terminals_by_launch.setdefault(event["launchRunId"], []).append(pos)
 
     active: dict[int, dict] = {}
+    active_apply_positions: dict[int, int] = {}
     applies: dict[str, tuple[int, dict]] = {}
     revoked: set[str] = set()
     fatal_control_identity = False
@@ -6499,12 +6550,6 @@ def project_legacy_obligation_migrations(
             if candidate_errors:
                 errors.append(f"{anchor.get('runId')}: migration target retains another invalid diagnostic")
                 continue
-            relation_error = migration_terminal_launch_relation_error(
-                events, target_pos, item, (positions, terminals_by_launch)
-            )
-            if relation_error is not None:
-                errors.append(f"{anchor.get('runId')}: {relation_error}")
-                continue
             replacement = anchor.get("replacementEvent")
             if replacement != normalized:
                 errors.append(f"{anchor.get('runId')}: replacementEvent does not match closed normalization")
@@ -6512,11 +6557,19 @@ def project_legacy_obligation_migrations(
             if anchor.get("evidence") != [{"kind": "manual-check", "ref": row["evidence"].format(target=target_id, digest=target_digest)}]:
                 errors.append(f"{anchor.get('runId')}: migration evidence does not match closed normalization")
                 continue
+            relation_error = migration_terminal_launch_relation_error(
+                events, target_pos, item, (positions, terminals_by_launch), migration_pos=pos,
+            )
+            if relation_error is not None:
+                errors.append(f"{anchor.get('runId')}: {relation_error}")
+                continue
             if target_pos in active:
                 errors.append(f"{anchor.get('runId')}: migration topology permits one apply per target")
                 active.pop(target_pos, None)
+                active_apply_positions.pop(target_pos, None)
                 continue
             active[target_pos] = replacement
+            active_apply_positions[target_pos] = pos
             applies[str(anchor.get("runId"))] = (target_pos, replacement, normalization_kind)
         else:
             apply_id = anchor.get("revokesMigrationRunId")
@@ -6540,11 +6593,17 @@ def project_legacy_obligation_migrations(
                 errors.append(f"{anchor.get('runId')}: revoke does not match referenced normalization")
                 continue
             active.pop(applied[0], None)
+            active_apply_positions.pop(applied[0], None)
             revoked.add(str(apply_id))
 
     if fatal_control_identity:
         counters["projected"] = 0
         return events, counters, errors
+    if active_migrations_out is not None and not errors:
+        active_migrations_out.update({
+            str(events[target_pos]["runId"]): (target_pos, active_apply_positions[target_pos])
+            for target_pos in active
+        })
     effective = [
         active.get(pos, event)
         for pos, event in enumerate(events)

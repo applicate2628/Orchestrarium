@@ -1724,8 +1724,9 @@ def _settlement_event(
 def _settle_launch_from_ledger(
     previous: str, args: argparse.Namespace, validator: Any
 ) -> dict[str, Any] | None:
+    lines = [line for line in previous.splitlines() if line.strip()]
     try:
-        events = [json.loads(line) for line in previous.splitlines() if line.strip()]
+        events = [json.loads(line) for line in lines]
     except json.JSONDecodeError as exc:
         raise ValueError(
             "WI-LEDGER-SETTLE-TARGET: existing ledger is not valid JSONL"
@@ -1735,12 +1736,33 @@ def _settle_launch_from_ledger(
         raise ValueError(
             "WI-LEDGER-SETTLE-TARGET: launch must identify one V2 launch event"
         )
-    terminals = [
-        event
-        for event in events
+    terminal_positions = [
+        pos
+        for pos, event in enumerate(events)
         if event.get("eventKind") == "terminal"
         and event.get("launchRunId") == args.launch_run_id
     ]
+    if terminal_positions and any(
+        event.get("eventKind") == validator.LEGACY_MIGRATION_KIND for event in events
+    ):
+        active_migrations: dict[str, tuple[int, int]] = {}
+        metadata = [{"sha256": hashlib.sha256(line.encode("utf-8")).hexdigest()} for line in lines]
+        _effective, _counters, migration_errors = validator.project_legacy_obligation_migrations(
+            events, metadata, args.work_item, active_migrations_out=active_migrations,
+        )
+        if migration_errors:
+            raise ValueError("; ".join(migration_errors))
+        for target_pos, migration_pos in active_migrations.values():
+            if events[target_pos].get("launchRunId") != args.launch_run_id:
+                continue
+            positions, relation_error = validator.classify_migrated_launch_terminals(
+                events, target_pos, args.work_item, migration_pos=migration_pos,
+            )
+            if relation_error is not None:
+                raise ValueError(relation_error)
+            terminal_positions = list(positions)
+            break
+    terminals = [events[pos] for pos in terminal_positions]
     if len(terminals) > 1:
         raise ValueError(
             "WI-LEDGER-SETTLE-TARGET: launch has multiple terminal events"
