@@ -61,7 +61,9 @@ class ClosureFixture(unittest.TestCase):
     def _write(self, events: list[dict]) -> Path:
         import json
 
-        td = Path(tempfile.mkdtemp())
+        root = Path(tempfile.mkdtemp())
+        td = root / "work-items" / "active" / "fixture-item"
+        td.mkdir(parents=True)
         (td / "status.md").write_text(STATUS_MD, encoding="utf-8")
         # PASS-gate events require their artifact to exist inside the work item.
         (td / "design.md").write_text("fixture artifact\n", encoding="utf-8")
@@ -1010,7 +1012,9 @@ def _recovery(run_id: str, target: dict, target_line: bytes, **over: object) -> 
 
 
 def _recovery_errors(events: list[dict]) -> tuple[list[str], dict[str, int]]:
-    item = Path(tempfile.mkdtemp())
+    root = Path(tempfile.mkdtemp())
+    item = root / "work-items" / "active" / "fixture-item"
+    item.mkdir(parents=True)
     (item / "status.md").write_text(STATUS_MD, encoding="utf-8")
     (item / "design.md").write_text("fixture artifact\n", encoding="utf-8")
     lines = [json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8") for event in events]
