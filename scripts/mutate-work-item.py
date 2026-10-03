@@ -2489,26 +2489,58 @@ def _relative_link(work_items: Path, path: Path) -> str:
     return Path(os.path.relpath(path, work_items)).as_posix()
 
 
-def _status_entry(root: Path, item: Path) -> ReadmeEntry:
+def _current_readme_status_error(fields: dict[str, str], location: str, source: Path) -> LifecycleError | None:
+    status = fields.get("status", "")
+    if location == "backlog":
+        if not status or status == "candidate":
+            return None
+        failure = (
+            "WI-CATEGORY-TERMINAL-IN-CURRENT"
+            if status in CATEGORIES["work-item"].terminal_statuses
+            else "WI-CATEGORY-STATUS-INVALID"
+        )
+        return LifecycleError(failure, f"backlog work-item has invalid current status {status!r}: {source.stem}")
+    if location == "active":
+        if status in CATEGORIES["work-item"].terminal_statuses:
+            return LifecycleError("WI-CATEGORY-TERMINAL-IN-CURRENT", f"terminal work-item remains active: {source.parent.name}")
+        if status not in CATEGORIES["work-item"].current_statuses - {"candidate"}:
+            return LifecycleError("WI-CATEGORY-STATUS-INVALID", f"active work-item has invalid status {status!r}: {source.parent}")
+        return None
+    if location == "roadmap":
+        if fields.get("format") != "roadmap-v1" or status in CATEGORIES["roadmap"].current_statuses:
+            return None
+        return LifecycleError("WI-CATEGORY-TERMINAL-IN-CURRENT", f"terminal V1 roadmap remains current: {source.stem}")
+    raise ValueError(f"unsupported current read-model location: {location}")
+
+
+def _project_current_readme_status(
+    entry: ReadmeEntry, fields: dict[str, str], data: bytes, location: str,
+    *, diagnostic: bool,
+) -> ReadmeEntry:
+    failure = _current_readme_status_error(fields, location, entry.link)
+    if failure is not None:
+        if not diagnostic:
+            raise failure
+        entry.section = "Blockers"
+        entry.checked = False
+        entry.classification = (
+            f"{failure.failure_id}: status={json.dumps(fields.get('status'), ensure_ascii=False)}"
+            f"; source sha256:{_sha256_bytes(data)}"
+        )
+    return entry
+
+
+def _status_entry(root: Path, item: Path, *, diagnostic_status: bool = False) -> ReadmeEntry:
     status_path = item / "status.md"
     if not status_path.is_file():
         raise LifecycleError("WI-CATEGORY-STATUS-MISSING", f"missing status.md: {item}")
-    text = _capture_file_snapshot(
+    data = _capture_file_snapshot(
         status_path,
         failure_id="WI-README-STALE",
         maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
-    ).data.decode("utf-8")
-    fields = _parse_fields(text)
+    ).data
+    fields = _parse_fields(data.decode("utf-8"))
     status = fields.get("status", "")
-    if status in CATEGORIES["work-item"].terminal_statuses:
-        raise LifecycleError(
-            "WI-CATEGORY-TERMINAL-IN-CURRENT",
-            f"terminal work-item remains active: {item.name}",
-        )
-    if status not in {"active", "blocked"}:
-        raise LifecycleError(
-            "WI-CATEGORY-STATUS-INVALID", f"active work-item has invalid status {status!r}: {item}"
-        )
     section = "Blockers" if status == "blocked" or fields.get("blocker") else "Current focus"
     label = fields.get("task") or item.name
     detail = fields.get("blocker", "") if section == "Blockers" else fields.get("current step", "")
@@ -2521,6 +2553,7 @@ def _status_entry(root: Path, item: Path) -> ReadmeEntry:
         detail,
         [status_path],
     )
+    _project_current_readme_status(entry, fields, data, "active", diagnostic=diagnostic_status)
     progressive: list[str] = []
     for field_name, category in (("roadmap", "roadmap"), ("epic", "epic")):
         related_values = _optional_relation_values(
@@ -2765,24 +2798,14 @@ def collect_readme_entries(root: Path) -> list[ReadmeEntry]:
     backlog = work_items / "backlog"
     if backlog.is_dir():
         for path in sorted(backlog.glob("*.md")):
-            fields = _parse_fields(_capture_file_snapshot(
+            data = _capture_file_snapshot(
                 path,
                 failure_id="WI-README-STALE",
                 maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
-            ).data.decode("utf-8"))
-            status = fields.get("status")
-            if status and status != "candidate":
-                failure = (
-                    "WI-CATEGORY-TERMINAL-IN-CURRENT"
-                    if status in CATEGORIES["work-item"].terminal_statuses
-                    else "WI-CATEGORY-STATUS-INVALID"
-                )
-                raise LifecycleError(
-                    failure,
-                    f"backlog work-item has invalid current status {status!r}: {path.stem}",
-                )
+            ).data
+            fields = _parse_fields(data.decode("utf-8"))
             entries.append(
-                ReadmeEntry(
+                _project_current_readme_status(ReadmeEntry(
                     "Next actions",
                     f"work-item:{path.stem}",
                     fields.get("task") or path.stem,
@@ -2790,33 +2813,27 @@ def collect_readme_entries(root: Path) -> list[ReadmeEntry]:
                     False,
                     fields.get("next action", ""),
                     [path],
-                )
+                ), fields, data, "backlog", diagnostic=True)
             )
 
     active = work_items / "active"
     if active.is_dir():
         for item in sorted(path for path in active.iterdir() if path.is_dir()):
-            entries.append(_status_entry(root, item))
+            entries.append(_status_entry(root, item, diagnostic_status=True))
 
     roadmaps = work_items / "roadmaps"
     if roadmaps.is_dir():
         for path in sorted(roadmaps.glob("*.md")):
-            text = _capture_file_snapshot(
+            data = _capture_file_snapshot(
                 path,
                 failure_id="WI-README-STALE",
                 maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
-            ).data.decode("utf-8")
-            fields = _parse_fields(text)
+            ).data
+            fields = _parse_fields(data.decode("utf-8"))
             if fields.get("format") != "roadmap-v1":
                 continue
-            status = fields.get("status", "")
-            if status not in {"draft", "active"}:
-                raise LifecycleError(
-                    "WI-CATEGORY-TERMINAL-IN-CURRENT",
-                    f"terminal V1 roadmap remains current: {path.stem}",
-                )
             entries.append(
-                ReadmeEntry(
+                _project_current_readme_status(ReadmeEntry(
                     "Roadmap and milestones",
                     f"roadmap:{path.stem}",
                     fields.get("milestones-or-horizon") or path.stem,
@@ -2824,7 +2841,7 @@ def collect_readme_entries(root: Path) -> list[ReadmeEntry]:
                     False,
                     fields.get("order", ""),
                     [path],
-                )
+                ), fields, data, "roadmap", diagnostic=True)
             )
 
     archive = work_items / "archive"
@@ -3138,7 +3155,7 @@ def _validate_active_status_bytes(data: bytes) -> None:
     except UnicodeDecodeError as exc:
         raise LifecycleError("WI-CATEGORY-STATUS-INVALID", "status must be UTF-8") from exc
     fields = _parse_fields(text)
-    if fields.get("status") not in {"active", "blocked"}:
+    if _current_readme_status_error(fields, "active", Path("status.md")) is not None:
         raise LifecycleError(
             "WI-CATEGORY-STATUS-INVALID", "active status must be active or blocked"
         )
@@ -3189,6 +3206,9 @@ def create_candidate(root: Path, slug: str, data: bytes, *, inject_readme_failur
         raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", f"slug already exists: {slug}")
     _preflight_readme(root)
     target = work_items / "backlog" / f"{slug}.md"
+    failure = _current_readme_status_error(_parse_fields(data.decode("utf-8")), "backlog", target)
+    if failure is not None:
+        raise LifecycleError("WI-README-STALE", str(failure)) from failure
     _atomic_write(target, data)
     if inject_readme_failure:
         raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
@@ -3714,6 +3734,11 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
     if locations != [backlog]:
         failure = "WI-CATEGORY-DUAL-LOCATION" if len(locations) > 1 else "WI-INVALID-TARGET"
         raise LifecycleError(failure, f"start requires exactly one backlog candidate: {slug}")
+    failure = _current_readme_status_error(
+        _parse_fields(backlog.read_text(encoding="utf-8")), "backlog", backlog,
+    )
+    if failure is not None:
+        raise failure
     transfer_relation = _validate_started_transfer_relation(backlog.read_bytes(), status_data)
     _validate_obligation_transfer_ownership(root)
     _preflight_readme(root)
@@ -3755,6 +3780,7 @@ def update_status(root: Path, slug: str, status_data: bytes, *, inject_readme_fa
     target = resolve_category(root, f"work-item:{slug}")
     if target.parent.name != "active" or not target.is_dir():
         raise LifecycleError("WI-INVALID-TARGET", "status update requires an active work-item")
+    _status_entry(root, target)
     _preflight_readme(root)
     status = target / "status.md"
     _atomic_write(status, status_data)
@@ -4692,6 +4718,9 @@ def _validate_item_before_close(item: Path) -> None:
             _validate_active_status_bytes(status_text.encode("utf-8"))
     if errors:
         raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join(errors))
+    failure = _current_readme_status_error(_parse_fields(status_text), "active", item / "status.md")
+    if failure is not None:
+        raise failure
 
 
 def _bug_disposition_fail(failure_id: str, message: str) -> LifecycleError:
@@ -5755,6 +5784,11 @@ def audit_categories(root: Path) -> tuple[str, ...]:
                     legacy.relative_to(work_items).as_posix()
                 )
                 continue
+            if category.current_kind == "work-item" and locations and locations[0].parent == work_items / "backlog":
+                source = locations[0]
+                failure = _current_readme_status_error(_parse_fields(source.read_text(encoding="utf-8")), "backlog", source)
+                if failure is not None:
+                    raise failure
             if category.current_kind == "flat" and locations:
                 path = locations[0]
                 archived = "archive" in path.parts
@@ -5785,6 +5819,10 @@ def audit_categories(root: Path) -> tuple[str, ...]:
                         "WI-CATEGORY-TERMINAL-IN-CURRENT",
                         f"{category.name}:{slug} has terminal status in current root",
                     )
+                if category.name == "roadmap" and not archived:
+                    failure = _current_readme_status_error(fields, "roadmap", path)
+                    if failure is not None:
+                        raise failure
                 if (
                     category.name == "decision"
                     and not archived
@@ -5805,11 +5843,9 @@ def audit_categories(root: Path) -> tuple[str, ...]:
                     f"work-item:{item.name} has an unapplied bug disposition manifest",
                 )
             fields = _parse_fields((item / "status.md").read_text(encoding="utf-8"))
-            if fields.get("status") in CATEGORIES["work-item"].terminal_statuses:
-                raise LifecycleError(
-                    "WI-CATEGORY-TERMINAL-IN-CURRENT",
-                    f"work-item:{item.name} has terminal status in active/",
-                )
+            failure = _current_readme_status_error(fields, "active", item / "status.md")
+            if failure is not None:
+                raise failure
     archive_root = work_items / "archive"
     if archive_root.is_dir():
         for month in sorted(path for path in archive_root.iterdir() if path.is_dir()):

@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = Path(
@@ -251,6 +253,232 @@ def seed_context_bug(root: Path, item_slug: str, bug_slug: str) -> Path:
         ),
     )
     return target
+
+
+def _unrelated_current_status_record(root: Path, kind: str) -> tuple[Path, str, str]:
+    if kind == "backlog":
+        path = root / "work-items" / "backlog" / "distant-candidate.md"
+        status, failure = "open", "WI-CATEGORY-STATUS-INVALID"
+        text = f"Task: Distant candidate.\nstatus: {status}\n"
+    elif kind == "active":
+        path = root / "work-items" / "active" / "alternate-active" / "status.md"
+        status, failure = "unexpected-active", "WI-CATEGORY-STATUS-INVALID"
+        text = f"Task: Alternate active item.\nstatus: {status}\n"
+    else:
+        path = root / "work-items" / "roadmaps" / "alternate-horizon.md"
+        status, failure = "superseded", "WI-CATEGORY-TERMINAL-IN-CURRENT"
+        text = f"Format: roadmap-v1\nstatus: {status}\n"
+    write(path, text)
+    return path, status, failure
+
+
+@pytest.mark.parametrize("kind", ["backlog", "active", "roadmap"])
+def test_local_close_projects_unrelated_current_status_diagnostics(tmp_path: Path, kind: str) -> None:
+    module = load_module()
+    root = tmp_path / kind
+    slug = "bounded-close"
+    instant = "2026-10-03T01:00:00Z"
+    seed_active(module, root, slug)
+    bug = seed_context_bug(root, slug, "preserved-bug")
+    write_bug_dispositions(root, slug, instant, [{
+        "id": bug.stem, "action": "preserve-current", "status": "open",
+        "inputSha256": hashlib.sha256(bug.read_bytes()).hexdigest(),
+        "reason": "Retain independent finding.", "evidence": "Synthetic accepted residual.",
+    }])
+    unrelated, value, failure = _unrelated_current_status_record(root, kind)
+    before = {path: path.read_bytes() for path in (unrelated, bug)}
+
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+
+    assert archived == root / "work-items" / "archive" / "2026-10" / slug
+    assert all(path.read_bytes() == data for path, data in before.items())
+    readme = root / "work-items" / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    blockers = text.split("## Blockers\n", 1)[1].split("\n## ", 1)[0]
+    source_link = unrelated.relative_to(root / "work-items").as_posix()
+    assert "- [ ]" in blockers and failure in blockers and value in blockers
+    assert source_link in blockers
+    assert hashlib.sha256(before[unrelated]).hexdigest() in blockers
+    receipt = json.loads((archived / "bug-dispositions-receipt.json").read_bytes())
+    assert receipt["readmeSha256"] == hashlib.sha256(readme.read_bytes()).hexdigest()
+    after = tree_file_bytes(root)
+    assert module.close_item(root, slug, closure(instant).encode(), instant) == archived
+    assert tree_file_bytes(root) == after
+    audit = run_cli("audit", "--root", str(root))
+    assert audit.returncode == 1 and failure in audit.stdout, audit.stdout
+    assert tree_file_bytes(root) == after
+
+
+def test_local_index_keeps_selected_candidate_and_start_strict(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "selected"
+    module.create_candidate(root, "valid-seed", b"Task: Legacy candidate without status.\n")
+    before = tree_file_bytes(root)
+    with pytest.raises(module.LifecycleError) as created:
+        module.create_candidate(root, "invalid-selected", b"status: open\nTask: Invalid candidate.\n")
+    assert created.value.failure_id == "WI-README-STALE"
+    assert tree_file_bytes(root) == before
+    selected = root / "work-items" / "backlog" / "valid-seed.md"
+    selected.write_bytes(b"status: open\nTask: Selected invalid candidate.\n")
+    before = tree_file_bytes(root)
+    with pytest.raises(module.LifecycleError) as started:
+        module.start_item(root, "valid-seed", quick_status().encode())
+    assert started.value.failure_id == "WI-CATEGORY-STATUS-INVALID"
+    assert tree_file_bytes(root) == before
+
+
+@pytest.mark.parametrize("status_value,failure_id", [
+    ("unexpected-active", "WI-CATEGORY-STATUS-INVALID"),
+    ("closed", "WI-CATEGORY-TERMINAL-IN-CURRENT"),
+])
+def test_local_update_refuses_invalid_selected_source(
+    tmp_path: Path, status_value: str, failure_id: str,
+) -> None:
+    module = load_module()
+    root = tmp_path / status_value
+    slug = "selected-update"
+    seed_active(module, root, slug)
+    source = root / "work-items" / "active" / slug / "status.md"
+    original = source.read_text(encoding="utf-8")
+    assert "status: active\n" in original
+    write(source, original.replace("status: active\n", f"status: {status_value}\n"))
+    assert module._parse_fields(source.read_text(encoding="utf-8"))["status"] == status_value
+    module.refresh_readme(root)
+    replacement = tmp_path / "replacement.md"
+    replacement.write_bytes(quick_status("Valid replacement.").encode())
+    before = tree_file_bytes(root)
+
+    result = run_cli("update", "--root", str(root), "--slug", slug, "--status-file", str(replacement))
+
+    assert result.returncode == 1 and failure_id in result.stdout, result.stdout
+    assert tree_file_bytes(root) == before
+
+
+def test_local_update_accepts_valid_selected_source_with_unrelated_diagnostic(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "control"
+    slug = "selected-update"
+    seed_active(module, root, slug)
+    unrelated, value, failure = _unrelated_current_status_record(root, "active")
+    unrelated_before = unrelated.read_bytes()
+    module.refresh_readme(root)
+    replacement = tmp_path / "replacement.md"
+    replacement.write_bytes(quick_status("Valid replacement.").encode())
+
+    result = run_cli("update", "--root", str(root), "--slug", slug, "--status-file", str(replacement))
+
+    assert result.returncode == 0, result.stdout
+    assert (root / "work-items" / "active" / slug / "status.md").read_bytes() == replacement.read_bytes()
+    assert unrelated.read_bytes() == unrelated_before
+    readme = (root / "work-items" / "README.md").read_text(encoding="utf-8")
+    blockers = readme.split("## Blockers\n", 1)[1].split("\n## ", 1)[0]
+    assert "- [ ]" in blockers and failure in blockers and value in blockers
+    assert hashlib.sha256(unrelated_before).hexdigest() in blockers
+
+
+def test_local_index_omission_compatibility_and_non_v1_exclusion(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "legacy-backlog"
+    write(root / "work-items" / "backlog" / "missing.md", "Task: Missing legacy status.\n")
+    write(root / "work-items" / "backlog" / "empty.md", "status:\nTask: Empty legacy status.\n")
+    write(root / "work-items" / "roadmaps" / "non-v1.md", "status: superseded\n")
+    entries = module.collect_readme_entries(root)
+    assert [entry.logical_reference for entry in entries] == ["work-item:empty", "work-item:missing"]
+    assert all(entry.section == "Next actions" for entry in entries)
+    for kind in ("active", "roadmap"):
+        for value in (None, ""):
+            case_root = tmp_path / f"{kind}-{'missing' if value is None else 'empty'}"
+            source = (
+                case_root / "work-items" / "active" / "record" / "status.md"
+                if kind == "active" else case_root / "work-items" / "roadmaps" / "record.md"
+            )
+            data = ("Format: roadmap-v1\n" if kind == "roadmap" else "")
+            if value is not None:
+                data += "status:\n"
+            write(source, data)
+            module.refresh_readme(case_root, allow_marker_bootstrap=True)
+            projected = module.collect_readme_entries(case_root)
+            assert len(projected) == 1 and projected[0].section == "Blockers"
+            before = tree_file_bytes(case_root)
+            with pytest.raises(module.LifecycleError):
+                module.audit(case_root)
+            assert tree_file_bytes(case_root) == before
+
+
+def test_local_index_direct_shadow_and_both_precomputers_agree(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "views"
+    slug = "view-selected"
+    instant = "2026-10-03T02:00:00Z"
+    seed_active(module, root, slug)
+    unrelated, _, _ = _unrelated_current_status_record(root, "backlog")
+    unrelated_before = unrelated.read_bytes()
+    module.refresh_readme(root)
+    work_items = root / "work-items"
+    source = work_items / "bugs" / "view-bug.md"
+    source_after = b"status: fixed\n"
+    write(source, "status: open\n")
+    archive_bug = work_items / "bugs" / "archive" / "2026-10" / source.name
+    predicted_bug = module._precompute_single_bug_readme_sha256(root, source, archive_bug, source_after, [])
+    bug_shadow = tmp_path / "bug-shadow"
+    shutil.copytree(work_items, bug_shadow / "work-items")
+    shadow_source = bug_shadow / "work-items" / source.relative_to(work_items)
+    shadow_target = bug_shadow / "work-items" / archive_bug.relative_to(work_items)
+    shadow_source.write_bytes(source_after)
+    shadow_target.parent.mkdir(parents=True)
+    shadow_source.rename(shadow_target)
+    assert predicted_bug == hashlib.sha256(module.render_readme_bytes(bug_shadow)).hexdigest()
+    active = work_items / "active" / slug
+    archive = work_items / "archive" / "2026-10" / slug
+    successor = work_items / "backlog" / "view-successor.md"
+    status_after = module._terminalize_status((active / "status.md").read_bytes())
+    closure_after = module._stamp_schema_marker(closure(instant).encode(), "closure.md")
+    successor_data = b"status: candidate\nTask: View successor.\n"
+    predicted_transition = module._precompute_transition_readme_sha256(
+        root, active, archive, successor, status_after, closure_after, successor_data, (),
+    )
+    transition_shadow = tmp_path / "transition-shadow"
+    shutil.copytree(work_items, transition_shadow / "work-items")
+    shadow_active = transition_shadow / "work-items" / active.relative_to(work_items)
+    shadow_archive = transition_shadow / "work-items" / archive.relative_to(work_items)
+    (shadow_active / "status.md").write_bytes(status_after)
+    (shadow_active / "closure.md").write_bytes(closure_after)
+    shadow_archive.parent.mkdir(parents=True)
+    shadow_active.rename(shadow_archive)
+    (transition_shadow / "work-items" / successor.relative_to(work_items)).write_bytes(successor_data)
+    assert predicted_transition == hashlib.sha256(module.render_readme_bytes(transition_shadow)).hexdigest()
+    assert unrelated.read_bytes() == unrelated_before
+
+
+def test_local_index_keeps_uncertain_sources_and_selected_close_strict(tmp_path: Path) -> None:
+    module = load_module()
+    instant = "2026-10-03T03:00:00Z"
+    for case in ("duplicate", "unreadable", "relation", "selected-missing", "selected-empty"):
+        root = tmp_path / case
+        slug = "strict-local-target"
+        seed_active(module, root, slug)
+        write_empty_bug_dispositions(root, slug, instant)
+        unrelated = root / "work-items" / "active" / "distant-record" / "status.md"
+        if case == "duplicate":
+            write(unrelated, "status: unexpected-active\n")
+            write(root / "work-items" / "backlog" / "distant-record.md", "status: candidate\n")
+        elif case == "unreadable":
+            unrelated.parent.mkdir(parents=True)
+            unrelated.write_bytes(b"status: unexpected-active\n\xff")
+        elif case == "relation":
+            write(unrelated, "status: unexpected-active\nRoadmap: missing-roadmap\n")
+        else:
+            status = root / "work-items" / "active" / slug / "status.md"
+            replacement = "" if case == "selected-missing" else "status:\n"
+            original = status.read_text(encoding="utf-8")
+            assert "status: active\n" in original
+            write(status, original.replace("status: active\n", replacement))
+            assert module._parse_fields(status.read_text(encoding="utf-8")).get("status") in {None, ""}
+        before = tree_file_bytes(root)
+        with pytest.raises((module.LifecycleError, UnicodeDecodeError)):
+            module.close_item(root, slug, closure(instant).encode(), instant)
+        assert tree_file_bytes(root) == before, case
+        assert not (root / "work-items" / "archive" / "2026-10" / slug).exists()
 
 
 def seed_fixed_bug_with_active_parent(module, root: Path, slug: str) -> tuple[Path, Path]:

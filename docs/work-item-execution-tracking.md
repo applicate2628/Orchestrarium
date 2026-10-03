@@ -618,6 +618,22 @@ The command delegates to the existing transition recovery owner and reports
 `--apply` or naming a non-pending operation changes no bytes. Do not use audit
 as a batch recovery command.
 
+The generated README is a diagnostic view, not a global acceptance verdict.
+Readable invalid current statuses in unrelated backlog, active, or Version 1
+roadmap records appear as unchecked `Blockers` with their original failure
+identifier, parsed status value, source link, and source SHA-256 digest. Their
+bytes are not normalized or repaired. Valid selected lifecycle changes may
+commit and refresh this view despite those unrelated discrepancies; receipts
+still bind the complete generated README. Direct, shadow, and precomputed views
+use the same collector and renderer.
+
+Selected candidate, start, import, and close inputs remain strictly validated
+before mutation, including existing missing/empty legacy-status rules. Full
+`audit` still exits nonzero on invalid current statuses after a diagnostic
+refresh. Unreadable data, uncertain relations, duplicate identities, archive
+status/evidence, marker checks, receipt/replay binding, and rollback remain
+strict. Non-Version-1 roadmap records keep their existing projection exclusion.
+
 If `start`, `update`, or `reopen` reports `WI-README-STALE` after saying the
 canonical state committed, do not retry that operation. Run `refresh`, then
 use `resolve` and `audit` to verify the target. To replace a reviewed static guide
@@ -627,7 +643,7 @@ run `python scripts/mutate-work-item.py refresh --root . --reset-static-guide
 --expected-readme-sha256 <original-sha256>`. This explicit reset replaces the live
 guide with the default guide and the current generated board; retained history
 does not remain a live prefix. Partial, duplicate, or reversed markers still
-refuse, and ordinary `refresh` remains strict. Rollback restores the retained
+refuse, and ordinary `refresh` retains marker and acquisition checks. Rollback restores the retained
 README bytes under caller authority without changing lifecycle records.
 
 ### Finish an accepted current-bug successor handoff
