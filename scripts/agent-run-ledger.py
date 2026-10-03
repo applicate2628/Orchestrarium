@@ -1552,6 +1552,33 @@ def _ordinary_custody_source(root: Path, artifact: str) -> bytes:
         raise ValueError("WI-LEDGER-CUSTODY-SOURCE-DRIFT: source artifact unavailable") from exc
 
 
+def _acquire_custody_snapshot(
+    item: Path, source_bytes: bytes, digest: str, validator: Any,
+    owned: dict[str, Path], *, owned_identities: dict[str, tuple[int, int]] | None = None,
+) -> Path:
+    """Publish or reuse the single digest-only snapshot store for both custody routes."""
+    directory = item / "review-artifact-custody"
+    snapshot = directory / digest
+    directory.mkdir(exist_ok=True)
+    directory_stat = directory.lstat()
+    if not stat.S_ISDIR(directory_stat.st_mode) or directory.is_symlink() or directory.is_junction():
+        raise ValueError("WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH: snapshot directory is linked or invalid")
+    try:
+        fd = os.open(snapshot, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        if not validator._ordinary_custody_snapshot(item, f"review-artifact-custody/{digest}", digest):
+            raise ValueError("WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH: existing snapshot conflicts")
+    else:
+        owned["snapshot"] = snapshot
+        if owned_identities is not None:
+            info = os.fstat(fd)
+            owned_identities["snapshot"] = info.st_dev, info.st_ino
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(source_bytes)
+            stream.flush()
+    return snapshot
+
+
 def _capture_review_custody(
     item: Path, args: argparse.Namespace, validator: Any,
     previous: str, event: dict[str, Any], owned: dict[str, Path],
@@ -1611,22 +1638,7 @@ def _capture_review_custody(
     source_bytes = _ordinary_custody_source(source_root, artifact)
     if hashlib.sha256(source_bytes).hexdigest() != digest or _git_custody_value(source_root, "HEAD") != head:
         raise ValueError("WI-LEDGER-CUSTODY-SOURCE-DRIFT: approved source bytes or HEAD changed")
-    directory = item / "review-artifact-custody"
-    snapshot = directory / digest
-    directory.mkdir(exist_ok=True)
-    directory_stat = directory.lstat()
-    if not stat.S_ISDIR(directory_stat.st_mode) or directory.is_symlink() or directory.is_junction():
-        raise ValueError("WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH: snapshot directory is linked or invalid")
-    try:
-        fd = os.open(snapshot, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        if not validator._ordinary_custody_snapshot(item, f"review-artifact-custody/{digest}", digest):
-            raise ValueError("WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH: existing snapshot conflicts")
-    else:
-        owned["snapshot"] = snapshot
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(source_bytes)
-            stream.flush()
+    _acquire_custody_snapshot(item, source_bytes, digest, validator, owned)
     event["reviewArtifactCustody"] = {
         "kind": "linked-worktree-review-v1", "targetRunId": target_id,
         "targetRawLineSha256": target_digest,

@@ -5887,6 +5887,161 @@ def audit(root: Path) -> tuple[str, ...]:
     return legacy_read_compatible
 
 
+def retain_historical_pass_custody(
+    root: Path, slug: str, run_id: str, raw_line_ordinal: int,
+    expected_raw_line_sha256: str, expected_ledger_sha256: str,
+    source_artifact: str, expected_original_sha256: str, *, apply: bool = False,
+) -> Path:
+    """Retain independently admitted original PASS bytes without rewriting its ledger.
+
+    Missing apply refuses before acquiring a lifecycle transaction. Exact replay
+    retains the original request's prefix digest even after later ledger appends.
+    Matching readers must be deployed before the original artifact is removed.
+    """
+    if apply is not True:
+        raise LifecycleError("WI-LEDGER-CUSTODY-APPLY-REQUIRED", "retain-pass-artifact requires explicit --apply")
+    return _retain_historical_pass_custody(
+        root, slug, run_id, raw_line_ordinal, expected_raw_line_sha256,
+        expected_ledger_sha256, source_artifact, expected_original_sha256,
+    )
+
+
+@_lifecycle_participant
+def _retain_historical_pass_custody(
+    root: Path, slug: str, run_id: str, raw_line_ordinal: int,
+    expected_raw_line_sha256: str, expected_ledger_sha256: str,
+    source_artifact: str, expected_original_sha256: str,
+) -> Path:
+    stale = "WI-LEDGER-CUSTODY-STALE-TARGET"
+    source_drift = "WI-LEDGER-CUSTODY-SOURCE-DRIFT"
+    mismatch = "WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH"
+    item = _active_migration_item(root, slug)
+    ledger = _load_agent_run_ledger()
+    validator = ledger.load_validator()
+    if (
+        type(raw_line_ordinal) is not int or raw_line_ordinal < 1
+        or not isinstance(run_id, str) or not run_id
+        or any(not isinstance(value, str) or validator.SHA256_RE.fullmatch(value) is None
+               for value in (expected_raw_line_sha256, expected_ledger_sha256, expected_original_sha256))
+    ):
+        raise LifecycleError(stale, "request raw identity or lowercase SHA-256 is invalid")
+    if (
+        not isinstance(source_artifact, str) or not validator._safe_repo_relative(source_artifact)
+        or source_artifact in {"", "."}
+    ):
+        raise LifecycleError(source_drift, "source artifact must be repository-relative")
+    association_key = f"review-artifact-custody/historical-pass/{expected_raw_line_sha256}.json"
+    association = _require_lifecycle_mutation_path(root, item / association_key, failure_id=stale)
+    repository = _repository_root_for_item(item)
+    with ledger.ledger_write_lock(item):
+        captured = _capture_file_snapshot(
+            item / "agent-runs.jsonl", failure_id=stale,
+            maximum_bytes=validator.MAX_LEDGER_EVENTS * validator.MAX_LEDGER_LINE_BYTES,
+        )
+        raw = captured.data
+        errors: list[str] = []
+        metadata: list[dict[str, object]] = []
+        events = validator.load_jsonl(captured.path, errors, metadata, raw)
+        targets = [
+            event for event, identity in zip(events, metadata)
+            if identity["line"] == raw_line_ordinal
+            and identity["sha256"] == expected_raw_line_sha256
+            and event.get("runId") == run_id
+        ]
+        if errors or len(targets) != 1:
+            raise LifecycleError(stale, "captured raw target differs")
+        target = targets[0]
+        if association.exists():
+            existing = _capture_file_snapshot(association, failure_id=stale)
+            try:
+                envelope = validator.decode_json_object(existing.data, source=association_key)
+            except ValueError as exc:
+                raise LifecycleError(stale, "existing association is invalid") from exc
+            if (
+                envelope.get("sourcePrefixSha256") != expected_ledger_sha256
+                or envelope.get("rawLineOrdinal") != raw_line_ordinal
+                or envelope.get("rawLineSha256") != expected_raw_line_sha256
+                or envelope.get("runId") != run_id
+                or envelope.get("originalArtifact") != target.get("artifact")
+                or envelope.get("snapshotSha256") != expected_original_sha256
+            ):
+                raise LifecycleError(stale, "replay request conflicts with immutable association")
+            _, replay_errors = validator.resolve_historical_pass_custody(item, raw, events, metadata)
+            if replay_errors:
+                raise LifecycleError(replay_errors[0].split(":", 1)[0], "; ".join(replay_errors))
+            _verify_captured_file(captured, stale)
+            _verify_captured_file(existing, stale)
+            return association
+        if hashlib.sha256(raw).hexdigest() != expected_ledger_sha256:
+            raise LifecycleError(stale, "complete captured ledger digest changed")
+        try:
+            original_bytes = ledger._ordinary_custody_source(repository, source_artifact)
+        except ValueError as exc:
+            raise LifecycleError(source_drift, str(exc)) from exc
+        if hashlib.sha256(original_bytes).hexdigest() != expected_original_sha256:
+            raise LifecycleError(source_drift, "independently admitted original digest differs")
+        snapshot_key = f"review-artifact-custody/{expected_original_sha256}"
+        envelope = {
+            "kind": "historical-pass-custody", "sourcePrefixSha256": expected_ledger_sha256,
+            "sourcePrefixBytes": len(raw), "rawLineOrdinal": raw_line_ordinal,
+            "rawLineSha256": expected_raw_line_sha256, "runId": run_id,
+            "originalArtifact": target.get("artifact"), "snapshot": snapshot_key,
+            "snapshotSha256": expected_original_sha256,
+        }
+        envelope_bytes = validator._canonical_projection_bytes(envelope)
+        candidates = {association_key: envelope_bytes, snapshot_key: original_bytes}
+        errors = validator.validate_work_item(
+            item, strict_revise=False, historical_pass_custody_blobs=candidates,
+            selected_ledger_bytes=raw,
+        )
+        if errors:
+            failure_id = errors[0].split(":", 1)[0] if errors[0].startswith("WI-LEDGER-CUSTODY-") else stale
+            raise LifecycleError(failure_id, "; ".join(errors))
+        _verify_captured_file(captured, stale)
+        owned: dict[str, Path] = {}
+        owned_identities: dict[str, tuple[int, int]] = {}
+        owned_snapshot = None
+        created_directories: list[Path] = []
+        published = False
+        try:
+            for directory in (item / "review-artifact-custody", association.parent):
+                if not directory.exists():
+                    directory.mkdir()
+                    created_directories.append(directory)
+            try:
+                snapshot = ledger._acquire_custody_snapshot(
+                    item, original_bytes, expected_original_sha256, validator, owned,
+                    owned_identities=owned_identities,
+                )
+            except ValueError as exc:
+                raise LifecycleError(mismatch, str(exc)) from exc
+            if "snapshot" in owned:
+                owned_snapshot = _capture_file_snapshot(snapshot, failure_id=mismatch, maximum_bytes=len(original_bytes))
+            _verify_captured_file(captured, stale)
+            if association.exists() or association.is_symlink():
+                raise LifecycleError(stale, "association appeared before publication")
+            _atomic_write(association, envelope_bytes)
+            published = True
+            return association
+        finally:
+            if not published:
+                if owned_snapshot is None and "snapshot" in owned:
+                    owned_snapshot = _capture_file_snapshot(
+                        owned["snapshot"], failure_id=mismatch, maximum_bytes=len(original_bytes),
+                    )
+                    if (
+                        owned_snapshot.identity != owned_identities.get("snapshot")
+                        or not original_bytes.startswith(owned_snapshot.data)
+                    ):
+                        raise LifecycleError(mismatch, "unpublished snapshot ownership or bytes changed; preserved")
+                if owned_snapshot is not None:
+                    _verify_captured_file(owned_snapshot, mismatch)
+                    owned_snapshot.path.unlink()
+                for directory in reversed(created_directories):
+                    if not any(directory.iterdir()):
+                        directory.rmdir()
+
+
 def _active_migration_item(root: Path, slug: str) -> Path:
     _validate_slug(slug)
     item = _work_items_root(root) / "active" / slug
@@ -19367,6 +19522,14 @@ def _parse_partial_recovery_status_bindings(values: list[str]) -> dict[str, str]
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
+    pass_custody = sub.add_parser(
+        "retain-pass-artifact", help="Retain exact admitted original bytes of one raw historical PASS; never append a verdict",
+    )
+    _add_root(pass_custody)
+    for flag in ("slug", "run-id", "expected-raw-line-sha256", "expected-ledger-sha256", "source-artifact", "expected-original-sha256"):
+        pass_custody.add_argument(f"--{flag}", required=True)
+    pass_custody.add_argument("--raw-line-ordinal", type=int, required=True)
+    pass_custody.add_argument("--apply", action="store_true", help="Explicitly authorize custody publication; omission refuses")
     for name in ("candidate", "start", "update", "close", "reopen"):
         command = sub.add_parser(name)
         _add_root(command)
@@ -19651,7 +19814,14 @@ def main(argv: list[str]) -> int:
     root = Path(args.root)
     lifecycle_diagnostic_observer = None
     try:
-        if args.command == "candidate":
+        if args.command == "retain-pass-artifact":
+            result = retain_historical_pass_custody(
+                root, args.slug, args.run_id, args.raw_line_ordinal,
+                args.expected_raw_line_sha256, args.expected_ledger_sha256,
+                args.source_artifact, args.expected_original_sha256, apply=args.apply,
+            )
+            print(f"WI-PASS-CUSTODY: {result.relative_to(_repository_root_for_item(result.parent.parent.parent)).as_posix()}")
+        elif args.command == "candidate":
             result = create_candidate(
                 root,
                 args.slug,

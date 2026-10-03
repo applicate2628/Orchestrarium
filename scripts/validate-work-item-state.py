@@ -831,6 +831,126 @@ def _ordinary_custody_snapshot(item: Path, snapshot: str, digest: str) -> bool:
         return False
 
 
+def resolve_historical_pass_custody(
+    item: Path, selected_ledger_bytes: bytes, events: Sequence[Mapping[str, object]],
+    raw_metadata: Sequence[Mapping[str, object]], *,
+    candidate_blobs: Mapping[str, bytes] | None = None,
+) -> tuple[Mapping[tuple[int, str, str, str], str], tuple[str, ...]]:
+    """Bind immutable artifact locators to captured raw PASS identities, not authority."""
+    errors: list[str] = []
+    locators: dict[tuple[int, str, str, str], str] = {}
+    directory = item / "review-artifact-custody" / "historical-pass"
+    blobs: dict[str, bytes] = {}
+    stale = "WI-LEDGER-CUSTODY-STALE-TARGET"
+    mismatch = "WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH"
+    try:
+        if directory.exists() or directory.is_symlink():
+            if (
+                _is_link_or_reparse(directory.parent) or _is_link_or_reparse(directory)
+                or not directory.is_dir()
+            ):
+                raise ValueError(f"{stale}: association directory is not ordinary")
+            for path in sorted(directory.iterdir(), key=lambda value: value.name):
+                if _is_link_or_reparse(path) or not path.is_file():
+                    raise ValueError(f"{stale}: association is not an ordinary file")
+                blobs[path.relative_to(item).as_posix()] = path.read_bytes()
+        for path, raw in (candidate_blobs or {}).items():
+            if not isinstance(path, str) or not isinstance(raw, bytes):
+                raise ValueError(f"{stale}: candidate custody is not path-bound bytes")
+            if path.startswith("review-artifact-custody/historical-pass/"):
+                if path in blobs and blobs[path] != raw:
+                    raise ValueError(f"{stale}: immutable association conflicts")
+                blobs[path] = raw
+        if len(events) != len(raw_metadata):
+            raise ValueError(f"{stale}: raw identity cardinality differs")
+        if not blobs:
+            return MappingProxyType({}), ()
+        if not isinstance(selected_ledger_bytes, bytes):
+            raise ValueError(f"{stale}: selected ledger is not captured bytes")
+        identities = {
+            (metadata.get("line"), metadata.get("sha256"), event.get("runId"), event.get("artifact")): event
+            for event, metadata in zip(events, raw_metadata)
+        }
+        fields = {
+            "kind", "sourcePrefixSha256", "sourcePrefixBytes", "rawLineOrdinal",
+            "rawLineSha256", "runId", "originalArtifact", "snapshot", "snapshotSha256",
+        }
+        for path, raw in blobs.items():
+            try:
+                envelope = decode_json_object(raw, source=path, maximum_bytes=MAX_LEDGER_LINE_BYTES)
+                if (
+                    set(envelope) != fields or envelope.get("kind") != "historical-pass-custody"
+                    or raw != _canonical_projection_bytes(envelope)
+                    or any(not isinstance(envelope.get(key), str)
+                           or SHA256_RE.fullmatch(envelope[key]) is None
+                           for key in ("sourcePrefixSha256", "rawLineSha256", "snapshotSha256"))
+                    or type(envelope.get("sourcePrefixBytes")) is not int
+                    or not 0 < envelope["sourcePrefixBytes"] <= len(selected_ledger_bytes)
+                    or type(envelope.get("rawLineOrdinal")) is not int
+                    or envelope["rawLineOrdinal"] < 1
+                    or not isinstance(envelope.get("runId"), str)
+                    or not isinstance(envelope.get("originalArtifact"), str)
+                    or not _safe_repo_relative(envelope["originalArtifact"])
+                    or envelope["originalArtifact"] in {"", "."}
+                    or path != f"review-artifact-custody/historical-pass/{envelope['rawLineSha256']}.json"
+                ):
+                    raise ValueError(f"{stale}: invalid canonical envelope or locator")
+                prefix = selected_ledger_bytes[:envelope["sourcePrefixBytes"]]
+                if hashlib.sha256(prefix).hexdigest() != envelope["sourcePrefixSha256"]:
+                    raise ValueError(f"{stale}: captured source prefix differs")
+                identity = (
+                    envelope["rawLineOrdinal"], envelope["rawLineSha256"],
+                    envelope["runId"], envelope["originalArtifact"],
+                )
+                event = identities.get(identity)
+                prefix_errors: list[str] = []
+                prefix_metadata: list[dict[str, object]] = []
+                prefix_events = load_jsonl(item / "agent-runs.jsonl", prefix_errors, prefix_metadata, prefix)
+                prefix_identities = {
+                    (metadata["line"], metadata["sha256"], row.get("runId"), row.get("artifact"))
+                    for row, metadata in zip(prefix_events, prefix_metadata)
+                }
+                if (
+                    prefix_errors or identity not in prefix_identities or event is None
+                    or event.get("gate") != "PASS" or event.get("status") != "completed"
+                    or type(event.get("schemaVersion")) is not int or event["schemaVersion"] not in {1, 2}
+                    or sum(isinstance(row.get("runId"), str)
+                           and row["runId"].casefold() == envelope["runId"].casefold()
+                           for row in events) != 1
+                ):
+                    raise ValueError(f"{stale}: captured raw completed PASS identity differs")
+                digest = envelope["snapshotSha256"]
+                snapshot = envelope["snapshot"]
+                if snapshot != f"review-artifact-custody/{digest}":
+                    raise ValueError(f"{mismatch}: snapshot path is not digest-only")
+                review = event.get("reviewArtifactCustody")
+                if review is not None and (
+                    not isinstance(review, dict) or review.get("snapshot") != snapshot
+                    or review.get("reviewedSha256") != digest
+                ):
+                    raise ValueError(f"{stale}: existing review custody conflicts")
+                if candidate_blobs is not None and snapshot in candidate_blobs:
+                    snapshot_valid = hashlib.sha256(candidate_blobs[snapshot]).hexdigest() == digest
+                    leaf = item / snapshot
+                    if leaf.exists() or leaf.is_symlink():
+                        snapshot_valid = snapshot_valid and _ordinary_custody_snapshot(item, snapshot, digest)
+                else:
+                    snapshot_valid = _ordinary_custody_snapshot(item, snapshot, digest)
+                if not snapshot_valid:
+                    raise ValueError(f"{mismatch}: missing or altered snapshot")
+                if identity in locators and locators[identity] != snapshot:
+                    raise ValueError(f"{stale}: conflicting raw identity locator")
+                locators[identity] = snapshot
+            except ValueError as exc:
+                message = str(exc)
+                errors.append(message if message.startswith("WI-LEDGER-CUSTODY-")
+                              else f"{stale}: invalid association: {message}")
+    except (OSError, ValueError) as exc:
+        errors.append(str(exc) if str(exc).startswith("WI-LEDGER-CUSTODY-")
+                      else f"{stale}: cannot acquire custody associations")
+    return MappingProxyType(locators if not errors else {}), tuple(errors)
+
+
 _LEGACY_PROJECTION_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", re.ASCII)
 
 
@@ -1352,6 +1472,9 @@ class LedgerValidationContextV1:
     group_open_revise_ids: tuple[str, ...]
     group_open_launch_ids: tuple[str, ...]
     invocation_token: object
+    historical_pass_custody: Mapping[tuple[int, str, str, str], str] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
 
 @dataclass(frozen=True)
@@ -1556,6 +1679,7 @@ def _validate_event(
     errors: list[str],
     *,
     historical_artifact_authorization: HistoricalArtifactAuthorization | None = None,
+    historical_pass_snapshot: str | None = None,
     legacy_archived_review_pointer_compat: bool = False,
     telemetry: dict[str, int] | None = None,
 ) -> bool:
@@ -1660,6 +1784,8 @@ def _validate_event(
             fail(errors, f"{run_id}: missing or altered review snapshot (WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH)")
         else:
             artifact_path = item / snapshot
+    elif historical_pass_snapshot is not None:
+        artifact_path = item / historical_pass_snapshot
     elif artifact:
         artifact_path = resolve_work_item_path(item, artifact, "artifact", run_id, errors)
     elif "artifact" in event and not isinstance(artifact, str):
@@ -1827,7 +1953,10 @@ def _validate_event(
             and historical_artifact_authorization.event_sha256
             == hashlib.sha256(_canonical_projection_bytes(event)).hexdigest()
         )
-        missing_artifact = artifact_path is not None and not artifact_path.exists()
+        missing_artifact = (
+            historical_pass_snapshot is None
+            and artifact_path is not None and not artifact_path.exists()
+        )
         compatible_missing_review_pointer = (
             missing_artifact
             and not authorized_missing
@@ -2085,7 +2214,8 @@ def _launch_profile_is_exact(event: Mapping[str, object]) -> bool:
 
 
 def _derive_authority_masks(
-    rows: Sequence[RuntimeLedgerRowV1], current_validity: Sequence[bool], item: Path
+    rows: Sequence[RuntimeLedgerRowV1], current_validity: Sequence[bool], item: Path,
+    historical_pass_custody: Mapping[tuple[int, str, str, str], str] | None = None,
 ) -> tuple[LedgerAuthorityV1, ...]:
     """Derive five independent authority axes from exact raw event fields."""
 
@@ -2163,7 +2293,11 @@ def _derive_authority_masks(
         if row.epoch == "sealed-prefix":
             isolated_errors: list[str] = []
             individually_current = _validate_event(
-                dict(event), item, set(), isolated_errors
+                dict(event), item, set(), isolated_errors,
+                historical_pass_snapshot=(historical_pass_custody or {}).get((
+                    row.raw_line_ordinal, row.raw_body_sha256,
+                    event.get("runId"), event.get("artifact"),
+                )),
             )
         else:
             individually_current = current_ok
@@ -2214,6 +2348,16 @@ def derive_event_validity(
         )
     seen: set[str] = set()
     current: list[bool] = []
+    # Raw-line hashes use different wire conventions in ordinary and H1 rows.
+    # The resolver has checked the exact digest against captured bytes; only its
+    # own context rows may consume that locator, never projected/inherited rows.
+    custody = {
+        (ordinal, run_id, artifact): snapshot
+        for (ordinal, _digest, run_id, artifact), snapshot in (
+            context.historical_pass_custody.items()
+            if context is not None and context.rows is rows else ()
+        )
+    }
     for row in rows:
         event = row.event
         if row.epoch in {
@@ -2224,8 +2368,15 @@ def derive_event_validity(
         ):
             current.append(False)
             continue
-        current.append(_validate_event(dict(event), item, seen, errors))
-    masks = _derive_authority_masks(rows, current, item)
+        snapshot = custody.get((row.raw_line_ordinal, event.get("runId"), event.get("artifact"))) \
+            if row.epoch in {"raw", "strict-suffix"} else None
+        current.append(_validate_event(
+            dict(event), item, seen, errors, historical_pass_snapshot=snapshot
+        ))
+    masks = _derive_authority_masks(
+        rows, current, item,
+        context.historical_pass_custody if context is not None and context.rows is rows else None,
+    )
     return tuple(
         LedgerEventValidityV1(current_schema_valid=value, authority=mask)
         for value, mask in zip(current, masks)
@@ -2239,6 +2390,7 @@ def derive_archived_event_validity(
     authorizations: dict[int, HistoricalArtifactAuthorization],
     *,
     rows: tuple[LedgerProjectionRowV1, ...],
+    historical_pass_custody: Mapping[tuple[int, str, str, str], str] | None = None,
     telemetry: dict[str, int] | None = None,
 ) -> tuple[list[bool], list[bool]]:
     """Return diagnostics validity plus the stricter closure-eligibility mask."""
@@ -2287,6 +2439,10 @@ def derive_archived_event_validity(
             seen,
             errors,
             historical_artifact_authorization=authorization,
+            historical_pass_snapshot=(historical_pass_custody or {}).get((
+                row.raw_line_ordinal, row.raw_line_sha256,
+                event.get("runId"), event.get("artifact"),
+            )) if row.transformation == "raw" else None,
             legacy_archived_review_pointer_compat=legacy_archived_review_pointer_compat,
             telemetry=telemetry,
         )
@@ -2984,6 +3140,9 @@ def _ledger_h1_runtime_rows(
     prefix_line_count: int | None,
     item: Path,
     errors: list[str],
+    *,
+    historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
+    historical_pass_custody_out: list[Mapping[tuple[int, str, str, str], str]] | None = None,
 ) -> tuple[RuntimeLedgerRowV1, ...]:
     events, physical = _ledger_h1_parse_lines(raw, ledger_path, errors)
     if len(events) != len(physical):
@@ -3006,8 +3165,16 @@ def _ledger_h1_runtime_rows(
         )
         for ordinal, (event, line) in enumerate(zip(events, physical), start=1)
     )
+    custody, custody_errors = resolve_historical_pass_custody(
+        item, raw, events,
+        tuple({"line": row.raw_line_ordinal, "sha256": row.raw_body_sha256} for row in rows),
+        candidate_blobs=historical_pass_custody_blobs,
+    )
+    errors.extend(custody_errors)
+    if historical_pass_custody_out is not None:
+        historical_pass_custody_out.append(custody)
     current = [False] * len(rows)
-    masks = _derive_authority_masks(rows, current, item)
+    masks = _derive_authority_masks(rows, current, item, custody)
     return tuple(
         RuntimeLedgerRowV1(
             row.event,
@@ -3519,7 +3686,8 @@ def _apply_active_suffix_dispositions(
 
 
 def _ledger_h1_candidate_group(
-    root: Path, artifacts: LedgerCompatibilityArtifactSetV1
+    root: Path, artifacts: LedgerCompatibilityArtifactSetV1,
+    historical_pass_custody_blobs_by_item: Mapping[Path, Mapping[str, bytes]] | None = None,
 ) -> Mapping[str, LedgerValidationContextV1]:
     failures: list[str] = []
     diagnostics: list[str] = []
@@ -3619,6 +3787,7 @@ def _ledger_h1_candidate_group(
     revise_identities: list[str] = []
     open_launch_ids: set[str] = set()
     physical_items_by_path: dict[str, Path] = {}
+    custody_by_path: dict[str, Mapping[tuple[int, str, str, str], str]] = {}
     for entry in entries:
         path = entry.get("ledgerPath")
         work_item = entry.get("workItem")
@@ -3711,9 +3880,18 @@ def _ledger_h1_candidate_group(
             diagnostics.extend(identity_errors)
             continue
         physical_items_by_path[path] = item
-        rows = _ledger_h1_runtime_rows(path, raw, entry["prefixLineCount"], item, diagnostics)
+        captured_custody: list[Mapping[tuple[int, str, str, str], str]] = []
+        custody_diagnostics: list[str] = []
+        rows = _ledger_h1_runtime_rows(
+            path, raw, entry["prefixLineCount"], item, custody_diagnostics,
+            historical_pass_custody_blobs=(historical_pass_custody_blobs_by_item or {}).get(item),
+            historical_pass_custody_out=captured_custody,
+        )
+        diagnostics.extend(custody_diagnostics)
+        failures.extend(message.split(":", 1)[0] for message in custody_diagnostics)
         if not rows:
             continue
+        custody_by_path[path] = captured_custody[0] if captured_custody else MappingProxyType({})
         wire, open_revises, open_launches = _ledger_h1_view_wire(entry, rows)
         projected_digest = _ledger_h1_digest(
             "orchestrarium:ledger-h1:projected-view:v1", wire
@@ -3993,6 +4171,7 @@ def _ledger_h1_candidate_group(
                 (),
                 (),
                 token,
+                custody_by_path.get(path, MappingProxyType({})),
             )
             for path in ledger_paths
         }
@@ -4013,6 +4192,7 @@ def _ledger_h1_candidate_group(
             tuple(revise_identities),
             open_launch_tuple,
             token,
+            custody_by_path.get(path, MappingProxyType({})),
         )
         for path in ledger_paths
     }
@@ -4041,6 +4221,9 @@ def _ledger_h1_acquisition_failure_context(
 
 def _load_live_ledger_h1_artifacts(
     root: Path,
+    *,
+    selected_ledger_path: Path | None = None,
+    selected_ledger_bytes: bytes | None = None,
 ) -> LedgerCompatibilityArtifactSetV1 | None:
     """Acquire one complete live participant set without interpreting authority."""
 
@@ -4188,7 +4371,13 @@ def _load_live_ledger_h1_artifacts(
             ledger_path = root.joinpath(*PurePosixPath(physical_ledger_path).parts)
             if not ledger_path.is_file() or _is_link_or_reparse(ledger_path):
                 return None
-            ledger_bytes_by_path[ledger_relative] = ledger_path.read_bytes()
+            ledger_bytes_by_path[ledger_relative] = (
+                selected_ledger_bytes
+                if selected_ledger_bytes is not None
+                and selected_ledger_path is not None
+                and ledger_path.absolute() == selected_ledger_path.absolute()
+                else ledger_path.read_bytes()
+            )
             participant_locations_by_path[ledger_relative] = location
         return LedgerCompatibilityArtifactSetV1(
             MappingProxyType(ledger_bytes_by_path),
@@ -4208,6 +4397,7 @@ def _load_effective_ledger_group(
     root: Path,
     *,
     compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
+    historical_pass_custody_blobs_by_item: Mapping[Path, Mapping[str, bytes]] | None = None,
 ) -> Mapping[str, LedgerValidationContextV1]:
     """Load and validate one receipt-bound two-ledger group without caching."""
 
@@ -4219,7 +4409,9 @@ def _load_effective_ledger_group(
             return MappingProxyType({exc.logical_ledger_path: context})
         if compatibility_artifacts is None:
             return MappingProxyType({})
-    return _ledger_h1_candidate_group(Path(root), compatibility_artifacts)
+    return _ledger_h1_candidate_group(
+        Path(root), compatibility_artifacts, historical_pass_custody_blobs_by_item
+    )
 
 
 def _ledger_h1_selection_failure(
@@ -4324,7 +4516,8 @@ def _ordinary_current_disposition_rows(
 
 
 def _ordinary_raw_v2_effective_context(
-    item: Path, selected_ledger_path: str, raw: bytes
+    item: Path, selected_ledger_path: str, raw: bytes,
+    historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
 ) -> LedgerValidationContextV1:
     """Read one ordinary ledger through the same typed control composition."""
 
@@ -4345,10 +4538,14 @@ def _ordinary_raw_v2_effective_context(
         migrated_rows, item, selected_ledger_path, raw
     )
     diagnostics.extend(disposition_errors)
+    custody, custody_errors = resolve_historical_pass_custody(
+        item, raw, events, metadata, candidate_blobs=historical_pass_custody_blobs
+    )
+    diagnostics.extend(custody_errors)
     return LedgerValidationContextV1(
         selected_ledger_path, rows, None,
         LedgerCompatibilityObservationV1("inactive", (), tuple(diagnostics)),
-        (), (), object(),
+        (), (), object(), custody,
     )
 
 
@@ -4358,6 +4555,8 @@ def load_effective_ledger_view(
     selected_ledger_path: str,
     *,
     compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
+    historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
+    selected_ledger_bytes: bytes | None = None,
 ) -> LedgerValidationContextV1:
     """Return the selected raw or receipt-activated effective ledger context."""
 
@@ -4365,7 +4564,10 @@ def load_effective_ledger_view(
     resolved_artifacts = compatibility_artifacts
     if resolved_artifacts is None and _ledger_h1_live_participants_exist(root):
         try:
-            resolved_artifacts = _load_live_ledger_h1_artifacts(root)
+            resolved_artifacts = _load_live_ledger_h1_artifacts(
+                root, selected_ledger_path=item / "agent-runs.jsonl",
+                selected_ledger_bytes=selected_ledger_bytes,
+            )
         except _LedgerH1AcquisitionError as exc:
             return _ledger_h1_acquisition_failure_context(exc)
     physical_selected_path = selected_ledger_path
@@ -4374,7 +4576,11 @@ def load_effective_ledger_view(
     contexts: Mapping[str, LedgerValidationContextV1] = MappingProxyType({})
     if resolved_artifacts is not None:
         contexts = _load_effective_ledger_group(
-            root, compatibility_artifacts=resolved_artifacts
+            root, compatibility_artifacts=resolved_artifacts,
+            historical_pass_custody_blobs_by_item=(
+                {item: historical_pass_custody_blobs}
+                if historical_pass_custody_blobs is not None else None
+            ),
         )
         try:
             item_relative = Path(item).absolute().relative_to(root.absolute()).as_posix()
@@ -4424,7 +4630,7 @@ def load_effective_ledger_view(
             (), (), token,
         )
     try:
-        raw = selected.read_bytes()
+        raw = selected.read_bytes() if selected_ledger_bytes is None else selected_ledger_bytes
     except OSError as exc:
         diagnostic = f"cannot read ledger: {selected}: {exc}"
         return LedgerValidationContextV1(
@@ -4432,7 +4638,9 @@ def load_effective_ledger_view(
             LedgerCompatibilityObservationV1("inactive", (), (diagnostic,)),
             (), (), token,
         )
-    return _ordinary_raw_v2_effective_context(item, selected_ledger_path, raw)
+    return _ordinary_raw_v2_effective_context(
+        item, selected_ledger_path, raw, historical_pass_custody_blobs
+    )
 
 
 def _is_link_or_reparse(path: Path) -> bool:
@@ -6241,6 +6449,10 @@ def validate_archived_ledger_obligations(
         return errors, [], []
     raw_metadata: list[dict[str, object]] = []
     events = load_jsonl(ledger, errors, raw_metadata, ledger_bytes)
+    historical_pass_custody, custody_errors = resolve_historical_pass_custody(
+        item, ledger_bytes, events, raw_metadata
+    )
+    errors.extend(custody_errors)
     rows = _ledger_projection_rows(events, raw_metadata, errors)
     shaped_rows, projection_counters, projection_errors = _project_manifest_rows(
         rows, item, ledger, ledger_bytes
@@ -6261,6 +6473,7 @@ def validate_archived_ledger_obligations(
         errors,
         historical_authorizations,
         rows=effective_rows,
+        historical_pass_custody=historical_pass_custody,
         telemetry=telemetry,
     )
     typed_closure_validity = _validity_from_boolean_events(
@@ -6852,7 +7065,10 @@ def _reduce_effective_current_state(
     active_current_validity = tuple(
         validity[position].current_schema_valid for position in active_positions
     )
-    active_masks = _derive_authority_masks(active_rows, active_current_validity, item)
+    active_masks = _derive_authority_masks(
+        active_rows, active_current_validity, item,
+        context.historical_pass_custody if context is not None else None,
+    )
     active_validity = tuple(
         LedgerEventValidityV1(current_schema_valid, authority)
         for current_schema_valid, authority in zip(
@@ -6893,13 +7109,20 @@ def validate_work_item(
     compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
     obligation_state_out: list[WorkItemObligationStateV1] | None = None,
     authority_state_out: list[dict[int, LedgerAuthorityV1]] | None = None,
+    historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
+    selected_ledger_bytes: bytes | None = None,
 ) -> list[str]:
     """ledger_path: candidate-validation seam — validate THIS file instead of the live
     ledger (the atomic-write flow validates its temp candidate before os.replace).
     strict_revise: open v2 REVISE obligations are errors (decision item 3: a validation
     tool's job is failing); pass False only for triage sessions.
+    selected_ledger_bytes: the caller's captured candidate image; all selected-ledger
+    parsing and custody resolution use this image without reacquiring live bytes.
     """
     errors: list[str] = []
+    if selected_ledger_bytes is not None and not isinstance(selected_ledger_bytes, bytes):
+        fail(errors, "WI-LEDGER-CUSTODY-STALE-TARGET: captured selected ledger must be bytes")
+        return errors
     if compatibility_artifacts is not None and (
         ledger_path is not None
         or projection_manifest_blobs is not None
@@ -6921,14 +7144,24 @@ def validate_work_item(
         str, str, str, str, tuple[tuple[int, str], ...]
     ] | None = None
     selected_identity: str | None = None
+    selected_context: LedgerValidationContextV1 | None = None
     if live_compatibility_observed and effective_compatibility_artifacts is None:
         assert root is not None
         target = _projection_target_identity(item, selected_ledger, errors)
         if target is None:
             return errors
         selected_identity = f"{target[1]}/agent-runs.jsonl"
+        if ledger_path is not None and selected_ledger_bytes is None:
+            try:
+                selected_ledger_bytes = selected_ledger.read_bytes()
+            except OSError as exc:
+                fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
+                return errors
         try:
-            live_artifacts = _load_live_ledger_h1_artifacts(root)
+            live_artifacts = _load_live_ledger_h1_artifacts(
+                root, selected_ledger_path=item / "agent-runs.jsonl",
+                selected_ledger_bytes=selected_ledger_bytes,
+            )
         except _LedgerH1AcquisitionError as exc:
             errors.extend(
                 _ledger_h1_acquisition_failure_context(exc).observation.diagnostics
@@ -6941,7 +7174,11 @@ def validate_work_item(
             )
             return errors
         live_contexts = _load_effective_ledger_group(
-            root, compatibility_artifacts=live_artifacts
+            root, compatibility_artifacts=live_artifacts,
+            historical_pass_custody_blobs_by_item=(
+                {item: historical_pass_custody_blobs}
+                if historical_pass_custody_blobs is not None else None
+            ),
         )
         classification, selection = _classify_ledger_h1_selection(
             target[1],
@@ -6971,40 +7208,22 @@ def validate_work_item(
                 return errors
             validated_h1_partition = token.h1_projection_partition
         else:
-            if ledger_path is None:
-                selected_identity = getattr(
-                    selection, "logical_ledger_path", selected_identity
-                )
-                effective_compatibility_artifacts = live_artifacts
-            else:
-                try:
-                    candidate_bytes = selected_ledger.read_bytes()
-                except OSError as exc:
-                    fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
-                    return errors
-                candidate_ledgers = dict(live_artifacts.ledger_bytes_by_path)
-                candidate_ledgers[selected_identity] = candidate_bytes
-                effective_compatibility_artifacts = LedgerCompatibilityArtifactSetV1(
-                    MappingProxyType(candidate_ledgers),
-                    live_artifacts.h1_manifest_path,
-                    live_artifacts.h1_manifest_bytes,
-                    live_artifacts.ledger_manifest_path,
-                    live_artifacts.ledger_manifest_bytes,
-                    live_artifacts.registry_bytes,
-                    live_artifacts.receipt_bytes_by_path,
-                    live_artifacts.participant_locations_by_path,
-                )
+            selected_identity = getattr(selection, "logical_ledger_path", selected_identity)
+            effective_compatibility_artifacts = live_artifacts
+            selected_context = live_contexts[selected_identity]
     if effective_compatibility_artifacts is not None or live_compatibility_observed:
         if root is None:
             fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: work item has no repository root")
             return errors
         if selected_identity is None:
             selected_identity = selected_ledger.absolute().relative_to(root.absolute()).as_posix()
-        context = load_effective_ledger_view(
+        context = selected_context or load_effective_ledger_view(
             root,
             item,
             selected_identity,
             compatibility_artifacts=effective_compatibility_artifacts,
+            historical_pass_custody_blobs=historical_pass_custody_blobs,
+            selected_ledger_bytes=selected_ledger_bytes,
         )
         errors.extend(context.observation.diagnostics)
         if telemetry is not None and context.observation.disposition_notices:
@@ -7092,12 +7311,17 @@ def validate_work_item(
     ledger_bytes = b""
     if not ledger_free_quick_fix:
         try:
-            ledger_bytes = selected_ledger.read_bytes()
+            ledger_bytes = selected_ledger.read_bytes() if selected_ledger_bytes is None else selected_ledger_bytes
         except OSError as exc:
             fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
         events = load_jsonl(selected_ledger, errors, raw_metadata, ledger_bytes)
     else:
         events = []
+    historical_pass_custody, custody_errors = resolve_historical_pass_custody(
+        item, ledger_bytes, events, raw_metadata,
+        candidate_blobs=historical_pass_custody_blobs,
+    )
+    errors.extend(custody_errors)
     rows = _ledger_projection_rows(events, raw_metadata, errors)
     shape_rows, projection_counters, projection_errors = _project_manifest_rows(
         rows, item, selected_ledger, ledger_bytes,
@@ -7131,13 +7355,18 @@ def validate_work_item(
     ):
         fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: inherited rows cannot share recovery")
     runtime_rows = _runtime_rows_from_projection(inherited_rows) + native_runtime_rows
+    context = LedgerValidationContextV1(
+        root_relative, runtime_rows, None,
+        LedgerCompatibilityObservationV1("inactive", (), ()),
+        (), (), object(), historical_pass_custody,
+    )
     active_positions, event_validity, open_revise, open_launches = (
         _reduce_effective_current_state(
             runtime_rows,
             item,
             errors,
             telemetry,
-            context=None,
+            context=context,
         )
     )
     if authority_state_out is not None:

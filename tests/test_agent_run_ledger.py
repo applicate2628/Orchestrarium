@@ -123,6 +123,63 @@ def test_custody_two_targets_reuse_one_exact_snapshot(tmp_path: Path) -> None:
     assert run_validator(item).returncode == 0
 
 
+def historical_pass_h1_fixture(tmp_path: Path, state: str):
+    fixture_path = ROOT / "tests" / "test_ledger_h1_effective_view.py"
+    spec = importlib.util.spec_from_file_location("custody_h1_fixtures", fixture_path)
+    fixtures = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixtures)
+    validator = load_ledger_module().load_validator()
+    root = tmp_path / state
+    artifacts, items, paths, _ = fixtures.synthetic_artifacts(
+        validator, root, sealed_closer_artifact="target.md",
+    )
+    if state == "revoked":
+        artifacts = fixtures.revoked_artifacts(validator, artifacts)
+    fixtures.materialize_live_artifacts(root, artifacts)
+    item = items[0]
+    (item / "status.md").write_text(valid_status(), encoding="utf-8")
+    source = root / "original-copy.md"
+    source.write_bytes((item / "target.md").read_bytes())
+    raw = (item / "agent-runs.jsonl").read_bytes()
+    target_raw = raw.splitlines()[3]
+    target = json.loads(target_raw)
+    return validator, root, item, source, raw, target_raw, target, paths[0]
+
+
+@pytest.mark.parametrize("missing_before_apply", [False, True], ids=["present-at-apply", "missing-at-apply"])
+@pytest.mark.parametrize("state", ["active", "revoked"])
+def test_historical_pass_custody_preserves_live_and_revoked_h1_authority(
+    tmp_path: Path, state: str, missing_before_apply: bool,
+) -> None:
+    validator, root, item, source, raw, target_raw, target, path = historical_pass_h1_fixture(tmp_path, state)
+    baseline_context = validator.load_effective_ledger_view(root, item, path)
+    baseline_errors = []
+    baseline = validator.derive_event_validity(
+        baseline_context.rows, item, baseline_errors, context=baseline_context,
+    )
+    if missing_before_apply:
+        (item / "target.md").unlink()
+    result = subprocess.run([
+        sys.executable, str(ROOT / "scripts" / "mutate-work-item.py"),
+        "retain-pass-artifact", "--root", str(root), "--slug", item.name,
+        "--run-id", target["runId"], "--raw-line-ordinal", "4",
+        "--expected-raw-line-sha256", hashlib.sha256(target_raw).hexdigest(),
+        "--expected-ledger-sha256", hashlib.sha256(raw).hexdigest(),
+        "--source-artifact", "original-copy.md", "--expected-original-sha256",
+        hashlib.sha256(source.read_bytes()).hexdigest(), "--apply",
+    ], capture_output=True, text=True)
+    assert result.returncode == 0, (state, result.stdout, result.stderr)
+    if not missing_before_apply:
+        (item / "target.md").unlink()
+    context = validator.load_effective_ledger_view(root, item, path)
+    assert context.observation.activation_state == state, context.observation.diagnostics
+    errors = []
+    actual = validator.derive_event_validity(context.rows, item, errors, context=context)
+    assert (actual, errors) == (baseline, baseline_errors)
+    assert (item / "agent-runs.jsonl").read_bytes() == raw
+    assert context.historical_pass_custody
+
+
 def test_custody_refuses_dirty_w_drift_at_unchanged_head(tmp_path: Path) -> None:
     item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
     approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()

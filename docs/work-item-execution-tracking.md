@@ -118,6 +118,10 @@ When a parent work item must close a review of bytes in a distinct linked worktr
 
 Under its ledger lock, the writer verifies the exact open target and parent ledger, checks the linked worktree identity and current HEAD, captures only bytes matching the reviewer's pre-supplied digest, and creates or verifies `review-artifact-custody/<digest>` under the parent. The typed V2 `reviewArtifactCustody` row binds the target's raw-line hash and the snapshot; the validator hashes that local snapshot during replay and never substitutes an archived same-name file or requires the source worktree to remain mounted. Source paths may resolve through an in-worktree link, but may not escape that worktree. The parent snapshot itself must be an ordinary non-link file. Stale inputs, changed W bytes, and conflicting snapshots fail without a closer. The independent reviewer still owns the PASS verdict; custody alone grants none. Deploy matching writer, schema, and validator before a typed append; older closed-schema readers cannot replay it afterward.
 
+## Retain An Active Historical PASS Artifact
+
+Before removing an active work item's old artifact pointer, independently admit the exact original bytes and their SHA-256 (Secure Hash Algorithm, 256-bit) digest; a reviewed rewrite is not the original. Run `python scripts/mutate-work-item.py retain-pass-artifact --root <repo> --slug <slug> --run-id <id> --raw-line-ordinal <physical-line> --expected-raw-line-sha256 <line-sha256> --expected-ledger-sha256 <ledger-sha256> --source-artifact <repo-relative-original-copy> --expected-original-sha256 <original-sha256> --apply`. Supply lowercase hexadecimal digests. The line digest excludes its carriage-return/line-feed terminator; the initial ledger digest covers every captured byte. Omitted `--apply` refuses without publication. Success prints `WI-PASS-CUSTODY:` and stores one immutable association under the item plus a digest-only snapshot, without appending a verdict or changing finding/closure authority. Deploy the matching validator on every consuming machine before removing the old pointer; older readers still require it. Exact replay uses the same original request digests even after later ledger appends. Stale row/prefix inputs, rewritten source bytes, and snapshot drift refuse. The snapshot moves with an archived item. Rollback requires separate authorization to withdraw this association and only a newly owned, unreferenced snapshot; never remove a shared snapshot or rewrite ledger history.
+
 ## Validate One Work Item
 
 Run this before stage closeout or archive movement.
@@ -730,6 +734,7 @@ declared root never grants a whole-repository cleanup `PASS`.
 - `JSONL`: JSON Lines; one JSON object per line, used here for append-only ledger events.
 - `PASS`: gate state meaning a scoped artifact passed the relevant checks.
 - `REVISE`: gate state meaning the artifact must return to the same role for bounded correction.
+- `SHA-256`: Secure Hash Algorithm with a 256-bit byte-content digest.
 - `V1` / `V2`: Version 1 / Version 2 of the execution-ledger event schema.
 - `C1`–`C5`: existing closure-relation checks for target order and eligibility, unique discharge, closing authority, and protected waivers.
 - `stale running agent`: a ledger event still marked `running` after the configured age threshold.

@@ -1064,6 +1064,241 @@ def tree_file_bytes(root: Path) -> dict[str, bytes]:
     }
 
 
+def historical_pass_fixture(tmp_path: Path):
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "historical-pass"
+    seed_active(module, root, slug)
+    item = root / "work-items" / "active" / slug
+    original = root / ".scratch" / "approved" / "original.md"
+    write(original, "Original accepted artifact bytes.\n")
+    source = root / "original-copy.md"
+    source.write_bytes(original.read_bytes())
+    event = {
+        "schemaVersion": 2, "runId": "historical-pass-001", "workItem": slug,
+        "role": "qa-engineer", "executionRole": "internal", "status": "completed",
+        "gate": "PASS", "scope": ["historical artifact"],
+        "artifact": ".scratch/approved/original.md", "eventKind": "standalone",
+        "evidence": [{"kind": "review", "ref": "Original acceptance recorded"}],
+        "startedAt": "2026-09-30T00:00:00Z", "updatedAt": "2026-09-30T00:00:00Z",
+    }
+    raw = json.dumps(event, separators=(",", ":")).encode("utf-8")
+    # Physical ordinal and CR/LF-excluding identity must survive blank lines.
+    ledger_bytes = b"\n" + raw + b"\r\n"
+    (item / "agent-runs.jsonl").write_bytes(ledger_bytes)
+    args = (
+        "retain-pass-artifact", "--root", str(root), "--slug", slug,
+        "--run-id", event["runId"], "--raw-line-ordinal", "2",
+        "--expected-raw-line-sha256", hashlib.sha256(raw).hexdigest(),
+        "--expected-ledger-sha256", hashlib.sha256(ledger_bytes).hexdigest(),
+        "--source-artifact", "original-copy.md", "--expected-original-sha256",
+        hashlib.sha256(source.read_bytes()).hexdigest(),
+    )
+    return module, root, item, original, source, event, ledger_bytes, args
+
+
+def test_historical_pass_custody_cli_restores_exact_active_and_archive_authority(tmp_path: Path) -> None:
+    module, root, item, original, source, event, before, args = historical_pass_fixture(tmp_path)
+    validator = module._load_agent_run_ledger().load_validator()
+    baseline = []
+    assert validator.validate_work_item(item, authority_state_out=baseline) == []
+    original.unlink()
+    assert any("artifact does not exist" in error for error in validator.validate_work_item(item))
+
+    result = run_cli(*args, "--apply")
+
+    assert result.returncode == 0, result.stdout
+    assert "WI-PASS-CUSTODY:" in result.stdout
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    current = []
+    assert validator.validate_work_item(item, authority_state_out=current) == []
+    assert current == baseline
+    # Replacement current-path bytes must not stand in for the old artifact.
+    original.write_bytes(b"Replacement bytes, not the accepted artifact.\n")
+    assert validator.validate_work_item(item) == []
+    archive = root / "work-items" / "archive" / "2026-10" / item.name
+    archive.parent.mkdir(parents=True)
+    shutil.move(str(item), archive)
+    archived_errors, open_revise, open_launches = validator.validate_archived_ledger_obligations(archive)
+    assert (archived_errors, open_revise, open_launches) == ([], [], [])
+    assert (archive / "agent-runs.jsonl").read_bytes() == before
+    association = next((archive / "review-artifact-custody" / "historical-pass").iterdir())
+    snapshot = archive / json.loads(association.read_bytes())["snapshot"]
+    assert snapshot.read_bytes() == source.read_bytes()
+    snapshot.write_bytes(b"Replacement bytes, not the accepted artifact.\n")
+    assert any("WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH" in error
+               for error in validator.validate_archived_ledger_obligations(archive)[0])
+
+
+def test_historical_pass_custody_omitted_apply_and_rewritten_source_preserve_bytes(tmp_path: Path) -> None:
+    module, root, item, original, source, event, before, args = historical_pass_fixture(tmp_path)
+    original.unlink()
+    untouched = tree_file_bytes(root)
+    refusal = run_cli(*args)
+    assert refusal.returncode != 0 and "WI-LEDGER-CUSTODY-APPLY-REQUIRED" in refusal.stdout
+    assert tree_file_bytes(root) == untouched
+    with unittest.TestCase().assertRaises(module.LifecycleError) as failure:
+        module.retain_historical_pass_custody(
+            root, item.name, event["runId"], 2, args[args.index("--expected-raw-line-sha256") + 1],
+            args[args.index("--expected-ledger-sha256") + 1], "original-copy.md",
+            args[args.index("--expected-original-sha256") + 1],
+        )
+    assert failure.exception.failure_id == "WI-LEDGER-CUSTODY-APPLY-REQUIRED"
+    assert tree_file_bytes(root) == untouched
+    source.write_bytes(b"Rewritten current candidate, not the original.\n")
+    untouched = tree_file_bytes(root)
+    refusal = run_cli(*args, "--apply")
+    assert refusal.returncode != 0 and "WI-LEDGER-CUSTODY-SOURCE-DRIFT" in refusal.stdout
+    assert tree_file_bytes(root) == untouched
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+
+def test_historical_pass_custody_exact_replay_after_append_is_publication_free(tmp_path: Path) -> None:
+    module, root, item, original, source, event, before, args = historical_pass_fixture(tmp_path)
+    original.unlink()
+    assert run_cli(*args, "--apply").returncode == 0
+    terminal = {**event, "runId": "later-neutral-terminal", "gate": "none"}
+    terminal.pop("artifact")
+    (item / "agent-runs.jsonl").write_bytes(before + json.dumps(terminal).encode("utf-8") + b"\n")
+    untouched = tree_file_bytes(root)
+    replay = run_cli(*args, "--apply")
+    assert replay.returncode == 0, replay.stdout
+    assert tree_file_bytes(root) == untouched
+    conflicted = list(args)
+    conflicted[conflicted.index("--expected-original-sha256") + 1] = "0" * 64
+    refusal = run_cli(*conflicted, "--apply")
+    assert refusal.returncode != 0 and "WI-LEDGER-CUSTODY-STALE-TARGET" in refusal.stdout
+    assert tree_file_bytes(root) == untouched
+
+
+def test_historical_pass_custody_tampered_prefix_ordinal_and_codec_fail_closed(tmp_path: Path) -> None:
+    for defect in ("ledger-prefix", "ordinal", "noncanonical-envelope"):
+        module, root, item, original, source, event, before, args = historical_pass_fixture(tmp_path / defect)
+        original.unlink()
+        assert run_cli(*args, "--apply").returncode == 0
+        validator = module._load_agent_run_ledger().load_validator()
+        association = next((item / "review-artifact-custody" / "historical-pass").iterdir())
+        if defect == "ledger-prefix":
+            (item / "agent-runs.jsonl").write_bytes(before.replace(b"historical artifact", b"changed artifact"))
+        elif defect == "ordinal":
+            envelope = json.loads(association.read_bytes())
+            envelope["rawLineOrdinal"] = 1
+            association.write_bytes(validator._canonical_projection_bytes(envelope))
+        else:
+            association.write_bytes(json.dumps(json.loads(association.read_bytes()), indent=2).encode("utf-8"))
+        errors = validator.validate_work_item(item)
+        assert any("WI-LEDGER-CUSTODY-STALE-TARGET" in error for error in errors), (defect, errors)
+        untouched = tree_file_bytes(root)
+        refusal = run_cli(*args, "--apply")
+        assert refusal.returncode != 0 and "WI-LEDGER-CUSTODY-STALE-TARGET" in refusal.stdout
+        assert tree_file_bytes(root) == untouched
+
+
+def test_historical_pass_custody_failed_publication_removes_only_new_snapshot(tmp_path: Path) -> None:
+    for shared in (False, True):
+        module, root, item, original, source, event, before, args = historical_pass_fixture(tmp_path / str(shared))
+        original.unlink()
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        if shared:
+            directory = item / "review-artifact-custody"
+            directory.mkdir()
+            (directory / digest).write_bytes(source.read_bytes())
+        untouched = tree_file_bytes(root)
+        with patch.object(module, "_atomic_write", side_effect=OSError("injected publication failure")):
+            with unittest.TestCase().assertRaises(OSError):
+                module.retain_historical_pass_custody(
+                    root, item.name, event["runId"], 2, args[args.index("--expected-raw-line-sha256") + 1],
+                    hashlib.sha256(before).hexdigest(), "original-copy.md", digest, apply=True,
+                )
+        assert tree_file_bytes(root) == untouched
+        assert not (item / "review-artifact-custody" / "historical-pass").exists()
+        assert (item / "review-artifact-custody" / digest).exists() is shared
+
+
+def test_historical_pass_custody_snapshot_acquisition_failure_preserves_canonical_bytes(tmp_path: Path) -> None:
+    module, root, item, original, source, event, before, args = historical_pass_fixture(tmp_path)
+    original.unlink()
+    untouched = tree_file_bytes(root)
+    ledger = module._load_agent_run_ledger()
+    acquire = ledger._acquire_custody_snapshot
+
+    def fail_after_capture(*arguments, **kwargs):
+        acquire(*arguments, **kwargs)
+        raise OSError("injected failure after snapshot acquisition")
+
+    with patch.object(ledger, "_acquire_custody_snapshot", side_effect=fail_after_capture):
+        with unittest.TestCase().assertRaises(OSError):
+            module.retain_historical_pass_custody(
+                root, item.name, event["runId"], 2, args[args.index("--expected-raw-line-sha256") + 1],
+                hashlib.sha256(before).hexdigest(), "original-copy.md", hashlib.sha256(source.read_bytes()).hexdigest(),
+                apply=True,
+            )
+    assert tree_file_bytes(root) == untouched
+
+
+def test_historical_pass_custody_candidate_uses_one_captured_ledger(tmp_path: Path) -> None:
+    fixture_spec = importlib.util.spec_from_file_location("captured_custody_fixtures", ROOT / "tests" / "test_agent_run_ledger.py")
+    h1_fixtures = importlib.util.module_from_spec(fixture_spec)
+    fixture_spec.loader.exec_module(h1_fixtures)
+    for state in ("ordinary", "active", "revoked"):
+        if state == "ordinary":
+            module, root, item, original, source, event, raw, args = historical_pass_fixture(tmp_path / state)
+            original.unlink()
+            ordinal = 2
+            line_sha = args[args.index("--expected-raw-line-sha256") + 1]
+            validator = module._load_agent_run_ledger().load_validator()
+        else:
+            validator, root, item, source, raw, line, event, _path = h1_fixtures.historical_pass_h1_fixture(tmp_path / state, state)
+            (item / "target.md").unlink()
+            module = load_module()
+            ordinal = 4
+            line_sha = hashlib.sha256(line).hexdigest()
+        selected = item / "agent-runs.jsonl"
+        ledger = module._load_agent_run_ledger()
+        capture = module._capture_file_snapshot
+        resolve = validator.resolve_historical_pass_custody
+        read = Path.read_bytes
+        captured = []
+        resolver_sources = []
+        forbidden_reads = []
+
+        def observe_capture(path, **kwargs):
+            snapshot = capture(path, **kwargs)
+            if path == selected:
+                captured.append(snapshot)
+            return snapshot
+
+        def observe_resolver(custody_item, source_bytes, *arguments, **kwargs):
+            if custody_item == item:
+                resolver_sources.append(source_bytes)
+            return resolve(custody_item, source_bytes, *arguments, **kwargs)
+
+        def deny_reacquisition(path):
+            if path == selected:
+                forbidden_reads.append(path)
+                raise OSError("selected ledger was already captured by its owner")
+            return read(path)
+
+        failure = None
+        with patch.object(ledger, "load_validator", return_value=validator), \
+                patch.object(module, "_capture_file_snapshot", side_effect=observe_capture), \
+                patch.object(validator, "resolve_historical_pass_custody", side_effect=observe_resolver), \
+                patch.object(Path, "read_bytes", deny_reacquisition):
+            try:
+                module.retain_historical_pass_custody(
+                    root, item.name, event["runId"], ordinal, line_sha,
+                    hashlib.sha256(raw).hexdigest(), "original-copy.md",
+                    hashlib.sha256(read(source)).hexdigest(), apply=True,
+                )
+            except module.LifecycleError as exc:
+                failure = exc
+        assert forbidden_reads == [], (state, failure)
+        assert failure is None, (state, failure)
+        assert len(captured) == 1 and len(resolver_sources) == 1, (state, len(captured), len(resolver_sources))
+        assert resolver_sources[0] is captured[0].data
+        assert selected.read_bytes() == raw
+
+
 def _active_successor_preflight_fixture(root: Path, *, leaf_count: int = 30) -> dict:
     module = load_module()
     old, new = "front-old", "front-new"
