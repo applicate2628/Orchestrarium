@@ -586,7 +586,15 @@ as a batch recovery command.
 
 If `start`, `update`, or `reopen` reports `WI-README-STALE` after saying the
 canonical state committed, do not retry that operation. Run `refresh`, then
-use `resolve` and `audit` to verify the target.
+use `resolve` and `audit` to verify the target. To replace a reviewed static guide
+or adopt a legacy README with neither generated marker, first retain the original
+README bytes as named canonical task data and verify their SHA-256 digest. Then
+run `python scripts/mutate-work-item.py refresh --root . --reset-static-guide
+--expected-readme-sha256 <original-sha256>`. This explicit reset replaces the live
+guide with the default guide and the current generated board; retained history
+does not remain a live prefix. Partial, duplicate, or reversed markers still
+refuse, and ordinary `refresh` remains strict. Rollback restores the retained
+README bytes under caller authority without changing lifecycle records.
 
 ### Finish an accepted current-bug successor handoff
 

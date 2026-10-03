@@ -3976,6 +3976,139 @@ def test_valid_human_static_guide_is_preserved_by_ordinary_refresh(
     assert refreshed.count(module.README_END) == 1
 
 
+def test_explicit_static_guide_reset_adopts_retained_legacy_board(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    status = root / "work-items" / "active" / "adopt-legacy" / "status.md"
+    write(status, quick_status("Current legacy adoption task."))
+    status_before = status.read_bytes()
+    readme = root / "work-items" / "README.md"
+    legacy_bytes = (
+        b"# Work items\r\n\r\n"
+        b"Snapshot commit: `964ee371`\r\n\r\n"
+        b"## Active work\r\n\r\n"
+        b"- Old lifecycle counts and clean worktree claim.\r\n"
+    )
+    readme.write_bytes(legacy_bytes)
+    retained = status.parent / "data" / "legacy-readme.md"
+    retained.parent.mkdir()
+    retained.write_bytes(readme.read_bytes())
+    legacy_hash = hashlib.sha256(legacy_bytes).hexdigest()
+    assert retained.read_bytes() == legacy_bytes
+    assert hashlib.sha256(retained.read_bytes()).hexdigest() == legacy_hash
+
+    ordinary = run_cli("refresh", "--root", str(root))
+    assert ordinary.returncode == 1
+    assert "WI-README-MARKERS" in ordinary.stdout
+    assert readme.read_bytes() == legacy_bytes
+    assert retained.read_bytes() == legacy_bytes
+    assert status.read_bytes() == status_before
+
+    repaired = run_cli(
+        "refresh",
+        "--root",
+        str(root),
+        "--reset-static-guide",
+        "--expected-readme-sha256",
+        legacy_hash,
+    )
+
+    assert repaired.returncode == 0, repaired.stdout
+    repaired_bytes = readme.read_bytes()
+    rendered = repaired_bytes.decode("utf-8")
+    begin = "<!-- BEGIN GENERATED WORK-ITEMS STATUS -->"
+    end = "<!-- END GENERATED WORK-ITEMS STATUS -->"
+    assert rendered.startswith(
+        "# Work items\n\nRead this page for current delivery status."
+    )
+    assert rendered.count(begin) == 1
+    assert rendered.count(end) == 1
+    assert rendered.index(begin) < rendered.index(end)
+    assert "Read-model: work-items-readme-v1" in rendered
+    assert "Current legacy adoption task." in rendered
+    assert "Snapshot commit" not in rendered
+    assert "## Active work" not in rendered
+    assert "Old lifecycle counts" not in rendered
+    repaired_hash = hashlib.sha256(repaired_bytes).hexdigest()
+    assert f"README-SHA256: {repaired_hash}" in repaired.stdout
+    assert status.read_bytes() == status_before
+    assert retained.read_bytes() == legacy_bytes
+    assert hashlib.sha256(retained.read_bytes()).hexdigest() == legacy_hash
+    assert not (root / "work-items" / "archive").exists()
+
+    replay = run_cli(
+        "refresh",
+        "--root",
+        str(root),
+        "--reset-static-guide",
+        "--expected-readme-sha256",
+        legacy_hash,
+    )
+    assert replay.returncode == 0, replay.stdout
+    assert readme.read_bytes() == repaired_bytes
+    assert retained.read_bytes() == legacy_bytes
+    assert status.read_bytes() == status_before
+
+    readme.write_bytes(retained.read_bytes())
+    assert readme.read_bytes() == legacy_bytes
+    assert hashlib.sha256(readme.read_bytes()).hexdigest() == legacy_hash
+    assert status.read_bytes() == status_before
+
+
+def test_explicit_legacy_static_guide_reset_refuses_wrong_or_malformed_target(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    status = root / "work-items" / "active" / "target-guard" / "status.md"
+    write(status, quick_status("Preserve canonical task data."))
+    status_before = status.read_bytes()
+    readme = root / "work-items" / "README.md"
+    legacy_bytes = b"# Reviewed legacy board without ownership markers\n"
+    readme.write_bytes(legacy_bytes)
+
+    for expected_hash in ("0" * 64, "not-a-digest"):
+        refused = run_cli(
+            "refresh",
+            "--root",
+            str(root),
+            "--reset-static-guide",
+            "--expected-readme-sha256",
+            expected_hash,
+        )
+        assert refused.returncode == 1
+        assert "WI-README-REPAIR-TARGET-MISMATCH" in refused.stdout
+        assert readme.read_bytes() == legacy_bytes
+        assert status.read_bytes() == status_before
+
+
+def test_explicit_static_guide_reset_refuses_corrupt_marker_pairs(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    status = root / "work-items" / "active" / "marker-guard" / "status.md"
+    write(status, quick_status("Preserve marker ownership."))
+    status_before = status.read_bytes()
+    readme = root / "work-items" / "README.md"
+    begin = b"<!-- BEGIN GENERATED WORK-ITEMS STATUS -->\n"
+    end = b"<!-- END GENERATED WORK-ITEMS STATUS -->\n"
+
+    for invalid in (begin, begin + begin + end, end + begin):
+        readme.write_bytes(invalid)
+        refused = run_cli(
+            "refresh",
+            "--root",
+            str(root),
+            "--reset-static-guide",
+            "--expected-readme-sha256",
+            hashlib.sha256(invalid).hexdigest(),
+        )
+        assert refused.returncode == 1
+        assert "WI-README-MARKERS" in refused.stdout
+        assert readme.read_bytes() == invalid
+        assert status.read_bytes() == status_before
+
+
 def test_explicit_static_guide_reset_is_target_bound_and_idempotent(
     tmp_path: Path,
 ) -> None:

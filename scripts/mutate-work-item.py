@@ -3011,7 +3011,7 @@ def reset_readme_static_guide(root: Path, expected_readme_sha256: str) -> str:
             "WI-README-MARKERS",
             "static-guide repair requires an existing marker-owned README",
         )
-    _static_guide(readme)
+    _static_guide(readme, allow_marker_bootstrap=True)
     current = readme.read_bytes()
     desired = render_readme_bytes(
         root,
