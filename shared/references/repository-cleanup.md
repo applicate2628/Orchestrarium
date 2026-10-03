@@ -8,6 +8,8 @@ The coordinator performs only `scan -> classify -> route -> recheck`. It may cla
 
 Existing owners remain authoritative:
 
+Report-candidate evidence custody and its before-classification ordering belong to the Archivist working rules ([Codex](../../src.codex/skills/knowledge-archivist/SKILL.md#working-rules), [Claude](../../src.claude/agents/knowledge-archivist.md#working-rules)); this coordinator observes that owner rather than adding a second custody predicate.
+
 - the lifecycle owner applies admitted work-item moves and dispositions;
 - `$knowledge-archivist` coordinates multi-item or drifted physical reconciliation;
 - the exact Git-operation owner changes Git state;

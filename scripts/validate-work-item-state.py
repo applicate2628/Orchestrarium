@@ -12,6 +12,7 @@ import re
 import stat as stat_module
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Literal, Mapping, Sequence
@@ -1366,6 +1367,7 @@ class LedgerProjectionRowV1:
     transformation: str = "raw"
     obligation_id: str | None = None
     predecessor_operation_id: str | None = None
+    projection_profile: tuple[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -1516,8 +1518,13 @@ def _sealed_context_is_bound(
 def _runtime_rows_from_projection(
     rows: Sequence[LedgerProjectionRowV1], *, epoch: Literal["raw", "strict-suffix"] = "raw"
 ) -> tuple[RuntimeLedgerRowV1, ...]:
-    return tuple(
-        RuntimeLedgerRowV1(
+    result: list[RuntimeLedgerRowV1] = []
+    for row in rows:
+        manifest_identity = row.transformation == "manifest-projected" and (
+            row.event.get("schemaVersion") == "1.0"
+            or row.projection_profile == ("identity-record-v0", 1)
+        )
+        result.append(RuntimeLedgerRowV1(
             MappingProxyType(copy.deepcopy(row.event)),
             row.raw_line_ordinal,
             row.raw_line_sha256,
@@ -1527,8 +1534,7 @@ def _runtime_rows_from_projection(
                 "transferred"
                 if row.transformation == "transferred"
                 else "manifest-profile"
-                if row.transformation == "manifest-projected"
-                and row.event.get("schemaVersion") == "1.0"
+                if manifest_identity
                 else "migration-replaced"
                 if row.transformation == "migration-replaced"
                 else epoch
@@ -1537,16 +1543,14 @@ def _runtime_rows_from_projection(
                 False,
                 False,
                 bool(
-                    row.transformation == "manifest-projected"
-                    and row.event.get("schemaVersion") == "1.0"
+                    manifest_identity
                     and row.event.get("gate") == "REVISE"
                 ),
                 False,
                 False,
             ),
-        )
-        for row in rows
-    )
+        ))
+    return tuple(result)
 
 
 def _runtime_rows_from_events(
@@ -2852,6 +2856,10 @@ def _validate_closure_authority(
                         continue
                 if not external_professional_close:
                     t_role = target.get("role")
+                    if not isinstance(t_role, str) or not t_role.strip():
+                        fail(errors, f"{rid}: target {target_id} lacks a concrete profession (C3-authority-fail)")
+                        bump("C3-authority-fail")
+                        continue
                     if t_role == "lead" and target.get("executionRole") == "main":
                         legacy_archive_closer = (
                             rows[pos].raw_line_ordinal in _archived_preclose_v2_rows
@@ -3039,6 +3047,7 @@ LEGACY_PROJECTION_PROFILE_REGISTRY = {
     ("attempt-pair-v0", 1),
     ("review-summary-v0", 1),
     ("identity-ledger-v1-string", 1),
+    ("identity-record-v0", 1),
 }
 LEGACY_PROJECTION_IDS = {
     "profile": "WI-LEDGER-MIGRATION-PROFILE-UNSUPPORTED",
@@ -4749,6 +4758,55 @@ def _projection_profile_key(profile_id: object, profile_version: object, errors:
 
 def _profile_projection(profile: tuple[str, int], raws: list[dict], item: Path, entry: dict, errors: list[str]) -> list[dict] | None:
     profile_id, _ = profile
+    if profile_id == "identity-record-v0":
+        required = {
+            "runId", "timestamp", "executionRole", "status", "gate",
+            "artifact", "artifactSha256", "summary",
+        }
+        provenance_fields = {
+            "requestedProvider", "resolvedProvider", "actualExecutionPath", "modelProfile",
+        }
+        if not raws:
+            fail(errors, "WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED: identity record ledger is empty")
+            return None
+        run_ids: set[str] = set()
+        projected: list[dict] = []
+        for ordinal, raw in enumerate(raws, start=1):
+            label = f"identity-record-v0 raw event {ordinal}"
+            if not _strict_shape(raw, required, required | {"candidateRevision", "provenance"}, errors, label):
+                fail(errors, f"WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED: {label} shape is unsupported")
+                return None
+            scalar_values = [raw[field] for field in required]
+            provenance = raw.get("provenance")
+            if "provenance" in raw:
+                if not isinstance(provenance, dict) or set(provenance) != provenance_fields:
+                    fail(errors, f"WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED: {label} provenance is unsupported")
+                    return None
+                scalar_values.extend(provenance.values())
+            if (
+                any(not isinstance(value, str) or not value.strip() or len(value) > MAX_LEDGER_LINE_CHARS for value in scalar_values)
+                or len(raw["runId"]) < MIN_LENGTHS["runId"]
+                or raw["runId"] in run_ids
+                or raw["status"] != "completed"
+                or raw["gate"] not in {"PASS", "REVISE"}
+                or _STRICT_UTC_RE.fullmatch(raw["timestamp"]) is None
+                or SHA256_RE.fullmatch(raw["artifactSha256"]) is None
+                or (
+                    "candidateRevision" in raw
+                    and (not isinstance(raw["candidateRevision"], str) or re.fullmatch(r"[0-9a-fA-F]{40}", raw["candidateRevision"], re.ASCII) is None)
+                )
+            ):
+                fail(errors, f"WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED: {label} fields are unsupported")
+                return None
+            try:
+                datetime.fromisoformat(raw["timestamp"])
+                confine_legacy_projection_path(item, raw["artifact"], allow_missing_leaf=True)
+            except ValueError:
+                fail(errors, f"WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED: {label} timestamp or artifact key is unsupported")
+                return None
+            run_ids.add(raw["runId"])
+            projected.append(copy.deepcopy(raw))
+        return projected
     if profile_id == "identity-ledger-v1-string":
         required = {
             "schemaVersion", "runId", "workItem", "role", "executionRole",
@@ -4906,6 +4964,7 @@ def project_manifest_bound_legacy_ledger_projections(
     validated_h1_partition: tuple[
         str, str, str, str, tuple[tuple[int, str], ...]
     ] | None = None,
+    projection_profiles_out: dict[int, tuple[str, int]] | None = None,
 ) -> tuple[list[dict], dict[str, int], list[str]]:
     """Read verified immutable legacy rows through closed shape-only profiles."""
     counters = {"manifest-apply": 0, "manifest-revoke": 0, "manifest-projected": 0}
@@ -5284,6 +5343,7 @@ def project_manifest_bound_legacy_ledger_projections(
             _projection_fail(errors, "topology", f"projection revoke group {first['operationGroupId']} has inconsistent apply binding")
     lines = ledger_bytes.splitlines(keepends=True)
     replacement_by_line: dict[int, dict] = {}
+    profiles_by_line: dict[int, tuple[str, int]] = {}
     entries_active: dict[tuple[str, str], list[tuple[dict, dict]]] = {}
     for (_, raw_ordinal), (record, _, entry) in active.items():
         entries_active.setdefault((record["manifestId"], record["manifestEntryId"]), []).append((record, entry))
@@ -5350,11 +5410,14 @@ def project_manifest_bound_legacy_ledger_projections(
             continue
         for raw_ordinal, projected in zip(entry["rawLineOrdinals"], calculated):
             replacement_by_line[raw_ordinal] = projected
+            profiles_by_line[raw_ordinal] = profile
             counters["manifest-projected"] += 1
     effective = [
         replacement_by_line.get(metadata.get("line"), event)
         for event, metadata in zip(events, raw_metadata)
     ]
+    if projection_profiles_out is not None and not errors:
+        projection_profiles_out.update(profiles_by_line)
     return effective, counters, errors
 
 
@@ -5372,11 +5435,13 @@ def _project_manifest_rows(
 ) -> tuple[tuple[LedgerProjectionRowV1, ...], dict[str, int], list[str]]:
     """Apply the existing manifest owner while retaining physical row identity."""
     events = _row_events(rows)
+    profiles_by_line: dict[int, tuple[str, int]] = {}
     projected, counters, errors = project_manifest_bound_legacy_ledger_projections(
         events, _row_metadata(rows), item, selected_ledger, ledger_bytes,
         manifest_blobs=manifest_blobs,
         registry_bytes=registry_bytes,
         validated_h1_partition=validated_h1_partition,
+        projection_profiles_out=profiles_by_line,
     )
     if len(projected) != len(rows):
         _projection_fail(errors, "identity", "manifest projection changed ledger cardinality")
@@ -5386,6 +5451,7 @@ def _project_manifest_rows(
             row if event is row.event else LedgerProjectionRowV1(
                 copy.deepcopy(event), row.raw_line_ordinal, row.raw_line_sha256,
                 row.raw_event_sha256, "manifest-projected",
+                projection_profile=profiles_by_line.get(row.raw_line_ordinal),
             )
             for row, event in zip(rows, projected)
         ),

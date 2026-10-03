@@ -76,6 +76,196 @@ def tree_bytes(root: Path) -> dict[str, bytes]:
     }
 
 
+def identity_record_fixture(root: Path, *, optional_fields: bool = False):
+    item = root / "work-items" / "active" / "alternate-item"
+    item.mkdir(parents=True)
+    events = [
+        {
+            "runId": f"historic-observation-{index}",
+            "timestamp": "2026-08-02T03:04:05Z",
+            "executionRole": "data-engineer",
+            "status": "completed",
+            "gate": gate,
+            "artifact": "missing-review.md",
+            "artifactSha256": "b" * 64,
+            "summary": f"Historical observation {index}: retained λ",
+        }
+        for index, gate in enumerate(("PASS", "REVISE", "PASS", "REVISE", "PASS"), 1)
+    ]
+    if optional_fields:
+        events[0]["candidateRevision"] = "a" * 40
+        events[0]["provenance"] = {
+            "requestedProvider": "historical-provider",
+            "resolvedProvider": "historical-provider",
+            "actualExecutionPath": "historical-path",
+            "modelProfile": "historical-model",
+        }
+    physical = b"".join(b"  " + canonical(event) + b"\r\n" for event in events)
+    (item / "agent-runs.jsonl").write_bytes(physical)
+    request = json.loads(settlement_request(physical, [
+        {"targetRunId": "historic-observation-2", "disposition": "preserve-open", "evidence": []},
+        {"targetRunId": "historic-observation-4", "disposition": "preserve-open", "evidence": []},
+    ]))
+    request.update(workItem=item.name, profileId="identity-record-v0")
+    return item, physical, events, canonical(request)
+
+
+def test_identity_record_preserve_open_enrollment_and_replay_conserve_bytes(tmp_path: Path) -> None:
+    owner = load_owner()
+    root = tmp_path / "repo"
+    item, physical, events, request = identity_record_fixture(root)
+    before = tree_bytes(root)
+
+    preflight = owner.settle_legacy_ledger(root, request)
+
+    assert preflight["applied"] is False
+    assert preflight["profileId"] == "identity-record-v0"
+    assert preflight["legacyRunIds"] == [event["runId"] for event in events]
+    assert preflight["openObligations"] == ["historic-observation-2", "historic-observation-4"]
+    assert tree_bytes(root) == before
+    applied = owner.settle_legacy_ledger(root, request, apply_admitted=True)
+    assert applied["applied"] is True
+    assert applied["settlementRunIds"] == []
+    assert (item / "agent-runs.jsonl").read_bytes() == physical
+    registry = root / "work-items" / "legacy-ledger-projections.jsonl"
+    assert len(registry.read_bytes().splitlines()) == 5
+    after = tree_bytes(root)
+    replay = owner.settle_legacy_ledger(root, request, apply_admitted=True)
+    assert replay["replay"] is True
+    assert tree_bytes(root) == after
+    validator = owner._load_agent_run_ledger().load_validator()
+    obligations = []
+    assert validator.validate_work_item(
+        item, strict_revise=False, validate_status_file=False,
+        obligation_state_out=obligations,
+    ) == []
+    assert [row.run_id for row in obligations[0].open_revise] == [
+        "historic-observation-2", "historic-observation-4",
+    ]
+
+
+def test_identity_record_optional_history_stays_inert_and_cannot_settle(tmp_path: Path) -> None:
+    owner = load_owner()
+    validator = owner._load_agent_run_ledger().load_validator()
+    root = tmp_path / "repo"
+    item, physical, events, request = identity_record_fixture(root, optional_fields=True)
+    owner.settle_legacy_ledger(root, request, apply_admitted=True)
+    context = validator.load_effective_ledger_view(
+        root, item, "work-items/active/alternate-item/agent-runs.jsonl",
+    )
+    errors = []
+    validity = validator.derive_event_validity(context.rows, item, errors, context=context)
+    assert errors == []
+    assert [dict(row.event) for row in context.rows] == events
+    assert [row.epoch for row in context.rows] == ["manifest-profile"] * 5
+    assert [row.authority.revise_target_eligible for row in validity] == [False, True, False, True, False]
+    assert all(not row.current_schema_valid for row in validity)
+    assert all(
+        not mask.launch_eligible and not mask.terminal_eligible
+        and not mask.closer_eligible and not mask.artifact_evidence_eligible
+        for mask in (row.authority for row in validity)
+    )
+    assert (item / "agent-runs.jsonl").read_bytes() == physical
+    refusal_root = tmp_path / "refusal-repo"
+    refusal_item, _, _, refusal_request = identity_record_fixture(refusal_root)
+    proof = refusal_item / "current.md"
+    proof.write_bytes(b"current proof\n")
+    changed = json.loads(refusal_request)
+    changed["settlements"][0].update(
+        disposition="satisfied-by-current-evidence",
+        evidence=[{"path": "work-items/active/alternate-item/current.md", "sha256": digest(proof.read_bytes())}],
+    )
+    before = tree_bytes(refusal_root)
+    with pytest.raises(owner.LifecycleError) as raised:
+        owner.settle_legacy_ledger(refusal_root, canonical(changed), apply_admitted=True)
+    assert raised.value.failure_id == "WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED"
+    assert tree_bytes(refusal_root) == before
+
+
+def test_identity_record_generic_prefix_cannot_be_closed_without_target_profession(tmp_path: Path) -> None:
+    owner = load_owner()
+    validator = owner._load_agent_run_ledger().load_validator()
+    root = tmp_path / "repo"
+    item, _, events, _ = identity_record_fixture(root)
+    proof = item / "current.md"
+    proof.write_bytes(b"Fresh synthetic current review evidence.\n")
+    target = {
+        **events[1], "executionRole": "qa-engineer", "artifact": "current.md",
+        "artifactSha256": digest(proof.read_bytes()),
+    }
+    closer = {
+        "schemaVersion": 2, "runId": "current-qa-closer-001", "workItem": item.name,
+        "role": "qa-engineer", "executionRole": "internal", "status": "completed",
+        "gate": "PASS", "scope": ["fixture"], "artifact": "current.md",
+        "closesRunIds": [target["runId"]],
+        "evidence": [{"kind": "review", "ref": "Fresh synthetic current review evidence"}],
+        "startedAt": "2026-10-03T00:00:00Z", "updatedAt": "2026-10-03T00:00:00Z",
+    }
+    assert "assignedRole" not in closer and "role" not in target
+    suffix_errors = []
+    assert validator._validate_event(closer, item, set(), suffix_errors)
+    assert suffix_errors == []
+    prefix = b"  " + canonical(target) + b"\r\n"
+    whole = prefix + canonical(closer) + b"\n"
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_bytes(whole)
+    entry = {
+        "entryId": "identity-record-v0-prefix", "profileId": "identity-record-v0",
+        "profileVersion": 1, "workItem": item.relative_to(root).as_posix(),
+        "ledgerPath": ledger.relative_to(root).as_posix(), "ledgerSha256": digest(whole),
+        "rawLineOrdinals": [1], "rawLineSha256": [digest(prefix)],
+        "projectedEvents": [target], "projectedEventSha256": [digest(canonical(target))],
+    }
+    manifest = {
+        "schemaVersion": 1, "manifestId": "identity-record-generic-guard",
+        "profiles": [{"profileId": "identity-record-v0", "profileVersion": 1}],
+        "entries": [entry],
+    }
+    # The lifecycle owner's persistent lock belongs to fixture infrastructure,
+    # so bind the ordinary transaction baseline before measuring publication.
+    with owner.LifecycleTransaction(root):
+        pass
+    before = tree_bytes(root)
+
+    with pytest.raises(owner.LifecycleError) as raised:
+        owner.apply_legacy_ledger_projection(
+            root, canonical(manifest), entry["entryId"], 1, digest(b""),
+            "generic-projection-guard-001", "2026-10-03T00:00:01Z",
+        )
+
+    assert raised.value.failure_id == "WI-LEDGER-MIGRATION-CANDIDATE-INVALID"
+    assert "C3-authority-fail" in str(raised.value)
+    assert "open REVISE obligation" in str(raised.value)
+    assert ledger.read_bytes() == whole
+    assert tree_bytes(root) == before
+
+
+@pytest.mark.parametrize("case", ["duplicate-id", "duplicate-key", "unknown-field", "stale-digest"])
+def test_identity_record_refuses_invalid_binding_without_residue(tmp_path: Path, case: str) -> None:
+    owner = load_owner()
+    root = tmp_path / "repo"
+    item, physical, events, request = identity_record_fixture(root)
+    request_value = json.loads(request)
+    if case == "duplicate-id":
+        events[4]["runId"] = events[0]["runId"]
+    elif case == "unknown-field":
+        events[0]["role"] = "data-engineer"
+    if case in {"duplicate-id", "unknown-field"}:
+        physical = b"".join(canonical(event) + b"\n" for event in events)
+    elif case == "duplicate-key":
+        physical = physical.replace(b'"runId":', b'"runId":"duplicate-value","runId":', 1)
+    (item / "agent-runs.jsonl").write_bytes(physical)
+    request_value["expectedLedgerSha256"] = digest(physical) if case != "stale-digest" else "0" * 64
+    before = tree_bytes(root)
+
+    with pytest.raises(owner.LifecycleError) as raised:
+        owner.settle_legacy_ledger(root, canonical(request_value), apply_admitted=True)
+
+    expected = "WI-LEDGER-MIGRATION-LEDGER-DRIFT" if case == "stale-digest" else "WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED"
+    assert raised.value.failure_id == expected
+    assert tree_bytes(root) == before
+
+
 def satisfied_fixture(root: Path, *, operation_id: str = "legacy-settlement-001") -> tuple[Path, bytes, bytes]:
     item = root / "work-items" / "active" / "legacy-item"
     item.mkdir(parents=True)

@@ -14833,7 +14833,7 @@ def apply_legacy_ledger_projection(root: Path, manifest_bytes: bytes, entry_id: 
     return _apply_legacy_ledger_projection_transaction(root, manifest_bytes, entry_id, raw_ordinal, expected_registry_sha256, operation_id, recorded_at, inject_failure=inject_failure)
 
 
-_LEGACY_SETTLEMENT_PROFILE = "identity-ledger-v1-string"
+_LEGACY_SETTLEMENT_PROFILES = {"identity-ledger-v1-string", "identity-record-v0"}
 _LEGACY_SETTLEMENT_REQUEST_FIELDS = {
     "schemaVersion", "operationId", "recordedAt", "workItem",
     "expectedLedgerSha256", "profileId", "profileVersion", "settlements",
@@ -14858,7 +14858,8 @@ def _legacy_settlement_request(request_bytes: bytes) -> dict:
     _projection_operation(operation_id, recorded_at)
     if (
         request.get("schemaVersion") != 1
-        or request.get("profileId") != _LEGACY_SETTLEMENT_PROFILE
+        or not isinstance(request.get("profileId"), str)
+        or request["profileId"] not in _LEGACY_SETTLEMENT_PROFILES
         or request.get("profileVersion") != 1
         or not isinstance(request.get("workItem"), str)
         or SLUG_RE.fullmatch(request["workItem"]) is None
@@ -14892,6 +14893,11 @@ def _legacy_settlement_request(request_bytes: bytes) -> dict:
             _legacy_settlement_fail(
                 "WI-LEDGER-LEGACY-SETTLEMENT-INCOMPLETE",
                 "settlement targets, dispositions, and evidence must be exact and unique",
+            )
+        if request["profileId"] == "identity-record-v0" and disposition != "preserve-open":
+            _legacy_settlement_fail(
+                "WI-LEDGER-LEGACY-PROFILE-UNSUPPORTED",
+                "identity-record-v0 admits preserve-open only",
             )
         seen.add(target)
         for proof in evidence:
@@ -14972,10 +14978,11 @@ def _legacy_settlement_manifest(
             ) from exc
         raise
     manifest_id = f"legacy-settlement-{_sha256_bytes(request_bytes)[:32]}"
-    entry_id = "identity-ledger-v1-string"
+    profile_id = request["profileId"]
+    entry_id = profile_id
     entry = {
         "entryId": entry_id,
-        "profileId": _LEGACY_SETTLEMENT_PROFILE,
+        "profileId": profile_id,
         "profileVersion": 1,
         "workItem": item.relative_to(root).as_posix(),
         "ledgerPath": (item / "agent-runs.jsonl").relative_to(root).as_posix(),
@@ -14989,14 +14996,14 @@ def _legacy_settlement_manifest(
         "schemaVersion": 1,
         "manifestId": manifest_id,
         "profiles": [
-            {"profileId": _LEGACY_SETTLEMENT_PROFILE, "profileVersion": 1}
+            {"profileId": profile_id, "profileVersion": 1}
         ],
         "entries": [entry],
     }
     profile_errors: list[str] = []
     validator = _load_agent_run_ledger().load_validator()
     projected = validator._profile_projection(
-        (_LEGACY_SETTLEMENT_PROFILE, 1), events, item, entry, profile_errors
+        (profile_id, 1), events, item, entry, profile_errors
     )
     if projected is None or profile_errors:
         _raise_legacy_settlement_validation(profile_errors)

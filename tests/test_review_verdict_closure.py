@@ -57,6 +57,42 @@ def _event(run_id: str, **over) -> dict:
     return base
 
 
+def test_c3_target_profession_is_required_before_role_matching() -> None:
+    target = _event("missing-profession-target", gate="REVISE", status="revise")
+    closer = _event(
+        "concrete-profession-closer", role="qa-engineer", executionRole="internal",
+        gate="PASS", closesRunIds=[target["runId"]],
+    )
+    validity = (
+        vws.LedgerEventValidityV1(False, vws.LedgerAuthorityV1(False, False, True, False, False)),
+        vws.LedgerEventValidityV1(True, vws.LedgerAuthorityV1(False, False, False, True, False)),
+    )
+    for role in (None, "", " \t"):
+        candidate_target = dict(target)
+        candidate_closer = dict(closer)
+        if role is None:
+            candidate_target.pop("role")
+        else:
+            candidate_target["role"] = role
+            candidate_closer["assignedRole"] = role
+        errors = []
+        open_revise, _ = vws._validate_closure_authority(
+            vws._runtime_rows_from_events([candidate_target, candidate_closer]),
+            errors, validity=validity,
+        )
+        assert any("C3-authority-fail" in error for error in errors), (role, errors)
+        assert [event["runId"] for event in open_revise] == ["missing-profession-target"]
+
+    errors = []
+    open_revise, _ = vws._validate_closure_authority(
+        vws._runtime_rows_from_events([
+            target, {**closer, "assignedRole": "architecture-reviewer"},
+        ]), errors, validity=validity,
+    )
+    assert errors == []
+    assert open_revise == []
+
+
 class ClosureFixture(unittest.TestCase):
     def _write(self, events: list[dict]) -> Path:
         import json

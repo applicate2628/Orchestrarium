@@ -341,10 +341,11 @@ Only after the separately required review and gates, apply that same request wit
 python -B scripts/mutate-work-item.py recover-mixed-current-ledger --root . --request-file <reviewed-request.json> --apply-admitted
 ```
 
-## Settle one identity-bearing string-1.0 legacy ledger
+## Settle one identity-bearing legacy ledger
 
 Use this owner operation only for an active ledger whose complete frozen
-population matches the closed `identity-ledger-v1-string` profile. The request
+population matches a closed, explicitly selected profile. The string-`1.0`
+format uses `identity-ledger-v1-string`, profile version 1. The request
 binds the complete ledger digest and must list every obligation reported by the
 existing reducer exactly once. `preserve-open` takes an empty evidence list and
 continues to block close; `satisfied-by-current-evidence` names one or more
@@ -388,6 +389,35 @@ complete after-image, and commits the projection manifest, registry, ledger
 suffix, and receipt under the lifecycle lock. Exact replay is a byte-identical
 no-op. There is no public reverse command; failures during apply restore every
 participant to its exact preimage.
+
+For omission-valid historical identity records, explicitly select
+`identity-record-v0`, profile version 1, through this same command and request
+shape. Each raw record contains bounded string fields `runId`, `timestamp`,
+`executionRole`, `status`, `gate`, `artifact`, `artifactSha256`, and `summary`.
+Identities must be unique; timestamps use strict UTC; status is `completed`;
+gate is `PASS` or `REVISE`; the artifact key is confined to the item and its
+digest is 64 hexadecimal characters. Optional `candidateRevision` is 40
+hexadecimal characters. Optional `provenance` contains exactly the string fields
+`requestedProvider`, `resolvedProvider`, `actualExecutionPath`, and
+`modelProfile`. Unknown fields and duplicate keys are refused.
+
+This profile admits **only `preserve-open` with empty evidence** for every
+reported obligation. Apply enrolls the complete frozen population in the
+existing projection manifest and registry but appends no closing ledger rows;
+exact bytes and run identities survive replay. Historical `PASS`, artifact
+digests, summary, revision, and provenance remain nonauthorizing even when an
+artifact currently matches. The typed projection grants only `REVISE`-target
+eligibility, never launch, terminal, closer, or artifact-evidence authority.
+It does not infer `role` from a profession-valued `executionRole` or synthesize
+`role`,
+`scope`, `workItem`, `evidence`, or a numeric schema version. Item association
+belongs only to the request and manifest. The shared closure owner requires a
+concrete, nonempty target profession before matching a closer's `role` or
+`assignedRole`; missing, empty, or whitespace-only professions fail closed and
+leave the obligation open. This also applies when generic projection combines
+historical prefix rows with a current PASS suffix. Known-profession current and
+string-`1.0` closures and the Lead/main pathway retain their contracts. Existing
+projection revocation removes enrollment without rewriting raw records.
 
 ## Migrate one legacy obligation
 
@@ -732,9 +762,11 @@ declared root never grants a whole-repository cleanup `PASS`.
 - `executionRole`: ledger field naming the actual executor of an event: `main` (the one main-conversation identity), `internal`, `consultant`, `external-worker`, `external-reviewer`, or `external-brigade`; the pre-2026-07-11 legacy value `lead` reads as `main`.
 - `gate`: acceptance result recorded for a scoped artifact, commonly `PASS`, `REVISE`, `BLOCKED`, or `none`.
 - `JSONL`: JSON Lines; one JSON object per line, used here for append-only ledger events.
+- `identity-record-v0`: explicit preservation-only historical identity-record profile, version 1; absent current-schema fields are not synthesized.
 - `PASS`: gate state meaning a scoped artifact passed the relevant checks.
 - `REVISE`: gate state meaning the artifact must return to the same role for bounded correction.
 - `SHA-256`: Secure Hash Algorithm with a 256-bit byte-content digest.
+- `UTC`: Coordinated Universal Time; historical identity-record timestamps end in `Z`.
 - `V1` / `V2`: Version 1 / Version 2 of the execution-ledger event schema.
 - `C1`–`C5`: existing closure-relation checks for target order and eligibility, unique discharge, closing authority, and protected waivers.
 - `stale running agent`: a ledger event still marked `running` after the configured age threshold.
