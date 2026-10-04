@@ -177,7 +177,7 @@ def stale_running_errors(
             and run_id not in unsettled_launches
         ) or (
             not compatibility_active
-            and event.get("eventKind") == "launch"
+            and event.get("schemaVersion") == 2
             and run_id not in unsettled_launches
         ):
             continue

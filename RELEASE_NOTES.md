@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-04
 
+- **Execution aging follows open launches, not coordination notes.** The existing work-item checker no longer treats valid Version 2 non-launch records as stale running agents. Reducer-open launches, legacy running records, validation failures and unresolved review obligations keep their existing checks. No ledger history, hook, command or schema is changed.
+
 - **Owned scratch cleanup handles ReadOnly files and explicitly absent link targets.** The existing lifecycle unlink owner retries a verified ordinary single-link Windows file by clearing only ReadOnly, restoring that attribute if the retry fails; it does not repair access-control lists or change foreign aliases. Version 1 release receipts can explicitly record an absent symlink target without inventing a content hash, while preserving the raw link binding, no-follow checks, target immutability, live-target custody, inventory consistency and replay. Existing receipts remain unchanged; older readers reject the new variant. No new command, hook or cleanup engine is introduced.
 
 ## 2026-10-03

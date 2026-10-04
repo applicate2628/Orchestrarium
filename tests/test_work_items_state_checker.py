@@ -796,7 +796,7 @@ def test_checker_reports_stale_running_agent_when_threshold_is_enabled(tmp_path:
     assert "stale running agent" in result.stdout
 
 
-def test_checker_stale_check_ignores_settled_launches_but_reports_unmatched_launches(
+def test_checker_stale_check_ages_only_open_v2_launches(
     tmp_path: Path,
 ):
     item = write_valid_item(tmp_path, "stale-item")
@@ -836,9 +836,20 @@ def test_checker_stale_check_ignores_settled_launches_but_reports_unmatched_laun
         "evidence": [],
         "eventKind": "launch",
     }
+    standalone = {
+        **launch_common,
+        "runId": "coordinator-standalone-001",
+        "role": "lead",
+        "executionRole": "main",
+        "status": "running",
+        "gate": "none",
+        "artifact": "",
+        "evidence": [],
+        "eventKind": "standalone",
+    }
     (item / "agent-runs.jsonl").write_text(
         "\n".join(
-            json.dumps(event) for event in (settled_launch, terminal, unmatched_launch)
+            json.dumps(event) for event in (settled_launch, terminal, unmatched_launch, standalone)
         )
         + "\n",
         encoding="utf-8",
@@ -856,6 +867,7 @@ def test_checker_stale_check_ignores_settled_launches_but_reports_unmatched_laun
     assert result.returncode == 1, result.stdout
     assert "launch-settled-001: stale running agent" not in result.stdout
     assert "launch-unmatched-001: stale running agent" in result.stdout
+    assert "coordinator-standalone-001: stale running agent" not in result.stdout
 
 
 def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Path, subtests):
