@@ -755,9 +755,24 @@ accepted artifact/reproduction rationale. A repository target outside that root
 must either be an ordinary file or link-free directory inside the same archive,
 or an ordinary file whose exact bytes equal the canonical artifact. The latter
 is bound as artifact custody and no longer requires the old target path on
-receiver replay. Other targets stay retained. Receiver or rollback software
+receiver replay. A definitively absent target has link-object-only custody:
+the receipt binds its original literal digest, repository-relative path and
+class with `targetKind: "absent"` and `targetCustody: "no-content"`; it carries
+no `targetSha256`. Every existing path prefix must be ordinary and inspected
+without following links. Malformed, escaping, unreadable or reparse-crossing
+paths refuse release. Absence is rechecked at admission, receipt replay and
+immediately before a surviving link is unlinked; targets are never created,
+followed or modified. Existing live-target rows and version-1 envelopes are
+unchanged. Other targets stay retained. Receiver or rollback software
 without this receipt reader must not consume a released archive; release of one
 declared root never grants a whole-repository cleanup `PASS`.
+
+For an ordinary owned file, a Windows permission failure permits exactly one
+ReadOnly retry only when the same non-reparse, single-link leaf and its bytes
+remain verified. Only ReadOnly is cleared; a failed retry restores that flag
+on the verified identity and leaves the failure visible. Access-control lists
+and ownership are never repaired. This operation is shared with ordinary
+scratch disposition; links and directory targets do not use it.
 
 ## Operator Rules
 

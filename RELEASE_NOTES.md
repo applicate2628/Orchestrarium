@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-04
+
+- **Owned scratch cleanup handles ReadOnly files and explicitly absent link targets.** The existing lifecycle unlink owner retries a verified ordinary single-link Windows file by clearing only ReadOnly, restoring that attribute if the retry fails; it does not repair access-control lists or change foreign aliases. Version 1 release receipts can explicitly record an absent symlink target without inventing a content hash, while preserving the raw link binding, no-follow checks, target immutability, live-target custody, inventory consistency and replay. Existing receipts remain unchanged; older readers reject the new variant. No new command, hook or cleanup engine is introduced.
+
 ## 2026-10-03
 
 - **A valid local lifecycle change no longer depends on unrelated readable status errors.** The existing README owner shows invalid current backlog, active, and Version 1 roadmap statuses as unchecked diagnostic blockers with source digests, preserving their bytes while the selected transition and receipt complete atomically. Selected inputs, full audit failures, unreadable or ambiguous sources, archives, replay, and rollback remain strict; direct and shadow views use the same status decision without a new command or receipt format.

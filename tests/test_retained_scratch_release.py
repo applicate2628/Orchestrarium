@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -119,16 +121,18 @@ def test_release_link_metadata_without_following_internal_target(tmp_path: Path,
     assert mutator.close_item(root, archived.name, closure, instant) == archived
 
 
-@pytest.mark.parametrize("target_kind", ["dangling", "external", "chained"])
+@pytest.mark.parametrize("target_kind", ["external", "chained", "malformed"])
 def test_unsafe_link_target_refused_before_receipt_or_deletion(tmp_path: Path, target_kind: str) -> None:
     mutator, root, archived, scratch, event, _closure, _instant = archived_fixture(tmp_path)
     add_artifact(archived)
     target = scratch / "payload.txt"
-    if target_kind == "dangling":
-        target = scratch / "missing.txt"
-    elif target_kind == "external":
+    if target_kind == "external":
         target = tmp_path / "outside.txt"
         target.write_bytes(b"external")
+    elif target_kind == "malformed":
+        if os.name != "nt":
+            pytest.skip("Windows reserved path contract")
+        target = root / "missing-parent" / "invalid:target"
     elif target_kind == "chained":
         try:
             (scratch / "other-link").symlink_to(target)
@@ -358,7 +362,7 @@ def test_tampered_receipt_cannot_smuggle_absolute_target_path(tmp_path: Path) ->
         mutator.close_item(root, archived.name, closure, instant)
 
 
-@pytest.mark.parametrize("target_kind", ["file", "directory"])
+@pytest.mark.parametrize("target_kind", ["file", "directory", "absent-contradiction"])
 def test_source_absent_replay_rejects_in_root_target_not_in_full_inventory(
     tmp_path: Path, target_kind: str,
 ) -> None:
@@ -377,7 +381,12 @@ def test_source_absent_replay_rejects_in_root_target_not_in_full_inventory(
     assert not scratch.exists()
     data = json.loads(receipt.read_text(encoding="utf-8"))
     row = next(row for row in data["inventory"] if row["kind"] == "symlink")
-    row["targetPath"] = (scratch / "nonexistent").relative_to(root).as_posix()
+    if target_kind == "absent-contradiction":
+        row["targetKind"] = "absent"
+        row["targetCustody"] = "no-content"
+        del row["targetSha256"]
+    else:
+        row["targetPath"] = (scratch / "nonexistent").relative_to(root).as_posix()
     data["inventorySha256"] = hashlib.sha256(
         json.dumps(data["inventory"], sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -501,13 +510,26 @@ def test_postlink_stage_with_different_inode_refuses_without_unlink(
     assert final.is_file() and stage.is_file() and scratch.is_dir()
 
 
-def test_cli_requires_apply_and_releases_only_named_root(tmp_path: Path) -> None:
-    mutator, root, archived, scratch, event, _closure, _instant = archived_fixture(tmp_path)
+@pytest.mark.parametrize("source_kind", ["live-link", "readonly", "absent-directory"])
+def test_cli_requires_apply_and_releases_only_named_root(tmp_path: Path, source_kind: str) -> None:
+    if source_kind == "readonly" and os.name != "nt":
+        pytest.skip("Windows ReadOnly unlink contract")
+    mutator, root, archived, scratch, event, closure, instant = archived_fixture(tmp_path)
+    target = root / "missing-parent" / "missing-directory" if source_kind == "absent-directory" else Path("payload.txt")
     try:
-        (scratch / "alias.txt").symlink_to(Path("payload.txt"))
+        (scratch / "alias.txt").symlink_to(target, target_is_directory=source_kind == "absent-directory")
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlink unavailable: {exc}")
     add_artifact(archived)
+    neighbor = root / "untouched.txt"
+    neighbor.write_bytes(b"untouched")
+    before_neighbor = neighbor.stat(), neighbor.read_bytes()
+    if source_kind == "readonly":
+        nested = scratch / "nested"
+        nested.mkdir()
+        (nested / "second.txt").write_bytes(b"second readonly")
+        for leaf in (scratch / "payload.txt", nested / "second.txt"):
+            leaf.chmod(stat.S_IREAD)
     command = [
         sys.executable, str(ROOT / "scripts" / "mutate-work-item.py"),
         "release-retained-scratch", "--root", ".", "--slug", archived.name,
@@ -520,3 +542,175 @@ def test_cli_requires_apply_and_releases_only_named_root(tmp_path: Path) -> None
     applied = subprocess.run([*command, "--apply"], cwd=root, capture_output=True, text=True, timeout=20)
     assert applied.returncode == 0, applied.stderr
     assert not scratch.exists()
+    replayed = subprocess.run([*command, "--apply"], cwd=root, capture_output=True, text=True, timeout=20)
+    assert replayed.returncode == 0, replayed.stderr
+    assert mutator.close_item(root, archived.name, closure, instant) == archived
+    assert (neighbor.stat(), neighbor.read_bytes()) == before_neighbor
+    if source_kind == "absent-directory":
+        assert not (root / "missing-parent").exists()
+        receipt = next((archived / "retained-scratch-releases").glob("*.json"))
+        row = next(row for row in json.loads(receipt.read_text(encoding="utf-8"))["inventory"] if row["kind"] == "symlink")
+        assert row["targetKind"] == "absent" and row["targetCustody"] == "no-content"
+        assert "targetSha256" not in row
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ReadOnly unlink contract")
+def test_ordinary_disposition_uses_same_readonly_unlink(tmp_path: Path) -> None:
+    helpers = load_module(SCRATCH_FIXTURE, f"readonly_disposition_{id(tmp_path)}")
+    root = tmp_path / "repo"
+    mutator, item, scratch, _ = helpers.seed_item(root)
+    (scratch / "payload.txt").chmod(stat.S_IREAD)
+    instant = "2026-08-09T01:00:00Z"
+    archived = mutator.close_item(root, item.name, helpers.closure(instant), instant)
+    assert archived.is_dir() and not scratch.exists()
+    assert mutator.close_item(root, item.name, helpers.closure(instant), instant) == archived
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ReadOnly unlink contract")
+def test_readonly_retry_failure_restores_attribute_and_preserves_bytes(tmp_path: Path, monkeypatch) -> None:
+    mutator, root, archived, scratch, event, _closure, _instant = archived_fixture(tmp_path)
+    add_artifact(archived)
+    leaf = scratch / "payload.txt"
+    leaf.chmod(stat.S_IREAD)
+    before = leaf.stat(), leaf.read_bytes()
+    original_unlink = Path.unlink
+    attempts = []
+
+    def denied(path, *args, **kwargs):
+        if path.name == "payload.txt":
+            attempts.append(path.stat().st_file_attributes)
+            raise PermissionError("denied retry")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", denied)
+    with pytest.raises(mutator.LifecycleError, match="denied retry"):
+        release(mutator, root, archived, event)
+    tombstone = next(scratch.parent.glob(".*.orchestrarium-delete-*"))
+    retained = tombstone / "payload.txt"
+    assert len(attempts) == 2
+    assert attempts[0] & stat.FILE_ATTRIBUTE_READONLY
+    assert not attempts[1] & stat.FILE_ATTRIBUTE_READONLY
+    after = retained.stat()
+    assert (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_file_attributes) == (
+        before[0].st_dev, before[0].st_ino, before[0].st_size, before[0].st_mtime_ns, before[0].st_file_attributes,
+    )
+    assert retained.read_bytes() == before[1]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ReadOnly unlink contract")
+@pytest.mark.parametrize("leaf_kind", ["writable", "hardlinked-readonly"])
+def test_permission_denial_does_not_clear_unowned_or_writable_attributes(tmp_path: Path, monkeypatch, leaf_kind: str) -> None:
+    mutator, root, archived, scratch, event, _closure, _instant = archived_fixture(tmp_path)
+    add_artifact(archived)
+    leaf = scratch / "payload.txt"
+    alias = root / "foreign-alias.txt"
+    if leaf_kind == "hardlinked-readonly":
+        os.link(leaf, alias)
+        leaf.chmod(stat.S_IREAD)
+    before = leaf.stat().st_file_attributes, leaf.read_bytes()
+    original_unlink = Path.unlink
+
+    def denied(path, *args, **kwargs):
+        if path.name == "payload.txt":
+            raise PermissionError("unchanged access denial")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", denied)
+    with pytest.raises(mutator.LifecycleError, match="unchanged access denial"):
+        release(mutator, root, archived, event)
+    retained = next(scratch.parent.glob(".*.orchestrarium-delete-*")) / "payload.txt"
+    assert (retained.stat().st_file_attributes, retained.read_bytes()) == before
+    if alias.exists():
+        assert (alias.stat().st_file_attributes, alias.read_bytes()) == before
+
+
+@pytest.mark.parametrize("obstacle", ["live", "reparse-prefix", "denied-prefix"])
+def test_absent_target_replay_refuses_live_reparse_or_unreadable_prefix(tmp_path: Path, monkeypatch, obstacle: str) -> None:
+    mutator, root, archived, scratch, event, _closure, _instant = archived_fixture(tmp_path)
+    add_artifact(archived)
+    prefix = root / "missing-parent"
+    target = prefix / "target"
+    try:
+        (scratch / "dangling").symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+    with pytest.raises(mutator.LifecycleError, match="injected"):
+        release(mutator, root, archived, event, inject_failure_at="after-receipt")
+    if obstacle == "live":
+        target.mkdir(parents=True)
+        (target / "untouched.txt").write_bytes(b"target bytes")
+    elif obstacle == "reparse-prefix":
+        other = root / "other"
+        other.mkdir()
+        prefix.symlink_to(other, target_is_directory=True)
+    else:
+        original_lstat = Path.lstat
+
+        def denied(path, *args, **kwargs):
+            if path == prefix:
+                raise PermissionError("unreadable target prefix")
+            return original_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "lstat", denied)
+    with pytest.raises(mutator.LifecycleError):
+        release(mutator, root, archived, event)
+    assert scratch.is_dir() and (scratch / "dangling").is_symlink()
+    if obstacle == "live":
+        assert (target / "untouched.txt").read_bytes() == b"target bytes"
+    elif obstacle == "reparse-prefix":
+        assert prefix.is_symlink() and list(other.iterdir()) == []
+
+
+@pytest.mark.parametrize("malformation", ["content-hash", "live-custody", "noncanonical-path"])
+def test_absent_receipt_variant_rejects_malformed_rows(tmp_path: Path, malformation: str) -> None:
+    mutator, root, archived, scratch, event, _closure, _instant = archived_fixture(tmp_path)
+    add_artifact(archived)
+    try:
+        (scratch / "dangling").symlink_to(root / "missing" / "target", target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+    with pytest.raises(mutator.LifecycleError, match="injected"):
+        release(mutator, root, archived, event, inject_failure_at="after-receipt")
+    receipt = next((archived / "retained-scratch-releases").glob("*.json"))
+    body = json.loads(receipt.read_text(encoding="utf-8"))
+    row = next(row for row in body["inventory"] if row["kind"] == "symlink")
+    if malformation == "content-hash":
+        row["targetSha256"] = "0" * 64
+    elif malformation == "live-custody":
+        row["targetCustody"] = "archive-target"
+    else:
+        row["targetPath"] = "."
+    body["inventorySha256"] = hashlib.sha256(json.dumps(body["inventory"], sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    receipt.write_text(json.dumps(body, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    with pytest.raises(mutator.LifecycleError, match="inventory is malformed"):
+        release(mutator, root, archived, event)
+    assert scratch.is_dir() and (scratch / "dangling").is_symlink()
+
+
+def test_inside_absent_link_partial_tombstone_rechecks_before_unlink(tmp_path: Path, monkeypatch) -> None:
+    mutator, root, archived, scratch, event, closure, instant = archived_fixture(tmp_path)
+    add_artifact(archived)
+    try:
+        (scratch / "dangling").symlink_to(Path("missing") / "target", target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+    with pytest.raises(mutator.LifecycleError, match="injected"):
+        release(mutator, root, archived, event, inject_failure_at="after-rename")
+    tombstone = next(scratch.parent.glob(".*.orchestrarium-delete-*"))
+    original_verify = mutator._verify_release_targets
+
+    def target_appears(*args, **kwargs):
+        if kwargs.get("surviving_root") is not None:
+            (tombstone / "missing" / "target").mkdir(parents=True)
+        return original_verify(*args, **kwargs)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(mutator, "_verify_release_targets", target_appears)
+        with pytest.raises(mutator.LifecycleError, match="became live"):
+            release(mutator, root, archived, event)
+    assert (tombstone / "dangling").is_symlink() and (tombstone / "payload.txt").is_file()
+    (tombstone / "missing" / "target").rmdir()
+    (tombstone / "missing").rmdir()
+    assert release(mutator, root, archived, event).is_file()
+    assert not tombstone.exists()
+    assert mutator.close_item(root, archived.name, closure, instant) == archived

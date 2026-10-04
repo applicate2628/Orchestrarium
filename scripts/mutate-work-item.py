@@ -3982,7 +3982,9 @@ def _assign_release_target_custody(
     for row in rows:
         bound = dict(row)
         if row["kind"] == "symlink":
-            if row["targetClass"] == "inside-root":
+            if row["targetKind"] == "absent":
+                bound["targetCustody"] = "no-content"
+            elif row["targetClass"] == "inside-root":
                 bound["targetCustody"] = "accepted-rationale"
             else:
                 target = root / Path(row["targetPath"])
@@ -3998,6 +4000,7 @@ def _assign_release_target_custody(
 
 def _verify_release_targets(
     root: Path, item: Path, source: Path, rows: tuple[dict, ...], artifact_sha256: str,
+    *, surviving_root: Path | None = None,
 ) -> None:
     classifier = _scratch_classifier_module()
     saved = {row["path"]: row for row in rows}
@@ -4008,6 +4011,20 @@ def _verify_release_targets(
         inside = target == source or source in target.parents
         if ("inside-root" if inside else "repository") != row["targetClass"]:
             raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "link target class differs from source root")
+        if row["targetKind"] == "absent":
+            if row["targetCustody"] != "no-content" or "targetSha256" in row:
+                raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "absent target custody differs")
+            if inside and target.relative_to(source).as_posix() in saved:
+                raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "absent target contradicts release inventory")
+            targets = [target]
+            if inside and surviving_root is not None:
+                targets.append(surviving_root / target.relative_to(source))
+            try:
+                if not all(classifier.release_target_absent(candidate, root) for candidate in targets):
+                    raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "absent link target became live")
+            except (OSError, classifier.OwnedTreeClassificationError) as exc:
+                raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "absent link target cannot be proven") from exc
+            continue
         if inside:
             if row["targetCustody"] != "accepted-rationale":
                 raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "inside-root target custody differs")
@@ -4081,18 +4098,22 @@ def _valid_release_inventory_rows(rows: object) -> bool:
             if set(row) != {"path", "kind", "sha256"} or not isinstance(row.get("sha256"), str) or SHA256_RE.fullmatch(row["sha256"]) is None:
                 return False
         elif kind == "symlink":
+            absent = row.get("targetKind") == "absent"
+            expected_keys = {"path", "kind", "rawTargetSha256", "targetPath", "targetClass", "targetKind", "targetCustody"}
+            if not absent:
+                expected_keys.add("targetSha256")
             if (
-                path == "." or set(row) != {"path", "kind", "rawTargetSha256", "targetPath", "targetClass", "targetKind", "targetSha256", "targetCustody"}
-                or any(not isinstance(row.get(key), str) or SHA256_RE.fullmatch(row[key]) is None for key in ("rawTargetSha256", "targetSha256"))
+                path == "." or set(row) != expected_keys
+                or any(not isinstance(row.get(key), str) or SHA256_RE.fullmatch(row[key]) is None for key in (("rawTargetSha256",) if absent else ("rawTargetSha256", "targetSha256")))
                 or row.get("targetClass") not in {"inside-root", "repository"}
-                or row.get("targetKind") not in {"file", "directory"}
-                or row.get("targetCustody") not in {"accepted-rationale", "archive-target", "artifact"}
+                or row.get("targetKind") not in {"file", "directory", "absent"}
+                or row.get("targetCustody") not in ({"no-content"} if absent else {"accepted-rationale", "archive-target", "artifact"})
                 or not isinstance(row.get("targetPath"), str)
             ):
                 return False
             target_path = PurePosixPath(row["targetPath"])
             if (
-                target_path.is_absolute() or Path(row["targetPath"]).drive
+                not target_path.parts or target_path.is_absolute() or Path(row["targetPath"]).drive
                 or "\\" in row["targetPath"]
                 or target_path.as_posix() != row["targetPath"]
                 or any(part in {"", ".", ".."} for part in target_path.parts)
@@ -4390,6 +4411,64 @@ def _scratch_disposition_plan(
     return tuple(plans)
 
 
+def _unlink_owned_scratch_file(path: Path) -> None:
+    """Unlink an owned leaf; retry only a proven Windows ReadOnly failure."""
+    before = path.lstat()
+    readonly = getattr(stat, "FILE_ATTRIBUTE_READONLY", 1)
+    eligible = (
+        os.name == "nt" and stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+        and bool(getattr(before, "st_file_attributes", 0) & readonly)
+        and not bool(getattr(before, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+    )
+    snapshot = _capture_file_snapshot(
+        path, failure_id="WI-SCRATCH-DISPOSITION-PENDING", require_single_link=True,
+        maximum_bytes=_scratch_classifier_module().MAX_OWNED_TREE_BYTES,
+    ) if eligible else None
+    try:
+        path.unlink()
+    except PermissionError as denied:
+        if snapshot is None:
+            raise
+        current = _capture_file_snapshot(
+            path, failure_id="WI-SCRATCH-DISPOSITION-PENDING", require_single_link=True,
+            maximum_bytes=snapshot.length,
+        )
+        if current != snapshot or _lifecycle_file_snapshot_key(path.lstat()) != _lifecycle_file_snapshot_key(before):
+            raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly leaf changed before retry") from denied
+        path.chmod(before.st_mode | stat.S_IWRITE, follow_symlinks=False)
+        try:
+            current = _capture_file_snapshot(
+                path, failure_id="WI-SCRATCH-DISPOSITION-PENDING", require_single_link=True,
+                maximum_bytes=snapshot.length,
+            )
+            after = path.lstat()
+            if (
+                current != snapshot or after.st_mtime_ns != before.st_mtime_ns
+                or after.st_file_attributes != (before.st_file_attributes & ~readonly)
+            ):
+                raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly leaf changed after attribute update")
+            path.unlink()
+        except (OSError, LifecycleError) as retry_failure:
+            try:
+                current = _capture_file_snapshot(
+                    path, failure_id="WI-SCRATCH-DISPOSITION-PENDING", require_single_link=True,
+                    maximum_bytes=snapshot.length,
+                )
+                restoring = path.lstat()
+                if (
+                    current != snapshot or restoring.st_mtime_ns != before.st_mtime_ns
+                    or (restoring.st_file_attributes & ~readonly) != (before.st_file_attributes & ~readonly)
+                ):
+                    raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly leaf changed before restoration")
+                path.chmod(before.st_mode, follow_symlinks=False)
+                _verify_captured_file(snapshot, "WI-SCRATCH-DISPOSITION-PENDING")
+                if path.lstat().st_file_attributes != before.st_file_attributes:
+                    raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly attribute restoration differs")
+            except (OSError, LifecycleError) as restore_failure:
+                raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", f"ReadOnly restoration refused: {restore_failure}") from retry_failure
+            raise retry_failure from denied
+
+
 def _remove_scratch_tree(tree_root: Path) -> None:
     """Remove one already-proven tree without following links or reparses."""
 
@@ -4411,7 +4490,7 @@ def _remove_scratch_tree(tree_root: Path) -> None:
             if child.is_directory:
                 stack.append(Path(entry.path))
             elif child.exists and stat.S_ISREG(os.lstat(entry.path).st_mode):
-                Path(entry.path).unlink()
+                _unlink_owned_scratch_file(Path(entry.path))
             else:
                 raise OSError(f"unsafe non-regular entry during removal: {entry.name}")
     for directory in reversed(directories):
@@ -4476,7 +4555,15 @@ def _settle_released_scratch(
         after = classifier.inspect_root_no_follow(target)
         if after != before or (row["kind"] == "symlink") != after.is_link_or_reparse:
             raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release descendant identity changed before unlink")
-        target.unlink()
+        if row["kind"] == "symlink":
+            if row["targetKind"] == "absent":
+                _verify_release_targets(
+                    root, item, plan.original, (row,), receipt["artifactSha256"],
+                    surviving_root=plan.tombstone,
+                )
+            target.unlink()
+        else:
+            _unlink_owned_scratch_file(target)
         if row["kind"] == "symlink" and not link_unlinked:
             link_unlinked = True
             if inject_failure_at == "after-first-link-unlink":

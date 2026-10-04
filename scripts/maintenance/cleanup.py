@@ -81,7 +81,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Iterator, Sequence
 
 
@@ -634,6 +634,39 @@ def classify_owned_tree(tree_root: Path, repository_root: Path) -> OwnedTreeSnap
     )
 
 
+def release_target_absent(target: Path, repository_root: Path) -> bool:
+    """Prove absence at an ordinary no-follow repository component boundary."""
+    target = Path(target)
+    repository_root = Path(repository_root)
+    try:
+        relative = target.relative_to(repository_root)
+    except ValueError as exc:
+        raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target escapes repository") from exc
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target is not canonical")
+    if any("\x00" in part for part in relative.parts) or (os.name == "nt" and any(
+        os.path.isreserved(part) if hasattr(os.path, "isreserved") else (
+            any(char in '<>:"|?*' or ord(char) < 32 for char in part)
+            or part.endswith((".", " ")) or PureWindowsPath(part).is_reserved()
+        ) for part in relative.parts
+    )):
+        raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target has a malformed component")
+    cursor = repository_root
+    if not stat_module.S_ISDIR(_path_lstat(cursor).st_mode):
+        raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "repository root is not ordinary")
+    for part in relative.parts:
+        cursor /= part
+        try:
+            info = _path_lstat(cursor)
+        except OwnedTreeClassificationError as exc:
+            if isinstance(exc.__cause__, FileNotFoundError):
+                return True
+            raise
+        if cursor != target and not stat_module.S_ISDIR(info.st_mode):
+            raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target parent is not ordinary")
+    return False
+
+
 def snapshot_release_tree(
     tree_root: Path,
     repository_root: Path,
@@ -685,15 +718,12 @@ def snapshot_release_tree(
                 "targetPath": target_relative.as_posix(), "targetClass": target_class,
             }
             if verify_link_targets:
-                cursor = repository_root
-                for part in target_relative.parts:
-                    cursor /= part
-                    target_info = _path_lstat(cursor)
-                    if cursor != target and not stat_module.S_ISDIR(target_info.st_mode):
-                        raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target parent is not ordinary")
-                target_kind, target_sha256 = release_target_digest(target, repository_root)
-                row["targetKind"] = target_kind
-                row["targetSha256"] = target_sha256
+                if release_target_absent(target, repository_root):
+                    row["targetKind"] = "absent"
+                else:
+                    target_kind, target_sha256 = release_target_digest(target, repository_root)
+                    row["targetKind"] = target_kind
+                    row["targetSha256"] = target_sha256
             rows.append(row)
         elif stat_module.S_ISDIR(info.st_mode):
             rows.append({"path": relative.as_posix(), "kind": "directory"})
