@@ -3159,12 +3159,61 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                 self.assertIsInstance(outcome, module.Refusal)
                 self.assertIn(outcome.failure_id, {"PS-MSG-FRAME", "PS-MSG-RANGE"})
 
+    def test_remote_ref_inventory_preserves_large_mixed_advertisement(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_remote_ref_inventory_mixed")
+        head_oid = "1" * 40
+        tag_oid = "2" * 40
+        peeled_oid = "3" * 40
+        pull_oid = "4" * 40
+        notes_oid = "5" * 40
+        rows = tuple(
+            [
+                f"{head_oid}\trefs/heads/branch-{index:05d}".encode("ascii")
+                for index in range(66)
+            ]
+            + [
+                f"{tag_oid}\trefs/tags/tag-{index:05d}".encode("ascii")
+                for index in range(33)
+            ]
+            + [
+                f"{peeled_oid}\trefs/tags/tag-{index:05d}^{{}}".encode("ascii")
+                for index in range(7)
+            ]
+            + [f"{notes_oid}\trefs/notes/commits".encode("ascii")]
+            + [
+                f"{pull_oid}\trefs/pull/{index}/head".encode("ascii")
+                for index in range(1, 612)
+            ]
+        )
+        self.assertEqual(len(rows), 718)
+
+        outcome = module._parse_remote_ref_tip_oids(rows, module._SHA1_OBJECT_FORMAT)
+
+        self.assertIsInstance(outcome, tuple)
+        self.assertEqual(len(outcome), 711)
+        self.assertEqual(len({tip.refname for tip in outcome}), 711)
+        for prefix, count, oid in (
+            (b"refs/heads/", 66, head_oid),
+            (b"refs/tags/", 33, tag_oid),
+            (b"refs/pull/", 611, pull_oid),
+            (b"refs/notes/", 1, notes_oid),
+        ):
+            selected = [tip for tip in outcome if tip.refname.startswith(prefix)]
+            self.assertEqual(len(selected), count)
+            self.assertTrue(all(tip.oid == oid for tip in selected))
+        peeled = [tip for tip in outcome if tip.peeled_oid is not None]
+        self.assertEqual(len(peeled), 7)
+        self.assertTrue(all(tip.peeled_oid == peeled_oid for tip in peeled))
+        self.assertEqual(peeled[0].refname, b"refs/tags/tag-00000")
+        self.assertEqual(peeled[-1].refname, b"refs/tags/tag-00006")
+        self.assertEqual(outcome[-1].refname, b"refs/pull/611/head")
+
     def test_range_missing_destination_refuses_over_cap_remote_ref_inventory(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_remote_ref_inventory_cap")
         tip = "1" * 40
         remote_rows = tuple(
             f"{tip}\trefs/heads/branch-{index:05d}".encode("ascii")
-            for index in range(257)
+            for index in range(module._MAX_REMOTE_REFS + 1)
         )
 
         async def fake_reader(argv, **_kwargs):
