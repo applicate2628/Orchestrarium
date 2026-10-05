@@ -11122,8 +11122,35 @@ def _incoming_attachment_kind(data: bytes) -> str | None:
     return None
 
 
+class _RetainedConsumerScanPreparation:
+    """Invocation-owned validator and captured/decoded inputs, never admission."""
+    def __init__(self) -> None:
+        self._validator: object | None = None
+        self._items: dict[Path, tuple[CapturedFileSnapshot, list[dict], list[dict[str, object]], tuple[str, ...]] | None] = {}
+
+    def validator(self):
+        if self._validator is None:
+            self._validator = _validator_module()
+        return self._validator
+
+    def item(self, item: Path):
+        if item not in self._items:
+            # Missing/failed preparation remains nonauthorizing for this scan.
+            self._items[item] = None
+            ledger_path = item / "agent-runs.jsonl"
+            if ledger_path.exists():
+                validator = self.validator()
+                carrier = _capture_file_snapshot(ledger_path, failure_id="WI-CATEGORY-MIGRATION-INVENTORY",
+                                                 maximum_bytes=validator.MAX_LEDGER_EVENTS * validator.MAX_LEDGER_LINE_BYTES)
+                diagnostics: list[str] = []
+                metadata: list[dict[str, object]] = []
+                events = validator.load_jsonl(ledger_path, diagnostics, metadata, carrier.data)
+                self._items[item] = (carrier, events, metadata, tuple(diagnostics))
+        return self._items[item]
+
+
 def _retained_preimage_consumer(
-    consumer: Path, work_items: Path, *, validator_loader: Callable[[], object] | None = None,
+    consumer: Path, work_items: Path, *, scan_preparation: _RetainedConsumerScanPreparation | None = None,
 ) -> bool:
     """Select only one bound payload or its exact provenance snapshot."""
     parts = consumer.relative_to(work_items).parts
@@ -11133,16 +11160,13 @@ def _retained_preimage_consumer(
         return False
     item = work_items.joinpath(*parts[:item_parts])
     relative = consumer.relative_to(item).as_posix()
-    validator = _validator_module() if validator_loader is None else validator_loader()
-    ledger_path = item / "agent-runs.jsonl"
-    if not ledger_path.exists():
-        return False
+    preparation = _RetainedConsumerScanPreparation() if scan_preparation is None else scan_preparation
+    validator = preparation.validator()
     try:
-        carrier = _capture_file_snapshot(ledger_path, failure_id="WI-CATEGORY-MIGRATION-INVENTORY",
-                                         maximum_bytes=validator.MAX_LEDGER_EVENTS * validator.MAX_LEDGER_LINE_BYTES)
-        parse_errors: list[str] = []
-        metadata: list[dict[str, object]] = []
-        events = validator.load_jsonl(ledger_path, parse_errors, metadata, carrier.data)
+        prepared = preparation.item(item)
+        if prepared is None:
+            return False
+        carrier, events, metadata, _diagnostics = prepared
         for event, identity in zip(events, metadata):
             profile_errors: list[str] = []
             profiles = validator.retained_preimage_profiles(event, item, profile_errors)
@@ -11232,13 +11256,7 @@ def _incoming_link_result(
             for owned in owned_resolved
         )
 
-    validator = None
-
-    def load_validator():
-        nonlocal validator
-        if validator is None:
-            validator = _validator_module()
-        return validator
+    preparation = _RetainedConsumerScanPreparation()
 
     for consumer in sorted(path for path in work_items.rglob("*") if path.is_file()):
         if consumer.name in {"README.md", "index.md"}:
@@ -11249,7 +11267,7 @@ def _incoming_link_result(
         consumer_rel = consumer.relative_to(work_items).as_posix()
         if mutable_consumers_only and "archive" in Path(consumer_rel).parts:
             continue
-        if _retained_preimage_consumer(consumer, work_items, validator_loader=load_validator):
+        if _retained_preimage_consumer(consumer, work_items, scan_preparation=preparation):
             continue
         try:
             consumer_bytes = consumer.read_bytes()

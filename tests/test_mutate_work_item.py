@@ -745,6 +745,85 @@ def test_retained_consumer_acquires_validator_once_per_lazy_scan(tmp_path: Path)
         assert direct.value is failure  # Preserve the current acquisition point.
 
 
+def test_retained_consumer_prepares_each_item_once(tmp_path: Path):
+    module, root, bug, _status, item, payload, before, report, profile = retained_preimage_fixture(tmp_path)
+    assert retained_preimage_append(item, profile).returncode == 0
+    seed_active(module, root, "preparation-peer")
+    peer = root / "work-items" / "active" / "preparation-peer"
+    peer_payload = peer / profile["ref"]
+    peer_payload.parent.mkdir(parents=True)
+    peer_payload.write_bytes(before)
+    (peer / report.name).write_bytes(report.read_bytes())
+    peer_profile = {**profile, "result": json.dumps({**json.loads(profile["result"]), "workItem": peer.name})}
+    assert retained_preimage_append(peer, peer_profile, run_id="peer-custody-record").returncode == 0
+    for owner in (item, peer):
+        write(owner / "inputs" / "ordinary-a.md", "Unmatched live input.\n")
+        write(owner / "inputs" / "ordinary-b.md", "Another unmatched live input.\n")
+    paths = {item / "agent-runs.jsonl", peer / "agent-runs.jsonl"}
+    captures, decodes = {}, {}
+    real_capture, real_loader = module._capture_file_snapshot, module._validator_module
+
+    def counted_capture(path, **kwargs):
+        if path in paths:
+            captures[path] = captures.get(path, 0) + 1
+        return real_capture(path, **kwargs)
+
+    def counted_loader():
+        validator = real_loader()
+        real_decode = validator.load_jsonl
+        def counted_decode(path, *args, **kwargs):
+            # Selected-proof prefix decoding is separate, still candidate-owned.
+            if path in paths and sys._getframe(1).f_code.co_name != "resolve_historical_pass_custody":
+                decodes[path] = decodes.get(path, 0) + 1
+            return real_decode(path, *args, **kwargs)
+        validator.load_jsonl = counted_decode
+        return validator
+
+    with patch.object(module, "_capture_file_snapshot", side_effect=counted_capture), \
+         patch.object(module, "_validator_module", side_effect=counted_loader):
+        result = module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)
+    assert result["result"] == "unmapped"
+    assert payload.read_bytes() == before and peer_payload.read_bytes() == before
+    assert captures == {path: 1 for path in paths}
+    assert decodes == {path: 1 for path in paths}
+
+
+def test_retained_consumer_cached_carrier_drift_never_refreshes_approval(tmp_path: Path):
+    for fault in ("growth", "content", "replacement", "parent"):
+        module, root, bug, status, item, payload, before, report, profile = retained_preimage_fixture(tmp_path / fault)
+        assert retained_preimage_append(item, profile).returncode == 0
+        ledger = item / "agent-runs.jsonl"
+        # Declared synthetic whitespace suffix; original public record/proof stays exact.
+        original = ledger.read_bytes() + b" \n"
+        ledger.write_bytes(original)
+        observed = {path: path.read_bytes() for path in (bug, status, root / "work-items" / "README.md")}
+        real_selector = module._retained_preimage_consumer
+        injected = []
+
+        def select_then_drift(consumer, work_items, **kwargs):
+            result = real_selector(consumer, work_items, **kwargs)
+            if consumer == ledger and not injected:
+                if fault == "growth":
+                    ledger.write_bytes(original + b" \n")
+                elif fault == "content":
+                    ledger.write_bytes(original[:-2] + b"\t\n")
+                elif fault == "replacement":
+                    replacement = item / "replacement-ledger.jsonl"
+                    replacement.write_bytes(original)
+                    os.replace(replacement, ledger)
+                else:
+                    item.rename(item.with_name("moved-custodian"))
+                injected.append(True)
+            return result
+
+        with patch.object(module, "_retained_preimage_consumer", side_effect=select_then_drift):
+            with pytest.raises(module.LifecycleError, match="cannot classify live incoming-link consumer"):
+                module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)
+        assert injected == [True]
+        assert all(path.read_bytes() == data for path, data in observed.items())
+        assert (item if fault != "parent" else item.with_name("moved-custodian")).joinpath(profile["ref"]).read_bytes() == before
+
+
 def test_snapshot_reads_captured_size_and_preserves_drift_refusal(tmp_path: Path):
     module = load_module()
     real_fdopen = module.os.fdopen
