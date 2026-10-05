@@ -1460,8 +1460,14 @@ def command_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _append_candidate_bytes(previous: bytes, event: dict[str, Any]) -> bytes:
+    separator = b"" if not previous or previous.endswith(b"\n") else b"\n"
+    return previous + separator + serialize_event(event).encode("utf-8") + b"\n"
+
+
 def _append_event_transaction(
-    item: Path, validator: Any, event_factory: Any, on_abort: Any = None
+    item: Path, validator: Any, event_factory: Any, on_abort: Any = None,
+    *, candidate_custody_blobs: dict[str, bytes] | None = None, before_replace: Any = None,
 ) -> bool:
     """Append one validator-approved event, or report an idempotent no-op.
 
@@ -1501,21 +1507,22 @@ def _append_event_transaction(
         event = event_factory(previous)
         if event is None:
             return False
-        prefix = b"" if not previous_bytes or previous_bytes.endswith(b"\n") else b"\n"
-        line = serialize_event(event)
         with candidate.open("wb") as fh:
-            fh.write(previous_bytes + prefix + line.encode("utf-8") + b"\n")
+            fh.write(_append_candidate_bytes(previous_bytes, event))
             fh.flush()
 
         # strict_revise=False: the helper RECORDS events (including REVISE verdicts
         # themselves); closure strictness is the checker's and the gates' job.
-        errors = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False)
+        custody_args = {"historical_pass_custody_blobs": candidate_custody_blobs} if candidate_custody_blobs is not None else {}
+        errors = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False, **custody_args)
         if errors:
             candidate.unlink(missing_ok=True)
             for error in errors:
                 print(f"FAIL: {error}", file=sys.stderr)
             print(f"RESULT: FAIL ({len(errors)} errors)", file=sys.stderr)
             raise ValueError("; ".join(errors))
+        if before_replace is not None:
+            before_replace()
         os.replace(candidate, ledger_path)
     except BaseException:
         candidate.unlink(missing_ok=True)
@@ -1649,6 +1656,82 @@ def _capture_review_custody(
     return event
 
 
+def _append_retained_preimage(item: Path, validator: Any, event: dict[str, Any], profiles: list[tuple[dict, dict]]) -> bool:
+    """Extend the existing append/custody transaction, never the retained payload."""
+    owner = validator.load_lifecycle_owner()
+    blobs: dict[str, bytes] = {}
+    created_files: list[tuple[Path, bytes, tuple[int, int, int, int]]] = []
+    created_directories: list[Path] = []
+    captures: list[Any] = []
+
+    def prepare(previous: str) -> dict[str, Any]:
+        report_ref = profiles[0][1]["provenance"]["ref"]
+        report_path = item / report_ref
+        if not report_path.exists() and not report_path.is_symlink():
+            root = validator.repo_root_for(item)
+            if root is None:
+                raise ValueError("WI-RETAINED-PREIMAGE: report has no repository identity")
+            report_path = root / report_ref
+        report = owner._capture_file_snapshot(report_path, failure_id="WI-RETAINED-PREIMAGE")
+        digest = hashlib.sha256(report.data).hexdigest()
+        for entry, profile in profiles:
+            if profile["provenance"]["sha256"] != digest:
+                raise ValueError("WI-RETAINED-PREIMAGE: accepted report digest differs")
+            captures.append(validator.capture_retained_preimage_payload(item, entry, profile))
+        captures.append(report)
+        line = serialize_event(event).encode("utf-8")
+        candidate = _append_candidate_bytes(previous.encode("utf-8"), event)
+        ordinal = len(candidate.splitlines(keepends=True))
+        raw_sha = hashlib.sha256(line).hexdigest()
+        association = owner._historical_pass_association(candidate, event, ordinal, raw_sha, digest)
+        blobs[f"review-artifact-custody/{digest}"] = report.data
+        blobs[f"review-artifact-custody/historical-pass/{raw_sha}.json"] = validator._canonical_projection_bytes(association)
+        return event
+
+    def publish() -> None:
+        for capture in captures:
+            owner._verify_captured_file(capture, "WI-RETAINED-PREIMAGE")
+        for directory in (item / "review-artifact-custody", item / "review-artifact-custody" / "historical-pass"):
+            if not directory.exists():
+                directory.mkdir()
+                created_directories.append(directory)
+        for key, data in blobs.items():
+            path = item / key
+            if "/historical-pass/" in key:
+                identities: list[tuple[int, int, int, int]] = []
+                try:
+                    owner._projection_create_or_exact(path, data, "WI-RETAINED-PREIMAGE", created_identities=identities)
+                finally:
+                    if identities:
+                        created_files.append((path, data, identities[0]))
+            else:
+                owned: dict[str, Path] = {}
+                creator: dict[str, tuple[int, int]] = {}
+                try:
+                    _acquire_custody_snapshot(item, data, path.name, validator, owned, owned_identities=creator)
+                finally:
+                    if "snapshot" in owned:
+                        info = path.lstat()
+                        if (info.st_dev, info.st_ino) != creator["snapshot"]:
+                            raise ValueError("WI-RETAINED-PREIMAGE: snapshot creator identity changed")
+                        created_files.append((path, data, _noncanonical_file_identity(info)))
+
+    def abort() -> None:
+        clean = True
+        for path, data, identity in reversed(created_files):
+            clean = remove_exact_mixed_owned_file(path, data, identity) and clean
+        for directory in reversed(created_directories):
+            if directory.exists() and not any(directory.iterdir()):
+                directory.rmdir()
+            else:
+                clean = False
+        if not clean:
+            raise ValueError("WI-RETAINED-PREIMAGE: changed or ambiguous owned append residue preserved")
+
+    return _append_event_transaction(item, validator, prepare, on_abort=abort,
+                                     candidate_custody_blobs=blobs, before_replace=publish)
+
+
 def command_append(args: argparse.Namespace) -> int:
     item = active_work_item(args, "append")
     if item is None:
@@ -1660,11 +1743,19 @@ def command_append(args: argparse.Namespace) -> int:
     validator = load_validator()
     try:
         event = build_event(args, validator)
+        retained_errors: list[str] = []
+        retained_profiles = validator.retained_preimage_profiles(event, item, retained_errors)
+        if retained_errors:
+            raise ValueError("; ".join(retained_errors))
         custody_requested = any(getattr(args, name, None) is not None for name in (
             "source_worktree", "expected_source_worktree_id", "expected_reviewed_sha256",
             "expected_ledger_sha256", "target_raw_line_sha256",
         ))
-        if custody_requested:
+        if retained_profiles and custody_requested:
+            raise ValueError("WI-RETAINED-PREIMAGE: retained stewardship cannot claim a linked review closer")
+        if retained_profiles:
+            _append_retained_preimage(item, validator, event, retained_profiles)
+        elif custody_requested:
             if any(getattr(args, name, None) is None for name in (
                 "source_worktree", "expected_source_worktree_id", "expected_reviewed_sha256",
                 "expected_ledger_sha256", "target_raw_line_sha256",

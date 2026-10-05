@@ -569,7 +569,7 @@ def load_jsonl(
     raw_metadata: list[dict[str, object]] | None = None,
     source_bytes: bytes | None = None,
 ) -> list[dict]:
-    if not path.exists():
+    if source_bytes is None and not path.exists():
         fail(errors, f"missing ledger: {path}")
         return []
     events: list[dict] = []
@@ -797,6 +797,64 @@ def validate_evidence(evidence: object, run_id: object, errors: list[str], requi
             fail(errors, f"{run_id}: evidence[{index}].result must be a string")
 
 
+def retained_preimage_profiles(event: Mapping[str, object], item: Path, errors: list[str]) -> list[tuple[dict, dict]]:
+    """One evidence codec; ordinary result prose remains ordinary evidence."""
+    profiles: list[tuple[dict, dict]] = []
+    entries = event.get("evidence")
+    if not isinstance(entries, list):
+        return profiles
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("result"), str):
+            continue
+        try:
+            recognition = json.loads(entry["result"])
+        except (ValueError, TypeError):
+            # Unstructured results cannot declare retained-input semantics.
+            continue
+        if not isinstance(recognition, dict) or recognition.get("kind") != "retained-preimage":
+            continue
+        try:
+            profile = decode_json_object(entry["result"].encode("utf-8"), source="retained-preimage result", maximum_bytes=MAX_LEDGER_LINE_BYTES)
+            ref = entry.get("ref")
+            provenance = profile.get("provenance")
+            safe_ref = (isinstance(ref, str) and _safe_repo_relative(ref)
+                        and not Path(ref).is_absolute() and not Path(ref).drive
+                        and len(PurePosixPath(ref).parts) >= 2 and PurePosixPath(ref).parts[0] == "inputs")
+            if (set(entry) != {"kind", "ref", "result"} or entry.get("kind") != "artifact"
+                or set(profile) != {"schemaVersion", "kind", "workItem", "purpose", "byteCount", "sha256", "provenance"}
+                or type(profile.get("schemaVersion")) is not int or profile["schemaVersion"] != 1
+                or profile.get("workItem") != item.name or profile.get("purpose") != "historical-only"
+                or type(profile.get("byteCount")) is not int or profile["byteCount"] < 0
+                or not isinstance(profile.get("sha256"), str) or SHA256_RE.fullmatch(profile["sha256"]) is None
+                or not safe_ref or not isinstance(provenance, dict) or set(provenance) != {"ref", "sha256", "snapshot"}
+                or provenance.get("ref") != event.get("artifact")
+                or not isinstance(provenance.get("ref"), str) or not _safe_repo_relative(provenance["ref"])
+                or provenance["ref"] in {"", "."} or Path(provenance["ref"]).is_absolute() or Path(provenance["ref"]).drive
+                or provenance.get("sha256") != event.get("artifactRevision")
+                or not isinstance(provenance.get("sha256"), str) or SHA256_RE.fullmatch(provenance["sha256"]) is None
+                or provenance.get("snapshot") != f"review-artifact-custody/{provenance['sha256']}"):
+                raise ValueError("descriptor fields, input namespace or provenance binding differ")
+            if (event.get("schemaVersion") != 2 or event.get("role") != "knowledge-archivist"
+                or event.get("executionRole") != "internal" or event.get("assignedRole", "knowledge-archivist") != "knowledge-archivist"
+                or event.get("eventKind") != "standalone" or event.get("status") != "completed" or event.get("gate") != "PASS"
+                or "closesRunIds" in event):
+                raise ValueError("actual internal standalone stewardship PASS without closes is required")
+            profiles.append((entry, profile))
+        except ValueError as exc:
+            fail(errors, f"WI-RETAINED-PREIMAGE: {event.get('runId')}: {exc}")
+    return profiles
+
+
+def capture_retained_preimage_payload(item: Path, entry: Mapping[str, object], profile: Mapping[str, object]):
+    """Use the existing ordinary/no-follow capture, bounded by declared bytes."""
+    owner = load_lifecycle_owner()
+    snapshot = owner._capture_file_snapshot(item / entry["ref"], failure_id="WI-RETAINED-PREIMAGE",
+                                            maximum_bytes=profile["byteCount"])
+    if snapshot.length != profile["byteCount"] or hashlib.sha256(snapshot.data).hexdigest() != profile["sha256"]:
+        raise ValueError("WI-RETAINED-PREIMAGE: payload byte count/hash differs")
+    return snapshot
+
+
 def _bounded_nonempty_string(
     value: object,
     *,
@@ -840,6 +898,7 @@ def resolve_historical_pass_custody(
     item: Path, selected_ledger_bytes: bytes, events: Sequence[Mapping[str, object]],
     raw_metadata: Sequence[Mapping[str, object]], *,
     candidate_blobs: Mapping[str, bytes] | None = None,
+    selected_association: str | None = None,
 ) -> tuple[Mapping[tuple[int, str, str, str], str], tuple[str, ...]]:
     """Bind immutable artifact locators to captured raw PASS identities, not authority."""
     errors: list[str] = []
@@ -849,13 +908,20 @@ def resolve_historical_pass_custody(
     stale = "WI-LEDGER-CUSTODY-STALE-TARGET"
     mismatch = "WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH"
     try:
+        if selected_association is not None and re.fullmatch(
+            r"review-artifact-custody/historical-pass/[0-9a-f]{64}\.json", selected_association
+        ) is None:
+            raise ValueError(f"{stale}: selected association key is invalid")
         if directory.exists() or directory.is_symlink():
             if (
                 _is_link_or_reparse(directory.parent) or _is_link_or_reparse(directory)
                 or not directory.is_dir()
             ):
                 raise ValueError(f"{stale}: association directory is not ordinary")
-            for path in sorted(directory.iterdir(), key=lambda value: value.name):
+            paths = [item / selected_association] if selected_association is not None else sorted(directory.iterdir(), key=lambda value: value.name)
+            for path in paths:
+                if selected_association is not None and not path.exists() and not path.is_symlink():
+                    continue
                 if _is_link_or_reparse(path) or not path.is_file():
                     raise ValueError(f"{stale}: association is not an ordinary file")
                 blobs[path.relative_to(item).as_posix()] = path.read_bytes()
@@ -863,6 +929,8 @@ def resolve_historical_pass_custody(
             if not isinstance(path, str) or not isinstance(raw, bytes):
                 raise ValueError(f"{stale}: candidate custody is not path-bound bytes")
             if path.startswith("review-artifact-custody/historical-pass/"):
+                if selected_association is not None and path != selected_association:
+                    continue
                 if path in blobs and blobs[path] != raw:
                     raise ValueError(f"{stale}: immutable association conflicts")
                 blobs[path] = raw
@@ -918,7 +986,7 @@ def resolve_historical_pass_custody(
                     if isinstance(row.get("runId"), str) and isinstance(row.get("artifact"), str)
                 }
                 if (
-                    prefix_errors or identity not in prefix_identities or event is None
+                    (prefix_errors and selected_association is None) or identity not in prefix_identities or event is None
                     or event.get("gate") != "PASS" or event.get("status") != "completed"
                     or type(event.get("schemaVersion")) is not int or event["schemaVersion"] not in {1, 2}
                     or sum(isinstance(row.get("runId"), str)
@@ -1738,6 +1806,7 @@ def _validate_event(
     historical_pass_snapshot: str | None = None,
     legacy_archived_review_pointer_compat: bool = False,
     telemetry: dict[str, int] | None = None,
+    retained_payloads: Mapping[str, object] | None = None,
 ) -> bool:
     if event.get("schemaVersion") == 3:
         return validate_v3_event(event, seen, errors)
@@ -1849,6 +1918,18 @@ def _validate_event(
 
     if evidence is not None:
         validate_evidence(evidence, run_id, errors, gate == "PASS")
+        for entry, profile in retained_preimage_profiles(event, item, errors):
+            # Explicit captures select runtime bindings, not descriptor schemas.
+            if retained_payloads is not None and entry["ref"] not in retained_payloads:
+                continue
+            try:
+                snapshot = (capture_retained_preimage_payload(item, entry, profile)
+                            if retained_payloads is None else retained_payloads[entry["ref"]])
+                if (snapshot.path != item / entry["ref"] or snapshot.length != profile["byteCount"]
+                    or hashlib.sha256(snapshot.data).hexdigest() != profile["sha256"]):
+                    raise ValueError("WI-RETAINED-PREIMAGE: captured payload binding differs")
+            except (ValueError, OSError, load_lifecycle_owner().LifecycleError) as exc:
+                fail(errors, str(exc) if str(exc).startswith("WI-RETAINED-PREIMAGE") else f"WI-RETAINED-PREIMAGE: {exc}")
 
     event_kind = event.get("eventKind")
     if "scratchEvidence" in event:

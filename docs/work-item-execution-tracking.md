@@ -802,6 +802,28 @@ on the verified identity and leaves the failure visible. Access-control lists
 and ownership are never repaired. This operation is shared with ordinary
 scratch disposition; links and directory targets do not use it.
 
+## Retained preimages and incoming-link selection
+
+An exact historical preimage is not a live document merely because its bytes resemble current links. Admission is opt-in and byte-bound: an actual internal `knowledge-archivist` standalone completed/PASS record, with no `closesRunIds` and no different assigned role, may declare one ordinary item-relative leaf below its own `inputs/`. This does not admit the directory, root status/ledgers/receipts/registries, or arbitrary digest-store leaves. Same-named historical input copies are distinct from their live counterparts.
+
+Use the existing `agent-run-ledger.py append --evidence-json` surface. Keep the normal PASS artifact/evidence requirements: artifact and its SHA-256 `artifactRevision` identify the accepted stewardship report. Add this existing evidence object; `result` is the serialized JSON **string**, not a new event field:
+
+```json
+{
+  "kind":"artifact",
+  "ref":"inputs/example.before",
+  "result":"{\"schemaVersion\":1,\"kind\":\"retained-preimage\",\"workItem\":\"example-item\",\"purpose\":\"historical-only\",\"byteCount\":4,\"sha256\":\"<payload-sha256>\",\"provenance\":{\"ref\":\"stewardship.md\",\"sha256\":\"<report-sha256>\",\"snapshot\":\"review-artifact-custody/<report-sha256>\"}}"
+}
+```
+
+The public writer captures the unchanged payload and accepted report, validates the ordinary whole append candidate, and publishes the report through the existing digest store and exact historical-PASS association. Failed append reclaims only its unchanged owned residue. The incoming-link owner resolves only the matching declaration's selected association and per-record schema/unique decoded identity; unrelated malformed legacy rows or unrelated associations do not become additional vetoes. Admission is ineffective without the exact validated association. The stewardship report remains usable through its immutable snapshot after its original path is overwritten or removed.
+
+Only the exact declared payload or exact derived `provenance.snapshot` is excluded from link interpretation. That exclusion preserves bytes and purpose; it does not assert that no historical links exist, grant goal completion, close a review obligation, or waive a gate. Every other consumer retains the existing native-content recognition, strict UTF-8 and reference checks. Unknown unreadable live input still refuses strict inventory.
+
+Mutating lifecycle calls capture the admission carrier, selected association, provenance snapshot and payload in their existing invocation-owned transaction. Existing verification boundaries recheck those observations before intent or later mutations. A standalone inventory grants no future mutation credit. Preview, apply and owning-item relocation use the same selector and retain their existing caller strictness.
+
+Downgrade is not generally safe: an older reader may refuse opaque bytes or treat UTF-8 historical links as live. Use a capable lifecycle owner; recovery restores capable code, never rewrites, moves or deletes the retained payload to bypass classification.
+
 ## Operator Rules
 
 - Do not trust a subagent report without a matching ledger event and independent verification evidence.

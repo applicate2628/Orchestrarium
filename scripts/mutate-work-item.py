@@ -471,6 +471,7 @@ class LifecycleTransaction:
         self._file = None
         self._identity: tuple[int, int] | None = None
         self._locked = False
+        self._retained_observations: dict[Path, CapturedFileSnapshot] = {}
 
     def _ensure_lock_file(self) -> None:
         scratch = self.path.parent
@@ -573,6 +574,15 @@ class LifecycleTransaction:
                 "WI-LIFECYCLE-LOCK-IDENTITY",
                 "lifecycle lock handle/path identity changed",
             )
+        for snapshot in self._retained_observations.values():
+            _verify_captured_file(snapshot, "WI-CATEGORY-MIGRATION-INVENTORY")
+
+    def observe_retained_inputs(self, snapshots: Iterable[CapturedFileSnapshot]) -> None:
+        for snapshot in snapshots:
+            previous = self._retained_observations.get(snapshot.path)
+            if previous is not None and previous != snapshot:
+                raise LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY", "retained-input observation changed during selection")
+            self._retained_observations[snapshot.path] = snapshot
 
     def __enter__(self) -> "LifecycleTransaction":
         self._ensure_lock_file()
@@ -2370,6 +2380,9 @@ def archive_month(terminal_instant: str) -> str:
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is not None:
+        transaction.verify()
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path: Path | None = None
     try:
@@ -7638,6 +7651,9 @@ def _apply_single_bug_transition(
         "WI-BUG-DISPOSITIONS-DRIFT" if intent["kind"] == BUG_SUPERSESSION_KIND
         else "WI-README-STALE"
     )
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is not None:
+        transaction.verify()
     _verify_captured_file(source_snapshot, preflight_id)
     _verify_captured_file(readme_snapshot, readme_preflight_id)
     for row in links:
@@ -7657,6 +7673,8 @@ def _apply_single_bug_transition(
     _atomic_write(source, source_after)
     if inject_failure_at == f"{failpoint}2":
         raise LifecycleError(rollback_id, f"injected {failpoint}2")
+    if transaction is not None:
+        transaction.verify()
     archive.parent.mkdir(parents=True, exist_ok=True)
     os.replace(source, archive)
     if inject_failure_at == f"{failpoint}3":
@@ -10551,6 +10569,9 @@ def _move_terminal_category(root: Path, reference: str) -> Path:
             refresh_readme(root)
             return source
     _preflight_readme_markers(root)
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is not None:
+        transaction.verify()
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", f"archive target exists: {target}")
@@ -10675,6 +10696,9 @@ def _migrate_v0_decision(root: Path, reference: str, inventory: dict, source: Pa
     archive_root_existed = archive.parent.parent.is_dir()
     readme_attempted = False
     try:
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        if transaction is not None:
+            transaction.verify()
         archive.parent.mkdir(parents=True, exist_ok=True)
         os.replace(source, archive)
         _atomic_write(manifest, manifest_after)
@@ -11098,6 +11122,73 @@ def _incoming_attachment_kind(data: bytes) -> str | None:
     return None
 
 
+def _retained_preimage_consumer(
+    consumer: Path, work_items: Path, *, validator_loader: Callable[[], object] | None = None,
+) -> bool:
+    """Select only one bound payload or its exact provenance snapshot."""
+    parts = consumer.relative_to(work_items).parts
+    item_parts = 2 if len(parts) >= 3 and parts[0] == "active" else \
+        3 if len(parts) >= 4 and parts[0] == "archive" else 0
+    if not item_parts:
+        return False
+    item = work_items.joinpath(*parts[:item_parts])
+    relative = consumer.relative_to(item).as_posix()
+    validator = _validator_module() if validator_loader is None else validator_loader()
+    ledger_path = item / "agent-runs.jsonl"
+    if not ledger_path.exists():
+        return False
+    try:
+        carrier = _capture_file_snapshot(ledger_path, failure_id="WI-CATEGORY-MIGRATION-INVENTORY",
+                                         maximum_bytes=validator.MAX_LEDGER_EVENTS * validator.MAX_LEDGER_LINE_BYTES)
+        parse_errors: list[str] = []
+        metadata: list[dict[str, object]] = []
+        events = validator.load_jsonl(ledger_path, parse_errors, metadata, carrier.data)
+        for event, identity in zip(events, metadata):
+            profile_errors: list[str] = []
+            profiles = validator.retained_preimage_profiles(event, item, profile_errors)
+            if profile_errors:
+                continue
+            for entry, profile in profiles:
+                if relative not in {entry["ref"], profile["provenance"]["snapshot"]}:
+                    continue
+                run_id = event.get("runId")
+                if not isinstance(run_id, str) or sum(isinstance(row.get("runId"), str)
+                    and row["runId"].casefold() == run_id.casefold() for row in events) != 1:
+                    continue
+                association_key = f"review-artifact-custody/historical-pass/{identity['sha256']}.json"
+                association = _capture_file_snapshot(item / association_key, failure_id="WI-CATEGORY-MIGRATION-INVENTORY",
+                                                     maximum_bytes=validator.MAX_LEDGER_LINE_BYTES)
+                provenance = _capture_file_snapshot(item / profile["provenance"]["snapshot"],
+                                                     failure_id="WI-CATEGORY-MIGRATION-INVENTORY")
+                payload = validator.capture_retained_preimage_payload(item, entry, profile)
+                # Resolve exactly the captured association/snapshot; unrelated
+                # declarations and legacy rows cannot become a new veto.
+                custody, custody_errors = validator.resolve_historical_pass_custody(
+                    item, carrier.data, events, metadata, selected_association=association_key,
+                    candidate_blobs={association_key: association.data,
+                                     profile["provenance"]["snapshot"]: provenance.data},
+                )
+                locator = custody.get((identity["line"], identity["sha256"], run_id, event.get("artifact")))
+                if custody_errors or locator != profile["provenance"]["snapshot"]:
+                    continue
+                record_errors: list[str] = []
+                if not validator._validate_event(event, item, set(), record_errors,
+                    historical_pass_snapshot=locator, retained_payloads={entry["ref"]: payload}) or record_errors:
+                    continue
+                captures = (carrier, association, provenance, payload)
+                for snapshot in captures:
+                    _verify_captured_file(snapshot, "WI-CATEGORY-MIGRATION-INVENTORY")
+                transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+                if transaction is not None:
+                    transaction.observe_retained_inputs(captures)
+                return True
+    except (OSError, ValueError, LifecycleError, validator.load_lifecycle_owner().LifecycleError):
+        # Failed admission is not an exemption. The caller retains its existing
+        # native/UTF-8/reference checks and strict refusal for unreadable input.
+        return False
+    return False
+
+
 def _incoming_link_result(
     root: Path,
     owned_paths: Iterable[Path],
@@ -11141,6 +11232,14 @@ def _incoming_link_result(
             for owned in owned_resolved
         )
 
+    validator = None
+
+    def load_validator():
+        nonlocal validator
+        if validator is None:
+            validator = _validator_module()
+        return validator
+
     for consumer in sorted(path for path in work_items.rglob("*") if path.is_file()):
         if consumer.name in {"README.md", "index.md"}:
             continue
@@ -11149,6 +11248,8 @@ def _incoming_link_result(
             continue
         consumer_rel = consumer.relative_to(work_items).as_posix()
         if mutable_consumers_only and "archive" in Path(consumer_rel).parts:
+            continue
+        if _retained_preimage_consumer(consumer, work_items, validator_loader=load_validator):
             continue
         try:
             consumer_bytes = consumer.read_bytes()
@@ -11497,10 +11598,10 @@ def _capture_file_snapshot(
                 != _lifecycle_file_snapshot_key(observed)[:5]
             ):
                 raise OSError("snapshot descriptor differs from its pathname")
-            data = stream.read(maximum_bytes + 1)
+            data = stream.read(before.st_size + 1)
             middle = os.fstat(stream.fileno())
             stream.seek(0)
-            verified = stream.read(maximum_bytes + 1)
+            verified = stream.read(before.st_size + 1)
             after = os.fstat(stream.fileno())
         current = path.lstat()
     except OSError as exc:
@@ -12956,6 +13057,9 @@ def apply_migration_inventory(
                         f"payload changed after preflight: {plan['reference']}",
                     )
                 cursor = plan["target"].parent
+                transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+                if transaction is not None:
+                    transaction.verify()
                 while cursor != work_items and not cursor.exists():
                     created_directories.add(cursor)
                     cursor = cursor.parent
@@ -13072,6 +13176,9 @@ def apply_migration_inventory(
     for _row, source, target, pending in planned:
         if not pending:
             continue
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        if transaction is not None:
+            transaction.verify()
         target.parent.mkdir(parents=True, exist_ok=True)
         os.replace(source, target)
     readme_hash: str | None = None

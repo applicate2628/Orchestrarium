@@ -561,6 +561,347 @@ def test_archive_fixed_bug_active_parent_links_receipt_and_exact_replay(tmp_path
     assert (archive.read_bytes(), status.read_bytes(), receipt_path.read_bytes(), readme.read_bytes()) == before_replay
 
 
+def retained_preimage_fixture(tmp_path: Path, *, text_payload: bool = False):
+    """Synthetic retained-input contract; never the actual retained preimage."""
+    module = load_module()
+    root = tmp_path / "repo"
+    bug, status = seed_fixed_bug_with_active_parent(module, root, "retained-input-probe")
+    seed_active(module, root, "preimage-custodian")
+    item = root / "work-items" / "active" / "preimage-custodian"
+    payload = item / "inputs" / "old-guidance" / ("renamed-guide.before" if text_payload else "opaque-source.saved")
+    payload.parent.mkdir(parents=True)
+    href = os.path.relpath(bug, payload.parent).replace(os.sep, "/")
+    data = f"Historical link: [prior]({href})\n".encode() + (b"UTF-8 history\n" if text_payload else b"\x82\x00opaque history\n")
+    payload.write_bytes(data)
+    report = item / "stewardship.md"
+    report.write_bytes(b"Synthetic accepted custody report; not current task completion.\n")
+    report_digest = hashlib.sha256(report.read_bytes()).hexdigest()
+    profile = {"kind": "artifact", "ref": payload.relative_to(item).as_posix(), "result": json.dumps({
+        "schemaVersion": 1, "kind": "retained-preimage", "workItem": item.name,
+        "purpose": "historical-only", "byteCount": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+        "provenance": {"ref": report.name, "sha256": report_digest,
+                       "snapshot": f"review-artifact-custody/{report_digest}"},
+    }, sort_keys=True)}
+    return module, root, bug, status, item, payload, data, report, profile
+
+
+def retained_preimage_cli(item: Path, script: Path, *args: str):
+    """Keep every public command's complete output beside the private fixture."""
+    result = subprocess.run([sys.executable, "-B", str(script), *args], cwd=ROOT,
+                            capture_output=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    proof_root = item.parents[2]
+    number = len(list(proof_root.glob("retained-cli-*.log")))
+    (proof_root / f"retained-cli-{number}.log").write_bytes(
+        result.stdout + b"\nSTDERR:\n" + result.stderr + f"\nEXIT:{result.returncode}\n".encode())
+    return result
+
+
+def retained_preimage_append(item: Path, profile: dict, *, role="knowledge-archivist", run_id="retained-custody-record"):
+    provenance = json.loads(profile["result"])["provenance"]
+    return retained_preimage_cli(item, LEDGER, "--work-item", str(item), "append", "--run-id", run_id,
+                                "--role", role, "--execution-role", "internal", "--status", "completed",
+                                "--gate", "PASS", "--event-kind", "standalone", "--scope", profile["ref"],
+                                "--artifact", provenance["ref"], "--artifact-revision", provenance["sha256"],
+                                "--evidence", f"artifact:{provenance['ref']}", "--evidence-json", json.dumps(profile))
+
+
+def retained_preimage_archive_oracle(tmp_path: Path, *, text_payload: bool):
+    """Removing semantic admission reproduces binary refusal or UTF-8 history rewriting."""
+    module, root, bug, status, item, payload, before, report, profile = retained_preimage_fixture(tmp_path, text_payload=text_payload)
+    appended = retained_preimage_append(item, profile)
+    assert appended.returncode == 0, appended.stdout + appended.stderr
+    result = retained_preimage_cli(item, SCRIPT, "archive-fixed-bug", "--root", str(root), "--slug", bug.stem,
+                                  "--terminal-instant", "2026-10-05T00:00:00Z", "--resolution", "Synthetic verified fix.",
+                                  "--evidence", "Synthetic public archive oracle.", "--apply")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert payload.read_bytes() == before
+    assert payload.parent == item / "inputs" / "old-guidance"
+    assert f"../../bugs/archive/2026-10/{bug.stem}.md#proof".encode() in status.read_bytes()
+    snapshot = item / json.loads(profile["result"])["provenance"]["snapshot"]
+    assert snapshot.read_bytes() == report.read_bytes()
+
+
+def test_retained_preimage_public_binary_archive_preserves_exact_bytes(tmp_path: Path):
+    retained_preimage_archive_oracle(tmp_path, text_payload=False)
+
+
+def test_retained_preimage_public_utf8_archive_does_not_rewrite_history(tmp_path: Path):
+    retained_preimage_archive_oracle(tmp_path, text_payload=True)
+
+
+def test_retained_preimage_wire_refuses_nonsteward_live_path_and_bad_binding(tmp_path: Path):
+    for case in ("issuer", "live", "count-type", "hash", "duplicate"):
+        _module, _root, _bug, _status, item, payload, before, _report, profile = retained_preimage_fixture(tmp_path / case)
+        profile = copy.deepcopy(profile)
+        decoded = json.loads(profile["result"])
+        role = "knowledge-archivist"
+        if case == "issuer":
+            role = "platform-engineer"
+        elif case == "live":
+            profile["ref"] = "status.md"
+        elif case == "count-type":
+            decoded["byteCount"] = True
+        elif case == "hash":
+            decoded["sha256"] = "0" * 64
+        profile["result"] = json.dumps(decoded)
+        if case == "duplicate":
+            profile["result"] = profile["result"].replace('"purpose": "historical-only"',
+                                                          '"purpose": "historical-only", "purpose": "historical-only"')
+        result = retained_preimage_append(item, profile, role=role)
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert payload.read_bytes() == before
+        assert not (item / "agent-runs.jsonl").exists()
+        assert not (item / "review-artifact-custody").exists()
+
+
+def test_retained_preimage_selected_record_is_local_and_snapshot_exact(tmp_path: Path):
+    module, root, bug, _status, item, payload, before, report, profile = retained_preimage_fixture(tmp_path)
+    result = retained_preimage_append(item, profile)
+    assert result.returncode == 0, result.stdout + result.stderr
+    snapshot = item / json.loads(profile["result"])["provenance"]["snapshot"]
+    report.unlink()
+    ledger = item / "agent-runs.jsonl"
+    # Declared synthetic unrelated legacy rows: not ordinary-producer recipes.
+    ledger.write_bytes(ledger.read_bytes() + b'{"runId":"unrelated-old-record","schemaVersion":"obsolete","artifact":"missing.md"}\nnot-json\n')
+    write(item / "review-artifact-custody" / "historical-pass" / ("e" * 64 + ".json"), "unrelated invalid association\n")
+    assert module._retained_preimage_consumer(payload, root / "work-items")
+    assert module._retained_preimage_consumer(snapshot, root / "work-items")
+    assert module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)["result"] == "unmapped"
+    unknown = item / "review-artifact-custody" / ("f" * 64)
+    unknown.write_bytes(b"unadmitted\x82")
+    with pytest.raises(module.LifecycleError, match="cannot classify live incoming-link consumer"):
+        module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)
+    unknown.unlink()
+    assert payload.read_bytes() == before
+    # Matching decoded identity remains reserved even on a schema-invalid row.
+    ledger.write_bytes(ledger.read_bytes() + b'{"runId":"RETAINED-CUSTODY-RECORD","schemaVersion":"obsolete"}\n')
+    assert not module._retained_preimage_consumer(payload, root / "work-items")
+    with pytest.raises(module.LifecycleError, match="cannot classify live incoming-link consumer"):
+        module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)
+
+
+class SnapshotReadProbe:
+    """Observe real requested sizes without allocating a schema-ceiling buffer."""
+    def __init__(self, stream, requests, after_first_read=None):
+        self.stream, self.requests, self.after_first_read = stream, requests, after_first_read
+        self.reads = 0
+
+    def __enter__(self):
+        self.stream.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self.stream.__exit__(*args)
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+    def read(self, size):
+        self.requests.append(size)
+        data = self.stream.read(min(size, 2 * 1024 * 1024))
+        self.reads += 1
+        if self.reads == 1 and self.after_first_read is not None:
+            self.after_first_read()
+        return data
+
+
+def test_retained_consumer_acquires_validator_once_per_lazy_scan(tmp_path: Path):
+    module, root, bug, _status, item, payload, before, _report, profile = retained_preimage_fixture(tmp_path)
+    assert retained_preimage_append(item, profile).returncode == 0
+    write(item / "inputs" / "unmatched-a.md", "Ordinary live neighbor.\n")
+    write(item / "inputs" / "unmatched-b.md", "Another ordinary neighbor.\n")
+    seed_active(module, root, "without-ledger")
+    real_loader, real_fdopen = module._validator_module, module.os.fdopen
+    loads, requests = [], []
+
+    def counted_loader():
+        loads.append(1)
+        return real_loader()
+
+    def observed_fdopen(*args, **kwargs):
+        return SnapshotReadProbe(real_fdopen(*args, **kwargs), requests)
+
+    with patch.object(module, "_validator_module", side_effect=counted_loader), \
+         patch.object(module.os, "fdopen", side_effect=observed_fdopen):
+        result = module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)
+        assert result["result"] == "unmapped"
+        assert payload.read_bytes() == before
+        assert len(loads) == 1
+        loads.clear()
+        assert module._retained_preimage_consumer(payload, root / "work-items")
+        assert len(loads) == 1  # Existing direct-selector default remains usable.
+
+    empty = tmp_path / "early-return"
+    owned = empty / "work-items" / "bugs" / "owned.md"
+    write(owned, "Owned input.\n")
+    failure = module.LifecycleError("WI-VALIDATOR-LOAD", "Injected acquisition failure")
+    with patch.object(module, "_validator_module", side_effect=failure):
+        assert module._incoming_link_result(empty, {owned}, "bug:owned")["result"] == "clear"
+        with pytest.raises(module.LifecycleError) as caught:
+            module._incoming_link_result(root, {bug}, f"bug:{bug.stem}")
+        assert caught.value is failure
+        with pytest.raises(module.LifecycleError) as direct:
+            module._retained_preimage_consumer(root / "work-items" / "active" / "without-ledger" / "status.md", root / "work-items")
+        assert direct.value is failure  # Preserve the current acquisition point.
+
+
+def test_snapshot_reads_captured_size_and_preserves_drift_refusal(tmp_path: Path):
+    module = load_module()
+    real_fdopen = module.os.fdopen
+    original = b"captured payload"
+    for fault in (None, "empty", "growth", "shrink", "rewrite", "replace", "parent"):
+        folder = tmp_path / str(fault) / "parent"
+        target = folder / "input.bin"
+        folder.mkdir(parents=True)
+        case_bytes = b"" if fault == "empty" else original
+        target.write_bytes(case_bytes)
+        requests = []
+        mutated = []
+
+        def drift():
+            if fault == "growth":
+                target.write_bytes(original + b"growing")
+            elif fault == "shrink":
+                target.write_bytes(original[:3])
+            elif fault == "rewrite":
+                target.write_bytes(b"x" * len(original))
+            elif fault == "replace":
+                replacement = folder / "replacement.bin"
+                replacement.write_bytes(original)
+                os.replace(replacement, target)
+            elif fault == "parent":
+                folder.rename(folder.with_name("moved-parent"))
+            if fault not in (None, "empty"):
+                mutated.append(True)
+
+        def observed_fdopen(*args, **kwargs):
+            return SnapshotReadProbe(real_fdopen(*args, **kwargs), requests, drift)
+
+        # Relax only this synthetic handle's sharing to exercise content races;
+        # ordinary native no-follow behavior remains covered by adjacent tests.
+        capture_open = module._open_readonly_nofollow
+        if fault not in (None, "empty"):
+            capture_open = lambda path: os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+        with patch.object(module, "_open_readonly_nofollow", side_effect=capture_open), \
+             patch.object(module.os, "fdopen", side_effect=observed_fdopen):
+            if fault in (None, "empty"):
+                snapshot = module._capture_file_snapshot(target, failure_id="WI-SNAPSHOT-COST", maximum_bytes=0 if fault == "empty" else 1024)
+                assert snapshot.data == case_bytes
+            else:
+                with pytest.raises(module.LifecycleError) as caught:
+                    module._capture_file_snapshot(target, failure_id="WI-SNAPSHOT-COST", maximum_bytes=1024)
+                assert caught.value.failure_id == "WI-SNAPSHOT-COST"
+        if fault in (None, "empty", "growth", "shrink", "rewrite"):
+            assert requests == [len(case_bytes) + 1, len(case_bytes) + 1], fault
+            if fault not in (None, "empty"):
+                assert mutated == [True], fault
+        else:
+            # Windows may refuse replacement/parent moves while the file is open.
+            assert 1 <= len(requests) <= 2 and all(size == len(case_bytes) + 1 for size in requests), fault
+
+
+def test_retained_preimage_multiple_descriptors_keep_runtime_binding_local(tmp_path: Path):
+    module, root, bug, status, item, first, original, report, profile = retained_preimage_fixture(tmp_path)
+    second = item / "inputs" / "separate-source.before"
+    second.write_bytes(b"Second retained historical bytes.\n")
+    second_result = {**json.loads(profile["result"]), "byteCount": second.stat().st_size,
+                     "sha256": hashlib.sha256(second.read_bytes()).hexdigest()}
+    second_profile = {**profile, "ref": second.relative_to(item).as_posix(),
+                      "result": json.dumps(second_result, sort_keys=True)}
+    provenance = json.loads(profile["result"])["provenance"]
+    appended = retained_preimage_cli(item, LEDGER, "--work-item", str(item), "append",
+        "--run-id", "multiple-retained-record", "--role", "knowledge-archivist",
+        "--execution-role", "internal", "--status", "completed", "--gate", "PASS",
+        "--event-kind", "standalone", "--scope", profile["ref"], "--artifact", provenance["ref"],
+        "--artifact-revision", provenance["sha256"], "--evidence", f"artifact:{provenance['ref']}",
+        "--evidence-json", json.dumps(profile), "--evidence-json", json.dumps(second_profile))
+    assert appended.returncode == 0, appended.stdout + appended.stderr
+    ledger = item / "agent-runs.jsonl"
+    snapshot = item / provenance["snapshot"]
+    association = next((item / "review-artifact-custody" / "historical-pass").iterdir())
+    observed = (first, ledger, report, snapshot, association, bug, status, root / "work-items" / "README.md")
+    before = {path: path.read_bytes() for path in observed}
+    assert module._retained_preimage_consumer(first, root / "work-items")
+    second.write_bytes(second.read_bytes() + b"Changed second payload.\x82")
+    assert {path: path.read_bytes() for path in observed} == before
+    assert first.read_bytes() == original
+    assert module._retained_preimage_consumer(first, root / "work-items")
+    assert not module._retained_preimage_consumer(second, root / "work-items")
+    with pytest.raises(module.LifecycleError, match="cannot classify live incoming-link consumer"):
+        module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)
+
+    # Selective runtime capture never relaxes same-record descriptor schemas.
+    validator = module._validator_module()
+    record = json.loads(ledger.read_bytes())
+    first_capture = validator.capture_retained_preimage_payload(item, profile, json.loads(profile["result"]))
+    invalid_second = {**second_profile, "result": json.dumps({**second_result, "purpose": "invalid-purpose"})}
+    invalid_record = {**record, "evidence": [invalid_second if row.get("ref") == second_profile["ref"] else row
+                                            for row in record["evidence"]]}
+    schema_errors = []
+    assert not validator._validate_event(invalid_record, item, set(), schema_errors,
+                                        retained_payloads={profile["ref"]: first_capture})
+    assert any("WI-RETAINED-PREIMAGE" in error for error in schema_errors)
+
+    # None and an explicit complete mapping both retain full payload checks.
+    full_errors = []
+    assert not validator._validate_event(record, item, set(), full_errors)
+    assert any("WI-RETAINED-PREIMAGE" in error for error in full_errors)
+    second_capture = validator.load_lifecycle_owner()._capture_file_snapshot(second, failure_id="WI-RETAINED-PREIMAGE")
+    mapped_errors = []
+    assert not validator._validate_event(record, item, set(), mapped_errors,
+        retained_payloads={profile["ref"]: first_capture, second_profile["ref"]: second_capture})
+    assert any("WI-RETAINED-PREIMAGE" in error for error in mapped_errors)
+    refused = retained_preimage_append(item, second_profile, run_id="invalid-second-append")
+    assert refused.returncode != 0
+    assert {path: path.read_bytes() for path in observed} == before
+
+
+def test_retained_preimage_observation_drift_refuses_before_intent(tmp_path: Path):
+    for participant in ("payload", "carrier", "association", "snapshot"):
+        module, root, bug, status, item, payload, _data, _report, profile = retained_preimage_fixture(tmp_path / participant)
+        appended = retained_preimage_append(item, profile)
+        assert appended.returncode == 0, appended.stdout + appended.stderr
+        ledger = item / "agent-runs.jsonl"
+        selected = {
+            "payload": payload, "carrier": ledger,
+            "association": next((item / "review-artifact-custody" / "historical-pass").iterdir()),
+            "snapshot": item / json.loads(profile["result"])["provenance"]["snapshot"],
+        }[participant]
+        before = (bug.read_bytes(), status.read_bytes(), (root / "work-items" / "README.md").read_bytes())
+        original = module._precompute_single_bug_readme_sha256
+
+        def drift(*args, **kwargs):
+            result = original(*args, **kwargs)
+            selected.write_bytes(selected.read_bytes() + b"changed after semantic selection")
+            return result
+
+        with patch.object(module, "_precompute_single_bug_readme_sha256", side_effect=drift):
+            with pytest.raises(module.LifecycleError):
+                module.archive_fixed_bug(root, bug.stem, "2026-10-05T00:00:00Z", "Synthetic fix.", "Synthetic proof.")
+        assert (bug.read_bytes(), status.read_bytes(), (root / "work-items" / "README.md").read_bytes()) == before
+        assert not (root / "work-items" / "lifecycle-transitions").exists()
+        assert not (root / "work-items" / "bugs" / "archive").exists()
+
+
+def test_retained_preimage_relocated_archive_and_live_neighbor_stay_strict(tmp_path: Path):
+    module, root, bug, _status, item, payload, before, report, profile = retained_preimage_fixture(tmp_path)
+    assert retained_preimage_append(item, profile).returncode == 0
+    report.write_bytes(b"current report pointer is replaced")
+    archive = root / "work-items" / "archive" / "2026-10" / item.name
+    archive.parent.mkdir(parents=True)
+    item.rename(archive)  # Declared synthetic relocation; never move an actual preimage.
+    relocated = archive / payload.relative_to(item)
+    assert module._retained_preimage_consumer(relocated, root / "work-items")
+    assert relocated.read_bytes() == before
+    neighbor = archive / "inputs" / "unadmitted-neighbor"
+    neighbor.write_bytes(b"unknown\x82")
+    with pytest.raises(module.LifecycleError, match="cannot classify live incoming-link consumer"):
+        module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)
+    assert module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True,
+                                       mutable_consumers_only=True)["result"] == "unmapped"
+    assert relocated.read_bytes() == before
+
+
 def test_archive_fixed_bug_requires_positive_apply_and_preserves_state(tmp_path: Path) -> None:
     module = load_module()
     root = tmp_path / "repo"
