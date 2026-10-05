@@ -11,7 +11,7 @@ import os
 import re
 import stat as stat_module
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
@@ -54,6 +54,8 @@ LEDGER_EVENT_FINDING_CLASS_INVALID = "LEDGER-EVENT-FINDING-CLASS-INVALID"
 LEDGER_EVENT_SCRATCH_EVIDENCE_INVALID = "LEDGER-EVENT-SCRATCH-EVIDENCE-INVALID"
 LEGACY_MIGRATION_V3_UNSUPPORTED = "WI-LEDGER-MIGRATION-V3-UNSUPPORTED"
 V2_ONLY_FIELDS = {
+    "custodyAction", "sourcePrefixSha256", "sourcePrefixBytes",
+    "rawLineOrdinal", "physicalLineSha256", "historyDisposition",
     "reviewedRole",
     "reviewArtifactCustody",
     "eventKind",
@@ -116,6 +118,8 @@ MIN_LENGTHS = {
     "updatedAt": 10,
 }
 ALLOWED_FIELDS = {
+    "custodyAction", "sourcePrefixSha256", "sourcePrefixBytes",
+    "rawLineOrdinal", "physicalLineSha256", "historyDisposition",
     "schemaVersion",
     "runId",
     "workItem",
@@ -871,6 +875,7 @@ def resolve_historical_pass_custody(
         identities = {
             (metadata.get("line"), metadata.get("sha256"), event.get("runId"), event.get("artifact")): event
             for event, metadata in zip(events, raw_metadata)
+            if isinstance(event.get("runId"), str) and isinstance(event.get("artifact"), str)
         }
         fields = {
             "kind", "sourcePrefixSha256", "sourcePrefixBytes", "rawLineOrdinal",
@@ -910,6 +915,7 @@ def resolve_historical_pass_custody(
                 prefix_identities = {
                     (metadata["line"], metadata["sha256"], row.get("runId"), row.get("artifact"))
                     for row, metadata in zip(prefix_events, prefix_metadata)
+                    if isinstance(row.get("runId"), str) and isinstance(row.get("artifact"), str)
                 }
                 if (
                     prefix_errors or identity not in prefix_identities or event is None
@@ -1386,9 +1392,31 @@ class WorkItemObligationRowV1:
 
 
 @dataclass(frozen=True)
+class LedgerAuthorityV1:
+    launch_eligible: bool
+    terminal_eligible: bool
+    revise_target_eligible: bool
+    closer_eligible: bool
+    artifact_evidence_eligible: bool
+
+
+@dataclass(frozen=True)
+class HistoricalLedgerHoldV1:
+    source_prefix_sha256: str
+    source_prefix_bytes: int
+    raw_line_ordinal: int
+    raw_line_sha256: str
+    admission_run_id: str
+    event: Mapping[str, object]
+    authority_before: LedgerAuthorityV1
+    disposition_run_id: str | None = None
+
+
+@dataclass(frozen=True)
 class WorkItemObligationStateV1:
     open_revise: tuple[WorkItemObligationRowV1, ...]
     open_launches: tuple[WorkItemObligationRowV1, ...]
+    unresolved_history: tuple[HistoricalLedgerHoldV1, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1411,15 +1439,6 @@ class _LedgerH1AcquisitionError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class LedgerAuthorityV1:
-    launch_eligible: bool
-    terminal_eligible: bool
-    revise_target_eligible: bool
-    closer_eligible: bool
-    artifact_evidence_eligible: bool
-
-
-@dataclass(frozen=True)
 class RuntimeLedgerRowV1:
     event: Mapping[str, object]
     raw_line_ordinal: int
@@ -1429,6 +1448,7 @@ class RuntimeLedgerRowV1:
     epoch: Literal[
         "raw", "manifest-profile", "sealed-prefix", "strict-suffix",
         "disposed-suffix", "disposed-raw", "transferred", "migration-replaced",
+        "historical-custody",
     ]
     authority: LedgerAuthorityV1
 
@@ -1477,6 +1497,8 @@ class LedgerValidationContextV1:
     historical_pass_custody: Mapping[tuple[int, str, str, str], str] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    unresolved_history: tuple[HistoricalLedgerHoldV1, ...] = ()
+    history_custody: tuple[HistoricalLedgerHoldV1, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1487,6 +1509,15 @@ class _LedgerInvocationTokenV1:
     ]
 
 
+@dataclass(frozen=True)
+class _HistoryCustodyInvocationTokenV1:
+    rows: tuple[RuntimeLedgerRowV1, ...]
+
+
+def _history_context_token(rows: tuple[RuntimeLedgerRowV1, ...]) -> object:
+    return _HistoryCustodyInvocationTokenV1(rows) if any(row.epoch == "historical-custody" for row in rows) else object()
+
+
 _NO_LEDGER_AUTHORITY = LedgerAuthorityV1(False, False, False, False, False)
 
 
@@ -1495,6 +1526,26 @@ def _sealed_context_is_bound(
     context: LedgerValidationContextV1 | None,
     errors: list[str],
 ) -> bool:
+    history_rows = tuple(row for row in rows if row.epoch == "historical-custody")
+    if history_rows:
+        token = context.invocation_token if isinstance(context, LedgerValidationContextV1) else None
+        minted = bool(
+            isinstance(context, LedgerValidationContextV1) and context.rows is rows
+            and ((isinstance(token, _HistoryCustodyInvocationTokenV1) and token.rows is rows)
+                 or (isinstance(token, _LedgerInvocationTokenV1)
+                     and token.rows_by_path.get(context.selected_ledger_path) is rows))
+        )
+        admitted = {hold.raw_line_ordinal: hold for hold in context.history_custody} \
+            if isinstance(context, LedgerValidationContextV1) and context.rows is rows else {}
+        if not minted or any(
+            row.raw_line_ordinal not in admitted
+            or row.raw_line_sha256 != admitted[row.raw_line_ordinal].raw_line_sha256
+            or row.event != admitted[row.raw_line_ordinal].event
+            or row.authority != admitted[row.raw_line_ordinal].authority_before
+            for row in history_rows
+        ):
+            fail(errors, "WI-LEDGER-HISTORY-BINDING: custody rows require their exact owner-bound context")
+            return False
     if not any(row.epoch in {"sealed-prefix", "disposed-suffix"} for row in rows):
         return True
     valid = bool(
@@ -1575,6 +1626,7 @@ def _capture_obligation_state(
     rows: Sequence[LedgerProjectionRowV1] | Sequence[RuntimeLedgerRowV1],
     open_revise: Sequence[Mapping[str, object]],
     open_launches: Sequence[Mapping[str, object]],
+    unresolved_history: tuple[HistoricalLedgerHoldV1, ...] = (),
 ) -> None:
     if sink is None:
         return
@@ -1615,7 +1667,7 @@ def _capture_obligation_state(
             ))
         return tuple(result)
 
-    sink.append(WorkItemObligationStateV1(bound(open_revise), bound(open_launches)))
+    sink.append(WorkItemObligationStateV1(bound(open_revise), bound(open_launches), unresolved_history))
 
 
 def _validity_from_boolean_events(
@@ -1807,12 +1859,19 @@ def _validate_event(
         "invalidatesEventSha256",
         "invalidationMode",
         "invalidatesRawLineOrdinal",
+        "custodyAction", "sourcePrefixSha256", "sourcePrefixBytes",
+        "rawLineOrdinal", "physicalLineSha256", "historyDisposition",
     }
     if event_kind == "closure-invalidation":
         if schema_version != 2:
             fail(errors, f"{run_id}: closure-invalidation requires schemaVersion 2")
         invalidation_mode = event.get("invalidationMode")
         invalid_current = invalidation_mode == "invalid-current-nonauthorizing"
+        historical_custody = invalidation_mode == "historical-custody"
+        if not historical_custody:
+            for key in ("custodyAction", "sourcePrefixSha256", "sourcePrefixBytes", "rawLineOrdinal", "physicalLineSha256", "historyDisposition"):
+                if key in event:
+                    fail(errors, f"{run_id}: {key} requires historical-custody mode")
         fixed = {
             "role": "lead",
             "executionRole": "main",
@@ -1821,6 +1880,7 @@ def _validate_event(
             "scope": [
                 "ledger-recovery:invalid-current-nonauthorizing"
                 if invalid_current
+                else "ledger-recovery:historical-custody" if historical_custody
                 else "ledger-recovery:closure-invalidation"
             ],
         }
@@ -1829,9 +1889,9 @@ def _validate_event(
                 fail(errors, f"{run_id}: closure-invalidation requires {key}={wanted!r}")
         target_id = event.get("invalidatesRunId")
         digest = event.get("invalidatesEventSha256")
-        if not isinstance(target_id, str) or len(target_id) < 8:
+        if not historical_custody and (not isinstance(target_id, str) or len(target_id) < 8):
             fail(errors, f"{run_id}: invalidatesRunId must be a runId string")
-        if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+        if not historical_custody and (not isinstance(digest, str) or not SHA256_RE.fullmatch(digest)):
             fail(errors, f"{run_id}: invalidatesEventSha256 must be lowercase SHA-256")
         if invalid_current:
             if (
@@ -1843,12 +1903,29 @@ def _validate_event(
                 fail(errors, f"{run_id}: invalid-current disposition requires authorizing=false")
             if not isinstance(event.get("evidence"), list) or not event["evidence"]:
                 fail(errors, f"{run_id}: invalid-current disposition requires evidence")
+        elif historical_custody:
+            if not isinstance(event.get("custodyAction"), str) or event["custodyAction"] not in {"admit", "dispose"}:
+                fail(errors, f"{run_id}: history custody action must be admit or dispose")
+            for key in ("sourcePrefixSha256", "physicalLineSha256"):
+                if not isinstance(event.get(key), str) or SHA256_RE.fullmatch(event[key]) is None:
+                    fail(errors, f"{run_id}: {key} must be lowercase SHA-256")
+            for key in ("sourcePrefixBytes", "rawLineOrdinal"):
+                if type(event.get(key)) is not int or event[key] < 1:
+                    fail(errors, f"{run_id}: {key} must be a positive integer")
+            if event.get("authorizing") is not False:
+                fail(errors, f"{run_id}: history custody requires authorizing=false")
+            if not isinstance(evidence, list) or not evidence:
+                fail(errors, f"{run_id}: history custody requires bound evidence")
+            if event.get("custodyAction") == "admit" and "historyDisposition" in event:
+                fail(errors, f"{run_id}: history admission forbids a disposition")
+            if event.get("custodyAction") == "dispose" and not isinstance(event.get("historyDisposition"), dict):
+                fail(errors, f"{run_id}: history disposal requires its bound proof descriptor")
         elif invalidation_mode is not None or "invalidatesRawLineOrdinal" in event:
             fail(errors, f"{run_id}: invalid-current disposition mode is invalid")
         forbidden_fields = {
             "launchRunId", "closesRunIds", "artifact", "scratchEvidence",
         }
-        if invalid_current:
+        if invalid_current or historical_custody:
             forbidden_fields |= {
                 "artifactRevision", "terminalClass", "actualExecutionPath",
                 "closerRunId", "targetTuple", "migrationAction",
@@ -1856,12 +1933,14 @@ def _validate_event(
                 "revokesMigrationRunId", "revokesMigrationEventSha256",
                 "replacementEvent",
             }
+        if historical_custody:
+            forbidden_fields |= {"invalidatesRunId", "invalidatesEventSha256", "invalidatesRawLineOrdinal"}
         for forbidden in sorted(forbidden_fields):
             if forbidden in event:
                 fail(errors, f"{run_id}: closure-invalidation forbids {forbidden}")
         refs = [entry.get("ref", "") for entry in event.get("evidence", []) if isinstance(entry, dict) and entry.get("kind") == "manual-check"]
         tokens = " ".join(refs).split()
-        if target_id not in tokens or digest not in tokens:
+        if not historical_custody and (target_id not in tokens or digest not in tokens):
             fail(errors, f"{run_id}: closure-invalidation manual-check must name exact target and digest tokens")
     elif recovery_fields & set(event):
         for key in sorted(recovery_fields & set(event)):
@@ -2081,7 +2160,7 @@ def _validate_event(
     elif typed_terminal_fields & set(event):
         disposition_authorizing = (
             event_kind == "closure-invalidation"
-            and event.get("invalidationMode") == "invalid-current-nonauthorizing"
+            and event.get("invalidationMode") in {"invalid-current-nonauthorizing", "historical-custody"}
         )
         unexpected_typed = typed_terminal_fields & set(event)
         internal_closer_identity = (
@@ -2246,6 +2325,8 @@ def _derive_authority_masks(
             and "launchRunId" not in event
             and _launch_profile_is_exact(event)
         )
+        if row.epoch == "historical-custody":
+            launch_eligible[pos] = row.authority.launch_eligible
 
     terminal_eligible = [False] * len(rows)
     settled: set[str] = set()
@@ -2284,6 +2365,9 @@ def _derive_authority_masks(
             and flags_match
         )
         terminal_eligible[pos] = eligible
+        if row.epoch == "historical-custody":
+            terminal_eligible[pos] = row.authority.terminal_eligible
+            eligible = terminal_eligible[pos]
         if eligible:
             settled.add(launch_id)
 
@@ -2291,6 +2375,9 @@ def _derive_authority_masks(
     for pos, row in enumerate(rows):
         event = row.event
         current_ok = pos < len(current_validity) and current_validity[pos]
+        if row.epoch == "historical-custody":
+            masks.append(row.authority)
+            continue
         if event.get("eventKind") == "closure-invalidation":
             masks.append(_NO_LEDGER_AUTHORITY)
             continue
@@ -2364,6 +2451,15 @@ def derive_event_validity(
     }
     for row in rows:
         event = row.event
+        if row.epoch == "historical-custody":
+            isolated_errors: list[str] = []
+            current.append(_validate_event(dict(event), item, set(), isolated_errors))
+            run_id = event.get("runId")
+            if isinstance(run_id, str) and len(run_id) >= MIN_LENGTHS["runId"] and run_id.strip():
+                if run_id.casefold() in seen:
+                    fail(errors, f"duplicate runId: {run_id}")
+                seen.add(run_id.casefold())
+            continue
         if row.epoch in {
             "manifest-profile", "sealed-prefix", "disposed-suffix", "disposed-raw", "transferred"
         } or (
@@ -2373,7 +2469,8 @@ def derive_event_validity(
             current.append(False)
             continue
         snapshot = custody.get((row.raw_line_ordinal, event.get("runId"), event.get("artifact"))) \
-            if row.epoch in {"raw", "strict-suffix"} else None
+            if row.epoch in {"raw", "strict-suffix"} and isinstance(event.get("runId"), str) \
+            and isinstance(event.get("artifact"), str) else None
         current.append(_validate_event(
             dict(event), item, seen, errors, historical_pass_snapshot=snapshot
         ))
@@ -4119,6 +4216,7 @@ def _ledger_h1_candidate_group(
     disposition_notices_by_path: dict[
         str, tuple[SuffixDispositionNoticeV1, ...]
     ] = {}
+    history_by_path: dict[str, tuple[HistoricalLedgerHoldV1, ...]] = {}
     if final_state == "active":
         for entry in entries:
             path = entry["ledgerPath"]
@@ -4134,9 +4232,14 @@ def _ledger_h1_candidate_group(
                     entry["prefixLineCount"],
                 )
             )
+            effective_rows, history_holds, history_errors = _apply_history_custody(
+                effective_rows, item, artifacts.ledger_bytes_by_path[path], custody_by_path.get(path),
+                (historical_pass_custody_blobs_by_item or {}).get(item),
+            )
             entry_rows[path] = effective_rows
+            history_by_path[path] = history_holds
             disposition_notices_by_path[path] = notices
-            for message in disposition_errors:
+            for message in (*disposition_errors, *history_errors):
                 failures.append(message.split(":", 1)[0])
                 diagnostics.append(message)
         if failures:
@@ -4160,27 +4263,30 @@ def _ledger_h1_candidate_group(
         token = _LedgerInvocationTokenV1(
             MappingProxyType({}), h1_projection_partition
         )
+        revoked_rows: dict[str, tuple[RuntimeLedgerRowV1, ...]] = {}
+        for path in ledger_paths:
+            raw_rows = tuple(replace(row, epoch="raw", authority=_NO_LEDGER_AUTHORITY)
+                             for row in entry_rows[path])
+            revoked_rows[path], history_by_path[path], history_errors = _apply_history_custody(
+                raw_rows, physical_items_by_path[path], artifacts.ledger_bytes_by_path[path], custody_by_path.get(path),
+                (historical_pass_custody_blobs_by_item or {}).get(physical_items_by_path[path]),
+            )
+            diagnostics.extend(history_errors)
+            failures.extend(message.split(":", 1)[0] for message in history_errors)
+        if failures:
+            return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+        token = _LedgerInvocationTokenV1(MappingProxyType(dict(revoked_rows)), h1_projection_partition)
         contexts = {
             path: LedgerValidationContextV1(
                 path,
-                tuple(
-                    RuntimeLedgerRowV1(
-                        row.event,
-                        row.raw_line_ordinal,
-                        row.raw_line_sha256,
-                        row.raw_body_sha256,
-                        row.projected_event_sha256,
-                        "raw",
-                        _NO_LEDGER_AUTHORITY,
-                    )
-                    for row in entry_rows[path]
-                ),
+                revoked_rows[path],
                 None,
                 LedgerCompatibilityObservationV1("revoked", (), ()),
                 (),
                 (),
                 token,
                 custody_by_path.get(path, MappingProxyType({})),
+                _unresolved_history(history_by_path.get(path, ())), history_by_path.get(path, ()),
             )
             for path in ledger_paths
         }
@@ -4202,6 +4308,7 @@ def _ledger_h1_candidate_group(
             open_launch_tuple,
             token,
             custody_by_path.get(path, MappingProxyType({})),
+            _unresolved_history(history_by_path.get(path, ())), history_by_path.get(path, ()),
         )
         for path in ledger_paths
     }
@@ -4486,6 +4593,321 @@ def _classify_ledger_h1_selection(
     return "ordinary-nonmember", None
 
 
+_HISTORY_CUSTODY_MODE = "historical-custody"
+HISTORY_DISPOSITION_KINDS = {"non-obligating", "current-evidence-covered", "admitted-historical-disposition"}
+HISTORY_SUBJECT_FIELDS = {"sourcePrefixSha256", "sourcePrefixBytes", "rawLineOrdinal", "physicalLineSha256"}
+
+
+def history_disposition_packet(events: Sequence[Mapping[str, object]], target: Mapping[str, object], item: Path) -> dict:
+    """Parse the admitted evidence codec once; qualification stays in this owner."""
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            raise ValueError(f"WI-LEDGER-HISTORY-DISPOSITION: {message}")
+
+    kind = target.get("kind")
+    classifier_id = target.get("classificationRunId")
+    resolution_ids = target.get("resolutionRunIds")
+    evidence = target.get("evidence")
+    require(kind in HISTORY_DISPOSITION_KINDS if isinstance(kind, str) else False, "unsupported disposition kind")
+    require(isinstance(classifier_id, str) and len(classifier_id) >= 8, "classificationRunId is invalid")
+    require(isinstance(resolution_ids, list) and all(isinstance(value, str) and len(value) >= 8 for value in resolution_ids),
+            "resolutionRunIds must contain actual run IDs")
+    ids = [classifier_id, *resolution_ids]
+    require(len(set(value.casefold() for value in ids)) == len(ids), "proof run IDs are duplicated")
+    require(isinstance(evidence, list) and bool(evidence), "bound review evidence is required")
+    evidence_errors: list[str] = []
+    validate_evidence(evidence, classifier_id, evidence_errors, False)
+    require(not evidence_errors, "; ".join(evidence_errors))
+    subject = {key: target.get(key) for key in HISTORY_SUBJECT_FIELDS}
+    positions: dict[str, list[int]] = {}
+    for pos, record in enumerate(events):
+        run_id = record.get("runId")
+        if isinstance(run_id, str):
+            positions.setdefault(run_id.casefold(), []).append(pos)
+    records, payloads, entries, bindings, descriptors = [], [], [], {}, []
+    common_fields = {"schemaVersion", "kind", "workItem", "subject", "currentContract", "report"}
+    for number, run_id in enumerate(ids):
+        matches = positions.get(run_id.casefold(), ())
+        require(len(matches) == 1 and events[matches[0]].get("runId") == run_id, "proof identity is absent or ambiguous")
+        record = events[matches[0]]
+        record_entries = record.get("evidence")
+        require(isinstance(record_entries, list), "proof record has no evidence")
+        typed = [entry for entry in record_entries if isinstance(entry, dict) and entry.get("kind") == "review"
+                 and isinstance(entry.get("result"), str)]
+        decoded = []
+        for entry in typed:
+            payload = decode_json_object(entry["result"].encode("utf-8"), source="history evidence", maximum_bytes=MAX_LEDGER_LINE_BYTES)
+            if payload.get("kind") == ("history-classification" if number == 0 else "history-resolution"):
+                decoded.append((entry, payload))
+        require(len(decoded) == 1, "proof must contain exactly one typed review result")
+        entry, payload = decoded[0]
+        wanted = common_fields | ({"dispositionKind", "findingClass", "requirements"} if number == 0
+                                  else {"classificationRunId", "requirementId"})
+        require(set(payload) == wanted and type(payload.get("schemaVersion")) is int and payload["schemaVersion"] == 1,
+                "typed review result fields or schema differ")
+        require(payload.get("workItem") == item.name and payload.get("subject") == subject, "proof subject/workItem differs")
+        require(isinstance(payload.get("subject"), dict) and set(payload["subject"]) == HISTORY_SUBJECT_FIELDS,
+                "proof physical subject is not exact")
+        require(type(payload["subject"].get("sourcePrefixBytes")) is int
+                and type(payload["subject"].get("rawLineOrdinal")) is int,
+                "proof physical ordinals/sizes require integers, not coercion")
+        for key in ("report", "currentContract"):
+            descriptor = payload.get(key)
+            require(isinstance(descriptor, dict) and set(descriptor) == {"ref", "sha256"}
+                    and isinstance(descriptor.get("ref"), str) and descriptor["ref"] not in {"", "."}
+                    and _safe_repo_relative(descriptor["ref"])
+                    and not Path(descriptor["ref"]).is_absolute() and not Path(descriptor["ref"]).drive
+                    and isinstance(descriptor.get("sha256"), str) and SHA256_RE.fullmatch(descriptor["sha256"]) is not None,
+                    "proof artifact descriptor is invalid")
+            descriptors.append(descriptor)
+        require(payload["report"]["ref"] == record.get("artifact") == entry.get("ref")
+                and payload["report"]["sha256"] == record.get("artifactRevision"), "report/event digest binding differs")
+        require(evidence.count(entry) == 1, "request must preserve each exact recorded review evidence entry")
+        records.append((matches[0], record))
+        payloads.append(payload)
+        entries.append(entry)
+        bindings[run_id] = hashlib.sha256(_canonical_projection_bytes(dict(record))).hexdigest()
+    classification = payloads[0]
+    require(classification.get("dispositionKind") == kind and isinstance(classification.get("findingClass"), str)
+            and classification["findingClass"] in FINDING_CLASSES,
+            "classification kind/finding class differs")
+    requirements = classification.get("requirements")
+    require(isinstance(requirements, list), "classification requirements must be explicit")
+    requirement_ids: set[str] = set()
+    for requirement in requirements:
+        require(isinstance(requirement, dict) and set(requirement) == {"requirementId", "role", "scope", "lane", "minimumEffort"},
+                "current requirement fields differ")
+        requirement_id = requirement.get("requirementId")
+        require(isinstance(requirement_id, str) and bool(requirement_id.strip()) and requirement_id not in requirement_ids,
+                "requirement identity is absent or repeated")
+        require(isinstance(requirement.get("role"), str) and bool(requirement["role"].strip())
+                and isinstance(requirement.get("scope"), list) and bool(requirement["scope"])
+                and all(isinstance(value, str) and bool(value.strip()) for value in requirement["scope"])
+                and (requirement.get("lane") is None or isinstance(requirement["lane"], str) and bool(requirement["lane"].strip()))
+                and requirement.get("minimumEffort") in EFFORT_ORDER, "current requirement qualification is invalid")
+        requirement_ids.add(requirement_id)
+    if kind != "current-evidence-covered":
+        require(classification["findingClass"] == "other" and not requirements and not resolution_ids,
+                "bookkeeping disposition must be explicitly non-obligating")
+    else:
+        require(bool(requirements) and len(resolution_ids) == len(requirements), "current-evidence coverage must be nonvacuous and exact")
+    approval = None
+    if kind == "admitted-historical-disposition":
+        approvals = [entry for entry in evidence if entry.get("kind") == "manual-check" and isinstance(entry.get("result"), str)]
+        require(len(approvals) == 1, "specific historical disposition approval is required")
+        approval_entry = approvals[0]
+        approval = decode_json_object(approval_entry["result"].encode(), source="historical disposition approval", maximum_bytes=MAX_LEDGER_LINE_BYTES)
+        wanted = {"schemaVersion", "kind", "workItem", "subject", "currentContract", "classificationRunId",
+                  "classificationReportSha256", "decision"}
+        require(set(approval) == wanted and type(approval.get("schemaVersion")) is int and approval["schemaVersion"] == 1
+                and approval.get("kind") == "history-disposition-approval" and approval.get("workItem") == item.name
+                and approval.get("subject") == subject and approval.get("currentContract") == classification["currentContract"]
+                and approval.get("classificationRunId") == classifier_id
+                and approval.get("classificationReportSha256") == classification["report"]["sha256"]
+                and approval.get("decision") == "accept-irrecoverable-bookkeeping", "specific approval binding differs")
+        entries.append(approval_entry)
+    require(len(evidence) == len(entries), "unused or caller-only evidence is forbidden")
+    return {"records": records, "payloads": payloads, "bindings": bindings, "descriptors": descriptors,
+            "requirements": requirements, "approval": approval}
+
+
+def _qualified_history_disposition(
+    rows: tuple[RuntimeLedgerRowV1, ...], item: Path, control_position: int,
+    event: Mapping[str, object], hold: HistoricalLedgerHoldV1,
+    candidate_blobs: Mapping[str, bytes] | None,
+    historical_positions: set[int],
+) -> None:
+    proof = event["historyDisposition"]
+    if set(proof) != {"kind", "classificationRunId", "resolutionRunIds", "evidence", "boundEvents"}:
+        raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: control proof fields differ")
+    target = {**proof, **{key: event[key] for key in HISTORY_SUBJECT_FIELDS}}
+    packet = history_disposition_packet(tuple(row.event for row in rows), target, item)
+    if proof["boundEvents"] != packet["bindings"]:
+        raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: captured event digests differ")
+    for descriptor in packet["descriptors"]:
+        digest = descriptor["sha256"]
+        key = f"review-artifact-custody/{digest}"
+        if candidate_blobs is not None and key in candidate_blobs:
+            valid = hashlib.sha256(candidate_blobs[key]).hexdigest() == digest
+            if (item / key).exists() or (item / key).is_symlink():
+                valid = valid and _ordinary_custody_snapshot(item, key, digest)
+        else:
+            valid = _ordinary_custody_snapshot(item, key, digest)
+        if not valid:
+            raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: immutable proof snapshot missing or changed")
+    classifier_position = packet["records"][0][0]
+    required_by_id = {requirement["requirementId"]: requirement for requirement in packet["requirements"]}
+    covered: set[str] = set()
+    for number, ((position, record), payload) in enumerate(zip(packet["records"], packet["payloads"])):
+        if position in historical_positions or position >= control_position or rows[position].epoch not in {"raw", "strict-suffix"}:
+            raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: proof is not an earlier current record")
+        errors: list[str] = []
+        snapshot = f"review-artifact-custody/{payload['report']['sha256']}"
+        # Candidate bytes were hash-checked above; the existing exact artifact
+        # association supplies this same locator after the operation commits.
+        current = _validate_event(dict(record), item, set(), errors, historical_pass_snapshot=snapshot)
+        if (not current or errors or position >= control_position
+            or rows[position].epoch not in {"raw", "strict-suffix"}
+            or record.get("workItem") != item.name or record.get("status") != "completed" or record.get("gate") != "PASS"
+            or record.get("executionRole") not in {"internal", "external-reviewer"}
+            or record.get("terminalClass") == "external-nonauthorizing"
+            or record.get("role") in {"lead", "consultant", "external-worker"}):
+            raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: proof record lacks current reviewer authority")
+        if number == 0:
+            if record.get("role") != "qa-engineer" or record.get("executionRole") != "internal" \
+                or record.get("assignedRole", "qa-engineer") != "qa-engineer":
+                raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: classification requires actual internal QA")
+        else:
+            requirement_id = payload.get("requirementId")
+            requirement = required_by_id.get(requirement_id) if isinstance(requirement_id, str) else None
+            profession_matches = requirement is not None and (
+                record.get("role") == requirement["role"] or record.get("assignedRole") == requirement["role"]
+            )
+            if (requirement is None or requirement_id in covered or position <= classifier_position
+                or payload.get("classificationRunId") != proof["classificationRunId"]
+                or payload["currentContract"] != packet["payloads"][0]["currentContract"]
+                or not profession_matches or record.get("scope") != requirement["scope"]
+                or record.get("lane") != requirement["lane"] or record.get("effort") not in EFFORT_ORDER
+                or EFFORT_ORDER.index(record["effort"]) < EFFORT_ORDER.index(requirement["minimumEffort"])):
+                raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: resolution coverage/profession/scope/lane/strength differs")
+            covered.add(requirement_id)
+    if covered != set(required_by_id):
+        raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: resolution requirement coverage is incomplete")
+    if proof["kind"] != "current-evidence-covered" and (
+        hold.event.get("gate") == "REVISE" or hold.authority_before.launch_eligible
+        or hold.authority_before.revise_target_eligible or hold.event.get("findingClass") in PROTECTED_CLASSES
+    ):
+        raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: real/protected obligation cannot be relabeled bookkeeping")
+
+
+def history_owner_control(event: Mapping[str, object]) -> bool:
+    return event.get("eventKind") in {"closure-invalidation", LEGACY_MIGRATION_KIND} or any(
+        key in event for key in (
+            "invalidationMode", "invalidatesRunId", "invalidatesEventSha256",
+            "invalidatesRawLineOrdinal", "custodyAction", "sourcePrefixSha256",
+            "sourcePrefixBytes", "rawLineOrdinal", "physicalLineSha256", "historyDisposition",
+            "migrationAction", "normalizationKind", "migratesRunId", "migratesEventSha256",
+            "revokesMigrationRunId", "revokesMigrationEventSha256", "replacementEvent",
+        )
+    )
+
+
+def _apply_history_custody(
+    rows: tuple[RuntimeLedgerRowV1, ...], item: Path, ledger_bytes: bytes,
+    historical_pass_custody: Mapping[tuple[int, str, str, str], str] | None = None,
+    candidate_blobs: Mapping[str, bytes] | None = None,
+) -> tuple[tuple[RuntimeLedgerRowV1, ...], tuple[HistoricalLedgerHoldV1, ...], tuple[str, ...]]:
+    """Bind append-only history controls and conserve the owner's preimage axes."""
+    controls = [(pos, row.event) for pos, row in enumerate(rows)
+                if row.event.get("invalidationMode") == _HISTORY_CUSTODY_MODE]
+    if not controls:
+        return rows, (), ()
+    errors: list[str] = []
+    physical = ledger_bytes.splitlines(keepends=True)
+    offsets = [0]
+    for line in physical:
+        offsets.append(offsets[-1] + len(line))
+    by_ordinal = {row.raw_line_ordinal: pos for pos, row in enumerate(rows)}
+    seen_ids: set[str] = set()
+    for row in rows:
+        run_id = row.event.get("runId")
+        if isinstance(run_id, str) and run_id.strip() and len(run_id) >= MIN_LENGTHS["runId"]:
+            if run_id.casefold() in seen_ids:
+                fail(errors, f"WI-LEDGER-HISTORY-IDENTITY: duplicate runId: {run_id}")
+            seen_ids.add(run_id.casefold())
+    current: list[bool] = []
+    for row in rows:
+        individual_errors: list[str] = []
+        snapshot = (historical_pass_custody or {}).get((row.raw_line_ordinal, row.raw_body_sha256,
+                    row.event.get("runId"), row.event.get("artifact"))) \
+            if isinstance(row.event.get("runId"), str) and isinstance(row.event.get("artifact"), str) else None
+        current.append(_validate_event(dict(row.event), item, set(), individual_errors,
+                                       historical_pass_snapshot=snapshot))
+    masks = _derive_authority_masks(rows, current, item, historical_pass_custody)
+    admissions: dict[int, HistoricalLedgerHoldV1] = {}
+    relation_events = tuple(row.event for row in rows)
+    by_run: dict[str, list[int]] = {}
+    for pos, row in enumerate(rows):
+        run_id = row.event.get("runId")
+        if isinstance(run_id, str):
+            by_run.setdefault(run_id.casefold(), []).append(pos)
+    run_positions = {key: tuple(positions) for key, positions in by_run.items()}
+    for control_position, event in controls:
+        control_errors: list[str] = []
+        if not _validate_event(dict(event), item, set(), control_errors):
+            errors.extend(f"WI-LEDGER-HISTORY-CONTROL: {message}" for message in control_errors)
+            continue
+        ordinal = event["rawLineOrdinal"]
+        boundary = event["sourcePrefixBytes"]
+        prefix = ledger_bytes[:boundary]
+        target_position = by_ordinal.get(ordinal)
+        control_ordinal = rows[control_position].raw_line_ordinal
+        if (
+            target_position is None or target_position >= control_position
+            or boundary > offsets[control_ordinal - 1]
+            or len(prefix) != boundary or not prefix.endswith(b"\n")
+            or hashlib.sha256(prefix).hexdigest() != event["sourcePrefixSha256"]
+            or ordinal > len(physical) or offsets[ordinal] > boundary
+            or hashlib.sha256(physical[ordinal - 1]).hexdigest() != event["physicalLineSha256"]
+        ):
+            fail(errors, "WI-LEDGER-HISTORY-BINDING: source prefix, ordinal or physical line differs")
+            continue
+        target = rows[target_position]
+        if event["custodyAction"] == "dispose":
+            hold = admissions.get(target_position)
+            if (hold is None or hold.disposition_run_id is not None
+                or hold.source_prefix_sha256 != event["sourcePrefixSha256"]
+                or hold.source_prefix_bytes != boundary or hold.raw_line_sha256 != event["physicalLineSha256"]):
+                fail(errors, "WI-LEDGER-HISTORY-DISPOSITION: hold is absent, already resolved or differently bound")
+                continue
+            try:
+                _qualified_history_disposition(rows, item, control_position, event, hold, candidate_blobs, set(admissions))
+            except ValueError as exc:
+                fail(errors, str(exc))
+                continue
+            admissions[target_position] = replace(hold, disposition_run_id=event["runId"])
+            continue
+        if (
+            target_position in admissions
+            or target.epoch not in {"raw", "strict-suffix"}
+            or history_owner_control(target.event)
+            or (isinstance(target.event.get("workItem"), str)
+                and target.event["workItem"] != item.name)
+        ):
+            fail(errors, "WI-LEDGER-HISTORY-TARGET: history target is repeated, projected or owner-controlled")
+            continue
+        orphan = bool(target.event.get("eventKind") == "terminal" and not
+                      terminal_has_valid_earlier_launch(relation_events, target_position, item, run_positions))
+        if current[target_position] and not orphan:
+            fail(errors, "WI-LEDGER-HISTORY-TARGET: target has no historical validation failure")
+            continue
+        admissions[target_position] = HistoricalLedgerHoldV1(
+            event["sourcePrefixSha256"], boundary, ordinal, event["physicalLineSha256"],
+            event["runId"], target.event, masks[target_position],
+        )
+    if errors:
+        return rows, (), tuple(errors)
+    effective = tuple(
+        replace(row, epoch="historical-custody", raw_line_sha256=admissions[pos].raw_line_sha256,
+                authority=admissions[pos].authority_before) if pos in admissions else row
+        for pos, row in enumerate(rows)
+    )
+    holds = tuple(admissions[pos] for pos in sorted(admissions))
+    return effective, holds, ()
+
+
+def _history_hold_errors(holds: Sequence[HistoricalLedgerHoldV1], errors: list[str]) -> None:
+    for hold in holds:
+        if hold.disposition_run_id is not None:
+            continue
+        fail(errors, f"WI-LEDGER-HISTORY-UNRESOLVED: physical row {hold.raw_line_ordinal} "
+             f"in prefix {hold.source_prefix_sha256} needs qualified current classification/disposition")
+
+
+def _unresolved_history(holds: Sequence[HistoricalLedgerHoldV1]) -> tuple[HistoricalLedgerHoldV1, ...]:
+    return tuple(hold for hold in holds if hold.disposition_run_id is None)
+
+
 def _ordinary_current_disposition_rows(
     rows: tuple[LedgerProjectionRowV1, ...], item: Path, ledger_path: str,
     ledger_bytes: bytes,
@@ -4551,10 +4973,14 @@ def _ordinary_raw_v2_effective_context(
         item, raw, events, metadata, candidate_blobs=historical_pass_custody_blobs
     )
     diagnostics.extend(custody_errors)
+    rows, history_holds, history_errors = _apply_history_custody(
+        rows, item, raw, custody, historical_pass_custody_blobs
+    )
+    diagnostics.extend(history_errors)
     return LedgerValidationContextV1(
         selected_ledger_path, rows, None,
         LedgerCompatibilityObservationV1("inactive", (), tuple(diagnostics)),
-        (), (), object(), custody,
+        (), (), _history_context_token(rows), custody, _unresolved_history(history_holds), history_holds,
     )
 
 
@@ -6528,6 +6954,25 @@ def validate_archived_ledger_obligations(
     errors.extend(migration_errors)
     effective_events = _row_events(effective_rows)
     runtime_rows = _runtime_rows_from_projection(effective_rows)
+    if any(row.event.get("invalidationMode") == _HISTORY_CUSTODY_MODE for row in runtime_rows):
+        runtime_rows, disposition_errors = _ordinary_current_disposition_rows(
+            effective_rows, item, f"{relative_item}/agent-runs.jsonl", ledger_bytes
+        )
+        errors.extend(disposition_errors)
+        runtime_rows, history_holds, history_errors = _apply_history_custody(
+            runtime_rows, item, ledger_bytes, historical_pass_custody
+        )
+        errors.extend(history_errors)
+        context = LedgerValidationContextV1(
+            f"{relative_item}/agent-runs.jsonl", runtime_rows, None,
+            LedgerCompatibilityObservationV1("inactive", (), ()),
+            (), (), _history_context_token(runtime_rows), historical_pass_custody, _unresolved_history(history_holds), history_holds,
+        )
+        _active, _validity, open_revise, open_launches = _reduce_effective_current_state(
+            runtime_rows, item, errors, telemetry, context=context
+        )
+        _history_hold_errors(history_holds, errors)
+        return errors, open_revise, open_launches
     historical_authorizations, disposition_errors = authorized_historical_missing_artifacts(
         item, ledger_bytes, events, raw_metadata
     )
@@ -7017,7 +7462,7 @@ def resolve_closure_invalidations(
         recovery = recovery_row.event
         if recovery.get("eventKind") != "closure-invalidation":
             continue
-        if recovery.get("invalidationMode") == _INVALID_CURRENT_DISPOSITION_MODE:
+        if recovery.get("invalidationMode") in {_INVALID_CURRENT_DISPOSITION_MODE, _HISTORY_CUSTODY_MODE}:
             continue
         active_context = context is not None and context.observation.activation_state == "active"
         if not validity[pos].current_schema_valid or (
@@ -7313,9 +7758,13 @@ def validate_work_item(
                     )
                 )
                 _capture_obligation_state(
-                    obligation_state_out, context.rows, open_revise, open_launches
+                    obligation_state_out, context.rows, open_revise, open_launches, context.unresolved_history
                 )
+                if authority_state_out is not None:
+                    authority_state_out.append({row.raw_line_ordinal: entry.authority
+                                                for row, entry in zip(context.rows, _validity)})
                 if strict_revise:
+                    _history_hold_errors(context.unresolved_history, errors)
                     for event in open_launches:
                         fail(
                             errors,
@@ -7339,9 +7788,13 @@ def validate_work_item(
             )
         )
         _capture_obligation_state(
-            obligation_state_out, context.rows, open_revise, open_launches
+            obligation_state_out, context.rows, open_revise, open_launches, context.unresolved_history
         )
+        if authority_state_out is not None:
+            authority_state_out.append({row.raw_line_ordinal: entry.authority
+                                        for row, entry in zip(context.rows, _validity)})
         if strict_revise:
+            _history_hold_errors(context.unresolved_history, errors)
             for event in open_launches:
                 fail(
                     errors,
@@ -7415,8 +7868,12 @@ def validate_work_item(
         native_effective_rows, item, root_relative, ledger_bytes
     )
     errors.extend(disposition_errors)
+    native_runtime_rows, history_holds, history_errors = _apply_history_custody(
+        native_runtime_rows, item, ledger_bytes, historical_pass_custody, historical_pass_custody_blobs
+    )
+    errors.extend(history_errors)
     if inherited_rows and any(
-        row.event.get("invalidationMode") == _INVALID_CURRENT_DISPOSITION_MODE
+        row.event.get("invalidationMode") in {_INVALID_CURRENT_DISPOSITION_MODE, _HISTORY_CUSTODY_MODE}
         for row in native_effective_rows
     ):
         fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: inherited rows cannot share recovery")
@@ -7424,7 +7881,7 @@ def validate_work_item(
     context = LedgerValidationContextV1(
         root_relative, runtime_rows, None,
         LedgerCompatibilityObservationV1("inactive", (), ()),
-        (), (), object(), historical_pass_custody,
+        (), (), _history_context_token(runtime_rows), historical_pass_custody, _unresolved_history(history_holds), history_holds,
     )
     active_positions, event_validity, open_revise, open_launches = (
         _reduce_effective_current_state(
@@ -7441,7 +7898,7 @@ def validate_work_item(
             for row, validity in zip(runtime_rows, event_validity)
         })
     _capture_obligation_state(
-        obligation_state_out, effective_rows, open_revise, open_launches
+        obligation_state_out, effective_rows, open_revise, open_launches, _unresolved_history(history_holds)
     )
     active_events = [effective_events[pos] for pos in active_positions]
     active_rows = [runtime_rows[pos] for pos in active_positions]
@@ -7452,6 +7909,7 @@ def validate_work_item(
         for name, value in projection_counters.items():
             telemetry[f"ledger-migration-{name}"] = value
     if strict_revise:
+        _history_hold_errors(history_holds, errors)
         for event in open_launches:
             fail(
                 errors,
@@ -7479,9 +7937,10 @@ def validate_work_item(
             for field in ("Closed", "Outcome", "Evidence", "Residual risk")
         )
     if validate_status_file and not (is_monthly_archive and archived_v1_closure):
+        status_rows = tuple(active_rows)
         context = LedgerValidationContextV1(
             selected_ledger.absolute().relative_to(root.absolute()).as_posix() if root is not None else str(selected_ledger),
-            tuple(active_rows),
+            status_rows,
             None,
             LedgerCompatibilityObservationV1("inactive", (), ()),
             tuple(
@@ -7511,7 +7970,8 @@ def validate_work_item(
                     key=lambda value: value.encode("utf-8"),
                 )
             ),
-            object(),
+            _history_context_token(status_rows),
+            historical_pass_custody, _unresolved_history(history_holds), history_holds,
         )
         validate_status(item, context, errors)
     return errors

@@ -2,6 +2,11 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-05
+
+- **Malformed historical bookkeeping no longer prevents fresh work in the same item.** The existing mixed-ledger recovery owner gains an explicit Version 2 custody and disposition path for malformed application records, including launches and unavailable semantic identifiers. It binds physical rows without rewriting old bytes, preserves independently valid authority and genuine open obligations, and allows validated fresh execution. Strict completion still requires qualified current evidence or an explicitly bound historical disposition; a fresh PASS alone cannot clear history. Existing Version 1 recovery stays compatible, while older readers refuse the new opt-in path. No new command, hook, engine or dependency is introduced.
+- **All recovery-tracked routes use the validated ledger writer.** The shared base rule now explicitly includes light and non-Lead routes: live execution records use the public writer, never direct JSON Lines edits or raw fallback after refusal. Synthetic fixtures, status and closure authorship, and lifecycle-owner transactions retain their existing contracts. This closes a base-rule discoverability gap without duplicating role rules or adding guards; it does not claim the historical authoring cause has been proved. Existing base wording is also condensed to fit the unchanged size budget while retaining its protected operational requirements.
+
 ## 2026-10-04
 
 - **Execution aging follows open launches, not coordination notes.** The existing work-item checker no longer treats valid Version 2 non-launch records as stale running agents. Reducer-open launches, legacy running records, validation failures and unresolved review obligations keep their existing checks. No ledger history, hook, command or schema is changed.

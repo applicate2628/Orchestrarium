@@ -6104,13 +6104,7 @@ def _retain_historical_pass_custody(
         if hashlib.sha256(original_bytes).hexdigest() != expected_original_sha256:
             raise LifecycleError(source_drift, "independently admitted original digest differs")
         snapshot_key = f"review-artifact-custody/{expected_original_sha256}"
-        envelope = {
-            "kind": "historical-pass-custody", "sourcePrefixSha256": expected_ledger_sha256,
-            "sourcePrefixBytes": len(raw), "rawLineOrdinal": raw_line_ordinal,
-            "rawLineSha256": expected_raw_line_sha256, "runId": run_id,
-            "originalArtifact": target.get("artifact"), "snapshot": snapshot_key,
-            "snapshotSha256": expected_original_sha256,
-        }
+        envelope = _historical_pass_association(raw, target, raw_line_ordinal, expected_raw_line_sha256, expected_original_sha256)
         envelope_bytes = validator._canonical_projection_bytes(envelope)
         candidates = {association_key: envelope_bytes, snapshot_key: original_bytes}
         errors = validator.validate_work_item(
@@ -6814,6 +6808,10 @@ def _inspect_transfer_obligations(root: Path, item: Path) -> tuple[object, ...]:
             "WI-OBLIGATION-TRANSFER-COVERAGE", "validator did not return one obligation state"
         )
     state = states[0]
+    if state.unresolved_history:
+        history_errors: list[str] = []
+        validator._history_hold_errors(state.unresolved_history, history_errors)
+        raise LifecycleError("WI-LEDGER-HISTORY-UNRESOLVED", "; ".join(history_errors))
     if state.open_launches:
         raise LifecycleError(
             "WI-OBLIGATION-TRANSFER-COVERAGE", "running launches cannot be transferred"
@@ -14755,7 +14753,10 @@ def _reserve_historical_disposition_output(
     return target
 
 
-def _projection_create_or_exact(path: Path, data: bytes, failure_id: str) -> bool:
+def _projection_create_or_exact(
+    path: Path, data: bytes, failure_id: str,
+    *, created_identities: list[tuple[int, int, int, int]] | None = None,
+) -> bool:
     path, replay = _projection_confine_output_sink(path, failure_id)
     if replay:
         if path.read_bytes() != data:
@@ -14769,8 +14770,12 @@ def _projection_create_or_exact(path: Path, data: bytes, failure_id: str) -> boo
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
+            created_identity = _load_agent_run_ledger()._noncanonical_file_identity(os.fstat(stream.fileno())) \
+                if created_identities is not None else None
         try:
             os.link(temporary, path)
+            if created_identities is not None and created_identity is not None:
+                created_identities.append(created_identity)
         except FileExistsError:
             path, replay = _projection_confine_output_sink(path, failure_id)
             if not replay:
@@ -15639,7 +15644,7 @@ def _mixed_recovery_request(request_bytes: bytes) -> dict:
     if not isinstance(request, dict) or set(request) != {
         "schemaVersion", "operationId", "recordedAt", "workItem",
         "expectedLedgerSha256", "targets",
-    } or request.get("schemaVersion") != 1:
+    } or type(request.get("schemaVersion")) is not int or request["schemaVersion"] not in {1, 2}:
         _mixed_recovery_fail("REQUEST", "request fields or version differ")
     operation_id = request.get("operationId")
     recorded_at = request.get("recordedAt")
@@ -15666,6 +15671,24 @@ def _mixed_recovery_request(request_bytes: bytes) -> dict:
         if not isinstance(target, dict):
             _mixed_recovery_fail("REQUEST", "target is not an object")
         action = target.get("action")
+        if request["schemaVersion"] == 2 and action in {"custody-invalid-history", "dispose-history-custody"}:
+            wanted = {"action", "sourcePrefixSha256", "sourcePrefixBytes", "rawLineOrdinal", "physicalLineSha256"}
+            if action == "dispose-history-custody":
+                wanted |= {"kind", "classificationRunId", "resolutionRunIds", "evidence"}
+            if set(target) != wanted:
+                _mixed_recovery_fail("REQUEST", "history target fields differ")
+            ordinal = target.get("rawLineOrdinal")
+            if type(ordinal) is not int or ordinal < 1 or ordinal in seen_ordinals:
+                _mixed_recovery_fail("REQUEST", "history target ordinal is invalid or repeated")
+            for key in ("sourcePrefixSha256", "physicalLineSha256"):
+                if not isinstance(target.get(key), str) or re.fullmatch(r"[0-9a-f]{64}", target[key], re.ASCII) is None:
+                    _mixed_recovery_fail("REQUEST", "history target digest differs")
+            if type(target.get("sourcePrefixBytes")) is not int or target["sourcePrefixBytes"] < 1:
+                _mixed_recovery_fail("REQUEST", "history source prefix size differs")
+            seen_ordinals.add(ordinal)
+            continue
+        if request["schemaVersion"] == 2:
+            _mixed_recovery_fail("REQUEST", "Version 2 requires a historical custody/disposition target")
         digest_field = {
             "migrate-invalid-finding-class": "eventBodySha256",
             "dispose-invalid-terminal": "physicalLineSha256",
@@ -15708,6 +15731,32 @@ def _mixed_recovery_controls(
         _mixed_recovery_fail("HISTORY", "; ".join(parse_errors) or "physical row cardinality differs")
     if any(event.get("schemaVersion") not in (1, 2) for event in events):
         _mixed_recovery_fail("HISTORY", "history is not an integer V1/V2 ledger")
+    if request["schemaVersion"] == 2:
+        controls, facts = [], []
+        for target in sorted(request["targets"], key=lambda row: row["rawLineOrdinal"]):
+            ordinal = target["rawLineOrdinal"]
+            if ordinal > len(events):
+                _mixed_recovery_fail("TARGET", "history target ordinal is outside captured history")
+            control = {
+                "schemaVersion": 2, "runId": f"mixed-recovery-{request['operationId']}-{ordinal}",
+                "workItem": item.name, "role": "lead", "executionRole": "main",
+                "status": "completed", "gate": "none", "startedAt": request["recordedAt"],
+                "updatedAt": request["recordedAt"], "scope": ["ledger-recovery:historical-custody"],
+                "eventKind": "closure-invalidation", "invalidationMode": "historical-custody",
+                "custodyAction": "admit" if target["action"] == "custody-invalid-history" else "dispose", "authorizing": False,
+                **{key: target[key] for key in ("sourcePrefixSha256", "sourcePrefixBytes", "rawLineOrdinal", "physicalLineSha256")},
+                "evidence": [{"kind": "manual-check", "ref":
+                    f"custody physical row {ordinal} {target['sourcePrefixSha256']} {target['physicalLineSha256']}"}],
+            }
+            if target["action"] == "dispose-history-custody":
+                control["historyDisposition"] = {key: target[key] for key in
+                                                  ("kind", "classificationRunId", "resolutionRunIds", "evidence")}
+                control["evidence"] = target["evidence"]
+            controls.append(control)
+            facts.append({**target, "beforeEvent": events[ordinal - 1],
+                          "afterEffectiveEvent": events[ordinal - 1],
+                          "disposed": target["action"] == "dispose-history-custody"})
+        return events, controls, facts
     by_target = {target["rawLineOrdinal"]: target for target in request["targets"]}
     by_run: dict[str, list[int]] = {}
     for position, event in enumerate(events):
@@ -15805,6 +15854,76 @@ def _mixed_recovery_controls(
     return events, controls, target_facts
 
 
+def _historical_pass_association(
+    prefix: bytes, event: dict, ordinal: int, raw_line_sha256: str, artifact_sha256: str,
+) -> dict:
+    return {
+        "kind": "historical-pass-custody", "sourcePrefixSha256": _sha256_bytes(prefix),
+        "sourcePrefixBytes": len(prefix), "rawLineOrdinal": ordinal,
+        "rawLineSha256": raw_line_sha256, "runId": event["runId"],
+        "originalArtifact": event["artifact"], "snapshot": f"review-artifact-custody/{artifact_sha256}",
+        "snapshotSha256": artifact_sha256,
+    }
+
+
+def _mixed_capture_history_evidence(
+    root: Path, item: Path, original: bytes, events: list[dict], controls: list[dict], writer: object, validator: object,
+) -> dict[str, bytes]:
+    """Capture accepted proof bytes once; no preview publication or mutable re-read."""
+    blobs: dict[str, bytes] = {}
+    physical = original.splitlines(keepends=True)
+    for control in controls:
+        proof = control.get("historyDisposition")
+        if proof is None:
+            continue
+        target = {**proof, **{key: control[key] for key in validator.HISTORY_SUBJECT_FIELDS}}
+        try:
+            packet = validator.history_disposition_packet(events, target, item)
+        except ValueError as exc:
+            _mixed_recovery_fail("EVIDENCE", str(exc))
+        proof["boundEvents"] = packet["bindings"]
+        for descriptor in packet["descriptors"]:
+            digest = descriptor["sha256"]
+            key = f"review-artifact-custody/{digest}"
+            if key in blobs:
+                continue
+            snapshot = item / key
+            if snapshot.exists() or snapshot.is_symlink():
+                if not validator._ordinary_custody_snapshot(item, key, digest):
+                    _mixed_recovery_fail("EVIDENCE", "retained snapshot differs")
+                data = _capture_file_snapshot(snapshot, failure_id="WI-MIXED-LEDGER-EVIDENCE",
+                                              maximum_bytes=validator.MAX_LEDGER_LINE_BYTES).data
+            else:
+                reference = descriptor["ref"]
+                source = item / reference
+                if not source.exists() and not source.is_symlink():
+                    source = root / reference
+                source = _require_lifecycle_mutation_path(root, source, failure_id="WI-MIXED-LEDGER-EVIDENCE")
+                data = _capture_file_snapshot(source, failure_id="WI-MIXED-LEDGER-EVIDENCE",
+                                              maximum_bytes=validator.MAX_LEDGER_LINE_BYTES).data
+            if _sha256_bytes(data) != digest:
+                _mixed_recovery_fail("EVIDENCE", "captured accepted report/contract digest differs")
+            blobs[key] = data
+        for (position, record), payload in zip(packet["records"], packet["payloads"]):
+            raw_line_sha = _sha256_bytes(physical[position].rstrip(b"\r\n"))
+            association = _historical_pass_association(original, record, position + 1, raw_line_sha, payload["report"]["sha256"])
+            key = f"review-artifact-custody/historical-pass/{raw_line_sha}.json"
+            if (item / key).exists():
+                # Existing exact association owns its original prefix, not this later operation's prefix.
+                existing = _capture_file_snapshot(item / key, failure_id="WI-MIXED-LEDGER-EVIDENCE").data
+                try:
+                    decoded = validator.decode_json_object(existing, source=key)
+                except ValueError as exc:
+                    _mixed_recovery_fail("EVIDENCE", str(exc))
+                if any(decoded.get(field) != association[field] for field in
+                       ("rawLineOrdinal", "rawLineSha256", "runId", "originalArtifact", "snapshot", "snapshotSha256")):
+                    _mixed_recovery_fail("EVIDENCE", "retained raw PASS association conflicts")
+                blobs[key] = existing
+            else:
+                blobs[key] = validator._canonical_projection_bytes(association)
+    return blobs
+
+
 def recover_mixed_current_ledger(
     root: Path, request_bytes: bytes, *, apply_admitted: bool = False,
     inject_failure: str | None = None,
@@ -15844,24 +15963,30 @@ def recover_mixed_current_ledger(
             events, controls, target_facts = _mixed_recovery_controls(
                 item, original, request, writer, validator
             )
+            evidence_blobs = _mixed_capture_history_evidence(root, item, original, events, controls, writer, validator)
+            for fact, control in zip(target_facts, controls):
+                if "historyDisposition" in control:
+                    fact["historyDisposition"] = control["historyDisposition"]
             suffix = b"".join(
                 (writer.serialize_event(event) + "\n").encode("utf-8")
                 for event in controls
             )
             candidate = original + suffix
             replay = not current_is_original
-            if replay and current != candidate:
+            if replay and not (current == candidate or (request["schemaVersion"] == 2 and current.startswith(candidate))):
                 _mixed_recovery_fail("DRIFT", "ledger is not the exact committed suffix")
             if receipt_path.exists() and not replay:
                 _mixed_recovery_fail("RECEIPT", "receipt exists without committed ledger")
             stage_preexisting = stage_path.exists()
-            stage_identity = writer._write_exact_staging_file(stage_path, candidate)
+            validation_candidate = candidate
+            stage_identity = writer._write_exact_staging_file(stage_path, validation_candidate)
             obligations: list = []
             authority: list = []
             validation_errors = validator.validate_work_item(
                 item, ledger_path=stage_path, strict_revise=False,
                 validate_status_file=False, obligation_state_out=obligations,
                 authority_state_out=authority,
+                historical_pass_custody_blobs=evidence_blobs or None,
             )
             if validation_errors or len(obligations) != 1 or len(authority) != 1:
                 if not stage_preexisting and not writer.remove_exact_mixed_owned_file(
@@ -15871,8 +15996,20 @@ def recover_mixed_current_ledger(
                 _mixed_recovery_fail("CANDIDATE", "; ".join(validation_errors) or "candidate reduction incomplete")
             open_revise = [row.run_id for row in obligations[0].open_revise]
             open_launches = [row.run_id for row in obligations[0].open_launches]
-            raw_revise = {str(event["runId"]) for event in events if event.get("schemaVersion") == 2 and event.get("gate") == "REVISE"}
-            raw_launches = {str(event["runId"]) for event in events if event.get("eventKind") == "launch"}
+            before_axes = {}
+            if request["schemaVersion"] == 2:
+                before_context = validator._ordinary_raw_v2_effective_context(item, str(ledger), original, evidence_blobs or None)
+                before_errors: list[str] = []
+                _active, before_validity, before_revise, before_launches = validator._reduce_effective_current_state(
+                    before_context.rows, item, before_errors, None, context=before_context
+                )
+                before_axes = {row.raw_line_ordinal: entry.authority
+                               for row, entry in zip(before_context.rows, before_validity)}
+                raw_revise = {row["runId"] for row in before_revise}
+                raw_launches = {row["runId"] for row in before_launches}
+            else:
+                raw_revise = {str(event["runId"]) for event in events if event.get("schemaVersion") == 2 and event.get("gate") == "REVISE"}
+                raw_launches = {str(event["runId"]) for event in events if event.get("eventKind") == "launch"}
             closed_revise = {
                 str(closed)
                 for ordinal, event in enumerate(events, start=1)
@@ -15899,6 +16036,16 @@ def recover_mixed_current_ledger(
             for fact in target_facts:
                 mask = authority[0].get(fact["rawLineOrdinal"], validator._NO_LEDGER_AUTHORITY)
                 fact["beforeAuthority"] = dict.fromkeys(axis_names, False)
+                if request["schemaVersion"] == 2:
+                    prior = before_axes.get(fact["rawLineOrdinal"], validator._NO_LEDGER_AUTHORITY)
+                    fact["beforeAuthority"] = dict(zip(axis_names, (
+                        prior.launch_eligible, prior.terminal_eligible, prior.revise_target_eligible,
+                        prior.closer_eligible, prior.artifact_evidence_eligible,
+                    )))
+                    if mask != prior:
+                        if not stage_preexisting:
+                            writer.remove_exact_mixed_owned_file(stage_path, validation_candidate, stage_identity)
+                        _mixed_recovery_fail("AUTHORITY", "independent preimage authority was not conserved")
                 fact["afterAuthority"] = dict(zip(axis_names, (
                     mask.launch_eligible, mask.terminal_eligible,
                     mask.revise_target_eligible, mask.closer_eligible,
@@ -15917,7 +16064,7 @@ def recover_mixed_current_ledger(
                 "settledLaunchRunIds": sorted(raw_launches & settled_launches),
             }
             receipt = {
-                "schemaVersion": 1, "operationId": request["operationId"],
+                "schemaVersion": request["schemaVersion"], "operationId": request["operationId"],
                 "recordedAt": request["recordedAt"],
                 "requestSha256": request_sha,
                 "ledgerBeforeSha256": before_sha,
@@ -15933,12 +16080,28 @@ def recover_mixed_current_ledger(
                 "settledLaunchRunIds": result["settledLaunchRunIds"],
             }
             receipt_bytes = json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+            if request["schemaVersion"] == 2:
+                for output in (result, receipt):
+                    output["unresolvedHistory"] = [{
+                        "sourcePrefixSha256": hold.source_prefix_sha256, "sourcePrefixBytes": hold.source_prefix_bytes,
+                        "rawLineOrdinal": hold.raw_line_ordinal, "physicalLineSha256": hold.raw_line_sha256,
+                        "admissionRunId": hold.admission_run_id,
+                    } for hold in obligations[0].unresolved_history]
+                receipt_bytes = json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
             if replay:
-                if history != original or current != candidate:
+                if history != original or not current.startswith(candidate):
                     _mixed_recovery_fail("REPLAY", "history or committed suffix differs")
+                if current != candidate:
+                    later_errors = validator.validate_work_item(
+                        item, selected_ledger_bytes=current, strict_revise=False, validate_status_file=False
+                    )
+                    if later_errors:
+                        if not stage_preexisting:
+                            writer.remove_exact_mixed_owned_file(stage_path, candidate, stage_identity)
+                        _mixed_recovery_fail("REPLAY", "later suffix is invalid: " + "; ".join(later_errors))
                 if apply_admitted:
                     _projection_create_or_exact(receipt_path, receipt_bytes, "WI-MIXED-LEDGER-RECEIPT")
-                if not stage_preexisting and not writer.remove_exact_mixed_owned_file(stage_path, candidate, stage_identity):
+                if not stage_preexisting and not writer.remove_exact_mixed_owned_file(stage_path, validation_candidate, stage_identity):
                     _mixed_recovery_fail("RESIDUE", "replay owned staging changed")
                 return {**result, "applied": apply_admitted, "replay": True}
             if not apply_admitted:
@@ -15948,7 +16111,38 @@ def recover_mixed_current_ledger(
             history_created = False
             history_identity = None
             replaced = False
+            owned_evidence: list[tuple[Path, bytes, tuple[int, int, int, int]]] = []
+            evidence_directories: list[Path] = []
             try:
+                for directory in (item / "review-artifact-custody", item / "review-artifact-custody" / "historical-pass"):
+                    if evidence_blobs and not directory.exists():
+                        directory.mkdir()
+                        evidence_directories.append(directory)
+                for key, data in evidence_blobs.items():
+                    path = item / key
+                    if "/historical-pass/" in key:
+                        created: list[tuple[int, int, int, int]] = []
+                        try:
+                            _projection_create_or_exact(path, data, "WI-MIXED-LEDGER-EVIDENCE", created_identities=created)
+                        finally:
+                            if created:
+                                owned_evidence.append((path, data, created[0]))
+                    else:
+                        owned: dict[str, Path] = {}
+                        identities: dict[str, tuple[int, int]] = {}
+                        try:
+                            writer._acquire_custody_snapshot(item, data, path.name, validator, owned, owned_identities=identities)
+                        finally:
+                            if "snapshot" in owned:
+                                info = owned["snapshot"].lstat()
+                                if (info.st_dev, info.st_ino) != identities["snapshot"]:
+                                    _mixed_recovery_fail("RESIDUE", "new proof snapshot creator identity changed")
+                                owned_evidence.append((owned["snapshot"], data, writer._noncanonical_file_identity(info)))
+                if evidence_blobs:
+                    final_errors = validator.validate_work_item(item, ledger_path=stage_path, strict_revise=False,
+                                                               validate_status_file=False)
+                    if final_errors:
+                        _mixed_recovery_fail("CANDIDATE", "; ".join(final_errors))
                 published_path, history_created, history_identity = writer.publish_mixed_current_history_blob(
                     item, before_sha, original
                 )
@@ -15984,6 +16178,13 @@ def recover_mixed_current_ledger(
                     _mixed_recovery_fail("RESIDUE", "handled failure left changed or ambiguous owned staging")
                 if history_created and history_identity is not None:
                     clean = writer.remove_exact_mixed_owned_file(history_path, original, history_identity) and clean
+                for path, data, identity in reversed(owned_evidence):
+                    clean = writer.remove_exact_mixed_owned_file(path, data, identity) and clean
+                for directory in reversed(evidence_directories):
+                    if directory.exists() and not any(directory.iterdir()):
+                        directory.rmdir()
+                    else:
+                        clean = False
                 if not clean:
                     _mixed_recovery_fail("RESIDUE", "handled failure left changed or ambiguous owned residue")
                 if isinstance(exc, LifecycleError):

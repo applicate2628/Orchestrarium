@@ -341,6 +341,34 @@ Only after the separately required review and gates, apply that same request wit
 python -B scripts/mutate-work-item.py recover-mixed-current-ledger --root . --request-file <reviewed-request.json> --apply-admitted
 ```
 
+### General historical custody and qualified disposition (request Version 2)
+
+The same `recover-mixed-current-ledger` command admits malformed application history without requiring a historical semantic run ID. Version 1 requests and receipts retain their existing migration/disposition behavior. Version 2 targets use `custody-invalid-history` or `dispose-history-custody`; they bind `sourcePrefixSha256`, `sourcePrefixBytes`, `rawLineOrdinal`, and `physicalLineSha256`. The prefix is the exact captured byte stream and the line digest includes its terminator. Missing or invalid old IDs remain opaque. All valid decoded IDs remain reserved, and case-insensitive collisions, forged work-item identities, conflicting valid terminal relations, or damaged owner controls refuse.
+
+Admission appends a nonauthorizing `closure-invalidation` with `invalidationMode="historical-custody"` and `custodyAction="admit"`. It neither invents old timestamps/scope nor turns old output into a successful verdict. The existing evaluator conserves independently valid authority and closure effects, including valid orphan artifact/closer axes. The public obligation state exposes physically bound `unresolved_history` separately from real review/launch obligations. Fresh fully valid launches and terminals remain appendable; invalid fresh input still refuses the whole candidate. Default strict validation, ordinary close, and transfer reject unresolved historical holds with `WI-LEDGER-HISTORY-UNRESOLVED`.
+
+Disposition uses the same Version 2 command and positive `--apply-admitted` flag. One target is:
+
+```json
+{
+  "action": "dispose-history-custody",
+  "sourcePrefixSha256": "<admitted-prefix-sha256>",
+  "sourcePrefixBytes": 123,
+  "rawLineOrdinal": 7,
+  "physicalLineSha256": "<complete-physical-line-sha256>",
+  "kind": "non-obligating",
+  "classificationRunId": "<actual-current-classification-run-id>",
+  "resolutionRunIds": [],
+  "evidence": [{"kind":"review","ref":"<classification-report>","result":"<exact recorded JSON result string>"}]
+}
+```
+
+Accepted kinds are `non-obligating`, `current-evidence-covered`, and `admitted-historical-disposition`. Each requires an actual current internal Quality Assurance (`qa-engineer`) PASS classification against a digest-bound current acceptance contract and report. Its existing `review` evidence entry carries a strict JSON object encoded in the `result` string, with exact fields `schemaVersion:1`, `kind:"history-classification"`, `workItem`, the four-field `subject`, `currentContract:{ref,sha256}`, `report:{ref,sha256}`, `dispositionKind`, `findingClass`, and `requirements`. The report reference equals the record artifact and evidence reference; its digest equals `artifactRevision`. These are explicitly produced evidence fields, not fields automatically invented by the ledger writer.
+
+Bookkeeping-only classification requires `findingClass:"other"` and empty requirements/resolutions. Covered current requirements are nonempty exact `{requirementId,role,scope,lane,minimumEffort}` objects. Each needs exactly one later qualified current reviewer PASS whose `history-resolution` result binds the same subject/contract, its own report, classification run, and requirement ID; profession, scope, lane and minimum effort must match. Specifically admitted irrecoverable bookkeeping additionally needs a target-bound `manual-check` statement with a strict `history-disposition-approval` result binding subject, contract, classifier/report digest, and `decision:"accept-irrecoverable-bookkeeping"`. Generic PASS, generic permission, caller-only evidence, missing fields, mismatched hashes and vacuous coverage cannot retire a hold. Actual ordinary obligations and protected/unclassified risk cannot be relabeled away.
+
+The control uses `custodyAction:"dispose"` and a `historyDisposition` object containing exactly `kind`, `classificationRunId`, `resolutionRunIds`, `evidence`, and `boundEvents` (the owner-captured canonical event SHA-256 map by run ID). Every reader verifies this proof; a receipt alone grants no authority. Preview captures report/contract bytes without publishing files. Apply publishes those same captured bytes in the existing digest-only custody store and binds each referenced PASS to its exact raw-record/artifact snapshot association. Accepted evidence remains usable after the original report pointer changes. Abort reclaims only newly owned identity-bound evidence; reused or ambiguous data is preserved. Exact replay also validates a later valid suffix without appending controls twice or truncating history. A disposition retires only its bound bookkeeping hold; it does not close a real review or settle a launch. Strict validation and ordinary lifecycle close become available only when both sets are genuinely resolved.
+
 ## Settle one identity-bearing legacy ledger
 
 Use this owner operation only for an active ledger whose complete frozen

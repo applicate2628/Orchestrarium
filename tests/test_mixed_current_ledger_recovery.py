@@ -7,6 +7,8 @@ import json
 import copy
 import subprocess
 import sys
+import os
+from dataclasses import replace
 from pathlib import Path
 import pytest
 
@@ -758,3 +760,411 @@ def test_mixed_candidate_reduction_is_linear(tmp_path: Path, monkeypatch: pytest
     assert large[1:3] == (1, 1)
     assert large[3] <= small[3] * 2 + 4
     assert large[0] <= small[0] * 5 // 2
+
+
+def _history_fixture(item: Path, *, extra: bool = False, orphan_closer: bool = False):
+    """Declared synthetic malformed history; never a normal producer recipe."""
+    before, _candidate, _revise, _orphan = _mixed_candidate(item)
+    (item / "status.md").write_text(minimal_staged_status(), encoding="utf-8")
+    base = [json.loads(line) for line in before.splitlines()]
+    base[2]["findingClass"] = "correctness"
+    malformed_launch = {**base[1], "runId": "historic-launch-opaque", "scope": []}
+    malformed_launch.pop("startedAt")
+    malformed_terminal = {**base[4], "runId": 17, "evidence": []}
+    malformed_terminal.pop("updatedAt")
+    unsupported = {"schemaVersion": 2, "eventKind": "provider-result", "scope": []}
+    orphan = {**base[2], "runId": "historic-orphan-pass", "gate": "PASS",
+              "launchRunId": "unavailable-launch", "findingClass": "correctness"}
+    if orphan_closer:
+        orphan["closesRunIds"] = [base[2]["runId"]]
+    events = [*base[:3], malformed_launch, malformed_terminal, unsupported, orphan]
+    if extra:
+        events.append({**unsupported, "runId": {"opaque": "not-semantic"}})
+    raw = b"".join(map(_line, events))
+    (item / "agent-runs.jsonl").write_bytes(raw)
+    request = {
+        "schemaVersion": 2, "operationId": "history-admission",
+        "recordedAt": "2026-10-04T12:00:00Z",
+        "workItem": f"work-items/active/{item.name}",
+        "expectedLedgerSha256": _sha(raw),
+        "targets": [{
+            "action": "custody-invalid-history", "sourcePrefixSha256": _sha(raw),
+            "sourcePrefixBytes": len(raw), "rawLineOrdinal": ordinal,
+            "physicalLineSha256": _sha(_line(event)),
+        } for ordinal, event in enumerate(events, 1) if ordinal > 3],
+    }
+    return raw, request
+
+
+def _history_cli(item: Path, request: dict, *, apply: bool = True):
+    request_file = item.parent.parent.parent / "request.json"
+    request_file.write_bytes(_line(request))
+    return subprocess.run(
+        [sys.executable, "-B", str(LIFECYCLE), "recover-mixed-current-ledger",
+         "--root", str(item.parents[2]), "--request-file", str(request_file),
+         *(["--apply-admitted"] if apply else [])],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+
+
+@pytest.mark.parametrize("slug,extra", [("general-history", False), ("renamed-evidence", True)])
+def test_history_custody_public_recording_preserves_obligations(tmp_path: Path, slug: str, extra: bool):
+    """Terminal-only recovery cannot admit this class; custody must not mint past PASS."""
+    item = tmp_path / "work-items" / "active" / slug
+    raw, request = _history_fixture(item, extra=extra)
+    result = _history_cli(item, request)
+    assert result.returncode == 0, result.stdout + result.stderr
+    recovered = (item / "agent-runs.jsonl").read_bytes()
+    assert recovered.startswith(raw)
+    assert (item / f"agent-runs.history.{_sha(raw)}.jsonl").read_bytes() == raw
+    validator = load_validator()
+    states, axes = [], []
+    assert validator.validate_work_item(item, strict_revise=False, validate_status_file=False,
+                                      obligation_state_out=states, authority_state_out=axes) == []
+    assert [row.run_id for row in states[0].open_revise] == ["review-revise-001"]
+    assert [row.raw_line_ordinal for row in states[0].unresolved_history] == list(range(4, 9 if extra else 8))
+    assert axes[0][1].artifact_evidence_eligible is True
+    assert axes[0][7].artifact_evidence_eligible is True
+    assert axes[0][7].terminal_eligible is False
+    writer_path = LIFECYCLE.with_name("agent-run-ledger.py")
+    append = [sys.executable, "-B", str(writer_path), "--work-item", str(item), "append",
+              "--role", "qa-engineer", "--execution-role", "internal", "--scope", "current-check"]
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    launch = subprocess.run([*append, "--run-id", "current-launch", "--status", "running",
+                             "--gate", "none", "--event-kind", "launch"], capture_output=True, text=True, env=env)
+    assert launch.returncode == 0, launch.stdout + launch.stderr
+    terminal = subprocess.run([*append, "--run-id", "current-terminal", "--status", "completed",
+                               "--gate", "PASS", "--event-kind", "terminal", "--launch-run-id", "current-launch",
+                               "--artifact", "implementation.md", "--evidence", "artifact:implementation.md"],
+                              capture_output=True, text=True, env=env)
+    assert terminal.returncode == 0, terminal.stdout + terminal.stderr
+    current = (item / "agent-runs.jsonl").read_bytes()
+    bad = subprocess.run([*append, "--run-id", "invalid-current", "--status", "completed",
+                          "--gate", "BLOCKED", "--event-kind", "terminal", "--launch-run-id", "unknown-launch"],
+                         capture_output=True, text=True, env=env)
+    assert bad.returncode != 0
+    assert (item / "agent-runs.jsonl").read_bytes() == current
+    for number, fields in enumerate([
+        ["--status", "completed", "--gate", "none", "--event-kind", "standalone", "--scope", ""],
+        ["--status", "completed", "--gate", "none", "--event-kind", "unsupported"],
+        ["--status", "completed", "--gate", "PASS", "--event-kind", "standalone", "--artifact", "implementation.md",
+         "--evidence-json", '{"kind":"artifact","ref":""}'],
+        ["--status", "completed", "--gate", "PASS", "--event-kind", "standalone", "--artifact", "../../../../outside.md",
+         "--evidence", "artifact:implementation.md"],
+    ]):
+        refused = subprocess.run([*append, "--run-id", f"invalid-producer-{number}", *fields],
+                                 capture_output=True, text=True, env=env)
+        assert refused.returncode != 0
+        assert (item / "agent-runs.jsonl").read_bytes() == current
+    strict = validator.validate_work_item(item, validate_status_file=False)
+    assert any("WI-LEDGER-HISTORY-UNRESOLVED" in error for error in strict)
+    assert any("open REVISE obligation: review-revise-001" in error for error in strict)
+    replay = _history_cli(item, request)
+    assert replay.returncode == 0, replay.stdout + replay.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == current
+
+
+def test_history_custody_preserves_legitimate_orphan_closer(tmp_path: Path):
+    """Suppressing orphan relation diagnostics must not erase its legitimate closure axis."""
+    item = tmp_path / "work-items" / "active" / "orphan-axis"
+    raw, request = _history_fixture(item, orphan_closer=True)
+    applied = _history_cli(item, request)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    validator = load_validator()
+    states, axes = [], []
+    assert validator.validate_work_item(item, strict_revise=False, validate_status_file=False,
+                                      obligation_state_out=states, authority_state_out=axes) == []
+    assert states[0].open_revise == ()
+    assert axes[0][7] == validator.LedgerAuthorityV1(False, False, False, True, True)
+    receipt = json.loads((item / "agent-runs.mixed.history-admission.receipt.json").read_bytes())
+    orphan = next(row for row in receipt["targets"] if row["rawLineOrdinal"] == 7)
+    assert orphan["beforeAuthority"] == orphan["afterAuthority"]
+    assert orphan["beforeAuthority"]["closerEligible"] is True
+    assert (item / "agent-runs.jsonl").read_bytes().startswith(raw)
+
+
+@pytest.mark.parametrize("mutation", ["duplicate-id", "owner-control", "wrong-prefix", "forged-work-item"])
+def test_history_custody_boundary_refuses_unchanged(tmp_path: Path, mutation: str):
+    item = tmp_path / "work-items" / "active" / "bound-history"
+    raw, request = _history_fixture(item)
+    events = [json.loads(line) for line in raw.splitlines()]
+    if mutation == "duplicate-id":
+        events[3]["runId"] = "REVIEW-LAUNCH-001"
+    elif mutation == "owner-control":
+        events[3]["invalidationMode"] = "historical-custody"
+    elif mutation == "forged-work-item":
+        events[3]["workItem"] = "another-item"
+    changed = b"".join(map(_line, events))
+    (item / "agent-runs.jsonl").write_bytes(changed)
+    request["expectedLedgerSha256"] = _sha(changed)
+    for target in request["targets"]:
+        target.update(sourcePrefixSha256=_sha(changed), sourcePrefixBytes=len(changed),
+                      physicalLineSha256=_sha(_line(events[target["rawLineOrdinal"] - 1])))
+    if mutation == "wrong-prefix":
+        request["targets"][0]["sourcePrefixSha256"] = "0" * 64
+    refused = _history_cli(item, request)
+    assert refused.returncode != 0
+    assert (item / "agent-runs.jsonl").read_bytes() == changed
+    assert not list(item.glob("agent-runs.history.*"))
+    assert not (item / "agent-runs.jsonl.tmp").exists()
+
+
+def test_history_archive_reader_keeps_meaningful_hold(tmp_path: Path):
+    item = tmp_path / "work-items" / "active" / "archived-history"
+    _raw, request = _history_fixture(item, orphan_closer=True)
+    applied = _history_cli(item, request)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    archive = tmp_path / "work-items" / "archive" / "2026-10" / item.name
+    archive.parent.mkdir(parents=True)
+    item.rename(archive)
+    validator = load_validator()
+    errors, findings, launches = validator.validate_archived_ledger_obligations(archive)
+    assert any("WI-LEDGER-HISTORY-UNRESOLVED" in error for error in errors), errors
+    assert not any("missing required field" in error for error in errors), errors
+    assert findings == [] and launches == []
+
+
+def test_history_compatibility_reader_returns_authority_and_holds(tmp_path: Path):
+    """The receipt-bound return must expose the same hold/axis outputs as raw candidates."""
+    from tests.test_ledger_h1_effective_view import synthetic_artifacts
+    validator = load_validator()
+    artifacts, items, paths, _expected = synthetic_artifacts(validator, tmp_path)
+    item, path = items[0], paths[0]
+    target = {"schemaVersion": 2, "eventKind": "launch", "runId": 19, "scope": []}
+    source = artifacts.ledger_bytes_by_path[path] + _line(target)
+    ordinal = len(source.splitlines())
+    control = {
+        "schemaVersion": 2, "runId": "compat-history-admit", "workItem": item.name,
+        "role": "lead", "executionRole": "main", "status": "completed", "gate": "none",
+        "scope": ["ledger-recovery:historical-custody"], "eventKind": "closure-invalidation",
+        "invalidationMode": "historical-custody", "custodyAction": "admit", "authorizing": False,
+        "sourcePrefixSha256": _sha(source), "sourcePrefixBytes": len(source),
+        "rawLineOrdinal": ordinal, "physicalLineSha256": _sha(_line(target)),
+        "evidence": [{"kind": "manual-check", "ref": "synthetic exact physical history custody"}],
+        "startedAt": "2026-10-04T12:00:00Z", "updatedAt": "2026-10-04T12:00:00Z",
+    }
+    candidate = validator.LedgerCompatibilityArtifactSetV1(**{
+        **artifacts.__dict__, "ledger_bytes_by_path": {**artifacts.ledger_bytes_by_path,
+                                                      path: source + _line(control)},
+    })
+    states, axes = [], []
+    assert validator.validate_work_item(item, compatibility_artifacts=candidate, strict_revise=False,
+                                      validate_status_file=False, obligation_state_out=states,
+                                      authority_state_out=axes) == []
+    assert len(states) == len(axes) == 1
+    assert states[0].unresolved_history[0].raw_line_ordinal == ordinal
+    assert axes[0][ordinal] == validator._NO_LEDGER_AUTHORITY
+    strict = validator.validate_work_item(item, compatibility_artifacts=candidate, validate_status_file=False)
+    assert any("WI-LEDGER-HISTORY-UNRESOLVED" in error for error in strict)
+
+
+def _history_review_record(item: Path, run_id: str, payload: dict, *, role="qa-engineer", scope="history-classification", effort="high", lane=None):
+    """Actual public producer against synthetic, digest-bound current evidence."""
+    report = {"ref": f"{run_id}.md", "sha256": _sha(_line(payload))}
+    (item / report["ref"]).write_bytes(_line(payload))
+    payload = {**payload, "report": report}
+    evidence = {"kind": "review", "ref": report["ref"], "result": json.dumps(payload, sort_keys=True)}
+    result = subprocess.run([
+        sys.executable, "-B", str(LIFECYCLE.with_name("agent-run-ledger.py")),
+        "--work-item", str(item), "append", "--run-id", run_id, "--role", role,
+        "--execution-role", "internal", "--status", "completed", "--gate", "PASS",
+        "--event-kind", "standalone", "--scope", scope, "--effort", effort,
+        "--artifact", report["ref"], "--artifact-revision", report["sha256"],
+        "--evidence-json", json.dumps(evidence),
+        *(["--lane", lane] if lane is not None else []),
+    ], capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    return evidence, payload
+
+
+def _history_disposition_request(item: Path, admission: dict, *, kind="non-obligating"):
+    contract_bytes = b"# Accepted current task\nHistorical malformed rows are bookkeeping; actual review obligations remain separate.\n"
+    (item / "current-contract.md").write_bytes(contract_bytes)
+    contract = {"ref": "current-contract.md", "sha256": _sha(contract_bytes)}
+    targets = []
+    for target in admission["targets"]:
+        subject = {key: target[key] for key in ("sourcePrefixSha256", "sourcePrefixBytes", "rawLineOrdinal", "physicalLineSha256")}
+        run_id = f"classification-row-{target['rawLineOrdinal']}"
+        requirements = [{"requirementId": "current-functional-check", "role": "qa-engineer",
+                         "scope": ["current-requirement"], "lane": "history-check", "minimumEffort": "high"}] \
+            if kind == "current-evidence-covered" else []
+        evidence, payload = _history_review_record(item, run_id, {
+            "schemaVersion": 1, "kind": "history-classification", "workItem": item.name,
+            "subject": subject, "currentContract": contract, "dispositionKind": kind,
+            "findingClass": "other", "requirements": requirements,
+        })
+        entries = [evidence]
+        resolutions = []
+        if requirements:
+            resolution_id = f"resolution-row-{target['rawLineOrdinal']}"
+            resolution, _payload = _history_review_record(item, resolution_id, {
+                "schemaVersion": 1, "kind": "history-resolution", "workItem": item.name,
+                "subject": subject, "currentContract": contract, "classificationRunId": run_id,
+                "requirementId": "current-functional-check",
+            }, scope="current-requirement", lane="history-check")
+            entries.append(resolution)
+            resolutions.append(resolution_id)
+        if kind == "admitted-historical-disposition":
+            entries.append({"kind": "manual-check", "ref": "Synthetic user approval of exactly classified irrecoverable bookkeeping",
+                            "result": json.dumps({
+                                "schemaVersion": 1, "kind": "history-disposition-approval", "workItem": item.name,
+                                "subject": subject, "currentContract": contract, "classificationRunId": run_id,
+                                "classificationReportSha256": payload["report"]["sha256"],
+                                "decision": "accept-irrecoverable-bookkeeping",
+                            }, sort_keys=True)})
+        targets.append({**subject, "action": "dispose-history-custody", "kind": kind,
+                        "classificationRunId": run_id, "resolutionRunIds": resolutions, "evidence": entries})
+    raw = (item / "agent-runs.jsonl").read_bytes()
+    return {**admission, "operationId": "history-disposition", "recordedAt": load_writer().utc_timestamp(),
+            "expectedLedgerSha256": _sha(raw), "targets": targets}
+
+
+@pytest.mark.parametrize("kind", ["non-obligating", "admitted-historical-disposition", "current-evidence-covered"])
+def test_history_disposition_qualified_proof_allows_honest_close(tmp_path: Path, kind: str):
+    item = tmp_path / "work-items" / "active" / "usable-history"
+    original, admission = _history_fixture(item, orphan_closer=True)
+    result = _history_cli(item, admission)
+    assert result.returncode == 0, result.stdout + result.stderr
+    request = _history_disposition_request(item, admission, kind=kind)
+    before = (item / "agent-runs.jsonl").read_bytes()
+    preview = _history_cli(item, request, apply=False)
+    assert preview.returncode == 0, preview.stdout + preview.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert not (item / "review-artifact-custody").exists()
+    applied = _history_cli(item, request)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    validator = load_validator()
+    states = []
+    assert validator.validate_work_item(item, validate_status_file=False, obligation_state_out=states) == []
+    assert states[0].unresolved_history == ()
+    assert states[0].open_revise == states[0].open_launches == ()
+    assert (item / "agent-runs.jsonl").read_bytes().startswith(original)
+    for target in request["targets"]:
+        for run_id in (target["classificationRunId"], *target["resolutionRunIds"]):
+            (item / f"{run_id}.md").write_bytes(b"superseded source report")
+    (item / "current-contract.md").write_bytes(b"changed mutable pointer")
+    assert validator.validate_work_item(item, validate_status_file=False) == []
+    replay = _history_cli(item, request)
+    assert replay.returncode == 0, replay.stdout + replay.stderr
+    lifecycle = load_script(LIFECYCLE, "history_honest_close")
+    instant = "2026-10-05T00:00:00Z"
+    (item / "bug-dispositions.json").write_bytes(_line({"schemaVersion": 1, "workItem": item.name,
+                                                      "closedAt": instant, "bugs": []}))
+    lifecycle.refresh_readme(tmp_path)
+    closure = f"Closed: {instant}\nOutcome: Synthetic qualified historical disposition verified.\nEvidence: public producer and reader oracle\nResidual risk: none in fixture\n".encode()
+    archive = lifecycle.close_item(tmp_path, item.name, closure, instant)
+    assert validator.validate_archived_ledger_obligations(archive) == ([], [], [])
+
+
+def test_history_disposition_refuses_generic_and_unbound_proof(tmp_path: Path):
+    item = tmp_path / "work-items" / "active" / "proof-boundary"
+    _original, admission = _history_fixture(item)
+    assert _history_cli(item, admission).returncode == 0
+    request = _history_disposition_request(item, admission, kind="current-evidence-covered")
+    before = (item / "agent-runs.jsonl").read_bytes()
+    bad_cases = []
+    missing = copy.deepcopy(request)
+    missing["targets"][0]["evidence"] = []
+    bad_cases.append(missing)
+    generic = copy.deepcopy(request)
+    generic["targets"][0]["evidence"][0]["result"] = "approved PASS"
+    bad_cases.append(generic)
+    no_resolution = copy.deepcopy(request)
+    no_resolution["targets"][0]["resolutionRunIds"] = []
+    bad_cases.append(no_resolution)
+    different_subject = copy.deepcopy(request)
+    different_subject["targets"][0]["physicalLineSha256"] = "0" * 64
+    bad_cases.append(different_subject)
+    for case in bad_cases:
+        refused = _history_cli(item, case)
+        assert refused.returncode != 0, refused.stdout + refused.stderr
+        assert (item / "agent-runs.jsonl").read_bytes() == before
+        assert not (item / "review-artifact-custody").exists()
+        assert not (item / "agent-runs.jsonl.tmp").exists()
+    applied = _history_cli(item, request)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    validator = load_validator()
+    strict = validator.validate_work_item(item, validate_status_file=False)
+    assert not any("HISTORY-UNRESOLVED" in error for error in strict)
+    assert any("open REVISE obligation: review-revise-001" in error for error in strict)
+
+
+@pytest.mark.parametrize("reused", [False, True])
+def test_history_disposition_abort_reclaims_only_owned_evidence(tmp_path: Path, reused: bool):
+    item = tmp_path / "work-items" / "active" / "proof-rollback"
+    _original, admission = _history_fixture(item, orphan_closer=True)
+    assert _history_cli(item, admission).returncode == 0
+    request = _history_disposition_request(item, admission)
+    reused_path = None
+    if reused:
+        descriptor = json.loads(request["targets"][0]["evidence"][0]["result"])["currentContract"]
+        writer = load_writer()
+        reused_path = writer._acquire_custody_snapshot(item, (item / descriptor["ref"]).read_bytes(), descriptor["sha256"],
+                                                     writer.load_validator(), {})
+        reused_bytes = reused_path.read_bytes()
+    before = (item / "agent-runs.jsonl").read_bytes()
+    lifecycle = load_script(LIFECYCLE, "history_proof_abort")
+    with pytest.raises(lifecycle.LifecycleError, match="injected handled"):
+        lifecycle.recover_mixed_current_ledger(tmp_path, _line(request), apply_admitted=True,
+                                              inject_failure="post-history-publish")
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    if reused_path is None:
+        assert not (item / "review-artifact-custody").exists()
+    else:
+        assert reused_path.read_bytes() == reused_bytes
+        assert list((item / "review-artifact-custody").iterdir()) == [reused_path]
+    assert not (item / "agent-runs.jsonl.tmp").exists()
+    assert not (item / f"agent-runs.history.{request['expectedLedgerSha256']}.jsonl").exists()
+
+
+def test_history_current_qualification_refuses_wrong_profession_scope_and_strength(tmp_path: Path):
+    item = tmp_path / "work-items" / "active" / "qualified-current"
+    _original, admission = _history_fixture(item, orphan_closer=True)
+    assert _history_cli(item, admission).returncode == 0
+    request = _history_disposition_request(item, admission, kind="current-evidence-covered")
+    cases = [
+        ("classification", "backend-engineer", "history-classification", None, "high"),
+        ("resolution", "qa-engineer", "wrong-current-scope", "history-check", "high"),
+        ("resolution", "qa-engineer", "current-requirement", "history-check", "low"),
+    ]
+    for number, (part, role, scope, lane, effort) in enumerate(cases):
+        case = copy.deepcopy(request)
+        index = 0 if part == "classification" else 1
+        payload = json.loads(case["targets"][0]["evidence"][index]["result"])
+        run_id = f"unqualified-record-{number}"
+        entry, _payload = _history_review_record(item, run_id, payload, role=role, scope=scope, lane=lane, effort=effort)
+        if part == "classification":
+            # A separately valid public classification record cannot acquire QA authority through its payload.
+            case["targets"][0]["classificationRunId"] = run_id
+        else:
+            case["targets"][0]["resolutionRunIds"] = [run_id]
+        case["targets"][0]["evidence"][index] = entry
+        before = (item / "agent-runs.jsonl").read_bytes()
+        case["expectedLedgerSha256"] = _sha(before)
+        refused = _history_cli(item, case)
+        assert refused.returncode != 0, refused.stdout + refused.stderr
+        assert (item / "agent-runs.jsonl").read_bytes() == before
+        assert not (item / "review-artifact-custody").exists()
+        assert not (item / "agent-runs.jsonl.tmp").exists()
+
+
+def test_history_pending_hold_blocks_transfer_at_existing_state_owner(tmp_path: Path):
+    item = tmp_path / "work-items" / "active" / "pending-transfer"
+    _raw, admission = _history_fixture(item)
+    assert _history_cli(item, admission).returncode == 0
+    lifecycle = load_script(LIFECYCLE, "history_transfer_hold")
+    with pytest.raises(lifecycle.LifecycleError, match="WI-LEDGER-HISTORY-UNRESOLVED"):
+        lifecycle._inspect_transfer_obligations(tmp_path, item)
+
+
+def test_history_custody_context_rejects_forged_invocation(tmp_path: Path):
+    item = tmp_path / "work-items" / "active" / "bound-context"
+    _raw, admission = _history_fixture(item)
+    assert _history_cli(item, admission).returncode == 0
+    validator = load_validator()
+    context = validator.load_effective_ledger_view(tmp_path, item, f"work-items/active/{item.name}/agent-runs.jsonl")
+    forged = replace(context, invocation_token=object())
+    errors = []
+    validator.derive_event_validity(forged.rows, item, errors, context=forged)
+    assert any("WI-LEDGER-HISTORY-BINDING" in error for error in errors), errors
