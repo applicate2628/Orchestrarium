@@ -432,7 +432,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'Codex addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
   '@ROOT/references-codex/subagent-operating-model.md',
-  '22e39c27d98a7b45e0262450e83b0e7fd047e4823fb2a040aeb73ea0ac0a2f9c',
+  'd5201d39c58038615b198df3b77d4f8117dcc024727c277801ad8222c6b6f62c',
   'Codex addendum matches the current canonical normalized fingerprint'),
  ('direct', 'role_index_codex', 'role_index_codex'),
  ('check_openai_yaml_interface',
@@ -795,7 +795,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   '@ROOT/src.codex/skills/vcpkg-ports-updater/SKILL.md'),
  ('check_common_skill_body_pin',
   'windows-gui-manual-testing',
-  'b3a029e6784d1d9e37f789b8b512f31f5e5c2161ca6807dc8a140854042ae6c8',
+  '7dd186bbeee1fab2eb44e2d4f1c4772ffea87d918605efdcc00a5a8fb3c272b8',
   '@ROOT/src.codex/skills/windows-gui-manual-testing/SKILL.md'),
  ('direct', 'common_pin_completeness', 'common_pin_completeness'),
  ('direct', 'layering_codex', 'layering_codex'),
@@ -928,12 +928,19 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'operating-model carries the A3 physical-state reconciliation trigger'),
  ('check_contains',
   '@ROOT/src.codex/skills/init-project/SKILL.md',
-  'normalize it to the current canonical format before presenting or trusting the current values.',
+  'Normalize effective values in memory through the dispatch owner\'s existing per-key read order before '
+  'presenting or trusting them. Use any global fallback as the starting point for project-local review; '
+  'do not rewrite borrowed/global configuration on read. Persist the explicitly selected project '
+  'configuration to the canonical project-local `.yaml` path only within the authorized configuration '
+  'write in Step 7, and do not recreate legacy files.',
   'init-project normalizes existing agents-mode before reading values'),
  ('check_contains',
   '@ROOT/src.codex/skills/init-project/SKILL.md',
-  'Any read of `.agents/.agents-mode.yaml` that drives a decision should normalize the file to the current '
-  'canonical format before trusting the flags.',
+  'For decision-driving reads, use the dispatch owner\'s per-key precedence (local `.agents/.agents-mode.yaml`, '
+  'local legacy `.agents/.agents-mode`, pack-local global `~/.codex/.agents-mode.yaml`, pack-local global '
+  'legacy `~/.codex/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults) '
+  'and the in-memory normalization in Step 1; inspection grants no write to the source overlay. '
+  'Persist only the explicitly selected authorized project configuration in Step 7.',
   'init-project requires read-time agents-mode normalization'),
  ('check_contains',
   '@ROOT/src.codex/skills/second-opinion/SKILL.md',

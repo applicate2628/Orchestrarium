@@ -118,6 +118,32 @@ def _stock_fast_policy_manifest_pair() -> tuple[bytes, bytes]:
     return policy_bytes, manifest_bytes
 
 
+def _stock_native_contract_prior_pair(kind: str) -> tuple[bytes, bytes]:
+    if kind == "fast":
+        return _stock_fast_policy_manifest_pair()
+    fixture = ROOT / "tests/fixtures/native-luna-policy-priors/default-model-unbinding"
+    policy = (fixture / "role-routing-policy.v1.json").read_bytes()
+    manifest = (fixture / "orchestrarium-role-manifest.json").read_bytes()
+    assert hashlib.sha256(policy).hexdigest() == "0a7ecdc12d3fd802b32bd7d41f78129bbdb8a5681beb1f1382d46e6b2fb82b90"
+    assert hashlib.sha256(manifest).hexdigest() == "1362c1206cb957b879109e33c577047c0d6b7b65860f602d1f51f400a6967d77"
+    return policy, manifest
+
+
+def _seed_native_contract_prior(project: Path, kind: str) -> tuple[Path, Path]:
+    lead = project / ".agents/skills/lead"
+    policy = lead / "shared/role-routing-policy.v1.json"
+    manifest = lead / "shared/orchestrarium-role-manifest.json"
+    old_policy, old_manifest = _stock_native_contract_prior_pair(kind)
+    policy.write_bytes(old_policy)
+    manifest.write_bytes(old_manifest)
+    if kind == "default-unbinding":
+        from tests.test_native_role_slice_a import INTERMEDIATE_MIGRATABLE_ROLE_BYTES
+        (project / ".codex/agents/default.toml").write_bytes(
+            INTERMEDIATE_MIGRATABLE_ROLE_BYTES["default"]
+        )
+    return policy, manifest
+
+
 @pytest.mark.parametrize("live_policy", (None, b'{"mutated": true}\n'))
 def test_stock_fast_fixture_is_independent_of_live_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, live_policy: bytes | None
@@ -1591,8 +1617,9 @@ def test_sol_migrated_roles_keep_independent_nonmodel_contract() -> None:
         )
 
 
-def test_installer_migrates_only_the_exact_stock_fast_policy_manifest_pair(
-    tmp_path: Path,
+@pytest.mark.parametrize("prior_kind", ("fast", "default-unbinding"))
+def test_installer_migrates_only_the_exact_stock_native_policy_manifest_pair(
+    tmp_path: Path, prior_kind: str,
 ) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -1606,13 +1633,15 @@ def test_installer_migrates_only_the_exact_stock_fast_policy_manifest_pair(
     manifest = lead / "shared" / "orchestrarium-role-manifest.json"
     installed_agents = project / ".codex" / "agents"
     config = project / ".codex" / "config.toml"
+    config.write_bytes(b'model = "gpt-6-astra"\n# unrelated user setting\n' + config.read_bytes())
     protected = {
         path.relative_to(project).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (config, *sorted(installed_agents.glob("*.toml")))
     }
-    old_policy, old_manifest = _stock_fast_policy_manifest_pair()
-    policy.write_bytes(old_policy)
-    manifest.write_bytes(old_manifest)
+    _seed_native_contract_prior(project, prior_kind)
+    sibling = project / ".agents/user-retention-state"
+    sibling.mkdir()
+    (sibling / "sentinel").write_bytes(b"user-owned sibling")
 
     assert installer.install("codex", arguments) == 0
     assert policy.read_bytes() == POLICY_PATH.read_bytes()
@@ -1623,36 +1652,20 @@ def test_installer_migrates_only_the_exact_stock_fast_policy_manifest_pair(
         path.relative_to(project).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (config, *sorted(installed_agents.glob("*.toml")))
     } == protected
-
-
-def test_installer_rejects_drifted_stock_fast_pair_before_mutation(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    arguments = [
-        "--force", "--no-hypothesis-hook", "--target", str(project),
-        "--allow-unsafe-target",
-    ]
+    assert (lead / "scripts/resolve-agents-mode.py").read_bytes() == RESOLVER.read_bytes()
+    assert (installed_agents / "default.toml").read_bytes() == (AGENTS_SOURCE / "default.toml").read_bytes()
+    focal = (policy, manifest, config, installed_agents / "default.toml",
+             lead / "scripts/resolve-agents-mode.py")
+    identities = {path: installer._CreateOnlyMutablePath._identity(path) for path in focal}
     assert installer.install("codex", arguments) == 0
-    lead = project / ".agents" / "skills" / "lead"
-    policy = lead / "shared" / "role-routing-policy.v1.json"
-    manifest = lead / "shared" / "orchestrarium-role-manifest.json"
-    old_policy, old_manifest = _stock_fast_policy_manifest_pair()
-    policy.write_bytes(old_policy)
-    manifest.write_bytes(old_manifest[:-2] + b" \n")
-    before = {
-        path.relative_to(project).as_posix(): path.read_bytes()
-        for path in sorted(project.rglob("*")) if path.is_file()
-    }
-
-    assert installer.install("codex", arguments) == 1
-    assert {
-        path.relative_to(project).as_posix(): path.read_bytes()
-        for path in sorted(project.rglob("*")) if path.is_file()
-    } == before
+    assert {path: installer._CreateOnlyMutablePath._identity(path) for path in focal} == identities
+    assert (sibling / "sentinel").read_bytes() == b"user-owned sibling"
+    assert not list((project / ".agents").glob(".orchestrarium-migration-retention-*"))
 
 
-def test_installer_rolls_back_stock_policy_when_manifest_migration_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("drift", ("fast-manifest", "default-policy", "default-manifest", "mixed"))
+def test_installer_rejects_drifted_or_mixed_stock_native_pair_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: str,
 ) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -1664,22 +1677,217 @@ def test_installer_rolls_back_stock_policy_when_manifest_migration_fails(
     lead = project / ".agents" / "skills" / "lead"
     policy = lead / "shared" / "role-routing-policy.v1.json"
     manifest = lead / "shared" / "orchestrarium-role-manifest.json"
-    old_policy, old_manifest = _stock_fast_policy_manifest_pair()
-    policy.write_bytes(old_policy)
-    manifest.write_bytes(old_manifest)
-    original = installer._CreateOnlyMutablePath.migrate_exact_file
-
-    def fail_manifest(self, relative: Path, expected_digest: str, payload: bytes):
-        if Path(relative).name == "orchestrarium-role-manifest.json":
-            raise RuntimeError("forced manifest migration failure")
-        return original(self, relative, expected_digest, payload)
-
-    monkeypatch.setattr(
-        installer._CreateOnlyMutablePath, "migrate_exact_file", fail_manifest
+    policy, manifest = _seed_native_contract_prior(
+        project, "fast" if drift == "fast-manifest" else "default-unbinding"
     )
+    if drift == "default-policy":
+        policy.write_bytes(policy.read_bytes() + b" ")
+    elif drift == "mixed":
+        policy.write_bytes(_stock_fast_policy_manifest_pair()[0])
+    else:
+        manifest.write_bytes(manifest.read_bytes() + b" ")
+    before = {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in sorted(project.rglob("*")) if path.is_file()
+    }
+
+    def transaction_entered(*_args, **_kwargs):
+        raise AssertionError("transaction entered for rejected prior pair")
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", transaction_entered)
     assert installer.install("codex", arguments) == 1
-    assert policy.read_bytes() == old_policy
-    assert manifest.read_bytes() == old_manifest
+    assert {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in sorted(project.rglob("*")) if path.is_file()
+    } == before
+
+
+@pytest.mark.parametrize("prior_kind", ("fast", "default-unbinding"))
+@pytest.mark.parametrize("fault", ("manifest-migration", "replacement-transfer", "after-native-leaf"))
+def test_installer_rolls_back_stock_native_pair_and_leaf_after_migration_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prior_kind: str, fault: str,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = [
+        "--force", "--no-hypothesis-hook", "--target", str(project),
+        "--allow-unsafe-target",
+    ]
+    assert installer.install("codex", arguments) == 0
+    lead = project / ".agents" / "skills" / "lead"
+    policy = lead / "shared" / "role-routing-policy.v1.json"
+    manifest = lead / "shared" / "orchestrarium-role-manifest.json"
+    _seed_native_contract_prior(project, prior_kind)
+    focal = (policy, manifest, project / ".codex/config.toml",
+             project / ".codex/agents/default.toml", lead / "scripts/resolve-agents-mode.py")
+    before = {path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path)) for path in focal}
+    original = installer._CreateOnlyMutablePath.migrate_exact_file
+    original_replace = installer.os.replace
+    reached = False
+
+    def fail_manifest(self, relative: Path, expected_digest: str, payload: bytes, **kwargs):
+        nonlocal reached
+        if Path(relative).name == "orchestrarium-role-manifest.json":
+            reached = True
+            raise RuntimeError("forced manifest migration failure")
+        return original(self, relative, expected_digest, payload, **kwargs)
+
+    def fail_after_native(*_args, **_kwargs):
+        nonlocal reached
+        reached = True
+        assert policy.read_bytes() == POLICY_PATH.read_bytes()
+        assert manifest.read_bytes() == (AGENTS_SOURCE / installer.CODEX_ROLE_MANIFEST).read_bytes()
+        assert (project / ".codex/agents/default.toml").read_bytes() == (AGENTS_SOURCE / "default.toml").read_bytes()
+        raise RuntimeError("forced post-native-leaf failure")
+
+    def fail_transfer(source, target):
+        nonlocal reached
+        if Path(source).suffix == ".tmp" and Path(target) == policy:
+            reached = True
+            raise RuntimeError("forced replacement transfer failure")
+        return original_replace(source, target)
+
+    if fault == "manifest-migration":
+        monkeypatch.setattr(installer._CreateOnlyMutablePath, "migrate_exact_file", fail_manifest)
+    elif fault == "replacement-transfer":
+        monkeypatch.setattr(installer.os, "replace", fail_transfer)
+    else:
+        monkeypatch.setattr(installer, "_merge_codex_agents", fail_after_native)
+    assert installer.install("codex", arguments) == 1
+    assert reached
+    assert {path: path.read_bytes() for path in focal} == {path: data for path, (data, _identity) in before.items()}
+    for path in (project / ".codex/config.toml", project / ".codex/agents/default.toml"):
+        assert installer._CreateOnlyMutablePath._identity(path) == before[path][1]
+    assert not list((project / ".agents").glob(".orchestrarium-migration-retention-*"))
+
+
+def test_stock_pair_retention_foreign_member_refuses_cleanup_and_preserves_prior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
+    assert installer.install("codex", arguments) == 0
+    _seed_native_contract_prior(project, "default-unbinding")
+    original = installer._finalize_canonical_lead_receipt
+    retained = {}
+    private = None
+
+    def foreign_member(plan, target, owner, reclaimed=()):
+        nonlocal private
+        private = next(iter(owner.transaction._migration_retention))
+        retained.update({path: path.read_bytes() for path in private.iterdir()})
+        (private / "foreign").write_bytes(b"foreign member")
+        return original(plan, target, owner, reclaimed)
+
+    monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", foreign_member)
+    assert installer.install("codex", arguments) == 1
+    assert "E_ROLLBACK_SETTLEMENT_FAILED" in capsys.readouterr().err
+    assert private is not None
+    assert (private / "foreign").read_bytes() == b"foreign member"
+    assert retained and all(path.read_bytes() == data for path, data in retained.items())
+
+
+@pytest.mark.parametrize("fault", ("replaced-storage", "cleanup-denied"))
+def test_stock_pair_retention_settlement_refuses_changed_storage_or_cleanup_denial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], fault: str,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
+    assert installer.install("codex", arguments) == 0
+    _seed_native_contract_prior(project, "default-unbinding")
+    finalize = installer._finalize_canonical_lead_receipt
+    rmdir = Path.rmdir
+    private = None
+    moved = None
+    retained = {}
+
+    def alter_storage(plan, target, owner, reclaimed=()):
+        nonlocal private, moved
+        private = next(iter(owner.transaction._migration_retention))
+        for record in owner.transaction._slice_a_migrated:
+            if record.tombstone_path.parent == private:
+                assert record.old_identity == owner._identity(record.tombstone_path)
+                assert record.old_identity[0] == private.stat().st_dev
+        if fault == "replaced-storage":
+            retained.update({path.name: path.read_bytes() for path in private.iterdir()})
+            moved = private.with_name(private.name + "-original")
+            private.rename(moved)
+            private.mkdir()
+            (private / "foreign").write_bytes(b"foreign replacement")
+        return finalize(plan, target, owner, reclaimed)
+
+    def deny_cleanup(path):
+        if fault == "cleanup-denied" and path == private:
+            raise PermissionError("injected retention cleanup denial")
+        return rmdir(path)
+
+    monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", alter_storage)
+    monkeypatch.setattr(Path, "rmdir", deny_cleanup)
+    assert installer.install("codex", arguments) == 1
+    assert "E_ROLLBACK_SETTLEMENT_FAILED" in capsys.readouterr().err
+    assert private is not None and private.is_dir()
+    if fault == "replaced-storage":
+        assert (private / "foreign").read_bytes() == b"foreign replacement"
+        assert moved is not None
+        assert all((moved / name).read_bytes() == data for name, data in retained.items())
+    else:
+        assert not list(private.iterdir())
+
+
+def test_stock_pair_retention_different_device_refuses_before_prior_rename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
+    assert installer.install("codex", arguments) == 0
+    policy, manifest = _seed_native_contract_prior(project, "default-unbinding")
+    before = (policy.read_bytes(), manifest.read_bytes())
+    source_stat = Path.stat
+    source_replace = installer.os.replace
+    renamed_prior = False
+
+    def different_device(path, *args, **kwargs):
+        metadata = source_stat(path, *args, **kwargs)
+        if path == project / ".agents":
+            fields = list(metadata)
+            fields[2] += 1
+            return os.stat_result(fields)
+        return metadata
+
+    def record_replace(source, target):
+        nonlocal renamed_prior
+        if Path(source) in (policy, manifest):
+            renamed_prior = True
+        return source_replace(source, target)
+
+    monkeypatch.setattr(Path, "stat", different_device)
+    monkeypatch.setattr(installer.os, "replace", record_replace)
+    assert installer.install("codex", arguments) == 1
+    assert "migration retention volume" in capsys.readouterr().err
+    assert not renamed_prior
+    assert (policy.read_bytes(), manifest.read_bytes()) == before
+    assert not list((project / ".agents").glob(".orchestrarium-migration-retention-*"))
+
+
+def test_stock_pair_retention_dry_run_never_reserves_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
+    assert installer.install("codex", arguments) == 0
+    policy, manifest = _seed_native_contract_prior(project, "default-unbinding")
+    before = (policy.read_bytes(), manifest.read_bytes(), (project / ".codex/agents/default.toml").read_bytes())
+
+    def reservation_forbidden(*args, **kwargs):
+        raise AssertionError("retention reserved during dry-run")
+
+    monkeypatch.setattr(installer._InstallTransaction, "reserve_migration_retention", reservation_forbidden)
+    assert installer.install("codex", arguments + ["--dry-run"]) == 0
+    assert (policy.read_bytes(), manifest.read_bytes(), (project / ".codex/agents/default.toml").read_bytes()) == before
+    assert not list((project / ".agents").glob(".orchestrarium-migration-retention-*"))
 
 
 @pytest.mark.parametrize("mode", ("repo", "target", "global"))

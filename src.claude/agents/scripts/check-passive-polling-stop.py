@@ -26,8 +26,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from hook_common import (
     CURRENT_TURN_BYTE_CAP,
+    NO_OBSERVED_FAILURE,
     STATUS_FOUND,
+    extract_model_tool_calls_with_ids,
     extract_text,
+    extract_tool_outputs_with_ids,
     parse_envelope,
     read_stdin_utf8,
     scan_current_turn_boundary,
@@ -83,7 +86,7 @@ ASYNC_NOUN_REGEX = re.compile(
 TIME_ESTIMATE_REGEX = re.compile(r"(?ix)\d+\s*(min|minute|hour|sec|мин|час|секунд)")
 
 OUTPUT_TOOL_NAMES = {"taskoutput", "monitor", "bashoutput", "powershelloutput"}
-SHELL_TOOL_NAMES = {"bash", "powershell", "shell", "shell_command"}
+SHELL_TOOL_NAMES = {"bash", "powershell", "shell", "shell_command", "exec_command"}
 READ_TOOL_NAMES = {"read"}
 
 SHELL_PROBE_REGEX = re.compile(
@@ -146,7 +149,7 @@ def main(config: StopRuntimeConfig) -> int:
             )
             if current_turn_status != STATUS_FOUND:
                 return 0
-            if _has_relevant_probe(current_turn_entries):
+            if _has_relevant_probe(current_turn_entries) is not False:
                 return 0
             reason = _deny_reason()
         else:
@@ -174,15 +177,132 @@ def _detect_passive_polling(text: str) -> bool:
     return bool(ASYNC_NOUN_REGEX.search(text) or TIME_ESTIMATE_REGEX.search(text))
 
 
-def _has_relevant_probe(entries: list[dict]) -> bool:
+def _has_relevant_probe(entries: list[dict]) -> bool | None:
+    """True: relevant invocation; False: known absence; None: opaque acquisition.
+
+    A completed opaque transport does not establish probe success. Its semantic
+    acquisition is unavailable, so this quality hook returns no verdict.
+    """
     for entry in entries:
         for tool_name, tool_input in _iter_tool_uses(entry):
             if _is_relevant_tool_call(tool_name, tool_input):
                 return True
+    if _has_completed_opaque_transport(entries):
+        return None
     return False
 
 
+def _has_completed_opaque_transport(entries: list[dict]) -> bool:
+    calls: dict[str, list[int]] = {}
+    results: dict[str, list[tuple[int, str]]] = {}
+    for index, entry in enumerate(entries):
+        for call_id, _call_text in extract_model_tool_calls_with_ids(entry):
+            calls.setdefault(call_id, []).append(index)
+        for result in extract_tool_outputs_with_ids(entry):
+            results.setdefault(result.call_id, []).append((index, result.execution_status))
+
+    for index, entry in enumerate(entries):
+        call = entry.get("payload")
+        if not isinstance(call, dict) or call.get("type") != "custom_tool_call":
+            continue
+        call_id = call.get("call_id")
+        opaque_input = call.get("input")
+        if (
+            call.get("name") != "exec" or call.get("status") != "completed"
+            or not isinstance(call_id, str) or not call_id.strip()
+            or not isinstance(opaque_input, str) or not opaque_input.strip()
+            or not _has_no_tool_error(call)
+            or calls.get(call_id) != [index]
+        ):
+            continue
+        paired = results.get(call_id, [])
+        if len(paired) != 1:
+            continue
+        result_index, execution_status = paired[0]
+        if result_index <= index or execution_status != NO_OBSERVED_FAILURE:
+            continue
+        output = entries[result_index].get("payload")
+        if (
+            isinstance(output, dict)
+            and output.get("type") == "custom_tool_call_output"
+            and _opaque_output_completed(output)
+        ):
+            return True
+    return False
+
+
+def _has_no_tool_error(record: dict) -> bool:
+    return all(key not in record or record[key] is False for key in ("is_error", "isError"))
+
+
+def _opaque_output_completed(output: dict) -> bool:
+    if not _has_no_tool_error(output):
+        return False
+    if "status" in output and output["status"] != "completed":
+        return False
+    blocks = output.get("output")
+    if not isinstance(blocks, list) or len(blocks) < 2:
+        return False
+    if any(
+        not isinstance(block, dict) or block.get("type") not in {"input_text", "text"}
+        or not isinstance(block.get("text"), str)
+        for block in blocks
+    ):
+        return False
+    frame_lines = blocks[0]["text"].splitlines()
+    if not frame_lines or frame_lines[0].strip() != "Script completed":
+        return False
+    if not extract_text({"content": blocks[1:]}).strip():
+        return False
+    return all(_opaque_body_usable(block["text"]) for block in blocks[1:])
+
+
+def _opaque_body_usable(text: str) -> bool:
+    """Inspect execution receipts, never subject status or JavaScript input."""
+    try:
+        body = json.loads(text)
+    except json.JSONDecodeError as exc:
+        # Neither supported container can certify a malformed receipt. Only
+        # inspect the parsed prefix, so later log/key mentions are not metadata.
+        return not re.search(
+            r'^\s*[\[{][\s\S]*"(?:exit_code|session_id|chunk_id|wall_time_seconds|original_token_count)"\s*:',
+            text[:exc.pos],
+        )
+    records = body if isinstance(body, list) else [body]
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if not _has_no_tool_error(record):
+            return False
+        shell_receipt = "exit_code" in record or (
+            "output" in record and any(
+                key in record for key in ("session_id", "chunk_id", "wall_time_seconds", "original_token_count")
+            )
+        )
+        if shell_receipt and (
+            type(record.get("exit_code")) is not int or record["exit_code"] != 0
+            or not isinstance(record.get("output"), str)
+            or record.get("session_id") is not None
+        ):
+            return False
+    return True
+
+
 def _iter_tool_uses(entry: dict) -> list[tuple[str, object]]:
+    payload = entry.get("payload")
+    if isinstance(payload, dict):
+        entry = payload
+    if entry.get("type") == "function_call":
+        arguments = entry.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                return []
+        name = entry.get("name")
+        if isinstance(name, str) and isinstance(arguments, dict):
+            return [(name, arguments)]
+        return []
     uses: list[tuple[str, object]] = []
 
     content = entry.get("content")
@@ -214,28 +334,19 @@ def _iter_tool_uses(entry: dict) -> list[tuple[str, object]]:
 
 
 def _is_relevant_tool_call(tool_name: str, tool_input: object) -> bool:
-    name = tool_name.strip().lower()
-    input_text = _stringify_tool_input(tool_input)
-    combined = f"{tool_name}\n{input_text}\n{extract_text({'content': tool_input})}"
+    name = tool_name.strip().lower().rsplit(".", 1)[-1]
 
     if name in OUTPUT_TOOL_NAMES:
         return True
-    if name in SHELL_TOOL_NAMES and SHELL_PROBE_REGEX.search(input_text):
-        return True
-    if name in READ_TOOL_NAMES and READ_PROBE_PATH_REGEX.search(input_text):
-        return True
-    if name.endswith("read") and READ_PROBE_PATH_REGEX.search(input_text):
-        return True
-    if (name.endswith("bash") or name.endswith("powershell")) and SHELL_PROBE_REGEX.search(combined):
-        return True
+    if not isinstance(tool_input, dict):
+        return False
+    if name in SHELL_TOOL_NAMES or name.endswith(("bash", "powershell")):
+        command = tool_input.get("cmd" if name == "exec_command" else "command")
+        return isinstance(command, str) and bool(SHELL_PROBE_REGEX.search(command))
+    if name in READ_TOOL_NAMES or name.endswith("read"):
+        path = tool_input.get("file_path") or tool_input.get("path")
+        return isinstance(path, str) and bool(READ_PROBE_PATH_REGEX.search(path))
     return False
-
-
-def _stringify_tool_input(tool_input: object) -> str:
-    try:
-        return json.dumps(tool_input, ensure_ascii=False)
-    except Exception:
-        return str(tool_input)
 
 
 def _deny_reason() -> str:

@@ -35,7 +35,7 @@ Do NOT auto-invoke for trivial changes (one-line typo, doc edit, single-file ref
 
 7. **Human gate at convergence only.** Return to the human in exactly three cases — never per round: (a) converged (both verdict angles PASS + all scout findings reconciled) — present the final design plus a short round history; (b) drift — present what would have drifted off the pinned objective and why you stopped; (c) deadlock — cap N=3 reached without convergence — present the aspect that never converged.
 
-8. **Implement after acceptance.** Once the human accepts the converged design, implement per the artifact with every guard/invariant/instrumentation the angles named, run the validation plan, capture evidence, and only then proceed to the commit gate.
+8. **Implement after acceptance.** Once the human accepts the converged design, implement its accepted guarantees and invariants, preserving upstream claim identity and required safety corrections that discharge genuine vetoes. Optional reviewer HOW or telemetry suggestions remain advisory/nonblocking unless separately admitted into scope; run the validation plan and capture evidence before the root's verified local checkpoint.
 
 ## Disambiguation
 
@@ -49,4 +49,4 @@ See also `/agents-design-panel` — the generation-side analog: it independently
 - The methodology lives in `.claude/agents/contracts/review-loop.md`; this command points at it and must not restate it.
 - The mechanical scout is `analyst` and casts no verdict; never route it to `qa-engineer`.
 - The deep angle is a direct-verdict `architecture-reviewer` at `model: fable` (the flagship alias as of 2026-07); it is intentionally NOT `consultant` (external-mode consultant shells out — the role-confusion). `consultant.md` stays untouched.
-- Do NOT commit, push, or install from this command. The converged design and any implementation stop at the human's commit gate.
+- Do NOT commit, push, or install from this command. Return the accepted artifact to the root; verified local commit checkpoints remain the root's responsibility under shared governance. Human review remains required before push, release, or equivalent publication.

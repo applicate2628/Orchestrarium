@@ -23,7 +23,7 @@ Per published model positioning + observed behavior (do not use context-window s
 - **A surgery/visual-bug-strong engine** → the surgical-correctness verdict.
 - **The most capable deep-reasoning engine** → the deep-reasoning verdict.
 - **A fast/cheap engine** → the mechanical scout (reliable only for fully-specified tasks, or as a mindless broad scout that may surface a blind-spot hint; map it to a FACTUAL, non-judging role, never a judging one).
-Each pack records its concrete engine→scope→role mapping in its binding.
+Each pack records its concrete engine→scope→role mapping in its binding. Accepted implementation preserves required guarantees, invariants, upstream claim identity, and genuine veto corrections; optional reviewer HOW or telemetry remains advisory/nonblocking unless separately admitted into scope. Utility execution grants no commit or publication authority: the root owns verified local checkpoints, and publication retains its human-review gate.
 
 ## Autonomous convergence + anti-drift
 

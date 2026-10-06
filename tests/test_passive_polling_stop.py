@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import copy
+import importlib.util
 import json
 import os
 import subprocess
@@ -46,6 +48,28 @@ def write_transcript(entries: list[dict[str, object]], directory: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def opaque_pair(body: object, *, call_id: str = "probe-1", input_text: str = 'text(await tools.exec_command({cmd:"Get-Date -Format o","workdir":"<repo>","max_output_tokens":100}));\n') -> list[dict]:
+    """Sanitized observed Codex transport; its JavaScript input stays opaque."""
+    return [
+        {"type": "response_item", "payload": {
+            "type": "custom_tool_call", "status": "completed", "call_id": call_id,
+            "name": "exec", "input": input_text,
+        }},
+        {"type": "response_item", "payload": {
+            "type": "custom_tool_call_output", "call_id": call_id, "output": [
+                {"type": "input_text", "text": "Script completed\nWall time 0.8 seconds\nOutput:\n"},
+                {"type": "input_text", "text": body if isinstance(body, str) else json.dumps(body)},
+            ],
+        }},
+    ]
+
+
+def shell_receipt(**changes: object) -> dict:
+    return {"chunk_id": "synthetic", "wall_time_seconds": 0.1736557,
+            "exit_code": 0, "original_token_count": 9,
+            "output": "2026-10-05T22:23:16.1003644+03:00\r\n", **changes}
 
 
 class TestPassivePollingStop(unittest.TestCase):
@@ -383,6 +407,178 @@ class TestPassivePollingStop(unittest.TestCase):
     def test_empty_stdin_allows_stop(self) -> None:
         result = self.run_hook(raw_stdin="")
         self.assert_allowed(result)
+
+    def test_current_observed_opaque_time_transport_returns_no_verdict(self) -> None:
+        self.assert_allowed(self.run_hook(
+            message="Waiting for review", transcript_entries=[
+                entry("user", "Check current review state."), *opaque_pair(shell_receipt()),
+            ],
+        ))
+
+    def test_completed_opaque_transport_returns_no_verdict_for_all_observation_kinds(self) -> None:
+        cases = (
+            ("job-status", shell_receipt(output='{"status":"failed","job":"synthetic"}')),
+            ("log", "ERROR: synthetic job failed; awaiting a retry."),
+            ("read", "Review result: changes requested."),
+            ("model-context-protocol", {"content": [{"type": "text", "text": "Job failed"}], "isError": False}),
+            ("unrelated-opaque-limitation", {"status": "failed", "value": 42}),
+        )
+        for label, body in cases:
+            with self.subTest(observation=label):
+                pair = opaque_pair(body, call_id="opaque-" + label,
+                                   input_text="// An opaque transport input\ntext(result);")
+                self.assert_allowed(self.run_hook(
+                    message="Waiting for review", transcript_entries=[entry("user", "Check state."), *pair],
+                ))
+
+    def test_opaque_transport_is_indeterminate_not_a_recognized_probe(self) -> None:
+        script = SCRIPT_PATHS[0]
+        spec = importlib.util.spec_from_file_location("passive_stop_acquisition_test", script)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        sys.path.insert(0, str(script.parent))
+        try:
+            spec.loader.exec_module(module)
+            self.assertIsNone(module._has_relevant_probe(opaque_pair(shell_receipt())))
+            self.assertIs(module._has_relevant_probe([tool_entry("Bash", {"command": "date"})]), True)
+            self.assertIs(module._has_relevant_probe([tool_entry("Bash", {"command": "true"})]), False)
+        finally:
+            sys.path.pop(0)
+            sys.modules.pop(spec.name, None)
+
+    def test_degraded_opaque_transport_does_not_create_indeterminate_treatment(self) -> None:
+        base = opaque_pair(shell_receipt())
+        cases: list[tuple[str, list[dict]]] = []
+
+        def changed(label: str, *, call: dict | None = None, result: dict | None = None) -> None:
+            pair = copy.deepcopy(base)
+            if call:
+                pair[0]["payload"].update(call)
+            if result:
+                pair[1]["payload"].update(result)
+            cases.append((label, pair))
+
+        cases.extend((
+            ("unpaired-call", base[:1]), ("unpaired-result", base[1:]),
+            ("duplicate-call", [base[0], *base]), ("duplicate-result", [*base, base[1]]),
+            ("reversed-pair", list(reversed(base))),
+            ("prior-turn-call", [base[0], entry("user", "New request."), base[1]]),
+        ))
+        changed("unmatched-identity", result={"call_id": "different"})
+        changed("missing-call-identity", call={"call_id": None})
+        changed("empty-identities", call={"call_id": " "}, result={"call_id": " "})
+        changed("empty-input", call={"input": " "})
+        changed("nonstring-input", call={"input": {"cmd": "Get-Date"}})
+        changed("pending-call", call={"status": "in_progress"})
+        changed("failed-call", call={"status": "failed"})
+        changed("missing-call-completion", call={"status": None})
+        changed("unknown-call", call={"name": "unknown"})
+        changed("wrong-result-type", result={"type": "unknown_output"})
+        changed("missing-result-identity", result={"call_id": None})
+        changed("pending-result", result={"status": "in_progress"})
+        changed("failed-result", result={"status": "failed"})
+        changed("explicit-result-error", result={"is_error": True})
+        changed("ambiguous-result-error", result={"is_error": "false"})
+        changed("empty-output", result={"output": []})
+        changed("nonlist-output", result={"output": "Script completed"})
+        for label, blocks in (
+            ("malformed-block", [{"type": "input_text", "text": 42}]),
+            ("unknown-block", [{"type": "unknown", "text": "Script completed"}]),
+            ("pending-frame", [{"type": "input_text", "text": "Script running"}, base[1]["payload"]["output"][1]]),
+            ("failed-frame", [{"type": "input_text", "text": "Script failed"}, base[1]["payload"]["output"][1]]),
+            ("no-result-body", [base[1]["payload"]["output"][0]]),
+        ):
+            changed(label, result={"output": blocks})
+        for label, receipt in (
+            ("shell-failed", shell_receipt(exit_code=1)),
+            ("shell-missing-status", {k: v for k, v in shell_receipt().items() if k != "exit_code"}),
+            ("shell-string-status", shell_receipt(exit_code="0")),
+            ("shell-boolean-status", shell_receipt(exit_code=False)),
+            ("shell-null-status", shell_receipt(exit_code=None)),
+            ("shell-running-session", shell_receipt(session_id=123)),
+            ("shell-malformed-output", shell_receipt(output=42)),
+            ("malformed-receipt", '{"exit_code":0,"output":'),
+            ("tool-execution-error", {"content": [], "isError": True}),
+            ("ambiguous-tool-execution-error", {"content": [], "isError": "false"}),
+        ):
+            cases.append((label, opaque_pair(receipt)))
+        for label, pair in cases:
+            with self.subTest(degradation=label):
+                self.assert_passive_blocked(self.run_hook(
+                    message="Waiting for review", transcript_entries=[entry("user", "Check state."), *pair],
+                ))
+
+    def test_direct_function_call_fields_preserve_relevant_invocations(self) -> None:
+        for name, arguments, wrapped in (
+            ("shell_command", {"command": "Get-Date -Format o"}, True),
+            ("exec_command", {"cmd": "gh run list"}, False),
+            ("functions.exec_command", {"cmd": "Get-Process"}, True),
+            ("Read", {"file_path": "task-output.log"}, True),
+            ("read", {"path": "review.log"}, False),
+            ("TaskOutput", {}, True),
+        ):
+            call = {"type": "function_call", "call_id": "direct-1", "name": name,
+                    "arguments": json.dumps(arguments)}
+            if wrapped:
+                call = {"type": "response_item", "payload": call}
+            with self.subTest(tool=name, wrapped=wrapped):
+                self.assert_allowed(self.run_hook(
+                    transcript_entries=[entry("user", "Check state."), call],
+                ))
+
+    def test_direct_calls_cannot_credit_descriptions_or_malformed_arguments(self) -> None:
+        for name, arguments in (
+            ("shell_command", json.dumps({"command": "true", "description": "Get-Date"})),
+            ("exec_command", json.dumps({"cmd": "true", "description": "gh pr view"})),
+            ("Read", json.dumps({"path": "source.py", "description": "review output log"})),
+            ("Bash", '["Get-Date"]'), ("Bash", '{"command":'),
+        ):
+            with self.subTest(tool=name, arguments=arguments):
+                self.assert_passive_blocked(self.run_hook(transcript_entries=[
+                    entry("user", "Check state."),
+                    {"type": "response_item", "payload": {
+                        "type": "function_call", "call_id": "direct-1", "name": name, "arguments": arguments,
+                    }},
+                ]))
+
+    def test_command_mentions_and_unknown_records_do_not_supply_transport(self) -> None:
+        for records in (
+            [entry("assistant", "Get-Date; Script completed")],
+            [{"type": "unknown", "payload": {"name": "exec", "input": "Get-Date", "status": "completed"}}],
+            [entry("user", "Get-Date; Script completed")],
+        ):
+            with self.subTest(records=records):
+                self.assert_passive_blocked(self.run_hook(transcript_entries=[entry("user", "Check state."), *records]))
+
+    def test_malformed_receipt_containers_remain_nonqualifying(self) -> None:
+        for label, body in (
+            ("malformed-object-control", '{"exit_code":1,"output":'),
+            ("valid-failed-array-control", [shell_receipt(exit_code=1)]),
+            ("malformed-failed-array", '[{"exit_code":1,"output":'),
+            ("malformed-mixed-array", '[{"status":"failed"},{"output":"stopped","exit_code":1'),
+            ("unclosed-success-array", '[{"exit_code":0,"output":"complete"}'),
+        ):
+            with self.subTest(container=label):
+                self.assert_passive_blocked(self.run_hook(
+                    message="Waiting for review", transcript_entries=[
+                        entry("user", "Check state."), *opaque_pair(body),
+                    ],
+                ))
+
+    def test_nonreceipt_json_key_mentions_remain_opaque_observations(self) -> None:
+        for label, body in (
+            ("ordinary-bracketed-log", '[ERROR] log mentions the JSON key "exit_code":1 as an example.'),
+            ("subject-status-array", [{"status": "failed", "job": "synthetic"}]),
+            ("quoted-key-in-subject", {"note": 'The example key "exit_code":1 is not an execution result.'}),
+            ("malformed-subject-json", '{"status":"failed","note":'),
+        ):
+            with self.subTest(observation=label):
+                self.assert_allowed(self.run_hook(
+                    message="Waiting for review", transcript_entries=[
+                        entry("user", "Check state."), *opaque_pair(body),
+                    ],
+                ))
 
 if __name__ == "__main__":
     unittest.main()

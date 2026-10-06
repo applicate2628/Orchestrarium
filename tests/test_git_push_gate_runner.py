@@ -719,6 +719,69 @@ def test_r4_result_composition_has_one_owner_and_both_main_paths_use_it() -> Non
     assert len(calls) == 1
 
 
+def test_parse_uncertain_public_guidance_requests_input_acquisition() -> None:
+    """Synthetic unclosed syntax stays denied without inventing push intent."""
+    command = "printf 'SYNTHETIC-PRIVATE-VALUE"
+    envelope = {"tool_name": "Bash", "tool_input": {"command": command}}
+    for target in TARGETS:
+        _common, preflight, _policy, _runner = _load_gate_target(target, "parse_guidance")
+        result = preflight.build_preflight(envelope)
+        assert result.reason_id == "PFP-DENY-PARSE"
+        assert result.failure_id == "PGG-PARSE-UNCERTAIN"
+        assert result.continuation == "RENDER_DENY"
+        assert preflight.find_git_push_records(result.parsed) == []
+        for surface in ("direct", "runner"):
+            completed = _run(target, envelope, surface=surface)
+            assert completed.returncode == 0 and completed.stderr == ""
+            payload = json.loads(completed.stdout)
+            assert set(payload) == {"hookSpecificOutput"}
+            specific = payload["hookSpecificOutput"]
+            assert set(specific) == {"hookEventName", "permissionDecision", "permissionDecisionReason"}
+            assert specific["hookEventName"] == "PreToolUse"
+            assert specific["permissionDecision"] == "deny"
+            reason = specific["permissionDecisionReason"]
+            print(f"PARSE_GUIDANCE {target.label}/{surface}: {reason}")
+            assert reason.startswith("PGG-PARSE-UNCERTAIN:")
+            assert command not in reason and "SYNTHETIC-PRIVATE-VALUE" not in reason
+            assert "exact command" in reason
+            assert "tool_name" in reason and "envelope" in reason
+            assert "syntax" in reason or "dialect" in reason
+            assert "direct push" not in reason
+            assert "[approve-publication]" not in reason
+            assert "scan-derived publication denied" not in reason
+
+
+def test_parse_uncertain_heavy_path_uses_same_reason_owner(tmp_path: Path) -> None:
+    """The heavy raise converges on the same renderer; receipt guidance stays specific."""
+    for target in TARGETS:
+        _common, preflight, policy, _runner = _load_gate_target(target, "heavy_guidance")
+        parse_result = preflight.build_preflight({
+            "tool_name": "Bash", "tool_input": {"command": "printf 'synthetic"},
+        })
+        heavy_result = preflight.build_preflight(_former_envelope("no-allow-deny", tmp_path))
+        assert heavy_result.continuation == "EVALUATE_HEAVY"
+
+        def render(value, failure_id=None):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            patches = contextlib.ExitStack()
+            with patches:
+                if failure_id is not None:
+                    patches.enter_context(mock.patch.object(
+                        policy, "evaluate_heavy", side_effect=policy.PrRouteDenied(failure_id),
+                    ))
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    result = policy.compose_gate_result(value)
+            return result, stdout.getvalue(), stderr.getvalue()
+
+        assert render(heavy_result, "PGG-PARSE-UNCERTAIN") == render(parse_result)
+        result, stdout, stderr = render(heavy_result, "PRG-RECEIPT-MISSING")
+        assert result == 0 and stderr == ""
+        reason = json.loads(stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("PRG-RECEIPT-MISSING: PR-scoped publication denied.")
+        assert "fresh non-empty publication-safety check" in reason
+        assert "tool_name" not in reason
+
+
 def test_r4_termination_roots_are_exactly_two_and_reusable_code_never_terminates() -> None:
     """GUARD-A3-TERMINATION-ROOTS."""
     roots = 0

@@ -1223,10 +1223,15 @@ def _load_role_dispatch_contract(
             if task["mutationClass"] == "read-only"
             else "workspace-write"
         )
+        profile_matches = (
+            "model" not in role_toml and "model_reasoning_effort" not in role_toml
+            if role_name == "default"
+            else role_toml.get("model") == profile["codexModel"]
+            and role_toml.get("model_reasoning_effort") == profile["effort"]
+        )
         if (
             role_toml.get("name") != role_name
-            or role_toml.get("model") != profile["codexModel"]
-            or role_toml.get("model_reasoning_effort") != profile["effort"]
+            or not profile_matches
             or sandbox != expected_sandbox
         ):
             raise ValueError("role TOML contract")
@@ -1414,20 +1419,11 @@ def _describe_ordinary_native_role_options_in_layout(
         return _ordinary_native_denied(
             task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
         )
-    default_agent_type_capability = (
-        "not-applicable"
-        if contract["roleKind"] == "skill-only"
-        else "capability-unknown"
-        if reported_agent_types is None
-        else "reported"
-        if contract["role"] in reported_agent_types
-        else "reported-absent"
-    )
     default_invocation = {
         "mode": "named-role-default",
         "agentType": contract["role"],
     }
-    if contract["roleKind"] == "skill-only":
+    if contract["roleKind"] == "skill-only" or contract["role"] == "default":
         default_invocation = {
             "mode": "generic-explicit-profile",
             "forkTurns": "none",
@@ -1436,6 +1432,15 @@ def _describe_ordinary_native_role_options_in_layout(
             "professionSkill": profession["skill"],
             "promptPreamble": profession["instructions"],
         }
+    default_agent_type_capability = (
+        "not-applicable"
+        if default_invocation["mode"] == "generic-explicit-profile"
+        else "capability-unknown"
+        if reported_agent_types is None
+        else "reported"
+        if contract["role"] in reported_agent_types
+        else "reported-absent"
+    )
     return {
         "schemaVersion": 1,
         "status": "available",
@@ -1497,7 +1502,8 @@ def resolve_ordinary_native_dispatch(
         return _ordinary_native_denied("", "", "E_ORDINARY_NATIVE_SELECTION_INVALID")
     explicit = requested_model is not None
     selected = None
-    if not explicit and description.get("roleKind") == "native" and (
+    default_mode = description["defaultInvocation"]["mode"]
+    if not explicit and default_mode == "named-role-default" and (
         description.get("defaultAgentTypeCapability") == "reported-absent"
     ):
         return _ordinary_native_denied(
@@ -1505,7 +1511,7 @@ def resolve_ordinary_native_dispatch(
             description.get("role"),
             "E_ORDINARY_NATIVE_AGENT_TYPE_UNAVAILABLE",
         )
-    if not explicit and description.get("roleKind") == "skill-only":
+    if not explicit and default_mode == "generic-explicit-profile":
         if not (
             description["hostObservation"].get("explicitModelControl")
             and description["hostObservation"].get("explicitReasoningEffortControl")

@@ -3889,6 +3889,8 @@ def _with_transcript_read_status(
 
 
 def _denial_scope(failure_id: str) -> str:
+    if failure_id == "PGG-PARSE-UNCERTAIN":
+        return "Command parsing incomplete"
     if failure_id in _TRANSCRIPT_FAILURE_IDS:
         return "Publication denied"
     if failure_id.startswith("PGG-"):
@@ -3988,7 +3990,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         "PGG-COMPOUND-CONTEXT": "Run one direct push as a solitary shell command before using scan-derived credit.",
         "PGG-LEXICAL-NORMALIZATION": "Use one literal unnormalized push command.",
         "PGG-OPTION-ARITY": "Use only complete documented push option forms.",
-        "PGG-PARSE-UNCERTAIN": "Use one exact solitary direct push command.",
+        "PGG-PARSE-UNCERTAIN": "Provide the exact command and tool_name from the tool envelope, plus syntax/dialect metadata, so command parsing can be diagnosed.",
         "PGG-REPOSITORY-REDIRECT": "Use the ambient repository without command-local repository redirection.",
         "PGG-ENV-PREFIX": "Run the push without an environment-assignment prefix.",
         "PGG-GIT-GLOBAL-OPTION": "Run the push without Git global options before the push subcommand.",

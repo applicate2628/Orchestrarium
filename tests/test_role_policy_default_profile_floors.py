@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 import subprocess
@@ -458,6 +459,92 @@ def test_skill_only_catalog_resolves_default_and_explicit_choices_without_agent_
     assert explicit["resolvedEffort"] == "low"
     assert "agentType" not in explicit["invocation"]
     assert explicit["profession"] == default["profession"]
+
+
+def test_fallback_default_emits_omitted_policy_tuple_without_named_agent_type() -> None:
+    host = {**_unknown_astra_host(), "reportedAgentTypes": ["worker"]}
+    description = RESOLVER.describe_ordinary_native_role_options(
+        "default", "recovery", host, repo_root=ROOT,
+    )
+    decision = RESOLVER.resolve_ordinary_native_dispatch(
+        description, caller_rationale="Use the policy-owned recovery tuple.",
+        approved_execution_scope=_scientific_scope(),
+    )
+    assert description["defaultInvocation"]["mode"] == "generic-explicit-profile"
+    assert description["defaultAgentTypeCapability"] == "not-applicable"
+    assert description["hostObservation"] == host
+    assert decision["status"] == "resolved"
+    assert decision["requestedModel"] is None and decision["requestedEffort"] is None
+    assert decision["resolvedModel"] == "gpt-6.1-sol"
+    assert decision["resolvedEffort"] == "xhigh"
+    assert decision["invocation"] == {
+        "mode": "generic-explicit-profile", "forkTurns": "none",
+        "model": "gpt-6.1-sol", "reasoningEffort": "xhigh",
+        "professionSkill": None,
+        "promptPreamble": description["profession"]["instructions"],
+    }
+    assert decision["profession"] == description["profession"]
+    assert decision["approvedExecutionScope"] == _scientific_scope()
+    assert decision["fallback"] == "none"
+    assert RESOLVER.resolve_role_dispatch(
+        "recovery", "default", "enabled", repo_root=ROOT,
+    )["status"] == "denied"
+
+
+@pytest.mark.parametrize("missing", ("model-control", "effort-control", "default-option"))
+def test_generic_fallback_default_refuses_missing_required_controls_or_policy_option(missing: str) -> None:
+    host = _unknown_astra_host()
+    if missing == "model-control":
+        host["explicitModelControl"] = False
+    elif missing == "effort-control":
+        host["explicitReasoningEffortControl"] = False
+    description = RESOLVER.describe_ordinary_native_role_options(
+        "default", "recovery", host, repo_root=ROOT,
+    )
+    if missing == "default-option":
+        description["options"] = [
+            option for option in description["options"]
+            if option["profile"] != description["defaultProfile"]
+        ]
+    decision = RESOLVER.resolve_ordinary_native_dispatch(
+        description, caller_rationale="A generic default must retain its explicit tuple.",
+        approved_execution_scope=_scientific_scope(),
+    )
+    assert decision["status"] == "denied"
+    assert decision["stableId"] == (
+        "E_ORDINARY_NATIVE_SELECTION_INVALID" if missing == "default-option"
+        else "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE"
+    )
+    assert decision["fallback"] == "none"
+
+
+@pytest.mark.parametrize("bindings", (
+    "", 'model = "gpt-6.1-sol"\n', 'model_reasoning_effort = "xhigh"\n',
+    'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "xhigh"\n',
+    'model = ""\nmodel_reasoning_effort = ""\n',
+))
+def test_fallback_loader_requires_absent_bindings_not_empty_partial_or_matching_values(
+    tmp_path: Path, bindings: str,
+) -> None:
+    policy = tmp_path / "shared/role-routing-policy.v1.json"
+    policy.parent.mkdir()
+    policy.write_bytes((ROOT / "shared/role-routing-policy.v1.json").read_bytes())
+    agents = tmp_path / "src.codex/agents"
+    agents.mkdir(parents=True)
+    source = (ROOT / "src.codex/agents/default.toml").read_text(encoding="utf-8")
+    unbound = "".join(line for line in source.splitlines(keepends=True)
+                      if not line.startswith(("model =", "model_reasoning_effort =")))
+    payload = (bindings + unbound).encode("utf-8")
+    (agents / "default.toml").write_bytes(payload)
+    manifest = json.loads((ROOT / "src.codex/agents/orchestrarium-role-manifest.json").read_bytes())
+    manifest["roles"]["default"]["sha256"] = hashlib.sha256(payload).hexdigest()
+    (agents / "orchestrarium-role-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    result = RESOLVER.describe_ordinary_native_role_options(
+        "default", "recovery", _unknown_astra_host(), repo_root=tmp_path,
+    )
+    assert result["status"] == ("denied" if bindings else "available")
+    if bindings:
+        assert result["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
 
 
 def test_every_skill_only_role_is_task_eligible_and_uses_current_skill_metadata() -> None:

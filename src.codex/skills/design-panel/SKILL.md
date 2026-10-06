@@ -68,7 +68,7 @@ The synthesis owner is the orchestrating session, performing synthesis directly 
 - This is a utility skill, not a new specialist role, and not a replacement for `$lead`.
 - Only the synthesis step may write `design.md`; candidate lanes never see each other's output.
 - Do not silently downgrade an external lane to internal execution.
-- Do NOT commit, push, or install from this skill. Implementation stops at the human commit gate.
+- Do NOT commit, push, or install from this skill. Return the accepted artifact to the root; verified local commit checkpoints remain the root's responsibility under shared governance. Human review remains required before push, release, or equivalent publication.
 
 ## Non-goals
 

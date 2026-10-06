@@ -53,8 +53,7 @@ Routing conventions (not persisted as keys):
    - Read `.claude/CLAUDE.md` and check if a `## Project policies` section already exists.
    - Read `.claude/.agents-mode.yaml` first.
    - If it is missing, read legacy `.claude/.agents-mode` as compatibility input only.
-   - If either file exists, normalize it to the current canonical format before presenting or trusting the current values.
-   - Normalize either input forward into `.claude/.agents-mode.yaml` and do not recreate legacy `.claude/.agents-mode`.
+   - Normalize effective values in memory through the dispatch owner's existing per-key read order before presenting or trusting them. Use any global fallback as the starting point for project-local review; do not rewrite borrowed/global configuration on read. Persist the explicitly selected project configuration to the canonical project-local `.yaml` path only within the authorized configuration write in Step 7, and do not recreate legacy files.
    - If either surface already exists, show the current values and ask whether to keep them, review them, or start fresh.
 
 2. **Read the installed canonical sources.**
@@ -176,6 +175,5 @@ Routing conventions (not persisted as keys):
 - If the user gives a custom answer that doesn't match an option, record it as-is.
 - Do not invent extra `agents-mode` keys beyond the canonical Claude-line schema.
 - Preserve unknown keys in `.claude/.agents-mode.yaml` when updating.
-- Any read of `.claude/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
-- Any read that drives a decision should prefer local `.claude/.agents-mode.yaml`, then local legacy `.claude/.agents-mode`, then global `~/.claude/.agents-mode.yaml`, then global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`; normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
+- For decision-driving reads, use the dispatch owner's per-key precedence (local `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults) and the in-memory normalization in Step 1; inspection grants no write to the source overlay. Persist only the explicitly selected authorized project configuration in Step 7.
 - Do not change any other section of CLAUDE.md.

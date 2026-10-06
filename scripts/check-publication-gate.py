@@ -98,10 +98,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {path}", file=sys.stderr)
         return 1
 
-    notes = root / "RELEASE_NOTES.md"
-    if not notes.is_file():
-        return _fail("missing RELEASE_NOTES.md at repo root")
-    content = notes.read_text(encoding="utf-8")
+    notes_proc = _run(["git", "show", ":RELEASE_NOTES.md"], text=False)
+    if notes_proc.returncode:
+        return _fail("could not read staged RELEASE_NOTES.md")
+    try:
+        content = notes_proc.stdout.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    except UnicodeDecodeError:
+        return _fail("staged RELEASE_NOTES.md must be valid UTF-8")
     if re.search(r"^## Unreleased$", content, re.MULTILINE):
         return _fail(
             "RELEASE_NOTES.md must use dated sections and must not keep a long-lived "

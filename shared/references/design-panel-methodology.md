@@ -44,7 +44,7 @@ one pinned design problem
    the sole planner-eligible design artifact
 ```
 
-A candidate is a complete, comparison-ready design proposal — it is not a sketch. It is simply not eligible to advance the design stage on its own. Only the synthesis step produces the canonical design artifact and carries the design-stage `PASS`.
+A candidate is a complete, comparison-ready design proposal — it is not a sketch. It is simply not eligible to advance the design stage on its own. Only the synthesis step produces the canonical design artifact and carries the design-stage `PASS`. The utility returns that artifact without commit, push, or installation authority; the root owns verified local checkpoints under shared governance, and human review remains required before push, release, or equivalent publication.
 
 ## Comparison rules (SET-level, never majority-vote)
 

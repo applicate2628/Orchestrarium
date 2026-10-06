@@ -46,4 +46,4 @@ Pick the panel when the design problem is a high-surface-count sweep or an open 
 - This is an operator technique, not a new specialist role; lanes are dispatched via the Agent tool.
 - The methodology lives in `.claude/agents/contracts/design-panel.md`; this command points at it and must not restate it.
 - Only the synthesis step may write `design.md`; candidate lanes write `design-<lane>.md` and are never shown to each other's output.
-- Do NOT commit, push, or install from this command. The synthesized design and any implementation stop at the human's commit gate.
+- Do NOT commit, push, or install from this command. Return the accepted artifact to the root; verified local commit checkpoints remain the root's responsibility under shared governance. Human review remains required before push, release, or equivalent publication.

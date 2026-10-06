@@ -60,9 +60,7 @@ Routing conventions (not persisted as keys):
    - Read `.agents/.agents-mode.yaml` first.
    - If it is missing, read legacy `.agents/.agents-mode` as compatibility input only.
    - If both local files are missing, fall back through pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale.
-   - If either file exists, normalize it to the current canonical format before presenting or trusting the current values.
-   - If any file exists, normalize the effective file to the current canonical format before presenting or trusting the current values.
-   - Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file. If the effective config came from the global scope, use it as the starting point for the project-local review instead of pretending there was no prior state.
+   - Normalize effective values in memory through the dispatch owner's existing per-key read order before presenting or trusting them. Use any global fallback as the starting point for project-local review; do not rewrite borrowed/global configuration on read. Persist the explicitly selected project configuration to the canonical project-local `.yaml` path only within the authorized configuration write in Step 7, and do not recreate legacy files.
    - If either surface already exists, show the current values and ask whether to keep them, review them, or start fresh.
 
 2. **Read the installed canonical sources.**
@@ -188,8 +186,6 @@ Routing conventions (not persisted as keys):
 - Be concise; the catalog and dispatch contract hold the details.
 - Do not invent extra policy keys or extra `agents-mode` keys.
 - Preserve unknown keys in `.agents/.agents-mode.yaml` when updating.
-- Any read of `.agents/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
-- Any read of the effective Codex overlay that drives a decision should normalize that file to the current canonical format before trusting the flags.
-- Any read that drives a decision should prefer local `.agents/.agents-mode.yaml`, then local legacy `.agents/.agents-mode`, then global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`; normalize whichever file supplied the effective config in the same scope and do not recreate any legacy file.
+- For decision-driving reads, use the dispatch owner's per-key precedence (local `.agents/.agents-mode.yaml`, local legacy `.agents/.agents-mode`, pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults) and the in-memory normalization in Step 1; inspection grants no write to the source overlay. Persist only the explicitly selected authorized project configuration in Step 7.
 - Do not modify any other section of `AGENTS.md`.
 - Treat root `AGENTS.md` as the project-runtime target, not the Orchestrarium monorepo maintenance overlay.

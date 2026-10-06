@@ -25,7 +25,7 @@ Before doing anything else, invoke the `Skill` tool with name `windows-gui-manua
 ## Return exactly one artifact
 
 - Return one visual findings package containing: tested control path, environment (theme, DPI, window state), evidence type (screenshot, video frame sequence), concrete observations (what moved, clipped, duplicated, repainted late), structural vs cosmetic classification, theme-specificity, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
-- On `REVISE` or `BLOCKED`, persist each finding using the qa-engineer-owned format with `found-by: windows-gui-manual-testing` before returning the package; include enough repro, control-path, theme, and DPI context to re-derive volatile `.scratch/` evidence.
+- On `REVISE` or `BLOCKED`, include each finding as an in-band bug registry proposal in the sole returned package using the qa-engineer-owned format and configured registry path with `found-by: windows-gui-manual-testing`. Write the record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path; include enough repro, control-path, theme, and DPI context to re-derive volatile `.scratch/` evidence.
 
 ## Non-goals
 

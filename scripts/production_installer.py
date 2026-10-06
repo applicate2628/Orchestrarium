@@ -467,17 +467,19 @@ UI_CONTINUITY_CONTRACT_SOURCE = (
 UI_CONTINUITY_CONTRACT_TARGET = Path("contracts") / "ui-transition-continuity.md"
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 CODEX_ROLE_MANIFEST = "orchestrarium-role-manifest.json"
-_STOCK_LUNA_PROFILE_POLICY_PRIOR = (
-    Path("shared") / "role-routing-policy.v1.json",
-    "dcab8e4da55b05475f9b9c507a3a9a97679a0c7b72006ff7ffca4b95ccd13451",
-)
-_STOCK_LUNA_PROFILE_MANIFEST_PRIOR = (
-    Path("shared") / "orchestrarium-role-manifest.json",
-    "842b1b29fae7d41a0b2422d8711652b3e6d7c720406c3ce3fc13259518f82115",
-)
-_STOCK_LUNA_PROFILE_PRIOR_PAIR = (
-    _STOCK_LUNA_PROFILE_POLICY_PRIOR,
-    _STOCK_LUNA_PROFILE_MANIFEST_PRIOR,
+_STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
+    (
+        (Path("shared") / "role-routing-policy.v1.json",
+         "dcab8e4da55b05475f9b9c507a3a9a97679a0c7b72006ff7ffca4b95ccd13451"),
+        (Path("shared") / "orchestrarium-role-manifest.json",
+         "842b1b29fae7d41a0b2422d8711652b3e6d7c720406c3ce3fc13259518f82115"),
+    ),
+    (
+        (Path("shared") / "role-routing-policy.v1.json",
+         "0a7ecdc12d3fd802b32bd7d41f78129bbdb8a5681beb1f1382d46e6b2fb82b90"),
+        (Path("shared") / "orchestrarium-role-manifest.json",
+         "1362c1206cb957b879109e33c577047c0d6b7b65860f602d1f51f400a6967d77"),
+    ),
 )
 CODEX_LEGACY_LUNA_CONFIG_NAME = "luna_mechanical"
 CODEX_LEGACY_LUNA_ROLE = Path("agents") / "luna-mechanical.toml"
@@ -763,6 +765,9 @@ class _SliceAMigratedFileRecord:
     new_digest: str
     tombstone_path: Path
     tombstone_identity: tuple[int, int, int, int]
+    retention_parent_path: Path | None = None
+    retention_parent_identity: tuple[int, int, int, int] | None = None
+    retention_directory_identity: tuple[int, int, int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -859,6 +864,7 @@ class _InstallTransaction:
         self._absent_parents: set[Path] = set()
         self._slice_a_created: list[_SliceACreatedRecord] = []
         self._slice_a_migrated: list[_SliceAMigratedFileRecord] = []
+        self._migration_retention: dict[Path, tuple[Path, tuple[int, int, int, int], tuple[int, int, int, int], _CreateOnlyMutablePath]] = {}
         # A single transaction may span the ordinary global home plus one or
         # more explicitly bound Claude subroots.  Each record carries its own
         # anchor identity, so rollback selects the matching owner rather than
@@ -995,6 +1001,66 @@ class _InstallTransaction:
     @staticmethod
     def _paths_overlap(left: Path, right: Path) -> bool:
         return left == right or left in right.parents or right in left.parents
+
+    def reserve_migration_retention(
+        self, owner: "_CreateOnlyMutablePath", relative_parent: Path, leaf_parent: Path,
+    ) -> Path:
+        parent = owner.destination(relative_parent)
+        if not parent.is_dir() or parent.stat().st_dev != leaf_parent.stat().st_dev:
+            raise ValueError("E_MUTABLE_PATH_ESCAPE: migration retention volume or parent")
+        if any(root == parent or root in parent.parents for root in self.paths):
+            raise ValueError("E_MUTABLE_PATH_ESCAPE: migration retention snapshot overlap")
+        for directory, (bound_parent, _parent_id, _directory_id, bound_owner) in self._migration_retention.items():
+            if bound_parent == parent and bound_owner is owner:
+                self.assert_migration_retention(directory, owner)
+                return directory
+        directory = Path(tempfile.mkdtemp(prefix=".orchestrarium-migration-retention-", dir=parent))
+        try:
+            owner._walk_existing(directory)
+            if any(self._paths_overlap(directory, root) for root in self.paths):
+                raise ValueError("E_MUTABLE_PATH_ESCAPE: migration retention snapshot overlap")
+            if directory.stat().st_dev != leaf_parent.stat().st_dev:
+                raise ValueError("E_MUTABLE_PATH_ESCAPE: migration retention volume")
+            self._migration_retention[directory] = (
+                parent, owner._identity(parent), owner._identity(directory), owner,
+            )
+        except BaseException:
+            directory.rmdir()
+            raise
+        return directory
+
+    def assert_migration_retention(
+        self, directory: Path, owner: "_CreateOnlyMutablePath",
+        pending: _SliceAMigratedFileRecord | None = None,
+    ) -> None:
+        parent, parent_identity, directory_identity, bound_owner = self._migration_retention[directory]
+        if bound_owner is not owner:
+            raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration retention owner")
+        owner.destination(directory.relative_to(owner.anchor))
+        if (owner._identity(owner.anchor) != owner._anchor_identity
+                or owner._identity(parent) != parent_identity
+                or owner._identity(directory) != directory_identity):
+            raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration retention storage")
+        recorded = {record.tombstone_path for record in self._slice_a_migrated
+                    if record.tombstone_path.parent == directory}
+        if pending is not None and pending.tombstone_path.parent == directory:
+            recorded.add(pending.tombstone_path)
+        for member in directory.iterdir():
+            if member not in recorded:
+                raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: foreign migration retention member")
+            owner._assert_regular(member, existing=True)
+
+    def _settle_migration_retention(self) -> list[_RollbackFailureMember]:
+        failures: list[_RollbackFailureMember] = []
+        for ordinal, (directory, (_parent, _parent_id, _directory_id, owner)) in enumerate(self._migration_retention.items()):
+            try:
+                self.assert_migration_retention(directory, owner)
+                directory.rmdir()
+            except BaseException as exc:
+                failures.append(_RollbackFailureMember(
+                    "backup", ordinal, str(directory), "E_ROLLBACK_SETTLEMENT_FAILED", str(exc),
+                ))
+        return failures
 
     def _settle_created(
         self,
@@ -1163,15 +1229,16 @@ class _InstallTransaction:
         assert self._temporary is not None
         if self.committed:
             migration_failures = self._commit_migrated()
+            retention_failures = self._settle_migration_retention()
             cleanup = self._discard_backup()
             recovery_path = self._temporary if cleanup is not None else None
             self._temporary = None
-            if migration_failures or cleanup is not None:
-                members = tuple(migration_failures + ([cleanup] if cleanup is not None else []))
+            if migration_failures or retention_failures or cleanup is not None:
+                members = tuple(migration_failures + retention_failures + ([cleanup] if cleanup is not None else []))
                 raise _InstallFailure(
                     "E_ROLLBACK_SETTLEMENT_FAILED",
                     "migration" if migration_failures else "backup",
-                    migration_failures[0].cause if migration_failures else cleanup.cause,
+                    members[0].cause,
                     members=members,
                     recovery_path=recovery_path,
                 )
@@ -1188,6 +1255,7 @@ class _InstallTransaction:
         failures.extend(created_failures)
         snapshot_failures, retain_backup = self._settle_snapshots(unresolved)
         failures.extend(snapshot_failures)
+        failures.extend(self._settle_migration_retention())
         recovery_path: Path | None = None
         if retain_backup:
             recovery_path = self._temporary
@@ -1565,7 +1633,8 @@ class _CreateOnlyMutablePath:
         return path
 
     def migrate_exact_file(
-        self, relative: Path, expected_digest: str, payload: bytes
+        self, relative: Path, expected_digest: str, payload: bytes,
+        *, retention_parent: Path | None = None,
     ) -> Path:
         """Replace one hash-pinned regular file and retain its inode for rollback."""
 
@@ -1575,19 +1644,27 @@ class _CreateOnlyMutablePath:
             raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
         if self.dry_run:
             return path
+        retention = (
+            self.transaction.reserve_migration_retention(self, retention_parent, path.parent)
+            if retention_parent is not None else None
+        )
         old_identity = self._identity(path)
         new_digest = hashlib.sha256(payload).hexdigest()
         descriptor, name = tempfile.mkstemp(
             prefix=f".{path.name}.native-role-upgrade.", suffix=".tmp", dir=path.parent
         )
         temporary = Path(name)
-        tombstone = temporary.with_suffix(".prior")
+        tombstone = (retention / temporary.with_suffix(".prior").name
+                     if retention is not None else temporary.with_suffix(".prior"))
+        record: _SliceAMigratedFileRecord | None = None
         try:
             with os.fdopen(descriptor, "wb") as stream:
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
             self._walk_existing(path.parent)
+            if retention is not None:
+                self.transaction.assert_migration_retention(retention, self)
             self._assert_regular(path, existing=True)
             if (
                 self._identity(path) != old_identity
@@ -1596,13 +1673,24 @@ class _CreateOnlyMutablePath:
                 or tombstone.is_symlink()
             ):
                 raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
+            record = _SliceAMigratedFileRecord(
+                anchor_path=self.anchor,
+                anchor_identity=self._identity(self.anchor),
+                parent_path=path.parent,
+                parent_identity=self._identity(path.parent),
+                leaf_path=path,
+                old_identity=old_identity,
+                old_digest=expected_digest,
+                new_identity=self._identity(temporary),
+                new_digest=new_digest,
+                tombstone_path=tombstone,
+                tombstone_identity=old_identity,
+                retention_parent_path=retention.parent if retention is not None else None,
+                retention_parent_identity=self._identity(retention.parent) if retention is not None else None,
+                retention_directory_identity=self._identity(retention) if retention is not None else None,
+            )
             os.replace(path, tombstone)
-            try:
-                os.replace(temporary, path)
-            except BaseException:
-                if tombstone.exists() and not (path.exists() or path.is_symlink()):
-                    os.replace(tombstone, path)
-                raise
+            os.replace(temporary, path)
             self._assert_regular(path, existing=True)
             self._assert_regular(tombstone, existing=True)
             if (
@@ -1612,30 +1700,34 @@ class _CreateOnlyMutablePath:
             ):
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
             self.transaction.register_slice_a_migrated(
-                _SliceAMigratedFileRecord(
-                    anchor_path=self.anchor,
-                    anchor_identity=self._identity(self.anchor),
-                    parent_path=path.parent,
-                    parent_identity=self._identity(path.parent),
-                    leaf_path=path,
-                    old_identity=old_identity,
-                    old_digest=expected_digest,
-                    new_identity=self._identity(path),
-                    new_digest=new_digest,
-                    tombstone_path=tombstone,
-                    tombstone_identity=self._identity(tombstone),
-                ),
+                record,
                 self,
             )
-        except BaseException:
-            if tombstone.exists() and not (path.exists() or path.is_symlink()):
-                os.replace(tombstone, path)
+        except BaseException as original:
+            if record is not None and record not in self.transaction._slice_a_migrated and tombstone.exists():
+                try:
+                    self.rollback_migrated(record, replacement_may_be_absent=True)
+                except BaseException as settlement:
+                    raise _InstallFailure(
+                        "E_ROLLBACK_SETTLEMENT_FAILED", "migration", original,
+                        members=(_RollbackFailureMember("migration", -1, str(tombstone),
+                                 "E_ROLLBACK_SETTLEMENT_FAILED", str(settlement)),),
+                        recovery_path=retention or tombstone.parent,
+                    ) from original
             raise
         finally:
             temporary.unlink(missing_ok=True)
         return path
 
-    def rollback_migrated(self, record: _SliceAMigratedFileRecord) -> None:
+    def _assert_migration_retention_record(self, record: _SliceAMigratedFileRecord) -> None:
+        if record.retention_parent_path is None:
+            return
+        self.transaction.assert_migration_retention(record.tombstone_path.parent, self, pending=record)
+        if (self._identity(record.retention_parent_path) != record.retention_parent_identity
+                or self._identity(record.tombstone_path.parent) != record.retention_directory_identity):
+            self._rollback_identity_changed()
+
+    def rollback_migrated(self, record: _SliceAMigratedFileRecord, *, replacement_may_be_absent: bool = False) -> None:
         """Restore the original stock role through its retained inode, never a copy."""
 
         try:
@@ -1653,11 +1745,13 @@ class _CreateOnlyMutablePath:
             self._walk_existing(record.parent_path)
             self._walk_existing(record.leaf_path)
             self._walk_existing(record.tombstone_path)
+            self._assert_migration_retention_record(record)
+            replacement_absent = replacement_may_be_absent and not record.leaf_path.exists() and not record.leaf_path.is_symlink()
             if (
                 self._identity(record.parent_path) != record.parent_identity
-                or self._identity(record.leaf_path) != record.new_identity
+                or (not replacement_absent and self._identity(record.leaf_path) != record.new_identity)
                 or self._identity(record.tombstone_path) != record.tombstone_identity
-                or _file_sha256(record.leaf_path) != record.new_digest
+                or (not replacement_absent and _file_sha256(record.leaf_path) != record.new_digest)
                 or _file_sha256(record.tombstone_path) != record.old_digest
             ):
                 self._rollback_identity_changed()
@@ -1675,6 +1769,7 @@ class _CreateOnlyMutablePath:
 
         self._walk_existing(record.leaf_path)
         self._walk_existing(record.tombstone_path)
+        self._assert_migration_retention_record(record)
         if (
             self._identity(record.leaf_path) != record.new_identity
             or self._identity(record.tombstone_path) != record.tombstone_identity
@@ -3083,6 +3178,7 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
     "default": frozenset({
         "90e5b43a727a1f6c42ed3bee05e033a2cd83eef102d9030301227f99b79c8d53",
         "b38bb7c4a05f93bd54a11c9a06d2bbdae9bed353db4fdd2f42b4abb9fd3ba3e1",
+        "fd846b4791aea45f743661615d913d2f3cc96ee0b86fdb8abe53871b97e3c07c",
     }),
     "worker": frozenset({
         "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815",
@@ -3737,27 +3833,28 @@ class _CanonicalSkillsPlan:
     nonlead_source: Path | None = None
 
 
-def _is_exact_stock_luna_profile_prior_pair(
+def _exact_stock_native_role_contract_prior_pair(
     installed: Path, stage: _CanonicalLeadStage
-) -> bool:
+) -> tuple[tuple[Path, str], ...]:
     """Admit only the stock policy+manifest pair with every other leaf current."""
 
-    for relative, expected_digest in _STOCK_LUNA_PROFILE_PRIOR_PAIR:
-        installed_leaf = installed / relative
-        staged_leaf = stage.path / relative
-        if (
-            _file_sha256(installed_leaf) != expected_digest
-            or not staged_leaf.is_file()
-            or staged_leaf.is_symlink()
-        ):
-            return False
-    candidate = Path(tempfile.mkdtemp(prefix="orchestrarium-luna-profile-prior-"))
+    prior_pair = next(
+        (pair for pair in _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS
+         if all(_file_sha256(installed / relative) == expected_digest
+                and (stage.path / relative).is_file()
+                and not (stage.path / relative).is_symlink()
+                for relative, expected_digest in pair)),
+        (),
+    )
+    if not prior_pair:
+        return ()
+    candidate = Path(tempfile.mkdtemp(prefix="orchestrarium-native-role-contract-prior-"))
     try:
         shutil.rmtree(candidate)
         _copy_tree(installed, candidate, ignore_runtime_cache=True)
-        for relative, _expected_digest in _STOCK_LUNA_PROFILE_PRIOR_PAIR:
+        for relative, _expected_digest in prior_pair:
             (candidate / relative).write_bytes((stage.path / relative).read_bytes())
-        return _tree_sha256(candidate, ignore_runtime_cache=True) == stage.digest
+        return prior_pair if _tree_sha256(candidate, ignore_runtime_cache=True) == stage.digest else ()
     finally:
         shutil.rmtree(candidate, ignore_errors=True)
 
@@ -3871,11 +3968,10 @@ def _preflight_canonical_skills(
                         raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: {skill.name}")
                     nonlead_receipted = recorded is not None and recorded == observed
             accepted_prior_files = (
-                _STOCK_LUNA_PROFILE_PRIOR_PAIR
+                _exact_stock_native_role_contract_prior_pair(installed, stage)
                 if skill.name == "lead"
                 and observed is not None
                 and observed != current
-                and _is_exact_stock_luna_profile_prior_pair(installed, stage)
                 else ()
             )
             adopting = (
@@ -4050,6 +4146,7 @@ def _apply_canonical_skills_plan(
                 target_relative / "lead" / relative,
                 expected_digest,
                 (lead.source / relative).read_bytes(),
+                retention_parent=target_relative.parent,
             )
     elif lead.accepted_prior is not None:
         owner.replace_exact_tree(

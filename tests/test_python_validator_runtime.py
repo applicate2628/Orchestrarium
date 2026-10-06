@@ -1235,6 +1235,130 @@ def test_shared_blueprint_checks_contract_without_whole_file_snapshot(
     assert result.errors == (1 if mutation == "required-heading" else 0)
 
 
+@pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))
+def test_initializer_read_contract_accepts_in_memory_and_rejects_boundary_loss(
+    tmp_path: Path, provider: str, validator: Path,
+) -> None:
+    adapter = _load(validator, f"initializer_read_contract_{provider}")
+    runtime = adapter._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(
+        action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
+        if action[0] == "check_contains"
+        and action[1].endswith(("/init-project/SKILL.md", "/agents-init-project.md"))
+        and ("before reading values" in action[-1]
+             or "read-time agents-mode normalization" in action[-1])
+    )
+    assert len(actions) == 2
+    text = (ROOT / actions[0][1].removeprefix("@ROOT/")).read_text(encoding="utf-8")
+    candidate = tmp_path / "initializer.md"
+    selected = tuple((action[0], str(candidate), *action[2:]) for action in actions)
+
+    def check(content: str | None):
+        if content is None:
+            candidate.unlink(missing_ok=True)
+        else:
+            candidate.write_text(content, encoding="utf-8")
+        result = runtime.validate_pack(
+            script=validator, provider=provider, actions=selected,
+            maintainer_only_shared_reference_names=frozenset(),
+            utility_skills=frozenset(), curated_role_skills=frozenset(), root=ROOT,
+        )
+        assert result.checks == 2
+        return result
+
+    accepted = check(text)
+    assert accepted.errors == 0
+    assert accepted.passed == 2
+    losses = (
+        ("Normalize effective values in memory", "Rewrite the configuration file"),
+        ("do not rewrite borrowed/global configuration on read", "rewrite borrowed/global configuration on read"),
+        ("explicitly selected authorized project configuration", "project configuration"),
+        (f"local `.{ 'agents' if provider == 'codex' else 'claude' }/.agents-mode.yaml`",
+         "borrowed provider overlay"),
+    )
+    for clause, replacement in losses:
+        assert clause in text
+        assert check(text.replace(clause, replacement)).errors > 0
+    assert check("").errors == 2
+    assert check(None).errors == 2
+
+
+@pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))
+@pytest.mark.parametrize("surface", ("gui-body", "provider-addendum"))
+def test_current_provider_currency_pins_accept_source_and_reject_protected_drift(
+    tmp_path: Path, provider: str, validator: Path, surface: str,
+) -> None:
+    adapter = _load(validator, f"currency_pin_{provider}_{surface}")
+    runtime = adapter._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(
+        action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
+        if (surface == "gui-body" and action[0] == "check_common_skill_body_pin"
+            and action[1] == "windows-gui-manual-testing")
+        or (surface == "provider-addendum" and action[0] == "check_normalized_sha256"
+            and action[1].endswith("/subagent-operating-model.md"))
+    )
+    assert len(actions) == 1
+    action = actions[0]
+    file_index = 3 if surface == "gui-body" else 1
+    data = (ROOT / action[file_index].removeprefix("@ROOT/")).read_bytes()
+    candidate = tmp_path / "protected.md"
+    redirected = list(action)
+    redirected[file_index] = str(candidate)
+
+    def check(content: bytes | None):
+        if content is None:
+            candidate.unlink(missing_ok=True)
+        else:
+            candidate.write_bytes(content)
+        result = runtime.validate_pack(
+            script=validator, provider=provider, actions=(tuple(redirected),),
+            maintainer_only_shared_reference_names=frozenset(),
+            utility_skills=frozenset(), curated_role_skills=frozenset(), root=ROOT,
+        )
+        assert result.checks == 1
+        return result
+
+    assert check(data).errors == 0
+    clause = (b"found-by: windows-gui-manual-testing" if surface == "gui-body"
+              else b"persistence limited to authorized install/configuration writes")
+    assert clause in data
+    assert check(data.replace(clause, b"[removed protected contract]")).errors == 1
+    if surface == "provider-addendum":
+        normalized = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        assert check(normalized.replace(b"\n", b"\r\n")).errors == 0
+    assert check(None).errors == 1
+
+
+@pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))
+def test_initializer_presets_remain_guarded_by_existing_actions(
+    tmp_path: Path, provider: str, validator: Path,
+) -> None:
+    adapter = _load(validator, f"initializer_preset_contract_{provider}")
+    runtime = adapter._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(
+        action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
+        if action[0] == "check_contains"
+        and ("init-project exposes power-mode preset" in action[-1]
+             or "init-project correctness-first/power-mode presets raise" in action[-1])
+    )
+    assert len(actions) == 3
+    text = (ROOT / actions[0][1].removeprefix("@ROOT/")).read_text(encoding="utf-8")
+    candidate = tmp_path / "presets.md"
+    selected = tuple((action[0], str(candidate), *action[2:]) for action in actions)
+    for content, errors in ((text, 0), (text.replace("review.security: 2", "review.security: 1"), 1)):
+        candidate.write_text(content, encoding="utf-8")
+        result = runtime.validate_pack(
+            script=validator, provider=provider, actions=selected,
+            maintainer_only_shared_reference_names=frozenset(),
+            utility_skills=frozenset(), curated_role_skills=frozenset(), root=ROOT,
+        )
+        assert result.checks == 3
+        assert result.errors == errors
+
+
 def test_layering_codex_derives_common_names_from_the_spine(tmp_path: Path) -> None:
     """Catches a layering exclusion still coupled to a stale runtime name map."""
     target, validator = _materialize_installed_pack(tmp_path, "codex")

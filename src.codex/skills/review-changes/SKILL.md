@@ -43,7 +43,7 @@ Run a repository-wide impact review triggered by recent changes. The changed fil
 - Narrow QA-only objective: select `$qa-engineer`; do not add Analyst or Architecture review without a separate evidence trigger.
 - Architecture objective: the Architecture Reviewer is the objective reviewer; do not add Analyst or QA unless required evidence is missing.
 - Research needed: when the selected reviewer cannot decide without a caller, dependency, or contract inventory, admit an Analyst to collect those facts before the downstream QA or review verdict.
-5. When the existing multi-fix anti-layering trigger applies, its Architecture Reviewer lane and distinct-engine audit remain mandatory; a `PILED` verdict maps to `REVISE` and blocks push. Workflow economy does not waive this trigger.
+5. Inside an already-triggered Architecture Reviewer gate, apply its mandatory multi-fix anti-layering audit and distinct-engine requirement when the owner's batch trigger applies; the batch trigger creates no additional reviewer, lane, artifact, engine, or review loop. A `PILED` verdict maps to `REVISE` and blocks push.
 
 ## What to verify
 

@@ -421,7 +421,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'Claude addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
   '@ROOT/references-claude/subagent-operating-model.md',
-  '2b4f4fdf49d36bd80270e4292ce30cf84b4650751b6a93493dd0e335c24ed404',
+  '1e3e492b169bb83fb9b2bfc51315604a2707d84ac90df7acf56f4edda8335267',
   'Claude addendum matches the current canonical normalized fingerprint'),
  ('direct', 'role_index_claude', 'role_index_claude'),
  ('check_common_skill_body_pin',
@@ -498,7 +498,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'src.claude/skills/vcpkg-ports-updater/SKILL.md'),
  ('check_common_skill_body_pin',
   'windows-gui-manual-testing',
-  'b3a029e6784d1d9e37f789b8b512f31f5e5c2161ca6807dc8a140854042ae6c8',
+  '7dd186bbeee1fab2eb44e2d4f1c4772ffea87d918605efdcc00a5a8fb3c272b8',
   'src.claude/skills/windows-gui-manual-testing/SKILL.md'),
  ('direct', 'common_pin_completeness', 'common_pin_completeness'),
  ('check_file', 'src.claude/skills/lead/SKILL.md', 'lead has a curated role-skill file'),
@@ -663,12 +663,19 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'operating-model carries the A3 physical-state reconciliation trigger'),
  ('check_contains',
   'src.claude/commands/agents-init-project.md',
-  'normalize it to the current canonical format before presenting or trusting the current values.',
+  'Normalize effective values in memory through the dispatch owner\'s existing per-key read order before '
+  'presenting or trusting them. Use any global fallback as the starting point for project-local review; '
+  'do not rewrite borrowed/global configuration on read. Persist the explicitly selected project '
+  'configuration to the canonical project-local `.yaml` path only within the authorized configuration '
+  'write in Step 7, and do not recreate legacy files.',
   'agents-init-project normalizes existing agents-mode before reading values'),
  ('check_contains',
   'src.claude/commands/agents-init-project.md',
-  'Any read of `.claude/.agents-mode.yaml` that drives a decision should normalize the file to the current '
-  'canonical format before trusting the flags.',
+  'For decision-driving reads, use the dispatch owner\'s per-key precedence (local `.claude/.agents-mode.yaml`, '
+  'local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global '
+  'legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults) '
+  'and the in-memory normalization in Step 1; inspection grants no write to the source overlay. '
+  'Persist only the explicitly selected authorized project configuration in Step 7.',
   'agents-init-project requires read-time agents-mode normalization'),
  ('check_contains',
   'src.claude/commands/agents-second-opinion.md',

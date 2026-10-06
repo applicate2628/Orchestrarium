@@ -172,7 +172,7 @@ Prefer short cause statements like:
 
 #### 7.1 Persist non-passing findings
 
-On `REVISE` or `BLOCKED`, file each finding in `work-items/bugs/<date>-<slug>.md` using the qa-engineer-owned format with `found-by: windows-gui-manual-testing` before returning the verdict. Cite volatile machine-local evidence by `.scratch/` path and frame timestamp, but make the bug's repro steps, control path, theme, actual DPI, DPI-awareness mode, and window state sufficient to re-derive that evidence.
+On `REVISE` or `BLOCKED`, include each finding as an in-band bug registry proposal in the sole returned artifact, using the qa-engineer-owned format and configured registry path (normally `work-items/bugs/<date>-<slug>.md`) with `found-by: windows-gui-manual-testing`. Write the record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. Cite volatile machine-local evidence by `.scratch/` path and frame timestamp, but make the bug's repro steps, control path, theme, actual DPI, DPI-awareness mode, and window state sufficient to re-derive that evidence.
 
 ### 8. Re-test after a fix
 

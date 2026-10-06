@@ -29,7 +29,7 @@
     },
     "default": {
       "relativePath": "default.toml",
-      "sha256": "29f46c8e87939b03de4853a8733129c68aa6572111e34df358bf1cd5268bc87c"
+      "sha256": "fd846b4791aea45f743661615d913d2f3cc96ee0b86fdb8abe53871b97e3c07c"
     },
     "explorer": {
       "relativePath": "explorer.toml",
