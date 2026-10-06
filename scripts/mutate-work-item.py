@@ -2422,6 +2422,34 @@ def _canonical_category(reference: str) -> tuple[Category, str]:
     return category, slug
 
 
+def _archived_work_item_candidates(
+    archive: Path, *, slug: str | None = None, reverse: bool = False,
+) -> tuple[Path, ...]:
+    if not archive.is_dir():
+        return ()
+    owned_inputs = {
+        "status.md", "closure.md", LEGACY_RETIREMENT_FILE,
+        BUG_DISPOSITIONS_MANIFEST, BUG_DISPOSITIONS_RECEIPT,
+    }
+    candidates: list[Path] = []
+    for container in sorted(
+        (path for path in archive.iterdir() if path.is_dir()), reverse=reverse,
+    ):
+        try:
+            month = datetime.strptime(container.name, "%Y-%m")
+        except ValueError:
+            canonical_month = False
+        else:
+            canonical_month = month.strftime("%Y-%m") == container.name
+        children = container.iterdir() if slug is None else (container / slug,)
+        for item in sorted((path for path in children if path.is_dir()), reverse=reverse):
+            # The canonical slot owns identity even with every input missing.
+            # Legacy candidates own their immediate lexical inputs, not attachments.
+            if canonical_month or owned_inputs.intersection(path.name for path in item.iterdir()):
+                candidates.append(item)
+    return tuple(candidates)
+
+
 def _category_locations(root: Path, category: Category, slug: str) -> list[Path]:
     work_items = _work_items_root(root)
     locations: list[Path] = []
@@ -2432,15 +2460,9 @@ def _category_locations(root: Path, category: Category, slug: str) -> list[Path]
             locations.append(backlog)
         if active.is_dir():
             locations.append(active)
-        archive = work_items / "archive"
-        if archive.is_dir():
-            locations.extend(
-                sorted(
-                    month / slug
-                    for month in archive.iterdir()
-                    if month.is_dir() and (month / slug).is_dir()
-                )
-            )
+        locations.extend(
+            _archived_work_item_candidates(work_items / "archive", slug=slug)
+        )
     else:
         current = work_items / category.current_root / f"{slug}.md"
         if current.is_file():
@@ -2860,9 +2882,8 @@ def collect_readme_entries(root: Path) -> list[ReadmeEntry]:
     archive = work_items / "archive"
     if archive.is_dir():
         archived: list[ReadmeEntry] = []
-        for month in sorted((path for path in archive.iterdir() if path.is_dir()), reverse=True):
-            for item in sorted((path for path in month.iterdir() if path.is_dir()), reverse=True):
-                archived.append(_archived_work_item_entry(item))
+        for item in _archived_work_item_candidates(archive, reverse=True):
+            archived.append(_archived_work_item_entry(item))
         entries.extend(archived)
 
     seen: set[str] = set()
@@ -5839,14 +5860,13 @@ def audit_categories(root: Path) -> tuple[str, ...]:
             current = work_items / category.current_root
             slugs.update(path.stem for path in current.glob("*.md"))
             archive = current / "archive"
-        if archive.is_dir():
+        if category.current_kind == "work-item":
+            slugs.update(path.name for path in _archived_work_item_candidates(archive))
+        elif archive.is_dir():
             for month in archive.iterdir():
                 if not month.is_dir():
                     continue
-                if category.current_kind == "work-item":
-                    slugs.update(path.name for path in month.iterdir() if path.is_dir())
-                else:
-                    slugs.update(path.stem for path in month.glob("*.md"))
+                slugs.update(path.stem for path in month.glob("*.md"))
         for slug in sorted(slugs):
             locations = _category_locations(root, category, slug)
             if len(locations) > 1:
@@ -5946,25 +5966,22 @@ def audit_categories(root: Path) -> tuple[str, ...]:
             failure = _current_readme_status_error(fields, "active", item / "status.md")
             if failure is not None:
                 raise failure
-    archive_root = work_items / "archive"
-    if archive_root.is_dir():
-        for month in sorted(path for path in archive_root.iterdir() if path.is_dir()):
-            for item in sorted(path for path in month.iterdir() if path.is_dir()):
-                manifest = item / BUG_DISPOSITIONS_MANIFEST
-                receipt = item / BUG_DISPOSITIONS_RECEIPT
-                if not manifest.exists() and not receipt.exists():
-                    continue
-                closure = item / "closure.md"
-                if not closure.is_file():
-                    raise LifecycleError(
-                        "WI-IMMUTABLE-ARCHIVE",
-                        f"archived disposition owner lacks closure: {item.name}",
-                    )
-                closure_data = closure.read_bytes()
-                fields = _parse_fields(closure_data.decode("utf-8"))
-                _verify_archived_bug_dispositions(
-                    root, item, closure_data, fields.get("closed", "")
-                )
+    for item in _archived_work_item_candidates(work_items / "archive"):
+        manifest = item / BUG_DISPOSITIONS_MANIFEST
+        receipt = item / BUG_DISPOSITIONS_RECEIPT
+        if not manifest.exists() and not receipt.exists():
+            continue
+        closure = item / "closure.md"
+        if not closure.is_file():
+            raise LifecycleError(
+                "WI-IMMUTABLE-ARCHIVE",
+                f"archived disposition owner lacks closure: {item.name}",
+            )
+        closure_data = closure.read_bytes()
+        fields = _parse_fields(closure_data.decode("utf-8"))
+        _verify_archived_bug_dispositions(
+            root, item, closure_data, fields.get("closed", "")
+        )
     return tuple(sorted(legacy_read_compatible))
 
 

@@ -4533,6 +4533,164 @@ def test_terminalization_stamps_schema_pair_once_and_replay_is_idempotent(
     ) == 1
 
 
+def test_archive_evidence_child_does_not_block_public_start(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "admitted-candidate"
+    module.create_candidate(root, slug, b"Task: Run the admitted repair.\n")
+    legacy_root = root / "work-items" / "archive" / "legacy-campaign"
+    write(legacy_root / "handoff.md", "Historical campaign evidence.\n")
+    evidence = legacy_root / "measurements-run"
+    write(evidence / "evidence.md", "Measurements only.\n")
+    write(evidence / "results.csv", "sample,value\n1,42\n")
+    before = tree_file_bytes(legacy_root)
+
+    target = module.start_item(root, slug, quick_status(slug).encode("utf-8"))
+
+    assert target == root / "work-items" / "active" / slug
+    assert target.joinpath("status.md").read_bytes() == quick_status(slug).encode("utf-8")
+    assert not root.joinpath("work-items", "backlog", f"{slug}.md").exists()
+    assert tree_file_bytes(legacy_root) == before
+    assert {entry.logical_reference for entry in module.collect_readme_entries(root)} == {
+        f"work-item:{slug}"
+    }
+    assert module._category_locations(root, module.CATEGORIES["work-item"], evidence.name) == []
+    assert module.audit(root) == ()
+
+
+def test_archive_canonical_missing_closure_still_blocks_public_start(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for owned_status in (False, True):
+        root = tmp_path / str(owned_status)
+        slug = "admitted-candidate"
+        module.create_candidate(root, slug, b"Task: Preserve terminal refusal.\n")
+        archived = root / "work-items" / "archive" / "2026-10" / "canonical-item"
+        archived.mkdir(parents=True)
+        if owned_status:
+            write(archived / "status.md", marked_status())
+        before = tree_file_bytes(root / "work-items")
+
+        with pytest.raises(module.LifecycleError) as failure:
+            module.start_item(root, slug, quick_status(slug).encode("utf-8"))
+
+        assert failure.value.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+        assert tree_file_bytes(root / "work-items") == before
+        assert not root.joinpath("work-items", "active", slug).exists()
+        assert module._category_locations(root, module.CATEGORIES["work-item"], archived.name) == [archived]
+
+
+def test_archive_candidate_selection_preserves_valid_identity_and_nested_attachment(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    archived = root / "work-items" / "archive" / "2026-10" / "canonical-item"
+    write(archived / "status.md", marked_status())
+    write(archived / "closure.md", marked_closure("2026-10-06T12:00:00Z"))
+    write(archived / "attachments" / "nested-item" / "closure.md", "Outcome: attachment\n")
+    before = tree_file_bytes(archived)
+
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    entries = module.collect_readme_entries(root)
+
+    assert len(entries) == 1
+    assert entries[0].logical_reference == "work-item:canonical-item"
+    assert entries[0].link == archived / "closure.md"
+    assert entries[0].classification is None
+    assert module.resolve_category(root, "work-item:canonical-item") == archived.resolve()
+    assert module.audit(root) == ()
+    assert tree_file_bytes(archived) == before
+
+
+def test_archive_nonmonth_owned_legacy_closure_keeps_compatibility(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    seed_legacy_archives(root)
+    original = root / "work-items" / "archive" / "2026-03" / "legacy-no-closed"
+    archived = root / "work-items" / "archive" / "legacy-campaign" / original.name
+    archived.parent.mkdir()
+    shutil.move(original, archived)
+    before = tree_file_bytes(archived)
+
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    entries = [entry for entry in module.collect_readme_entries(root)
+               if entry.logical_reference == "work-item:legacy-no-closed"]
+
+    assert len(entries) == 1
+    assert entries[0].classification == "WI-LEGACY-READ-COMPAT"
+    assert entries[0].link == archived / "closure.md"
+    assert module.resolve_category(root, "work-item:legacy-no-closed") == archived.resolve()
+    assert module.audit(root) == ()
+    assert tree_file_bytes(archived) == before
+
+
+def test_archive_nonmonth_owned_status_is_not_hidden(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for member_kind in ("empty", "malformed", "directory"):
+        root = tmp_path / member_kind
+        archived = root / "work-items" / "archive" / "legacy-campaign" / "owned-item"
+        status = archived / "status.md"
+        if member_kind == "directory":
+            status.mkdir(parents=True)
+        else:
+            write(status, "" if member_kind == "empty" else "Lifecycle-schema: invalid\n")
+
+        assert module._category_locations(root, module.CATEGORIES["work-item"], archived.name) == [archived]
+        with pytest.raises(module.LifecycleError) as failure:
+            module.collect_readme_entries(root)
+        assert failure.value.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+
+
+def test_archive_candidate_calendar_slot_requires_exact_valid_month(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    archive = root / "work-items" / "archive"
+    for container in ("2026-13", "2026-00", "2026-1", "0000-10"):
+        (archive / container / "unowned-child").mkdir(parents=True)
+    assert module.collect_readme_entries(root) == []
+    assert module._category_locations(root, module.CATEGORIES["work-item"], "unowned-child") == []
+    assert module.audit_categories(root) == ()
+    canonical = archive / "2026-10" / "unowned-child"
+    canonical.mkdir(parents=True)
+    assert module._category_locations(root, module.CATEGORIES["work-item"], "unowned-child") == [canonical]
+    with pytest.raises(module.LifecycleError) as failure:
+        module.collect_readme_entries(root)
+    assert failure.value.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+
+
+def test_archive_nonmonth_disposition_owner_keeps_terminal_obligation(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    archived = root / "work-items" / "archive" / "legacy-campaign" / "disposition-owner"
+    write(archived / module.BUG_DISPOSITIONS_MANIFEST, "{}\n")
+
+    assert module._category_locations(root, module.CATEGORIES["work-item"], archived.name) == [archived]
+    with pytest.raises(module.LifecycleError) as failure:
+        module.audit_categories(root)
+    assert failure.value.failure_id == "WI-IMMUTABLE-ARCHIVE"
+    with pytest.raises(module.LifecycleError) as failure:
+        module.collect_readme_entries(root)
+    assert failure.value.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+
+
+def test_archive_candidate_selection_keeps_genuine_duplicate_refusal(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    for container in ("2026-10", "legacy-campaign"):
+        archived = root / "work-items" / "archive" / container / "duplicate-item"
+        write(archived / "closure.md", "Outcome: existing legacy record.\n")
+
+    assert len(module._category_locations(root, module.CATEGORIES["work-item"], "duplicate-item")) == 2
+    for operation in (module.collect_readme_entries, module.audit_categories):
+        with pytest.raises(module.LifecycleError) as failure:
+            operation(root)
+        assert failure.value.failure_id == "WI-CATEGORY-DUAL-LOCATION"
+
+
 def test_legacy_archive_projection_is_informational_and_byte_preserving(
     tmp_path: Path,
 ) -> None:
