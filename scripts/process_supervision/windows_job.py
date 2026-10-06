@@ -321,9 +321,7 @@ class WindowsJobProcessV1:
                     active_zero = True
                     break
                 now = time.monotonic()
-                if not self._job_terminated and (
-                    self.poll() is not None or now >= deadline - 0.25
-                ):
+                if not self._job_terminated and now >= deadline - 0.25:
                     self.terminate_job()
                 if now >= deadline:
                     self._issues.append("WJOB-JOB-NONEMPTY")

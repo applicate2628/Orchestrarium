@@ -63,6 +63,62 @@ def test_job_membership_precedes_first_child_instruction(tmp_path: Path) -> None
         process.close()
 
 
+def test_natural_completion_after_positive_accounting_snapshot_is_not_terminated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real earlier positive snapshot must not force an already-empty Job."""
+    job = importlib.import_module("scripts.process_supervision.windows_job")
+    process = job.WindowsJobOwnerV1.launch(
+        executable=sys.executable,
+        argv=(sys.executable, "-B", "-c", "import sys; sys.stdin.buffer.read(1)"),
+        cwd=str(tmp_path),
+        environment=dict(os.environ),
+        stdout="null",
+        stderr="null",
+    )
+    stdin_fd = process.take_stdin_fd()
+    deadline = time.monotonic() + 5.0
+    original_query = process._active_processes
+    delayed = False
+
+    def delayed_native_snapshot() -> int:
+        nonlocal delayed, stdin_fd
+        snapshot = original_query()
+        if not delayed:
+            delayed = True
+            assert snapshot > 0
+            assert stdin_fd is not None
+            assert os.write(stdin_fd, b"x") == 1
+            os.close(stdin_fd)
+            stdin_fd = None
+            assert process.wait(deadline - 0.5) == 0
+            fresh = original_query()
+            while fresh != 0 and time.monotonic() < deadline - 0.5:
+                time.sleep(0.001)
+                fresh = original_query()
+            assert fresh == 0
+            assert not process._job_terminated
+            assert time.monotonic() < deadline - 0.25
+        return snapshot
+
+    try:
+        with monkeypatch.context() as observation:
+            observation.setattr(process, "_active_processes", delayed_native_snapshot)
+            closure = process.settle(deadline)
+        assert delayed
+        assert closure.complete
+        assert closure.direct_exit_code == 0
+        assert closure.direct_reaped
+        assert closure.active_zero
+        assert closure.handles_closed
+        assert not closure.issues
+        assert not closure.job_terminated
+    finally:
+        if stdin_fd is not None:
+            os.close(stdin_fd)
+        process.close()
+
+
 def test_direct_exit_still_reaps_job_descendant(tmp_path: Path) -> None:
     """Direct-process exit must never stand in for an empty Job."""
     job = importlib.import_module("scripts.process_supervision.windows_job")
