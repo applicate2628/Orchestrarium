@@ -33,8 +33,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "488c41acb051ccf6100422b28b3d4ded846e8d9cdd88fb937fb9b383f8d70319",
     ),
     "hook-behavior-contracts": (
-        18_131,
-        "4212588f126b74fae8c7351f6c0188461e17dc912d7d2fb8ad8298020ba2dfa1",
+        18_711,
+        "29084ee4acac9d075291b3d9180f3d78c3f3d77251d4a60463949855b74bf14a",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.
@@ -61,7 +61,7 @@ EXPECTED_SHARED_MANIFEST: dict[str, tuple[str, ...]] = {
     ),
     "shared gates": (
         "`quick-fix`: target+steps",
-        "before QA across phases/specialists, assign one integration owner",
+        "Before cross-phase/specialist QA, assign one integration owner",
         "**Repository orientation; Mechanism inventory before new paths:**",
         "REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>",
         "**Hypothesis disclosure discipline:**",
@@ -83,8 +83,8 @@ EXPECTED_CLAUDE_MANIFEST: dict[str, tuple[str, ...]] = {
         "nine structural hooks",
         "They are backstops; they do not replace `AGENTS.md`",
         "a subagent must never be blocked",
-        "The first other valid root final receives one reconciliation pass",
-        "`stop_hook_active` allows the next Stop",
+        "Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership",
+        "Passive verdicts and the leaf/re-entry skips remain unchanged",
         "[skip-bugfix-discipline]",
         "[approve-publication]",
         "[approve-mcp-fallback:v1]",
@@ -343,18 +343,18 @@ def test_required_anchors_have_no_uninstalled_reference_dependency() -> None:
     assert REFERENCE.is_file()
 
 
-def test_stop_behavior_stays_the_accepted_concise_62_word_delta() -> None:
+def test_stop_ownership_preserves_current_clauses_within_concise_budget() -> None:
     lines = CLAUDE_MD.read_text(encoding="utf-8").splitlines()
     stop_lines = [line for line in lines if line.startswith("- **Stop ownership.**")]
     assert len(stop_lines) == 1
     stop = stop_lines[0]
-    assert len(stop.split()) == 62
+    assert 0 < len(stop.split()) <= 62
     for required in (
-        "Passive verdicts remain unchanged.",
-        "The first other valid root final receives one reconciliation pass",
-        "`stop_hook_active` allows the next Stop",
-        "even for a standalone answer or pause",
-        "cannot guarantee model obedience",
+        "Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership",
+        "their subagent skip preserves that ownership boundary",
+        "Passive verdicts and the leaf/re-entry skips remain unchanged.",
+        "Non-passive Stops exit 0 silently",
+        "the main conversation still owns ongoing-task continuation under shared governance.",
     ):
         assert required in stop
 

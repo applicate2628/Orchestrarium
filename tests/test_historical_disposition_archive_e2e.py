@@ -99,7 +99,7 @@ def active_item(root: Path) -> Path:
     item = root / "work-items" / "active" / "active-control"
     (item / "reviews").mkdir(parents=True)
     (item / "status.md").write_text(
-        "# Status\n\n## Current state\n**Primary task status**: open\n\n## Active agents\n- none\n"
+        "---\nstatus: active\n---\n\n# Status\n\n## Current state\n**Primary task status**: open\n\n## Active agents\n- none\n"
         "\n## Completed agents\n- none\n\n## Next action\nContinue.\n",
         encoding="utf-8",
     )
