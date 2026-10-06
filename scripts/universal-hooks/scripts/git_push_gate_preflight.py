@@ -2403,7 +2403,7 @@ class PreflightResult(NamedTuple):
     simple_pr_approval: bool = False
 
 
-_OUTCOMES = frozenset(("ALLOW_FINAL", "DEFER"))
+_OUTCOMES = frozenset(("ALLOW_FINAL", "ABSTAIN", "DEFER"))
 _CONTINUATIONS = frozenset(("NONE", "RENDER_DENY", "EVALUATE_HEAVY"))
 _DIALECTS = frozenset(("posix", "powershell", "unsupported"))
 _CURRENT_TURN_STATUSES = frozenset(
@@ -2422,6 +2422,7 @@ _PREFLIGHT_REASONS = frozenset((
     "PFP-DENY-PARSE", "PFP-ALLOW-DRY-RUN", "PFP-DENY-TRANSCRIPT",
     "PFP-ALLOW-USER-APPROVED", "PFP-HEAVY", "PFP-DENY-KNOWN",
     "PFP-DENY-INTERNAL", "PFP-ALLOW-MALFORMED",
+    "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE",
 ))
 _GENERIC_STATUSES = frozenset((
     "PGG-ADMISSIBLE", "PGG-PARSE-UNCERTAIN", "PGG-LEXICAL-NORMALIZATION",
@@ -2439,6 +2440,9 @@ _PREFLIGHT_BRANCHES = {
     "PFP-ALLOW-NO-COMMAND": ("ALLOW_FINAL", "NONE", frozenset(), None),
     "PFP-ALLOW-NON-PUSH": (
         "ALLOW_FINAL", "NONE", frozenset(("command", "dialect", "parsed")), None,
+    ),
+    "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE": (
+        "ABSTAIN", "NONE", frozenset(("command", "dialect", "parsed")), None,
     ),
     "PFP-ALLOW-DRY-RUN": (
         "ALLOW_FINAL", "NONE", frozenset(("command", "dialect", "parsed")), None,
@@ -2636,6 +2640,8 @@ def validate_preflight_result(result: object) -> PreflightResult:
         raise ValueError("invalid repository workdir source")
     if result.transcript_diagnostic is not None:
         validate_transcript_diagnostic(result.transcript_diagnostic)
+        if result.outcome == "ABSTAIN":
+            raise ValueError("unexpected branch field: transcript_diagnostic")
     branch = _PREFLIGHT_BRANCHES[result.reason_id]
     expected_outcome, expected_continuation, present_fields, expected_failure = branch
     if (result.outcome, result.continuation) != (
@@ -2720,9 +2726,8 @@ def build_preflight(envelope: dict) -> PreflightResult:
             )
         if not pushes and not minus_c_candidate:
             return _result(
-                "DEFER", "PFP-DENY-PARSE", "RENDER_DENY",
+                "ABSTAIN", "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE", "NONE",
                 command=command, dialect=resolution.dialect, parsed=parsed,
-                failure_id="PGG-PARSE-UNCERTAIN",
             )
         if _has_solitary_direct_dry_credit(parsed):
             return _result(

@@ -22,6 +22,8 @@ The rules below apply to every tracked file in the repository, including docs, r
 
 ## Review and publication
 
+The shell-observation publication guard abstains when its analysis is incomplete and it observes no publication or bypass candidate. Uncertainty alone does not deny ordinary work. An observed publication or bypass candidate remains subject to the existing authorization checks. Abstention certifies neither the command's exact effects, safety or dry-run status nor permission to publish.
+
 - Human review is mandatory before `git push`, release, or equivalent publication.
 - A history/recovery size-limit refusal means earlier permission could not be verified within the acquisition bounds; it does not establish that the current transcript is unreadable or that the user never granted permission. Diagnostics must preserve that distinction without granting authority from summaries or weakening limits.
 - `RELEASE_NOTES.md` is the canonical tracked release log for this repository.

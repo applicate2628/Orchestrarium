@@ -3622,6 +3622,7 @@ class TestOracleFailClosed(unittest.TestCase):
             "test_empty_stdin_fails_open",
             "test_non_bash_tool_input_fails_open",
             "test_frozen_bootstrap_injects_held_posix_helper_and_reaches_range_main",
+            "test_frozen_bootstrap_injects_held_windows_job_module",
         }
         # Test-only setup owner: creates an isolated Git root for direct
         # process-bound probes and cannot execute a caller-controlled command.

@@ -2,6 +2,11 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-07
+
+- **Incomplete analysis without a publication signal no longer blocks ordinary work.** The publication guard abstains when it observes no publication or bypass candidate, so uncertainty alone does not stop unrelated commands. Observed candidates retain the existing authorization checks; abstention does not certify exact effects, safety, a dry run or permission to publish.
+- **Reuse decisions reach implementation through the existing handoff.** Approved inputs carry the checked repository mechanisms, ready alternatives, evidence-backed selection and integration tradeoffs; constraints and acceptance criteria retain the fit requirements and selected choice. Local inventory comes first, with research into mature alternatives when needed. Implementers use that accepted decision or raise a material conflict to its owner. This adds no stage, report, universal web-search requirement or dependency.
+
 ## 2026-10-06
 
 - **Local governance checks follow their current owners.** Composed checks now use canonical clauses, and the strict reference fingerprint matches the reviewed English change. The concise Stop hook description is checked against its ownership and size limit; the historical disposition test fixture supplies a valid active status while preserving checker and ledger controls.

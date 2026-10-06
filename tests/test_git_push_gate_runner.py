@@ -51,6 +51,7 @@ PREFLIGHT_REASON_BRANCHES = {
     "PFP-ALLOW-SUBAGENT": ("ALLOW_FINAL", "NONE"),
     "PFP-ALLOW-NO-COMMAND": ("ALLOW_FINAL", "NONE"),
     "PFP-ALLOW-NON-PUSH": ("ALLOW_FINAL", "NONE"),
+    "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE": ("ABSTAIN", "NONE"),
     "PFP-ALLOW-DRY-RUN": ("ALLOW_FINAL", "NONE"),
     "PFP-ALLOW-USER-APPROVED": ("ALLOW_FINAL", "NONE"),
     "PFP-ALLOW-MALFORMED": ("ALLOW_FINAL", "NONE"),
@@ -64,6 +65,7 @@ PREFLIGHT_REASON_PRESENT_FIELDS = {
     "PFP-ALLOW-SUBAGENT": frozenset(),
     "PFP-ALLOW-NO-COMMAND": frozenset(),
     "PFP-ALLOW-NON-PUSH": frozenset(("command", "dialect", "parsed")),
+    "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE": frozenset(("command", "dialect", "parsed")),
     "PFP-ALLOW-DRY-RUN": frozenset(("command", "dialect", "parsed")),
     "PFP-ALLOW-USER-APPROVED": frozenset((
         "command", "dialect", "transcript_path", "parsed",
@@ -304,6 +306,11 @@ def _builder_positive_results(module, tmp_path: Path):
         "DEFER", "PFP-DENY-INTERNAL", "RENDER_DENY",
         None, None, "", None, None, None, False, None,
     ))
+    deny_parse = module.validate_preflight_result(module.PreflightResult(
+        "DEFER", "PFP-DENY-PARSE", "RENDER_DENY", "env 1=x", "posix", "",
+        module.parse_shell_command("env 1=x", "posix"), None, None, False,
+        "PGG-PARSE-UNCERTAIN",
+    ))
     malformed = module.build_preflight_from_stdin
     original = module.read_stdin_utf8
     try:
@@ -326,7 +333,7 @@ def _builder_positive_results(module, tmp_path: Path):
         "tool_input": {"command": "git push origin main"},
         "transcript_path": str(approved_transcript),
     })
-    return (*rows, deny_known, deny_internal, malformed_result, approved)
+    return (*rows, deny_known, deny_internal, deny_parse, malformed_result, approved)
 
 
 def test_r5_preflight_reason_branches_are_exhaustive_and_coherent(tmp_path: Path) -> None:
@@ -670,7 +677,10 @@ def _exercise_former_row(target: GateTarget, row, tmp_path: Path, root: str):
     assert counters["heavy"] == expected_heavy
     if scenario in {"active-pr", "generic-scan"}:
         assert counters["owner"] == 1
-    expected_policy_load = 0 if kind == "return" and owner == "preflight" else 1
+    # Preserve the former path inventory; its zero-signal refusal now abstains.
+    expected_policy_load = 0 if (
+        kind == "return" and owner == "preflight" or row_id == "parse-uncertain"
+    ) else 1
     if root == "runner":
         assert counters["policy_load"] == expected_policy_load
     return result, stdout.getvalue(), stderr.getvalue(), counters
@@ -686,7 +696,7 @@ def test_r5_all_former_paths_execute_through_real_target_owners(tmp_path: Path) 
             result, stdout, stderr, _counters = runner
             assert type(result) is int and result == 0
             assert stderr == ""
-            if row[0] == "return" and row[1] != "no-allow-deny":
+            if (row[0] == "return" and row[1] != "no-allow-deny") or row[1] == "parse-uncertain":
                 assert stdout == ""
             else:
                 payload = json.loads(stdout)
@@ -719,45 +729,97 @@ def test_r4_result_composition_has_one_owner_and_both_main_paths_use_it() -> Non
     assert len(calls) == 1
 
 
-def test_parse_uncertain_public_guidance_requests_input_acquisition() -> None:
-    """Synthetic unclosed syntax stays denied without inventing push intent."""
-    command = "printf 'SYNTHETIC-PRIVATE-VALUE"
-    envelope = {"tool_name": "Bash", "tool_input": {"command": command}}
-    for target in TARGETS:
-        _common, preflight, _policy, _runner = _load_gate_target(target, "parse_guidance")
+def test_zero_signal_incomplete_analysis_abstains_without_authority() -> None:
+    """S1/S3: unknown observation alone cannot veto or authorize an operation."""
+    target = TARGETS[0]
+    _common, preflight, _policy, _runner = _load_gate_target(target, "abstention")
+    # Observer data only. The first input is valid PowerShell; its body remains
+    # incomplete under the observed Bash/POSIX analysis without runtime claims.
+    commands = (
+        "@'\nconst value = { label: \"it's synthetic\" };\n"
+        "console.log(JSON.stringify(value));\n'@ | node",
+        "env 1=x\nprintf 'git push origin sample'",
+    )
+    for command in commands:
+        envelope = {"tool_name": "Bash", "tool_input": {"command": command}}
         result = preflight.build_preflight(envelope)
-        assert result.reason_id == "PFP-DENY-PARSE"
-        assert result.failure_id == "PGG-PARSE-UNCERTAIN"
-        assert result.continuation == "RENDER_DENY"
+        assert result[:3] == (
+            "ABSTAIN", "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE", "NONE",
+        )
+        assert result.command == command and result.dialect == "posix"
         assert preflight.find_git_push_records(result.parsed) == []
+        assert not preflight._has_malformed_minus_c_push_candidate(result.parsed)
+        assert not result.parsed.effective_publications.exact_complete
+        assert result.parsed.effective_publications.eligible_direct_dry == ()
+        assert result.parsed.effective_publications.eligible_direct_generic == ()
+        assert (result.transcript_path, result.repository_workdir,
+                result.repository_workdir_source) == ("", "", "")
+        assert (result.current_turn_status, result.generic_decision,
+                result.failure_id, result.transcript_diagnostic) == (None,) * 4
+        assert not result.push_instruction and not result.simple_pr_approval
         for surface in ("direct", "runner"):
             completed = _run(target, envelope, surface=surface)
-            assert completed.returncode == 0 and completed.stderr == ""
-            payload = json.loads(completed.stdout)
-            assert set(payload) == {"hookSpecificOutput"}
-            specific = payload["hookSpecificOutput"]
-            assert set(specific) == {"hookEventName", "permissionDecision", "permissionDecisionReason"}
-            assert specific["hookEventName"] == "PreToolUse"
-            assert specific["permissionDecision"] == "deny"
-            reason = specific["permissionDecisionReason"]
-            print(f"PARSE_GUIDANCE {target.label}/{surface}: {reason}")
-            assert reason.startswith("PGG-PARSE-UNCERTAIN:")
-            assert command not in reason and "SYNTHETIC-PRIVATE-VALUE" not in reason
-            assert "exact command" in reason
-            assert "tool_name" in reason and "envelope" in reason
-            assert "syntax" in reason or "dialect" in reason
-            assert "direct push" not in reason
-            assert "[approve-publication]" not in reason
-            assert "scan-derived publication denied" not in reason
+            assert (completed.returncode, completed.stdout, completed.stderr) == (0, "", "")
+    # Real receiving paths still refuse an observed unauthorized publication.
+    for surface in ("direct", "runner"):
+        completed = _run(target, {
+            "tool_name": "Bash", "tool_input": {"command": "git push origin main"},
+        }, surface=surface)
+        assert completed.returncode == 0 and completed.stderr == ""
+        decision = json.loads(completed.stdout)["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny"
+        assert decision["permissionDecisionReason"].startswith("PRG-TRANSCRIPT-UNAVAILABLE:")
+
+
+def test_abstention_transport_rejects_tampered_and_foreign_results() -> None:
+    """S3: both consumers use the real strict validator before continuation."""
+    target = TARGETS[0]
+    _common, preflight, policy, runner = _load_gate_target(target, "abstention_transport")
+    result = preflight.build_preflight({
+        "tool_name": "Bash", "tool_input": {"command": "env 1=x"},
+    })
+    assert result.outcome == "ABSTAIN"
+    invalid = (
+        result._replace(outcome="UNKNOWN"),
+        result._replace(outcome="ALLOW_FINAL"),
+        result._replace(reason_id="UNKNOWN"),
+        result._replace(reason_id="PFP-ALLOW-NON-PUSH"),
+        result._replace(continuation="UNKNOWN"),
+        result._replace(continuation="EVALUATE_HEAVY"),
+        result._replace(parsed=None),
+        result._replace(push_instruction=True),
+        result._replace(simple_pr_approval=True),
+        result._replace(transcript_diagnostic=preflight.TranscriptDiagnostic(
+            "missing", "not-run", "not-run", "not-run",
+        )),
+        tuple(result),
+        object(),
+    )
+    for candidate in invalid:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            assert policy.compose_gate_result(candidate) == 0
+        assert stderr.getvalue() == ""
+        assert json.loads(stdout.getvalue())["hookSpecificOutput"]["permissionDecision"] == "deny"
+        with mock.patch.object(runner, "_load_preflight", return_value=(target.runner_path, preflight)), \
+             mock.patch.object(preflight, "build_preflight_from_stdin", return_value=candidate), \
+             mock.patch.object(runner, "_load_policy", side_effect=AssertionError("unexpected policy load")), \
+             contextlib.redirect_stdout(io.StringIO()) as captured:
+            assert runner.main() == 0
+        decision = json.loads(captured.getvalue())["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny"
+        assert decision["permissionDecisionReason"].startswith(EXPECTED_FAILURE_ID + ":")
 
 
 def test_parse_uncertain_heavy_path_uses_same_reason_owner(tmp_path: Path) -> None:
     """The heavy raise converges on the same renderer; receipt guidance stays specific."""
     for target in TARGETS:
         _common, preflight, policy, _runner = _load_gate_target(target, "heavy_guidance")
-        parse_result = preflight.build_preflight({
-            "tool_name": "Bash", "tool_input": {"command": "printf 'synthetic"},
-        })
+        parse_result = preflight.validate_preflight_result(preflight.PreflightResult(
+            "DEFER", "PFP-DENY-PARSE", "RENDER_DENY", "printf 'synthetic", "posix", "",
+            preflight.parse_shell_command("printf 'synthetic", "posix"),
+            None, None, False, "PGG-PARSE-UNCERTAIN",
+        ))
         heavy_result = preflight.build_preflight(_former_envelope("no-allow-deny", tmp_path))
         assert heavy_result.continuation == "EVALUATE_HEAVY"
 

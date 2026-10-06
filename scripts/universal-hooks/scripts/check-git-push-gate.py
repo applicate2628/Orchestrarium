@@ -243,6 +243,12 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      bodies are data; uncertain regions preserve literal push candidates,
      while prefixes, option roles, operands, repository context, and command
      boundaries remain explicit provenance. No detected push or candidate → exit 0.
+     Incomplete analysis with no effective publication record or malformed-minus-C
+     candidate returns ABSTAIN, preserving uncertainty without vetoing ordinary
+     work. Abstention certifies neither exact effects nor publication authority;
+     it supplies no dry-run, human-approval, grant, or scan credit. The analysis
+     dialect does not establish the actual interpreter. Positive candidates
+     continue through the existing publication checks even under uncertainty.
   5. Every exact direct push proving a standalone positive long `--dry-run`,
      with no negation, ambiguous option role, or conservative candidate → exit 0.
   6. Missing, unreadable, or invalid transcript data denies with
@@ -3949,6 +3955,8 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             None, None, None, False, None,
         )
     if result.outcome == "ALLOW_FINAL":
+        return 0
+    if result.outcome == "ABSTAIN" and result.continuation == "NONE":
         return 0
 
     failure_id: str | None = result.failure_id

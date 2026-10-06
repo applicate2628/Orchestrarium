@@ -96,6 +96,8 @@ def main() -> int:
             )
             if decision.outcome == "ALLOW_FINAL":
                 result = 0
+            elif decision.outcome == "ABSTAIN" and decision.continuation == "NONE":
+                result = 0
             else:
                 policy = _load_policy(runner)
                 result = policy.main(decision)
