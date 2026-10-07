@@ -714,3 +714,257 @@ def test_inside_absent_link_partial_tombstone_rechecks_before_unlink(tmp_path: P
     assert release(mutator, root, archived, event).is_file()
     assert not tombstone.exists()
     assert mutator.close_item(root, archived.name, closure, instant) == archived
+
+
+def prior_disposal_fixture(tmp_path: Path):
+    """The synthetic operator has reviewed this exact completed action mapping."""
+    helpers = load_module(SCRATCH_FIXTURE, f"prior_disposal_fixture_{id(tmp_path)}")
+    root = tmp_path / "repo"
+    mutator, item, scratch, _payload = helpers.seed_item(root, disposition="retain")
+    raw = (item / "agent-runs.jsonl").read_bytes().splitlines()[-1]
+    event = json.loads(raw)
+    entry = event["scratchEvidence"][0]
+    (scratch / "payload.txt").unlink()
+    scratch.rmdir()
+    (item / "completed-action.md").write_text(
+        f"The reviewed synthetic action removed only {entry['path']}; canonical observations remain.\n",
+        encoding="utf-8",
+    )
+    (item / "reviewed-admission.md").write_text(
+        f"The synthetic operator reviewed and accepted this exact {event['runId']}/{entry['entryId']} action mapping.\n",
+        encoding="utf-8",
+    )
+    digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+    request = {
+        "schemaVersion": 1, "mode": "accepted-prior-disposal", "workItem": item.name,
+        "recordedAt": "2026-08-09T00:20:00Z", "subjects": [{
+            "runId": event["runId"], "entryId": entry["entryId"],
+            "eventSha256": hashlib.sha256(raw).hexdigest(), "sourcePath": entry["path"],
+            "canonicalPointer": entry["canonicalPointer"],
+            "canonicalPointerSha256": digest(item / entry["canonicalPointer"]),
+            "actionEvidence": [{"artifact": "completed-action.md", "sha256": digest(item / "completed-action.md"),
+                                "actionFrom": "2026-08-09T00:10:00Z", "actionThrough": "2026-08-09T00:10:01Z"}],
+            "admissionEvidence": {"artifact": "reviewed-admission.md", "sha256": digest(item / "reviewed-admission.md")},
+            "rationale": "Reviewed exact completed disposal preserves canonical observations; raw recovery is not certified.",
+        }],
+    }
+    request_file = tmp_path / "reviewed-request.json"
+    request_file.write_text(json.dumps(request), encoding="utf-8")
+    return helpers, mutator, root, item, scratch, event, request, request_file
+
+
+def reconciliation_cli(root: Path, item: Path, request_file: Path, *, apply=True):
+    environment = dict(os.environ)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    return subprocess.run(
+        [sys.executable, "-B", str(ROOT / "scripts" / "mutate-work-item.py"),
+         "reconcile-retained-scratch", "--root", str(root), "--slug", item.name,
+         "--request-file", str(request_file), *(["--apply"] if apply else [])],
+        cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30,
+    )
+
+
+def test_reconcile_prior_disposal_public_cli_preserves_history_and_replays(tmp_path: Path):
+    helpers, mutator, root, item, scratch, event, request, request_file = prior_disposal_fixture(tmp_path)
+    before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    refused = reconciliation_cli(root, item, request_file, apply=False)
+    assert refused.returncode == 1 and "WI-SCRATCH-RECONCILIATION-APPLY-REQUIRED" in refused.stdout
+    assert {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+    applied = reconciliation_cli(root, item, request_file)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    path = mutator._release_receipt_path(item, event["runId"], event["scratchEvidence"][0]["entryId"])
+    receipt_bytes = path.read_bytes()
+    receipt = json.loads(receipt_bytes)
+    assert receipt["schemaVersion"] == 2 and receipt["mode"] == "accepted-prior-disposal"
+    assert receipt["rawRecovery"] == "not-certified" and receipt["evidenceScope"] == "canonical-observations"
+    assert not {"inventory", "inventorySha256", "archive"} & set(receipt)
+    after = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert set(after) - set(before) == {path.relative_to(root)}
+    assert {p: after[p] for p in before} == before and not scratch.exists()
+    replay = reconciliation_cli(root, item, request_file)
+    assert replay.returncode == 0, replay.stdout + replay.stderr
+    assert path.read_bytes() == receipt_bytes
+    assert mutator._scratch_disposition_plan(root, item, archived=False)[0].disposition == "completed-disposal"
+    instant = "2026-08-09T01:00:00Z"
+    closure_file = tmp_path / "closure-input.md"
+    closure_file.write_bytes(helpers.closure(instant))
+    argv = [sys.executable, "-B", str(ROOT / "scripts/mutate-work-item.py"), "close", "--root", str(root),
+            "--slug", item.name, "--closure-file", str(closure_file), "--terminal-instant", instant]
+    environment = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    for _ in range(2):
+        closed = subprocess.run(argv, cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30)
+        assert closed.returncode == 0, closed.stdout + closed.stderr
+    archived = root / "work-items/archive/2026-08" / item.name
+    assert (archived / "agent-runs.jsonl").read_bytes() == before[item.relative_to(root) / "agent-runs.jsonl"]
+    assert mutator._release_receipt_path(archived, receipt["runId"], receipt["entryId"]).read_bytes() == receipt_bytes
+    assert not scratch.exists()
+    before_reverse = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    reverse = subprocess.run(
+        [sys.executable, "-B", str(ROOT / "scripts/mutate-work-item.py"), "release-retained-scratch",
+         "--root", str(root), "--slug", archived.name, "--terminal-run-id", receipt["runId"],
+         "--expected-event-sha256", receipt["eventSha256"], "--entry-id", receipt["entryId"],
+         "--artifact", receipt["canonicalPointer"], "--rationale", "Reviewed synthetic reverse-mode refusal.", "--apply"],
+        cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30,
+    )
+    assert reverse.returncode == 1
+    assert reverse.stdout == "WI-SCRATCH-RELEASE-RECEIPT: live-inventory release requires a Version 1 receipt\n"
+    assert reverse.stderr == ""
+    assert {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before_reverse
+    assert (archived / "agent-runs.jsonl").read_bytes() == before[item.relative_to(root) / "agent-runs.jsonl"]
+    assert mutator._release_receipt_path(archived, receipt["runId"], receipt["entryId"]).read_bytes() == receipt_bytes
+    assert not scratch.exists()
+    print("PRIOR_DISPOSAL_PUBLIC_CHANNEL", applied.stdout.strip(), "close/replay exits=0; ledger/pointers unchanged")
+    print("PRIOR_DISPOSAL_REVERSE_MODE", reverse.stdout.strip(), "exit=1; no traceback; all filesystem bytes unchanged")
+
+
+@pytest.mark.parametrize("fault", [
+    "raw-event", "path", "pointer", "action", "admission", "unknown-subject", "duplicate",
+    "cross-item", "inventory", "mode", "empty", "default-version", "duplicate-json", "backdated",
+])
+def test_reconciliation_rejects_unbound_or_malformed_requests(tmp_path: Path, fault: str):
+    _helpers, _mutator, root, item, scratch, _event, request, request_file = prior_disposal_fixture(tmp_path)
+    subject = request["subjects"][0]
+    if fault == "raw-event": subject["eventSha256"] = "0" * 64
+    elif fault == "path": subject["sourcePath"] += "-other"
+    elif fault == "pointer": subject["canonicalPointerSha256"] = "0" * 64
+    elif fault == "action": subject["actionEvidence"][0]["sha256"] = "0" * 64
+    elif fault == "admission": (item / "reviewed-admission.md").unlink()
+    elif fault == "unknown-subject": subject["entryId"] = "unproved-entry"
+    elif fault == "duplicate": request["subjects"].append(dict(subject))
+    elif fault == "cross-item": request["workItem"] = "other-item"
+    elif fault == "inventory": subject["inventory"] = []
+    elif fault == "mode": request["mode"] = "unrecognized"
+    elif fault == "empty": request["subjects"] = []
+    elif fault == "default-version": request["schemaVersion"] = False
+    elif fault == "backdated": request["recordedAt"] = subject["actionEvidence"][0]["actionThrough"]
+    encoded = json.dumps(request)
+    if fault == "duplicate-json": encoded = encoded.replace('"schemaVersion": 1', '"schemaVersion": 1, "schemaVersion": 1', 1)
+    request_file.write_text(encoded, encoding="utf-8")
+    before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    result = reconciliation_cli(root, item, request_file)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "WI-SCRATCH-" in result.stdout
+    assert {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+    assert not scratch.exists() and not (item / "retained-scratch-releases").exists()
+
+
+@pytest.mark.parametrize("state", ["original", "tombstone"])
+def test_reconciliation_preserves_present_or_tombstoned_data(tmp_path: Path, state: str):
+    _helpers, mutator, root, item, scratch, event, _request, request_file = prior_disposal_fixture(tmp_path)
+    entry = event["scratchEvidence"][0]
+    present = scratch if state == "original" else mutator._scratch_tombstone(scratch, item.name, event["runId"], entry["entryId"])
+    present.write_bytes(b"newly present bytes must remain")
+    result = reconciliation_cli(root, item, request_file)
+    assert result.returncode == 1 and "WI-SCRATCH-RECONCILIATION-DRIFT" in result.stdout
+    assert present.read_bytes() == b"newly present bytes must remain"
+    assert not (item / "retained-scratch-releases").exists()
+
+
+@pytest.mark.parametrize("fault", ["entry-pin", "mode", "stage", "pointer-drift"])
+def test_reconciliation_receipt_and_proof_drift_never_replace_prior_bytes(tmp_path: Path, fault: str):
+    _helpers, mutator, root, item, scratch, event, _request, request_file = prior_disposal_fixture(tmp_path)
+    assert reconciliation_cli(root, item, request_file).returncode == 0
+    path = mutator._release_receipt_path(item, event["runId"], event["scratchEvidence"][0]["entryId"])
+    receipt = json.loads(path.read_bytes())
+    if fault == "entry-pin": receipt["entrySha256"] = "0" * 64; path.write_text(json.dumps(receipt), encoding="utf-8")
+    elif fault == "mode": receipt["mode"] = "unknown"; path.write_text(json.dumps(receipt), encoding="utf-8")
+    elif fault == "stage": path.with_name(f".{path.name}.foreign.tmp").write_bytes(b"partial metadata")
+    elif fault == "pointer-drift": (item / "implementation.md").write_bytes(b"changed canonical observations")
+    before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    refused = reconciliation_cli(root, item, request_file)
+    assert refused.returncode == 1, refused.stdout + refused.stderr
+    with pytest.raises(mutator.LifecycleError):
+        mutator._scratch_disposition_plan(root, item, archived=False)
+    assert {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+    assert not scratch.exists()
+
+
+def add_second_retained_subject(root, item, event, request, request_file):
+    entry = {**event["scratchEvidence"][0], "entryId": "entry-b"}
+    entry["path"] = str(Path(entry["path"]).with_name("entry-b")).replace("\\", "/")
+    event["scratchEvidence"].append(entry)
+    ledger = item / "agent-runs.jsonl"
+    lines = ledger.read_bytes().splitlines()
+    lines[-1] = json.dumps(event, separators=(",", ":")).encode()
+    ledger.write_bytes(b"\n".join(lines) + b"\n")
+    scratch = root / entry["path"]
+    scratch.mkdir(); (scratch / "payload.txt").write_bytes(b"second reviewed synthetic payload")
+    (scratch / "payload.txt").unlink(); scratch.rmdir()
+    subject = json.loads(json.dumps(request["subjects"][0]))
+    subject.update(entryId=entry["entryId"], sourcePath=entry["path"])
+    request["subjects"].append(subject)
+    (item / "completed-action.md").write_text("The operator reviewed both exact synthetic completed removals.\n", encoding="utf-8")
+    (item / "reviewed-admission.md").write_text("Both requested run/entry mappings were explicitly reviewed by the synthetic operator.\n", encoding="utf-8")
+    for row in request["subjects"]:
+        row["eventSha256"] = hashlib.sha256(lines[-1]).hexdigest()
+        row["actionEvidence"][0]["sha256"] = hashlib.sha256((item / "completed-action.md").read_bytes()).hexdigest()
+        row["admissionEvidence"]["sha256"] = hashlib.sha256((item / "reviewed-admission.md").read_bytes()).hexdigest()
+    request_file.write_text(json.dumps(request), encoding="utf-8")
+
+
+def test_reconciliation_batch_failure_rolls_back_only_new_metadata(tmp_path: Path, monkeypatch):
+    _helpers, mutator, root, item, _scratch, event, request, request_file = prior_disposal_fixture(tmp_path)
+    add_second_retained_subject(root, item, event, request, request_file)
+    before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    real_publish = mutator._publish_release_receipt
+    calls = 0
+    def fail_second(path, encoded, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2: raise OSError("injected second metadata publication failure")
+        return real_publish(path, encoded, **kwargs)
+    monkeypatch.setattr(mutator, "_publish_release_receipt", fail_second)
+    with pytest.raises(OSError, match="second metadata publication"):
+        mutator.reconcile_retained_scratch(root, item.name, request_file, apply=True)
+    assert calls == 2
+    assert {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+    assert not (item / "retained-scratch-releases").exists()
+
+
+@pytest.mark.parametrize("change", ["reappearance", "proof-drift"])
+def test_completed_disposal_rechecks_before_and_after_archive_without_deletion(tmp_path: Path, monkeypatch, change: str):
+    helpers, mutator, root, item, scratch, _event, _request, request_file = prior_disposal_fixture(tmp_path)
+    assert reconciliation_cli(root, item, request_file).returncode == 0
+    instant = "2026-08-09T01:00:00Z"
+    if change == "reappearance":
+        prepare = mutator._prepare_bug_dispositions
+        def prepare_then_reappear(*args, **kwargs):
+            result = prepare(*args, **kwargs)
+            scratch.write_bytes(b"late unrelated payload")
+            return result
+        monkeypatch.setattr(mutator, "_prepare_bug_dispositions", prepare_then_reappear)
+    else:
+        refresh = mutator.refresh_readme
+        def refresh_then_drift(*args, **kwargs):
+            result = refresh(*args, **kwargs)
+            archived = root / "work-items/archive/2026-08" / item.name
+            (archived / "implementation.md").write_bytes(b"late changed canonical observations")
+            return result
+        monkeypatch.setattr(mutator, "refresh_readme", refresh_then_drift)
+    with pytest.raises(mutator.LifecycleError, match="completed-disposal|reviewed evidence"):
+        mutator.close_item(root, item.name, helpers.closure(instant), instant)
+    if change == "reappearance":
+        assert scratch.read_bytes() == b"late unrelated payload" and item.is_dir()
+    else:
+        assert (root / "work-items/archive/2026-08" / item.name / "implementation.md").read_bytes() == b"late changed canonical observations"
+        assert not scratch.exists()
+
+
+def test_reconciliation_preserves_unselected_missing_retention_and_open_launch(tmp_path: Path):
+    helpers, mutator, root, item, scratch, event, request, request_file = prior_disposal_fixture(tmp_path)
+    add_second_retained_subject(root, item, event, request, request_file)
+    request["subjects"].pop()
+    request_file.write_text(json.dumps(request), encoding="utf-8")
+    applied = reconciliation_cli(root, item, request_file)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    with pytest.raises(mutator.LifecycleError, match="retained scratch evidence is missing"):
+        mutator._scratch_disposition_plan(root, item, archived=False)
+    ledger = item / "agent-runs.jsonl"
+    original_rows = ledger.read_bytes()
+    launch = json.loads(original_rows.splitlines()[0]); launch["runId"] = "unrelated-open-launch"
+    ledger.write_bytes(original_rows + json.dumps(launch).encode() + b"\n")
+    assert reconciliation_cli(root, item, request_file).returncode == 0
+    assert ledger.read_bytes().startswith(original_rows)
+    with pytest.raises(mutator.LifecycleError, match="WI-LEDGER-UNSETTLED|launch"):
+        mutator.close_item(root, item.name, helpers.closure("2026-08-09T01:00:00Z"), "2026-08-09T01:00:00Z")
+    assert item.is_dir() and not scratch.exists()

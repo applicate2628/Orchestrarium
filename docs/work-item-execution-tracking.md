@@ -752,6 +752,10 @@ fields.
 
 ## Release one archived retained scratch entry
 
+This section describes Version 1 live-inventory release. Recording an accepted
+completed disposal uses the separate metadata-only operation below; it cannot
+fabricate this inventory or delete a newly present root.
+
 An archived ledger entry with `scratchEvidence.disposition: retain` remains
 required by ordinary close replay. Release is an opt-in post-close operation
 for exactly one terminal `runId` and `entryId`; it does not authorize a batch
@@ -803,6 +807,53 @@ remain verified. Only ReadOnly is cleared; a failed retry restores that flag
 on the verified identity and leaves the failure visible. Access-control lists
 and ownership are never repaired. This operation is shared with ordinary
 scratch disposition; links and directory targets do not use it.
+
+### Record an accepted completed disposal
+
+For a unique active or archived item, the lifecycle owner can record a reviewed
+past removal of exact valid retained entries without rewriting their terminal
+ledger rows. The trusted operator first reviews the request's subject-to-action
+and admission mapping. Hashes pin its current bytes; the writer does not infer
+historical acceptance from arbitrary Markdown, a copied PASS or rationale text.
+
+```powershell
+python scripts/mutate-work-item.py reconcile-retained-scratch --root <repository> --slug <item-slug> --request-file <reviewed-request.json> --apply
+```
+
+The strict UTF-8 JSON request has exactly `schemaVersion: 1`,
+`mode: "accepted-prior-disposal"`, `workItem`, `recordedAt` and nonempty `subjects`.
+Each subject has exactly `runId`, `entryId`, `eventSha256`, `sourcePath`,
+`canonicalPointer`, `canonicalPointerSha256`, `actionEvidence`,
+`admissionEvidence` and `rationale`. Action references have exactly `artifact`,
+`sha256`, `actionFrom` and `actionThrough`; the admission reference has exactly
+`artifact` and `sha256`. All artifacts are confined ordinary same-item files.
+Use the original stored terminal line without its ending for `eventSha256`,
+never a parsed/reserialized event. Action times and current recording time use
+strict UTC; recording must follow each completed action range. The request
+reuses existing ledger JSON byte and scratch-entry bounds. Duplicate selectors,
+unknown/default/missing fields and unbound or changed evidence refuse.
+
+Without positive `--apply`, the command refuses before acquiring a lifecycle
+transaction or creating persistent state. Apply captures the reviewed inputs
+under the existing lifecycle transaction and selected ledger lock, validates
+the complete batch, and creates only additive Version 2 receipts in
+`retained-scratch-releases/`. Each receipt binds stable `workItem`, exact raw
+event/entry/path, current pointer, action/admission hashes, recording time,
+`evidenceScope: "canonical-observations"` and `rawRecovery: "not-certified"`.
+It has no live inventory or archive-location field. Both original and tombstone
+must be absent; present/reappeared data is preserved and refuses this mode.
+Failed publication rolls back only newly owned metadata. Exact identical
+repetition reads back existing receipts; changed inputs or conflicting mode/stage
+do not overwrite them.
+
+One retained-scratch reader interprets this completed-disposal state for active
+close and archived replay, rechecking proof and absence before close writes and
+after archive placement. It performs no payload rename, unlink, restoration or
+inventory. Unknown or unselected missing retains and ordinary open obligations
+still block close. This mode certifies neither exact raw recovery nor future
+custody, parent closure or publication authority. Root runs its normal receiving
+and closure checks after Source acceptance; installed command availability still
+requires rollout verification.
 
 ## Retained preimages and incoming-link selection
 

@@ -3957,9 +3957,18 @@ def _release_receipt_path(item: Path, run_id: str, entry_id: str) -> Path:
     return item / "retained-scratch-releases" / f"{identity}.json"
 
 
-def _release_event_binding(item: Path, run_id: str, entry_id: str) -> tuple[str, dict]:
+def _release_event_binding(
+    item: Path, run_id: str, entry_id: str, *, event_out: list[dict] | None = None,
+) -> tuple[str, dict]:
     matches: list[tuple[str, dict]] = []
-    for raw_line in (item / "agent-runs.jsonl").read_bytes().splitlines():
+    ledger_bytes = (
+        _capture_file_snapshot(
+            item / "agent-runs.jsonl", failure_id="WI-SCRATCH-RECONCILIATION-IDENTITY",
+            maximum_bytes=_validator_module().MAX_TRANSFER_LEDGER_BYTES, require_single_link=True,
+        ).data
+        if event_out is not None else (item / "agent-runs.jsonl").read_bytes()
+    )
+    for raw_line in ledger_bytes.splitlines():
         try:
             event = json.loads(raw_line)
         except (ValueError, TypeError) as exc:
@@ -3972,10 +3981,14 @@ def _release_event_binding(item: Path, run_id: str, entry_id: str) -> tuple[str,
     selected = [entry for entry in entries if isinstance(entry, dict) and entry.get("entryId") == entry_id]
     if len(selected) != 1 or selected[0].get("disposition") != "retain":
         raise LifecycleError("WI-SCRATCH-RELEASE-IDENTITY", "one exact retained entry is required")
+    if event_out is not None:
+        event_out.append(matches[0][1])
     return matches[0][0], selected[0]
 
 
-def _release_artifact_snapshot(item: Path, artifact: str) -> str:
+def _release_artifact_snapshot(
+    item: Path, artifact: str, *, retained_inputs: list[CapturedFileSnapshot] | None = None,
+) -> str:
     relative = PurePosixPath(artifact)
     if (
         not artifact or relative.is_absolute() or Path(artifact).drive or "\\" in artifact
@@ -3990,9 +4003,115 @@ def _release_artifact_snapshot(item: Path, artifact: str) -> str:
     )
     if not path.is_file():
         raise LifecycleError("WI-SCRATCH-RELEASE-EVIDENCE", "canonical artifact is missing")
-    return _sha256_bytes(_capture_file_snapshot(
+    snapshot = _capture_file_snapshot(
         path, failure_id="WI-SCRATCH-RELEASE-EVIDENCE", require_single_link=True,
-    ).data)
+    )
+    if retained_inputs is not None:
+        retained_inputs.append(snapshot)
+    return _sha256_bytes(snapshot.data)
+
+
+_PRIOR_DISPOSAL_MODE = "accepted-prior-disposal"
+_PRIOR_DISPOSAL_SUBJECT_FIELDS = frozenset({
+    "runId", "entryId", "eventSha256", "sourcePath", "canonicalPointer",
+    "canonicalPointerSha256", "actionEvidence", "admissionEvidence", "rationale",
+})
+_PRIOR_DISPOSAL_RECEIPT_FIELDS = _PRIOR_DISPOSAL_SUBJECT_FIELDS | {
+    "schemaVersion", "mode", "workItem", "entrySha256", "recordedAt",
+    "evidenceScope", "rawRecovery",
+}
+
+
+def _prior_disposal_absence(root: Path, item: Path, receipt: dict) -> None:
+    original = root / Path(receipt["sourcePath"])
+    tombstone = _scratch_tombstone(original, item.name, receipt["runId"], receipt["entryId"])
+    classifier = _scratch_classifier_module()
+    for candidate in (original, tombstone):
+        _lifecycle_reject_unreduced_reparse(
+            candidate, failure_id="WI-SCRATCH-RECONCILIATION-DRIFT",
+            message="completed disposal crosses a link or reparse point",
+        )
+        try:
+            observed = classifier.inspect_root_no_follow(candidate)
+        except classifier.OwnedTreeClassificationError as exc:
+            raise LifecycleError("WI-SCRATCH-RECONCILIATION-DRIFT", str(exc)) from exc
+        if observed.exists:
+            raise LifecycleError(
+                "WI-SCRATCH-RECONCILIATION-DRIFT",
+                "completed-disposal original or tombstone is present",
+            )
+
+
+def _validate_prior_disposal_receipt(
+    root: Path, item: Path, run_id: str, entry_id: str, entry: dict, receipt: dict,
+    *, retained_inputs: list[CapturedFileSnapshot] | None = None,
+) -> None:
+    """Bind reviewed caller data, not the semantic truth of arbitrary Markdown."""
+    validator = _validator_module()
+    if (
+        type(receipt) is not dict or set(receipt) != _PRIOR_DISPOSAL_RECEIPT_FIELDS
+        or type(receipt["schemaVersion"]) is not int or receipt["schemaVersion"] != 2
+        or receipt["mode"] != _PRIOR_DISPOSAL_MODE or receipt["workItem"] != item.name
+        or receipt["runId"] != run_id or receipt["entryId"] != entry_id
+        or receipt["evidenceScope"] != "canonical-observations"
+        or receipt["rawRecovery"] != "not-certified"
+    ):
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-RECEIPT", "completed-disposal receipt shape differs")
+    events: list[dict] = []
+    event_hash, bound_entry = _release_event_binding(item, run_id, entry_id, event_out=events)
+    event = events[0]
+    errors: list[str] = []
+    artifact_path = item / event["artifact"] if isinstance(event.get("artifact"), str) else None
+    validator.validate_scratch_evidence(event, item, artifact_path, run_id, errors)
+    if errors:
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-IDENTITY", "; ".join(errors))
+    entry_hash = _sha256_bytes(json.dumps(bound_entry, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    if (
+        bound_entry != entry or receipt["eventSha256"] != event_hash
+        or receipt["entrySha256"] != entry_hash or receipt["sourcePath"] != entry["path"]
+        or receipt["sourcePath"] != f".scratch/work-items/{item.name}/{run_id}/{entry_id}"
+        or receipt["canonicalPointer"] != entry["canonicalPointer"]
+    ):
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-IDENTITY", "completed-disposal subject differs")
+    for name in ("eventSha256", "entrySha256", "canonicalPointerSha256"):
+        if not isinstance(receipt[name], str) or SHA256_RE.fullmatch(receipt[name]) is None:
+            raise LifecycleError("WI-SCRATCH-RECONCILIATION-RECEIPT", "completed-disposal digest is invalid")
+    rationale = receipt["rationale"]
+    if not isinstance(rationale, str) or not rationale.strip() or len(rationale) > validator.MAX_SCRATCH_REASON_LENGTH:
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-EVIDENCE", "reviewed disposition rationale is required")
+    try:
+        recorded = _strict_utc(receipt["recordedAt"])
+    except (LifecycleError, TypeError) as exc:
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-EVIDENCE", "recording time is invalid") from exc
+    actions = receipt["actionEvidence"]
+    admission = receipt["admissionEvidence"]
+    if (
+        type(actions) is not list or not actions or len(actions) > validator.MAX_SCRATCH_EVIDENCE_ENTRIES
+        or any(type(row) is not dict or set(row) != {"artifact", "sha256", "actionFrom", "actionThrough"} for row in actions)
+        or type(admission) is not dict or set(admission) != {"artifact", "sha256"}
+    ):
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-EVIDENCE", "reviewed action and admission references are required")
+    references = [(receipt["canonicalPointer"], receipt["canonicalPointerSha256"])]
+    for row in (*actions, admission):
+        if (
+            not isinstance(row["artifact"], str) or not row["artifact"]
+            or len(row["artifact"]) > validator.MAX_SCRATCH_POINTER_LENGTH
+            or not isinstance(row["sha256"], str) or SHA256_RE.fullmatch(row["sha256"]) is None
+        ):
+            raise LifecycleError("WI-SCRATCH-RECONCILIATION-EVIDENCE", "evidence reference is invalid")
+        references.append((row["artifact"], row["sha256"]))
+    for row in actions:
+        try:
+            action_from = _strict_utc(row["actionFrom"])
+            action_through = _strict_utc(row["actionThrough"])
+        except (LifecycleError, TypeError) as exc:
+            raise LifecycleError("WI-SCRATCH-RECONCILIATION-EVIDENCE", "past action time is invalid") from exc
+        if not action_from <= action_through < recorded:
+            raise LifecycleError("WI-SCRATCH-RECONCILIATION-EVIDENCE", "recording time must follow the completed action")
+    for artifact, expected_hash in references:
+        if _release_artifact_snapshot(item, artifact, retained_inputs=retained_inputs) != expected_hash:
+            raise LifecycleError("WI-SCRATCH-RECONCILIATION-EVIDENCE", "reviewed evidence bytes differ")
+    _prior_disposal_absence(root, item, receipt)
 
 
 def _release_inventory(
@@ -4221,34 +4340,42 @@ def _release_receipt(
         receipt = json.loads(raw)
     except (TypeError, ValueError) as exc:
         raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt is malformed") from exc
-    event_hash, bound_entry = _release_event_binding(item, run_id, entry_id)
-    expected_keys = {
-        "schemaVersion", "archive", "runId", "entryId", "eventSha256", "entrySha256",
-        "sourcePath", "artifact", "artifactSha256", "rationale", "inventory", "inventorySha256",
-    }
-    if not isinstance(receipt, dict) or set(receipt) != expected_keys:
-        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt shape differs")
-    rows = receipt["inventory"]
-    try:
-        valid_rows = _valid_release_inventory_rows(rows)
-        digest = _sha256_bytes(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode("utf-8")) if valid_rows else ""
-    except (TypeError, ValueError, KeyError):
-        valid_rows, digest = False, ""
-    if not valid_rows or digest != receipt["inventorySha256"]:
-        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release inventory is malformed")
-    archive_relative = item.relative_to(root).as_posix()
-    entry_hash = _sha256_bytes(json.dumps(bound_entry, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-    if (
-        receipt["schemaVersion"] != 1 or receipt["archive"] != archive_relative
-        or receipt["runId"] != run_id or receipt["entryId"] != entry_id
-        or receipt["eventSha256"] != event_hash or receipt["entrySha256"] != entry_hash
-        or receipt["sourcePath"] != entry["path"]
-        or not isinstance(receipt["rationale"], str) or not receipt["rationale"].strip()
-        or not isinstance(receipt["artifact"], str)
-        or receipt["artifactSha256"] != _release_artifact_snapshot(item, receipt["artifact"])
-    ):
-        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release identity or evidence differs")
-    _verify_release_targets(root, item, root / Path(entry["path"]), tuple(rows), receipt["artifactSha256"])
+    if isinstance(receipt, dict) and receipt.get("schemaVersion") == 2:
+        try:
+            receipt = _validator_module().decode_json_object(raw.decode("utf-8"), source="completed-disposal receipt")
+        except ValueError as exc:
+            raise LifecycleError("WI-SCRATCH-RECONCILIATION-RECEIPT", "completed-disposal receipt is malformed") from exc
+        _validate_prior_disposal_receipt(root, item, run_id, entry_id, entry, receipt)
+    else:
+        event_hash, bound_entry = _release_event_binding(item, run_id, entry_id)
+        expected_keys = {
+            "schemaVersion", "archive", "runId", "entryId", "eventSha256", "entrySha256",
+            "sourcePath", "artifact", "artifactSha256", "rationale", "inventory", "inventorySha256",
+        }
+        if not isinstance(receipt, dict) or set(receipt) != expected_keys:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt shape differs")
+        rows = receipt["inventory"]
+        try:
+            valid_rows = _valid_release_inventory_rows(rows)
+            digest = _sha256_bytes(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode("utf-8")) if valid_rows else ""
+        except (TypeError, ValueError, KeyError):
+            valid_rows, digest = False, ""
+        if not valid_rows or digest != receipt["inventorySha256"]:
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release inventory is malformed")
+        archive_relative = item.relative_to(root).as_posix()
+        entry_hash = _sha256_bytes(json.dumps(bound_entry, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        if (
+            item.parent.parent != _work_items_root(root) / "archive"
+            or receipt["schemaVersion"] != 1 or receipt["archive"] != archive_relative
+            or receipt["runId"] != run_id or receipt["entryId"] != entry_id
+            or receipt["eventSha256"] != event_hash or receipt["entrySha256"] != entry_hash
+            or receipt["sourcePath"] != entry["path"]
+            or not isinstance(receipt["rationale"], str) or not receipt["rationale"].strip()
+            or not isinstance(receipt["artifact"], str)
+            or receipt["artifactSha256"] != _release_artifact_snapshot(item, receipt["artifact"])
+        ):
+            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release identity or evidence differs")
+        _verify_release_targets(root, item, root / Path(entry["path"]), tuple(rows), receipt["artifactSha256"])
     if reconciliation_stage is not None:
         try:
             rebound_final = path.lstat()
@@ -4285,6 +4412,27 @@ def _release_rows_match(actual: tuple[dict, ...], expected: tuple[dict, ...], *,
     return True
 
 
+def _scratch_ledger_entries(item: Path) -> list[tuple[str, dict]]:
+    validator = _validator_module()
+    errors: list[str] = []
+    raw_metadata: list[dict[str, object]] = []
+    events = validator.load_jsonl(item / "agent-runs.jsonl", errors, raw_metadata)
+    effective_events, _migration_counts, projection_errors = validator.project_legacy_obligation_migrations(
+        events, raw_metadata, item
+    )
+    errors.extend(projection_errors)
+    for event in effective_events:
+        entries = event.get("scratchEvidence")
+        if entries is not None and (
+            not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries)
+        ):
+            errors.append(f"{event.get('runId')}: scratchEvidence must be a list of objects")
+    validator.validate_scratch_ownership(effective_events, item, errors)
+    if errors:
+        raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join(errors))
+    return [(event["runId"], entry) for event in effective_events for entry in event.get("scratchEvidence", [])]
+
+
 def _scratch_disposition_plan(
     root: Path,
     item: Path,
@@ -4312,26 +4460,7 @@ def _scratch_disposition_plan(
         return ()
 
     validator = _validator_module()
-    errors: list[str] = []
-    raw_metadata: list[dict[str, object]] = []
-    events = validator.load_jsonl(ledger, errors, raw_metadata)
-    effective_events, _migration_counts, projection_errors = validator.project_legacy_obligation_migrations(
-        events, raw_metadata, item
-    )
-    errors.extend(projection_errors)
-    for event in effective_events:
-        entries = event.get("scratchEvidence")
-        if entries is not None and (
-            not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries)
-        ):
-            errors.append(f"{event.get('runId')}: scratchEvidence must be a list of objects")
-    validator.validate_scratch_ownership(effective_events, item, errors)
-    if errors:
-        raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join(errors))
-    recorded: list[tuple[str, dict]] = []
-    for event in effective_events:
-        for entry in event.get("scratchEvidence", []):
-            recorded.append((event["runId"], entry))
+    recorded = _scratch_ledger_entries(item)
     if not recorded:
         originals, tombstones = _scratch_namespace_entries(owner_root)
         if owner_inspection.exists and (set(originals) != set(retention_paths) or tombstones):
@@ -4359,7 +4488,7 @@ def _scratch_disposition_plan(
             )
         release_receipt = (
             _release_receipt(root, item, run_id, entry["entryId"], entry)
-            if archived and entry["disposition"] == "retain" else None
+            if entry["disposition"] == "retain" else None
         )
         if entry["disposition"] == "retain" and release_receipt is None and (tombstone_exists or not original_exists):
             raise LifecycleError(
@@ -4367,7 +4496,7 @@ def _scratch_disposition_plan(
                 f"retained scratch evidence is missing or tombstoned: {entry['path']}",
             )
         if not original_exists and not tombstone_exists:
-            if not archived:
+            if not archived and release_receipt is None:
                 raise LifecycleError(
                     "WI-SCRATCH-OWNERSHIP-INCOMPLETE",
                     f"declared scratch evidence is missing: {entry['path']}",
@@ -4388,12 +4517,13 @@ def _scratch_disposition_plan(
                 "; ".join(pointer_errors) or "missing canonical pointer",
             )
         if release_receipt is not None:
-            expected_rows = tuple(release_receipt["inventory"])
-            if original_exists or tombstone_exists:
-                source = tombstone if tombstone_exists else original
-                actual_rows = _release_inventory(root, source, original, verify_link_targets=False)
-                if not _release_rows_match(actual_rows, expected_rows, subset=tombstone_exists):
-                    raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release source differs from bound inventory")
+            if release_receipt["schemaVersion"] == 1:
+                expected_rows = tuple(release_receipt["inventory"])
+                if original_exists or tombstone_exists:
+                    source = tombstone if tombstone_exists else original
+                    actual_rows = _release_inventory(root, source, original, verify_link_targets=False)
+                    if not _release_rows_match(actual_rows, expected_rows, subset=tombstone_exists):
+                        raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release source differs from bound inventory")
             snapshot = None
             proof = None
         elif entry["disposition"] == "retain":
@@ -4421,7 +4551,10 @@ def _scratch_disposition_plan(
             ScratchDisposition(
                 original=original,
                 tombstone=tombstone,
-                disposition="release" if release_receipt is not None else entry["disposition"],
+                disposition=(
+                    "completed-disposal" if release_receipt is not None and release_receipt["schemaVersion"] == 2
+                    else "release" if release_receipt is not None else entry["disposition"]
+                ),
                 proof=proof,
                 canonical_pointer=pointer,
                 snapshot=snapshot,
@@ -4618,10 +4751,26 @@ def _settle_released_scratch(
         raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "injected after-final-removal")
 
 
+def _recheck_completed_disposal(root: Path, plan: ScratchDisposition) -> None:
+    receipt = plan.release_receipt
+    if receipt is None or receipt.get("schemaVersion") != 2:
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-RECEIPT", "completed-disposal plan has no V2 receipt")
+    locations = _category_locations(root, CATEGORIES["work-item"], receipt["workItem"])
+    if len(locations) != 1:
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-IDENTITY", "completed-disposal item is not unique")
+    item = locations[0]
+    _event_hash, entry = _release_event_binding(item, receipt["runId"], receipt["entryId"])
+    if _release_receipt(root, item, receipt["runId"], receipt["entryId"], entry) != receipt:
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-DRIFT", "completed-disposal receipt changed after preflight")
+
+
 def _settle_scratch_dispositions(root: Path, plans: tuple[ScratchDisposition, ...]) -> None:
     classifier = _scratch_classifier_module()
     for plan in plans:
         if plan.disposition == "retain":
+            continue
+        if plan.disposition == "completed-disposal":
+            _recheck_completed_disposal(root, plan)
             continue
         if plan.disposition == "release":
             try:
@@ -4676,6 +4825,200 @@ def _settle_scratch_dispositions(root: Path, plans: tuple[ScratchDisposition, ..
             ) from exc
 
 
+def _publish_release_receipt(
+    path: Path, receipt_bytes: bytes,
+    *, owned: list[tuple[Path, tuple[int, int], bytes]] | None = None,
+) -> None:
+    """Existing create-once metadata publication, shared by both receipt modes."""
+    _lifecycle_reject_unreduced_reparse(
+        path.parent, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
+        message="release receipt parent crosses a link or reparse point",
+    )
+    path.parent.mkdir(exist_ok=True)
+    stage_prefix = f".{path.name}."
+    try:
+        with os.scandir(path.parent) as entries:
+            prior_stages = sorted(
+                (Path(entry.path) for entry in entries
+                 if entry.name.startswith(stage_prefix) and entry.name.endswith(".tmp")),
+                key=lambda candidate: candidate.name,
+            )
+        for stage in prior_stages:
+            _lifecycle_reject_unreduced_reparse(
+                stage, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
+                message="release receipt staging path is unsafe",
+            )
+            staged = _capture_file_snapshot(
+                stage, failure_id="WI-SCRATCH-RELEASE-RECEIPT", require_single_link=True,
+            ).data
+            if staged != receipt_bytes:
+                raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "unsettled release receipt staging bytes require review")
+            stage.unlink()
+    except OSError as exc:
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt staging cannot be settled") from exc
+    temporary: Path | None = None
+    try:
+        descriptor, name = tempfile.mkstemp(prefix=stage_prefix, suffix=".tmp", dir=path.parent)
+        temporary = Path(name)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(receipt_bytes)
+            stream.flush()
+            os.fsync(stream.fileno())
+        identity = _lifecycle_file_identity(temporary.lstat())
+        os.link(temporary, path)
+        if owned is not None:
+            owned.append((path, identity, receipt_bytes))
+    except FileExistsError as exc:
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt already exists") from exc
+    except OSError as exc:
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "atomic create-once release receipt is unavailable") from exc
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as exc:
+                raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt staging residue remains") from exc
+    if _capture_file_snapshot(path, failure_id="WI-SCRATCH-RELEASE-RECEIPT", require_single_link=True).data != receipt_bytes:
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt readback differs")
+
+
+def reconcile_retained_scratch(
+    root: Path, slug: str, request_file: Path, *, apply: bool = False,
+) -> tuple[Path, ...]:
+    """Record the trusted operator's reviewed past disposal; never remove payloads."""
+    if not apply:
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-APPLY-REQUIRED", "reconciliation requires explicit apply")
+    _validate_slug(slug)
+    return _reconcile_retained_scratch_transaction(root, slug, Path(request_file))
+
+
+@_lifecycle_participant
+def _reconcile_retained_scratch_transaction(root: Path, slug: str, request_file: Path) -> tuple[Path, ...]:
+    root = Path(os.path.abspath(root))
+    locations = _category_locations(root, CATEGORIES["work-item"], slug)
+    work_items = _work_items_root(root)
+    if (
+        len(locations) != 1 or not locations[0].is_dir()
+        or not (locations[0].parent == work_items / "active" or locations[0].parent.parent == work_items / "archive")
+    ):
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-IDENTITY", "one unique active or archived item is required")
+    item = locations[0]
+    _lifecycle_reject_unreduced_reparse(item, failure_id="WI-SCRATCH-RECONCILIATION-IDENTITY", message="item path is unsafe")
+    validator = _validator_module()
+    ledger_owner = _agent_run_ledger_module()
+    try:
+        with ledger_owner.ledger_write_lock(item):
+            request_snapshot = _capture_file_snapshot(
+                Path(os.path.abspath(request_file)), failure_id="WI-SCRATCH-RECONCILIATION-REQUEST",
+                maximum_bytes=validator.MAX_LEDGER_LINE_BYTES, require_single_link=True,
+            )
+            try:
+                request = validator.decode_json_object(
+                    request_snapshot.data.decode("utf-8"), source="retained scratch reconciliation request",
+                    maximum_bytes=validator.MAX_LEDGER_LINE_BYTES,
+                )
+            except ValueError as exc:
+                raise LifecycleError("WI-SCRATCH-RECONCILIATION-REQUEST", "request is not bounded strict UTF-8 JSON") from exc
+            if (
+                set(request) != {"schemaVersion", "mode", "workItem", "recordedAt", "subjects"}
+                or type(request["schemaVersion"]) is not int or request["schemaVersion"] != 1
+                or request["mode"] != _PRIOR_DISPOSAL_MODE or request["workItem"] != slug
+                or type(request["subjects"]) is not list or not request["subjects"]
+                or len(request["subjects"]) > validator.MAX_SCRATCH_EVIDENCE_ENTRIES
+            ):
+                raise LifecycleError("WI-SCRATCH-RECONCILIATION-REQUEST", "request shape differs")
+            _capture_file_snapshot(
+                item / "agent-runs.jsonl", failure_id="WI-SCRATCH-RECONCILIATION-IDENTITY",
+                maximum_bytes=validator.MAX_TRANSFER_LEDGER_BYTES, require_single_link=True,
+            )
+            entries = {(run_id, entry["entryId"]): entry for run_id, entry in _scratch_ledger_entries(item)}
+            retained_inputs = [request_snapshot]
+            prepared: list[tuple[Path, dict, dict, bytes, bool]] = []
+            selected: set[tuple[str, str]] = set()
+            for subject in request["subjects"]:
+                if type(subject) is not dict or set(subject) != _PRIOR_DISPOSAL_SUBJECT_FIELDS:
+                    raise LifecycleError("WI-SCRATCH-RECONCILIATION-REQUEST", "subject shape differs")
+                run_id, entry_id = subject["runId"], subject["entryId"]
+                if (
+                    not isinstance(run_id, str) or not isinstance(entry_id, str)
+                    or len(run_id) > 128 or len(entry_id) > validator.MAX_SCRATCH_ENTRY_ID_LENGTH
+                    or validator.SCRATCH_IDENTIFIER_RE.fullmatch(run_id) is None
+                    or validator.SCRATCH_IDENTIFIER_RE.fullmatch(entry_id) is None
+                    or (run_id.casefold(), entry_id.casefold()) in selected
+                    or (run_id, entry_id) not in entries
+                ):
+                    raise LifecycleError("WI-SCRATCH-RECONCILIATION-IDENTITY", "subject selector is invalid, duplicate or unbound")
+                selected.add((run_id.casefold(), entry_id.casefold()))
+                entry = entries[(run_id, entry_id)]
+                _event_hash, bound_entry = _release_event_binding(item, run_id, entry_id)
+                receipt = {
+                    **subject, "schemaVersion": 2, "mode": _PRIOR_DISPOSAL_MODE, "workItem": slug,
+                    "entrySha256": _sha256_bytes(json.dumps(bound_entry, sort_keys=True, separators=(",", ":")).encode("utf-8")),
+                    "recordedAt": request["recordedAt"], "evidenceScope": "canonical-observations",
+                    "rawRecovery": "not-certified",
+                }
+                for name in ("eventSha256", "canonicalPointerSha256"):
+                    receipt[name] = _normalize_sha256_input(receipt[name])
+                if isinstance(receipt["actionEvidence"], list):
+                    receipt["actionEvidence"] = [
+                        {**row, "sha256": _normalize_sha256_input(row.get("sha256"))} if isinstance(row, dict) else row
+                        for row in receipt["actionEvidence"]
+                    ]
+                if isinstance(receipt["admissionEvidence"], dict):
+                    receipt["admissionEvidence"] = {
+                        **receipt["admissionEvidence"], "sha256": _normalize_sha256_input(receipt["admissionEvidence"].get("sha256")),
+                    }
+                _validate_prior_disposal_receipt(root, item, run_id, entry_id, entry, receipt, retained_inputs=retained_inputs)
+                path = _release_receipt_path(item, run_id, entry_id)
+                existing = _release_receipt(root, item, run_id, entry_id, entry)
+                if existing is not None and existing != receipt:
+                    raise LifecycleError("WI-SCRATCH-RECONCILIATION-RECEIPT", "replay request differs from existing receipt")
+                encoded = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+                prepared.append((path, entry, receipt, encoded, existing is None))
+            _verify_captured_file(request_snapshot, "WI-SCRATCH-RECONCILIATION-DRIFT")
+            transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+            transaction.observe_retained_inputs(retained_inputs)
+            transaction.verify()
+            owned: list[tuple[Path, tuple[int, int], bytes]] = []
+            parent = item / "retained-scratch-releases"
+            created_parent = False
+            try:
+                if not parent.exists():
+                    _lifecycle_reject_unreduced_reparse(parent, failure_id="WI-SCRATCH-RECONCILIATION-RECEIPT", message="receipt parent is unsafe")
+                    parent.mkdir()
+                    created_parent = True
+                for path, entry, receipt, encoded, create in prepared:
+                    _validate_prior_disposal_receipt(root, item, receipt["runId"], receipt["entryId"], entry, receipt)
+                    if create:
+                        _publish_release_receipt(path, encoded, owned=owned)
+                for path, entry, receipt, _encoded, _create in prepared:
+                    if _release_receipt(root, item, receipt["runId"], receipt["entryId"], entry) != receipt:
+                        raise LifecycleError("WI-SCRATCH-RECONCILIATION-DRIFT", "published receipt readback differs")
+                _verify_captured_file(request_snapshot, "WI-SCRATCH-RECONCILIATION-DRIFT")
+                transaction.verify()
+            except BaseException as primary:
+                failures: list[str] = []
+                for path, identity, encoded in reversed(owned):
+                    try:
+                        snapshot = _capture_file_snapshot(path, failure_id="WI-SCRATCH-RECONCILIATION-ROLLBACK")
+                        if snapshot.identity != identity or snapshot.data != encoded:
+                            raise LifecycleError("WI-SCRATCH-RECONCILIATION-ROLLBACK", "owned receipt changed")
+                        path.unlink()
+                    except (LifecycleError, OSError) as exc:
+                        failures.append(str(exc))
+                if created_parent:
+                    try:
+                        parent.rmdir()
+                    except OSError as exc:
+                        failures.append(str(exc))
+                if failures:
+                    raise LifecycleError("WI-SCRATCH-RECONCILIATION-ROLLBACK", "; ".join(failures)) from primary
+                raise
+            return tuple(row[0] for row in prepared)
+    except ledger_owner.LedgerWriteLockError as exc:
+        raise LifecycleError("WI-SCRATCH-RECONCILIATION-LOCK", "selected ledger lock is unavailable") from exc
+
+
 def release_retained_scratch(
     root: Path,
     slug: str,
@@ -4706,6 +5049,8 @@ def release_retained_scratch(
     artifact_hash = _release_artifact_snapshot(item, artifact)
     path = _release_receipt_path(item, terminal_run_id, entry_id)
     existing = _release_receipt(root, item, terminal_run_id, entry_id, entry)
+    if existing is not None and existing["schemaVersion"] != 1:
+        raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "live-inventory release requires a Version 1 receipt")
     if existing is None:
         plans = _scratch_disposition_plan(root, item, archived=True)
         selected = [plan for plan in plans if plan.original == root / Path(entry["path"])]
@@ -4737,67 +5082,13 @@ def release_retained_scratch(
             "inventory": inventory,
             "inventorySha256": _sha256_bytes(json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode("utf-8")),
         }
-        _lifecycle_reject_unreduced_reparse(
-            path.parent, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
-            message="release receipt parent crosses a link or reparse point",
-        )
         try:
             receipt_bytes = (
                 json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n"
             ).encode("utf-8")
         except (OSError, TypeError, ValueError, UnicodeError) as exc:
             raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt cannot be serialized") from exc
-        path.parent.mkdir(exist_ok=True)
-        stage_prefix = f".{path.name}."
-        try:
-            with os.scandir(path.parent) as entries:
-                prior_stages = sorted(
-                    (Path(entry.path) for entry in entries
-                     if entry.name.startswith(stage_prefix) and entry.name.endswith(".tmp")),
-                    key=lambda candidate: candidate.name,
-                )
-            for stage in prior_stages:
-                _lifecycle_reject_unreduced_reparse(
-                    stage, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
-                    message="release receipt staging path is unsafe",
-                )
-                staged = _capture_file_snapshot(
-                    stage, failure_id="WI-SCRATCH-RELEASE-RECEIPT",
-                    require_single_link=True,
-                ).data
-                if staged != receipt_bytes:
-                    raise LifecycleError(
-                        "WI-SCRATCH-RELEASE-RECEIPT",
-                        "unsettled release receipt staging bytes require review",
-                    )
-                stage.unlink()
-        except OSError as exc:
-            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt staging cannot be settled") from exc
-        temporary: Path | None = None
-        try:
-            descriptor, name = tempfile.mkstemp(
-                prefix=f".{path.name}.", suffix=".tmp", dir=path.parent,
-            )
-            temporary = Path(name)
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(receipt_bytes)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.link(temporary, path)
-        except FileExistsError as exc:
-            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt already exists") from exc
-        except OSError as exc:
-            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "atomic create-once release receipt is unavailable") from exc
-        finally:
-            if temporary is not None:
-                try:
-                    temporary.unlink(missing_ok=True)
-                except OSError as exc:
-                    raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt staging residue remains") from exc
-        if _capture_file_snapshot(
-            path, failure_id="WI-SCRATCH-RELEASE-RECEIPT", require_single_link=True,
-        ).data != receipt_bytes:
-            raise LifecycleError("WI-SCRATCH-RELEASE-RECEIPT", "release receipt readback differs")
+        _publish_release_receipt(path, receipt_bytes)
         existing = _release_receipt(root, item, terminal_run_id, entry_id, entry)
     elif (
         existing["artifact"] != artifact or existing["artifactSha256"] != artifact_hash
@@ -5686,6 +5977,9 @@ def close_item(
     item_moved = False
     receipt_path = target / BUG_DISPOSITIONS_RECEIPT
     try:
+        for scratch in scratch_plan:
+            if scratch.disposition == "completed-disposal":
+                _recheck_completed_disposal(root, scratch)
         for index, plan in enumerate(bug_plans, start=1):
             if plan.action != "terminalize":
                 continue
@@ -20232,6 +20526,11 @@ def build_parser() -> argparse.ArgumentParser:
     release.add_argument("--artifact", required=True)
     release.add_argument("--rationale", required=True)
     release.add_argument("--apply", action="store_true")
+    reconcile = sub.add_parser("reconcile-retained-scratch")
+    _add_root(reconcile)
+    reconcile.add_argument("--slug", required=True)
+    reconcile.add_argument("--request-file", required=True)
+    reconcile.add_argument("--apply", action="store_true")
     trial = sub.add_parser("trial")
     _add_root(trial)
     trial.add_argument("--fixture", required=True)
@@ -20738,6 +21037,11 @@ def main(argv: list[str]) -> int:
                 rationale=args.rationale, apply=args.apply,
             )
             print(f"WI-SCRATCH-RELEASE-SETTLED receipt={result.relative_to(Path(os.path.abspath(root))).as_posix()}")
+        elif args.command == "reconcile-retained-scratch":
+            result = reconcile_retained_scratch(root, args.slug, Path(args.request_file), apply=args.apply)
+            print("WI-SCRATCH-RECONCILIATION-SETTLED receipts=" + json.dumps([
+                path.relative_to(Path(os.path.abspath(root))).as_posix() for path in result
+            ]))
         elif args.command == "import-active-successor":
             if args.apply:
                 if not args.preflight_digest:
