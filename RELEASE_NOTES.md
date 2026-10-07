@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-08
+
+- **Accepted runs lead to a concrete task action.** Root Lead now reconciles the original admitted outcome after launch settlement, then continues required ready work or invokes the existing lifecycle close and verifies archive, receipt and generated status. Wider repository readiness consumes current task and Git dispositions across the requested roots; preserved bytes or one closed slice cannot stand in for that outcome. Explicit unfinished recovery copies remain useful and report the broader target as provisional. Unrelated active work and protected Git bytes remain preserved, while publication still requires human authority.
+
 ## 2026-10-07
 
 - **Lifecycle directory moves preserve retained observations.** The transaction proves the moved directory and rebased parent chains while keeping original captured leaf identities and bytes. Complete observation updates and safe inverse moves share one owner; failed proof compensates before return. Unverified compensation retains the move's source, destination and native identity through caller cleanup, preserving originals and reappeared foreign data while rollback remains incomplete. Unrelated and verified-restored cleanup continue normally. Version-1 retained-scratch release holds this transaction across admission, publication, settlement and replay; its explicit apply requirement and existing file-move contracts remain unchanged.

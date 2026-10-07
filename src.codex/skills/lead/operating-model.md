@@ -22,11 +22,11 @@ Apply the binding shared **Workflow economy (binding)** rule. This Codex project
 ## Rolling-loop execution
 
 - The system operates as a rolling loop, not a stop-and-wait chain.
-- `PASS` immediately advances to the next approved role.
+- `PASS` accepts its producing stage; progression and task completion consume the [Lead work-cycle terminal decision](SKILL.md#work-cycle-ownership-recipe).
 - `REVISE` stays inside the same role for a bounded correction.
 - Apply the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap before the lead must escalate to the user with a summary of all attempts, remaining findings, and a recommendation.
 - A handoff interrupt or worker stall without an artifact is not a completed `REVISE` artifact. Keep the stage open, record the interruption in `status.md`, then either re-dispatch the same role with a narrower slice or route to the proper factual role.
-- A root-owned external job that outlives a model turn follows the Lead skill's **Conditional external-run monitoring** rule; this projection adds no second polling or recovery-state owner.
+- A root-owned external job that outlives a model turn follows the Lead skill's **Conditional external-run monitoring** rule; this projection adds no second polling or recovery-state owner. On accepted terminal results use the same [work-cycle owner](SKILL.md#work-cycle-ownership-recipe), rather than treating run settlement as task closure.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
 - The shared `$repo-cleanup` host-policy-denial exception may advance an independently verified delivery, handoff, commit, or transfer only for freshly proven harmless empty agent-owned directory residue, with every receiving gate passing and no dependency on that directory. Cleanup remains incomplete with failing zero-residue predicates, and the handoff reports the residue and resume condition; this never waives another blocker.
 - A consultant sweep is advisory-only. Run it only when the lead explicitly wants a second opinion or a repo-local lane policy explicitly asks for one and `consultantMode` is not `disabled`.
@@ -42,7 +42,7 @@ Apply the binding shared **Workflow economy (binding)** rule. This Codex project
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
 - If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
 - When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
-- Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
+- Before a task-done claim, item switch or wider readiness handoff, apply the Lead-owned [work-cycle terminal decision](SKILL.md#work-cycle-ownership-recipe): continue the ready required action or execute existing close and observe its archive/receipt/read-model result. Reconcile the original admitted outcome, requested roots and task/Git obligations; preserve unrelated/unknown state and retain exact refusal/resume evidence.
 - Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
 - When an independently verified scope is accepted, Lead creates a timely local Git commit checkpoint if the scope is coherent and separable, staging only that scope. Any open gate blocks its dependent changes; unrelated ready work and eligible checkpoints continue. The checkpoint preserves evidence and is neither completion nor publication. Human review, leak checking, and explicit publication authority still govern push and release.
@@ -194,7 +194,7 @@ Resolve the template and evidence triggers first. Each listed role is a candidat
 - Require `roadmap.md`, `brief.md`, and `status.md` before non-trivial work starts or resumes.
 - Require `plan.md` before implementation or review only when the selected route admits a Plan stage.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
-- Update `status.md` after accepted artifacts, interruptions, or stage changes so work can resume without relying on chat memory.
+- Update `status.md` after accepted artifacts, interruptions, or stage changes through the [Lead work-cycle owner](SKILL.md#work-cycle-ownership-recipe), including its terminal action/observation; a status refresh alone is not closure.
 - Keep `status.md` explicit about the next concrete action and any open obligations that still block closeout. For each unresolved blocked action, record the exact action, current blocking reason, concrete resume condition, and next step. After a relevant condition changes, and again before completion, reassess the affected action from current evidence; an old denial without that reassessment is not current blockage evidence, and reassessment grants no permission, bypass, retry, deletion, or other mutation authority.
 - If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery.
 - Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
@@ -209,7 +209,7 @@ Do:
 
 - assign one explicit owner for each critical risk
 - give each role only the minimal approved context it needs
-- require one artifact and one explicit gate decision per stage
+- require one artifact and one explicit gate decision per stage, then consume the [Lead terminal decision](SKILL.md#work-cycle-ownership-recipe) before task completion or switch
 - block progression until the current artifact is accepted
 - keep one source of truth for the brief, accepted decisions, constraints, and status
 - keep durable task memory in `work-items/` instead of relying on session memory

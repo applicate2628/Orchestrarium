@@ -182,7 +182,7 @@ A subagent `PASS` still requires verification by the orchestrating owner or the 
 ### 3.9 Rolling-loop execution
 
 - The system operates as a rolling loop, not a stop-and-wait chain.
-- `PASS` immediately advances to the next approved role.
+- `PASS` accepts its producing stage; before progression or task completion apply the Lead-owned terminal decision referenced in the dispatch-boundary work-cycle recipe below.
 - `REVISE` stays within the same role for a bounded correction.
 - Apply the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap before the lead re-routes, escalates, or blocks the work; this reference does not own the numeric limit.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
@@ -753,12 +753,12 @@ The following is a catalog of artifacts that may be useful near the repository, 
 
 #### Dispatch-boundary work-cycle recipe
 
-Apply this only before a non-trivial provider or subagent dispatch. Standalone bounded fact lookup remains inline; trivial coordination and a side question that does not become separately admitted work create no work-item. It is an orchestration ordering contract, not host enforcement.
+Apply dispatch admission before a non-trivial provider or subagent dispatch and the referenced terminal decision after result acceptance. Direct/light routes with an admitted active item reuse that decision. Standalone bounded fact lookup remains inline; trivial coordination and a side question that does not become separately admitted work create no work-item. It is an orchestration ordering contract, not host enforcement.
 
 1. Bind the dispatch to exactly one admitted work-item whose current task, scope, and next action cover it.
 2. Independent authorized items may remain active concurrently; selecting one does not park or close another without a user instruction or accepted lifecycle decision.
 3. Create or select a separate item for newly admitted work not covered by an existing item, then append the root-owned running launch event through the existing ledger helper before scheduling.
-4. After accepting artifact and evidence, append the terminal event with its exact `launchRunId`, then refresh status and next action. Use `closesRunIds` only to discharge `REVISE`, never to settle an orphan launch.
+4. After accepting artifact and evidence, append the terminal event with its exact `launchRunId`, then apply the active Lead contract's **Work-cycle ownership recipe / Terminal result and task action** before a task-done claim, item switch or next dispatch. That owner reconciles the original admitted outcome and performs a ready continuation or the existing close with observed archive/receipt/read-model postconditions. Refresh status and next action for continuing work; retain exact close refusal and resume without blocking independent ready work. Use `closesRunIds` only to discharge `REVISE`, never to settle an orphan launch.
 5. Request one bounded reconciliation only when the active set changes or is called into question by admission, parking, closure, identity-changing reprioritization, a delivery-wave or milestone boundary, or material status, ledger, or location drift. A stable active-item set, ordinary same-item continuation, and trivial turns do not retrigger it.
 
 ### 11.3 What should be automated

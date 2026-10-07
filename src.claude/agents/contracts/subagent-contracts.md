@@ -281,7 +281,7 @@ For substantial tasks, prefer a structured closeout in the final summary:
 - **Still open:** remaining required work to satisfy the current request, or `none`
 - **Risks / follow-ups:** residual risks, deferred work, or known limitations
 
-This is a recommended format for user-facing task completion, not a mandatory gate artifact. For pipeline handoffs, use the shared response format above.
+This is a recommended format for user-facing task completion, not a mandatory gate artifact. A root task-completion claim must follow the [Lead terminal decision](../../skills/lead/SKILL.md#work-cycle-ownership-recipe) and cite its actual lifecycle outcome or name the still-open required action, owning cause and resume point. A scoped specialist PASS or stage handoff does not close the root task. For pipeline handoffs, use the shared response format above.
 
 ## Gate questions
 
@@ -294,7 +294,7 @@ Ask these before advancing:
 5. Is the next stage receiving only the context it truly needs?
 6. Is an independent reviewer or human gate still required?
 7. Is the blast radius still inside the approved change surface?
-8. Is any admitted-scope obligation still open even though one sub-batch is finished?
+8. Has the [Lead terminal decision](../../skills/lead/SKILL.md#work-cycle-ownership-recipe) reconciled the original admitted outcome, observed actual closure when terminal, or recorded and continued the exact required next action?
 
 ## Terms and Abbreviations
 
