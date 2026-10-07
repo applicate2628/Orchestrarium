@@ -53,6 +53,70 @@ def active_status(task: str) -> bytes:
     ).encode("utf-8")
 
 
+def test_ordinary_selected_admission_ignores_unselected_h1_semantics(tmp_path: Path) -> None:
+    """P1/P2: public writer and reader separate namespace from member validity."""
+    fixtures = load_module(READER_FIXTURE_SCRIPT, "selected_admission_fixtures")
+    reader = fixtures.load_validator()
+    root = tmp_path / "selected-admission"
+    artifacts, members, paths, _expected = fixtures.synthetic_artifacts(
+        reader, root, sealed_closer_artifact="target.md",
+    )
+    fixtures.materialize_live_artifacts(root, artifacts)
+
+    def append(item: Path, run_id: str):
+        item.mkdir(parents=True, exist_ok=True)
+        (item / "status.md").write_bytes(active_status("Synthetic selected admission"))
+        return subprocess.run(
+            [sys.executable, "-B", str(ROOT / "scripts" / "agent-run-ledger.py"),
+             "--work-item", str(item), "append", "--run-id", run_id,
+             "--role", "analyst", "--execution-role", "internal",
+             "--status", "running", "--gate", "none", "--scope", "selected admission",
+             "--event-kind", "launch", "--model", "gpt-6.1-sol",
+             "--started-at", "2026-09-10T04:00:00Z", "--updated-at", "2026-09-10T04:00:00Z"],
+            capture_output=True, text=True, timeout=30,
+        )
+
+    def ordinary(name: str):
+        item = root / "work-items" / "active" / name
+        result = append(item, f"{name}-launch")
+        assert result.returncode == 0, result.stderr
+        assert "RESULT: PASS append" in result.stdout
+        rows = [json.loads(line) for line in (item / "agent-runs.jsonl").read_bytes().splitlines()]
+        assert len(rows) == 1 and rows[0]["schemaVersion"] == 2
+        assert rows[0]["runId"] == f"{name}-launch"
+        context = reader.load_effective_ledger_view(
+            root, item, (item / "agent-runs.jsonl").relative_to(root).as_posix(),
+        )
+        assert context.observation.activation_state == "inactive"
+        assert context.observation.diagnostics == ()
+        assert context.view is None and len(context.rows) == 1
+        assert context.group_open_revise_ids == context.group_open_launch_ids == ()
+        assert reader.validate_work_item(item, strict_revise=False) == []
+        assert not list(item.glob("*.tmp")) and not list(item.glob("*.lock"))
+        return item
+
+    ordinary("ordinary-control")
+    copied_artifact = members[0] / "target.md"
+    copied_bytes = copied_artifact.read_bytes()
+    member_ledger = members[0] / "agent-runs.jsonl"
+    member_before = member_ledger.read_bytes()
+    copied_artifact.unlink()
+    ordinary("ordinary-missing-artifact")
+    denied = append(members[0], "selected-invalid-launch")
+    assert denied.returncode == 1 and "WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH" in denied.stderr
+    assert member_ledger.read_bytes() == member_before
+    copied_artifact.write_bytes(copied_bytes)
+    assert reader.load_effective_ledger_view(root, members[0], paths[0]).observation.activation_state == "active"
+
+    member_ledger.write_bytes(member_before.replace(b"synthetic reader fixture", b"changed historical data", 1))
+    drifted = member_ledger.read_bytes()
+    ordinary("ordinary-prefix-drift")
+    denied = append(members[0], "selected-drift-launch")
+    assert denied.returncode == 1 and "WI-LEDGER-MIGRATION-LEDGER-DRIFT" in denied.stderr
+    assert member_ledger.read_bytes() == drifted
+    assert not list(root.rglob("*.jsonl.tmp")) and not list(root.rglob("*.jsonl.lock"))
+
+
 def tree_state(root: Path):
     files = {
         path.relative_to(root).as_posix(): path.read_bytes()

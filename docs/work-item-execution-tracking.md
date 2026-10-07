@@ -83,7 +83,9 @@ python .\scripts\agent-run-ledger.py --work-item work-items\active\<slug> append
   --evidence "command:pytest -q"
 ```
 
-The append command validates the work item after writing the event. If the new event makes the ledger invalid, the helper rolls `agent-runs.jsonl` back.
+The append command validates the selected work item against its temporary candidate ledger before replacing `agent-runs.jsonl`. Refusal preserves the previous ledger bytes and cleans the helper's owned candidate and lock.
+
+The writer and effective reader first authenticate Historical Compatibility (H1) metadata and the selected item's canonical ledger identity. A proved ordinary nonmember uses ordinary validation without acquiring unrelated historical ledger contents, artifacts, or derived views. Selected or potentially aliased historical members still require their complete receipt-bound group and authority checks; malformed or ambiguous metadata, unsafe selected identity, and invalid selected records remain failures. Ordinary success neither repairs the historical group nor clears its obligations. An ordinary append previously blocked solely by unrelated historical semantics now returns exit zero with `RESULT: PASS append`; a selected invalid member still fails without ledger replacement.
 
 Current external provider wrappers record the exact resolved model, effort, and policy-admitted sandbox, input/output, permission, or tool flags in both their `launch` and `terminal` events. The flags use the bounded provider-specific `launchFlags` string array on the wire and `--launch-flags-json` at the append command boundary. Positional prompts, arbitrary configuration, path-bearing, credential-bearing, malformed, or oversized flag bindings are rejected before launch or append. Older Version 2 events without `launchFlags` remain valid compatibility input; `realization` remains unsupported and is not inferred from this field.
 

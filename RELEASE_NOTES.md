@@ -4,6 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-07
 
+- **Ordinary ledger admission is independent of unrelated historical record validity.** The validated writer and effective reader authenticate compatibility metadata and canonical membership before selecting ordinary or historical validation. A proved ordinary nonmember no longer depends on unrelated historical contents or views; selected or potentially aliased members retain full group and authority checks. Invalid metadata and selected records still fail, and ordinary success does not repair history or clear its obligations.
 - **Incomplete analysis without a publication signal no longer blocks ordinary work.** The publication guard abstains when it observes no publication or bypass candidate, so uncertainty alone does not stop unrelated commands. Observed candidates retain the existing authorization checks; abstention does not certify exact effects, safety, a dry run or permission to publish.
 - **Reuse decisions reach implementation through the existing handoff.** Approved inputs carry the checked repository mechanisms, ready alternatives, evidence-backed selection and integration tradeoffs; constraints and acceptance criteria retain the fit requirements and selected choice. Local inventory comes first, with research into mature alternatives when needed. Implementers use that accepted decision or raise a material conflict to its owner. This adds no stage, report, universal web-search requirement or dependency.
 

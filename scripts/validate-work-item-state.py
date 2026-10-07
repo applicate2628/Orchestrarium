@@ -1499,6 +1499,18 @@ class LedgerCompatibilityArtifactSetV1:
     participant_locations_by_path: Mapping[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _LedgerH1PartitionV1:
+    entries: tuple[Mapping[str, object], ...]
+    open_revise_identity_sha256: str
+    open_revise_oracle_sha256: str
+    participant_locations_by_path: Mapping[str, object]
+    activation_state: Literal["active", "revoked"]
+    h1_projection_partition: tuple[
+        str, str, str, str, tuple[tuple[int, str], ...]
+    ]
+
+
 class _LedgerH1AcquisitionError(RuntimeError):
     def __init__(self, failure_id: str, logical_ledger_path: str) -> None:
         super().__init__(failure_id, logical_ledger_path)
@@ -1567,6 +1579,13 @@ class LedgerValidationContextV1:
     )
     unresolved_history: tuple[HistoricalLedgerHoldV1, ...] = ()
     history_custody: tuple[HistoricalLedgerHoldV1, ...] = ()
+
+
+@dataclass(frozen=True)
+class _LedgerH1SelectedV1:
+    classification: Literal["ordinary-nonmember", "member", "invalid"]
+    partition: _LedgerH1PartitionV1 | None
+    context: LedgerValidationContextV1 | None
 
 
 @dataclass(frozen=True)
@@ -3872,10 +3891,10 @@ def _apply_active_suffix_dispositions(
     return tuple(effective), tuple(notices), ()
 
 
-def _ledger_h1_candidate_group(
+def _validate_ledger_h1_partition(
     root: Path, artifacts: LedgerCompatibilityArtifactSetV1,
-    historical_pass_custody_blobs_by_item: Mapping[Path, Mapping[str, bytes]] | None = None,
-) -> Mapping[str, LedgerValidationContextV1]:
+) -> _LedgerH1PartitionV1 | LedgerValidationContextV1:
+    """Authenticate H1 namespace/exclusion metadata, never participant contents."""
     failures: list[str] = []
     diagnostics: list[str] = []
 
@@ -3883,21 +3902,22 @@ def _ledger_h1_candidate_group(
         failures.append(failure_id)
         diagnostics.append(f"{failure_id}: {detail}")
 
+    def invalid() -> LedgerValidationContextV1:
+        return LedgerValidationContextV1(
+            artifacts.ledger_manifest_path, (), None,
+            LedgerCompatibilityObservationV1(
+                "invalid", tuple(dict.fromkeys(failures)), tuple(diagnostics),
+            ),
+            (), (), object(),
+        )
+
     byte_fields = (
         artifacts.h1_manifest_bytes,
         artifacts.ledger_manifest_bytes,
         artifacts.registry_bytes,
     )
     if (
-        not isinstance(artifacts.ledger_bytes_by_path, Mapping)
-        or not artifacts.ledger_bytes_by_path
-        or any(
-            not isinstance(path, str)
-            or not _safe_repo_relative(path)
-            or not isinstance(raw, bytes)
-            for path, raw in artifacts.ledger_bytes_by_path.items()
-        )
-        or any(not isinstance(value, bytes) or not value for value in byte_fields)
+        any(not isinstance(value, bytes) or not value for value in byte_fields)
         or not isinstance(artifacts.receipt_bytes_by_path, Mapping)
         or not artifacts.receipt_bytes_by_path
         or any(
@@ -3910,7 +3930,7 @@ def _ledger_h1_candidate_group(
         or not isinstance(artifacts.participant_locations_by_path, Mapping)
     ):
         reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "candidate artifact set is incomplete or has wrong member types")
-        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+        return invalid()
 
     manifest = _projection_json_object(
         artifacts.ledger_manifest_bytes.rstrip(b"\n"), artifacts.ledger_manifest_path, diagnostics
@@ -3927,7 +3947,7 @@ def _ledger_h1_candidate_group(
     }
     if manifest is None or set(manifest) != manifest_fields:
         reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "ledger compatibility manifest shape is invalid")
-        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+        return invalid()
     profiles = manifest.get("profiles")
     entries = manifest.get("entries")
     if (
@@ -3940,20 +3960,21 @@ def _ledger_h1_candidate_group(
         or len(entries) != 2
     ):
         reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "ledger compatibility manifest identity/profile is invalid")
-        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+        return invalid()
     entry_fields = {
         "entryId", "profileId", "profileVersion", "workItem", "ledgerPath",
         "prefixLineCount", "prefixByteLength", "prefixSha256", "projectedViewSha256",
     }
     if any(not isinstance(entry, dict) or set(entry) != entry_fields for entry in entries):
         reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "ledger compatibility entry shape is invalid")
-        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+        return invalid()
     ledger_paths = [entry["ledgerPath"] for entry in entries]
+    if any(not isinstance(path, str) or not _safe_repo_relative(path) for path in ledger_paths):
+        reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest ledger identities are invalid")
+        return invalid()
     sorted_paths = sorted(ledger_paths, key=lambda value: value.encode("utf-8") if isinstance(value, str) else b"")
     if ledger_paths != sorted_paths or len(set(ledger_paths)) != 2:
         reject("WI-LEDGER-COMPAT-MEMBER-ORDER", "manifest entries are not uniquely UTF-8 sorted")
-    if set(artifacts.ledger_bytes_by_path) != set(ledger_paths):
-        reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "candidate ledger keys differ from manifest entries")
     location_records = artifacts.participant_locations_by_path
     if location_records and set(location_records) != set(ledger_paths):
         reject(
@@ -3969,12 +3990,7 @@ def _ledger_h1_candidate_group(
     ):
         reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest paths are not canonical")
 
-    entry_rows: dict[str, tuple[RuntimeLedgerRowV1, ...]] = {}
-    views: dict[str, LedgerCompatibilityViewV1] = {}
-    revise_identities: list[str] = []
-    open_launch_ids: set[str] = set()
-    physical_items_by_path: dict[str, Path] = {}
-    custody_by_path: dict[str, Mapping[tuple[int, str, str, str], str]] = {}
+    lifecycle = load_lifecycle_owner()
     for entry in entries:
         path = entry.get("ledgerPath")
         work_item = entry.get("workItem")
@@ -3987,9 +4003,9 @@ def _ledger_h1_candidate_group(
             or entry.get("profileId") != _LEDGER_H1_PROFILE
             or entry.get("profileVersion") != 1
             or not isinstance(entry.get("entryId"), str)
-            or not isinstance(entry.get("prefixLineCount"), int)
+            or type(entry.get("prefixLineCount")) is not int
             or entry.get("prefixLineCount", 0) < 1
-            or not isinstance(entry.get("prefixByteLength"), int)
+            or type(entry.get("prefixByteLength")) is not int
             or entry.get("prefixByteLength", 0) < 1
             or not isinstance(entry.get("prefixSha256"), str)
             or SHA256_RE.fullmatch(entry["prefixSha256"]) is None
@@ -3998,132 +4014,52 @@ def _ledger_h1_candidate_group(
         ):
             reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest entry identity or seal type is invalid")
             continue
-        raw = artifacts.ledger_bytes_by_path.get(path)
-        if not isinstance(raw, bytes):
+        if not _safe_repo_relative(work_item) or not lifecycle.is_valid_slug(PurePosixPath(work_item).name):
+            reject("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS", f"noncanonical logical participant {path}")
             continue
-        boundary = entry["prefixByteLength"]
-        prefix = raw[:boundary]
-        if (
-            len(prefix) != boundary
-            or not prefix.endswith(b"\n")
-            or len(prefix.splitlines(keepends=True)) != entry["prefixLineCount"]
-            or hashlib.sha256(prefix).hexdigest() != entry["prefixSha256"]
-        ):
-            reject("WI-LEDGER-MIGRATION-LEDGER-DRIFT", f"sealed prefix differs for {path}")
-            continue
-        physical_work_item = work_item
-        physical_ledger_path = path
+        location = location_records.get(path)
         if location_records:
-            supplied_location = location_records.get(path)
-            lifecycle = load_lifecycle_owner()
-            try:
-                fresh_location = lifecycle.resolve_work_item_ledger_location(
-                    root,
-                    logical_work_item=work_item,
-                    logical_ledger_path=path,
-                )
-            except lifecycle.LifecycleError as exc:
-                reject(
-                    "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",
-                    f"participant location cannot be re-resolved for {path}: {exc.failure_id}",
-                )
-                continue
-            if supplied_location != fresh_location:
-                reject(
-                    "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",
-                    f"participant location metadata differs for {path}",
-                )
-                continue
-            physical_work_item = getattr(fresh_location, "physical_work_item", None)
-            physical_ledger_path = getattr(fresh_location, "physical_ledger_path", None)
+            physical_item = getattr(location, "physical_work_item", None)
+            physical_path = getattr(location, "physical_ledger_path", None)
+            parts = PurePosixPath(physical_item).parts if isinstance(physical_item, str) else ()
             if (
-                getattr(fresh_location, "logical_work_item", None) != work_item
-                or getattr(fresh_location, "logical_ledger_path", None) != path
-                or not isinstance(physical_work_item, str)
-                or not _safe_repo_relative(physical_work_item)
-                or not isinstance(physical_ledger_path, str)
-                or not _safe_repo_relative(physical_ledger_path)
-                or physical_ledger_path
-                != f"{physical_work_item}/agent-runs.jsonl"
-                or PurePosixPath(physical_work_item).name
-                != PurePosixPath(work_item).name
-            ):
-                reject(
-                    "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",
-                    f"participant logical and physical identities differ for {path}",
+                not isinstance(location, lifecycle.WorkItemLedgerLocationV1)
+                or getattr(location, "logical_work_item", None) != work_item
+                or getattr(location, "logical_ledger_path", None) != path
+                or not isinstance(physical_item, str)
+                or not _safe_repo_relative(physical_item)
+                or not (
+                    len(parts) == 3 and parts[:2] == ("work-items", "active")
+                    or len(parts) == 4 and parts[:2] == ("work-items", "archive")
+                    and re.fullmatch(r"\d{4}-\d{2}", parts[2]) is not None
                 )
-                continue
-        item = root.joinpath(*PurePosixPath(physical_work_item).parts)
-        physical_ledger = root.joinpath(*PurePosixPath(physical_ledger_path).parts)
-        identity_errors: list[str] = []
-        identity = _projection_target_identity(
-            item,
-            physical_ledger,
-            identity_errors,
-            require_ledger=bool(location_records),
-        )
-        if identity is None or identity[1] != physical_work_item:
-            reject("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS", f"unsafe manifest target {work_item}")
-            diagnostics.extend(identity_errors)
-            continue
-        physical_items_by_path[path] = item
-        captured_custody: list[Mapping[tuple[int, str, str, str], str]] = []
-        custody_diagnostics: list[str] = []
-        rows = _ledger_h1_runtime_rows(
-            path, raw, entry["prefixLineCount"], item, custody_diagnostics,
-            historical_pass_custody_blobs=(historical_pass_custody_blobs_by_item or {}).get(item),
-            historical_pass_custody_out=captured_custody,
-        )
-        diagnostics.extend(custody_diagnostics)
-        failures.extend(message.split(":", 1)[0] for message in custody_diagnostics)
-        if not rows:
-            continue
-        custody_by_path[path] = captured_custody[0] if captured_custody else MappingProxyType({})
-        wire, open_revises, open_launches = _ledger_h1_view_wire(entry, rows)
-        projected_digest = _ledger_h1_digest(
-            "orchestrarium:ledger-h1:projected-view:v1", wire
-        )
-        if projected_digest != entry["projectedViewSha256"]:
-            reject("WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH", f"projected view differs for {path}")
-            continue
-        entry_rows[path] = rows
-        views[path] = LedgerCompatibilityViewV1(
-            MappingProxyType(wire), projected_digest, MappingProxyType(wire["reduction"])
-        )
-        logical_work_item = item.name
-        revise_rows = [
-            row
-            for row in rows
-            if row.event.get("runId") in open_revises
-        ]
-        if any(row.event.get("workItem") != logical_work_item for row in revise_rows):
-            reject(
-                "WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH",
-                f"open-REVISE logical work-item identity differs for {path}",
-            )
-            continue
-        revise_identities.extend(
-            f"{logical_work_item}\0{run_id}" for run_id in open_revises
-        )
-        open_launch_ids.update(open_launches)
+                or parts[-1:] != (PurePosixPath(work_item).name,)
+                or physical_path != f"{physical_item}/agent-runs.jsonl"
+                or location.phase not in {"active", "active-intent", "moved-intent", "settled-archive"}
+                or not isinstance(location.ledger_sha256, str)
+                or SHA256_RE.fullmatch(location.ledger_sha256) is None
+                or location.operation_id is not None and (
+                    not isinstance(location.operation_id, str) or not location.operation_id
+                )
+                or location.provenance_path is not None and (
+                    not isinstance(location.provenance_path, str)
+                    or not _safe_repo_relative(location.provenance_path)
+                )
+                or location.provenance_sha256 is not None and (
+                    not isinstance(location.provenance_sha256, str)
+                    or SHA256_RE.fullmatch(location.provenance_sha256) is None
+                )
+            ):
+                reject("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS", f"participant identity hint differs for {path}")
 
-    revise_identities.sort(key=lambda value: value.encode("utf-8"))
-    identity_payload = "\n".join(revise_identities).encode("utf-8")
-    oracle = {
-        "schemaVersion": 1,
-        "ledgerPrefixes": [
-            {"ledgerPath": entry["ledgerPath"], "prefixSha256": entry["prefixSha256"]}
-            for entry in entries
-        ],
-        "openReviseIdentities": revise_identities,
-    }
-    if (
-        hashlib.sha256(identity_payload).hexdigest() != manifest.get("openReviseIdentitySha256")
-        or _ledger_h1_digest(
-            "orchestrarium:ledger-h1:open-revise-oracle:v1", oracle
-        ) != manifest.get("openReviseOracleSha256")
+    if any(
+        not isinstance(manifest.get(field), str)
+        or SHA256_RE.fullmatch(manifest[field]) is None
+        for field in ("openReviseIdentitySha256", "openReviseOracleSha256")
     ):
-        reject("WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH", "group open-REVISE oracle differs")
+        reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest oracle digest types are invalid")
+    if failures:
+        return invalid()
 
     registry_lines = artifacts.registry_bytes.splitlines(keepends=True)
     parsed_registry: list[dict[str, object] | None] = []
@@ -4289,6 +4225,200 @@ def _ledger_h1_candidate_group(
     if set(artifacts.receipt_bytes_by_path) != expected_receipt_paths:
         reject("WI-LEDGER-COMPAT-RECEIPT-INVALID", "candidate receipt paths differ from registry-derived paths")
 
+    if failures:
+        return invalid()
+
+    h1_projection_partition = (
+        artifacts.ledger_manifest_path,
+        manifest_sha,
+        _LEDGER_H1_REGISTRY,
+        hashlib.sha256(artifacts.registry_bytes).hexdigest(),
+        tuple(
+            (start + offset + 1, hashlib.sha256(line).hexdigest())
+            for start, _records, lines in groups
+            for offset, line in enumerate(lines)
+        ),
+    )
+
+    return _LedgerH1PartitionV1(
+        tuple(MappingProxyType(dict(entry)) for entry in entries),
+        manifest["openReviseIdentitySha256"], manifest["openReviseOracleSha256"],
+        MappingProxyType(dict(location_records)), final_state, h1_projection_partition,
+    )
+
+
+
+def _ledger_h1_candidate_group(
+    root: Path, artifacts: LedgerCompatibilityArtifactSetV1,
+    historical_pass_custody_blobs_by_item: Mapping[Path, Mapping[str, bytes]] | None = None,
+) -> Mapping[str, LedgerValidationContextV1]:
+    failures: list[str] = []
+    diagnostics: list[str] = []
+
+    def reject(failure_id: str, detail: str) -> None:
+        failures.append(failure_id)
+        diagnostics.append(f"{failure_id}: {detail}")
+
+    if (
+        not isinstance(artifacts.ledger_bytes_by_path, Mapping)
+        or not artifacts.ledger_bytes_by_path
+        or any(
+            not isinstance(path, str) or not _safe_repo_relative(path)
+            or not isinstance(raw, bytes)
+            for path, raw in artifacts.ledger_bytes_by_path.items()
+        )
+    ):
+        reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "candidate ledger members are incomplete or mistyped")
+        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+    partition = _validate_ledger_h1_partition(root, artifacts)
+    if isinstance(partition, LedgerValidationContextV1):
+        return _ledger_h1_invalid_contexts(
+            root, artifacts, partition.observation.failure_ids, partition.observation.diagnostics,
+        )
+    entries = partition.entries
+    ledger_paths = [entry["ledgerPath"] for entry in entries]
+    if set(artifacts.ledger_bytes_by_path) != set(ledger_paths):
+        reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "candidate ledger keys differ from manifest entries")
+    location_records = artifacts.participant_locations_by_path
+    final_state = partition.activation_state
+    h1_projection_partition = partition.h1_projection_partition
+
+    entry_rows: dict[str, tuple[RuntimeLedgerRowV1, ...]] = {}
+    views: dict[str, LedgerCompatibilityViewV1] = {}
+    revise_identities: list[str] = []
+    open_launch_ids: set[str] = set()
+    physical_items_by_path: dict[str, Path] = {}
+    custody_by_path: dict[str, Mapping[tuple[int, str, str, str], str]] = {}
+    for entry in entries:
+        path = entry["ledgerPath"]
+        work_item = entry["workItem"]
+        raw = artifacts.ledger_bytes_by_path.get(path)
+        if not isinstance(raw, bytes):
+            continue
+        boundary = entry["prefixByteLength"]
+        prefix = raw[:boundary]
+        if (
+            len(prefix) != boundary
+            or not prefix.endswith(b"\n")
+            or len(prefix.splitlines(keepends=True)) != entry["prefixLineCount"]
+            or hashlib.sha256(prefix).hexdigest() != entry["prefixSha256"]
+        ):
+            reject("WI-LEDGER-MIGRATION-LEDGER-DRIFT", f"sealed prefix differs for {path}")
+            continue
+        physical_work_item = work_item
+        physical_ledger_path = path
+        if location_records:
+            supplied_location = location_records.get(path)
+            lifecycle = load_lifecycle_owner()
+            try:
+                fresh_location = lifecycle.resolve_work_item_ledger_location(
+                    root,
+                    logical_work_item=work_item,
+                    logical_ledger_path=path,
+                )
+            except lifecycle.LifecycleError as exc:
+                reject(
+                    "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",
+                    f"participant location cannot be re-resolved for {path}: {exc.failure_id}",
+                )
+                continue
+            if supplied_location != fresh_location:
+                reject(
+                    "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",
+                    f"participant location metadata differs for {path}",
+                )
+                continue
+            physical_work_item = getattr(fresh_location, "physical_work_item", None)
+            physical_ledger_path = getattr(fresh_location, "physical_ledger_path", None)
+            if (
+                getattr(fresh_location, "logical_work_item", None) != work_item
+                or getattr(fresh_location, "logical_ledger_path", None) != path
+                or not isinstance(physical_work_item, str)
+                or not _safe_repo_relative(physical_work_item)
+                or not isinstance(physical_ledger_path, str)
+                or not _safe_repo_relative(physical_ledger_path)
+                or physical_ledger_path
+                != f"{physical_work_item}/agent-runs.jsonl"
+                or PurePosixPath(physical_work_item).name
+                != PurePosixPath(work_item).name
+            ):
+                reject(
+                    "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",
+                    f"participant logical and physical identities differ for {path}",
+                )
+                continue
+        item = root.joinpath(*PurePosixPath(physical_work_item).parts)
+        physical_ledger = root.joinpath(*PurePosixPath(physical_ledger_path).parts)
+        identity_errors: list[str] = []
+        identity = _projection_target_identity(
+            item,
+            physical_ledger,
+            identity_errors,
+            require_ledger=bool(location_records),
+        )
+        if identity is None or identity[1] != physical_work_item:
+            reject("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS", f"unsafe manifest target {work_item}")
+            diagnostics.extend(identity_errors)
+            continue
+        physical_items_by_path[path] = item
+        captured_custody: list[Mapping[tuple[int, str, str, str], str]] = []
+        custody_diagnostics: list[str] = []
+        rows = _ledger_h1_runtime_rows(
+            path, raw, entry["prefixLineCount"], item, custody_diagnostics,
+            historical_pass_custody_blobs=(historical_pass_custody_blobs_by_item or {}).get(item),
+            historical_pass_custody_out=captured_custody,
+        )
+        diagnostics.extend(custody_diagnostics)
+        failures.extend(message.split(":", 1)[0] for message in custody_diagnostics)
+        if not rows:
+            continue
+        custody_by_path[path] = captured_custody[0] if captured_custody else MappingProxyType({})
+        wire, open_revises, open_launches = _ledger_h1_view_wire(entry, rows)
+        projected_digest = _ledger_h1_digest(
+            "orchestrarium:ledger-h1:projected-view:v1", wire
+        )
+        if projected_digest != entry["projectedViewSha256"]:
+            reject("WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH", f"projected view differs for {path}")
+            continue
+        entry_rows[path] = rows
+        views[path] = LedgerCompatibilityViewV1(
+            MappingProxyType(wire), projected_digest, MappingProxyType(wire["reduction"])
+        )
+        logical_work_item = item.name
+        revise_rows = [
+            row
+            for row in rows
+            if row.event.get("runId") in open_revises
+        ]
+        if any(row.event.get("workItem") != logical_work_item for row in revise_rows):
+            reject(
+                "WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH",
+                f"open-REVISE logical work-item identity differs for {path}",
+            )
+            continue
+        revise_identities.extend(
+            f"{logical_work_item}\0{run_id}" for run_id in open_revises
+        )
+        open_launch_ids.update(open_launches)
+
+    revise_identities.sort(key=lambda value: value.encode("utf-8"))
+    identity_payload = "\n".join(revise_identities).encode("utf-8")
+    oracle = {
+        "schemaVersion": 1,
+        "ledgerPrefixes": [
+            {"ledgerPath": entry["ledgerPath"], "prefixSha256": entry["prefixSha256"]}
+            for entry in entries
+        ],
+        "openReviseIdentities": revise_identities,
+    }
+    if (
+        hashlib.sha256(identity_payload).hexdigest() != partition.open_revise_identity_sha256
+        or _ledger_h1_digest(
+            "orchestrarium:ledger-h1:open-revise-oracle:v1", oracle
+        ) != partition.open_revise_oracle_sha256
+    ):
+        reject("WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH", "group open-REVISE oracle differs")
+
     if failures or set(entry_rows) != set(ledger_paths) or set(views) != set(ledger_paths):
         if not failures:
             reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "not every manifest ledger projected")
@@ -4327,18 +4457,6 @@ def _ledger_h1_candidate_group(
             return _ledger_h1_invalid_contexts(
                 root, artifacts, failures, diagnostics
             )
-
-    h1_projection_partition = (
-        artifacts.ledger_manifest_path,
-        manifest_sha,
-        _LEDGER_H1_REGISTRY,
-        hashlib.sha256(artifacts.registry_bytes).hexdigest(),
-        tuple(
-            (start + offset + 1, hashlib.sha256(line).hexdigest())
-            for start, _records, lines in groups
-            for offset, line in enumerate(lines)
-        ),
-    )
 
     if final_state == "revoked":
         token = _LedgerInvocationTokenV1(
@@ -4416,13 +4534,10 @@ def _ledger_h1_acquisition_failure_context(
     )
 
 
-def _load_live_ledger_h1_artifacts(
+def _load_live_ledger_h1_metadata(
     root: Path,
-    *,
-    selected_ledger_path: Path | None = None,
-    selected_ledger_bytes: bytes | None = None,
 ) -> LedgerCompatibilityArtifactSetV1 | None:
-    """Acquire one complete live participant set without interpreting authority."""
+    """Acquire the exact H1 artifact namespace and metadata, not member leaves."""
 
     location = _resolve_ledger_h1_artifact_set_location(root)
     if location is None:
@@ -4533,6 +4648,32 @@ def _load_live_ledger_h1_artifacts(
             manifest.get("entries"), list
         ):
             return None
+        return LedgerCompatibilityArtifactSetV1(
+            MappingProxyType({}), h1_relative, h1_path.read_bytes(),
+            manifest_relative, manifest_bytes, registry_bytes,
+            MappingProxyType(receipt_bytes_by_path), MappingProxyType({}),
+        )
+    except OSError:
+        return None
+
+
+def _load_live_ledger_h1_artifacts(
+    root: Path,
+    *,
+    selected_ledger_path: Path | None = None,
+    selected_ledger_bytes: bytes | None = None,
+    metadata_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
+) -> LedgerCompatibilityArtifactSetV1 | None:
+    """Acquire participant contents only for selected/full-group validation."""
+    metadata = metadata_artifacts or _load_live_ledger_h1_metadata(root)
+    if metadata is None:
+        return None
+    try:
+        manifest = _projection_json_object(
+            metadata.ledger_manifest_bytes.rstrip(b"\n"), metadata.ledger_manifest_path, [],
+        )
+        if not isinstance(manifest, dict) or not isinstance(manifest.get("entries"), list):
+            return None
         ledger_bytes_by_path: dict[str, bytes] = {}
         participant_locations_by_path: dict[str, object] = {}
         lifecycle = load_lifecycle_owner()
@@ -4576,15 +4717,10 @@ def _load_live_ledger_h1_artifacts(
                 else ledger_path.read_bytes()
             )
             participant_locations_by_path[ledger_relative] = location
-        return LedgerCompatibilityArtifactSetV1(
-            MappingProxyType(ledger_bytes_by_path),
-            h1_relative,
-            h1_path.read_bytes(),
-            manifest_relative,
-            manifest_bytes,
-            registry_bytes,
-            MappingProxyType(receipt_bytes_by_path),
-            MappingProxyType(participant_locations_by_path),
+        return replace(
+            metadata,
+            ledger_bytes_by_path=MappingProxyType(ledger_bytes_by_path),
+            participant_locations_by_path=MappingProxyType(participant_locations_by_path),
         )
     except OSError:
         return None
@@ -4633,45 +4769,109 @@ def _ledger_h1_selection_failure(
 def _classify_ledger_h1_selection(
     item_relative: str,
     selected_ledger_path: str,
-    artifacts: LedgerCompatibilityArtifactSetV1,
-    contexts: Mapping[str, LedgerValidationContextV1],
-) -> tuple[str, object | LedgerValidationContextV1 | None]:
-    """Classify one selection only after its complete H1 group is validated."""
-
-    invalid_contexts = [
-        context
-        for context in contexts.values()
-        if context.observation.activation_state == "invalid"
-    ]
-    if invalid_contexts:
-        return "invalid", invalid_contexts[0]
-    exact_matches: list[object] = []
-    intersections = 0
-    for location in artifacts.participant_locations_by_path.values():
-        item_match = item_relative in {
-            getattr(location, "logical_work_item", None),
-            getattr(location, "physical_work_item", None),
-        }
-        ledger_match = selected_ledger_path in {
-            getattr(location, "logical_ledger_path", None),
-            getattr(location, "physical_ledger_path", None),
-        }
-        if item_match and ledger_match:
-            exact_matches.append(location)
-        elif item_match or ledger_match:
-            intersections += 1
-    if len(exact_matches) == 1 and intersections == 0:
-        location = exact_matches[0]
-        context_key = getattr(location, "logical_ledger_path", None)
-        context = contexts.get(context_key)
-        if context is not None:
-            return "member", location
-    if exact_matches or intersections:
+    partition: _LedgerH1PartitionV1,
+) -> tuple[str, LedgerValidationContextV1 | None]:
+    """Prove stable-ID disjointness; potential members need full resolution."""
+    lifecycle = load_lifecycle_owner()
+    if (
+        not isinstance(item_relative, str) or not _safe_repo_relative(item_relative)
+        or not lifecycle.is_valid_slug(PurePosixPath(item_relative).name)
+        or selected_ledger_path != f"{item_relative}/agent-runs.jsonl"
+    ):
         return "invalid", _ledger_h1_selection_failure(
             selected_ledger_path,
-            "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected item and ledger partially, multiply, or cross-match H1 participants",
+            "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected item and ledger identities are invalid",
         )
+    selected_id = os.path.normcase(PurePosixPath(item_relative).name)
+    if any(
+        selected_id == os.path.normcase(PurePosixPath(entry["workItem"]).name)
+        for entry in partition.entries
+    ):
+        return "potential-member", None
     return "ordinary-nonmember", None
+
+
+def _resolve_ledger_h1_selected(
+    root: Path,
+    item: Path,
+    selected_ledger_path: str,
+    *,
+    compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
+    historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
+    selected_ledger_bytes: bytes | None = None,
+) -> _LedgerH1SelectedV1:
+    """One metadata-first selection composition for validator and reader."""
+    target_errors: list[str] = []
+    target = _projection_target_identity(item, root.joinpath(*PurePosixPath(selected_ledger_path).parts), target_errors)
+    if (
+        target is None or target[0].absolute() != root.absolute()
+        or selected_ledger_path != f"{target[1]}/agent-runs.jsonl"
+    ):
+        return _LedgerH1SelectedV1("invalid", None, _ledger_h1_selection_failure(
+            selected_ledger_path,
+            "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected ledger identity is invalid",
+        ))
+    try:
+        metadata = compatibility_artifacts
+        if metadata is None:
+            metadata = _load_live_ledger_h1_metadata(root)
+    except _LedgerH1AcquisitionError as exc:
+        return _LedgerH1SelectedV1("invalid", None, _ledger_h1_acquisition_failure_context(exc))
+    if metadata is None:
+        if _ledger_h1_live_participants_exist(root):
+            failure = _LedgerH1AcquisitionError("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE", selected_ledger_path)
+            return _LedgerH1SelectedV1("invalid", None, _ledger_h1_acquisition_failure_context(failure))
+        return _LedgerH1SelectedV1("ordinary-nonmember", None, None)
+    partition = _validate_ledger_h1_partition(root, metadata)
+    if isinstance(partition, LedgerValidationContextV1):
+        return _LedgerH1SelectedV1("invalid", None, partition)
+    classification, failure = _classify_ledger_h1_selection(target[1], selected_ledger_path, partition)
+    if classification == "invalid":
+        return _LedgerH1SelectedV1("invalid", partition, failure)
+    if classification == "ordinary-nonmember":
+        return _LedgerH1SelectedV1(classification, partition, None)
+    try:
+        artifacts = compatibility_artifacts
+        if artifacts is None:
+            artifacts = _load_live_ledger_h1_artifacts(
+                root, selected_ledger_path=item / "agent-runs.jsonl",
+                selected_ledger_bytes=selected_ledger_bytes, metadata_artifacts=metadata,
+            )
+    except _LedgerH1AcquisitionError as exc:
+        return _LedgerH1SelectedV1("invalid", partition, _ledger_h1_acquisition_failure_context(exc))
+    if artifacts is None:
+        failure = _LedgerH1AcquisitionError("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE", selected_ledger_path)
+        return _LedgerH1SelectedV1("invalid", partition, _ledger_h1_acquisition_failure_context(failure))
+    contexts = _load_effective_ledger_group(
+        root, compatibility_artifacts=artifacts,
+        historical_pass_custody_blobs_by_item=(
+            {item: historical_pass_custody_blobs}
+            if historical_pass_custody_blobs is not None else None
+        ),
+    )
+    invalid = next((context for context in contexts.values() if context.observation.activation_state == "invalid"), None)
+    if invalid is not None:
+        return _LedgerH1SelectedV1("invalid", partition, invalid)
+    matches: list[str] = []
+    intersections = 0
+    for entry in partition.entries:
+        logical_item = entry["workItem"]
+        logical_path = entry["ledgerPath"]
+        location = artifacts.participant_locations_by_path.get(logical_path)
+        physical_item = getattr(location, "physical_work_item", logical_item)
+        physical_path = getattr(location, "physical_ledger_path", logical_path)
+        item_match = target[1] in {logical_item, physical_item}
+        ledger_match = selected_ledger_path in {logical_path, physical_path}
+        if item_match and ledger_match:
+            matches.append(logical_path)
+        elif item_match or ledger_match:
+            intersections += 1
+    if len(matches) != 1 or intersections or matches[0] not in contexts:
+        return _LedgerH1SelectedV1("invalid", partition, _ledger_h1_selection_failure(
+            selected_ledger_path,
+            "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected item and ledger partially, multiply, or cross-match H1 participants",
+        ))
+    return _LedgerH1SelectedV1("member", partition, contexts[matches[0]])
 
 
 _HISTORY_CUSTODY_MODE = "historical-custody"
@@ -5030,16 +5230,41 @@ def _ordinary_current_disposition_rows(
 def _ordinary_raw_v2_effective_context(
     item: Path, selected_ledger_path: str, raw: bytes,
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
+    *, h1_partition: _LedgerH1PartitionV1 | None = None,
 ) -> LedgerValidationContextV1:
-    """Read one ordinary ledger through the same typed control composition."""
+    """Reconstruct inactive raw rows; metadata exclusion conveys no H1 authority."""
 
     diagnostics: list[str] = []
     metadata: list[dict[str, object]] = []
     selected = item / "agent-runs.jsonl"
+    root = repo_root_for(item)
+    if h1_partition is not None and not isinstance(h1_partition, _LedgerH1PartitionV1):
+        return _ledger_h1_selection_failure(
+            selected_ledger_path, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: partition input is invalid",
+        )
+    if h1_partition is None and root is not None and _ledger_h1_live_participants_exist(root):
+        target = _projection_target_identity(item, selected, diagnostics)
+        if target is None:
+            return _ledger_h1_selection_failure(
+                selected_ledger_path, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: raw target identity is invalid",
+            )
+        try:
+            metadata_artifacts = _load_live_ledger_h1_metadata(root)
+        except _LedgerH1AcquisitionError as exc:
+            return _ledger_h1_acquisition_failure_context(exc)
+        if metadata_artifacts is None:
+            return _ledger_h1_acquisition_failure_context(_LedgerH1AcquisitionError(
+                "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE", selected_ledger_path,
+            ))
+        resolved = _validate_ledger_h1_partition(root, metadata_artifacts)
+        if isinstance(resolved, LedgerValidationContextV1):
+            return resolved
+        h1_partition = resolved
     events = load_jsonl(selected, diagnostics, metadata, raw)
     projection_rows = _ledger_projection_rows(events, metadata, diagnostics)
     shape_rows, _shape_counters, shape_errors = _project_manifest_rows(
-        projection_rows, item, selected, raw
+        projection_rows, item, selected, raw,
+        validated_h1_partition=h1_partition.h1_projection_partition if h1_partition is not None else None,
     )
     diagnostics.extend(shape_errors)
     migrated_rows, _migration_counters, migration_errors = _project_migration_rows(
@@ -5074,77 +5299,33 @@ def load_effective_ledger_view(
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
     selected_ledger_bytes: bytes | None = None,
 ) -> LedgerValidationContextV1:
-    """Return the selected raw or receipt-activated effective ledger context."""
-
+    """Read the selected item; unrelated H1 contents are not ordinary admission."""
     root = Path(root)
-    resolved_artifacts = compatibility_artifacts
-    if resolved_artifacts is None and _ledger_h1_live_participants_exist(root):
-        try:
-            resolved_artifacts = _load_live_ledger_h1_artifacts(
-                root, selected_ledger_path=item / "agent-runs.jsonl",
-                selected_ledger_bytes=selected_ledger_bytes,
-            )
-        except _LedgerH1AcquisitionError as exc:
-            return _ledger_h1_acquisition_failure_context(exc)
-    physical_selected_path = selected_ledger_path
-    context_key = selected_ledger_path
-    selection_classification = "ordinary-nonmember"
-    contexts: Mapping[str, LedgerValidationContextV1] = MappingProxyType({})
-    if resolved_artifacts is not None:
-        contexts = _load_effective_ledger_group(
-            root, compatibility_artifacts=resolved_artifacts,
-            historical_pass_custody_blobs_by_item=(
-                {item: historical_pass_custody_blobs}
-                if historical_pass_custody_blobs is not None else None
-            ),
+    if selected_ledger_bytes is not None and not isinstance(selected_ledger_bytes, bytes):
+        return _ledger_h1_selection_failure(
+            selected_ledger_path, "WI-LEDGER-CUSTODY-STALE-TARGET: captured selected ledger must be bytes",
         )
-        try:
-            item_relative = Path(item).absolute().relative_to(root.absolute()).as_posix()
-        except ValueError:
-            item_relative = ""
-        selection_classification, selection = _classify_ledger_h1_selection(
-            item_relative,
-            selected_ledger_path,
-            resolved_artifacts,
-            contexts,
-        )
-        if selection_classification == "invalid":
-            assert isinstance(selection, LedgerValidationContextV1)
-            return selection
-        if selection_classification == "member":
-            location = selection
-            physical_selected_path = getattr(location, "physical_ledger_path")
-            context_key = getattr(location, "logical_ledger_path")
-    selected = root.joinpath(*PurePosixPath(physical_selected_path).parts)
+    selected = root.joinpath(*PurePosixPath(selected_ledger_path).parts)
     identity_errors: list[str] = []
     identity = _projection_target_identity(item, selected, identity_errors)
-    token = object()
-    if identity is None or physical_selected_path != f"{identity[1]}/agent-runs.jsonl":
-        diagnostic = "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected ledger identity is invalid"
-        return LedgerValidationContextV1(
-            selected_ledger_path, (), None,
-            LedgerCompatibilityObservationV1("invalid", ("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",), tuple((*identity_errors, diagnostic))),
-            (), (), token,
-        )
-    if context_key in contexts:
-        return contexts[context_key]
     if (
-        compatibility_artifacts is not None
-        and selection_classification != "ordinary-nonmember"
+        identity is None or identity[0].absolute() != root.absolute()
+        or selected_ledger_path != f"{identity[1]}/agent-runs.jsonl"
     ):
-        diagnostic = "WI-LEDGER-COMPAT-ACTIVATION-PARTIAL: selected ledger is absent from candidate group"
-        return LedgerValidationContextV1(
-            selected_ledger_path, (), None,
-            LedgerCompatibilityObservationV1("invalid", ("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL",), (diagnostic,)),
-            (), (), token,
+        return _ledger_h1_selection_failure(
+            selected_ledger_path, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected ledger identity is invalid",
         )
-    if resolved_artifacts is None and _ledger_h1_live_participants_exist(root):
-        diagnostic = "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE: compatibility participants exist without one valid receipt-bound group"
-        return LedgerValidationContextV1(
-            selected_ledger_path, (), None,
-            LedgerCompatibilityObservationV1("invalid", ("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE",), (diagnostic,)),
-            (), (), token,
+    partition = None
+    if compatibility_artifacts is not None or _ledger_h1_live_participants_exist(root):
+        resolution = _resolve_ledger_h1_selected(
+            root, item, selected_ledger_path, compatibility_artifacts=compatibility_artifacts,
+            historical_pass_custody_blobs=historical_pass_custody_blobs,
+            selected_ledger_bytes=selected_ledger_bytes,
         )
+        if resolution.classification != "ordinary-nonmember":
+            assert resolution.context is not None
+            return resolution.context
+        partition = resolution.partition
     try:
         raw = selected.read_bytes() if selected_ledger_bytes is None else selected_ledger_bytes
     except OSError as exc:
@@ -5152,10 +5333,11 @@ def load_effective_ledger_view(
         return LedgerValidationContextV1(
             selected_ledger_path, (), None,
             LedgerCompatibilityObservationV1("inactive", (), (diagnostic,)),
-            (), (), token,
+            (), (), object(),
         )
     return _ordinary_raw_v2_effective_context(
-        item, selected_ledger_path, raw, historical_pass_custody_blobs
+        item, selected_ledger_path, raw, historical_pass_custody_blobs,
+        h1_partition=partition,
     )
 
 
@@ -7708,6 +7890,8 @@ def validate_work_item(
     ledger (the atomic-write flow validates its temp candidate before os.replace).
     strict_revise: open v2 REVISE obligations are errors (decision item 3: a validation
     tool's job is failing); pass False only for triage sessions.
+    H1 admission authenticates metadata and joint selection first; ordinary nonmembers
+    do not acquire unrelated participant content or historical authority.
     selected_ledger_bytes: the caller's captured candidate image; all selected-ledger
     parsing and custody resolution use this image without reacquiring live bytes.
     """
@@ -7737,8 +7921,10 @@ def validate_work_item(
     ] | None = None
     selected_identity: str | None = None
     selected_context: LedgerValidationContextV1 | None = None
-    if live_compatibility_observed and effective_compatibility_artifacts is None:
-        assert root is not None
+    if effective_compatibility_artifacts is not None or live_compatibility_observed:
+        if root is None:
+            fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: work item has no repository root")
+            return errors
         target = _projection_target_identity(item, selected_ledger, errors)
         if target is None:
             return errors
@@ -7749,60 +7935,26 @@ def validate_work_item(
             except OSError as exc:
                 fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
                 return errors
-        try:
-            live_artifacts = _load_live_ledger_h1_artifacts(
-                root, selected_ledger_path=item / "agent-runs.jsonl",
-                selected_ledger_bytes=selected_ledger_bytes,
-            )
-        except _LedgerH1AcquisitionError as exc:
-            errors.extend(
-                _ledger_h1_acquisition_failure_context(exc).observation.diagnostics
-            )
-            return errors
-        if live_artifacts is None:
-            fail(
-                errors,
-                "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE: active compatibility candidate inputs are unavailable",
-            )
-            return errors
-        live_contexts = _load_effective_ledger_group(
-            root, compatibility_artifacts=live_artifacts,
-            historical_pass_custody_blobs_by_item=(
-                {item: historical_pass_custody_blobs}
-                if historical_pass_custody_blobs is not None else None
-            ),
+        resolution = _resolve_ledger_h1_selected(
+            root, item, selected_identity, compatibility_artifacts=effective_compatibility_artifacts,
+            historical_pass_custody_blobs=historical_pass_custody_blobs,
+            selected_ledger_bytes=selected_ledger_bytes,
         )
-        classification, selection = _classify_ledger_h1_selection(
-            target[1],
-            selected_identity,
-            live_artifacts,
-            live_contexts,
-        )
-        if classification == "invalid":
-            assert isinstance(selection, LedgerValidationContextV1)
-            errors.extend(selection.observation.diagnostics)
+        if resolution.classification == "invalid":
+            assert resolution.context is not None
+            errors.extend(resolution.context.observation.diagnostics)
             return errors
-        if classification == "ordinary-nonmember":
+        if resolution.classification == "ordinary-nonmember":
             live_compatibility_observed = False
-            tokens = {id(context.invocation_token): context.invocation_token for context in live_contexts.values()}
-            if len(tokens) != 1:
-                fail(
-                    errors,
-                    "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: validated H1 group has no unique invocation token",
-                )
-                return errors
-            token = next(iter(tokens.values()))
-            if not isinstance(token, _LedgerInvocationTokenV1):
-                fail(
-                    errors,
-                    "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: validated H1 group invocation token is invalid",
-                )
-                return errors
-            validated_h1_partition = token.h1_projection_partition
+            effective_compatibility_artifacts = None
+            validated_h1_partition = (
+                resolution.partition.h1_projection_partition
+                if resolution.partition is not None else None
+            )
         else:
-            selected_identity = getattr(selection, "logical_ledger_path", selected_identity)
-            effective_compatibility_artifacts = live_artifacts
-            selected_context = live_contexts[selected_identity]
+            selected_context = resolution.context
+            assert selected_context is not None
+            selected_identity = selected_context.selected_ledger_path
     if effective_compatibility_artifacts is not None or live_compatibility_observed:
         if root is None:
             fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: work item has no repository root")

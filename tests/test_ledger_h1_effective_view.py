@@ -10,6 +10,8 @@ import json
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
+from unittest import mock
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -401,6 +403,115 @@ def materialize_live_artifacts(root: Path, artifacts) -> None:
         target = root.joinpath(*relative.split("/"))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(raw)
+
+
+def test_disjoint_metadata_admission_never_acquires_missing_member_contents(tmp_path: Path) -> None:
+    """P2/P4/L3: shared entrypoints and raw omission use metadata exclusion only."""
+    module = load_validator()
+    root = tmp_path / "metadata-only-selection"
+    artifacts, members, paths, _expected = synthetic_artifacts(
+        module, root, sealed_closer_artifact="target.md",
+    )
+    materialize_live_artifacts(root, artifacts)
+    original_member = artifacts.ledger_bytes_by_path[paths[0]]
+    (members[0] / "agent-runs.jsonl").unlink()
+    (members[0] / "target.md").unlink()
+    (members[0] / "status.md").write_bytes(b"invalid unselected status\n")
+    (members[0] / "closure.md").write_bytes(b"invalid unselected closure\n")
+    ordinary = root / "work-items" / "active" / "independent-selection"
+    ordinary.mkdir(parents=True)
+    selected = ordinary / "agent-runs.jsonl"
+    captured = ledger_bytes([event("independent-record", ordinary.name)])
+    selected.write_bytes(b"{}\n")
+    candidate = ordinary / "agent-runs.jsonl.tmp"
+    candidate.write_bytes(b"{}\n")
+    relative = selected.relative_to(root).as_posix()
+    lifecycle = module.load_lifecycle_owner()
+    historical_before = {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in root.rglob("*") if p.is_file() and ordinary not in p.parents
+    }
+    with mock.patch.object(module, "_load_live_ledger_h1_artifacts", side_effect=AssertionError("unselected content acquisition")), \
+         mock.patch.object(module, "_load_effective_ledger_group", side_effect=AssertionError("unselected group semantics")), \
+         mock.patch.object(lifecycle, "resolve_work_item_ledger_location", side_effect=AssertionError("unselected physical resolution")):
+        assert module.validate_work_item(
+            ordinary, ledger_path=candidate, selected_ledger_bytes=captured,
+            strict_revise=False, validate_status_file=False,
+        ) == []
+        context = module.load_effective_ledger_view(root, ordinary, relative, selected_ledger_bytes=captured)
+        default_raw = module._ordinary_raw_v2_effective_context(ordinary, relative, captured)
+        member_raw = module._ordinary_raw_v2_effective_context(members[0], paths[0], original_member)
+    for context in (context, default_raw):
+        assert context.observation.activation_state == "inactive"
+        assert context.observation.diagnostics == ()
+        assert context.view is None and len(context.rows) == 1
+        assert context.rows[0].event["runId"] == "independent-record"
+        assert not isinstance(context.invocation_token, module._LedgerInvocationTokenV1)
+        assert context.group_open_revise_ids == context.group_open_launch_ids == ()
+    assert member_raw.view is None and member_raw.observation.activation_state == "inactive"
+    assert not isinstance(member_raw.invocation_token, module._LedgerInvocationTokenV1)
+    refused = module.load_effective_ledger_view(root, members[0], paths[0])
+    assert refused.observation.activation_state == "invalid"
+    assert "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in refused.observation.failure_ids
+    assert {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in root.rglob("*") if p.is_file() and ordinary not in p.parents
+    } == historical_before
+
+
+def test_metadata_partition_and_potential_members_fail_closed(tmp_path: Path) -> None:
+    """P3/P4/L2: metadata descriptors cannot confer group authority or aliases."""
+    module = load_validator()
+    root = tmp_path / "partition-negative-controls"
+    artifacts, members, paths, _expected = synthetic_artifacts(module, root)
+    materialize_live_artifacts(root, artifacts)
+    metadata = module._load_live_ledger_h1_metadata(root)
+    partition = module._validate_ledger_h1_partition(root, metadata)
+    assert isinstance(partition, module._LedgerH1PartitionV1)
+    assert metadata.ledger_bytes_by_path == {}
+    assert not hasattr(partition, "invocation_token") and not hasattr(partition, "view")
+    assert not hasattr(partition, "rows")
+    damaged = [
+        replace(metadata, h1_manifest_bytes=b""),
+        replace(metadata, ledger_manifest_bytes=b""),
+        replace(metadata, registry_bytes=b""),
+        replace(metadata, receipt_bytes_by_path={}),
+    ]
+    for field, value in (
+        ("prefixLineCount", 0), ("prefixByteLength", 0),
+        ("prefixLineCount", True), ("prefixSha256", "bad"), ("workItem", ""),
+    ):
+        manifest = json.loads(metadata.ledger_manifest_bytes)
+        manifest["entries"][0][field] = value
+        damaged.append(replace(metadata, ledger_manifest_bytes=canonical(manifest) + b"\n"))
+    reversed_manifest = json.loads(metadata.ledger_manifest_bytes)
+    reversed_manifest["entries"].reverse()
+    damaged.append(replace(metadata, ledger_manifest_bytes=canonical(reversed_manifest) + b"\n"))
+    locations = {
+        path: module.load_lifecycle_owner().resolve_work_item_ledger_location(
+            root, logical_work_item=path.rsplit("/", 1)[0], logical_ledger_path=path,
+        ) for path in paths
+    }
+    locations[paths[0]] = replace(
+        locations[paths[0]], physical_work_item="work-items/active/unrelated-id",
+        physical_ledger_path="work-items/active/unrelated-id/agent-runs.jsonl",
+    )
+    damaged.append(replace(metadata, participant_locations_by_path=locations))
+    for candidate in damaged:
+        rejected = module._validate_ledger_h1_partition(root, candidate)
+        assert isinstance(rejected, module.LedgerValidationContextV1)
+        assert rejected.observation.activation_state == "invalid"
+        assert rejected.observation.failure_ids and not isinstance(rejected.invocation_token, module._LedgerInvocationTokenV1)
+    alias = root / "work-items" / "archive" / "2026-10" / members[0].name
+    alias.mkdir(parents=True)
+    (alias / "agent-runs.jsonl").write_bytes(artifacts.ledger_bytes_by_path[paths[0]])
+    rejected = module.load_effective_ledger_view(root, alias, (alias / "agent-runs.jsonl").relative_to(root).as_posix())
+    assert rejected.observation.activation_state == "invalid"
+    assert "WI-CATEGORY-DUAL-LOCATION" in rejected.observation.failure_ids
+    classification, _failure = module._classify_ledger_h1_selection(
+        "work-items/active/Reader-a", "work-items/active/Reader-a/agent-runs.jsonl", partition,
+    )
+    assert classification == "invalid"
 
 
 def revoked_artifacts(module, applied):
