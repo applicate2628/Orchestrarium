@@ -102,6 +102,18 @@ unknown; it is otherwise outside the built-in item lifecycle. Close and reopen
 continue to move only the owning work-item records, and README remains a
 derived view rather than a topology source.
 
+Directory relocation belongs to the existing lifecycle transaction. After a
+native move, the owner proves the same ordinary directory and the complete
+rebased parent chains while retaining captured leaf identities and bytes.
+It updates observation locations together; captures outside the moved subtree
+remain strict. Failed post-move proof compensates before returning, and an
+unsafe inverse preserves conflicting state with a visible rollback failure.
+An unverified inverse retains its actual source, destination and original
+directory identity in the invocation. Intersecting caller cleanup, including
+containing-ancestor removal, is withheld through exit; unrelated cleanup stays
+available. Caught secondary errors cannot turn unsettled rollback into completion.
+This changes no topology declaration, receipt schema or file-move contract.
+
 The owner-local `archive-fixed-bug` route uses the existing built-in `bugs/`
 and `bugs/archive/YYYY-MM/` roots. It does not add an auxiliary root or change
 this schema: with explicit `--apply` and strict UTC terminal evidence, the

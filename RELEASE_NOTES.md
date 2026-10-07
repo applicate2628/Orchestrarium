@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-07
 
+- **Lifecycle directory moves preserve retained observations.** The transaction proves the moved directory and rebased parent chains while keeping original captured leaf identities and bytes. Complete observation updates and safe inverse moves share one owner; failed proof compensates before return. Unverified compensation retains the move's source, destination and native identity through caller cleanup, preserving originals and reappeared foreign data while rollback remains incomplete. Unrelated and verified-restored cleanup continue normally. Version-1 retained-scratch release holds this transaction across admission, publication, settlement and replay; its explicit apply requirement and existing file-move contracts remain unchanged.
+
 - **Accepted prior scratch disposal has an owner-supported reconciliation.** Reviewed exact retained entries whose originals and tombstones are absent can receive a metadata-only version-2 receipt through `reconcile-retained-scratch --apply`. Active close and archived replay share its strict bindings; original ledger bytes, unknown/unselected obligations and version-1 live-inventory release remain intact. The operation grants no physical deletion, custody, raw-recovery or publication authority.
 
 - **Windows transfer outputs use native no-replace rename.** Completed absent outputs no longer require hard-link support on Windows; POSIX retains descriptor-relative link and temporary unlink. Raced destinations still refuse without clobbering, and forced replacement remains limited to the previously bound existing output. Parent, temporary, identity, failure and cleanup controls are unchanged.

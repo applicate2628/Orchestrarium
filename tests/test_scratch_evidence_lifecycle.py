@@ -687,3 +687,150 @@ def test_jsonl_reader_streams_and_strict_decoder_rejects_nested_duplicate(
     errors: list[str] = []
     assert validator.load_jsonl(ledger, errors) == []
     assert any("duplicate JSON key: key" in error for error in errors), errors
+
+
+@pytest.mark.parametrize("scenario", ["control", "associated", "caller-rollback"])
+def test_public_close_preserves_activated_retained_observations(tmp_path: Path, scenario: str) -> None:
+    associated = scenario != "control"
+    helpers = load_module(ROOT / "tests/test_mutate_work_item.py", f"relocation_helpers_{id(tmp_path)}")
+    root = tmp_path / "repo"
+    owner, item, _scratch, _payload = seed_item(root, slug="moving-custodian", disposition="retain")
+    helpers._seed_legacy_backlog(root, "obsolete-intake", {"design.md": b"# Design only -- not admitted\n\nDecision: reject.\n"})
+    owner.refresh_readme(root, allow_marker_bootstrap=True)
+    owner.retire_legacy_backlog(root, "obsolete-intake", b"Rejected before admission; no active history.\n", "2026-08-01T00:00:00Z")
+    environment = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    if associated:
+        payload = item / "inputs/history/opaque.saved"
+        payload.parent.mkdir(parents=True)
+        payload.write_bytes(b"\x82\x00synthetic historical observation\n")
+        report = item / "stewardship.md"
+        report.write_bytes(b"Synthetic accepted custody report; original bytes remain required.\n")
+        digest = hashlib.sha256(report.read_bytes()).hexdigest()
+        profile = {"kind": "artifact", "ref": payload.relative_to(item).as_posix(), "result": json.dumps({
+            "schemaVersion": 1, "kind": "retained-preimage", "workItem": item.name, "purpose": "historical-only",
+            "byteCount": len(payload.read_bytes()), "sha256": hashlib.sha256(payload.read_bytes()).hexdigest(),
+            "provenance": {"ref": report.name, "sha256": digest, "snapshot": f"review-artifact-custody/{digest}"},
+        }, sort_keys=True)}
+        result = subprocess.run(
+            [sys.executable, "-B", str(ROOT / "scripts/agent-run-ledger.py"), "--work-item", str(item),
+             "append", "--run-id", "observed-custody-record", "--role", "knowledge-archivist", "--execution-role", "internal",
+             "--status", "completed", "--gate", "PASS", "--event-kind", "standalone", "--scope", profile["ref"],
+             "--artifact", report.name, "--artifact-revision", digest, "--evidence", f"artifact:{report.name}",
+             "--evidence-json", json.dumps(profile)],
+            cwd=ROOT, env=environment, capture_output=True, timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    trace = tmp_path / "observations.json"
+    observer = tmp_path / "observer.py"
+    observer.write_text('''import hashlib,json,runpy,sys
+from pathlib import Path
+source,out,*args=sys.argv[1:]; trace={"observed":{},"final":{},"readme":0,"exit":0}
+def observe(frame,event,arg):
+ name=frame.f_code.co_name
+ if event=="return" and name=="observe_retained_inputs":
+  for p,s in frame.f_locals["self"]._retained_observations.items():trace["observed"][str(p)]={"identity":s.identity,"length":s.length,"sha256":hashlib.sha256(s.data).hexdigest()}
+ if event=="return" and name=="replace_directory":
+  for p,s in frame.f_locals["self"]._retained_observations.items():trace["final"][str(p)]={"identity":s.identity,"length":s.length,"sha256":hashlib.sha256(s.data).hexdigest()}
+ if event=="call" and name=="refresh_readme":trace["readme"]+=1
+ if event=="call" and name=="__exit__" and type(frame.f_locals.get("self")).__name__=="LifecycleTransaction":trace["exit"]+=1
+sys.argv=[source,*args];sys.setprofile(observe)
+try:runpy.run_path(source,run_name="__main__")
+finally:sys.setprofile(None);Path(out).write_text(json.dumps(trace),encoding="utf-8")
+''', encoding="utf-8")
+    instant = "2026-08-09T01:00:00Z"
+    closure_file = tmp_path / "closure-input.md"
+    closure_file.write_bytes(closure(instant))
+    directory_identity = item.stat().st_dev, item.stat().st_ino
+    closed = subprocess.run(
+        [sys.executable, "-B", str(observer), str(MUTATOR), str(trace), "close", "--root", str(root),
+         "--slug", item.name, "--closure-file", str(closure_file), "--terminal-instant", instant,
+         *(["--inject-readme-failure", "after-canonical"] if scenario == "caller-rollback" else [])],
+        cwd=ROOT, env=environment, capture_output=True, timeout=60,
+    )
+    assert closed.returncode == (1 if scenario == "caller-rollback" else 0), closed.stdout + closed.stderr
+    result = json.loads(trace.read_text(encoding="utf-8"))
+    archived = root / "work-items/archive/2026-08" / item.name
+    current = item if scenario == "caller-rollback" else archived
+    assert current.is_dir() and (current.stat().st_dev, current.stat().st_ino) == directory_identity
+    assert result["exit"] > 0
+    if scenario == "caller-rollback":
+        assert not archived.exists() and b"WI-README-STALE" in closed.stdout
+    else:
+        assert not item.exists() and result["readme"] > 0
+    if associated:
+        assert result["observed"]
+        for old, original in result["observed"].items():
+            moved = current / Path(old).relative_to(item)
+            assert result["final"][str(moved)] == original
+            assert [moved.stat().st_dev, moved.stat().st_ino] == original["identity"]
+            assert len(moved.read_bytes()) == original["length"]
+            assert hashlib.sha256(moved.read_bytes()).hexdigest() == original["sha256"]
+    else:
+        assert result["observed"] == result["final"] == {}
+    print("ACTIVATED_PUBLIC_CLOSE", scenario, closed.returncode, len(result["observed"]), "original proofs/readback preserved")
+
+
+@pytest.mark.parametrize("operation", ["retire", "close"])
+def test_public_unsettled_relocation_preserves_original_and_reappeared_tree(tmp_path: Path, operation: str) -> None:
+    oracle = tmp_path / "unsettled-oracle.py"
+    facts_path = tmp_path / "unsettled-facts.json"
+    oracle.write_text('''import hashlib,importlib.util,inspect,json,sys
+from pathlib import Path
+source,temporary,operation=Path(sys.argv[1]),Path(sys.argv[2]),sys.argv[3]
+def load(name,path):
+ spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec);sys.modules[name]=module;spec.loader.exec_module(module);return module
+owner=load("unsettled_owner",source/"scripts/mutate-work-item.py")
+root=temporary/"repo"
+if operation=="retire":
+ helpers=load("unsettled_legacy",source/"tests/test_mutate_work_item.py")
+ original,_=helpers._seed_legacy_backlog(root,"rejected-input",{"design.md":b"original reviewed input\\n","nested/proof.md":b"original nested proof\\n"})
+ owner.refresh_readme(root,allow_marker_bootstrap=True)
+ request=temporary/"disposition.md";request.write_bytes(b"Rejected synthetic input before admission.\\n")
+ args=["retire-legacy-backlog","--root",str(root),"--slug",original.name,"--disposition-file",str(request),"--terminal-instant","2026-08-01T00:00:00Z"]
+else:
+ helpers=load("unsettled_scratch",source/"tests/test_scratch_evidence_lifecycle.py")
+ _,original,_,_=helpers.seed_item(root,disposition="retain")
+ request=temporary/"closure-input.md";request.write_bytes(helpers.closure("2026-08-09T01:00:00Z"))
+ args=["close","--root",str(root),"--slug",original.name,"--closure-file",str(request),"--terminal-instant","2026-08-09T01:00:00Z"]
+def identity(path):
+ info=path.lstat();return [info.st_dev,info.st_ino]
+def tree(path):
+ return {leaf.relative_to(path).as_posix():{"identity":identity(leaf),"length":len(leaf.read_bytes()),"sha256":hashlib.sha256(leaf.read_bytes()).hexdigest()} for leaf in path.rglob("*") if leaf.is_file()}
+facts={"originalIdentity":identity(original),"injected":False}
+verify=owner.LifecycleTransaction._verify_observation_map
+finalize=owner.LifecycleOutcomeComposer.finalize
+def record_outcome(self):
+ result=finalize(self);facts["rollback"]=result.rollback;facts["primary"]=str(result.primary);facts["cleanup"]=[{"phase":row.phase,"failureId":row.failure_id} for row in result.cleanup_failures];return result
+def inject(self,observations):
+ verify(self,observations);caller=inspect.currentframe().f_back
+ if not facts["injected"] and caller.f_code.co_name=="replace_directory" and caller.f_locals.get("source")==original and not original.exists():
+  destination=caller.f_locals["destination"];facts.update(injected=True,destination=str(destination),stagedIdentity=identity(destination),stagedBefore=tree(destination),observationCount=len(observations))
+  original.mkdir()
+  names=["foreign.txt"] if operation=="retire" else ["closure.md","status.md"]
+  for name in names:(original/name).write_bytes(("foreign reappeared "+name+" must survive\\n").encode())
+  facts.update(foreignIdentity=identity(original),foreignBefore=tree(original))
+  raise owner.LifecycleError("TEST-CALLER-PRIMARY","injected failure after verified directory candidate")
+owner.LifecycleTransaction._verify_observation_map=inject;owner.LifecycleOutcomeComposer.finalize=record_outcome
+try:facts["publicExit"]=owner.main(args)
+finally:
+ owner.LifecycleTransaction._verify_observation_map=verify;owner.LifecycleOutcomeComposer.finalize=finalize
+ staged=Path(facts["destination"]) if facts["injected"] else None
+ facts.update(foreignAfterIdentity=identity(original),foreignAfter=tree(original),stagedExists=staged.exists() if staged else False,stagedAfterIdentity=identity(staged) if staged and staged.exists() else None,stagedAfter=tree(staged) if staged and staged.exists() else None)
+ (temporary/"unsettled-facts.json").write_text(json.dumps(facts),encoding="utf-8")
+print("UNSETTLED_PUBLIC",operation,json.dumps(facts),flush=True)
+raise SystemExit(facts["publicExit"])
+''', encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-B", str(oracle), str(ROOT), str(tmp_path), operation],
+        cwd=ROOT, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, timeout=60,
+    )
+    assert result.returncode == 1 and b"TEST-CALLER-PRIMARY" in result.stdout, result.stdout + result.stderr
+    facts = json.loads(facts_path.read_text(encoding="utf-8"))
+    assert facts["injected"] and facts["observationCount"] == 0
+    assert facts["stagedExists"] and facts["stagedAfterIdentity"] == facts["originalIdentity"] == facts["stagedIdentity"]
+    assert facts["stagedAfter"] == facts["stagedBefore"]
+    assert facts["foreignAfterIdentity"] == facts["foreignIdentity"]
+    assert facts["foreignAfter"] == facts["foreignBefore"]
+    assert facts["rollback"] == "incomplete" and "injected failure" in facts["primary"]
+    assert facts["cleanup"] == [{"phase": "rollback-parent-chain", "failureId": "WI-LIFECYCLE-RELOCATION-ROLLBACK"}]
+    print("UNSETTLED_PUBLIC_PRESERVED", operation, "original/foreign IDs and bytes; rollback incomplete")

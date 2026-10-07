@@ -456,6 +456,13 @@ def _lifecycle_reject_unreduced_reparse(
             raise LifecycleError(failure_id, message)
 
 
+@dataclass(frozen=True)
+class UnsettledLifecycleRelocation:
+    source: Path
+    destination: Path
+    identity: tuple[int, int]
+
+
 class LifecycleTransaction:
     """One fail-fast native lock for a repository's physical lifecycle."""
 
@@ -472,6 +479,7 @@ class LifecycleTransaction:
         self._identity: tuple[int, int] | None = None
         self._locked = False
         self._retained_observations: dict[Path, CapturedFileSnapshot] = {}
+        self._unsettled_relocations: tuple[UnsettledLifecycleRelocation, ...] = ()
 
     def _ensure_lock_file(self) -> None:
         scratch = self.path.parent
@@ -551,6 +559,9 @@ class LifecycleTransaction:
         self._locked = False
 
     def verify(self) -> None:
+        self._verify_observation_map(self._retained_observations)
+
+    def _verify_observation_map(self, observations: dict[Path, CapturedFileSnapshot]) -> None:
         if not self._locked or self._file is None or self._identity is None:
             raise LifecycleError(
                 "WI-LIFECYCLE-LOCK-IDENTITY",
@@ -574,7 +585,7 @@ class LifecycleTransaction:
                 "WI-LIFECYCLE-LOCK-IDENTITY",
                 "lifecycle lock handle/path identity changed",
             )
-        for snapshot in self._retained_observations.values():
+        for snapshot in observations.values():
             _verify_captured_file(snapshot, "WI-CATEGORY-MIGRATION-INVENTORY")
 
     def observe_retained_inputs(self, snapshots: Iterable[CapturedFileSnapshot]) -> None:
@@ -583,6 +594,102 @@ class LifecycleTransaction:
             if previous is not None and previous != snapshot:
                 raise LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY", "retained-input observation changed during selection")
             self._retained_observations[snapshot.path] = snapshot
+
+    def cleanup_intersects_unsettled(self, paths: tuple[Path, ...]) -> bool:
+        for path in paths:
+            absolute = _lifecycle_unresolved_absolute(path)
+            for relocation in self._unsettled_relocations:
+                for protected in (relocation.source, relocation.destination):
+                    if absolute.is_relative_to(protected) or protected.is_relative_to(absolute):
+                        return True
+        return False
+
+    def replace_directory(self, source: Path, destination: Path) -> None:
+        """Move the same directory and relocate original descendant proofs atomically."""
+        if self.cleanup_intersects_unsettled((source, destination)):
+            raise LifecycleError("WI-LIFECYCLE-RELOCATION", "directory relocation intersects unsettled ownership")
+        self.verify()
+        failure_id = "WI-LIFECYCLE-RELOCATION"
+        source = _lifecycle_unresolved_absolute(source)
+        destination = _lifecycle_unresolved_absolute(destination)
+        if source == destination or destination.is_relative_to(source) or source.is_relative_to(destination):
+            raise LifecycleError(failure_id, "directory relocation overlaps its source")
+        _lifecycle_reject_unreduced_reparse(source, failure_id=failure_id, message="relocation source is unsafe")
+        _lifecycle_reject_unreduced_reparse(destination, failure_id=failure_id, message="relocation destination is unsafe")
+        source_chain = _capture_path_parent_chain(source, failure_id)
+        destination_chain = _capture_path_parent_chain(destination, failure_id)
+        source_info = source.lstat()
+        if not stat.S_ISDIR(source_info.st_mode):
+            raise LifecycleError(failure_id, "relocation source is not a directory")
+        identity = _lifecycle_file_identity(source_info)
+        previous = self._retained_observations
+        projected: dict[Path, CapturedFileSnapshot] = {}
+        affected: list[tuple[Path, CapturedFileSnapshot]] = []
+        for path, snapshot in previous.items():
+            if path.is_relative_to(source):
+                target = destination / path.relative_to(source)
+                affected.append((target, snapshot))
+            else:
+                target = path
+            if target in projected:
+                raise LifecycleError(failure_id, "relocation observation keys conflict")
+            projected[target] = snapshot
+        common = dict(source_chain.participants)
+        for path, expected in destination_chain.participants:
+            if path in common and common[path] != expected:
+                raise LifecycleError(failure_id, "common directory ancestor changed")
+        os.replace(source, destination)
+        try:
+            _verify_captured_parent_chain(source_chain, failure_id)
+            _verify_captured_parent_chain(destination_chain, failure_id)
+            _lifecycle_reject_unreduced_reparse(destination, failure_id=failure_id, message="moved directory is unsafe")
+            moved = destination.lstat()
+            if not stat.S_ISDIR(moved.st_mode) or _lifecycle_file_identity(moved) != identity:
+                raise LifecycleError(failure_id, "destination is not the original moved directory")
+            if os.path.lexists(source):
+                raise LifecycleError(failure_id, "source reappeared during relocation")
+            candidate = dict(projected)
+            for target, snapshot in affected:
+                chain = _capture_path_parent_chain(target, failure_id)
+                current = dict(chain.participants)
+                for parent, expected in snapshot.parent_chain.participants:
+                    relocated = destination / parent.relative_to(source) if parent.is_relative_to(source) else parent
+                    if parent.is_relative_to(source) or relocated in current:
+                        if current.get(relocated) != expected:
+                            raise LifecycleError(failure_id, "captured ancestor changed during relocation")
+                candidate[target] = CapturedFileSnapshot(
+                    target, snapshot.identity, snapshot.length, snapshot.data, chain, snapshot.require_single_link,
+                )
+            self._verify_observation_map(candidate)
+        except BaseException as primary:
+            try:
+                _verify_captured_parent_chain(source_chain, failure_id)
+                _verify_captured_parent_chain(destination_chain, failure_id)
+                _lifecycle_reject_unreduced_reparse(destination, failure_id=failure_id, message="rollback directory is unsafe")
+                moved = destination.lstat()
+                if not stat.S_ISDIR(moved.st_mode) or _lifecycle_file_identity(moved) != identity:
+                    raise LifecycleError(failure_id, "rollback directory identity changed")
+                if os.path.lexists(source):
+                    raise LifecycleError(failure_id, "rollback source is no longer absent")
+                os.replace(destination, source)
+                restored = source.lstat()
+                if not stat.S_ISDIR(restored.st_mode) or _lifecycle_file_identity(restored) != identity:
+                    raise LifecycleError(failure_id, "restored directory identity differs")
+                self._verify_observation_map(previous)
+            except BaseException as rollback:
+                self._unsettled_relocations += (UnsettledLifecycleRelocation(source, destination, identity),)
+                composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+                if composer is not None:
+                    composer.capture_primary(primary)
+                    if "rollback-parent-chain" not in composer._cleanup:
+                        composer.record_cleanup(
+                            phase="rollback-parent-chain", failure_id="WI-LIFECYCLE-RELOCATION-ROLLBACK",
+                            resource=str(destination), diagnostic=str(rollback), cause=rollback,
+                        )
+                else:
+                    raise LifecycleError("WI-LIFECYCLE-RELOCATION-ROLLBACK", f"relocation failed: {primary}; rollback failed: {rollback}") from primary
+            raise
+        self._retained_observations = candidate
 
     def __enter__(self) -> "LifecycleTransaction":
         self._ensure_lock_file()
@@ -717,6 +824,8 @@ def _lifecycle_participant(function):
                     )
             _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(composer_token)
 
+        if transaction is not None and transaction._unsettled_relocations:
+            composer.set_rollback("incomplete")
         bundle = composer.finalize()
         top_level = composer.top_level(bundle)
         if diagnostic_observer is not None:
@@ -733,6 +842,20 @@ def _lifecycle_participant(function):
 
     wrapper.__lifecycle_transaction_participant__ = True
     return wrapper
+
+
+def _replace_lifecycle_directory(source: Path, destination: Path) -> None:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is None:
+        raise LifecycleError("WI-LIFECYCLE-RELOCATION", "directory relocation requires its held lifecycle transaction")
+    transaction.replace_directory(source, destination)
+
+
+def _lifecycle_cleanup_intersects_unsettled(*paths: Path) -> bool:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is None:
+        raise LifecycleError("WI-LIFECYCLE-RELOCATION", "cleanup disposition requires its held lifecycle transaction")
+    return transaction.cleanup_intersects_unsettled(paths)
 
 
 @dataclass(frozen=True)
@@ -3630,7 +3753,7 @@ def convert_legacy_candidate(
             cleanup_marker,
             _legacy_cleanup_metadata(slug, target, transaction, converted, rows),
         )
-        os.replace(source, staged_source)
+        _replace_lifecycle_directory(source, staged_source)
         os.replace(staged_candidate, target)
         if inject_readme_failure:
             raise LifecycleError("WI-README-STALE", "injected legacy conversion failure")
@@ -3651,15 +3774,17 @@ def convert_legacy_candidate(
             raise _committed_cleanup_failure(target, transaction, exc) from exc
     except BaseException:
         if not committed:
-            if target.exists():
+            if target.exists() and not _lifecycle_cleanup_intersects_unsettled(target):
                 target.unlink()
-            if staged_source.exists() and not source.exists():
-                os.replace(staged_source, source)
+            if staged_source.exists() and not source.exists() and not _lifecycle_cleanup_intersects_unsettled(staged_source, source):
+                _replace_lifecycle_directory(staged_source, source)
             _restore_readme_snapshot(readme, readme_before)
-            if staged_candidate.exists():
+            if staged_candidate.exists() and not _lifecycle_cleanup_intersects_unsettled(staged_candidate):
                 staged_candidate.unlink()
-            cleanup_marker.unlink(missing_ok=True)
-            transaction.rmdir()
+            if not _lifecycle_cleanup_intersects_unsettled(cleanup_marker):
+                cleanup_marker.unlink(missing_ok=True)
+            if not _lifecycle_cleanup_intersects_unsettled(transaction):
+                transaction.rmdir()
         raise
     return target
 
@@ -3724,28 +3849,30 @@ def retire_legacy_backlog(
     created_archive = not archive.exists()
     created_month = not month_dir.exists()
     try:
-        os.replace(source, staged_source)
+        _replace_lifecycle_directory(source, staged_source)
         _atomic_write(staged_source / LEGACY_RETIREMENT_FILE, metadata_data)
         month_dir.mkdir(parents=True, exist_ok=True)
-        os.replace(staged_source, target)
+        _replace_lifecycle_directory(staged_source, target)
         if inject_readme_failure:
             raise LifecycleError("WI-README-STALE", "injected legacy retirement failure")
         refresh_readme(root)
         _legacy_retirement_entry(target, target / LEGACY_RETIREMENT_FILE)
     except BaseException:
-        if target.exists() and not staged_source.exists():
-            os.replace(target, staged_source)
-        (staged_source / LEGACY_RETIREMENT_FILE).unlink(missing_ok=True)
-        if staged_source.exists() and not source.exists():
-            os.replace(staged_source, source)
+        if target.exists() and not staged_source.exists() and not _lifecycle_cleanup_intersects_unsettled(target, staged_source):
+            _replace_lifecycle_directory(target, staged_source)
+        if not _lifecycle_cleanup_intersects_unsettled(staged_source / LEGACY_RETIREMENT_FILE):
+            (staged_source / LEGACY_RETIREMENT_FILE).unlink(missing_ok=True)
+        if staged_source.exists() and not source.exists() and not _lifecycle_cleanup_intersects_unsettled(staged_source, source):
+            _replace_lifecycle_directory(staged_source, source)
         _restore_readme_snapshot(readme, readme_before)
-        if created_month and month_dir.is_dir() and not any(month_dir.iterdir()):
+        if created_month and month_dir.is_dir() and not any(month_dir.iterdir()) and not _lifecycle_cleanup_intersects_unsettled(month_dir):
             month_dir.rmdir()
-        if created_archive and archive.is_dir() and not any(archive.iterdir()):
+        if created_archive and archive.is_dir() and not any(archive.iterdir()) and not _lifecycle_cleanup_intersects_unsettled(archive):
             archive.rmdir()
         raise
     finally:
-        shutil.rmtree(transaction, ignore_errors=True)
+        if not _lifecycle_cleanup_intersects_unsettled(transaction):
+            shutil.rmtree(transaction, ignore_errors=True)
     return target
 
 
@@ -3792,14 +3919,15 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
             )
             if errors:
                 raise LifecycleError("WI-LEDGER-BOOTSTRAP-INVALID", "; ".join(errors))
-        os.replace(temp, target)
+        _replace_lifecycle_directory(temp, target)
         committed = True
     finally:
         if not committed:
-            if moved_candidate.exists() and not backlog.exists():
+            if moved_candidate.exists() and not backlog.exists() and not _lifecycle_cleanup_intersects_unsettled(moved_candidate, backlog):
                 backlog.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(moved_candidate, backlog)
-            shutil.rmtree(temp, ignore_errors=True)
+            if not _lifecycle_cleanup_intersects_unsettled(temp):
+                shutil.rmtree(temp, ignore_errors=True)
     if inject_readme_failure:
         raise _postcommit_readme_stale("start")
     try:
@@ -4692,7 +4820,7 @@ def _settle_released_scratch(
         rebound = classifier.inspect_root_no_follow(plan.original)
         if rebound != original or rebound.is_link_or_reparse:
             raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release root identity changed before rename")
-        os.replace(plan.original, plan.tombstone)
+        (_replace_lifecycle_directory(plan.original, plan.tombstone) if rebound.is_directory else os.replace(plan.original, plan.tombstone))
         if inject_failure_at == "after-rename":
             raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "injected after-rename")
     actual = _release_inventory(root, plan.tombstone, plan.original, verify_link_targets=False)
@@ -4808,7 +4936,7 @@ def _settle_scratch_dispositions(root: Path, plans: tuple[ScratchDisposition, ..
             assert plan.proof is not None
             _verify_scratch_proof(snapshot, plan.proof, canonical_pointer)
             if source == plan.original:
-                os.replace(plan.original, plan.tombstone)
+                _replace_lifecycle_directory(plan.original, plan.tombstone)
             tombstone_snapshot = classifier.classify_owned_tree(plan.tombstone, root)
             if not classifier.identity_matches(tombstone_snapshot, plan.snapshot):
                 raise LifecycleError(
@@ -5035,6 +5163,17 @@ def release_retained_scratch(
     if not apply:
         raise LifecycleError("WI-SCRATCH-RELEASE-APPLY-REQUIRED", "release requires explicit apply")
     _validate_slug(slug)
+    return _release_retained_scratch_transaction(
+        root, slug, terminal_run_id=terminal_run_id, expected_event_sha256=expected_event_sha256,
+        entry_id=entry_id, artifact=artifact, rationale=rationale, inject_failure_at=inject_failure_at,
+    )
+
+
+@_lifecycle_participant
+def _release_retained_scratch_transaction(
+    root: Path, slug: str, *, terminal_run_id: str, expected_event_sha256: str,
+    entry_id: str, artifact: str, rationale: str, inject_failure_at: str | None = None,
+) -> Path:
     root = Path(os.path.abspath(root))
     locations = _category_locations(root, CATEGORIES["work-item"], slug)
     if len(locations) != 1 or "archive" not in locations[0].parts:
@@ -6000,7 +6139,7 @@ def close_item(
         _atomic_write(closure_path, archived_closure_data)
         _atomic_write(status_path, _terminalize_status(prior_status))
         _mkdir_parents_tracked(target.parent, created_dirs)
-        os.replace(active, target)
+        _replace_lifecycle_directory(active, target)
         item_moved = True
         if inject_readme_failure:
             raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
@@ -6034,29 +6173,32 @@ def close_item(
     except BaseException as exc:
         rollback_failures: list[str] = []
 
-        def attempt(label: str, action) -> None:
+        def attempt(label: str, action, *paths: Path) -> None:
+            if _lifecycle_cleanup_intersects_unsettled(*paths):
+                return
             try:
                 action()
             except BaseException as rollback_exc:
                 rollback_failures.append(f"{label}: {rollback_exc}")
 
         if receipt_path.exists():
-            attempt("remove receipt", receipt_path.unlink)
+            attempt("remove receipt", receipt_path.unlink, receipt_path)
         if item_moved and target.exists() and not active.exists():
-            attempt("restore active item", lambda: os.replace(target, active))
+            attempt("restore active item", lambda: _replace_lifecycle_directory(target, active), target, active)
         if active.is_dir():
             restored_closure = active / "closure.md"
             restored_status = active / "status.md"
             if prior_closure is None:
                 if restored_closure.exists():
-                    attempt("remove closure", restored_closure.unlink)
+                    attempt("remove closure", restored_closure.unlink, restored_closure)
             else:
                 attempt(
                     "restore closure",
                     lambda: _atomic_write(restored_closure, prior_closure),
+                    restored_closure,
                 )
-            attempt("restore status", lambda: _atomic_write(restored_status, prior_status))
-        else:
+            attempt("restore status", lambda: _atomic_write(restored_status, prior_status), restored_status)
+        elif not _lifecycle_cleanup_intersects_unsettled(active):
             rollback_failures.append("restore active item: active directory is unavailable")
         for plan in reversed(touched_bugs):
             assert plan.target is not None
@@ -6064,21 +6206,25 @@ def close_item(
                 attempt(
                     f"restore bug location {plan.bug_id}",
                     lambda plan=plan: os.replace(plan.target, plan.source),
+                    plan.target, plan.source,
                 )
             if plan.source.exists():
                 attempt(
                     f"restore bug bytes {plan.bug_id}",
                     lambda plan=plan: _atomic_write(plan.source, plan.before),
+                    plan.source,
                 )
             else:
                 rollback_failures.append(
                     f"restore bug bytes {plan.bug_id}: current source is unavailable"
                 )
         if readme_existed:
-            attempt("restore README", lambda: _atomic_write(readme, readme_before))
+            attempt("restore README", lambda: _atomic_write(readme, readme_before), readme)
         elif readme.exists():
-            attempt("remove generated README", readme.unlink)
+            attempt("remove generated README", readme.unlink, readme)
         for directory in reversed(created_dirs):
+            if _lifecycle_cleanup_intersects_unsettled(directory):
+                continue
             try:
                 directory.rmdir()
             except OSError:
@@ -6122,11 +6268,12 @@ def reopen_item(
     committed = False
     try:
         _atomic_write(temp / "status.md", status_data)
-        os.replace(temp, target)
+        _replace_lifecycle_directory(temp, target)
         committed = True
     finally:
         if not committed:
-            shutil.rmtree(temp, ignore_errors=True)
+            if not _lifecycle_cleanup_intersects_unsettled(temp):
+                shutil.rmtree(temp, ignore_errors=True)
     if inject_readme_failure:
         raise _postcommit_readme_stale("reopen")
     try:
@@ -10188,7 +10335,7 @@ def archive_with_successor(
     if inject_failure_at == "T2":
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", "injected T2")
     archive.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(active, archive)
+    _replace_lifecycle_directory(active, archive)
     if inject_failure_at == "T3":
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "injected T3")
     return _recover_transition(root, intent_path, inject_failure_at=inject_failure_at)
@@ -10892,11 +11039,13 @@ def _move_terminal_category(root: Path, reference: str) -> Path:
         _atomic_write(status, terminal_status)
         _atomic_write(closure, terminal_closure)
     try:
-        os.replace(source, target)
+        (_replace_lifecycle_directory(source, target) if category.name == "work-item" else os.replace(source, target))
     except BaseException:
         if category.name == "work-item":
-            _atomic_write(status, prior_status)
-            _atomic_write(closure, prior_closure)
+            if not _lifecycle_cleanup_intersects_unsettled(status):
+                _atomic_write(status, prior_status)
+            if not _lifecycle_cleanup_intersects_unsettled(closure):
+                _atomic_write(closure, prior_closure)
         raise
     try:
         refresh_readme(root)
@@ -13509,7 +13658,7 @@ def apply_migration_inventory(
         if transaction is not None:
             transaction.verify()
         target.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(source, target)
+        (_replace_lifecycle_directory(source, target) if source.is_dir() else os.replace(source, target))
     readme_hash: str | None = None
     if render_readme:
         readme_hash = refresh_readme(root, allow_marker_bootstrap=True)
@@ -18736,7 +18885,7 @@ def _ledger_h1_restore_before_receipt(
     for member, source, target, side in reversed(distribution):
         if side == "target":
             source.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(target, source)
+            (_replace_lifecycle_directory(target, source) if member["kind"] == "directory" else os.replace(target, source))
             _ledger_h1_exact_member_at(
                 source,
                 member,
@@ -18863,7 +19012,7 @@ def _recover_ledger_h1_artifact_set_relocation(
     artifact_base.mkdir(exist_ok=True)
     for member, source, target, side in distribution:
         if side == "source":
-            os.replace(source, target)
+            (_replace_lifecycle_directory(source, target) if member["kind"] == "directory" else os.replace(source, target))
             _ledger_h1_exact_member_at(
                 target,
                 member,
@@ -18991,7 +19140,7 @@ def _relocate_ledger_h1_artifact_set_locked(
             target = plan.repository.joinpath(
                 *PurePosixPath(str(member["targetPath"])).parts
             )
-            os.replace(source, target)
+            (_replace_lifecycle_directory(source, target) if member["kind"] == "directory" else os.replace(source, target))
             _ledger_h1_intent_distribution(root, intent)
             if inject_failure == f"after-member-{index}":
                 raise LifecycleError(
@@ -20048,7 +20197,7 @@ def _recover_successor_import(root: Path, intent_path: Path, intent: dict) -> di
             _remove_scratch_tree(stage)
         if hold_here:
             source.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(hold, source)
+            _replace_lifecycle_directory(hold, source)
         if stage_root.exists():
             _remove_scratch_tree(stage_root)
         _successor_import_release_stage_parent(stage_root)
@@ -20162,11 +20311,11 @@ def apply_import_active_successor(
         if rebound["digest"] != preflight_digest:
             raise LifecycleError("WI-SUCCESSOR-IMPORT-DRIFT", "bound inputs changed before publish")
         phase = "source-hold"
-        os.replace(source, hold)
+        _replace_lifecycle_directory(source, hold)
         if inject_failure_at == "after-source-hold":
             raise LifecycleError("WI-SUCCESSOR-IMPORT-RECOVERY", "injected after-source-hold")
         phase = "successor-publish"
-        os.replace(stage, successor)
+        _replace_lifecycle_directory(stage, successor)
         if inject_failure_at == "after-successor-publish":
             raise LifecycleError("WI-SUCCESSOR-IMPORT-RECOVERY", "injected after-successor-publish")
         phase = "links-publish"
