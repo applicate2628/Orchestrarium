@@ -14,6 +14,7 @@ import io
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import stat
@@ -21,6 +22,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import zipfile
@@ -397,7 +399,7 @@ class IoBoundaryTests(unittest.TestCase):
                 expected,
                 module.run_bounded_process(command, repository, {}),
             )
-        posix_owner.assert_called_once_with(command, repository, {})
+        posix_owner.assert_called_once_with(command, repository, {}, None)
 
         with (
             mock.patch.object(module.os, "name", "nt"),
@@ -416,7 +418,7 @@ class IoBoundaryTests(unittest.TestCase):
                 expected,
                 module.run_bounded_process(command, repository, {}),
             )
-        process_runner_owner.assert_called_once_with(command, repository, {})
+        process_runner_owner.assert_called_once_with(command, repository, {}, None)
 
     def test_bound_git_process_rejects_runner_executable_identity_mismatch(self) -> None:
         module = load_transfer_module()
@@ -648,34 +650,73 @@ class IoBoundaryTests(unittest.TestCase):
             self.assertEqual(b"raced\n", output.read_bytes())
             self.assertEqual([], list(output.parent.glob(f".{output.name}.*.tmp")))
 
-    def test_default_publish_uses_one_atomic_no_replace_link(self) -> None:
+    def test_absent_publish_uses_one_platform_no_replace_operation(self) -> None:
         module = load_transfer_module()
         with tempfile.TemporaryDirectory(prefix="repo-transfer-output-link-") as temp:
             root = Path(temp) / "repo"
             root.mkdir()
-            output = Path(temp) / "inventory.json"
-            binding = module.bind_output(output, root, force=False)
             real_link = os.link
+            real_rename = os.rename
             real_replace = os.replace
-            with (
-                mock.patch.object(module.os, "link", wraps=real_link) as link_mock,
-                mock.patch.object(
-                    module.os, "replace", wraps=real_replace
-                ) as replace_mock,
-            ):
-                module.publish_output_bytes(binding, b"new\n")
-            self.assertEqual(b"new\n", output.read_bytes())
-            self.assertEqual(1, link_mock.call_count)
-            _source, destination = link_mock.call_args.args
-            if os.name == "nt":
-                self.assertEqual(output, Path(destination))
-            else:
-                self.assertEqual(output.name, destination)
-                self.assertEqual(
-                    link_mock.call_args.kwargs["src_dir_fd"],
-                    link_mock.call_args.kwargs["dst_dir_fd"],
-                )
-            self.assertEqual(0, replace_mock.call_count)
+            real_unlink = os.unlink
+            for force in (False, True):
+                with self.subTest(force=force):
+                    output = Path(temp) / f"inventory-{force}.json"
+                    binding = module.bind_output(output, root, force=force)
+                    with (
+                        mock.patch.object(module.os, "link", wraps=real_link) as link_mock,
+                        mock.patch.object(module.os, "rename", wraps=real_rename) as rename_mock,
+                        mock.patch.object(module.os, "replace", wraps=real_replace) as replace_mock,
+                        mock.patch.object(module.os, "unlink", wraps=real_unlink) as unlink_mock,
+                    ):
+                        module.publish_output_bytes(binding, b"new\n")
+                    self.assertEqual(b"new\n", output.read_bytes())
+                    self.assertEqual(0, replace_mock.call_count)
+                    if os.name == "nt":
+                        self.assertEqual(1, rename_mock.call_count)
+                        self.assertEqual(0, link_mock.call_count)
+                        self.assertEqual(0, unlink_mock.call_count)
+                        _source, destination = rename_mock.call_args.args
+                        self.assertEqual(output, Path(destination))
+                    else:
+                        self.assertEqual(1, link_mock.call_count)
+                        self.assertEqual(0, rename_mock.call_count)
+                        self.assertEqual(1, unlink_mock.call_count)
+                        _source, destination = link_mock.call_args.args
+                        self.assertEqual(output.name, destination)
+                        self.assertEqual(
+                            link_mock.call_args.kwargs["src_dir_fd"],
+                            link_mock.call_args.kwargs["dst_dir_fd"],
+                        )
+                    self.assertEqual([], list(output.parent.glob(f".{output.name}.*.tmp")))
+
+    def test_force_absent_output_created_after_last_check_is_not_replaced(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-kernel-race-") as temp:
+            root = Path(temp) / "repo"
+            root.mkdir()
+            output = Path(temp) / "inventory.json"
+            binding = module.bind_output(output, root, force=True)
+            real_metadata = module._output_named_metadata
+            injected = 0
+
+            def create_after_absence(path, parent):
+                nonlocal injected
+                try:
+                    return real_metadata(path, parent)
+                except FileNotFoundError:
+                    if path == output and injected == 0:
+                        with output.open("xb") as stream:
+                            stream.write(b"kernel-race-winner\n")
+                        injected += 1
+                    raise
+
+            with mock.patch.object(module, "_output_named_metadata", side_effect=create_after_absence):
+                with self.assertRaisesRegex(module.ContractError, r"^TRANSFER-OUTPUT-EXISTS$") as caught:
+                    module.publish_output_bytes(binding, b"new\n")
+            self.assertEqual(1, injected)
+            self.assertIsInstance(caught.exception.__cause__, FileExistsError)
+            self.assertEqual(b"kernel-race-winner\n", output.read_bytes())
             self.assertEqual([], list(output.parent.glob(f".{output.name}.*.tmp")))
 
     def test_force_success_replay_cleans_temporary_files(self) -> None:
@@ -970,9 +1011,8 @@ class IoBoundaryTests(unittest.TestCase):
             document.write_bytes(b'{"schemaVersion":1}')
             self.assertEqual({"schemaVersion": 1}, module.read_json(document, "inventory"))
 
-            with mock.patch.object(module, "MAX_JSON_BYTES", 8):
-                with self.assertRaisesRegex(module.ContractError, r"^invalid inventory$"):
-                    module.read_json(document, "inventory")
+            with self.assertRaisesRegex(module.ContractError, r"^invalid inventory$"):
+                module.read_json(document, "inventory", cap=8)
 
     def test_json_input_rejects_directory_and_link_before_read(self) -> None:
         module = load_transfer_module()
@@ -1054,13 +1094,13 @@ class IoBoundaryTests(unittest.TestCase):
             replacement.write_bytes(b'{"schemaVersion":2}')
             real_parse = module.read_json_bytes
 
-            def replace_then_parse(data: bytes, label: str):
+            def replace_then_parse(data: bytes, label: str, *args, **kwargs):
                 if os.name == "nt":
                     with self.assertRaises(PermissionError):
                         os.replace(replacement, document)
                 else:
                     os.replace(replacement, document)
-                return real_parse(data, label)
+                return real_parse(data, label, *args, **kwargs)
 
             if os.name == "nt":
                 with mock.patch.object(module, "read_json_bytes", side_effect=replace_then_parse):
@@ -1412,6 +1452,303 @@ class IoBoundaryTests(unittest.TestCase):
             self.assertEqual(2, result.returncode, result.stderr)
             self.assertIn("invalid internal manifest", result.stderr)
             self.assertNotIn("Traceback", result.stderr)
+
+
+class WindowsGitHelperOracle:
+    """Test-owned receiving channel; native job membership supplies attribution."""
+
+    def __init__(self, parent: Path):
+        self.temp = tempfile.TemporaryDirectory(prefix="helper-oracle-", dir=parent)
+        self.root = Path(self.temp.name)
+        self.receipts = self.root / "receipts"
+        self.receipts.mkdir()
+        self.marker = self.root / "helper-ran.txt"
+        self.nonce = secrets.token_hex(16)
+        self.observations: dict[str, dict] = {}
+        self.jobs: list[object] = []
+        self.contexts: list[dict] = []
+        import ctypes
+        from ctypes import wintypes
+
+        self.ctypes, self.wintypes = ctypes, wintypes
+        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        self.kernel.OpenProcess.restype = wintypes.HANDLE
+        self.kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+        self.kernel.CloseHandle.restype = wintypes.BOOL
+        self.kernel.GetProcessTimes.argtypes = (wintypes.HANDLE,) + (ctypes.POINTER(wintypes.FILETIME),) * 4
+        self.kernel.GetProcessTimes.restype = wintypes.BOOL
+        self.kernel.IsProcessInJob.argtypes = (wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL))
+        self.kernel.IsProcessInJob.restype = wintypes.BOOL
+        self.kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        self.kernel.WaitForSingleObject.restype = wintypes.DWORD
+        self.kernel.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        self.kernel.GetExitCodeProcess.restype = wintypes.BOOL
+        self.receiver = self.root / "receiver.py"
+        self.receiver.write_text('''import ctypes,json,os,sys,time
+from ctypes import wintypes
+from pathlib import Path
+k=ctypes.WinDLL("kernel32",use_last_error=True)
+k.GetCurrentProcess.restype=wintypes.HANDLE
+k.GetProcessTimes.argtypes=(wintypes.HANDLE,)+(ctypes.POINTER(wintypes.FILETIME),)*4
+k.GetProcessTimes.restype=wintypes.BOOL
+times=[wintypes.FILETIME() for _ in range(4)]
+if not k.GetProcessTimes(k.GetCurrentProcess(),*[ctypes.byref(t) for t in times]): raise ctypes.WinError(ctypes.get_last_error())
+birth=str((times[0].dwHighDateTime<<32)|times[0].dwLowDateTime)
+nonce,directory,marker=sys.argv[1:4]; root=Path(directory)
+r={"schemaVersion":1,"scopeNonce":nonce,"event":"helper-started","pid":os.getpid(),"creationTime":birth}
+key=str(os.getpid())+"-"+birth
+pending=root/(key+".pending")
+with pending.open("x",encoding="utf-8") as f: json.dump(r,f)
+os.rename(pending,root/(key+".json"))
+with Path(marker).open("a",encoding="ascii") as f: f.write(key+"\\n")
+deadline=time.monotonic()+10
+while time.monotonic()<deadline:
+ p=root/(key+".ack")
+ if p.exists():
+  if json.loads(p.read_text())!={"scopeNonce":nonce,"pid":os.getpid(),"creationTime":birth}: raise RuntimeError("invalid acknowledgement")
+  sys.exit(0)
+ time.sleep(.01)
+raise RuntimeError("acknowledgement timeout")
+''', encoding="utf-8")
+        self.probe = self.root / "probe.cmd"
+        self.probe.write_text(
+            f'@echo off\n"{sys.executable}" -B "{self.receiver}" "{self.nonce}" "{self.receipts}" "{self.marker}"\n',
+            encoding="utf-8",
+        )
+        self.command = f'"{self.probe}"'
+        self.launcher = self.root / "control.py"
+        self.launcher.write_text('''import importlib.util,json,sys
+from pathlib import Path
+source,git,cwd=sys.argv[1:4]; sys.path.insert(0,source)
+from scripts.process_supervision.process_runner import ProcessRunnerV1,EnvironmentRowV1
+path=Path(source)/"src.codex/skills/manual-repo-transfer/scripts/repo_transfer.py"
+spec=importlib.util.spec_from_file_location("oracle_transfer",path); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+owner=ProcessRunnerV1()
+try:
+ env=m.sanitized_git_environment()
+ request,sink=owner.build_repository_transfer_git_request(argv=(git,"-c","core.fsmonitor=false","diff","--cached","--ext-diff","--","secret.txt"),resolved_executable=Path(git),cwd=cwd,environment=tuple(EnvironmentRowV1(k,v) for k,v in sorted(env.items(),key=lambda p:p[0].casefold())),deadline_seconds=20,capture_limit_bytes=65536)
+ result=owner.run(request)
+ print(json.dumps({"failure":result.failure_id,"exit":result.target_exit_code,"treeEmpty":result.tree.tree_empty,"closed":result.resources_closed,"stderr":sink.bytes_for("stderr").decode("utf-8","replace")}),flush=True)
+finally: owner.close()
+''', encoding="utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        incomplete = []
+        try:
+            for process in self.jobs:
+                closure = process.close()
+                if not closure.complete:
+                    incomplete.append(closure)
+        finally:
+            self.temp.cleanup()
+        if incomplete:
+            raise AssertionError(("oracle jobs did not settle", incomplete))
+
+    def birth(self, handle: int) -> str:
+        times = [self.wintypes.FILETIME() for _ in range(4)]
+        if not self.kernel.GetProcessTimes(handle, *[self.ctypes.byref(t) for t in times]):
+            raise self.ctypes.WinError(self.ctypes.get_last_error())
+        return str((times[0].dwHighDateTime << 32) | times[0].dwLowDateTime)
+
+    def member(self, handle: int, job: int) -> bool:
+        member = self.wintypes.BOOL()
+        if not self.kernel.IsProcessInJob(handle, job, self.ctypes.byref(member)):
+            raise self.ctypes.WinError(self.ctypes.get_last_error())
+        return bool(member.value)
+
+    def parse_receipt(self, raw: bytes) -> dict:
+        if len(raw) > 4096:
+            raise AssertionError("oversized helper receipt")
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise AssertionError("duplicate helper receipt field")
+                result[key] = value
+            return result
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
+        if (
+            type(value) is not dict
+            or set(value) != {"schemaVersion", "scopeNonce", "event", "pid", "creationTime"}
+            or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1
+            or not self.nonce or value["scopeNonce"] != self.nonce
+            or value["event"] != "helper-started"
+            or type(value["pid"]) is not int or not 0 < value["pid"] <= 0xFFFFFFFF
+            or type(value["creationTime"]) is not str
+            or not re.fullmatch(r"[1-9][0-9]*", value["creationTime"])
+        ):
+            raise AssertionError("invalid helper receipt")
+        return value
+
+    def attribute(self, receipt: dict, jobs: dict[str, object], *, ack_path: Path | None = None) -> dict:
+        handle = self.kernel.OpenProcess(0x1000 | 0x100000, False, receipt["pid"])
+        if not handle:
+            raise self.ctypes.WinError(self.ctypes.get_last_error())
+        try:
+            if self.birth(handle) != receipt["creationTime"]:
+                raise AssertionError("stale helper birth identity")
+            membership = {name: self.member(handle, job._handles["job"]) for name, job in jobs.items()}
+            exit_code = None
+            if ack_path is not None:
+                ack = {name: receipt[name] for name in ("scopeNonce", "pid", "creationTime")}
+                pending = ack_path.with_suffix(".ack-pending")
+                with pending.open("x", encoding="utf-8") as stream:
+                    json.dump(ack, stream)
+                os.rename(pending, ack_path)
+                waited = self.kernel.WaitForSingleObject(handle, 5000)
+                if waited == 258:
+                    raise TimeoutError("helper receiver did not exit after acknowledgement")
+                if waited != 0:
+                    raise self.ctypes.WinError(self.ctypes.get_last_error())
+                result = self.wintypes.DWORD()
+                if not self.kernel.GetExitCodeProcess(handle, self.ctypes.byref(result)):
+                    raise self.ctypes.WinError(self.ctypes.get_last_error())
+                exit_code = result.value
+                if exit_code != 0:
+                    raise AssertionError(("helper receiver failed", exit_code))
+            return {"membership": membership, "receiverExit": exit_code}
+        finally:
+            if not self.kernel.CloseHandle(handle):
+                raise self.ctypes.WinError(self.ctypes.get_last_error())
+
+    def receive(self, jobs: dict[str, object]) -> None:
+        for path in sorted(self.receipts.glob("*.json")):
+            key = path.stem
+            if key in self.observations:
+                continue
+            with path.open("rb") as stream:
+                receipt = self.parse_receipt(stream.read(4097))
+            if key != f'{receipt["pid"]}-{receipt["creationTime"]}':
+                raise AssertionError("helper receipt identity/name mismatch")
+            attribution = self.attribute(receipt, jobs, ack_path=path.with_suffix(".ack"))
+            self.observations[key] = {"receipt": receipt, **attribution}
+
+    def validate_marker(self, raw: bytes) -> None:
+        if len(raw) > 65536:
+            raise AssertionError("oversized helper marker")
+        keys = raw.decode("ascii").splitlines()
+        if len(keys) != len(set(keys)) or set(keys) != set(self.observations):
+            raise AssertionError("helper marker lacks complete causal receipt")
+        if any(not (self.receipts / f"{key}.ack").is_file() for key in keys):
+            raise AssertionError("helper acknowledgement missing")
+        if any(self.observations[key]["receiverExit"] != 0 for key in keys):
+            raise AssertionError("helper receiver settlement missing")
+        if list(self.receipts.glob("*.pending")):
+            raise AssertionError("unsettled helper receipt")
+
+    def require_complete_channel(self) -> None:
+        with self.marker.open("rb") if self.marker.exists() else io.BytesIO() as stream:
+            self.validate_marker(stream.read(65537))
+
+    def launch(self, argv: list[str], cwd: Path):
+        source = SCRIPT.parents[4]
+        added_path = str(source) not in sys.path
+        if added_path:
+            sys.path.insert(0, str(source))
+        try:
+            from scripts.process_supervision.windows_job import WindowsJobOwnerV1
+        finally:
+            if added_path:
+                sys.path.remove(str(source))
+        process = WindowsJobOwnerV1.launch(
+            executable=sys.executable, argv=argv, cwd=str(cwd),
+            environment=dict(os.environ), stdin="null",
+        )
+        self.jobs.append(process)
+        context = {
+            "pid": process.pid, "creationTime": self.birth(process._handles["process"]),
+            "argv": argv, "cwd": str(cwd), "fixture": str(self.root),
+            "gettempdir": tempfile.gettempdir(), "cachedTempdir": tempfile.tempdir,
+            "tempInputs": {name: os.environ.get(name) for name in ("TMP", "TEMP", "TMPDIR")},
+            "sourceSha256": sha256(SCRIPT.read_bytes()),
+            "testSha256": sha256(Path(__file__).read_bytes()),
+            "pythonSha256": sha256(Path(sys.executable).read_bytes()),
+            "gitSha256": sha256(GIT_EXECUTABLE.read_bytes()),
+            "configuredCommand": self.command,
+        }
+        self.contexts.append(context)
+        return process
+
+    def execute(self, process, jobs: dict[str, object], *, timeout=30.0, acknowledge=True) -> tuple[int, bytes, bytes]:
+        captured = [bytearray(), bytearray()]
+        errors: list[BaseException] = []
+        descriptors = [process.take_stdout_fd(), process.take_stderr_fd()]
+        def drain(index, descriptor):
+            try:
+                with os.fdopen(descriptor, "rb", buffering=0) as stream:
+                    while chunk := stream.read(4096):
+                        if len(captured[index]) + len(chunk) > 65536:
+                            if not errors:
+                                errors.append(AssertionError("oracle capture limit exceeded"))
+                        else:
+                            captured[index].extend(chunk)
+            except BaseException as error:
+                errors.append(error)
+        threads = [threading.Thread(target=drain, args=(i, fd)) for i, fd in enumerate(descriptors)]
+        for thread in threads:
+            thread.start()
+        failed = True
+        try:
+            deadline = time.monotonic() + timeout
+            while True:
+                if acknowledge:
+                    self.receive(jobs)
+                if errors:
+                    raise errors[0]
+                code = process.poll()
+                if code is not None:
+                    break
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("causal helper execution deadline")
+                time.sleep(0.01)
+            if acknowledge:
+                self.receive(jobs)
+            for thread in threads:
+                thread.join(5)
+            if any(thread.is_alive() for thread in threads):
+                raise AssertionError("oracle capture stream did not settle")
+            if errors:
+                raise errors[0]
+            failed = False
+            return code, bytes(captured[0]), bytes(captured[1])
+        finally:
+            if failed and not process.settle(time.monotonic() + 5, terminate=True).complete:
+                errors.append(AssertionError("failed oracle job did not settle"))
+            for thread in threads:
+                thread.join(5)
+            if any(thread.is_alive() for thread in threads):
+                raise AssertionError("oracle capture stream did not settle")
+            if errors:
+                raise errors[0]
+
+    def control(self, repo: Path, source=None):
+        argv = [sys.executable, "-B", str(self.launcher), str(SCRIPT.parents[4]), str(GIT_EXECUTABLE), str(repo)]
+        process = self.launch(argv, SCRIPT.parents[4])
+        jobs = {"control": process}
+        if source is not None:
+            jobs["source"] = source
+        before = set(self.observations)
+        code, stdout, stderr = self.execute(process, jobs)
+        closure = process.settle(time.monotonic() + 5)
+        if not closure.complete or closure.direct_exit_code != 0 or code != 0:
+            raise AssertionError(("Git helper control failed", closure, stderr))
+        result = json.loads(stdout)
+        if result["failure"] is not None or result["exit"] != 0 or not result["treeEmpty"] or not result["closed"]:
+            raise AssertionError(("typed Git helper control failed", result))
+        added = [self.observations[key] for key in set(self.observations) - before]
+        owned = [row for row in added if row["membership"]["control"]]
+        if not owned:
+            raise AssertionError("positive helper sensitivity missing")
+        self.require_complete_channel()
+        return owned
+
+    def assert_no_owned_helper(self, name: str) -> None:
+        if any(row["membership"].get(name) for row in self.observations.values()):
+            raise AssertionError(f"{name} executed configured Git helper")
 
 
 class SecurityContractTests(unittest.TestCase):
@@ -1972,12 +2309,11 @@ class SecurityContractTests(unittest.TestCase):
         real_open = module._windows_open_ordinary_path
         real_close = module._windows_close_handle
 
-        def recording_open(path, *, directory, options, owner=None):
+        def recording_open(path, *, directory, **kwargs):
             handle = real_open(
                 path,
                 directory=directory,
-                options=options,
-                owner=owner,
+                **kwargs,
             )
             opened.append((handle, directory))
             return handle
@@ -2018,12 +2354,11 @@ class SecurityContractTests(unittest.TestCase):
         real_os_close = module.os.close
         real_close_handle = module._windows_close_handle
 
-        def recording_path(path, *, directory, options, owner=None):
+        def recording_path(path, *, directory, **kwargs):
             handle = real_open_path(
                 path,
                 directory=directory,
-                options=options,
-                owner=owner,
+                **kwargs,
             )
             if not directory:
                 leaf_handles.append(handle)
@@ -2090,12 +2425,11 @@ class SecurityContractTests(unittest.TestCase):
             streams.append(stream)
             return stream
 
-        def recording_path(path, *, directory, options, owner=None):
+        def recording_path(path, *, directory, **kwargs):
             handle = real_open_path(
                 path,
                 directory=directory,
-                options=options,
-                owner=owner,
+                **kwargs,
             )
             if not directory:
                 leaf_handles.append(handle)
@@ -2136,12 +2470,11 @@ class SecurityContractTests(unittest.TestCase):
         real_open_path = module._windows_open_ordinary_path
         real_close_handle = module._windows_close_handle
 
-        def recording_path(path, *, directory, options, owner=None):
+        def recording_path(path, *, directory, **kwargs):
             handle = real_open_path(
                 path,
                 directory=directory,
-                options=options,
-                owner=owner,
+                **kwargs,
             )
             if not directory:
                 leaf_handles.append(handle)
@@ -3117,6 +3450,71 @@ class SecurityContractTests(unittest.TestCase):
         self.assertEqual([{"path": "cache", "kind": "regenerate", "setSha256": self.exact_set_sha256(inventory, "cache")}], preview["deletionProofs"])
 
     def test_git_external_helpers_never_execute(self) -> None:
+        if os.name == "nt":
+            with WindowsGitHelperOracle(self.root) as oracle:
+                git(self.repo, "config", "diff.external", oracle.command)
+                git(self.repo, "config", "core.fsmonitor", oracle.command)
+                oracle.control(self.repo)
+                with self.assertRaisesRegex(AssertionError, "control executed"):
+                    oracle.assert_no_owned_helper("control")
+                specimen = next(iter(oracle.observations.values()))["receipt"]
+                invalid = [b"{", b"{}", canonical_json({**specimen, "scopeNonce": "wrong"}),
+                           canonical_json({**specimen, "pid": 0}),
+                           canonical_json({**specimen, "creationTime": "0"}),
+                           canonical_json({key: value for key, value in specimen.items() if key != "scopeNonce"})]
+                for raw in invalid:
+                    with self.subTest(channel=raw), self.assertRaises((AssertionError, ValueError)):
+                        oracle.parse_receipt(raw)
+                orphan = oracle.marker.read_bytes()
+                with self.assertRaisesRegex(AssertionError, "complete causal receipt"):
+                    oracle.validate_marker(orphan + b"unattributed\n")
+                argv = [sys.executable, "-B", str(SCRIPT), "inventory", "--repo", str(self.repo),
+                        "--output", str(self.inventory_path), "--force", "--git-executable", str(GIT_EXECUTABLE)]
+                source = oracle.launch(argv, SCRIPT.parents[4])
+                anchor = {**specimen, "pid": source.pid,
+                          "creationTime": oracle.birth(source._handles["process"])}
+                with self.assertRaisesRegex(AssertionError, "stale helper birth"):
+                    oracle.attribute({**anchor, "creationTime": str(int(anchor["creationTime"]) + 1)}, {"source": source})
+                with self.assertRaises(OSError):
+                    oracle.attribute({**anchor, "pid": 0xFFFFFFFF}, {"source": source})
+                with self.assertRaises(OSError):
+                    oracle.member(source._handles["process"], oracle.ctypes.c_void_p(-2).value)
+                code, stdout, stderr = oracle.execute(source, {"source": source})
+                self.assertEqual(0, code, stderr.decode("utf-8", "replace"))
+                inventory = json.loads(self.inventory_path.read_text(encoding="utf-8"))
+                self.assertTrue(inventory["snapshot"]["digest"])
+                outside = oracle.control(self.repo, source)
+                self.assertTrue(all(not row["membership"]["source"] for row in outside))
+                oracle.require_complete_channel()
+                oracle.assert_no_owned_helper("source")
+                closure = source.settle(time.monotonic() + 5)
+                self.assertTrue(closure.complete, closure)
+                print("CAUSAL_HELPER_ORACLE " + json.dumps({"contexts": oracle.contexts,
+                      "receipts": list(oracle.observations.values()), "sourceExit": code,
+                      "inventoryDigest": inventory["snapshot"]["digest"], "sourceClosure": repr(closure)}))
+            # Failed channels own a disjoint receiver tree; none of their markers
+            # or receipts are removed to turn the Source observation into success.
+            with WindowsGitHelperOracle(self.root) as failed_channel:
+                git(self.repo, "config", "diff.external", failed_channel.command)
+                git(self.repo, "config", "core.fsmonitor", failed_channel.command)
+                timeout = failed_channel.launch(
+                    [sys.executable, "-B", str(failed_channel.launcher), str(SCRIPT.parents[4]), str(GIT_EXECUTABLE), str(self.repo)],
+                    SCRIPT.parents[4],
+                )
+                with self.assertRaises(TimeoutError):
+                    failed_channel.execute(timeout, {"timeout": timeout}, timeout=2.0, acknowledge=False)
+                closure = timeout.close()
+                self.assertTrue(closure.complete, closure)
+                failed_receipts = list(failed_channel.receipts.glob("*.json"))
+                self.assertTrue(failed_receipts, "timeout control must reach the real Git receiver")
+                with self.assertRaisesRegex(AssertionError, "complete causal receipt"):
+                    failed_channel.require_complete_channel()
+                for path in failed_receipts:
+                    self.assertFalse(path.with_suffix(".ack").exists())
+                print("CAUSAL_HELPER_TIMEOUT " + json.dumps({"contexts": failed_channel.contexts,
+                      "unacknowledged": [failed_channel.parse_receipt(path.read_bytes()) for path in failed_receipts],
+                      "closure": repr(closure)}))
+            return
         marker = self.root / "helper-ran.txt"
         probe = self.root / "probe.cmd"
         probe.write_text("@echo off\necho helper-ran>\"%~1\"\n", encoding="utf-8")

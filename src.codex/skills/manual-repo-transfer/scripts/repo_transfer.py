@@ -1332,7 +1332,7 @@ def publish_output(
                 raise ContractError(TRANSFER_OUTPUT_EXISTS)
             try:
                 if os.name == "nt":
-                    os.link(temporary, binding.path)
+                    os.rename(temporary, binding.path)
                 else:
                     assert parent is not None
                     os.link(
@@ -1346,9 +1346,7 @@ def publish_output(
                 raise ContractError(TRANSFER_OUTPUT_EXISTS) from error
             except OSError as error:
                 raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED) from error
-            if os.name == "nt":
-                temporary.unlink()
-            else:
+            if os.name != "nt":
                 os.unlink(temporary.name, dir_fd=parent)
         else:
             try:
