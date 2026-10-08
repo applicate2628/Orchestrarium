@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-08
 
+- **Mid-turn reminders prompt useful parallel work and timely resource settlement.** The existing Codex root advisory now asks Lead to fill useful independent capacity, select fresh fitting Model Context Protocol (MCP) tools, and verify creator-owned process cleanup immediately after terminal, failed, cancelled or timed-out launches and before checkpoints and handoffs. It preserves user/shared/uncertain resources, forbids PID/ancestry-only termination, and records unavailable physical host teardown without claiming cleanup; trigger, mode, leaf and nonblocking behavior remain unchanged.
+
 - **Native continuity retains actual execution identity.** Lead now distinguishes logical lane settlement from physical host teardown, accounts for reusable host-retained contexts when no release API exists, and retains returned runner identities and state before formatting or truncating output. Recovery uses existing status/validated ledger acknowledgment and only exact authorized resume identities; a fresh run supplies no lost historical receipt or replay authority.
 
 - **Parent parking preserves already-fixed bugs without changing them.** Bug dispositions now distinguish retaining intact physical-current records from terminalizing semantic-current input, with matching receipt/replay admission. The separate explicitly applied fixed-bug archive command accepts a unique admitted archived parent as well as an active one, preserving parent identity/lifecycle and existing evidence, link, rollback and replay guards. Broader category diagnostics and unsafe archived physical consumers retain their refusals.

@@ -20,12 +20,22 @@ HOOK = (
 )
 REMINDER = (
     "[parallel and MCP momentum] Root Lead: if the user has not paused or parked "
-    "new launches, recheck Ready before starting work; start useful compatible "
-    "independent lanes without waiting and refill released capacity. Pass each "
-    "lane only its needed tools and context. Keep leaves non-spawning; clean up "
-    "owned stale processes, dead code, and disposable trash while preserving "
-    "user or uncertain state. Advisory only: no decision, spawn, schedule, "
-    "block, metering, or fan-out."
+    "new launches, recheck Ready before starting work; fill available capacity "
+    "with the maximum useful set of compatible independent ready lanes and "
+    "refill immediately as lanes settle. Do not invent work or calls. Discover "
+    "fresh task-fitting Model Context Protocol (MCP) tools before manual work "
+    "where they improve quality; select exact available tools for each lane. "
+    "Pass only needed tools and short context; keep leaves non-spawning. "
+    "Immediately verify and settle creator-owned process and orphan cleanup "
+    "after each spawn terminal result, failure, cancellation, or timeout, "
+    "and again before checkpoints, commit, push, handoff, or final completion. "
+    "Use creator-retained process or Job handles, or equivalent stable identity "
+    "ownership; never kill by PID or ancestry alone. Clean up owned stale "
+    "processes, dead code, and disposable trash while preserving user or "
+    "uncertain state, shared resources, and ambiguous ownership. If physical "
+    "host release is unavailable, report host-retained / teardown unverified, "
+    "not cleaned. Advisory only: no decision, spawn, schedule, block, metering, "
+    "or fan-out."
 )
 
 
@@ -117,6 +127,19 @@ def test_root_active_modes_emit_one_soft_additional_context(
         "dead code",
         "disposable trash",
         "while preserving user or uncertain state",
+        "maximum useful set of compatible independent ready lanes",
+        "refill immediately as lanes settle",
+        "Do not invent work or calls",
+        "fresh task-fitting Model Context Protocol (MCP) tools before manual work",
+        "needed tools and short context; keep leaves non-spawning",
+        "Immediately verify and settle creator-owned process and orphan cleanup",
+        "after each spawn terminal result, failure, cancellation, or timeout",
+        "before checkpoints, commit, push, handoff, or final completion",
+        "creator-retained process or Job handles",
+        "equivalent stable identity ownership",
+        "never kill by PID or ancestry alone",
+        "shared resources, and ambiguous ownership",
+        "host-retained / teardown unverified, not cleaned",
     ):
         assert requested_term in payload["hookSpecificOutput"]["additionalContext"]
     for duplicate_tool_choice in ("MCP discovery", "freshness for indexed results"):
