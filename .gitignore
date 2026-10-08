@@ -36,3 +36,6 @@
 # Windows PowerShell module cache (pwsh hooks running with cwd=repo write it here)
 /Microsoft/
 graphify-out/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

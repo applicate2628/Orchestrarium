@@ -52,7 +52,10 @@ def _run(
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     fake = tmp_path / "fake-claude.py"
-    fake.write_text(child_source or "print('GATE: PASS')\n", encoding="utf-8")
+    fake.write_text(
+        child_source or "import sys\nsys.stdin.buffer.read()\nprint('GATE: PASS')\n",
+        encoding="utf-8",
+    )
     prompt = tmp_path / "prompt.md"
     prompt.write_bytes(prompt_bytes if prompt_bytes is not None else b"review\n")
     terminal_receipt = (tmp_path / "terminal.receipt").resolve()

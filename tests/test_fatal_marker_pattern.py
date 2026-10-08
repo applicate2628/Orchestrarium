@@ -139,7 +139,9 @@ def _make_work_item(tmp_path: Path, suffix: str) -> Path:
     return item
 
 
-def _run_transport(tmp_path: Path, err_line: str) -> dict:
+def _run_transport(
+    tmp_path: Path, err_line: str, *, expected_wrapper_exit: int = 0
+) -> dict:
     fake = tmp_path / "fake-codex.py"
     fake.write_text(
         "import json,os,runpy,sys\n"
@@ -186,7 +188,7 @@ def _run_transport(tmp_path: Path, err_line: str) -> dict:
         encoding="utf-8",
         timeout=30,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == expected_wrapper_exit, result.stderr
     events = [
         json.loads(line)
         for line in (item / "agent-runs.jsonl").read_text(
@@ -203,10 +205,15 @@ def _run_transport(tmp_path: Path, err_line: str) -> dict:
 def test_real_captured_fatal_line_blocks_an_otherwise_passing_run(
     tmp_path: Path,
 ) -> None:
-    terminal = _run_transport(tmp_path, REAL_INCIDENT_LINE)
+    terminal = _run_transport(tmp_path, REAL_INCIDENT_LINE, expected_wrapper_exit=1)
     assert terminal["status"] == "blocked"
     assert terminal["gate"] == "none"
     assert "err markers present" in terminal["notes"]
+    assert "primaryExitCode=0;" in terminal["notes"]
+    assert "cleanupStatus=complete;" in terminal["notes"]
+    assert "cleanupIssueCount=0;" in terminal["notes"]
+    assert "resultDelivered=true;" in terminal["notes"]
+    assert "stderrMarkers=1" in terminal["notes"]
 
 
 @requires_windows_process_runner
