@@ -794,21 +794,48 @@ def check_periodic_checker(root: Path) -> None:
         base = Path(tmp)
         item = base / "work-items" / "active" / "valid"
         (item / "reviews").mkdir(parents=True)
-        (item / "status.md").write_text(STATUS_TEXT, encoding="utf-8")
+        status_text = """---
+template: staged
+status: active
+started: 2026-05-03T14:20:00Z
+updated: 2026-05-03T14:24:00Z
+---
+
+Task: Validate the periodic checker contract.
+Current step: Check the accepted synthetic QA result.
+Last result: Synthetic QA completed.
+Next action: Close the stage after publication gate.
+Scope boundary: Periodic checker fixture only.
+Owner: qa-engineer
+Integration owner: lead
+Evidence gate: public periodic checker
+"""
+        (item / "status.md").write_text(status_text, encoding="utf-8")
         (item / "reviews" / "qa.md").write_text("# QA\n\nGate: PASS\n", encoding="utf-8")
         (item / "agent-runs.jsonl").write_text(json.dumps(ledger_event(workItem="valid")) + "\n", encoding="utf-8")
 
-        proc = subprocess.run(
-            [sys.executable, str(checker), "--root", str(base), "--stale-hours", "24", "--now", "2026-05-03T15:00:00Z"],
+        command = [sys.executable, str(checker), "--root", str(base), "--stale-hours", "24", "--now", "2026-05-03T15:00:00Z"]
+        run_options = dict(
             cwd=root,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
         )
+        proc = subprocess.run(command, **run_options)
         if proc.returncode != 0:
             raise AssertionError(f"periodic checker should pass:\n{proc.stdout}")
         require("RESULT: PASS" in proc.stdout, f"periodic checker output missed pass result:\n{proc.stdout}")
+        # The positive producer must not be repaired by weakening invalid-status refusal.
+        (item / "status.md").write_text(
+            status_text.replace("status: active\n", "status: invalid\n"), encoding="utf-8",
+        )
+        invalid = subprocess.run(command, **run_options)
+        require(invalid.returncode != 0, "periodic checker accepted an invalid active status")
+        require(
+            "WI-CATEGORY-STATUS-INVALID" in invalid.stdout,
+            f"periodic checker lost invalid-status cause:\n{invalid.stdout}",
+        )
 
 
 def main(argv: list[str]) -> int:

@@ -520,6 +520,8 @@ bug whose parsed `context` equals the closing slug. A `terminalize` row contains
 `id`, `action`, `inputSha256`, `status`, `resolution`, and `evidence`; a
 `preserve-current` row uses `reason` instead of `resolution`.
 
+Physical-current membership differs from semantic mutation eligibility. `preserve-current` keeps an intact exact-context bug byte-identical for a recognized current or terminal status, without closing, reopening, normalizing or archiving it. Preparation and archived receipt/replay use the same action/status contract. Newly admitted terminal preservation requires one status/context, a matching single id when present (legacy absence is supported), unambiguous owned terminal fields and one physical selected source. Its equal status/hash receipt and null target are close-time evidence, not fresh bug re-verification. Version 2 may retain existing terminal metadata unchanged for exact-context preservation; placeholders remain terminalize-only. `terminalize` still requires semantic-current input and every existing evidence/context/target guard. A separate broad category audit may report retained current-root terminal-state debt; this supplies no bug mutation or global clean claim.
+
 Version 2 keeps the same top-level fields (`schemaVersion`, `workItem`,
 `closedAt`, and `bugs`) and adds `contextBefore` and `contextAfter` to every
 Version 1 row. Every exact-context current bug remains required. The manifest
@@ -558,10 +560,10 @@ exact-context bug row when the repository has any.
 }
 ```
 
-### Archive an already-fixed flat bug while its parent stays active
+### Archive an already-fixed flat bug under an active or archived parent
 
 When one current `work-items/bugs/<bug-slug>.md` already has parsed
-`status: fixed` and names an existing active parent, use the lifecycle owner's
+`status: fixed` and names one active or admitted archived parent, use the lifecycle owner's
 separate fixed-bug route; do not change it back to `open`, hand-move it, or close
 the parent just to archive the bug:
 
@@ -574,8 +576,10 @@ nothing. Supply real, nonempty, single-line resolution and evidence and a strict
 UTC `YYYY-MM-DDTHH:MM:SSZ` instant. Matching existing terminal fields are
 preserved; conflicting or duplicate fields fail before mutation. The recorded
 instant selects `work-items/bugs/archive/YYYY-MM/`, not the bug slug's date or
-wall clock. The bug keeps its id, `fixed` status, and context; its parent remains
-active. The owner inventories lifecycle references in text and structured
+wall clock. The bug keeps its id, `fixed` status, and context; parent lifecycle
+and identity remain unchanged. The existing unique physical resolver admits active
+or archived parents, with readable-legacy and stamped-strict archive admission;
+missing, duplicate, backlog or invalid archived parents refuse. The owner inventories lifecycle references in text and structured
 records, leaves logical `bug:<slug>` references unchanged, and rewrites
 recognized mutable physical Markdown links to the archived path. Mandatory
 Markdown/JSON/JSONL records keep their codec and validation obligations. Known
@@ -886,6 +890,18 @@ Downgrade is not generally safe: an older reader may refuse opaque bytes or trea
 - Do not accept `PASS` without evidence and an artifact when the role contract requires one.
 - Do not hand-edit JSONL unless no helper is available; prefer `agent-run-ledger.*`.
 - Run `check-work-items-state.* --root .` before broad closeout so stale active work items are visible, not silently skipped.
+
+## Selected-item obligation observation
+
+After successful terminal append/settlement, including already-settled replay, run `python -B scripts/validate-work-item-state.py --work-item work-items/active/<slug> --obligations-json`. Installed Lead uses its sibling validator. Deploy the helper before teaching the flag; unsupported flags record unavailable observation, never fallback to counts.
+
+The optional mode emits one JSON object: `schemaVersion: 1`, `workItem`, `ledgerPath`, `ledgerSha256`, `selection` (`live`, `candidate`, `ledger-free`), `strict`, `obligations`, `diagnostics`, and `result` (`PASS`/`FAIL` for validation). `--telemetry` nests counters. Default text format and exit polarity remain unchanged; required-read secondary diagnostics and error counts have the exception described below. Candidate/non-strict triage is not a completion oracle. Selected bytes are captured once and passed to the existing evaluator; the digest binds that revision. Approved ledger-free quick fixes explicitly identify absent ledger/null digest; required missing ledgers fail.
+
+The observation freezes selected presence as well as bytes. A captured present image, including empty bytes, is validated even if the path later disappears. Genuine captured absence stays absent if a file later appears and is ledger-free only under the existing live quick-fix contract; required, candidate and compatible-member absence refuse. The direct validator API distinguishes explicit `selected_ledger_absent=True` from omitted legacy acquisition and rejects combining absence with `selected_ledger_bytes`. A failed read stays incomplete and is never parsed as successful empty data. Default failure output retains its original cannot-read cause and nonzero exit; the manufactured `ledger has no events` diagnostic after that failed read is removed, so its error count can change.
+
+Available typed projection contains `openLaunches`, `openRevises`, `unresolvedHistory`. Current rows expose run/source digests and ordinals, source kind, obligation/predecessor IDs, and declared artifact/lane. History rows expose prefix digest/length, raw line identity, admission/disposition run and declared run ID. Arbitrary notes/prompts/raw evidence are excluded. Null is unavailable; errors plus empty arrays remain FAIL. Only successful strict live/approved ledger-free validation with available empty arrays establishes effective obligations clear at that revision.
+
+Root consumes the completed tool frame and verifies item/selection/strictness/digest/diagnostics, then checks current selected presence and digest before dependent action; changed presence or bytes require a fresh observation. Persist terminal identity, observed revision/selection, exact pending IDs/causes and action owner/resume in existing `Last result`/next-action text. Known strict obligation FAIL is useful state; tool/acquisition failure records unavailable/resume. Continue independent admitted ready work. No acknowledgment-only ledger event mutates the observed revision. Writer success/replay markers stay independent; observation is neither task completion nor publication authority. Independent QA inspects actual tool receipt and persisted Root acknowledgment.
 
 ## Terms and Abbreviations
 

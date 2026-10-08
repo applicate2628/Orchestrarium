@@ -7545,6 +7545,10 @@ def test_audit_rejects_unknown_top_level_directory(tmp_path: Path) -> None:
     except module.LifecycleError as exc:
         assert exc.failure_id == "WI-CATEGORY-UNKNOWN-ROOT"
         assert "unknown-category" in str(exc)
+        assert "work-items/root-contract.json" in str(exc)
+        assert "creator/data owner" in str(exc)
+        assert "classify" in str(exc)
+        assert "flat-json" in str(exc)
     else:
         raise AssertionError("audit accepted an unknown top-level work-items directory")
 
@@ -7837,6 +7841,10 @@ def test_root_contract_does_not_admit_undeclared_root(tmp_path: Path) -> None:
     except module.LifecycleError as exc:
         assert exc.failure_id == "WI-CATEGORY-UNKNOWN-ROOT"
         assert "performance" in str(exc)
+        assert "work-items/root-contract.json" in str(exc)
+        assert "creator/data owner" in str(exc)
+        assert "classify" in str(exc)
+        assert "flat-json" in str(exc)
     else:
         raise AssertionError("contract admitted an undeclared work-items root")
 
@@ -12888,3 +12896,211 @@ def _adapt_test(function):
 for _name, _function in tuple(globals().items()):
     if _name.startswith("test_") and callable(_function):
         setattr(_UnittestAdapter, _name, _adapt_test(_function))
+
+
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_parent_park_preserves_fixed_and_open_bug_bytes_and_replays(tmp_path, version):
+    module = load_module()
+    root = tmp_path / "park"
+    parent = "retained-parent"
+    instant = "2026-10-08T00:00:00Z"
+    retention = None
+    if version == 3:
+        _item, _retained, _pointer, _before, _pointer_before, retention = seed_retained_scratch_manifest(module, root, parent, instant)
+    else:
+        seed_active(module, root, parent)
+    fixed = seed_context_bug(root, parent, "retained-fixed")
+    opened = seed_context_bug(root, parent, "retained-open")
+    fixed.write_bytes(fixed.read_bytes().replace(b"status: open", b"status: fixed"))
+    if version == 2:
+        fixed.write_bytes(fixed.read_bytes() + b"\nTerminal-at: 2026-10-01T00:00:00Z\nResolution: Prior fix.\nEvidence: Prior accepted proof.\n")
+    before = {path: path.read_bytes() for path in (fixed, opened)}
+    identities = {path: (path.stat().st_dev, path.stat().st_ino) for path in before}
+    instant = "2026-10-08T00:00:00Z"
+    rows = []
+    for path in before:
+        row = {"id": path.stem, "action": "preserve-current", "inputSha256": hashlib.sha256(before[path]).hexdigest(), "status": module._parse_fields(before[path].decode())["status"], "reason": "Retained under a separate owner.", "evidence": "Parent parking changes no bug bytes."}
+        if version == 2:
+            row.update(contextBefore=parent, contextAfter=parent)
+        rows.append(row)
+    manifest = write_bug_dispositions(root, parent, instant, rows)
+    data = json.loads(manifest.read_bytes());data["schemaVersion"] = version
+    if version == 3:
+        data["evidenceRetention"] = retention["evidenceRetention"]
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    request = root / "park-closure.md"
+    request.write_text(closure(instant).replace("Outcome: Lifecycle transition completed.", "Outcome: PARK; bugs retained unchanged."), encoding="utf-8")
+    command = ("close", "--root", str(root), "--slug", parent, "--closure-file", str(request), "--terminal-instant", instant)
+    result = run_cli(*command)
+    assert result.returncode == 0, result.stdout
+    archived = root / "work-items" / "archive" / "2026-10" / parent
+    assert module.resolve_category(root, f"work-item:{parent}") == archived.resolve()
+    receipt = json.loads((archived / "bug-dispositions-receipt.json").read_bytes())
+    assert receipt["schemaVersion"] == version
+    for row in receipt["bugs"]:
+        assert row["target"] is None and row["statusBefore"] == row["statusAfter"]
+        assert row["beforeSha256"] == row["afterSha256"]
+    assert hashlib.sha256((root / "work-items" / "README.md").read_bytes()).hexdigest() == receipt["readmeSha256"]
+    for path in before:
+        assert path.read_bytes() == before[path]
+        assert (path.stat().st_dev, path.stat().st_ino) == identities[path]
+    snapshot = tree_file_bytes(root)
+    replay = run_cli(*command)
+    assert replay.returncode == 0, replay.stdout
+    assert tree_file_bytes(root) == snapshot
+
+
+@pytest.mark.parametrize("parent_kind", ["canonical", "legacy"])
+def test_fixed_bug_admin_accepts_archived_parent_and_repairs_mutable_link(tmp_path, parent_kind):
+    module = load_module()
+    root = tmp_path / "admin"
+    parent = "parked-owner"
+    instant = "2026-10-08T00:00:00Z"
+    if parent_kind == "canonical":
+        seed_active(module, root, parent)
+        write_empty_bug_dispositions(root, parent, instant)
+        archive_parent = module.close_item(root, parent, closure(instant).encode(), instant)
+    else:
+        archive_parent = root / "work-items" / "archive" / "2026-10" / parent
+        write(archive_parent / "status.md", "status: closed\n")
+        write(archive_parent / "closure.md", closure(instant))
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+    bug = seed_context_bug(root, parent, "later-fixed")
+    bug.write_bytes(bug.read_bytes().replace(b"status: open", b"status: fixed"))
+    consumer = seed_context_bug(root, "other-owner", "mutable-consumer")
+    consumer.write_bytes(consumer.read_bytes() + b"\nRelated: bug:later-fixed\n[physical](later-fixed.md#proof)\n")
+    parent_before = tree_file_bytes(archive_parent)
+    parent_identity = (archive_parent.stat().st_dev, archive_parent.stat().st_ino)
+    command = ("archive-fixed-bug", "--root", str(root), "--slug", bug.stem, "--terminal-instant", instant, "--resolution", "Accepted synthetic fix.", "--evidence", "Synthetic current proof.", "--apply")
+    result = run_cli(*command)
+    assert result.returncode == 0, result.stdout
+    target = root / "work-items" / "bugs" / "archive" / "2026-10" / bug.name
+    receipt = json.loads(target.with_name(f"{bug.stem}.fixed-archive-receipt.json").read_bytes())
+    assert not bug.exists() and target.exists()
+    assert b"archive/2026-10/later-fixed.md#proof" in consumer.read_bytes()
+    assert b"bug:later-fixed" in consumer.read_bytes()
+    assert len(receipt["links"]) == 1
+    assert tree_file_bytes(archive_parent) == parent_before
+    assert (archive_parent.stat().st_dev, archive_parent.stat().st_ino) == parent_identity
+    snapshot = tree_file_bytes(root)
+    replay = run_cli(*command)
+    assert replay.returncode == 0, replay.stdout
+    assert tree_file_bytes(root) == snapshot
+
+
+@pytest.mark.parametrize("case", ["legacy-id", "wrong-id", "duplicate-id", "duplicate-status", "duplicate-context", "duplicate-metadata", "physical-copy", "unknown-status", "terminalize-evidenced"])
+def test_terminal_preservation_intact_record_boundary(tmp_path, case):
+    module = load_module()
+    root = tmp_path / case
+    parent = "intact-owner"
+    seed_active(module, root, parent)
+    bug = seed_context_bug(root, parent, "selected-bug")
+    original = bug.read_bytes().replace(b"status: open", b"status: fixed")
+    if case == "legacy-id":
+        original = original.replace(b"- id: selected-bug\n", b"")
+    elif case == "wrong-id":
+        original = original.replace(b"- id: selected-bug", b"- id: other-bug")
+    elif case == "duplicate-id":
+        original += b"- id: other-bug\n"
+    elif case == "duplicate-status":
+        original += b"- status: fixed\n"
+    elif case == "duplicate-context":
+        original += b"- context: intact-owner\n"
+    elif case == "duplicate-metadata":
+        original += b"Evidence: first\nEvidence: second\n"
+    elif case == "unknown-status":
+        original = original.replace(b"status: fixed", b"status: unrecognized")
+    elif case == "terminalize-evidenced":
+        original += b"Terminal-at: 2026-10-01T00:00:00Z\nResolution: Original fix.\nEvidence: Original proof.\n"
+    bug.write_bytes(original)
+    if case == "physical-copy":
+        target = root / "work-items" / "bugs" / "archive" / "2026-09" / bug.name
+        target.parent.mkdir(parents=True)
+        target.write_bytes(original)
+    instant = "2026-10-08T00:00:00Z"
+    row = {"id": bug.stem, "action": "preserve-current", "inputSha256": hashlib.sha256(original).hexdigest(), "status": module._parse_fields(original.decode())["status"], "reason": "Retain only an intact record.", "evidence": "Owner boundary oracle."}
+    if case == "terminalize-evidenced":
+        row.pop("reason");row.update(action="terminalize", resolution="No repeated mutation.")
+    write_bug_dispositions(root, parent, instant, [row])
+    before = tree_file_bytes(root)
+    if case == "legacy-id":
+        archived = module.close_item(root, parent, closure(instant).encode(), instant)
+        assert archived.is_dir() and bug.read_bytes() == original
+    else:
+        with pytest.raises(module.LifecycleError):
+            module.close_item(root, parent, closure(instant).encode(), instant)
+        assert tree_file_bytes(root) == before
+
+
+@pytest.mark.parametrize("parent_kind", ["missing", "duplicate", "invalid-archive", "backlog"])
+def test_fixed_bug_admin_parent_location_refusals_keep_originals(tmp_path, parent_kind):
+    module = load_module()
+    root = tmp_path / parent_kind
+    parent = "bounded-parent"
+    if parent_kind != "missing":
+        archived = root / "work-items" / "archive" / "2026-10" / parent
+        if parent_kind != "backlog":
+            write(archived / "status.md", "status: closed\n")
+            if parent_kind != "invalid-archive":
+                write(archived / "closure.md", closure("2026-10-08T00:00:00Z"))
+        else:
+            write(root / "work-items" / "backlog" / f"{parent}.md", "status: candidate\nTask: Candidate only.\n")
+        if parent_kind == "duplicate":
+            write(root / "work-items" / "active" / parent / "status.md", quick_status())
+    bug = seed_context_bug(root, parent, "bounded-fixed")
+    bug.write_bytes(bug.read_bytes().replace(b"status: open", b"status: fixed"))
+    module.resolve_category(root, f"bug:{bug.stem}")  # initialize the existing public owner before byte census
+    before = tree_file_bytes(root)
+    with pytest.raises(module.LifecycleError):
+        module.archive_fixed_bug(root, bug.stem, "2026-10-08T00:00:00Z", "Accepted fix.", "Accepted evidence.")
+    assert tree_file_bytes(root) == before
+
+
+def test_terminal_preservation_receipt_unknown_before_status_refuses_replay(tmp_path):
+    module = load_module()
+    root = tmp_path / "receipt"
+    parent = "receipt-owner"
+    seed_active(module, root, parent)
+    bug = seed_context_bug(root, parent, "receipt-fixed")
+    bug.write_bytes(bug.read_bytes().replace(b"status: open", b"status: fixed"))
+    before = bug.read_bytes()
+    instant = "2026-10-08T00:00:00Z"
+    write_bug_dispositions(root, parent, instant, [{"id": bug.stem, "action": "preserve-current", "inputSha256": hashlib.sha256(before).hexdigest(), "status": "fixed", "reason": "Retain.", "evidence": "Accepted unchanged image."}])
+    archived = module.close_item(root, parent, closure(instant).encode(), instant)
+    receipt = archived / "bug-dispositions-receipt.json"
+    payload = json.loads(receipt.read_bytes());payload["bugs"][0]["statusBefore"] = "unrecognized"
+    receipt.write_text(json.dumps(payload), encoding="utf-8")
+    snapshot = tree_file_bytes(root)
+    with pytest.raises(module.LifecycleError) as refused:
+        module.close_item(root, parent, closure(instant).encode(), instant)
+    assert refused.value.failure_id == "WI-IMMUTABLE-ARCHIVE"
+    assert tree_file_bytes(root) == snapshot and bug.read_bytes() == before
+
+
+def test_successor_archive_preserves_terminal_bug_with_shared_owner(tmp_path):
+    module = load_module()
+    root = tmp_path / "successor"
+    parent = "shared-preserve-owner"
+    seed_active(module, root, parent)
+    item = root / "work-items" / "active" / parent
+    recorded = run_ledger(item, "append", "--run-id", "successor-synthetic-terminal", "--role", "qa-engineer", "--execution-role", "internal", "--status", "completed", "--gate", "none", "--scope", "synthetic successor input", "--started-at", "2026-10-08T00:00:00Z", "--updated-at", "2026-10-08T00:00:00Z")
+    assert recorded.returncode == 0, recorded.stdout
+    bug = seed_context_bug(root, parent, "successor-preserved-fixed")
+    bug.write_bytes(bug.read_bytes().replace(b"status: open", b"status: fixed"))
+    before = bug.read_bytes()
+    instant = "2026-10-08T00:05:00Z"
+    write_bug_dispositions(root, parent, instant, [{"id": bug.stem, "action": "preserve-current", "inputSha256": hashlib.sha256(before).hexdigest(), "status": "fixed", "reason": "Keep independent bug ownership.", "evidence": "Successor changes no bug bytes."}])
+    module.refresh_readme(root)
+    ledger_sha = hashlib.sha256((item / "agent-runs.jsonl").read_bytes()).hexdigest()
+    readme_sha = hashlib.sha256((root / "work-items" / "README.md").read_bytes()).hexdigest()
+    successor = b"Task: Resume independent work.\nContinues: shared-preserve-owner\nObligation-transfer: preserve-successor-operation\nNext action: Review the retained scope.\nupdated: 2026-10-08T00:05:00Z\n"
+    transfer = json.dumps({"schemaVersion": 1, "sourceWorkItem": parent, "successorWorkItem": "ready-successor", "expectedSourceLedgerSha256": ledger_sha, "obligations": []}).encode()
+    args = (root, parent, closure(instant).encode(), instant, "ready-successor", successor, "preserve-successor-operation", ledger_sha, readme_sha)
+    receipt = module.archive_with_successor(*args, obligation_transfer_data=transfer)
+    archived = root / receipt["archivePath"]
+    bug_receipt = json.loads((archived / "bug-dispositions-receipt.json").read_bytes())
+    assert bug_receipt["bugs"][0]["statusBefore"] == "fixed"
+    assert bug_receipt["bugs"][0]["target"] is None and bug.read_bytes() == before
+    snapshot = tree_file_bytes(root)
+    assert module.archive_with_successor(*args, obligation_transfer_data=transfer) == receipt
+    assert tree_file_bytes(root) == snapshot

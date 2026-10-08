@@ -296,6 +296,8 @@ Ask these before advancing:
 7. Is the blast radius still inside the approved change surface?
 8. Has the [Lead terminal decision](../../skills/lead/SKILL.md#work-cycle-ownership-recipe) reconciled the original admitted outcome, observed actual closure when terminal, or recorded and continued the exact required next action?
 
+Root consumes the Lead recipe's actual returned runner identities/state before formatting/truncation and its strict selected-item `--obligations-json` receipt after terminal writes/replay, acknowledging recovery metadata and revision/pending causes/action in existing status or the normal validated ledger. Logical lane release and supported host teardown/accounting follow that same owner; host retention is not silently called cleanup. Unavailable output is never a clean receipt; no acknowledgment-only ledger row is added.
+
 ## Terms and Abbreviations
 
 - `agent-run-ledger.*`: helper script family that initializes legacy work-item ledger files and appends validated `agent-runs.jsonl` events.

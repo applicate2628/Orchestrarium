@@ -202,7 +202,7 @@ def v3_event(**overrides) -> dict:
 
 def test_staged_missing_and_empty_ledgers_remain_invalid(tmp_path: Path) -> None:
     for name, ledger_text, diagnostic in (
-        ("missing", None, "missing ledger"),
+        ("missing", None, "cannot read ledger"),
         ("empty", "", "ledger has no events"),
     ):
         item = tmp_path / "work-items" / "active" / f"staged-{name}-ledger"
@@ -214,6 +214,8 @@ def test_staged_missing_and_empty_ledgers_remain_invalid(tmp_path: Path) -> None
 
         assert result.returncode == 1
         assert diagnostic in result.stdout
+        if ledger_text is None:
+            assert "ledger has no events" not in result.stdout
 
 
 def test_pass_ledger_with_artifact_and_evidence(tmp_path: Path) -> None:
@@ -1031,3 +1033,164 @@ _PYTEST_ONLY_RECOVERY_TESTS = {
 for _name, _function in tuple(globals().items()):
     if _name.startswith("test_") and _name not in _PYTEST_ONLY_RECOVERY_TESTS and callable(_function):
         setattr(_UnittestAdapter, _name, _adapt_test(_function))
+
+
+@pytest.mark.parametrize("fixture,expected", [("closure-invalidation-v2", 0), ("legacy-obligation-migration-v2", 1)])
+def test_obligations_json_exposes_effective_state_without_raw_counts(fixture, expected):
+    item = ROOT / "tests" / "fixtures" / "agent-run-ledger" / fixture
+    before = (item / "agent-runs.jsonl").read_bytes()
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(item), "--obligations-json", "--telemetry"], capture_output=True, text=True)
+    payload = json.loads(result.stdout)
+    assert result.returncode == expected
+    assert payload["schemaVersion"] == 1
+    assert payload["selection"] == "live" and payload["strict"] is True
+    assert payload["ledgerSha256"] == hashlib.sha256(before).hexdigest()
+    assert "telemetry" in payload and "notes" not in payload
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    if expected == 0:
+        assert payload["result"] == "PASS" and payload["diagnostics"] == []
+        assert payload["obligations"] == {"openLaunches": [], "openRevises": [], "unresolvedHistory": []}
+    else:
+        assert payload["result"] == "FAIL"
+        row = payload["obligations"]["openLaunches"][0]
+        assert row["runId"] == "toolchain-luna-profile-floor-20260812-r1"
+        assert row["rawLineOrdinal"] == 1 and len(row["rawLineSha256"]) == 64
+        assert any("unsettled launch:" in message for message in payload["diagnostics"])
+
+
+def test_obligations_json_missing_required_ledger_is_unavailable(tmp_path):
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(tmp_path), "--obligations-json"], capture_output=True, text=True)
+    payload = json.loads(result.stdout)
+    assert result.returncode == 1 and payload["result"] == "FAIL"
+    assert payload["obligations"] is None and payload["ledgerSha256"] is None
+    assert payload["selection"] == "live" and payload["diagnostics"]
+
+
+def test_obligations_json_candidate_and_triage_are_explicit():
+    item = ROOT / "tests" / "fixtures" / "agent-run-ledger" / "closure-invalidation-v2"
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(item), "--ledger-path", str(item / "agent-runs.jsonl"), "--no-strict-revise", "--obligations-json"], capture_output=True, text=True)
+    payload = json.loads(result.stdout)
+    assert payload["selection"] == "candidate" and payload["strict"] is False
+
+
+@pytest.mark.parametrize("suffix,cause", [(b'{invalid-json}\n', "invalid JSON"), (b'\xff\n', "cannot read ledger"), (b'"' + b'x' * 200000 + b'"\n', "bounded line length")], ids=["malformed-json", "invalid-utf8", "oversize-line"])
+def test_obligations_json_incomplete_acquisition_is_null(tmp_path, suffix, cause):
+    item = tmp_path / "partial"
+    shutil.copytree(ROOT / "tests" / "fixtures" / "agent-run-ledger" / "closure-invalidation-v2", item)
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_bytes(ledger.read_bytes() + suffix)
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(item), "--obligations-json"], capture_output=True, text=True)
+    payload = json.loads(result.stdout)
+    assert result.returncode == 1 and payload["result"] == "FAIL"
+    assert payload["obligations"] is None
+    assert any(cause in value for value in payload["diagnostics"])
+
+
+def test_load_jsonl_count_limit_records_incomplete_in_same_pass(tmp_path, monkeypatch):
+    module = load_validator_module()
+    monkeypatch.setattr(module, "MAX_LEDGER_EVENTS", 1)
+    observed = []
+    errors = []
+    events = module.load_jsonl(tmp_path / "unused", errors, source_bytes=b'{}\n{}\n', ledger_acquisition_complete_out=observed)
+    assert events == [{}] and observed == [False]
+    assert any("bounded event count" in value for value in errors)
+
+
+def test_obligations_json_approved_ledger_free_is_explicit(tmp_path):
+    write(tmp_path / "status.md", minimal_quick_fix_status())
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(tmp_path), "--obligations-json"], capture_output=True, text=True)
+    payload = json.loads(result.stdout)
+    assert result.returncode == 0 and payload["selection"] == "ledger-free"
+    assert payload["ledgerSha256"] is None and payload["obligations"]["openLaunches"] == []
+
+
+def _selection_revise_fixture(tmp_path):
+    item = tmp_path / "closure-invalidation-v2"
+    write(item / "status.md", minimal_quick_fix_status())
+    write(item / "design.md", "# Accepted synthetic design.\n")
+    fixture = ROOT / "tests" / "fixtures" / "agent-run-ledger" / "closure-invalidation-v2" / "agent-runs.jsonl"
+    captured = fixture.read_bytes().splitlines(keepends=True)[0]
+    return item, captured
+
+
+@pytest.mark.parametrize("initially_present", [True, False], ids=["present-delete", "absent-appear"])
+def test_obligations_selection_is_frozen_across_validation_boundary(tmp_path, monkeypatch, capsys, initially_present):
+    module = load_validator_module()
+    item, captured = _selection_revise_fixture(tmp_path)
+    ledger = item / "agent-runs.jsonl"
+    if initially_present:
+        ledger.write_bytes(captured)
+        baseline = module.validate_work_item(item)
+        assert len(baseline) == 1 and "open REVISE obligation: fixture-revise-run" in baseline[0]
+    original = module.validate_work_item
+    def interpose(*args, **kwargs):
+        if initially_present:
+            ledger.unlink()
+        else:
+            ledger.write_bytes(captured)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(module, "validate_work_item", interpose)
+    result = module.main(["--work-item", str(item), "--obligations-json"])
+    observed = json.loads(capsys.readouterr().out)
+    if initially_present:
+        assert result == 1 and observed["result"] == "FAIL"
+        assert observed["selection"] == "live"
+        assert observed["ledgerSha256"] == hashlib.sha256(captured).hexdigest()
+        assert [row["runId"] for row in observed["obligations"]["openRevises"]] == ["fixture-revise-run"]
+    else:
+        assert result == 0 and observed["result"] == "PASS"
+        assert observed["selection"] == "ledger-free" and observed["ledgerSha256"] is None
+        assert observed["obligations"] == {"openLaunches": [], "openRevises": [], "unresolvedHistory": []}
+        assert ledger.exists()  # this absent snapshot is no longer current
+
+
+def test_selected_api_read_failure_is_not_successful_empty_acquisition(tmp_path, monkeypatch):
+    module = load_validator_module()
+    item, captured = _selection_revise_fixture(tmp_path)
+    selected = item / "agent-runs.jsonl"
+    selected.write_bytes(captured)
+    original = Path.read_bytes
+    def fail_selected(path):
+        if path == selected:
+            raise OSError("controlled selected acquisition failure")
+        return original(path)
+    monkeypatch.setattr(Path, "read_bytes", fail_selected)
+    acquired = []
+    errors = module.validate_work_item(item, ledger_acquisition_complete_out=acquired)
+    assert any("cannot read ledger:" in value and "controlled selected acquisition failure" in value for value in errors)
+    assert acquired == [False]
+    observed = module._obligations_observation(item, None, True, {})
+    assert observed["result"] == "FAIL" and observed["obligations"] is None
+    assert any("controlled selected acquisition failure" in value for value in observed["diagnostics"])
+
+
+def test_captured_empty_present_does_not_become_ledger_free(tmp_path):
+    module = load_validator_module()
+    item, _captured = _selection_revise_fixture(tmp_path)
+    acquired = []
+    errors = module.validate_work_item(item, selected_ledger_bytes=b"", ledger_acquisition_complete_out=acquired)
+    assert any("ledger has no events:" in value for value in errors)
+    assert acquired == [True]
+
+
+def test_frozen_absence_refuses_required_candidate_and_inconsistent_selection(tmp_path, monkeypatch):
+    module = load_validator_module()
+    item, captured = _selection_revise_fixture(tmp_path)
+    selected = item / "agent-runs.jsonl"
+    selected.write_bytes(captured)
+    original = Path.read_bytes
+    def refuse_reacquisition(path):
+        assert path != selected, "frozen selection must not reacquire selected bytes"
+        return original(path)
+    monkeypatch.setattr(Path, "read_bytes", refuse_reacquisition)
+    acquired = []
+    errors = module.validate_work_item(item, selected_ledger_bytes=captured, selected_ledger_absent=True, ledger_acquisition_complete_out=acquired)
+    assert any("inconsistent captured selected ledger presence/absence" in value for value in errors)
+    assert acquired == []
+    acquired = []
+    errors = module.validate_work_item(item, ledger_path=selected, selected_ledger_absent=True, ledger_acquisition_complete_out=acquired)
+    assert any("missing ledger:" in value for value in errors) and acquired == [False]
+    write(item / "status.md", minimal_staged_status())
+    acquired = []
+    errors = module.validate_work_item(item, selected_ledger_absent=True, ledger_acquisition_complete_out=acquired)
+    assert any("missing ledger:" in value for value in errors) and acquired == [False]

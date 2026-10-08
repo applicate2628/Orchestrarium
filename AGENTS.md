@@ -113,3 +113,20 @@ Keep accepted artifacts near the code when the repository is the source of truth
 - `UI`: User Interface, the visible or interactive surface presented to a user.
 - `UX`: User Experience, the user's end-to-end interaction quality and clarity.
 - `YAML`: YAML Ain't Markup Language, the structured data format used by files such as `.agents-mode.yaml`.
+
+## Local source-navigation precedence
+
+This section owns graph-tool applicability for this checkout. Apply the existing [shared MCP continuity policy](shared/references/mcp-continuity.md) for current tool discovery, command-contract inspection, target identity, freshness and omitted coverage. Inherited/generated tool triggers do not require duplicate graph queries, setup or refresh when the task uses another fitting current tool.
+
+Follow explicit user tool instructions first, including conditional CodeGraph-first when its index is actually present at the selected target. Otherwise use this checkout's existing Graft source-context route for current symbols, callers and change scope; use Graphify for explicit Graphify requests or fitting broader corpus exploration. Direct source reads remain available for details or coverage the selected graph does not provide. Do not query another graph solely to satisfy a conflicting generic trigger.
+
+Use the installed command's actual help/version contract in the current shell. Do not install, upgrade, sync third-party skills or download models merely because inherited setup prose says to. For Graphify, signal activity immediately before each command from the verified selected repository root. In PowerShell use:
+
+```powershell
+New-Item -ItemType Directory -Force -Path 'graphify-out' | Out-Null
+New-Item -ItemType File -Force -Path 'graphify-out/.graphify-activity' | Out-Null
+```
+
+Decide whether structural refresh is needed in this order: (1) an explicit refresh request, or a missing/corrupt/empty index that is actually required for the task; (2) verified material drift affecting the requested source/relationships; (3) otherwise use the existing index. Verify the selected root before classifying its index; a wrong-root result requires correcting the target, not rebuilding the other root. For an existing Graphify index, use the installed documented structural update command, `graphify update .`, only within the admitted task and confirmed command contract. Do not run a deep/large-language-model build automatically. If a required missing index cannot be serviced through the documented authorized structural path, use verified fitting source tools and state the omitted graph coverage rather than invent setup authority.
+
+Age can prompt a freshness check; age plus one small edit does not override the reuse decision without material relevant drift. A zero-result query alone does not prove staleness: try known literal identifiers or another fitting source-navigation tool, and refresh only with independent evidence of the missing/corrupt/empty required index or relevant drift. Pending semantic enrichment is omitted coverage, not total structural-index absence.

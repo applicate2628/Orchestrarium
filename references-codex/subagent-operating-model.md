@@ -18,7 +18,8 @@ This file keeps only Codex-specific runtime and repository concretization for th
 ## Codex-side repository concretization
 
 - Adjacent findings and `BLOCKED:prerequisite` use the configured bug-registry path when the repository defines one.
-- Task-memory root, recovery entry point, active-item directory, and archive location remain repository-defined in this Codex-side reference model. Accepted terminal results consume the [Lead work-cycle owner](../src.codex/skills/lead/SKILL.md#work-cycle-ownership-recipe) for actual continuation/close and original-target readiness; this addendum owns no second completion algorithm.
+- Task-memory root, recovery entry point, active-item directory, and archive location remain repository-defined in this Codex-side reference model. Accepted terminal results consume the [Lead work-cycle owner](../src.codex/skills/lead/SKILL.md#work-cycle-ownership-recipe) for strict selected-item `--obligations-json` receipt/status acknowledgment and actual continuation/close and original-target readiness. This includes logical-phase versus supported-host release/accounting and retention of actual runner identities/state before formatting/truncation; this addendum owns no second completion or teardown algorithm.
+- Bug preservation and separate fixed-bug administration use the [shared lifecycle owner contract](../shared/references/work-items-root-contract.md) and its operator runbook; no provider-specific status or parent-location rule is added.
 - Periodic controls stay pack-local in [periodic-control-matrix.md](periodic-control-matrix.md).
 - Older Codex examples may still show `Gate: PASS | REVISE | BLOCKED | RETURN(role)`; the typed `BLOCKED[:class]` form from the shared core remains compatible.
 

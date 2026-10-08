@@ -2142,3 +2142,208 @@ def test_internal_closer_binds_actual_codex_terminal_and_launch_without_extended
     revised = run_validator(item)
     assert revised.returncode != 0
     assert "internal closer does not bind" in revised.stdout
+
+
+
+def _independent_decision_fixture(root: Path, *, mixed: bool = False):
+    """Reuse decision owners' admitted producers in the public writer's root."""
+    status = root / "work-items" / "active" / "ledger-helper" / "status.md"
+    status.write_text("status: active\n" + status.read_text(encoding="utf-8"), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(
+        "ledger_decision_fixtures", ROOT / "tests" / "test_mutate_work_item.py"
+    )
+    assert spec is not None and spec.loader is not None
+    fixtures = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = fixtures
+    spec.loader.exec_module(fixtures)
+    owner = fixtures.load_module()
+    entries = []
+    count = 1 if mixed else 13
+    for index in range(count):
+        path = root / "work-items" / "decisions" / f"2026-07-{index + 1:02d}-public-h1-{index:02d}.md"
+        fixtures.write(
+            path,
+            fixtures._legacy_h1_decision_record(
+                mode="bold" if mixed or index >= 7 else "plain",
+                status="proposed (deferred)" if mixed or index in {7, 8} else "accepted (frozen)",
+            ),
+        )
+        entries.append(
+            {"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest().upper(), "state": "admitted"}
+        )
+    fixtures._write_decision_h1_manifest(root, entries)
+    if mixed:
+        path = root / "work-items" / "decisions" / "2026-06-30-public-v0.md"
+        fixtures.write(path, fixtures._legacy_v0_decision_record(identity_line=f"id: {path.stem}"))
+        fixtures._write_decision_v0_manifest(
+            root,
+            [{"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest().upper(), "state": "admitted"}],
+        )
+        assert len(owner._preflight_current_decision_v0(root)) == 1
+    assert len(owner._preflight_current_decision_h1(root)) == count
+    assert len(owner.audit_categories(root)) == count + int(mixed)
+    frozen = {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in (root / "work-items" / "decisions").glob("*.md")
+    }
+    for name in ("decision-h1-compatibility.json", "decision-v0-compatibility.json"):
+        path = root / "work-items" / name
+        if path.exists():
+            frozen[path.relative_to(root).as_posix()] = path.read_bytes()
+    return owner, frozen
+
+
+def _decision_public_launch(item: Path):
+    return run_ledger(
+        item, "append",
+        "--run-id", "decision-h1-launch",
+        "--role", "qa-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "lifecycle settlement",
+        "--event-kind", "launch",
+        "--started-at", "2026-09-12T10:00:00Z",
+        "--updated-at", "2026-09-12T10:00:00Z",
+    )
+
+
+def _decision_public_settlement(item: Path, *, result_id: str = "decision-h1-result"):
+    return run_ledger(
+        item, "settle-launch",
+        "--launch-run-id", "decision-h1-launch",
+        "--run-id", result_id,
+        "--status", "completed",
+        "--gate", "PASS",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:focused lifecycle settlement",
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    )
+
+
+def _assert_decision_public_custody(root: Path, item: Path, frozen) -> None:
+    assert all((root / relative).read_bytes() == raw for relative, raw in frozen.items())
+    assert not (item / "agent-runs.jsonl.lock").exists()
+    assert not (item / "agent-runs.jsonl.tmp").exists()
+
+
+def _assert_decision_public_readback(root: Path, item: Path, owner, frozen) -> None:
+    path = item / "agent-runs.jsonl"
+    rows = [json.loads(raw) for raw in path.read_bytes().splitlines()]
+    assert len(rows) == 2
+    launch, terminal = rows
+    assert launch["schemaVersion"] == 2 and launch["eventKind"] == "launch"
+    assert launch["runId"] == "decision-h1-launch" and launch["gate"] == "none"
+    assert launch["status"] == "running" and launch["role"] == "qa-engineer"
+    assert terminal["schemaVersion"] == 2 and terminal["runId"] == "decision-h1-result"
+    assert terminal["launchRunId"] == launch["runId"]
+    assert terminal["status"] == "completed" and terminal["gate"] == "PASS"
+    for field in ("role", "executionRole", "scope"):
+        assert terminal[field] == launch[field]
+    assert owner.resolve_ledger_h1_artifact_set_location(root) is None
+    validator = load_ledger_module().load_validator()
+    context = validator.load_effective_ledger_view(root, item, path.absolute().relative_to(root.absolute()).as_posix())
+    assert context.observation.activation_state == "inactive", context.observation.diagnostics
+    assert not context.observation.failure_ids, context.observation.diagnostics
+    checked = run_validator(item)
+    assert checked.returncode == 0, (checked.stdout, checked.stderr)
+    _assert_decision_public_custody(root, item, frozen)
+
+
+def test_public_append_accepts_independent_decision_h1(tmp_path: Path):
+    root = tmp_path / "repo"
+    item = prepare_valid_work_item(root)
+    owner, frozen = _independent_decision_fixture(root)
+    result = _decision_public_launch(item)
+    if result.returncode != 0:
+        assert not (item / "agent-runs.jsonl").exists()
+        _assert_decision_public_custody(root, item, frozen)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert "RESULT: PASS append" in result.stdout
+    rows = [json.loads(raw) for raw in (item / "agent-runs.jsonl").read_bytes().splitlines()]
+    assert len(rows) == 1 and rows[0]["eventKind"] == "launch"
+    settled = _decision_public_settlement(item)
+    assert settled.returncode == 0, (settled.stdout, settled.stderr)
+    assert "RESULT: PASS settle-launch" in settled.stdout
+    _assert_decision_public_readback(root, item, owner, frozen)
+
+
+def test_public_settle_accepts_independent_decision_h1_after_launch(tmp_path: Path):
+    root = tmp_path / "repo"
+    item = prepare_valid_work_item(root)
+    launch = _decision_public_launch(item)
+    assert launch.returncode == 0, (launch.stdout, launch.stderr)
+    ledger = item / "agent-runs.jsonl"
+    launch_bytes = ledger.read_bytes()
+    rows = [json.loads(raw) for raw in launch_bytes.splitlines()]
+    assert len(rows) == 1 and rows[0]["eventKind"] == "launch"
+    owner, frozen = _independent_decision_fixture(root)
+    settled = _decision_public_settlement(item)
+    if settled.returncode != 0:
+        assert ledger.read_bytes() == launch_bytes
+        _assert_decision_public_custody(root, item, frozen)
+    assert settled.returncode == 0, (settled.stdout, settled.stderr)
+    assert "RESULT: PASS settle-launch" in settled.stdout
+    _assert_decision_public_readback(root, item, owner, frozen)
+    terminal_bytes = ledger.read_bytes()
+    replay = _decision_public_settlement(item)
+    assert replay.returncode == 0 and "already-settled" in replay.stdout
+    assert ledger.read_bytes() == terminal_bytes
+    conflict = _decision_public_settlement(item, result_id="decision-h1-conflicting-result")
+    assert conflict.returncode != 0 and "WI-LEDGER-SETTLE-CONFLICT" in conflict.stderr
+    assert ledger.read_bytes() == terminal_bytes
+    _assert_decision_public_custody(root, item, frozen)
+
+
+def test_public_ledger_accepts_mixed_v0_h1_decision_cohort(tmp_path: Path):
+    root = tmp_path / "repo"
+    item = prepare_valid_work_item(root)
+    owner, frozen = _independent_decision_fixture(root, mixed=True)
+    launch = _decision_public_launch(item)
+    if launch.returncode != 0:
+        assert not (item / "agent-runs.jsonl").exists()
+        _assert_decision_public_custody(root, item, frozen)
+    assert launch.returncode == 0, (launch.stdout, launch.stderr)
+    settled = _decision_public_settlement(item)
+    assert settled.returncode == 0, (settled.stdout, settled.stderr)
+    _assert_decision_public_readback(root, item, owner, frozen)
+    for name in ("legacy-ledger-projection-manifests", "legacy-ledger-projections.jsonl", "legacy-ledger-projection-receipts"):
+        assert not (root / "work-items" / name).exists()
+
+
+@pytest.mark.parametrize("participant", ("manifest", "registry", "receipt"))
+def test_public_ledger_independent_decision_cannot_mask_typed_partial(
+    tmp_path: Path, participant: str
+):
+    root = tmp_path / "repo"
+    item = prepare_valid_work_item(root)
+    seeded = _decision_public_launch(item)
+    assert seeded.returncode == 0, (seeded.stdout, seeded.stderr)
+    ledger = item / "agent-runs.jsonl"
+    before = ledger.read_bytes()
+    owner, frozen = _independent_decision_fixture(root)
+    partials = {
+        "manifest": ("legacy-ledger-projection-manifests/partial.json", {"schemaVersion": 2, "policyDecision": owner._SEALED_PREFIX_POLICY}),
+        "registry": ("legacy-ledger-projections.jsonl", {"schemaVersion": 2, "profileId": owner._SEALED_PREFIX_PROFILE}),
+        "receipt": ("legacy-ledger-projection-receipts/partial-v2.json", {"schemaVersion": 2, "ledgerManifestPath": "work-items/legacy-ledger-projection-manifests/partial.json"}),
+    }
+    relative, payload = partials[participant]
+    path = root / "work-items" / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    frozen[path.relative_to(root).as_posix()] = path.read_bytes()
+    appended = run_ledger(
+        item, "append", "--run-id", "decision-h1-refused-extra-launch",
+        "--role", "qa-engineer", "--execution-role", "internal",
+        "--status", "running", "--gate", "none", "--scope", "lifecycle settlement",
+        "--event-kind", "launch", "--started-at", "2026-09-12T10:01:00Z",
+        "--updated-at", "2026-09-12T10:01:00Z",
+    )
+    assert appended.returncode != 0 and "WI-LEDGER-COMPAT-SET-TOPOLOGY" in appended.stderr
+    assert ledger.read_bytes() == before
+    _assert_decision_public_custody(root, item, frozen)
+    settled = _decision_public_settlement(item)
+    assert settled.returncode != 0 and "WI-LEDGER-COMPAT-SET-TOPOLOGY" in settled.stderr
+    assert ledger.read_bytes() == before
+    _assert_decision_public_custody(root, item, frozen)

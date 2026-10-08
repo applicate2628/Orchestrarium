@@ -1081,3 +1081,80 @@ class LedgerH1EffectiveViewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_selected_observation_acquisition_tracks_active_and_revoked_h1(tmp_path):
+    module = load_validator()
+    for state in ("active", "revoked"):
+        root = tmp_path / state
+        artifacts, items, paths, _expected = synthetic_artifacts(module, root)
+        if state == "revoked":
+            artifacts = revoked_artifacts(module, artifacts)
+        materialize_live_artifacts(root, artifacts)
+        states, acquired = [], []
+        errors = module.validate_work_item(items[0], strict_revise=False, validate_status_file=False, obligation_state_out=states, ledger_acquisition_complete_out=acquired)
+        assert acquired == [True] and len(states) == 1
+        # Existing historical field errors remain owned by the revoked reader.
+        if state == "active":
+            assert errors == []
+        observation = module._obligations_observation(items[0], None, True, {})
+        assert observation["obligations"] is not None
+        assert observation["ledgerSha256"] == digest((items[0] / "agent-runs.jsonl").read_bytes())
+
+
+def test_h1_observation_preserves_semantic_error_and_rejects_partial_parse(tmp_path):
+    module = load_validator()
+    artifacts, items, paths, _expected = synthetic_artifacts(module, tmp_path)
+    materialize_live_artifacts(tmp_path, artifacts)
+    ledger = items[1] / "agent-runs.jsonl"
+    original = ledger.read_bytes()
+    # A current object with missing semantic fields is completely acquired.
+    ledger.write_bytes(original + b"{}\n")
+    observation = module._obligations_observation(items[1], None, True, {})
+    assert observation["result"] == "FAIL" and observation["obligations"] is not None
+    assert any("event missing required field" in value for value in observation["diagnostics"])
+    for suffix in (b"{bad}\n", b"\xff\n", b"{}"):
+        ledger.write_bytes(original + suffix)
+        observation = module._obligations_observation(items[1], None, True, {})
+        assert observation["result"] == "FAIL" and observation["obligations"] is None
+        assert observation["diagnostics"]
+
+
+def test_frozen_h1_absence_refuses_before_selected_acquisition(tmp_path, monkeypatch):
+    module = load_validator()
+    for state in ("active", "revoked"):
+        root = tmp_path / state
+        artifacts, items, paths, _expected = synthetic_artifacts(module, root)
+        if state == "revoked":
+            artifacts = revoked_artifacts(module, artifacts)
+        materialize_live_artifacts(root, artifacts)
+        selected = items[0] / "agent-runs.jsonl"
+        original = Path.read_bytes
+        with monkeypatch.context() as patch:
+            def forbid_selected(path):
+                assert path != selected, "H1 frozen absence must not read late selected contents"
+                return original(path)
+            patch.setattr(Path, "read_bytes", forbid_selected)
+            acquired, states = [], []
+            errors = module.validate_work_item(items[0], selected_ledger_absent=True, ledger_acquisition_complete_out=acquired, obligation_state_out=states, validate_status_file=False)
+        assert any("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in value for value in errors)
+        assert True not in acquired and states == []
+
+
+def test_h1_observation_uses_captured_present_image_after_live_change(tmp_path, monkeypatch):
+    module = load_validator()
+    artifacts, items, paths, _expected = synthetic_artifacts(module, tmp_path)
+    materialize_live_artifacts(tmp_path, artifacts)
+    selected = items[0] / "agent-runs.jsonl"
+    captured = selected.read_bytes()
+    baseline = module._obligations_observation(items[0], None, True, {})
+    assert baseline["obligations"] is not None
+    original = module.validate_work_item
+    def change_selected(*args, **kwargs):
+        selected.write_bytes(b"{late malformed row}\n")
+        return original(*args, **kwargs)
+    monkeypatch.setattr(module, "validate_work_item", change_selected)
+    observed = module._obligations_observation(items[0], None, True, {})
+    assert observed["ledgerSha256"] == digest(captured)
+    assert observed["obligations"] == baseline["obligations"]
+    assert observed["result"] == baseline["result"]

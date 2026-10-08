@@ -1217,7 +1217,13 @@ class ProjectTopology:
             noun = "directory" if len(unknown_roots) == 1 else "directories"
             raise LifecycleError(
                 "WI-CATEGORY-UNKNOWN-ROOT",
-                f"unknown top-level work-items {noun}: " + ", ".join(unknown_roots),
+                f"unknown top-level work-items {noun}: " + ", ".join(unknown_roots)
+                + ". Preserve these bytes; identify their creator/data owner and classify their format and lifecycle. "
+                "The project-owned work-items/root-contract.json and work-items-root-contract documentation "
+                "(shared/references/work-items-root-contract.md) define the existing Version 2 flat-json auxiliary rules. "
+                "An eligible auxiliary may be declared by its owner under that contract; otherwise the owner must "
+                "map or migrate it to a supported lifecycle category using admitted lifecycle semantics. "
+                "This diagnostic authorizes no declaration, migration, move or deletion.",
             )
 
     def with_read_model_roots(self) -> ProjectTopology:
@@ -1421,9 +1427,14 @@ def _authoritative_field_occurrences(
     return tuple(occurrences)
 
 
-def _parse_fields(text: str) -> dict[str, str]:
+def _parse_fields(
+    text: str, *, occurrences_out: list[tuple[int, str, str, str]] | None = None,
+) -> dict[str, str]:
     fields: dict[str, str] = {}
-    for _line_number, name, value, _line in _authoritative_field_occurrences(text):
+    for occurrence in _authoritative_field_occurrences(text):
+        if occurrences_out is not None:
+            occurrences_out.append(occurrence)
+        _line_number, name, value, _line = occurrence
         fields[name] = value
     return fields
 
@@ -5554,6 +5565,16 @@ def _terminal_bug_bytes(
     ).encode("utf-8")
 
 
+def _bug_disposition_before_status_eligible(action: object, status: object) -> bool:
+    """Preservation retains known states; terminalization mutates current states."""
+    if not isinstance(status, str):
+        return False
+    category = CATEGORIES["bug"]
+    if action == "preserve-current":
+        return status in category.current_statuses | category.terminal_statuses
+    return action == "terminalize" and status in category.current_statuses
+
+
 def _prepare_bug_dispositions(
     root: Path,
     item: Path,
@@ -5639,24 +5660,44 @@ def _prepare_bug_dispositions(
             raise _bug_disposition_fail(
                 "WI-BUG-DISPOSITIONS-DRIFT", f"bug bytes changed: {bug_id}"
             )
+        occurrences = [] if schema_version == 2 or action == "preserve-current" else None
         try:
-            fields = _parse_fields(before.decode("utf-8"))
+            fields = _parse_fields(before.decode("utf-8"), occurrences_out=occurrences)
         except UnicodeDecodeError as exc:
             raise _bug_disposition_fail(
                 "WI-BUG-DISPOSITIONS-INVALID",
                 f"current bug record is not UTF-8: {bug_id}",
             ) from exc
         current_status = fields.get("status", "")
-        if current_status not in bug_category.current_statuses:
+        if not _bug_disposition_before_status_eligible(action, current_status):
             raise _bug_disposition_fail(
                 "WI-BUG-DISPOSITIONS-DRIFT",
                 f"bug is not current: {bug_id} ({current_status!r})",
             )
+        if action == "preserve-current" and current_status in bug_category.terminal_statuses:
+            assert occurrences is not None
+            owned_fields: dict[str, list[str]] = {}
+            for _line, name, value, _raw in occurrences:
+                owned_fields.setdefault(name, []).append(value)
+            if (
+                owned_fields.get("status") != [current_status]
+                or len(owned_fields.get("context", [])) != 1
+                or ("id" in owned_fields and owned_fields["id"] != [bug_id])
+                or any(len(owned_fields.get(name, [])) > 1 for name in (
+                    "terminal-at", "resolution", "evidence", "successor",
+                ))
+            ):
+                raise _bug_disposition_fail(
+                    "WI-BUG-DISPOSITIONS-INVALID", f"terminal preservation record is ambiguous: {bug_id}",
+                )
+            if _category_locations(root, bug_category, bug_id) != [source]:
+                raise _bug_disposition_fail(
+                    "WI-BUG-DISPOSITIONS-DRIFT", f"preserved bug is not uniquely current: {bug_id}",
+                )
         context_before: str | None = None
         context_after: str | None = None
         if schema_version == 2:
-            text = before.decode("utf-8")
-            occurrences = _authoritative_field_occurrences(text)
+            assert occurrences is not None
             statuses = [
                 value for _line, name, value, _raw in occurrences if name == "status"
             ]
@@ -5692,7 +5733,7 @@ def _prepare_bug_dispositions(
                     "WI-BUG-DISPOSITIONS-INVALID",
                     f"placeholder-context bug must be terminalized: {bug_id}",
                 )
-            if any(
+            if action == "terminalize" and any(
                 fields.get(key)
                 for key in ("terminal-at", "resolution", "evidence", "successor")
             ):
@@ -5945,7 +5986,7 @@ def _verify_archived_bug_dispositions(
             or result.get("action") != decision["action"]
             or result.get("beforeSha256") != decision["inputSha256"]
             or result.get("statusAfter") != decision["status"]
-            or result.get("statusBefore") not in CATEGORIES["bug"].current_statuses
+            or not _bug_disposition_before_status_eligible(action, result.get("statusBefore"))
             or result.get("source") != f"bugs/{decision['id']}.md"
             or not isinstance(result.get("afterSha256"), str)
             or not SHA256_RE.fullmatch(result["afterSha256"])
@@ -8165,9 +8206,14 @@ def _fixed_bug_terminal_image(
     context = by_name.get("context", [""])[0]
     if not SLUG_RE.fullmatch(context):
         raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", "bug context is not a work-item slug")
-    parent = _work_items_root(root) / "active" / context
-    if _category_locations(root, CATEGORIES["work-item"], context) != [parent]:
-        raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", "bug parent is not uniquely active")
+    work_items = _work_items_root(root)
+    parent = resolve_category(root, f"work-item:{context}")
+    if parent == (work_items / "active" / context).resolve():
+        pass  # preserve existing active-parent admission
+    elif parent.is_dir() and parent.parent.parent == (work_items / "archive").resolve():
+        _archived_work_item_entry(parent)
+    else:
+        raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", "bug parent is not active or archived")
     required = {"terminal-at": terminal_instant, "resolution": resolution, "evidence": evidence}
     for name, value in required.items():
         if name in by_name and by_name[name] != [value]:
@@ -18307,7 +18353,21 @@ def _ledger_h1_archive_bases(repository: Path, work_items: Path) -> tuple[Path, 
 def _ledger_h1_root_profile_observed(work_items: Path) -> bool:
     h1 = work_items / DECISION_H1_MANIFEST
     if _ledger_h1_lexically_exists(h1):
-        return True
+        try:
+            manifest_bytes = _capture_file_snapshot(
+                h1, failure_id="WI-DECISION-H1-MANIFEST-INVALID"
+            ).data
+            _preflight_current_decision_h1(
+                work_items.parent, manifest_bytes=manifest_bytes
+            )
+        except (OSError, LifecycleError):
+            return True
+        payload = json.loads(
+            manifest_bytes.decode("utf-8"),
+            object_pairs_hook=_decision_compatibility_json_object,
+        )
+        if payload["policyDecision"] == _SEALED_PREFIX_POLICY:
+            return True
     profile_marker = _SEALED_PREFIX_PROFILE.encode("ascii")
     policy_marker = _SEALED_PREFIX_POLICY.encode("ascii")
     manifests = work_items / LEGACY_PROJECTION_MANIFEST_DIR

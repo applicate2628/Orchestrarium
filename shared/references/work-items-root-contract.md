@@ -6,6 +6,10 @@ owner that resolves this contract for lifecycle operations. Physical Lifecycle
 V1 is the lifecycle design version; both on-disk root-contract profiles below
 use schema Version 2.
 
+## Unknown-root recovery
+
+`ProjectTopology` retains `WI-CATEGORY-UNKNOWN-ROOT` and sorted actual names with present or absent contracts. Its diagnostic names `work-items/root-contract.json` and this owner contract. Preserve bytes; identify creator/data owner and classify actual format/lifecycle. An eligible project-owned Version 2 `flat-json` auxiliary may be declared by its owner under this contract; otherwise the owner maps/migrates to a supported lifecycle category using existing admitted semantics. The error grants no declaration/migration/deletion authority and never accepts by directory name. Unsafe/malformed contracts retain distinct `WI-CATEGORY-ROOT-CONTRACT-INVALID` refusal.
+
 ## Exact schema
 
 The contract is optional. When present, it is a regular UTF-8 JavaScript Object
@@ -117,7 +121,7 @@ This changes no topology declaration, receipt schema or file-move contract.
 The owner-local `archive-fixed-bug` route uses the existing built-in `bugs/`
 and `bugs/archive/YYYY-MM/` roots. It does not add an auxiliary root or change
 this schema: with explicit `--apply` and strict UTC terminal evidence, the
-lifecycle owner archives one already-`fixed` bug while its parent stays active,
+lifecycle owner archives one already-`fixed` bug under a uniquely active or admitted archived parent, preserving parent lifecycle/identity,
 repairs mutable incoming physical links, and binds the move, link images, and
 README in a settlement receipt. See the operator command in
 `docs/work-item-execution-tracking.md`.

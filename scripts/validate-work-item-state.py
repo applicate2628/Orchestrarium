@@ -568,7 +568,11 @@ def load_jsonl(
     errors: list[str],
     raw_metadata: list[dict[str, object]] | None = None,
     source_bytes: bytes | None = None,
+    *, ledger_acquisition_complete_out: list[bool] | None = None,
 ) -> list[dict]:
+    if ledger_acquisition_complete_out is not None:
+        ledger_acquisition_complete_out.append(False)
+    complete = True
     if source_bytes is None and not path.exists():
         fail(errors, f"missing ledger: {path}")
         return []
@@ -599,11 +603,13 @@ def load_jsonl(
                 while raw and not raw.endswith("\n"):
                     raw = stream.readline(MAX_LEDGER_LINE_CHARS + 2)
                 fail(errors, f"{path}:{line_no}: event exceeds bounded line length")
+                complete = False
                 continue
             if not line.strip():
                 continue
             if len(events) >= MAX_LEDGER_EVENTS:
                 fail(errors, f"ledger exceeds bounded event count: {path}")
+                complete = False
                 break
             try:
                 event = decode_json_object(
@@ -613,6 +619,7 @@ def load_jsonl(
                 )
             except ValueError as exc:
                 fail(errors, str(exc))
+                complete = False
                 continue
             events.append(event)
             if raw_metadata is not None:
@@ -631,6 +638,8 @@ def load_jsonl(
                 )
     if not events:
         fail(errors, f"ledger has no events: {path}")
+    if ledger_acquisition_complete_out is not None:
+        ledger_acquisition_complete_out[-1] = complete
     return events
 
 
@@ -3310,8 +3319,11 @@ def _ledger_h1_authority_wire(authority: LedgerAuthorityV1) -> dict[str, bool]:
 
 
 def _ledger_h1_parse_lines(
-    raw: bytes, source: str, errors: list[str]
+    raw: bytes, source: str, errors: list[str],
+    *, ledger_acquisition_complete_out: list[bool] | None = None,
 ) -> tuple[list[dict[str, object]], list[bytes]]:
+    if ledger_acquisition_complete_out is not None:
+        ledger_acquisition_complete_out.append(False)
     if not isinstance(raw, bytes) or not raw:
         fail(errors, f"WI-LEDGER-MIGRATION-LEDGER-DRIFT: {source} is empty or not bytes")
         return [], []
@@ -3323,10 +3335,12 @@ def _ledger_h1_parse_lines(
         fail(errors, f"WI-LEDGER-MIGRATION-LEDGER-DRIFT: {source} has invalid physical lines")
         return [], []
     events: list[dict[str, object]] = []
+    complete = True
     for ordinal, line in enumerate(physical, start=1):
         body = line[:-1]
         if len(body) > MAX_LEDGER_LINE_BYTES:
             fail(errors, f"{source}:{ordinal}: event exceeds bounded line length")
+            complete = False
             continue
         try:
             text = body.decode("utf-8", errors="strict")
@@ -3337,6 +3351,9 @@ def _ledger_h1_parse_lines(
             )
         except (UnicodeDecodeError, ValueError) as exc:
             fail(errors, str(exc))
+            complete = False
+    if ledger_acquisition_complete_out is not None:
+        ledger_acquisition_complete_out[-1] = complete
     return events, physical
 
 
@@ -3349,8 +3366,12 @@ def _ledger_h1_runtime_rows(
     *,
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
     historical_pass_custody_out: list[Mapping[tuple[int, str, str, str], str]] | None = None,
+    ledger_acquisition_complete_out: list[bool] | None = None,
 ) -> tuple[RuntimeLedgerRowV1, ...]:
-    events, physical = _ledger_h1_parse_lines(raw, ledger_path, errors)
+    events, physical = _ledger_h1_parse_lines(
+        raw, ledger_path, errors,
+        ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+    )
     if len(events) != len(physical):
         return ()
     rows = tuple(
@@ -4251,6 +4272,7 @@ def _validate_ledger_h1_partition(
 def _ledger_h1_candidate_group(
     root: Path, artifacts: LedgerCompatibilityArtifactSetV1,
     historical_pass_custody_blobs_by_item: Mapping[Path, Mapping[str, bytes]] | None = None,
+    *, ledger_acquisition_complete_by_path: dict[str, list[bool]] | None = None,
 ) -> Mapping[str, LedgerValidationContextV1]:
     failures: list[str] = []
     diagnostics: list[str] = []
@@ -4367,6 +4389,10 @@ def _ledger_h1_candidate_group(
             path, raw, entry["prefixLineCount"], item, custody_diagnostics,
             historical_pass_custody_blobs=(historical_pass_custody_blobs_by_item or {}).get(item),
             historical_pass_custody_out=captured_custody,
+            ledger_acquisition_complete_out=(
+                ledger_acquisition_complete_by_path.setdefault(path, [])
+                if ledger_acquisition_complete_by_path is not None else None
+            ),
         )
         diagnostics.extend(custody_diagnostics)
         failures.extend(message.split(":", 1)[0] for message in custody_diagnostics)
@@ -4731,6 +4757,7 @@ def _load_effective_ledger_group(
     *,
     compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
     historical_pass_custody_blobs_by_item: Mapping[Path, Mapping[str, bytes]] | None = None,
+    ledger_acquisition_complete_by_path: dict[str, list[bool]] | None = None,
 ) -> Mapping[str, LedgerValidationContextV1]:
     """Load and validate one receipt-bound two-ledger group without caching."""
 
@@ -4743,7 +4770,8 @@ def _load_effective_ledger_group(
         if compatibility_artifacts is None:
             return MappingProxyType({})
     return _ledger_h1_candidate_group(
-        Path(root), compatibility_artifacts, historical_pass_custody_blobs_by_item
+        Path(root), compatibility_artifacts, historical_pass_custody_blobs_by_item,
+        ledger_acquisition_complete_by_path=ledger_acquisition_complete_by_path,
     )
 
 
@@ -4799,6 +4827,8 @@ def _resolve_ledger_h1_selected(
     compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
     selected_ledger_bytes: bytes | None = None,
+    selected_ledger_absent: bool = False,
+    ledger_acquisition_complete_out: list[bool] | None = None,
 ) -> _LedgerH1SelectedV1:
     """One metadata-first selection composition for validator and reader."""
     target_errors: list[str] = []
@@ -4830,6 +4860,13 @@ def _resolve_ledger_h1_selected(
         return _LedgerH1SelectedV1("invalid", partition, failure)
     if classification == "ordinary-nonmember":
         return _LedgerH1SelectedV1(classification, partition, None)
+    if selected_ledger_absent:
+        failure = _LedgerH1AcquisitionError(
+            "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE", selected_ledger_path,
+        )
+        return _LedgerH1SelectedV1(
+            "invalid", partition, _ledger_h1_acquisition_failure_context(failure),
+        )
     try:
         artifacts = compatibility_artifacts
         if artifacts is None:
@@ -4842,12 +4879,16 @@ def _resolve_ledger_h1_selected(
     if artifacts is None:
         failure = _LedgerH1AcquisitionError("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE", selected_ledger_path)
         return _LedgerH1SelectedV1("invalid", partition, _ledger_h1_acquisition_failure_context(failure))
+    acquisition_by_path: dict[str, list[bool]] | None = (
+        {} if ledger_acquisition_complete_out is not None else None
+    )
     contexts = _load_effective_ledger_group(
         root, compatibility_artifacts=artifacts,
         historical_pass_custody_blobs_by_item=(
             {item: historical_pass_custody_blobs}
             if historical_pass_custody_blobs is not None else None
         ),
+        ledger_acquisition_complete_by_path=acquisition_by_path,
     )
     invalid = next((context for context in contexts.values() if context.observation.activation_state == "invalid"), None)
     if invalid is not None:
@@ -4871,6 +4912,8 @@ def _resolve_ledger_h1_selected(
             selected_ledger_path,
             "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected item and ledger partially, multiply, or cross-match H1 participants",
         ))
+    if ledger_acquisition_complete_out is not None and acquisition_by_path is not None:
+        ledger_acquisition_complete_out.extend(acquisition_by_path.get(matches[0], []))
     return _LedgerH1SelectedV1("member", partition, contexts[matches[0]])
 
 
@@ -5231,6 +5274,7 @@ def _ordinary_raw_v2_effective_context(
     item: Path, selected_ledger_path: str, raw: bytes,
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
     *, h1_partition: _LedgerH1PartitionV1 | None = None,
+    ledger_acquisition_complete_out: list[bool] | None = None,
 ) -> LedgerValidationContextV1:
     """Reconstruct inactive raw rows; metadata exclusion conveys no H1 authority."""
 
@@ -5260,7 +5304,10 @@ def _ordinary_raw_v2_effective_context(
         if isinstance(resolved, LedgerValidationContextV1):
             return resolved
         h1_partition = resolved
-    events = load_jsonl(selected, diagnostics, metadata, raw)
+    events = load_jsonl(
+        selected, diagnostics, metadata, raw,
+        ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+    )
     projection_rows = _ledger_projection_rows(events, metadata, diagnostics)
     shape_rows, _shape_counters, shape_errors = _project_manifest_rows(
         projection_rows, item, selected, raw,
@@ -5298,6 +5345,8 @@ def load_effective_ledger_view(
     compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
     selected_ledger_bytes: bytes | None = None,
+    selected_ledger_absent: bool = False,
+    ledger_acquisition_complete_out: list[bool] | None = None,
 ) -> LedgerValidationContextV1:
     """Read the selected item; unrelated H1 contents are not ordinary admission."""
     root = Path(root)
@@ -5321,11 +5370,19 @@ def load_effective_ledger_view(
             root, item, selected_ledger_path, compatibility_artifacts=compatibility_artifacts,
             historical_pass_custody_blobs=historical_pass_custody_blobs,
             selected_ledger_bytes=selected_ledger_bytes,
+            selected_ledger_absent=selected_ledger_absent,
+            ledger_acquisition_complete_out=ledger_acquisition_complete_out,
         )
         if resolution.classification != "ordinary-nonmember":
             assert resolution.context is not None
             return resolution.context
         partition = resolution.partition
+    if selected_ledger_absent:
+        return LedgerValidationContextV1(
+            selected_ledger_path, (), None,
+            LedgerCompatibilityObservationV1("inactive", (), (f"missing ledger: {selected}",)),
+            (), (), object(),
+        )
     try:
         raw = selected.read_bytes() if selected_ledger_bytes is None else selected_ledger_bytes
     except OSError as exc:
@@ -5338,6 +5395,7 @@ def load_effective_ledger_view(
     return _ordinary_raw_v2_effective_context(
         item, selected_ledger_path, raw, historical_pass_custody_blobs,
         h1_partition=partition,
+        ledger_acquisition_complete_out=ledger_acquisition_complete_out,
     )
 
 
@@ -7885,6 +7943,8 @@ def validate_work_item(
     authority_state_out: list[dict[int, LedgerAuthorityV1]] | None = None,
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
     selected_ledger_bytes: bytes | None = None,
+    *, ledger_acquisition_complete_out: list[bool] | None = None,
+    selected_ledger_absent: bool = False,
 ) -> list[str]:
     """ledger_path: candidate-validation seam — validate THIS file instead of the live
     ledger (the atomic-write flow validates its temp candidate before os.replace).
@@ -7894,8 +7954,16 @@ def validate_work_item(
     do not acquire unrelated participant content or historical authority.
     selected_ledger_bytes: the caller's captured candidate image; all selected-ledger
     parsing and custody resolution use this image without reacquiring live bytes.
+    selected_ledger_absent: frozen absence, mutually exclusive with captured bytes;
+    grants ledger-free selection only through the existing live quick-fix contract.
+    Omitted bytes and absence preserve legacy acquisition.
     """
     errors: list[str] = []
+    if not isinstance(selected_ledger_absent, bool) or (
+        selected_ledger_absent and selected_ledger_bytes is not None
+    ):
+        fail(errors, "WI-LEDGER-CUSTODY-STALE-TARGET: inconsistent captured selected ledger presence/absence")
+        return errors
     if selected_ledger_bytes is not None and not isinstance(selected_ledger_bytes, bytes):
         fail(errors, "WI-LEDGER-CUSTODY-STALE-TARGET: captured selected ledger must be bytes")
         return errors
@@ -7929,7 +7997,7 @@ def validate_work_item(
         if target is None:
             return errors
         selected_identity = f"{target[1]}/agent-runs.jsonl"
-        if ledger_path is not None and selected_ledger_bytes is None:
+        if ledger_path is not None and selected_ledger_bytes is None and not selected_ledger_absent:
             try:
                 selected_ledger_bytes = selected_ledger.read_bytes()
             except OSError as exc:
@@ -7939,6 +8007,8 @@ def validate_work_item(
             root, item, selected_identity, compatibility_artifacts=effective_compatibility_artifacts,
             historical_pass_custody_blobs=historical_pass_custody_blobs,
             selected_ledger_bytes=selected_ledger_bytes,
+            selected_ledger_absent=selected_ledger_absent,
+            ledger_acquisition_complete_out=ledger_acquisition_complete_out,
         )
         if resolution.classification == "invalid":
             assert resolution.context is not None
@@ -7968,6 +8038,8 @@ def validate_work_item(
             compatibility_artifacts=effective_compatibility_artifacts,
             historical_pass_custody_blobs=historical_pass_custody_blobs,
             selected_ledger_bytes=selected_ledger_bytes,
+            selected_ledger_absent=selected_ledger_absent,
+            ledger_acquisition_complete_out=ledger_acquisition_complete_out,
         )
         errors.extend(context.observation.diagnostics)
         if telemetry is not None and context.observation.disposition_notices:
@@ -8056,19 +8128,35 @@ def validate_work_item(
     # explicitly supplied candidate ledger retain the exact fail-closed behavior.
     ledger_free_quick_fix = (
         ledger_path is None
-        and not selected_ledger.exists()
+        and selected_ledger_bytes is None
+        and (selected_ledger_absent or not selected_ledger.exists())
         and is_quick_fix_status(status_text)
     )
     raw_metadata: list[dict[str, object]] = []
     ledger_bytes = b""
     if not ledger_free_quick_fix:
-        try:
-            ledger_bytes = selected_ledger.read_bytes() if selected_ledger_bytes is None else selected_ledger_bytes
-        except OSError as exc:
-            fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
-        events = load_jsonl(selected_ledger, errors, raw_metadata, ledger_bytes)
+        if selected_ledger_absent:
+            fail(errors, f"missing ledger: {selected_ledger}")
+            events = []
+            if ledger_acquisition_complete_out is not None:
+                ledger_acquisition_complete_out.append(False)
+        else:
+            try:
+                ledger_bytes = selected_ledger.read_bytes() if selected_ledger_bytes is None else selected_ledger_bytes
+            except OSError as exc:
+                fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
+                events = []
+                if ledger_acquisition_complete_out is not None:
+                    ledger_acquisition_complete_out.append(False)
+            else:
+                events = load_jsonl(
+                    selected_ledger, errors, raw_metadata, ledger_bytes,
+                    ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+                )
     else:
         events = []
+        if ledger_acquisition_complete_out is not None:
+            ledger_acquisition_complete_out.append(True)
     historical_pass_custody, custody_errors = resolve_historical_pass_custody(
         item, ledger_bytes, events, raw_metadata,
         candidate_blobs=historical_pass_custody_blobs,
@@ -8210,16 +8298,107 @@ def validate_work_item(
     return errors
 
 
+def _serialize_obligations(state: WorkItemObligationStateV1) -> dict[str, object]:
+    """Expose only typed source identities and declared artifact/lane fields."""
+    def row(value: WorkItemObligationRowV1) -> dict[str, object]:
+        return {
+            "runId": value.run_id,
+            "rawLineOrdinal": value.raw_line_ordinal,
+            "rawLineSha256": value.raw_line_sha256,
+            "rawEventSha256": value.raw_event_sha256,
+            "projectedEventSha256": value.projected_event_sha256,
+            "sourceKind": value.source_kind,
+            "obligationId": value.obligation_id,
+            "predecessorOperationId": value.predecessor_operation_id,
+            "artifact": value.event.get("artifact") if isinstance(value.event.get("artifact"), str) else None,
+            "lane": value.event.get("lane") if isinstance(value.event.get("lane"), str) else None,
+        }
+
+    return {
+        "openLaunches": [row(value) for value in state.open_launches],
+        "openRevises": [row(value) for value in state.open_revise],
+        "unresolvedHistory": [
+            {
+                "sourcePrefixSha256": value.source_prefix_sha256,
+                "sourcePrefixBytes": value.source_prefix_bytes,
+                "rawLineOrdinal": value.raw_line_ordinal,
+                "rawLineSha256": value.raw_line_sha256,
+                "admissionRunId": value.admission_run_id,
+                "dispositionRunId": value.disposition_run_id,
+                "runId": value.event.get("runId") if isinstance(value.event.get("runId"), str) else None,
+            }
+            for value in state.unresolved_history
+        ],
+    }
+
+
+def _obligations_observation(
+    item: Path, ledger_path: Path | None, strict: bool, telemetry: dict[str, int],
+) -> dict[str, object]:
+    selected = ledger_path or (item / "agent-runs.jsonl")
+    root = repo_root_for(item)
+    ledger_identity = (
+        selected.relative_to(root).as_posix()
+        if root is not None and selected.is_relative_to(root)
+        else selected.as_posix()
+    )
+    payload: dict[str, object] = {
+        "schemaVersion": 1, "workItem": item.name, "ledgerPath": ledger_identity,
+        "ledgerSha256": None, "selection": "candidate" if ledger_path else "live",
+        "strict": strict, "obligations": None, "diagnostics": [], "result": "FAIL",
+    }
+    states: list[WorkItemObligationStateV1] = []
+    acquisition_complete: list[bool] = []
+    try:
+        captured = None
+        selected_absent = False
+        try:
+            captured = selected.read_bytes()
+        except FileNotFoundError:
+            selected_absent = True
+            if ledger_path is None:
+                status = item / "status.md"
+                if status.exists() and is_quick_fix_status(status.read_text(encoding="utf-8")):
+                    payload["selection"] = "ledger-free"
+        else:
+            payload["ledgerSha256"] = hashlib.sha256(captured).hexdigest()
+        errors = validate_work_item(
+            item, ledger_path=ledger_path, strict_revise=strict, telemetry=telemetry,
+            obligation_state_out=states, selected_ledger_bytes=captured,
+            selected_ledger_absent=selected_absent,
+            ledger_acquisition_complete_out=acquisition_complete,
+        )
+        if acquisition_complete == [True] and states:
+            payload["obligations"] = _serialize_obligations(states[-1])
+        elif not errors:
+            errors.append("selected-ledger acquisition or obligation projection unavailable")
+        payload["diagnostics"] = errors
+        payload["result"] = "FAIL" if errors else "PASS"
+    except (OSError, UnicodeError, ValueError) as exc:
+        payload["diagnostics"] = [f"cannot observe work-item obligations: {exc}"]
+    return payload
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--work-item", required=True, help="Path to one work-items/active/<item> directory")
     parser.add_argument("--ledger-path", help="Validate this candidate ledger file instead of the item's live agent-runs.jsonl")
     parser.add_argument("--no-strict-revise", action="store_true", help="Do not fail on open v2 REVISE obligations (triage only)")
     parser.add_argument("--telemetry", action="store_true", help="Print closure rule-fire counters")
+    parser.add_argument("--obligations-json", action="store_true", help="Emit a captured selected-ledger obligation observation as JSON")
     args = parser.parse_args(argv)
 
     item = Path(args.work_item).resolve()
     telemetry: dict[str, int] = {}
+    if args.obligations_json:
+        observation = _obligations_observation(
+            item, Path(args.ledger_path).resolve() if args.ledger_path else None,
+            not args.no_strict_revise, telemetry,
+        )
+        if args.telemetry:
+            observation["telemetry"] = dict(sorted(telemetry.items()))
+        print(json.dumps(observation, ensure_ascii=True))
+        return 0 if observation["result"] == "PASS" else 1
     errors = validate_work_item(
         item,
         ledger_path=Path(args.ledger_path).resolve() if args.ledger_path else None,

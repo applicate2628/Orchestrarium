@@ -927,3 +927,23 @@ def test_relocation_cli_requires_positive_apply(tmp_path: Path) -> None:
     )
     assert applied.returncode == 0, applied.stdout
     assert "WI-LEDGER-H1-ARTIFACT-SET-RELOCATED" in applied.stdout
+
+
+def test_selected_acquisition_uses_archived_h1_logical_identity(tmp_path):
+    support = load_module(SUPPORT_PATH, "h1_observation_archived_support")
+    root = tmp_path / "archived-selected"
+    writer, reader, items, paths, _receipt = support.archive_first_activated_h1_member(root)
+    location = reader.load_lifecycle_owner().resolve_work_item_ledger_location(root, logical_work_item=paths[0].rsplit("/", 1)[0], logical_ledger_path=paths[0])
+    selected = root / location.physical_work_item
+    assert "archive" in selected.parts and selected != items[0]
+    acquired, states = [], []
+    reader.validate_work_item(selected, strict_revise=False, validate_status_file=False, ledger_acquisition_complete_out=acquired, obligation_state_out=states)
+    assert acquired == [True] and len(states) == 1
+    observation = reader._obligations_observation(selected, None, True, {})
+    assert observation["obligations"] is not None
+    assert observation["ledgerPath"] == location.physical_ledger_path
+    assert observation["ledgerSha256"] == digest((selected / "agent-runs.jsonl").read_bytes())
+    acquired, states = [], []
+    errors = reader.validate_work_item(selected, selected_ledger_absent=True, ledger_acquisition_complete_out=acquired, obligation_state_out=states, validate_status_file=False)
+    assert any("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in value for value in errors)
+    assert True not in acquired and states == []
