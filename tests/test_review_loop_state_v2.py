@@ -648,6 +648,71 @@ def test_v1_migration_rejects_ambiguous_multi_failure_history(tmp_path: Path) ->
     assert state.read_bytes() == before
 
 
+@pytest.mark.parametrize("affected_lanes", ((), ("surgical",)))
+def test_next_round_accepts_changed_artifact_after_pass(
+    tmp_path: Path, affected_lanes: tuple[str, ...],
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    for lane in ("surgical", "deep", "scout"):
+        running = _run(
+            repo, "mark-running", "--state", state,
+            "--operation-id", f"running-1-{lane}", "--round", 1,
+            "--lane", lane, "--attempt-id", first["attempts"][lane],
+        )
+        assert running.returncode == 0, running.stderr
+        assert _record(repo, state, first, lane, "PASS").returncode == 0
+    completed = _run(repo, "complete-round", "--state", state,
+                     "--operation-id", "complete-1", "--round", 1)
+    assert completed.returncode == 0, completed.stderr
+    initial = json.loads(state.read_text(encoding="utf-8"))["rounds"][0]
+    snapshot = repo / initial["artifact"]["snapshot"]
+    snapshot_before = snapshot.read_bytes()
+    args = _next_round_arguments(repo, state, "round-2", affected_lanes=affected_lanes)
+
+    admitted = _run(repo, *args)
+
+    assert admitted.returncode == 0, admitted.stderr
+    second = json.loads(admitted.stdout)
+    assert second["event"] == "ORCHESTRARIUM_REVIEW_LOOP_STATE_V2"
+    assert second["round"] == 2
+    assert second["artifact_revision"] != first["artifact_revision"]
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    assert persisted["rounds"][0] == initial
+    assert snapshot.read_bytes() == snapshot_before
+    assert persisted["rounds"][1]["artifact"]["revision"] == second["artifact_revision"]
+    assert (repo / persisted["rounds"][1]["artifact"]["snapshot"]).read_bytes() == (repo / "round-2.md").read_bytes()
+    active_lanes = affected_lanes or ("surgical", "deep", "scout")
+    assert set(second["attempts"]) == set(active_lanes)
+    if affected_lanes:
+        assert second["coverage"]["source_revision"] == first["artifact_revision"]
+        assert persisted["rounds"][1]["deep"]["state"] == "retained"
+        assert persisted["rounds"][1]["scout"]["state"] == "retained"
+    for lane in active_lanes:
+        assert _record_round(repo, state, second, 2, lane, "PASS").returncode == 0
+    assert _run(repo, "complete-round", "--state", state,
+                "--operation-id", "complete-2", "--round", 2).returncode == 0
+    validated = _run(repo, "validate", "--state", state, "--require-v2")
+    assert validated.returncode == 0, validated.stderr
+
+
+def test_next_round_rejects_unchanged_artifact_after_revise(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    diff = _text(repo / ".scratch" / "unchanged-diff.txt", "claimed change without changed artifact\n")
+    before = _tree_bytes(repo / ".scratch" / "reviews")
+
+    refused = _run(repo, "next-round", "--state", state,
+                   "--operation-id", "round-2", "--diff-file", diff,
+                   "--artifact-file", repo / "design.md")
+
+    assert refused.returncode != 0
+    assert "next round requires a changed artifact revision" in refused.stderr
+    assert refused.stdout == ""
+    assert _tree_bytes(repo / ".scratch" / "reviews") == before
+
+
 def test_next_round_accepts_new_frozen_revision_after_revise(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     state, receipt = _begin(repo)

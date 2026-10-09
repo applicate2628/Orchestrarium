@@ -1328,11 +1328,8 @@ def command_next_round(args: argparse.Namespace) -> dict[str, Any]:
     def transition(data: dict[str, Any], root: Path, reviews: Path, state: Path) -> dict[str, Any]:
         nonlocal created
         prior = data["rounds"][-1]
-        if prior["phase"] != "complete" or not any(
-            _resolved_lane(data, prior, lane).get("verdict") == "REVISE"
-            for lane in VERDICT_LANES
-        ):
-            raise StateError("RLSTATE_INVALID", "next round requires a complete REVISE round")
+        if prior["phase"] != "complete":
+            raise StateError("RLSTATE_INVALID", "next round requires a complete round")
         number = len(data["rounds"]) + 1
         if number > REVIEW_LOOP_ROUND_CAP:
             raise StateError("RLSTATE_INVALID", "round cap exceeded")
@@ -1340,6 +1337,8 @@ def command_next_round(args: argparse.Namespace) -> dict[str, Any]:
             artifact, created = _freeze_snapshot(args.artifact_file, root, reviews, data["loop_id"], number)
         else:
             artifact = _freeze_git(args.git_revision, root)
+        if artifact["revision"] == prior["artifact"]["revision"]:
+            raise StateError("RLSTATE_INVALID", "next round requires a changed artifact revision")
         rnd = _new_round(number, diff, artifact, prior=prior if requested else None, affected_lanes=requested or None)
         data["rounds"].append(rnd)
         errors = validate_v2(data)
