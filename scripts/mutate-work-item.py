@@ -26,11 +26,11 @@ import threading
 import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Iterable, Literal
+from typing import Iterable, Literal, Mapping
 
 
 README_BEGIN = "<!-- BEGIN GENERATED WORK-ITEMS STATUS -->"
@@ -137,6 +137,8 @@ def _normalize_sha256_input(value: object) -> object:
     return value
 
 
+LIFECYCLE_WRITE_CLEANUP_PHASES = ("write-child-acquisition", "write-temp-cleanup", "write-target-release")
+
 LIFECYCLE_CLEANUP_PHASES = (
     "receipt-final",
     "receipt-pending",
@@ -145,6 +147,7 @@ LIFECYCLE_CLEANUP_PHASES = (
     "rollback-status:work-item:2026-08-11-pr600-review-fix",
     "rollback-status:work-item:2026-08-11-pr598-review-fix",
     "rollback-postcheck",
+    *LIFECYCLE_WRITE_CLEANUP_PHASES,
     "transaction-release",
 )
 
@@ -209,6 +212,7 @@ class LifecycleOutcomeComposer:
         self._result: object | None = None
         self._primary: BaseException | None = None
         self._cleanup: dict[str, LifecycleCleanupFailure] = {}
+        self._write_cleanup: dict[str, list[tuple[LifecycleCleanupFailure, BaseException | None]]] = {}
         self._rollback = "not-needed"
 
     def propose_result(self, result: object) -> None:
@@ -229,6 +233,8 @@ class LifecycleOutcomeComposer:
     ) -> None:
         if phase not in LIFECYCLE_CLEANUP_PHASES:
             raise ValueError(f"unknown lifecycle cleanup phase: {phase}")
+        if phase in LIFECYCLE_WRITE_CLEANUP_PHASES:
+            raise ValueError(f"write-owned lifecycle cleanup phase: {phase}")
         if phase in self._cleanup:
             raise ValueError(f"lifecycle cleanup phase already recorded: {phase}")
         self._cleanup[phase] = LifecycleCleanupFailure(
@@ -239,6 +245,48 @@ class LifecycleOutcomeComposer:
             cause_type=type(cause).__name__ if cause is not None else None,
         )
 
+    def record_write_cleanup(self, *, phase: str, failure_id: str, resource: str | None,
+                             diagnostic: object, cause: BaseException | None = None) -> None:
+        if phase not in LIFECYCLE_WRITE_CLEANUP_PHASES:
+            raise ValueError(f"unknown write cleanup phase: {phase}")
+        record = LifecycleCleanupFailure(
+            phase=phase, failure_id=failure_id, resource=resource,
+            diagnostic=_lifecycle_sanitize_diagnostic(diagnostic),
+            cause_type=type(cause).__name__ if cause is not None else None,
+        )
+        self._write_cleanup.setdefault(phase, []).append((record, cause))
+
+    def _write_cleanup_entry(self, phase: str) -> LifecycleCleanupFailure:
+        occurrences = self._write_cleanup[phase]
+        pieces = []
+        for index, (record, cause) in enumerate(occurrences, 1):
+            codes = " ".join(f"{name}={getattr(cause, name)}" for name in ("errno", "winerror")
+                             if cause is not None and getattr(cause, name, None) is not None)
+            pieces.append(_lifecycle_sanitize_diagnostic(
+                f"[{index}] {record.failure_id} {record.resource} {record.cause_type} {codes}: {record.diagnostic}; {cause}"
+            ))
+        summary = f"occurrences={len(occurrences)}; "
+        complete = summary + "; ".join(pieces)
+        if len(complete) <= 512:
+            diagnostic = complete
+        else:
+            omitted = len(occurrences)
+            for index in range(len(pieces)):
+                prefix = summary + "; ".join(pieces[:index + 1])
+                suffix = f"; omitted-details={len(pieces) - index - 1}"
+                if len(prefix) + len(suffix) > 512:
+                    break
+                omitted = len(pieces) - index - 1
+            suffix = f"; omitted-details={omitted}"
+            diagnostic = complete[:512 - len(suffix)] + suffix
+        resources = {record.resource for record, _cause in occurrences}
+        types = dict.fromkeys(record.cause_type for record, _cause in occurrences if record.cause_type is not None)
+        return LifecycleCleanupFailure(
+            phase=phase, failure_id=occurrences[0][0].failure_id,
+            resource=occurrences[0][0].resource if len(resources) == 1 else f"{len(resources)} write resources",
+            diagnostic=diagnostic, cause_type="|".join(types) if types else None,
+        )
+
     def set_rollback(self, rollback: str) -> None:
         if rollback not in {"not-needed", "completed", "incomplete"}:
             raise ValueError(f"invalid rollback state: {rollback}")
@@ -246,9 +294,9 @@ class LifecycleOutcomeComposer:
 
     def finalize(self) -> LifecycleOutcomeBundle:
         cleanup = tuple(
-            self._cleanup[phase]
+            self._write_cleanup_entry(phase) if phase in self._write_cleanup else self._cleanup[phase]
             for phase in LIFECYCLE_CLEANUP_PHASES
-            if phase in self._cleanup
+            if phase in self._cleanup or phase in self._write_cleanup
         )
         return LifecycleOutcomeBundle(
             result=self._result,
@@ -932,6 +980,54 @@ class ReadmeEntry:
     detail: str = ""
     source_paths: list[Path] = field(default_factory=list)
     classification: str | None = None
+
+
+@dataclass(frozen=True)
+class ArchiveEntity:
+    path: Path
+    kind: str
+    logical_reference: str | None
+    snapshots: tuple[CapturedFileSnapshot, ...] = ()
+
+
+@dataclass(frozen=True)
+class ArchiveEntityInventory:
+    entities: tuple[ArchiveEntity, ...]
+    acquisition_complete: bool
+    classification_complete: bool
+    directories: tuple[tuple[Path, CapturedPathParentChain, tuple[str, ...]], ...]
+    archive_absent: Path | None = None
+
+    def verify(self) -> None:
+        if self.archive_absent is not None and _ledger_location_lexically_exists(self.archive_absent):
+            raise LifecycleError("WI-README-STALE", "archive appeared during inventory observation")
+        for path, chain, names in self.directories:
+            _verify_captured_parent_chain(chain, "WI-README-STALE")
+            try:
+                current = tuple(sorted(child.name for child in path.iterdir()))
+            except OSError as exc:
+                raise LifecycleError("WI-README-STALE", f"archive membership unavailable: {path}") from exc
+            if current != names:
+                raise LifecycleError("WI-README-STALE", f"archive membership changed: {path}")
+        for entity in self.entities:
+            for snapshot in entity.snapshots:
+                _verify_captured_file(snapshot, "WI-README-STALE")
+
+    def observation(self, work_items: Path) -> dict:
+        rows = []
+        for entity in self.entities:
+            if entity.kind != "unbound-flat-container":
+                continue
+            container = _relative_link(work_items, entity.path)
+            rows.append({"path": container, "container": container, "kind": "container",
+                         "sha256": None, "diagnostic": "WI-ARCHIVE-ENTITY-UNBOUND"})
+            rows.extend({"path": _relative_link(work_items, snapshot.path), "container": container,
+                         "kind": "leaf", "sha256": _sha256_bytes(snapshot.data),
+                         "diagnostic": "WI-ARCHIVE-ENTITY-UNBOUND"}
+                        for snapshot in entity.snapshots)
+        return {"schemaVersion": 1, "acquisitionComplete": self.acquisition_complete,
+                "classificationComplete": self.classification_complete,
+                "unbound": sorted(rows, key=lambda row: row["path"])}
 
 
 @dataclass(frozen=True)
@@ -2513,32 +2609,430 @@ def archive_month(terminal_instant: str) -> str:
     return _strict_utc(terminal_instant).strftime("%Y-%m")
 
 
-def _atomic_write(path: Path, data: bytes) -> None:
-    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
-    if transaction is not None:
-        transaction.verify()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
-        ) as handle:
-            temp_path = Path(handle.name)
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_path, path)
-        temp_path = None
-        if _capture_file_snapshot(
-            path, failure_id="WI-ATOMIC-BYTE-CHECK", maximum_bytes=len(data)
-        ).data != data:
-            raise LifecycleError("WI-ATOMIC-BYTE-CHECK", f"byte check failed: {path}")
-    finally:
-        if temp_path is not None:
+class LifecycleWriteTarget:
+    """One process-local ordinary-parent capability for a lifecycle file effect."""
+
+    def __init__(self, path: Path, *, failure_id: str):
+        self.path = _lifecycle_unresolved_absolute(path)
+        self.leaf = self.path.name
+        self.failure_id = failure_id
+        self._directories = []
+        self._parent = None
+        self._open = False
+        self._native = None
+
+    def _failure(self, stage: str, cause: BaseException) -> LifecycleError:
+        return LifecycleError("WI-LIFECYCLE-WRITE-BOUNDARY", f"{stage}: {cause}")
+
+    def __enter__(self):
+        try:
+            if not self.leaf or self.leaf in {".", ".."}:
+                raise OSError(errno.EINVAL, "destination has no simple leaf")
+            if os.name == "nt":
+                self._initialize_windows()
+                handle = self._windows_root(self.path.anchor)
+            else:
+                if not getattr(os, "O_NOFOLLOW", 0) or not getattr(os, "O_DIRECTORY", 0) or not all(
+                    function in os.supports_dir_fd for function in (os.open, os.stat, os.mkdir, os.unlink, os.rename)
+                ):
+                    raise OSError(errno.ENOTSUP, "handle-relative no-follow writes unavailable")
+                handle = os.open(self.path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                os.set_inheritable(handle, False)
+            current = Path(self.path.anchor)
+            self._retain_directory(current, handle)
+            for component in self.path.parent.parts[1:]:
+                current = current / component
+                if os.name == "nt":
+                    child = self._windows_child(handle, component, directory=True, create=True)
+                else:
+                    try:
+                        os.mkdir(component, mode=0o777, dir_fd=handle)
+                    except FileExistsError:
+                        pass
+                    child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=handle)
+                    os.set_inheritable(child, False)
+                self._retain_directory(current, child)
+                handle = child
+            self._parent = handle
+            self._open = True
+            self.verify()
             try:
-                temp_path.unlink()
+                observed = self._file(self.leaf)
             except FileNotFoundError:
                 pass
+            else:
+                self._release_handle(observed)
+            self.verify()
+            return self
+        except BaseException as exc:
+            self.__exit__(type(exc), exc, exc.__traceback__)
+            if isinstance(exc, LifecycleError):
+                raise
+            raise LifecycleError(self.failure_id, f"write target admission: {exc}") from exc
+
+    def __exit__(self, kind, primary, traceback):
+        failures = []
+        for _path, handle, _identity in reversed(self._directories):
+            try:
+                self._close(handle)
+            except OSError as exc:
+                failures.append(exc)
+        self._directories.clear()
+        self._parent = None
+        self._open = False
+        if failures:
+            composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+            if composer is not None:
+                for cause in failures:
+                    composer.record_write_cleanup(phase="write-target-release", failure_id="WI-LIFECYCLE-WRITE-BOUNDARY",
+                                            resource=self.leaf, diagnostic="write target handle release failed", cause=cause)
+            else:
+                raise self._failure("handle release", OSError(f"{primary}; {failures}")) from primary
+        return False
+
+    def _retain_directory(self, path: Path, handle) -> None:
+        index = len(self._directories)
+        self._directories.append((path, handle, None))
+        self._directories[index] = (path, handle, self._identity(handle))
+
+    def _check_leaf(self, leaf: str) -> None:
+        if not isinstance(leaf, str) or not leaf or leaf in {".", ".."} or "/" in leaf or "\\" in leaf:
+            raise OSError(errno.EINVAL, "not a simple child leaf")
+        if os.name == "nt" and ":" in leaf:
+            raise OSError(errno.EINVAL, "alternate streams are not ordinary child leaves")
+
+    def verify(self) -> None:
+        if not self._open:
+            raise self._failure("currentness", OSError("write target is closed"))
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        if transaction is not None:
+            transaction.verify()
+        try:
+            for path, handle, identity in self._directories:
+                observed = path.lstat()
+                if not stat.S_ISDIR(observed.st_mode) or _lifecycle_path_has_reparse(path):
+                    raise OSError("admitted directory path changed kind")
+                if self._identity(handle) != identity or _lifecycle_file_identity(observed) != identity:
+                    raise OSError("admitted directory identity changed")
+        except OSError as exc:
+            raise self._failure("currentness", exc) from exc
+
+    def _file(self, leaf: str, *, create: bool = False, delete: bool = False):
+        self._check_leaf(leaf)
+        if os.name == "nt":
+            return self._windows_child(self._parent, leaf, create=create, exclusive=create, delete=delete, write=create)
+        flags = os.O_RDWR | os.O_CREAT | os.O_EXCL if create else os.O_RDONLY
+        descriptor = os.open(leaf, flags | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), 0o600, dir_fd=self._parent)
+        try:
+            os.set_inheritable(descriptor, False)
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise OSError("child is not an ordinary file")
+            return descriptor
+        except BaseException as primary:
+            self._release_handle(descriptor, primary)
+            raise
+
+    def read(self, leaf: str | None = None, *, maximum_bytes: int = 4 * 1024 * 1024) -> bytes | None:
+        self.verify()
+        leaf = self.leaf if leaf is None else leaf
+        try:
+            handle = self._file(leaf)
+        except FileNotFoundError:
+            self.verify()
+            return None
+        primary = None
+        try:
+            return self._read_handle(handle, maximum_bytes)
+        except OSError as exc:
+            primary = self._failure("child read", exc)
+            raise primary from exc
+        except BaseException as exc:
+            primary = exc
+            raise
+        finally:
+            self._release_handle(handle, primary)
+
+    def _read_handle(self, handle, maximum_bytes: int) -> bytes:
+        if os.name == "nt":
+            return self._windows_read(handle, maximum_bytes)
+        if os.fstat(handle).st_size > maximum_bytes:
+            raise OSError("child exceeds its admitted byte envelope")
+        chunks = []
+        total = 0
+        while True:
+            part = os.read(handle, min(65536, maximum_bytes + 1 - total))
+            if not part:
+                break
+            chunks.append(part); total += len(part)
+            if total > maximum_bytes:
+                raise OSError("child exceeds its admitted byte envelope")
+        return b"".join(chunks)
+
+    def quarantine(self, current: bytes) -> None:
+        leaf = f"{self.leaf}.conflict-{_sha256_bytes(current)[:16]}"
+        existing = self.read(leaf)
+        if existing is not None and existing != current:
+            raise LifecycleError(self.failure_id, "receipt quarantine conflicts")
+        if existing is not None:
+            return
+        self.verify()
+        handle = self._file(self.leaf, delete=True)
+        primary = None
+        try:
+            if self._read_handle(handle, len(current)) != current:
+                raise self._failure("quarantine", OSError("receipt changed before quarantine"))
+            self.verify()
+            if os.name == "nt":
+                self._windows_rename(handle, leaf, replace=False)
+            else:
+                # Exclusive destination link then owned-source unlink cannot overwrite a collision.
+                os.link(self.leaf, leaf, src_dir_fd=self._parent, dst_dir_fd=self._parent, follow_symlinks=False)
+                if os.stat(self.leaf, dir_fd=self._parent, follow_symlinks=False).st_ino != os.fstat(handle).st_ino:
+                    raise OSError("quarantine source identity changed")
+                os.unlink(self.leaf, dir_fd=self._parent)
+            self.verify()
+        except BaseException as exc:
+            primary = exc
+            raise
+        finally:
+            self._release_handle(handle, primary)
+
+    def publish(self, data: bytes) -> None:
+        self.verify()
+        leaf = f".{self.leaf}.{uuid.uuid4().hex}.tmp"
+        handle = None
+        published = False
+        primary = None
+        try:
+            handle = self._file(leaf, create=True, delete=True)
+            identity = self._identity(handle)
+            self._write_handle(handle, data)
+            self.verify()
+            if os.name == "nt":
+                self._windows_rename(handle, self.leaf, replace=True)
+            else:
+                if _lifecycle_file_identity(os.stat(leaf, dir_fd=self._parent, follow_symlinks=False)) != identity:
+                    raise OSError("owned temporary identity changed")
+                os.replace(leaf, self.leaf, src_dir_fd=self._parent, dst_dir_fd=self._parent)
+            published = True
+            if os.name != "nt":
+                creator = handle
+                handle = None
+                self._release_handle(creator)
+            if self.read(maximum_bytes=len(data)) != data:
+                raise LifecycleError("WI-ATOMIC-BYTE-CHECK", f"byte check failed: {self.leaf}")
+            self.verify()
+        except BaseException as exc:
+            primary = exc
+            if isinstance(exc, LifecycleError):
+                raise
+            raise self._failure("publication", exc) from exc
+        finally:
+            if handle is not None:
+                try:
+                    if not published:
+                        if os.name == "nt":
+                            self._windows_delete(handle)
+                        else:
+                            observed = os.stat(leaf, dir_fd=self._parent, follow_symlinks=False)
+                            if _lifecycle_file_identity(observed) != self._identity(handle):
+                                raise OSError("owned temporary cleanup identity changed")
+                            os.unlink(leaf, dir_fd=self._parent)
+                except OSError as cause:
+                    composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+                    if composer is not None:
+                        composer.record_write_cleanup(phase="write-temp-cleanup", failure_id="WI-LIFECYCLE-WRITE-BOUNDARY",
+                                                resource=leaf, diagnostic="owned write temporary cleanup failed", cause=cause)
+                    else:
+                        raise self._failure("temporary cleanup", OSError(f"{primary}; {cause}")) from primary
+                finally:
+                    self._release_handle(handle, primary)
+
+    def _identity(self, handle):
+        if os.name != "nt":
+            return _lifecycle_file_identity(os.fstat(handle))
+        c, w, k, _nt, _types = self._native
+        class Identity(c.Structure):
+            _fields_ = [("volume", c.c_ulonglong), ("file", c.c_ubyte * 16)]
+        value = Identity()
+        if not k.GetFileInformationByHandleEx(handle, 18, c.byref(value), c.sizeof(value)):
+            raise OSError(c.get_last_error(), "native file identity unavailable")
+        return int(value.volume), int.from_bytes(value.file, "little")
+
+    def _release_handle(self, handle, primary: BaseException | None = None) -> None:
+        try:
+            self._close(handle)
+        except OSError as cause:
+            composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+            if composer is not None:
+                composer.record_write_cleanup(phase="write-target-release", failure_id="WI-LIFECYCLE-WRITE-BOUNDARY",
+                    resource=self.leaf, diagnostic="owned write handle release failed", cause=cause)
+            else:
+                raise self._failure("handle release", OSError(f"{primary}; {cause}")) from primary
+
+    def _close(self, handle):
+        if os.name != "nt":
+            os.close(handle)
+        else:
+            c, _w, k, _nt, _types = self._native
+            if not k.CloseHandle(handle):
+                raise OSError(c.get_last_error(), "native handle close failed")
+
+    def _initialize_windows(self):
+        import ctypes as c
+        from ctypes import wintypes as w
+        class Unicode(c.Structure):
+            _fields_ = [("Length", w.USHORT), ("MaximumLength", w.USHORT), ("Buffer", c.c_void_p)]
+        class Attributes(c.Structure):
+            _fields_ = [("Length", w.ULONG), ("RootDirectory", w.HANDLE), ("ObjectName", c.POINTER(Unicode)),
+                        ("Attributes", w.ULONG), ("SecurityDescriptor", c.c_void_p), ("SecurityQualityOfService", c.c_void_p)]
+        class Status(c.Structure):
+            _fields_ = [("Status", c.c_void_p), ("Information", c.c_size_t)]
+        k = c.WinDLL("kernel32", use_last_error=True); nt = c.WinDLL("ntdll")
+        k.CreateFileW.argtypes = [w.LPCWSTR, w.DWORD, w.DWORD, c.c_void_p, w.DWORD, w.DWORD, w.HANDLE]; k.CreateFileW.restype = w.HANDLE
+        k.CloseHandle.argtypes = [w.HANDLE]; k.CloseHandle.restype = w.BOOL
+        k.SetHandleInformation.argtypes = [w.HANDLE, w.DWORD, w.DWORD]; k.SetHandleInformation.restype = w.BOOL
+        k.GetFileInformationByHandleEx.argtypes = [w.HANDLE, c.c_int, c.c_void_p, w.DWORD]; k.GetFileInformationByHandleEx.restype = w.BOOL
+        k.ReadFile.argtypes = [w.HANDLE, c.c_void_p, w.DWORD, c.POINTER(w.DWORD), c.c_void_p]; k.ReadFile.restype = w.BOOL
+        k.WriteFile.argtypes = k.ReadFile.argtypes; k.WriteFile.restype = w.BOOL
+        k.FlushFileBuffers.argtypes = [w.HANDLE]; k.FlushFileBuffers.restype = w.BOOL
+        nt.NtCreateFile.argtypes = [c.POINTER(w.HANDLE), w.ULONG, c.POINTER(Attributes), c.POINTER(Status), c.c_void_p,
+                                  w.ULONG, w.ULONG, w.ULONG, w.ULONG, c.c_void_p, w.ULONG]; nt.NtCreateFile.restype = w.LONG
+        nt.NtSetInformationFile.argtypes = [w.HANDLE, c.POINTER(Status), c.c_void_p, w.ULONG, c.c_int]; nt.NtSetInformationFile.restype = w.LONG
+        nt.RtlNtStatusToDosError.argtypes = [w.LONG]; nt.RtlNtStatusToDosError.restype = w.ULONG
+        self._native = c, w, k, nt, (Unicode, Attributes, Status)
+
+    def _windows_status(self, status, stage):
+        if status < 0:
+            c, _w, _k, nt, _types = self._native
+            code = nt.RtlNtStatusToDosError(status)
+            if code in {2, 3}:
+                raise FileNotFoundError(code, stage)
+            raise OSError(code, f"{stage} NTSTATUS=0x{status & 0xffffffff:08x}")
+
+    def _windows_check(self, handle, *, directory):
+        c, w, k, _nt, _types = self._native
+        class Tag(c.Structure):
+            _fields_ = [("Attributes", w.DWORD), ("Tag", w.DWORD)]
+        value = Tag()
+        if not k.GetFileInformationByHandleEx(handle, 9, c.byref(value), c.sizeof(value)):
+            raise OSError(c.get_last_error(), "native child attributes unavailable")
+        if value.Attributes & 0x400 or bool(value.Attributes & 0x10) != directory:
+            raise OSError("child is not the admitted ordinary kind")
+        if not k.SetHandleInformation(handle, 1, 0):
+            raise OSError(c.get_last_error(), "cannot make native handle non-inheritable")
+
+    def _windows_root(self, anchor):
+        c, w, k, _nt, _types = self._native
+        handle = k.CreateFileW(anchor, 0x1000a0, 3, None, 3, 0x02200000, None)
+        if handle == w.HANDLE(-1).value:
+            raise OSError(c.get_last_error(), "native volume directory open failed")
+        try:
+            self._windows_check(handle, directory=True)
+            return handle
+        except BaseException as primary:
+            self._release_handle(handle, primary); raise
+
+    def _windows_child(self, parent, leaf, *, directory=False, create=False, exclusive=False, delete=False, write=False):
+        self._check_leaf(leaf)
+        c, w, _k, nt, types = self._native; Unicode, Attributes, Status = types
+        text = c.create_unicode_buffer(leaf); length = len(leaf.encode("utf-16-le"))
+        if length > 65532:
+            raise OSError("native child name exceeds Unicode descriptor")
+        name = Unicode(length, length + 2, c.cast(text, c.c_void_p))
+        attributes = Attributes(c.sizeof(Attributes), parent, c.pointer(name), 0x40, None, None)
+        output = w.HANDLE(); status = Status()
+        access = 0x1000a0 if directory else 0x100081 | (2 if write else 0) | (0x10000 if delete else 0)
+        disposition = 2 if exclusive else 3 if create else 1
+        options = 0x200020 | (1 if directory else 0x40)
+        result = nt.NtCreateFile(c.byref(output), access, c.byref(attributes), c.byref(status), None, 0x80,
+                                 3 if directory or create else 7, disposition, options, None, 0)
+        self._windows_status(result, "relative child open")
+        try:
+            self._windows_check(output.value, directory=directory)
+            return output.value
+        except BaseException as primary:
+            cleanup = None
+            if exclusive and delete:
+                try:
+                    self._windows_delete(output.value)
+                except OSError as cause:
+                    cleanup = cause
+            try:
+                self._close(output.value)
+            except OSError as cause:
+                cleanup = cause if cleanup is None else OSError(f"{cleanup}; {cause}")
+            if cleanup is not None:
+                composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+                if composer is not None:
+                    composer.record_write_cleanup(phase="write-child-acquisition", failure_id="WI-LIFECYCLE-WRITE-BOUNDARY",
+                                            resource=leaf, diagnostic="owned child acquisition cleanup failed", cause=cleanup)
+                else:
+                    raise self._failure("child acquisition cleanup", OSError(f"{primary}; {cleanup}")) from primary
+            raise
+
+    def _windows_read(self, handle, maximum_bytes):
+        c, w, k, _nt, _types = self._native
+        chunks = []; total = 0
+        while True:
+            buffer = c.create_string_buffer(min(65536, maximum_bytes + 1 - total)); count = w.DWORD()
+            if not k.ReadFile(handle, buffer, len(buffer), c.byref(count), None):
+                raise OSError(c.get_last_error(), "native child read failed")
+            if not count.value:
+                break
+            chunks.append(buffer.raw[:count.value]); total += count.value
+            if total > maximum_bytes:
+                raise OSError("native child exceeds admitted byte envelope")
+        return b"".join(chunks)
+
+    def _write_handle(self, handle, data):
+        if os.name != "nt":
+            offset = 0
+            while offset < len(data):
+                count = os.write(handle, data[offset:]);
+                if not count:
+                    raise OSError("write made no progress")
+                offset += count
+            os.fsync(handle)
+            return
+        c, w, k, _nt, _types = self._native; offset = 0
+        while offset < len(data):
+            part = data[offset:offset + 65536]; buffer = c.create_string_buffer(part); count = w.DWORD()
+            if not k.WriteFile(handle, buffer, len(part), c.byref(count), None) or not count.value:
+                raise OSError(c.get_last_error(), "native child write failed")
+            offset += count.value
+        if not k.FlushFileBuffers(handle):
+            raise OSError(c.get_last_error(), "native child flush failed")
+
+    def _windows_rename(self, handle, leaf, *, replace):
+        self._check_leaf(leaf)
+        c, w, _k, nt, types = self._native; Status = types[2]
+        class Rename(c.Structure):
+            _fields_ = [("ReplaceIfExists", c.c_ubyte), ("RootDirectory", w.HANDLE),
+                        ("FileNameLength", w.ULONG), ("FileName", w.WCHAR * 1)]
+        name = leaf.encode("utf-16-le"); buffer = c.create_string_buffer(max(c.sizeof(Rename), Rename.FileName.offset + len(name)))
+        value = Rename.from_buffer(buffer); value.ReplaceIfExists = bool(replace)
+        value.RootDirectory = self._parent; value.FileNameLength = len(name)
+        c.memmove(c.addressof(buffer) + Rename.FileName.offset, name, len(name)); status = Status()
+        self._windows_status(nt.NtSetInformationFile(handle, c.byref(status), buffer, len(buffer), 10), "relative child rename")
+
+    def _windows_delete(self, handle):
+        c, _w, _k, nt, types = self._native; value = c.c_ubyte(1); status = types[2]()
+        self._windows_status(nt.NtSetInformationFile(handle, c.byref(status), c.byref(value), 1, 13), "owned temporary disposition")
+
+
+def _admit_lifecycle_write_target(path: Path, *, failure_id: str) -> LifecycleWriteTarget:
+    return LifecycleWriteTarget(path, failure_id=failure_id)
+
+
+def _atomic_write(path: Path, data: bytes, *, target: LifecycleWriteTarget | None = None) -> None:
+    if target is None:
+        with _admit_lifecycle_write_target(path, failure_id="WI-LIFECYCLE-WRITE-BOUNDARY") as acquired:
+            acquired.publish(data)
+    else:
+        if type(target) is not LifecycleWriteTarget or target.path != _lifecycle_unresolved_absolute(path) or not target._open:
+            raise LifecycleError("WI-LIFECYCLE-WRITE-BOUNDARY", "supplied write target does not bind destination")
+        target.publish(data)
 
 
 def _canonical_category(reference: str) -> tuple[Category, str]:
@@ -2556,47 +3050,99 @@ def _canonical_category(reference: str) -> tuple[Category, str]:
     return category, slug
 
 
-def _archived_work_item_candidates(
-    archive: Path, *, slug: str | None = None, reverse: bool = False,
-) -> tuple[Path, ...]:
-    if not archive.is_dir():
-        return ()
+def _archive_entity_inventory(root: Path) -> ArchiveEntityInventory:
+    archive = _work_items_root(root) / "archive"
+    if not _ledger_location_lexically_exists(archive):
+        return ArchiveEntityInventory((), True, True, (), archive)
     owned_inputs = {
         "status.md", "closure.md", LEGACY_RETIREMENT_FILE,
         BUG_DISPOSITIONS_MANIFEST, BUG_DISPOSITIONS_RECEIPT,
     }
-    candidates: list[Path] = []
-    for container in sorted(
-        (path for path in archive.iterdir() if path.is_dir()), reverse=reverse,
-    ):
+    directories = []
+    entities = []
+
+    def children(path: Path, *, lexical_only: bool = False) -> tuple[Path, ...]:
+        chain = _capture_path_parent_chain(path / ".inventory-observation", "WI-ARCHIVE-ENTITY-UNBOUND")
+        try:
+            result = tuple(sorted(path.iterdir(), key=lambda child: child.name))
+            for child in (() if lexical_only else result):
+                info = child.lstat()
+                if stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0)
+                        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)):
+                    raise OSError("archive contains a linked entry")
+                if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+                    raise OSError("archive contains an unsupported entry")
+        except OSError as exc:
+            raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", f"archive acquisition unavailable: {path}") from exc
+        directories.append((path, chain, tuple(child.name for child in result)))
+        return result
+
+    for container in children(archive):
+        if not container.is_dir():
+            raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", f"unsupported direct archive leaf: {container}")
         try:
             month = datetime.strptime(container.name, "%Y-%m")
         except ValueError:
             canonical_month = False
         else:
             canonical_month = month.strftime("%Y-%m") == container.name
-        children = container.iterdir() if slug is None else (container / slug,)
-        for item in sorted((path for path in children if path.is_dir()), reverse=reverse):
-            # The canonical slot owns identity even with every input missing.
-            # Legacy candidates own their immediate lexical inputs, not attachments.
-            if canonical_month or owned_inputs.intersection(path.name for path in item.iterdir()):
-                candidates.append(item)
-    return tuple(candidates)
+        for item in children(container):
+            if not item.is_dir():
+                if canonical_month:
+                    raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", f"unsupported direct archive leaf: {item}")
+                continue
+            leaves = children(item, lexical_only=not canonical_month)
+            owned = owned_inputs.intersection(path.name for path in leaves)
+            if not canonical_month and not owned:
+                continue
+            if owned or not leaves and canonical_month:
+                kind = "work-item" if {"closure.md", LEGACY_RETIREMENT_FILE}.intersection(owned) else "invalid-work-item"
+                entities.append(ArchiveEntity(item, kind, f"work-item:{item.name}"))
+            elif leaves:
+                if any(not path.is_file() for path in leaves):
+                    raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", f"unsupported mixed archive collection: {item}")
+                snapshots = tuple(_capture_file_snapshot(path, failure_id="WI-ARCHIVE-ENTITY-UNBOUND",
+                    maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP) for path in leaves)
+                entities.append(ArchiveEntity(item, "unbound-flat-container", None, snapshots))
+    inventory = ArchiveEntityInventory(tuple(entities), True,
+        not any(entity.kind == "unbound-flat-container" for entity in entities), tuple(directories))
+    inventory.verify()
+    return inventory
+
+
+def _archived_work_item_candidates(
+    archive: Path, *, slug: str | None = None, reverse: bool = False,
+) -> tuple[Path, ...]:
+    inventory = _archive_entity_inventory(archive.parent.parent)
+    return tuple(sorted((entity.path for entity in inventory.entities
+        if entity.logical_reference is not None and (slug is None or entity.path.name == slug)), reverse=reverse))
+
+
+def _reject_unbound_archive_selection(inventory: ArchiveEntityInventory, *, slug: str | None = None,
+                                     path: Path | None = None) -> None:
+    for entity in inventory.entities:
+        if entity.kind != "unbound-flat-container":
+            continue
+        paths = (entity.path, *(snapshot.path for snapshot in entity.snapshots))
+        if (slug is not None and (entity.path.name == slug or any(p.stem == slug for p in paths[1:]))) or (
+                path is not None and any(path == candidate for candidate in paths)):
+            raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", f"selected identity has unresolved archive data: {entity.path}")
 
 
 def _category_locations(root: Path, category: Category, slug: str) -> list[Path]:
     work_items = _work_items_root(root)
     locations: list[Path] = []
     if category.current_kind == "work-item":
+        inventory = _archive_entity_inventory(root)
+        _reject_unbound_archive_selection(inventory, slug=slug)
         backlog = work_items / "backlog" / f"{slug}.md"
         active = work_items / "active" / slug
         if backlog.is_file():
             locations.append(backlog)
         if active.is_dir():
             locations.append(active)
-        locations.extend(
-            _archived_work_item_candidates(work_items / "archive", slug=slug)
-        )
+        locations.extend(entity.path for entity in inventory.entities
+                         if entity.logical_reference == f"work-item:{slug}")
     else:
         current = work_items / category.current_root / f"{slug}.md"
         if current.is_file():
@@ -2614,6 +3160,10 @@ def _category_locations(root: Path, category: Category, slug: str) -> list[Path]
 
 
 def resolve_category(root: Path, reference: str) -> Path:
+    return _resolve_category_read_model(root, reference)
+
+
+def _resolve_category_read_model(root: Path, reference: str) -> Path:
     category, slug = _canonical_category(reference)
     locations = _category_locations(root, category, slug)
     if len(locations) > 1:
@@ -2651,6 +3201,7 @@ def resolve_legacy_path(root: Path, legacy_path: str) -> Path:
             "WI-LEGACY-LINK-UNMAPPED",
             f"legacy path is absent and has no incoming-link inventory: {legacy_path}",
         )
+    _reject_unbound_archive_selection(_archive_entity_inventory(root), path=resolved)
     return resolved
 
 
@@ -2733,7 +3284,7 @@ def _status_entry(root: Path, item: Path, *, diagnostic_status: bool = False) ->
             continue
         related_slug = related_values[0]
         _validate_slug(related_slug)
-        related = resolve_category(root, f"{category}:{related_slug}")
+        related = _resolve_category_read_model(root, f"{category}:{related_slug}")
         entry.source_paths.append(related)
         progressive.append(
             f"[{field_name}]({_relative_link(_work_items_root(root), related)})"
@@ -2961,7 +3512,12 @@ def _archived_work_item_entry(item: Path) -> ReadmeEntry:
 
 
 def collect_readme_entries(root: Path) -> list[ReadmeEntry]:
+    return _collect_readme_entries(root)
+
+
+def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInventory | None = None) -> list[ReadmeEntry]:
     work_items = _work_items_root(root)
+    inventory = archive_inventory if archive_inventory is not None else _archive_entity_inventory(root)
     entries: list[ReadmeEntry] = []
 
     backlog = work_items / "backlog"
@@ -3013,12 +3569,16 @@ def collect_readme_entries(root: Path) -> list[ReadmeEntry]:
                 ), fields, data, "roadmap", diagnostic=True)
             )
 
-    archive = work_items / "archive"
-    if archive.is_dir():
-        archived: list[ReadmeEntry] = []
-        for item in _archived_work_item_candidates(archive, reverse=True):
-            archived.append(_archived_work_item_entry(item))
-        entries.extend(archived)
+    for entity in inventory.entities:
+        if entity.logical_reference is not None:
+            entries.append(_archived_work_item_entry(entity.path))
+        else:
+            for path in (entity.path, *(snapshot.path for snapshot in entity.snapshots)):
+                relative = _relative_link(work_items, path)
+                entries.append(ReadmeEntry("Blockers", f"archive-observation:{relative}", relative,
+                    path, False, "Identify the creator and format, then use its existing owner.",
+                    [] if path == entity.path else [path], "WI-ARCHIVE-ENTITY-UNBOUND"))
+    inventory.verify()
 
     seen: set[str] = set()
     for entry in entries:
@@ -3056,6 +3616,8 @@ def _input_digest(entries: Iterable[ReadmeEntry], work_items: Path) -> str:
 def _canonical_timestamp(entries: Iterable[ReadmeEntry]) -> str:
     instants: list[str] = []
     for entry in entries:
+        if entry.classification == "WI-ARCHIVE-ENTITY-UNBOUND":
+            continue
         for path in entry.source_paths:
             if path.name == LEGACY_RETIREMENT_FILE:
                 try:
@@ -3120,14 +3682,28 @@ def render_readme_bytes(
     allow_marker_bootstrap: bool = False,
     static_guide_override: str | None = None,
 ) -> bytes:
+    return _render_readme_bytes(root, allow_marker_bootstrap=allow_marker_bootstrap,
+                                static_guide_override=static_guide_override)
+
+
+def _render_readme_bytes(
+    root: Path, *, allow_marker_bootstrap: bool = False,
+    static_guide_override: str | None = None, input_digest_out: list[str] | None = None,
+    archive_inventory_out: list[dict] | None = None,
+) -> bytes:
     work_items = _work_items_root(root)
-    entries = collect_readme_entries(root)
+    inventory = _archive_entity_inventory(root)
+    entries = _collect_readme_entries(root, archive_inventory=inventory)
+    canonical_timestamp = _canonical_timestamp(entries)
+    input_digest = _input_digest(entries, work_items)
+    if input_digest_out is not None:
+        input_digest_out.append(input_digest)
     lines = [
         README_BEGIN,
         "Read-model: work-items-readme-v1",
         "Ordered sources: backlog|active|roadmaps|archive",
-        f"Canonical changes through: {_canonical_timestamp(entries)}",
-        f"Canonical input digest: sha256:{_input_digest(entries, work_items)}",
+        f"Canonical changes through: {canonical_timestamp}",
+        f"Canonical input digest: sha256:{input_digest}",
         "",
     ]
     by_section = {section: [] for section in README_SECTIONS}
@@ -3158,32 +3734,77 @@ def render_readme_bytes(
             allow_marker_bootstrap=allow_marker_bootstrap,
         )
     )
-    return (
+    rendered = (
         static_guide
         + "\n".join(lines)
         + "\n"
     ).encode("utf-8")
+    inventory.verify()
+    if archive_inventory_out is not None:
+        archive_inventory_out.append(inventory.observation(work_items))
+    return rendered
 
 
-def refresh_readme(root: Path, *, allow_marker_bootstrap: bool = False) -> str:
+def observe_readme(root: Path) -> dict:
+    """Observe acquired README/input hashes without entering a writer transaction."""
+    readme = _work_items_root(root) / "README.md"
+    snapshot = None
+    try:
+        readme.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise LifecycleError("WI-README-STALE", "README entry cannot be inspected") from exc
+    else:
+        snapshot = _capture_file_snapshot(readme, failure_id="WI-README-STALE")
+    digests: list[str] = []
+    inventories: list[dict] = []
+    expected = _render_readme_bytes(root, input_digest_out=digests, archive_inventory_out=inventories)
+    if snapshot is not None:
+        _verify_captured_file(snapshot, "WI-README-STALE")
+    elif _ledger_location_lexically_exists(readme):
+        raise LifecycleError("WI-README-STALE", "README appeared during observation")
+    repeated_digests: list[str] = []
+    repeated_inventories: list[dict] = []
+    repeated = _render_readme_bytes(root, input_digest_out=repeated_digests, archive_inventory_out=repeated_inventories)
+    if repeated != expected or digests != repeated_digests or inventories != repeated_inventories:
+        raise LifecycleError("WI-README-STALE", "README inputs drifted during observation")
+    if snapshot is not None:
+        _verify_captured_file(snapshot, "WI-README-STALE")
+    elif _ledger_location_lexically_exists(readme):
+        raise LifecycleError("WI-README-STALE", "README appeared during repeated observation")
+    return {"matches": snapshot is not None and snapshot.data == expected,
+            "observedSha256": _sha256_bytes(snapshot.data) if snapshot is not None else None,
+            "expectedSha256": _sha256_bytes(expected), "inputDigest": digests[0],
+            "archiveInventory": inventories[0]}
+
+
+def refresh_readme(root: Path, *, allow_marker_bootstrap: bool = False,
+                   archive_inventory_out: list[dict] | None = None) -> str:
     work_items = _work_items_root(root)
-    expected = render_readme_bytes(
+    inventories: list[dict] = []
+    expected = _render_readme_bytes(
         root,
         allow_marker_bootstrap=allow_marker_bootstrap,
+        archive_inventory_out=inventories,
     )
     readme = work_items / "README.md"
     _atomic_write(readme, expected)
-    observed = render_readme_bytes(root)
-    if observed != expected or _capture_file_snapshot(
+    repeated_inventories: list[dict] = []
+    observed = _render_readme_bytes(root, archive_inventory_out=repeated_inventories)
+    if observed != expected or inventories != repeated_inventories or _capture_file_snapshot(
         readme,
         failure_id="WI-README-STALE",
         maximum_bytes=len(expected),
     ).data != expected:
         raise LifecycleError("WI-README-STALE", "README byte verification failed")
+    if archive_inventory_out is not None:
+        archive_inventory_out.append(inventories[0])
     return hashlib.sha256(expected).hexdigest()
 
 
-def reset_readme_static_guide(root: Path, expected_readme_sha256: str) -> str:
+def reset_readme_static_guide(root: Path, expected_readme_sha256: str, *,
+                            archive_inventory_out: list[dict] | None = None) -> str:
     if not re.fullmatch(r"[0-9A-Fa-f]{64}", expected_readme_sha256):
         raise LifecycleError(
             "WI-README-REPAIR-TARGET-MISMATCH",
@@ -3198,28 +3819,30 @@ def reset_readme_static_guide(root: Path, expected_readme_sha256: str) -> str:
         )
     _static_guide(readme, allow_marker_bootstrap=True)
     current = readme.read_bytes()
-    desired = render_readme_bytes(
+    inventories: list[dict] = []
+    desired = _render_readme_bytes(
         root,
         static_guide_override=_default_static_guide(),
+        archive_inventory_out=inventories,
     )
     current_hash = hashlib.sha256(current).hexdigest()
     expected_hash = expected_readme_sha256.casefold()
-    if current_hash != expected_hash:
-        if current == desired:
-            return current_hash
+    if current_hash != expected_hash and current != desired:
         raise LifecycleError(
             "WI-README-REPAIR-TARGET-MISMATCH",
             "README bytes differ from the explicitly targeted repair input",
         )
-    if current == desired:
-        return current_hash
-    _atomic_write(readme, desired)
-    observed = render_readme_bytes(root)
-    if observed != desired or readme.read_bytes() != desired:
+    if current != desired:
+        _atomic_write(readme, desired)
+    repeated_inventories: list[dict] = []
+    observed = _render_readme_bytes(root, archive_inventory_out=repeated_inventories)
+    if observed != desired or inventories != repeated_inventories or readme.read_bytes() != desired:
         raise LifecycleError(
             "WI-README-STALE",
             "README static-guide repair failed complete-byte verification",
         )
+    if archive_inventory_out is not None:
+        archive_inventory_out.append(inventories[0])
     return hashlib.sha256(desired).hexdigest()
 
 
@@ -5800,6 +6423,144 @@ def _prepare_bug_dispositions(
     return manifest, manifest_data, tuple(sorted(plans, key=lambda plan: plan.bug_id))
 
 
+def _close_link_uri_changes(before: bytes, after: bytes) -> list[dict[str, str]]:
+    """Assert a URI-only delta using the existing closed Markdown spans."""
+    old, new = before.decode("utf-8"), after.decode("utf-8")
+    old_links, new_links = list(_markdown_local_links(old)), list(_markdown_local_links(new))
+    def outside_hrefs(text: str, links: list[MarkdownLocalLink]) -> str:
+        for link in reversed(links):
+            text = text[:link.href_start] + text[link.href_end:]
+        return text
+    if len(old_links) != len(new_links) or outside_hrefs(old, old_links) != outside_hrefs(new, new_links):
+        raise LifecycleError("WI-CLOSE-LINK-VERIFY", "link upkeep changed non-URI bytes")
+    old_fields, new_fields = _parse_fields(old), _parse_fields(new)
+    if any(old_fields.get(key) != new_fields.get(key) for key in ("id", "context", "status")):
+        raise LifecycleError("WI-CLOSE-LINK-VERIFY", "link upkeep changed record identity or lifecycle fields")
+    return [{"from": left.href, "to": right.href} for left, right in zip(old_links, new_links)
+            if left.href != right.href]
+
+
+def _close_link_authority(root: Path, path: Path, before: bytes,
+                          image: BugDispositionPlan | None, allow_protected: bool,
+                          schema_version: int) -> str:
+    if image is not None:
+        if image.action == "terminalize":
+            return "selected-terminalize"
+        protected = True
+    else:
+        protected = False
+    work_items = _work_items_root(root)
+    parts = path.relative_to(work_items).parts
+    label = "/".join(parts)
+    fields = _parse_fields(before.decode("utf-8"))
+    category = next((value for value in CATEGORIES.values()
+                     if value.current_kind == "flat" and len(parts) == 2
+                     and parts[0] == value.current_root and path.suffix == ".md"), None)
+    if category is not None:
+        if not is_valid_slug(path.stem) or _category_locations(root, category, path.stem) != [path]:
+            raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"consumer has no unique current owner: {label}")
+        if category.name == "bug":
+            if not _bug_disposition_before_status_eligible("preserve-current", fields.get("status")):
+                raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"bug consumer has no admitted status: {label}")
+            protected |= (schema_version == 2 and image is None
+                          and fields.get("context") in BUG_DISPOSITION_PLACEHOLDER_CONTEXTS)
+        elif fields.get("status") not in category.current_statuses:
+            raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"consumer has no admitted current status: {label}")
+    elif len(parts) == 3 and parts[0] == "active" and parts[2] == "status.md":
+        if _category_locations(root, CATEGORIES["work-item"], parts[1]) != [path.parent]:
+            raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"status consumer has no unique current owner: {label}")
+        _validate_active_status_bytes(before)
+    else:
+        raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"affected consumer has no admitted metadata owner: {label}")
+    if protected:
+        if not allow_protected:
+            raise LifecycleError("WI-CLOSE-LINK-PRESERVATION", f"protected consumer requires positive URI-upkeep authority: {label}")
+        return "protected-uri-maintenance"
+    return "current-metadata"
+
+
+def _verify_close_link_maintenance(work_items: Path, slug: str, instant: str,
+                                  value: object, results: dict) -> dict[str, dict]:
+    """Verify close-time assertions; never freeze later current consumer bytes."""
+    failure = "WI-IMMUTABLE-ARCHIVE"
+    def reject() -> None:
+        raise LifecycleError(failure, "ordinary-close link receipt binding differs")
+    if (not isinstance(value, dict) or set(value) != {
+        "version", "source", "target", "allowProtectedUriUpdates", "consumers"
+    } or type(value["version"]) is not int or value["version"] != 1
+        or value["source"] != f"active/{slug}"
+        or value["target"] != f"archive/{archive_month(instant)}/{slug}"
+        or type(value["allowProtectedUriUpdates"]) is not bool
+        or not isinstance(value["consumers"], list) or not value["consumers"]):
+        reject()
+    by_source: dict[str, dict] = {}
+    for row in value["consumers"]:
+        if (not isinstance(row, dict) or set(row) != {
+            "source", "target", "beforeSha256", "afterSha256", "authority", "uriChanges"
+        } or any(not isinstance(row.get(key), str) or not SHA256_RE.fullmatch(row[key])
+                 for key in ("beforeSha256", "afterSha256"))
+            or row["beforeSha256"] == row["afterSha256"]
+            or not isinstance(row["uriChanges"], list) or not row["uriChanges"]):
+            reject()
+        for key in ("source", "target"):
+            path = row.get(key)
+            if (not isinstance(path, str) or not path or "\\" in path
+                or PurePosixPath(path).is_absolute() or any(part in {"", ".", ".."} for part in path.split("/"))):
+                reject()
+            _terminalization_bound_path(work_items, path, label="close link receipt")
+        if row["source"] in by_source or "archive" in PurePosixPath(row["source"]).parts:
+            reject()
+        authority = row["authority"]
+        result = next((item for item in results.values() if item.get("source") == row["source"]), None)
+        if authority == "selected-terminalize":
+            if (result is None or result.get("action") != "terminalize" or any(
+                result.get(key) != row[key] for key in ("source", "target", "beforeSha256", "afterSha256")
+            )):
+                reject()
+        elif authority in {"current-metadata", "protected-uri-maintenance"}:
+            if row["target"] != row["source"]:
+                reject()
+            parts = PurePosixPath(row["source"]).parts
+            metadata_path = (len(parts) == 2 and PurePosixPath(parts[1]).suffix == ".md"
+                and any(category.current_kind == "flat" and parts[0] == category.current_root
+                        for category in CATEGORIES.values()))
+            status_path = len(parts) == 3 and parts[0] == "active" and parts[2] == "status.md"
+            if not metadata_path and not status_path:
+                reject()
+            if authority == "protected-uri-maintenance" and not value["allowProtectedUriUpdates"]:
+                reject()
+            if authority == "protected-uri-maintenance" and (not metadata_path or parts[0] != "bugs"):
+                reject()
+            if result is not None and (authority != "protected-uri-maintenance"
+                or result.get("action") != "preserve-current"
+                or result.get("beforeSha256") != row["beforeSha256"]
+                or result.get("afterSha256") != row["afterSha256"]
+                or result.get("statusBefore") != result.get("statusAfter")):
+                reject()
+        else:
+            reject()
+        for change in row["uriChanges"]:
+            if (not isinstance(change, dict) or set(change) != {"from", "to"}
+                or any(not isinstance(change[key], str) for key in ("from", "to"))):
+                reject()
+            old, new = _local_markdown_href_parts(change["from"]), _local_markdown_href_parts(change["to"])
+            if old is None or new is None or old[1] != new[1]:
+                reject()
+            original = Path(os.path.abspath(work_items / row["source"])).parent / old[0]
+            original = Path(os.path.abspath(original))
+            source = work_items / value["source"]
+            if original != source and source not in original.parents:
+                reject()
+            expected = work_items / value["target"] / original.relative_to(source)
+            actual = Path(os.path.abspath((work_items / row["target"]).parent / new[0]))
+            if actual != expected:
+                reject()
+        by_source[row["source"]] = row
+    if list(by_source) != sorted(by_source):
+        reject()
+    return by_source
+
+
 def _bug_disposition_receipt_bytes(
     root: Path,
     slug: str,
@@ -5809,6 +6570,8 @@ def _bug_disposition_receipt_bytes(
     plans: tuple[BugDispositionPlan, ...],
     readme_sha256: str,
     evidence_retention: tuple[EvidenceRetentionPlan, ...] = (),
+    *,
+    link_maintenance: dict | None = None,
 ) -> bytes:
     manifest = json.loads(manifest_data.decode("utf-8"))
     schema_version = manifest["schemaVersion"]
@@ -5864,6 +6627,8 @@ def _bug_disposition_receipt_bytes(
             else {}
         ),
     }
+    if link_maintenance is not None:
+        payload["linkMaintenance"] = link_maintenance
     return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
@@ -5908,6 +6673,8 @@ def _verify_archived_bug_dispositions(
     }
     if schema_version == 3:
         expected_keys.add("evidenceRetention")
+    if isinstance(receipt, dict) and "linkMaintenance" in receipt:
+        expected_keys.add("linkMaintenance")
     if (
         not isinstance(receipt, dict)
         or set(receipt) != expected_keys
@@ -5937,6 +6704,16 @@ def _verify_archived_bug_dispositions(
         raise _bug_disposition_fail(
             "WI-IMMUTABLE-ARCHIVE", f"bug disposition receipt ids differ: {slug}"
         )
+    link_consumers = {}
+    if "linkMaintenance" in receipt:
+        try:
+            link_consumers = _verify_close_link_maintenance(
+                _work_items_root(root), slug, terminal_instant, receipt["linkMaintenance"], by_id
+            )
+        except LifecycleError as exc:
+            raise _bug_disposition_fail(
+                "WI-IMMUTABLE-ARCHIVE", "ordinary-close link receipt binding differs"
+            ) from exc
     if schema_version == 3:
         manifest_retention = manifest["evidenceRetention"]
         receipt_retention = receipt["evidenceRetention"]
@@ -6043,7 +6820,10 @@ def _verify_archived_bug_dispositions(
         elif (
             result.get("target") is not None
             or result.get("statusBefore") != decision["status"]
-            or result.get("afterSha256") != decision["inputSha256"]
+            or result.get("afterSha256") != (
+                link_consumers[result["source"]]["afterSha256"]
+                if result["source"] in link_consumers else decision["inputSha256"]
+            )
             or (
                 schema_version == 2
                 and (
@@ -6069,6 +6849,99 @@ def _mkdir_parents_tracked(path: Path, created: list[Path]) -> None:
         created.append(directory)
 
 
+def _plan_parent_archive_links(
+    root: Path, source: Path, target: Path, *,
+    bug_plans: tuple[BugDispositionPlan, ...] = (),
+    bug_manifest: dict | None = None,
+    target_after_images: Mapping[Path, bytes] | None = None,
+    allow_protected_uri_updates: bool = False,
+) -> dict:
+    """Capture one parent relocation's authorized consumer and target images."""
+    work_items = _work_items_root(root)
+    target_after_images = target_after_images or {}
+    incoming = _incoming_link_result(
+        root, {source}, f"work-item:{source.name}",
+        mutable_consumers_only=True, strict_consumer_reads=True,
+    )
+    images = {plan.source: plan for plan in bug_plans}
+    links = _physical_archive_link_plans(
+        root, source, target, incoming["references"],
+        failure_id="WI-CLOSE-LINK-INVENTORY", include_descendants=True,
+        consumer_images=images,
+    )
+    link_rows = []
+    consumer_captures = {}
+    target_images = {}
+    target_directory_identities = {}
+    for row in links:
+        consumer = row["path"]
+        image = images.get(consumer)
+        snapshot = _capture_file_snapshot(consumer, failure_id="WI-CLOSE-LINK-DRIFT")
+        if snapshot.data != row["before"]:
+            raise LifecycleError("WI-CLOSE-LINK-DRIFT", "consumer changed after link preflight")
+        consumer_captures[consumer] = snapshot
+        authority = _close_link_authority(
+            root, consumer, row["before"], image, allow_protected_uri_updates,
+            bug_manifest["schemaVersion"] if bug_manifest is not None else 1,
+        )
+        changes = _close_link_uri_changes(image.after if image is not None else row["before"], row["after"])
+        final = (image.target or image.source) if image is not None else consumer
+        link_rows.append({
+            "source": consumer.relative_to(work_items).as_posix(),
+            "target": final.relative_to(work_items).as_posix(),
+            "beforeSha256": row["beforeSha256"], "afterSha256": row["afterSha256"],
+            "authority": authority, "uriChanges": changes,
+        })
+        for change in changes:
+            parts = _local_markdown_href_parts(change["from"])
+            assert parts is not None
+            old_target = (consumer.parent / parts[0]).resolve()
+            if old_target in target_images:
+                continue
+            if old_target.is_file():
+                captured = _capture_file_snapshot(old_target, failure_id="WI-CLOSE-LINK-INVENTORY")
+                data = captured.data
+                data = target_after_images.get(old_target, data)
+                target_images[old_target] = (target / old_target.relative_to(source), captured, data)
+            elif old_target.is_dir():
+                target_images[old_target] = (target / old_target.relative_to(source), None, None)
+                target_directory_identities[old_target] = _lifecycle_file_identity(old_target.lstat())
+            elif old_target in target_after_images:
+                _require_lifecycle_mutation_path(root, old_target, failure_id="WI-CLOSE-LINK-INVENTORY")
+                target_images[old_target] = (target / old_target.relative_to(source), None, target_after_images[old_target])
+            else:
+                raise LifecycleError("WI-CLOSE-LINK-INVENTORY", "incoming URI target is unavailable")
+        if image is not None:
+            images[consumer] = replace(image, after=row["after"])
+    bug_plans = tuple(images[plan.source] for plan in bug_plans)
+    link_maintenance = {
+        "version": 1, "source": source.relative_to(work_items).as_posix(), "target": target.relative_to(work_items).as_posix(),
+        "allowProtectedUriUpdates": allow_protected_uri_updates, "consumers": link_rows,
+    } if link_rows else None
+    return {"bugs": bug_plans, "links": links,
+            "consumerCaptures": consumer_captures, "targetImages": target_images,
+            "targetDirectoryIdentities": target_directory_identities,
+            "maintenance": link_maintenance}
+
+
+def _verify_parent_archive_link_targets(plan: dict, *, archived: bool,
+                                        failure_id: str) -> None:
+    for original, (final, captured, data) in plan["targetImages"].items():
+        path = final if archived else original
+        if not archived and captured is not None:
+            _verify_captured_file(captured, failure_id)
+        elif data is None:
+            _lifecycle_reject_unreduced_reparse(path, failure_id=failure_id,
+                message="URI directory target crosses a link or reparse point")
+            if not path.is_dir() or _lifecycle_file_identity(path.lstat()) != plan["targetDirectoryIdentities"][original]:
+                raise LifecycleError(failure_id, "URI directory target differs")
+        elif archived:
+            if _capture_file_snapshot(path, failure_id=failure_id).data != data:
+                raise LifecycleError(failure_id, "URI target bytes differ")
+        elif path.exists():
+            raise LifecycleError(failure_id, "declared absent URI target appeared")
+
+
 def close_item(
     root: Path,
     slug: str,
@@ -6077,7 +6950,10 @@ def close_item(
     *,
     inject_readme_failure: bool = False,
     inject_bug_failure_after: int | None = None,
+    allow_protected_uri_updates: bool = False,
 ) -> Path:
+    if type(allow_protected_uri_updates) is not bool:
+        raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", "URI-upkeep authority must be boolean")
     _validate_slug(slug)
     month = archive_month(terminal_instant)
     _validate_closure(closure_data, terminal_instant)
@@ -6149,13 +7025,27 @@ def close_item(
     status_path = active / "status.md"
     prior_status = status_path.read_bytes()
     target = work_items / "archive" / month / slug
+    link_plan = _plan_parent_archive_links(
+        root, active, target, bug_plans=bug_plans, bug_manifest=manifest_preview,
+        target_after_images={status_path: _terminalize_status(prior_status),
+                             closure_path: archived_closure_data},
+        allow_protected_uri_updates=allow_protected_uri_updates,
+    )
+    bug_plans = link_plan["bugs"]
+    images = {plan.source: plan for plan in bug_plans}
+    links = link_plan["links"]
+    consumer_captures = link_plan["consumerCaptures"]
+    link_maintenance = link_plan["maintenance"]
     readme = work_items / "README.md"
     readme_existed = readme.is_file()
     readme_before = readme.read_bytes() if readme_existed else b""
     created_dirs: list[Path] = []
     touched_bugs: list[BugDispositionPlan] = []
+    touched_links: list[dict] = []
+    written_link_captures = {}
     item_moved = False
     receipt_path = target / BUG_DISPOSITIONS_RECEIPT
+    receipt_capture = None
     try:
         for scratch in scratch_plan:
             if scratch.disposition == "completed-disposal":
@@ -6163,6 +7053,8 @@ def close_item(
         for index, plan in enumerate(bug_plans, start=1):
             if plan.action != "terminalize":
                 continue
+            if plan.source in consumer_captures:
+                _verify_captured_file(consumer_captures[plan.source], "WI-CLOSE-LINK-DRIFT")
             if plan.source.read_bytes() != plan.before or plan.target is None:
                 raise _bug_disposition_fail(
                     "WI-BUG-DISPOSITIONS-DRIFT",
@@ -6170,13 +7062,39 @@ def close_item(
                 )
             touched_bugs.append(plan)
             _atomic_write(plan.source, plan.after)
+            if plan.source in consumer_captures:
+                captured_after = _capture_file_snapshot(plan.source, failure_id="WI-CLOSE-LINK-DRIFT")
+                if captured_after.data != plan.after:
+                    raise LifecycleError("WI-CLOSE-LINK-DRIFT", "URI bug postimage differs")
+                written_link_captures[plan.source] = captured_after
             _mkdir_parents_tracked(plan.target.parent, created_dirs)
             os.replace(plan.source, plan.target)
+            if plan.source in consumer_captures:
+                captured_after = _capture_file_snapshot(
+                    plan.target, failure_id="WI-CLOSE-LINK-DRIFT"
+                )
+                if captured_after.data != plan.after:
+                    raise LifecycleError("WI-CLOSE-LINK-DRIFT", "moved URI bug postimage differs")
+                written_link_captures[plan.source] = captured_after
             if inject_bug_failure_after == index:
                 raise _bug_disposition_fail(
                     "WI-BUG-DISPOSITIONS-DRIFT",
                     f"injected bug disposition failure after row {index}",
                 )
+        for row in links:
+            image = images.get(row["path"])
+            if image is not None and image.action == "terminalize":
+                continue
+            _verify_captured_file(consumer_captures[row["path"]], "WI-CLOSE-LINK-DRIFT")
+            touched_links.append(row)
+            _atomic_write(row["path"], row["after"])
+            captured_after = _capture_file_snapshot(
+                row["path"], failure_id="WI-CLOSE-LINK-DRIFT"
+            )
+            if captured_after.data != row["after"]:
+                raise LifecycleError("WI-CLOSE-LINK-DRIFT", "URI consumer postimage differs")
+            written_link_captures[row["path"]] = captured_after
+        _verify_parent_archive_link_targets(link_plan, archived=False, failure_id="WI-CLOSE-LINK-DRIFT")
         _atomic_write(closure_path, archived_closure_data)
         _atomic_write(status_path, _terminalize_status(prior_status))
         _mkdir_parents_tracked(target.parent, created_dirs)
@@ -6206,11 +7124,23 @@ def close_item(
             bug_plans,
             readme_sha256,
             evidence_retention,
+            link_maintenance=link_maintenance,
         )
         _atomic_write(receipt_path, receipt_data)
+        if link_maintenance is not None:
+            captured_receipt = _capture_file_snapshot(receipt_path, failure_id="WI-CLOSE-LINK-VERIFY")
+            if captured_receipt.data != receipt_data:
+                raise LifecycleError("WI-CLOSE-LINK-VERIFY", "URI receipt postimage differs")
+            receipt_capture = captured_receipt
         _verify_archived_bug_dispositions(
             root, target, archived_closure_data, terminal_instant
         )
+        for row in links:
+            image = images.get(row["path"])
+            final = (image.target or image.source) if image is not None else row["path"]
+            if _capture_file_snapshot(final, failure_id="WI-CLOSE-LINK-VERIFY").data != row["after"]:
+                raise LifecycleError("WI-CLOSE-LINK-VERIFY", "URI consumer final image differs")
+        _verify_parent_archive_link_targets(link_plan, archived=True, failure_id="WI-CLOSE-LINK-VERIFY")
     except BaseException as exc:
         rollback_failures: list[str] = []
 
@@ -6223,7 +7153,13 @@ def close_item(
                 rollback_failures.append(f"{label}: {rollback_exc}")
 
         if receipt_path.exists():
-            attempt("remove receipt", receipt_path.unlink, receipt_path)
+            def remove_receipt():
+                if link_maintenance is not None:
+                    if receipt_capture is None:
+                        raise LifecycleError("WI-CLOSE-LINK-DRIFT", "owned URI receipt image unavailable")
+                    _verify_captured_file(receipt_capture, "WI-CLOSE-LINK-DRIFT")
+                receipt_path.unlink()
+            attempt("remove receipt", remove_receipt, receipt_path)
         if item_moved and target.exists() and not active.exists():
             attempt("restore active item", lambda: _replace_lifecycle_directory(target, active), target, active)
         if active.is_dir():
@@ -6243,22 +7179,54 @@ def close_item(
             rollback_failures.append("restore active item: active directory is unavailable")
         for plan in reversed(touched_bugs):
             assert plan.target is not None
-            if plan.target.exists() and not plan.source.exists():
-                attempt(
-                    f"restore bug location {plan.bug_id}",
-                    lambda plan=plan: os.replace(plan.target, plan.source),
-                    plan.target, plan.source,
+            def restore_bug(plan=plan):
+                failure_id = "WI-BUG-DISPOSITIONS-ROLLBACK"
+                source_image = _read_lifecycle_image(
+                    plan.source, plan.before, plan.after, failure_id=failure_id,
                 )
-            if plan.source.exists():
-                attempt(
-                    f"restore bug bytes {plan.bug_id}",
-                    lambda plan=plan: _atomic_write(plan.source, plan.before),
-                    plan.source,
+                target_image = _read_lifecycle_image(
+                    plan.target, plan.after, failure_id=failure_id,
                 )
-            else:
-                rollback_failures.append(
-                    f"restore bug bytes {plan.bug_id}: current source is unavailable"
-                )
+                if target_image is not None:
+                    if source_image is not None or target_image != plan.after:
+                        raise LifecycleError(failure_id, "bug rollback locations contain unowned images")
+                    target_capture = _capture_file_snapshot(plan.target, failure_id=failure_id)
+                    if target_capture.data != plan.after:
+                        raise LifecycleError(failure_id, "bug rollback target differs")
+                    if plan.source in written_link_captures:
+                        _verify_captured_file(written_link_captures[plan.source], failure_id)
+                    _verify_captured_file(target_capture, failure_id)
+                    if _read_lifecycle_image(plan.source, plan.before, plan.after,
+                                             failure_id=failure_id) is not None:
+                        raise LifecycleError(failure_id, "bug rollback source is occupied")
+                    os.replace(plan.target, plan.source)
+                    source_capture = _capture_file_snapshot(plan.source, failure_id=failure_id)
+                    if source_capture.identity != target_capture.identity:
+                        raise LifecycleError(failure_id, "restored bug identity differs")
+                else:
+                    if source_image == plan.before:
+                        return  # No published postimage, or already restored.
+                    if source_image != plan.after:
+                        raise LifecycleError(failure_id, "bug rollback source is not the owned postimage")
+                    source_capture = _capture_file_snapshot(plan.source, failure_id=failure_id)
+                    if plan.source in written_link_captures:
+                        _verify_captured_file(written_link_captures[plan.source], failure_id)
+                if source_capture.data != plan.after:
+                    raise LifecycleError(failure_id, "bug rollback source changed")
+                _verify_captured_file(source_capture, failure_id)
+                _atomic_write(plan.source, plan.before)
+            attempt(f"restore bug {plan.bug_id}", restore_bug, plan.source, plan.target)
+        for row in reversed(touched_links):
+            def restore_link(row=row):
+                capture = written_link_captures.get(row["path"])
+                if capture is None:
+                    if _read_lifecycle_image(row["path"], row["before"], row["after"],
+                                             failure_id="WI-CLOSE-LINK-DRIFT") == row["before"]:
+                        return
+                    raise LifecycleError("WI-CLOSE-LINK-DRIFT", "owned URI image unavailable")
+                _verify_captured_file(capture, "WI-CLOSE-LINK-DRIFT")
+                _atomic_write(row["path"], row["before"])
+            attempt(f"restore URI consumer {row['pathRelative']}", restore_link, row["path"])
         if readme_existed:
             attempt("restore README", lambda: _atomic_write(readme, readme_before), readme)
         elif readme.exists():
@@ -6327,6 +7295,11 @@ def reopen_item(
 def audit_categories(root: Path) -> tuple[str, ...]:
     topology = _resolve_project_topology(root).with_read_model_roots()
     work_items = topology.work_items
+    archive_inventory = _archive_entity_inventory(root)
+    unbound = archive_inventory.observation(work_items)["unbound"]
+    if unbound:
+        raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", "unresolved archive entities: " +
+                             ", ".join(row["path"] for row in unbound))
     if not topology.root_contract_present:
         topology.assert_known_top_level_roots()
     decision_v0_records = _preflight_current_decision_v0(root)
@@ -6708,28 +7681,39 @@ def _migration_receipt_bytes(facts: dict) -> bytes:
     return (json.dumps(facts, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
-def _reconcile_migration_receipt(item: Path, facts: dict) -> None:
-    root = _repository_root_for_item(item)
-    receipt = item / "ledger-migration-receipts" / f"{facts['operationId']}.json"
-    receipt = _require_lifecycle_mutation_path(
-        root, receipt, failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH"
-    )
-    wanted = _migration_receipt_bytes(facts)
-    if receipt.exists():
-        current = receipt.read_bytes()
-        if current == wanted:
-            return
-        quarantine = receipt.with_name(f"{receipt.name}.conflict-{_sha256_bytes(current)[:16]}")
-        quarantine = _require_lifecycle_mutation_path(
-            root, quarantine, failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH"
-        )
-        if quarantine.exists() and quarantine.read_bytes() != current:
+def _migration_receipt_current(target: LifecycleWriteTarget, wanted: bytes) -> bytes | None:
+    current = target.read()
+    if current is not None and current != wanted:
+        quarantine = f"{target.leaf}.conflict-{_sha256_bytes(current)[:16]}"
+        prior = target.read(quarantine)
+        if prior is not None and prior != current:
             raise LifecycleError("WI-LEDGER-MIGRATION-RECEIPT-MISMATCH", "receipt quarantine conflicts")
-        if not quarantine.exists():
-            os.replace(receipt, quarantine)
-    _atomic_write(receipt, wanted)
-    if receipt.read_bytes() != wanted:
+    return current
+
+
+def _reconcile_migration_receipt(item: Path, facts: dict, *, target: LifecycleWriteTarget | None = None) -> None:
+    root = _repository_root_for_item(item)
+    receipt = _require_lifecycle_mutation_path(
+        root, item / "ledger-migration-receipts" / f"{facts['operationId']}.json",
+        failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
+    )
+    if target is None:
+        with _admit_lifecycle_write_target(receipt, failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH") as acquired:
+            _reconcile_migration_receipt(item, facts, target=acquired)
+        return
+    if type(target) is not LifecycleWriteTarget or target.path != receipt or not target._open:
+        raise LifecycleError("WI-LIFECYCLE-WRITE-BOUNDARY", "receipt target does not bind destination")
+    wanted = _migration_receipt_bytes(facts)
+    current = _migration_receipt_current(target, wanted)
+    if current == wanted:
+        target.verify()
+        return
+    if current is not None:
+        target.quarantine(current)
+    _atomic_write(receipt, wanted, target=target)
+    if target.read(maximum_bytes=len(wanted)) != wanted:
         raise LifecycleError("WI-LEDGER-MIGRATION-RECEIPT-MISMATCH", "receipt readback differs")
+    target.verify()
 
 
 def _committed_migration_facts(
@@ -6869,19 +7853,25 @@ def _migrate_legacy_ledger_obligation_locked(
     ledger_path = _require_lifecycle_mutation_path(
         root, ledger_path, failure_id="WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE"
     )
-    _atomic_write(ledger_path, staged.staged_bytes)
-    if inject_failure == "post-replace-corrupt":
-        ledger_path.write_bytes(staged.staged_bytes + b"corrupt")
-    try:
-        actual = ledger_path.read_bytes()
-    except OSError as exc:
-        raise LifecycleError("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "ledger readback failed") from exc
-    if _sha256_bytes(actual) != staged.receipt_facts["afterLedgerSha256"]:
-        raise LifecycleError("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "ledger is neither exact before nor exact after")
-    if inject_failure == "after-anchor":
-        raise LifecycleError("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "injected crash after anchor")
-    _reconcile_migration_receipt(item, staged.receipt_facts)
-    return staged.receipt_facts
+    receipt_path = _require_lifecycle_mutation_path(
+        root, item / "ledger-migration-receipts" / f"{staged.receipt_facts['operationId']}.json",
+        failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
+    )
+    with _admit_lifecycle_write_target(receipt_path, failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH") as receipt_target:
+        _migration_receipt_current(receipt_target, _migration_receipt_bytes(staged.receipt_facts))
+        _atomic_write(ledger_path, staged.staged_bytes)
+        if inject_failure == "post-replace-corrupt":
+            ledger_path.write_bytes(staged.staged_bytes + b"corrupt")
+        try:
+            actual = ledger_path.read_bytes()
+        except OSError as exc:
+            raise LifecycleError("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "ledger readback failed") from exc
+        if _sha256_bytes(actual) != staged.receipt_facts["afterLedgerSha256"]:
+            raise LifecycleError("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "ledger is neither exact before nor exact after")
+        if inject_failure == "after-anchor":
+            raise LifecycleError("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "injected crash after anchor")
+        _reconcile_migration_receipt(item, staged.receipt_facts, target=receipt_target)
+        return staged.receipt_facts
 
 
 def migrate_legacy_ledger_obligation(
@@ -8228,6 +9218,8 @@ def _fixed_bug_terminal_image(
 def _physical_archive_link_plans(
     root: Path, source: Path, archive: Path, references: list[dict],
     *, failure_id: str,
+    include_descendants: bool = False,
+    consumer_images: Mapping[Path, BugDispositionPlan] | None = None,
 ) -> list[dict]:
     repository = _work_items_root(root).parent
     physical_paths: set[str] = set()
@@ -8237,20 +9229,50 @@ def _physical_archive_link_plans(
         if "archive" in PurePosixPath(row["consumer"]).parts:
             raise LifecycleError(failure_id, "immutable archived consumer has a physical link")
         physical_paths.add(row["consumer"])
+    referenced_paths = set(physical_paths)
+    referenced_hrefs = {(row["consumer"], row["value"]) for row in references if row["kind"] == "physical"}
+    source_resolved = source.resolve()
+    if consumer_images is not None:
+        physical_paths.update(
+            path.relative_to(_work_items_root(root)).as_posix()
+            for path in consumer_images
+        )
     plans: list[dict] = []
     for relative in sorted(physical_paths):
         consumer = _work_items_root(root) / relative
         snapshot = _capture_file_snapshot(consumer, failure_id=failure_id)
-        text = snapshot.data.decode("utf-8")
+        image = consumer_images.get(consumer) if consumer_images is not None else None
+        if image is not None and (image.source != consumer or snapshot.data != image.before):
+            raise LifecycleError(failure_id, f"consumer image changed: {relative}")
+        final_consumer = (image.target or image.source) if image is not None else consumer
+        try:
+            text = (image.after if image is not None else snapshot.data).decode("utf-8")
+        except UnicodeError as exc:
+            raise LifecycleError(failure_id, f"consumer is not UTF-8: {relative}") from exc
         replacements: list[tuple[int, int, str]] = []
         for link in _markdown_local_links(text):
-            if _markdown_href_resolves(consumer.parent, link.href, source):
-                parts = _local_markdown_href_parts(link.href)
-                if parts is None:
-                    raise LifecycleError(failure_id, f"unclassifiable link: {relative}")
-                href = os.path.relpath(archive, consumer.parent).replace(os.sep, "/") + parts[1]
+            parts = _local_markdown_href_parts(link.href)
+            if parts is None:
+                continue
+            candidate = consumer.parent / parts[0]
+            if include_descendants:
+                lexical = Path(os.path.abspath(candidate))
+                if (relative, link.href) not in referenced_hrefs and not (
+                    lexical == source_resolved or source_resolved in lexical.parents
+                ):
+                    continue
+                _lifecycle_reject_unreduced_reparse(
+                    candidate, failure_id=failure_id,
+                    message=f"link target crosses a link or reparse point: {relative}",
+                )
+            candidate = candidate.resolve()
+            if candidate == source_resolved or (include_descendants and source_resolved in candidate.parents):
+                destination = archive / candidate.relative_to(source_resolved)
+                href = os.path.relpath(destination, final_consumer.parent).replace(os.sep, "/") + parts[1]
                 replacements.append((link.href_start, link.href_end, href))
         if not replacements:
+            if image is not None and relative not in referenced_paths:
+                continue
             raise LifecycleError(failure_id, f"physical link has no safe rewrite: {relative}")
         for start, end, href in reversed(replacements):
             text = text[:start] + href + text[end:]
@@ -8808,6 +9830,175 @@ def _recover_single_bug_transition(
     return settled
 
 
+def _parent_archive_uri_intent_fields(root: Path, plan: dict) -> dict:
+    if plan["maintenance"] is None:
+        return {}
+    relative = lambda path: path.relative_to(Path(root).resolve()).as_posix()
+    selected = {bug.source for bug in plan["bugs"]}
+    consumers = [{"source": relative(row["path"]), "target": relative(row["path"]),
+        "before": _b64(row["before"]), "after": _b64(row["after"]),
+        "beforeSha256": row["beforeSha256"], "afterSha256": row["afterSha256"]}
+        for row in plan["links"] if row["path"] not in selected]
+    targets = []
+    for original, (final, captured, data) in plan["targetImages"].items():
+        row = {"source": relative(original), "target": relative(final)}
+        if data is None:
+            row.update(kind="directory", identity=[str(v) for v in plan["targetDirectoryIdentities"][original]])
+        else:
+            row.update(kind="file", beforeSha256=_sha256_bytes(captured.data) if captured is not None else None,
+                       afterSha256=_sha256_bytes(data))
+        targets.append(row)
+    return {"uriConsumers": {"version": 1, "allowProtectedUriUpdates": plan["maintenance"]["allowProtectedUriUpdates"],
+                              "rows": sorted(consumers, key=lambda row: row["source"])},
+            "uriTargetBindings": {"version": 1, "rows": sorted(targets, key=lambda row: row["source"])}}
+
+
+def _transition_parent_uri_images(root: Path, intent: dict) -> list[dict]:
+    """Validate every component of a URI-bearing intent; never downgrade omission."""
+    failure = "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+    def reject() -> None:
+        raise LifecycleError(failure, "parent URI intent bindings differ")
+    try:
+        receipt = json.loads((_unb64(intent["bugReceiptAfter"]) or b"").decode("utf-8", errors="strict"))
+    except (UnicodeError, ValueError, TypeError):
+        reject()
+    if not isinstance(receipt, dict):
+        reject()
+    if not any(key in intent for key in ("uriConsumers", "uriTargetBindings")) and "linkMaintenance" not in receipt:
+        return []
+    if any(key not in intent for key in ("uriConsumers", "uriTargetBindings")) or "linkMaintenance" not in receipt:
+        reject()
+    value, targets = intent["uriConsumers"], intent["uriTargetBindings"]
+    if (not isinstance(value, dict) or set(value) != {"version", "allowProtectedUriUpdates", "rows"}
+        or type(value["version"]) is not int or value["version"] != 1
+        or type(value["allowProtectedUriUpdates"]) is not bool or not isinstance(value["rows"], list)
+        or not isinstance(targets, dict) or set(targets) != {"version", "rows"}
+        or type(targets["version"]) is not int or targets["version"] != 1
+        or not isinstance(targets["rows"], list) or not targets["rows"]):
+        reject()
+    results = receipt.get("bugs")
+    if not isinstance(results, list) or any(not isinstance(row, dict) for row in results):
+        reject()
+    maintenance = receipt["linkMaintenance"]
+    consumers = _verify_close_link_maintenance(_work_items_root(root), intent["slug"], intent["terminalInstant"],
+                                             maintenance, {row.get("id"): row for row in results})
+    if value["allowProtectedUriUpdates"] != maintenance["allowProtectedUriUpdates"]:
+        reject()
+    def path(relative: object) -> Path:
+        if (not isinstance(relative, str) or not relative or "\\" in relative
+            or any(part in {"", ".", ".."} for part in relative.split("/"))):
+            reject()
+        return _intent_path(root, relative)
+    def digest(value: object) -> bool:
+        return isinstance(value, str) and bool(SHA256_RE.fullmatch(value))
+    images = {}
+    for row in value["rows"]:
+        if (not isinstance(row, dict) or set(row) != {"source", "target", "before", "after", "beforeSha256", "afterSha256"}
+            or not digest(row["beforeSha256"]) or not digest(row["afterSha256"])):
+            reject()
+        source, target = path(row["source"]), path(row["target"])
+        before, after = _unb64(row["before"]), _unb64(row["after"])
+        if before is None or after is None:
+            reject()
+        try:
+            before.decode("utf-8", errors="strict"); after.decode("utf-8", errors="strict")
+        except UnicodeError:
+            reject()
+        if (source in images or source != target or _sha256_bytes(before) != row["beforeSha256"]
+            or _sha256_bytes(after) != row["afterSha256"]):
+            reject()
+        images[source] = {"path": source, "target": target, "before": before, "after": after}
+    if [row["source"] for row in value["rows"]] != sorted(row["source"] for row in value["rows"]):
+        reject()
+    selected = {plan.source: plan for plan in _transition_bug_plans(root, intent)}
+    for key, row in consumers.items():
+        source, target = _work_items_root(root) / key, _work_items_root(root) / row["target"]
+        if source in selected:
+            if source in images:
+                reject()
+            plan = selected[source]
+            if (target != (plan.target or source) or _sha256_bytes(plan.before) != row["beforeSha256"]
+                or _sha256_bytes(plan.after) != row["afterSha256"]):
+                reject()
+        else:
+            image = images.get(source)
+            if (image is None or image["target"] != target or _sha256_bytes(image["before"]) != row["beforeSha256"]
+                or _sha256_bytes(image["after"]) != row["afterSha256"]
+                or _close_link_uri_changes(image["before"], image["after"]) != row["uriChanges"]):
+                reject()
+    if set(images) != {_work_items_root(root) / key for key in consumers} - set(selected):
+        reject()
+    expected_targets = set()
+    active, archive = path(intent["activePath"]), path(intent["archivePath"])
+    if active != _work_items_root(root) / maintenance["source"] or archive != _work_items_root(root) / maintenance["target"]:
+        reject()
+    for key, row in consumers.items():
+        for change in row["uriChanges"]:
+            href = _local_markdown_href_parts(change["from"])
+            if href is None:
+                reject()
+            expected_targets.add(Path(os.path.abspath((_work_items_root(root) / key).parent / href[0])))
+    seen = []
+    for row in targets["rows"]:
+        if not isinstance(row, dict):
+            reject()
+        source, target = path(row.get("source")), path(row.get("target"))
+        if source not in expected_targets or source in seen or target != archive / source.relative_to(active):
+            reject()
+        seen.append(source)
+        if row.get("kind") == "file":
+            if set(row) != {"source", "target", "kind", "beforeSha256", "afterSha256"} or not digest(row["afterSha256"]):
+                reject()
+            special = {active / "status.md": (intent["statusBefore"], intent["statusAfter"]),
+                       active / "closure.md": (intent["closureBefore"], intent["closureAfter"])}
+            if source in special:
+                before, after = map(_unb64, special[source])
+                if before is None and source != active / "closure.md":
+                    reject()
+                if row["beforeSha256"] != (_sha256_bytes(before) if before is not None else None) or after is None or row["afterSha256"] != _sha256_bytes(after):
+                    reject()
+            elif not digest(row["beforeSha256"]) or row["beforeSha256"] != row["afterSha256"]:
+                reject()
+        elif row.get("kind") == "directory":
+            identity = row.get("identity")
+            if (set(row) != {"source", "target", "kind", "identity"} or not isinstance(identity, list)
+                or len(identity) != 2 or any(not isinstance(v, str) or not v.isascii() or not v.isdecimal()
+                                          or str(int(v)) != v for v in identity)):
+                reject()
+        else:
+            reject()
+    if set(seen) != expected_targets or [row["source"] for row in targets["rows"]] != sorted(row["source"] for row in targets["rows"]):
+        reject()
+    return list(images.values())
+
+
+def _verify_transition_uri_targets(root: Path, intent: dict, *, archived: bool, failure_id: str) -> None:
+    for row in intent.get("uriTargetBindings", {}).get("rows", []):
+        path = _intent_path(root, row["target"] if archived else row["source"])
+        if row["kind"] == "directory":
+            _lifecycle_reject_unreduced_reparse(path, failure_id=failure_id, message="URI target crosses a link or reparse point")
+            try:
+                identity = _lifecycle_file_identity(path.lstat()) if path.is_dir() else None
+            except OSError as exc:
+                raise LifecycleError(failure_id, "URI directory target is unavailable") from exc
+            if identity != tuple(int(value) for value in row["identity"]):
+                raise LifecycleError(failure_id, "URI directory target identity differs")
+        else:
+            _lifecycle_reject_unreduced_reparse(path, failure_id=failure_id, message="URI target crosses a link or reparse point")
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                if not archived and row["beforeSha256"] is None:
+                    continue
+                raise LifecycleError(failure_id, "URI file target is unavailable")
+            except OSError as exc:
+                raise LifecycleError(failure_id, "URI file target cannot be inspected") from exc
+            captured = _capture_file_snapshot(path, failure_id=failure_id)
+            allowed = {row["afterSha256"]} if archived else {row["beforeSha256"], row["afterSha256"]}
+            if _sha256_bytes(captured.data) not in allowed:
+                raise LifecycleError(failure_id, "URI file target bytes differ")
+
+
 def _load_transition_intent(root: Path, path: Path) -> dict:
     try:
         snapshot = _capture_file_snapshot(
@@ -8826,20 +10017,20 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
         ) from exc
     is_v1 = (
         isinstance(payload, dict)
-        and set(payload) == TRANSITION_INTENT_FIELDS
+        and set(payload) in (TRANSITION_INTENT_FIELDS, TRANSITION_INTENT_FIELDS | {"uriConsumers", "uriTargetBindings"})
         and payload.get("schemaVersion") == 1
         and payload.get("owner") == TRANSITION_OWNER
     )
     is_v2 = (
         isinstance(payload, dict)
-        and set(payload) == TRANSFER_TRANSITION_INTENT_FIELDS
+        and set(payload) in (TRANSFER_TRANSITION_INTENT_FIELDS, TRANSFER_TRANSITION_INTENT_FIELDS | {"uriConsumers", "uriTargetBindings"})
         and payload.get("schemaVersion") == 2
         and payload.get("owner") == TRANSFER_TRANSITION_OWNER
         and isinstance(payload.get("obligations"), list)
     )
     is_legacy_v2 = (
         isinstance(payload, dict)
-        and set(payload) == LEGACY_TRANSFER_TRANSITION_INTENT_FIELDS
+        and set(payload) in (LEGACY_TRANSFER_TRANSITION_INTENT_FIELDS, LEGACY_TRANSFER_TRANSITION_INTENT_FIELDS | {"uriConsumers", "uriTargetBindings"})
         and payload.get("schemaVersion") == 2
         and payload.get("owner") == TRANSFER_TRANSITION_OWNER
         and isinstance(payload.get("obligations"), list)
@@ -8943,6 +10134,8 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
         )
     elif payload["migrationReceiptPath"] is not None:
         _intent_path(root, payload["migrationReceiptPath"])
+    if is_v1 or is_v2 or is_legacy_v2:
+        _transition_parent_uri_images(root, payload)
     return payload
 
 
@@ -9812,6 +11005,7 @@ def _precompute_transition_readme_sha256(
     closure_after: bytes,
     successor_data: bytes,
     plans: tuple[BugDispositionPlan, ...],
+    links: list[dict] | None = None,
 ) -> str:
     work_items = _work_items_root(root)
     static_guide = _static_guide(work_items / "README.md")
@@ -9835,6 +11029,9 @@ def _precompute_transition_readme_sha256(
                 _atomic_write(source, plan.after)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(source, target)
+        for row in links or []:
+            if row["path"] not in {plan.source for plan in plans if plan.action == "terminalize"}:
+                _atomic_write(shadow(row["path"]), row["after"])
         shadow_archive.parent.mkdir(parents=True, exist_ok=True)
         os.replace(shadow_active, shadow_archive)
         _atomic_write(shadow(successor), successor_data)
@@ -9939,6 +11136,13 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) 
         )
     if any(payload.get(key) != value for key, value in physical.items()):
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt hashes differ")
+    bug_receipt, _ = _ledger_location_proof_object(bug_receipt_path, failure_id=failure_id, unreadable="bug receipt is unreadable")
+    if isinstance(bug_receipt, dict) and "linkMaintenance" in bug_receipt:
+        rows = bug_receipt.get("bugs")
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise LifecycleError(failure_id, "bug receipt rows differ")
+        _verify_close_link_maintenance(_work_items_root(root), payload["workItem"], payload["terminalInstant"],
+            bug_receipt["linkMaintenance"], {row.get("id"): row for row in rows})
     if payload.get("schemaVersion") == 2:
         coverage_errors = _validator_module().validate_transfer_receipt_obligation_coverage(
             Path(root).resolve(), payload, archive
@@ -9953,8 +11157,17 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) 
     return payload
 
 
-def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str | None = None) -> dict | None:
+def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str | None = None,
+                        expected_request: dict | None = None) -> dict | None:
     intent = _load_transition_intent(root, intent_path)
+    if expected_request is not None:
+        path_fields = {"activePath", "archivePath", "successorPath"}
+        if any(
+            (_intent_path(root, intent[key]) != value if key in path_fields
+             else intent.get(key) != value)
+            for key, value in expected_request.items()
+        ):
+            raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "resume inputs differ")
     if intent.get("kind") == LEDGER_H1_RELOCATION_KIND:
         return _recover_ledger_h1_artifact_set_relocation(
             root,
@@ -9983,7 +11196,12 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
     bug_receipt_after = _unb64(intent["bugReceiptAfter"]) or b""
     successor_data = _unb64(intent["successorData"]) or b""
     plans = _transition_bug_plans(root, intent)
+    uri_images = _transition_parent_uri_images(root, intent)
     if active.is_dir():
+        _verify_transition_uri_targets(root, intent, archived=False, failure_id=rollback_failure_id)
+        for row in uri_images:
+            if _read_lifecycle_image(row["path"], row["before"], row["after"], failure_id=rollback_failure_id) not in {row["before"], row["after"]}:
+                raise LifecycleError(rollback_failure_id, "URI consumer rollback image differs")
         status = _require_lifecycle_mutation_path(
             root, active / "status.md",
             failure_id="WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE",
@@ -10011,18 +11229,35 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         if current_status not in {status_before, status_after} or current_closure not in {closure_before, closure_after}:
             raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", "active before-image cannot be proven")
         for plan in plans:
-            current = plan.source if plan.source.exists() else plan.target
-            if current is None or _read_lifecycle_image(
-                current,
+            source_image = _read_lifecycle_image(
+                plan.source,
                 plan.before,
                 plan.after,
                 failure_id=rollback_failure_id,
-            ) not in {plan.before, plan.after}:
+            )
+            target_image = _read_lifecycle_image(
+                plan.target, plan.after, failure_id=rollback_failure_id,
+            ) if plan.target is not None else None
+            if source_image is not None:
+                if target_image is not None or source_image not in {plan.before, plan.after}:
+                    raise LifecycleError(rollback_failure_id, f"bug rollback locations differ: {plan.bug_id}")
+            elif target_image != plan.after or plan.target is None:
                 raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", f"bug before-image differs: {plan.bug_id}")
-            if plan.target is not None and plan.target.exists() and not plan.source.exists():
+            if source_image == plan.before:
+                continue  # Exact restored/preserved bytes need no write.
+            if target_image is not None:
                 plan.source.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(plan.target, plan.source)
+            if _read_lifecycle_image(plan.source, plan.before, plan.after,
+                                     failure_id=rollback_failure_id) not in {plan.before, plan.after}:
+                raise LifecycleError(rollback_failure_id, f"bug rollback source changed: {plan.bug_id}")
             _atomic_write(plan.source, plan.before)
+        for row in uri_images:
+            observed = _read_lifecycle_image(row["path"], row["before"], row["after"], failure_id=rollback_failure_id)
+            if observed not in {row["before"], row["after"]}:
+                raise LifecycleError(rollback_failure_id, "URI consumer changed before rollback")
+            if observed == row["after"]:
+                _atomic_write(row["path"], row["before"])
         current_bug_receipt = _read_lifecycle_image(
             bug_receipt,
             bug_receipt_before,
@@ -10072,17 +11307,6 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         failure_id=forward_failure_id,
     ) != closure_after:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "archive identity differs")
-    if successor.exists():
-        if _read_lifecycle_image(
-            successor,
-            successor_data,
-            failure_id=forward_failure_id,
-        ) != successor_data:
-            raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "successor bytes differ")
-    else:
-        _atomic_write(successor, successor_data)
-    if inject_failure_at == "T4":
-        raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "injected T4")
     archived_bug_receipt = archive / BUG_DISPOSITIONS_RECEIPT
     archived_bug_receipt = _require_lifecycle_mutation_path(
         root, archived_bug_receipt,
@@ -10098,6 +11322,50 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
             "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
             "pre-archive bug receipt is missing or changed",
         )
+    _verify_transition_uri_targets(root, intent, archived=True, failure_id=forward_failure_id)
+    maintenance = json.loads(bug_receipt_after.decode("utf-8")).get("linkMaintenance")
+    uri_selected = {_work_items_root(root) / row["source"] for row in maintenance["consumers"]} if maintenance is not None else set()
+    for plan in plans:
+        if plan.source not in uri_selected:
+            continue
+        source_image = _read_lifecycle_image(plan.source, plan.before, plan.after, failure_id=forward_failure_id)
+        target_image = _read_lifecycle_image(plan.target, plan.after, failure_id=forward_failure_id) if plan.target is not None else None
+        if plan.target is not None:
+            if source_image is not None:
+                if target_image is not None or source_image not in {plan.before, plan.after}:
+                    raise LifecycleError(forward_failure_id, "URI bug forward locations differ")
+                if source_image == plan.before:
+                    _atomic_write(plan.source, plan.after)
+                plan.target.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(plan.source, plan.target)
+            elif target_image != plan.after:
+                raise LifecycleError(forward_failure_id, "URI bug forward target differs")
+        else:
+            if source_image not in {plan.before, plan.after}:
+                raise LifecycleError(forward_failure_id, "URI bug forward image differs")
+            if source_image == plan.before:
+                _atomic_write(plan.source, plan.after)
+    for row in uri_images:
+        observed = _read_lifecycle_image(row["target"], row["before"], row["after"], failure_id=forward_failure_id)
+        if observed not in {row["before"], row["after"]}:
+            raise LifecycleError(forward_failure_id, "URI consumer forward image differs")
+        if observed == row["before"]:
+            _atomic_write(row["target"], row["after"])
+    if successor.exists():
+        if _read_lifecycle_image(
+            successor,
+            successor_data,
+            failure_id=forward_failure_id,
+        ) != successor_data:
+            raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "successor bytes differ")
+    else:
+        _atomic_write(successor, successor_data)
+    if inject_failure_at == "T4":
+        raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "injected T4")
+    _verify_transition_uri_targets(root, intent, archived=True, failure_id=forward_failure_id)
+    for row in uri_images:
+        if _read_lifecycle_image(row["target"], row["after"], failure_id=forward_failure_id) != row["after"]:
+            raise LifecycleError(forward_failure_id, "URI consumer readback differs")
     readme_sha = _safe_refresh_readme(root)
     if readme_sha != intent["finalReadmeSha256"]:
         raise LifecycleError(
@@ -10106,6 +11374,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         )
     if inject_failure_at == "T5":
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "injected T5")
+    _verify_transition_uri_targets(root, intent, archived=True, failure_id=forward_failure_id)
     settlement = _settlement_payload(root, intent, readme_sha)
     receipt_path = archive / "lifecycle-transition-receipt.json"
     receipt_bytes = _migration_receipt_bytes(settlement)
@@ -10125,6 +11394,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
     _transition_fsync_directory(receipt_path.parent)
     if inject_failure_at == "T6":
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "injected T6")
+    _verify_transition_uri_targets(root, intent, archived=True, failure_id=forward_failure_id)
     _verify_settlement(root, receipt_path, settlement)
     if inject_failure_at == "T7":
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "injected T7")
@@ -10174,6 +11444,7 @@ def archive_with_successor(
     *,
     obligation_transfer_data: bytes | None = None,
     inject_failure_at: str | None = None,
+    allow_protected_uri_updates: bool = False,
 ) -> dict:
     _validate_slug(slug)
     _validate_slug(successor_slug)
@@ -10187,6 +11458,7 @@ def archive_with_successor(
     settled_path = _require_lifecycle_mutation_path(
         root, settled_path, failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
     )
+    payload = None
     if settled_path.is_file():
         payload = _verify_settlement(root, settled_path)
         if (
@@ -10204,12 +11476,28 @@ def archive_with_successor(
             )
         ):
             raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "replay inputs differ")
-        return payload
     intent_path = _transition_intent_path(root, operation_id)
     if intent_path.exists():
-        recovered = _recover_transition(root, intent_path, inject_failure_at=inject_failure_at)
+        recovered = _recover_transition(
+            root, intent_path, inject_failure_at=inject_failure_at,
+            expected_request={
+                "operationId": operation_id, "slug": slug,
+                "closureInputSha256": _sha256_bytes(closure_data),
+                "successorSlug": successor_slug, "successorData": _b64(successor_data),
+                "terminalInstant": terminal_instant,
+                "expectedLedgerSha256": expected_ledger_sha256,
+                "expectedReadmeSha256": expected_readme_sha256,
+                "transferInputSha256": (_sha256_bytes(obligation_transfer_data)
+                                        if obligation_transfer_data is not None else None),
+                "activePath": work_items / "active" / slug,
+                "archivePath": archive,
+                "successorPath": work_items / "backlog" / f"{successor_slug}.md",
+            },
+        )
         if recovered is not None:
             return recovered
+    elif payload is not None:
+        return payload
     active = _active_migration_item(root, slug)
     ledger = active / "agent-runs.jsonl"
     if _ledger_location_regular_sha256(
@@ -10270,11 +11558,18 @@ def archive_with_successor(
     prior_status = status.read_bytes()
     status_after = _terminalize_status(prior_status)
     prior_closure = (active / "closure.md").read_bytes() if (active / "closure.md").exists() else None
+    manifest = json.loads(manifest_data.decode("utf-8"))
+    link_plan = _plan_parent_archive_links(
+        root, active, archive, bug_plans=bug_plans, bug_manifest=manifest,
+        target_after_images={status: status_after, active / "closure.md": archived_closure},
+        allow_protected_uri_updates=allow_protected_uri_updates,
+    )
+    bug_plans = link_plan["bugs"]
     relative = lambda path: path.relative_to(Path(root).resolve()).as_posix()
     successor_path = work_items / "backlog" / f"{successor_slug}.md"
     final_readme_sha = _precompute_transition_readme_sha256(
         root, active, archive, successor_path, status_after, archived_closure,
-        successor_data, bug_plans,
+        successor_data, bug_plans, link_plan["links"],
     )
     bug_receipt_path = active / BUG_DISPOSITIONS_RECEIPT
     bug_receipt_path = _require_lifecycle_mutation_path(
@@ -10283,7 +11578,7 @@ def archive_with_successor(
     if bug_receipt_path.exists():
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "active bug receipt already exists")
     bug_receipt_after = _bug_disposition_receipt_bytes(
-        root, slug, terminal_instant, manifest_data, archived_closure, bug_plans, final_readme_sha
+        root, slug, terminal_instant, manifest_data, archived_closure, bug_plans, final_readme_sha, link_maintenance=link_plan["maintenance"]
     )
     intent = {
         "schemaVersion": 2 if obligation_transfer_data is not None else 1,
@@ -10340,6 +11635,11 @@ def archive_with_successor(
             ),
             "obligations": transfer_obligations,
         })
+    intent.update(_parent_archive_uri_intent_fields(root, link_plan))
+    _transition_parent_uri_images(root, intent)
+    intent_bytes = _migration_receipt_bytes(intent)
+    if len(intent_bytes) > TRANSITION_INTENT_FILE_BYTE_CAP:
+        raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition intent exceeds its byte limit")
     intent_path = _require_lifecycle_mutation_path(
         root, intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
     )
@@ -10348,10 +11648,13 @@ def archive_with_successor(
             snapshot,
             "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
         )
-    _atomic_write(intent_path, _migration_receipt_bytes(intent))
+    _atomic_write(intent_path, intent_bytes)
     _transition_fsync_directory(intent_path.parent)
     if inject_failure_at == "T0":
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", "injected T0")
+    for captured in link_plan["consumerCaptures"].values():
+        _verify_captured_file(captured, "WI-CLOSE-LINK-DRIFT")
+    _verify_parent_archive_link_targets(link_plan, archived=False, failure_id="WI-CLOSE-LINK-DRIFT")
     for plan in bug_plans:
         plan_source = _require_lifecycle_mutation_path(
             root, plan.source,
@@ -10368,6 +11671,11 @@ def archive_with_successor(
             assert plan_target is not None
             plan_target.parent.mkdir(parents=True, exist_ok=True)
             os.replace(plan_source, plan_target)
+    terminalized = {plan.source for plan in bug_plans if plan.action == "terminalize"}
+    for row in link_plan["links"]:
+        if row["path"] not in terminalized:
+            _verify_captured_file(link_plan["consumerCaptures"][row["path"]], "WI-CLOSE-LINK-DRIFT")
+            _atomic_write(row["path"], row["after"])
     closure_path = _require_lifecycle_mutation_path(
         root, active / "closure.md",
         failure_id="WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE",
@@ -11025,7 +12333,8 @@ def _admission_for(category_name: str) -> CategoryAdmission:
     return row
 
 
-def _move_terminal_category(root: Path, reference: str) -> Path:
+def _move_terminal_category(root: Path, reference: str, *,
+                            allow_protected_uri_updates: bool = False) -> Path:
     category, slug = _canonical_category(reference)
     _admission_for(category.name)
     locations = _category_locations(root, category, slug)
@@ -11076,27 +12385,95 @@ def _move_terminal_category(root: Path, reference: str) -> Path:
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
     if transaction is not None:
         transaction.verify()
-    target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", f"archive target exists: {target}")
     if category.name == "work-item":
         prior_status = status.read_bytes()
         prior_closure = closure.read_bytes()
-        _atomic_write(status, terminal_status)
-        _atomic_write(closure, terminal_closure)
-    try:
-        (_replace_lifecycle_directory(source, target) if category.name == "work-item" else os.replace(source, target))
-    except BaseException:
-        if category.name == "work-item":
-            if not _lifecycle_cleanup_intersects_unsettled(status):
-                _atomic_write(status, prior_status)
-            if not _lifecycle_cleanup_intersects_unsettled(closure):
-                _atomic_write(closure, prior_closure)
-        raise
-    try:
-        refresh_readme(root)
-    except LifecycleError as exc:
-        raise LifecycleError("WI-README-STALE", str(exc)) from exc
+        manifest = None
+        bug_plans = ()
+        manifest_path = source / BUG_DISPOSITIONS_MANIFEST
+        if manifest_path.exists() or manifest_path.is_symlink():
+            _path, _data, manifest = _load_bug_disposition_manifest(source, slug, instant)
+            _path, _data, bug_plans = _prepare_bug_dispositions(root, source, slug, instant)
+            if any(plan.action != "preserve-current" for plan in bug_plans):
+                raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", "legacy migration grants no bug terminalization")
+        plan = _plan_parent_archive_links(
+            root, source, target, bug_plans=bug_plans, bug_manifest=manifest,
+            target_after_images={status: terminal_status, closure: terminal_closure},
+            allow_protected_uri_updates=allow_protected_uri_updates,
+        )
+        readme = _work_items_root(root) / "README.md"
+        readme_before = _capture_file_snapshot(readme, failure_id="WI-README-STALE")
+        touched = []
+        created_dirs = []
+        readme_after = None
+        moved = False
+        try:
+            for row in plan["links"]:
+                _verify_captured_file(plan["consumerCaptures"][row["path"]], "WI-CLOSE-LINK-DRIFT")
+                touched.append(row)
+                _atomic_write(row["path"], row["after"])
+            _verify_parent_archive_link_targets(plan, archived=False, failure_id="WI-CLOSE-LINK-DRIFT")
+            _atomic_write(status, terminal_status)
+            _atomic_write(closure, terminal_closure)
+            _mkdir_parents_tracked(target.parent, created_dirs)
+            _replace_lifecycle_directory(source, target)
+            moved = True
+            readme_after = render_readme_bytes(root)
+            refresh_readme(root)
+            for row in plan["links"]:
+                if _capture_file_snapshot(row["path"], failure_id="WI-CLOSE-LINK-VERIFY").data != row["after"]:
+                    raise LifecycleError("WI-CLOSE-LINK-VERIFY", "URI consumer final image differs")
+            _verify_parent_archive_link_targets(plan, archived=True, failure_id="WI-CLOSE-LINK-VERIFY")
+        except BaseException as exc:
+            failures = []
+            try:
+                if moved:
+                    if source.exists() or not target.is_dir():
+                        raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", "parent rollback locations differ")
+                    for name, data in (("status.md", terminal_status), ("closure.md", terminal_closure)):
+                        if _read_lifecycle_image(target / name, data, failure_id="WI-CLOSE-LINK-DRIFT") != data:
+                            raise LifecycleError("WI-CLOSE-LINK-DRIFT", "parent rollback image differs")
+                    _replace_lifecycle_directory(target, source)
+                for path, before, after in ((status, prior_status, terminal_status), (closure, prior_closure, terminal_closure)):
+                    if _read_lifecycle_image(path, before, after, failure_id="WI-CLOSE-LINK-DRIFT") not in {before, after}:
+                        raise LifecycleError("WI-CLOSE-LINK-DRIFT", "parent rollback image differs")
+                    _atomic_write(path, before)
+            except BaseException as cause:
+                failures.append(str(cause))
+            for row in reversed(touched):
+                try:
+                    observed = _read_lifecycle_image(row["path"], row["before"], row["after"], failure_id="WI-CLOSE-LINK-DRIFT")
+                    if observed not in {row["before"], row["after"]}:
+                        raise LifecycleError("WI-CLOSE-LINK-DRIFT", "URI rollback consumer changed")
+                    if observed == row["after"]:
+                        _atomic_write(row["path"], row["before"])
+                except BaseException as cause:
+                    failures.append(str(cause))
+            try:
+                if readme.read_bytes() != readme_before.data:
+                    if readme_after is None or readme.read_bytes() != readme_after:
+                        raise LifecycleError("WI-README-STALE", "README rollback image differs")
+                    _atomic_write(readme, readme_before.data)
+            except BaseException as cause:
+                failures.append(str(cause))
+            for directory in reversed(created_dirs):
+                try:
+                    if directory.exists() and not any(directory.iterdir()):
+                        directory.rmdir()
+                except OSError as cause:
+                    failures.append(str(cause))
+            if failures:
+                raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", f"{exc}; rollback incomplete: {'; '.join(failures)}") from exc
+            raise
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(source, target)
+        try:
+            refresh_readme(root)
+        except LifecycleError as exc:
+            raise LifecycleError("WI-README-STALE", str(exc)) from exc
     return target
 
 
@@ -11256,7 +12633,8 @@ def _migrate_v0_decision(root: Path, reference: str, inventory: dict, source: Pa
 
 
 def migrate_legacy(
-    root: Path, reference: str, *, incoming_links_inventory: Path | None
+    root: Path, reference: str, *, incoming_links_inventory: Path | None,
+    allow_protected_uri_updates: bool = False,
 ) -> Path:
     category, _slug = _canonical_category(reference)
     _admission_for(category.name)
@@ -11284,7 +12662,7 @@ def migrate_legacy(
         row = _v0_archive_manifest_row(root, current.name)
         if locations and row is not None and row.get("archiveEvidence") is not None:
             return _migrate_v0_decision(root, reference, inventory, None)
-    return _move_terminal_category(root, reference)
+    return _move_terminal_category(root, reference, allow_protected_uri_updates=allow_protected_uri_updates)
 
 
 @dataclass(frozen=True)
@@ -11530,6 +12908,8 @@ def _validated_migration_payload_target(
     slug: str,
     payload: Path,
 ) -> tuple[str, Path]:
+    _reject_unbound_archive_selection(_archive_entity_inventory(root), path=payload,
+                                     slug=slug if category.current_kind == "work-item" else None)
     if category.name == "work-item":
         closure = payload / "closure.md"
         if not closure.is_file():
@@ -20518,6 +21898,7 @@ def build_parser() -> argparse.ArgumentParser:
         elif name == "close":
             command.add_argument("--closure-file", required=True)
             command.add_argument("--terminal-instant", required=True)
+            command.add_argument("--allow-protected-uri-updates", action="store_true")
         else:
             command.add_argument("--successor-slug", required=True)
             command.add_argument("--status-file", required=True)
@@ -20556,6 +21937,7 @@ def build_parser() -> argparse.ArgumentParser:
     migrate_mode.add_argument("--reference")
     migrate_mode.add_argument("--inventory")
     migrate.add_argument("--incoming-links-inventory")
+    migrate.add_argument("--allow-protected-uri-updates", action="store_true")
     migrate.add_argument("--apply-admitted", action="store_true")
     migrate.add_argument("--render-readme", action="store_true")
     migrate.add_argument("--byte-check", action="store_true")
@@ -20700,6 +22082,7 @@ def build_parser() -> argparse.ArgumentParser:
     archive_successor.add_argument("--expected-ledger-sha256", required=True)
     archive_successor.add_argument("--expected-readme-sha256", required=True)
     archive_successor.add_argument("--obligation-transfer-file")
+    archive_successor.add_argument("--allow-protected-uri-updates", action="store_true")
     archive_successor.add_argument(
         "--inject-failure-at", choices=tuple(f"T{i}" for i in range(10)), help=argparse.SUPPRESS
     )
@@ -20850,6 +22233,7 @@ def main(argv: list[str]) -> int:
                 _read_arg_file(args.closure_file),
                 args.terminal_instant,
                 inject_readme_failure=bool(args.inject_readme_failure),
+                allow_protected_uri_updates=bool(args.allow_protected_uri_updates),
             )
             print(result)
         elif args.command == "reopen":
@@ -20862,6 +22246,7 @@ def main(argv: list[str]) -> int:
             )
             print(result)
         elif args.command == "refresh":
+            archive_inventories: list[dict] = []
             if args.reset_static_guide:
                 if not args.expected_readme_sha256:
                     raise LifecycleError(
@@ -20871,6 +22256,7 @@ def main(argv: list[str]) -> int:
                 readme_hash = reset_readme_static_guide(
                     root,
                     args.expected_readme_sha256,
+                    archive_inventory_out=archive_inventories,
                 )
             else:
                 if args.expected_readme_sha256:
@@ -20878,7 +22264,9 @@ def main(argv: list[str]) -> int:
                         "WI-README-REPAIR-TARGET-MISMATCH",
                         "--expected-readme-sha256 requires --reset-static-guide",
                     )
-                readme_hash = refresh_readme(root)
+                readme_hash = refresh_readme(root, archive_inventory_out=archive_inventories)
+            for row in archive_inventories[0]["unbound"]:
+                print(f"INFO WI-ARCHIVE-ENTITY-UNBOUND: {row['path']}")
             print(f"README-SHA256: {readme_hash}")
         elif args.command == "resolve":
             if args.reference:
@@ -20956,6 +22344,7 @@ def main(argv: list[str]) -> int:
                         if args.incoming_links_inventory
                         else None
                     ),
+                    allow_protected_uri_updates=args.allow_protected_uri_updates,
                 )
         elif args.command == "terminalize-v1":
             rows, replay = terminalize_v1_inventory(
@@ -21204,6 +22593,7 @@ def main(argv: list[str]) -> int:
                     if args.obligation_transfer_file else None
                 ),
                 inject_failure_at=args.inject_failure_at,
+                allow_protected_uri_updates=args.allow_protected_uri_updates,
             )
             print(
                 "WI-LIFECYCLE-TRANSITION-COMMITTED "

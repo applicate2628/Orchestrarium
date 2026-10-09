@@ -96,30 +96,41 @@ def committed_fixture(tmp_path: Path, *, operation_id: str = "migration-op-001")
     return item, expected, lifecycle, before, result
 
 
+def settled_parent_migration_fixture(tmp_path: Path):
+    item, expected, lifecycle, before, result = committed_fixture(tmp_path)
+    events = [json.loads(line) for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    target = next(event for event in events if event.get("runId") == expected["targetRunId"])
+    settled = subprocess.run(
+        [sys.executable, "-B", str(LEDGER), "--work-item", str(item), "settle-launch",
+         "--launch-run-id", target["launchRunId"], "--run-id", f"{target['launchRunId']}-migration-neutral",
+         "--status", "completed", "--gate", "none",
+         "--started-at", "2026-08-18T00:00:01Z", "--updated-at", "2026-08-18T00:00:01Z"],
+        cwd=ROOT, capture_output=True, text=True, timeout=30,
+    )
+    assert settled.returncode == 0, settled.stdout + settled.stderr
+    return item, expected, lifecycle, before, result
+
+
 def append_reviewer_pass(item: Path, expected: dict) -> None:
-    ledger_owner = load_script(LEDGER, f"reviewer_pass_ledger_{id(item)}")
-    ledger_path = item / "agent-runs.jsonl"
-    work_item = json.loads(ledger_path.read_text(encoding="utf-8").splitlines()[0])["workItem"]
-    launch = {
-        "schemaVersion": 2, "runId": "migration-review-r1", "workItem": work_item,
-        "role": "toolchain-engineer", "executionRole": "internal", "status": "running", "gate": "none",
-        "scope": ["implementation.md"], "eventKind": "launch",
-        "startedAt": "2026-08-18T00:01:00Z", "updatedAt": "2026-08-18T00:01:00Z",
-    }
-    terminal = {
-        **launch, "runId": "migration-review-r1-terminal", "status": "completed", "gate": "PASS",
-        "eventKind": "terminal", "launchRunId": launch["runId"], "closesRunIds": [expected["targetRunId"]],
-        "artifact": "implementation.md", "artifactRevision": "a" * 64, "lane": "implementation", "effort": "high",
-        "evidence": [{"kind": "artifact", "ref": "implementation.md"}],
-        "startedAt": "2026-08-18T00:02:00Z", "updatedAt": "2026-08-18T00:02:00Z",
-    }
-    with ledger_path.open("ab") as stream:
-        stream.write((ledger_owner.serialize_event(launch) + "\n").encode())
-        stream.write((ledger_owner.serialize_event(terminal) + "\n").encode())
+    work_item = json.loads((item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()[0])["workItem"]
+    common = ["--role", "toolchain-engineer", "--execution-role", "internal",
+              "--scope", "implementation.md", "--work-item-name", work_item]
+    for arguments in (
+        ["--run-id", "migration-review-r1", "--status", "running", "--gate", "none",
+         "--event-kind", "launch", "--started-at", "2026-08-18T00:01:00Z", "--updated-at", "2026-08-18T00:01:00Z"],
+        ["--run-id", "migration-review-r1-terminal", "--status", "completed", "--gate", "PASS",
+         "--event-kind", "terminal", "--launch-run-id", "migration-review-r1", "--closes", expected["targetRunId"],
+         "--artifact", "implementation.md", "--artifact-revision", "a" * 64, "--lane", "implementation", "--effort", "high",
+         "--evidence", "artifact:implementation.md", "--started-at", "2026-08-18T00:02:00Z", "--updated-at", "2026-08-18T00:02:00Z"],
+    ):
+        written = subprocess.run([sys.executable, "-B", str(LEDGER), "--work-item", str(item), "append", *common, *arguments],
+                                 cwd=ROOT, capture_output=True, text=True, timeout=30)
+        assert written.returncode == 0, written.stdout + written.stderr
+
 
 
 def transition_fixture(tmp_path: Path):
-    item, expected, lifecycle, _, migration = committed_fixture(tmp_path)
+    item, expected, lifecycle, _, migration = settled_parent_migration_fixture(tmp_path)
     ledger_path = item / "agent-runs.jsonl"
     append_reviewer_pass(item, expected)
     instant = "2026-08-18T00:03:00Z"
@@ -156,7 +167,7 @@ def run_transition(fixture: dict, *, inject: str | None = None):
 
 
 def transfer_fixture(tmp_path: Path):
-    item, expected, lifecycle, _, migration = committed_fixture(tmp_path)
+    item, expected, lifecycle, _, migration = settled_parent_migration_fixture(tmp_path)
     ledger_path = item / "agent-runs.jsonl"
     ledger_before = ledger_path.read_bytes()
     instant = "2026-08-18T00:03:00Z"
@@ -1144,7 +1155,8 @@ def test_lifecycle_contention_uses_existing_lock_failure(tmp_path: Path) -> None
     lifecycle = load_script(LIFECYCLE, "migration_lifecycle_lock")
     before = (item / "agent-runs.jsonl").read_bytes()
     class Held:
-        def __init__(self, _root): pass
+        def __init__(self, _root):
+            self._unsettled_relocations = ()
         def __enter__(self): raise lifecycle.LifecycleError("WI-LIFECYCLE-LOCK-HELD", "held")
     with patch.object(lifecycle, "LifecycleTransaction", Held), pytest.raises(lifecycle.LifecycleError) as caught:
         lifecycle.migrate_legacy_ledger_obligation(tmp_path, item.name, expected["targetRunId"], expected["targetRawSha256"], sha256(before), "migration-op-lock", "2026-08-18T00:00:00Z")
@@ -2492,3 +2504,97 @@ def test_migration_diff_guard_rejects_baseline_manifest_drift(tmp_path: Path) ->
     )
     with pytest.raises(AssertionError, match="migration Phase 0 baseline manifest drifted"):
         checker.check_legacy_migration_diff_guard(copied_root)
+
+
+@pytest.mark.parametrize("case", ["migration", "receipt-link", "receipt-swap", "transition", "intent-link", "intent-swap"])
+def test_lifecycle_write_boundary_original_public_cases(tmp_path: Path, monkeypatch, capsys, case: str) -> None:
+    module = load_script(LIFECYCLE, f"write_boundary_{case}_{id(tmp_path)}")
+    root, outside = tmp_path / "repo", tmp_path / "outside"
+    root.mkdir(); outside.mkdir()
+    (outside / "sentinel").write_bytes(b"outside sentinel")
+    migration = case.startswith("receipt") or case == "migration"
+    if migration:
+        events = [json.loads(line) for line in (FIXTURE / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
+        slug = events[0]["workItem"]
+        item = root / "work-items" / "active" / slug
+        shutil.copytree(FIXTURE, item)
+        expected = json.loads((item / "expected.json").read_text())
+        ledger_before = (item / "agent-runs.jsonl").read_bytes()
+        operation = "path-boundary-swap" if case == "receipt-swap" else "path-boundary-migration"
+        output = item / "ledger-migration-receipts" / f"{operation}.json"
+        args = ["migrate-legacy-ledger-obligation", "--root", str(root), "--slug", slug,
+                "--target-run-id", expected["targetRunId"], "--target-event-sha256", expected["targetRawSha256"],
+                "--expected-ledger-sha256", sha256(ledger_before), "--operation-id", operation,
+                "--recorded-at", "2026-10-09T00:00:00Z"]
+    else:
+        # Existing accepted public start/writer recipe; explicit synthetic zero-duty transfer.
+        from tests.test_mutate_work_item import seed_active, run_ledger, closure
+        slug = "path-safety-parent"
+        seed_active(module, root, slug)
+        item = root / "work-items" / "active" / slug
+        recorded = run_ledger(item, "append", "--run-id", "safety-synthetic-terminal", "--role", "qa-engineer",
+            "--execution-role", "internal", "--status", "completed", "--gate", "none", "--scope", "synthetic boundary",
+            "--started-at", "2026-10-09T00:00:00Z", "--updated-at", "2026-10-09T00:00:00Z")
+        assert recorded.returncode == 0, recorded.stdout + recorded.stderr
+        ledger_before = (item / "agent-runs.jsonl").read_bytes()
+        instant, operation = "2026-10-09T01:00:00Z", "path-safety-transition"
+        (item / "bug-dispositions.json").write_text(json.dumps({"schemaVersion": 1, "workItem": slug, "closedAt": instant, "bugs": []}))
+        (root / "closure-input").write_bytes(closure(instant).encode())
+        (root / "successor-input").write_bytes(b"Task: Continue independent scope.\nContinues: path-safety-parent\nObligation-transfer: path-safety-transition\nNext action: Inspect.\nupdated: 2026-10-09T01:00:00Z\n")
+        (root / "transfer-input").write_text(json.dumps({"schemaVersion": 1, "sourceWorkItem": slug,
+            "successorWorkItem": "path-safety-successor", "expectedSourceLedgerSha256": sha256(ledger_before), "obligations": []}))
+        module.refresh_readme(root)
+        output = module._transition_intent_path(root, operation)
+        args = ["archive-with-successor", "--root", str(root), "--slug", slug, "--closure-file", str(root / "closure-input"),
+                "--terminal-instant", instant, "--successor-slug", "path-safety-successor", "--successor-file", str(root / "successor-input"),
+                "--operation-id", operation, "--expected-ledger-sha256", sha256(ledger_before),
+                "--expected-readme-sha256", sha256((root / "work-items" / "README.md").read_bytes()),
+                "--obligation-transfer-file", str(root / "transfer-input"), "--inject-failure-at", "T0"]
+    if case.endswith("link"):
+        output.parent.parent.mkdir(parents=True, exist_ok=True)
+        output.parent.symlink_to(outside, target_is_directory=True)
+    if case.endswith("swap"):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        original = module._atomic_write
+        def swapped(path, data, **kwargs):
+            if path == output:
+                path.parent.rename(path.parent.with_name("retained-parent"))
+                path.parent.symlink_to(outside, target_is_directory=True)
+            return original(path, data, **kwargs)
+        monkeypatch.setattr(module, "_atomic_write", swapped)
+    result = module.main(args)
+    diagnostic = capsys.readouterr().out
+    assert (outside / "sentinel").read_bytes() == b"outside sentinel"
+    assert sorted(path.name for path in outside.iterdir()) == ["sentinel"]
+    after = (item / "agent-runs.jsonl").read_bytes()
+    if case == "migration":
+        assert result == 0 and "WI-LEDGER-MIGRATION-COMMITTED" in diagnostic and output.is_file()
+        assert after.startswith(ledger_before) and len(after.splitlines()) == len(ledger_before.splitlines()) + 1
+    elif case == "transition":
+        assert result == 1 and "injected T0" in diagnostic and output.is_file() and after == ledger_before
+    else:
+        assert result == 1 and "COMMITTED" not in diagnostic and "injected T0" not in diagnostic
+        if case != "receipt-swap":
+            assert after == ledger_before
+        else:
+            assert after.startswith(ledger_before) and len(after.splitlines()) == len(ledger_before.splitlines()) + 1
+            monkeypatch.setattr(module, "_atomic_write", original)
+            assert module.main(args) == 0  # Exact replay reconciles the admitted late anchor.
+            assert (item / "agent-runs.jsonl").read_bytes() == after and output.is_file()
+
+
+def test_migration_receipt_quarantine_collision_refuses_before_anchor(tmp_path: Path) -> None:
+    item, expected = copied_fixture(tmp_path)
+    module = load_script(LIFECYCLE, "migration_quarantine_preflight")
+    before = (item / "agent-runs.jsonl").read_bytes()
+    receipt = item / "ledger-migration-receipts" / "quarantine-preflight.json"
+    receipt.parent.mkdir()
+    receipt.write_bytes(b"existing conflicting receipt")
+    quarantine = receipt.with_name(f"{receipt.name}.conflict-{sha256(receipt.read_bytes())[:16]}")
+    quarantine.write_bytes(b"foreign quarantine image")
+    with pytest.raises(module.LifecycleError) as refused:
+        module.migrate_legacy_ledger_obligation(tmp_path, item.name, expected["targetRunId"], expected["targetRawSha256"],
+            sha256(before), "quarantine-preflight", "2026-10-09T00:00:00Z")
+    assert refused.value.failure_id == "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH"
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert receipt.read_bytes() == b"existing conflicting receipt" and quarantine.read_bytes() == b"foreign quarantine image"

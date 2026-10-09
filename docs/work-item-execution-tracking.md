@@ -28,6 +28,22 @@ Use that reference for the exact JSON schema, reserved built-in roots,
 non-reparse confinement, compatibility, and lifecycle failure/recovery rules;
 do not infer topology from `README.md` or create an auxiliary root ad hoc.
 
+## Full-goal completion receiving
+
+This is the public recipe for Lead's **Full-goal completion workflow**, only when the original full/project Goal is enrolled through an admitted brief/epic. Existing ordinary lifecycle and trivial-task defaults remain valid. The Root binds original human scope, all criteria/operations, actual native Goal identity/objective/status, accepted root/member authority and current semantic proof in the existing records. Taskless preservation domains remain explicit; physical counts and archive labels do not establish delivery.
+
+Use the source checker, or the corresponding checker in the explicitly selected installed Lead scripts directory. Select by the admitted layout; do not guess from cwd, ancestors or provider names. Verify the selected helper/imported closure after its writers release; a checker hash alone does not prove other changed owners. With the actual coordinator root and epic slug:
+
+```text
+python -B scripts/check-work-items-state.py --root <explicit-coordinator> --goal <actual-epic> --goal-phase <observe|preclose|final> --json
+```
+
+Consume the completed metadata frame and actual structured version-1 result: admissionId, phase, decision, criteria, roots/members and quote contract/admission/evaluator hashes/references. Match the original scope and current observations. The quote binds observation-time inputs, not an atomic native transaction; quiesce/recheck admitted inputs and native identity before acting. A missing/malformed/pending result is unavailable, not empty/clean. Exit zero may mean ready-for-last-close or eligible; only final/eligible can qualify for native completion.
+
+At wider readiness, observe and act on continue/unverified with exact cause/owner/resume and ready work. After substantive semantic/review/custody/install/Git/resource proof is accepted, preclose ready-for-last-close allows the existing delivered coordinator close and actual archive/receipt/README/absence receiving, then epic terminal move/readback. Keep original roots/criteria intact and never archive unfinished work to reach covered-empty. Local Children remain same-root; the Goal block binds multi-root members. Independent item A may close while B remains active.
+
+Fresh final must find the unique archived epic eligible with the same originals and accepted full proof. Root separately accepts current native identity/objective and quote binding immediately before supported completion, then authoritative same-target readback. Refusal/mismatch stays pending; no retry/bypass or post-hoc undo claim. Persist finalization resume before close; after archive use fresh final/native/readback, never active-ledger append, closure tamper or reverse move. Native completion bookkeeping is a consequence of eligibility, not a pending other action creating a self-cycle. Required adapter proof, Git and resources stay substantive. This Root route is no host-wide interception, atomicity guarantee or publication grant. Real original-root/native/install and required commission gates need their own accepted receiving evidence; synthetic core PASS cannot satisfy them.
+
 ## Canonical Staged Start
 
 Classify new work before creating recovery state: use the existing quick-fix four-fact status or the staged lifecycle owner. `agent-run-ledger init` is compatibility-only for a legacy or manual recovery surface; it is not a creation path for newly admitted work.
@@ -481,15 +497,16 @@ apply command:
 python scripts/mutate-work-item.py --root . migrate-legacy-ledger-obligation --slug <active-slug> --target-run-id <target-run-id> --target-event-sha256 <target-raw-sha256> --expected-ledger-sha256 <current-ledger-sha256> --operation-id <bounded-operation-id> --recorded-at <strict-UTC> --normalization-kind <invalid-finding-class|remove-string-scratch-evidence>
 ```
 
-`WI-LEDGER-MIGRATION-COMMITTED` is authoritative only after exact anchor
-readback and receipt reconciliation. The anchor is the commit marker; the
-receipt is a derived read model. Its exact fields are `operationId`,
+Before ledger replacement, the lifecycle owner stages the migration and admits the exact receipt target and any current/quarantine conflict. Atomic lifecycle writes use the same short-lived bound parent/leaf resource for relative exclusive temporary creation, replacement, readback, quarantine and unpublished-temp cleanup; a later pathname check is not write authority. Initial unsafe receipt admission refuses before the anchor and preserves ledger bytes. Default write resources release before legitimate directory moves; the migration receipt target spans only early admission through reconciliation.
+
+`WI-LEDGER-MIGRATION-COMMITTED` is authoritative only after exact anchor readback and receipt reconciliation. The anchor is the commit marker; the receipt is a derived read model. A valid late anchor followed by failure remains causal pending state, not a rolled-back success or an invitation to append again. Exact committed replay reacquires its bound receipt target and reconciles without a duplicate anchor. Primary write failure stays primary; all cleanup attempts run, repeated write-phase failures retain their distinct causes/counts within the existing sanitized diagnostic bound, and cleanup-only failure stays nonzero. The migration receipt's exact fields are `operationId`,
 `targetRunId`, `targetEventSha256`, `anchorRunId`, `anchorEventSha256`,
 `beforeLedgerBytes`, `beforeLedgerSha256`, `afterLedgerBytes`,
 `afterLedgerSha256`, `replacementEventSha256`, `normalizationKind`, `diagnosticId`,
 `sourcePath`, `receiptPath`, and `recordedAt`. `findingClass` is present only
-when the normalized target had one. Missing or conflicting derived
-receipt bytes are reconstructed only from the valid anchor and exact ledger.
+when the normalized target had one. Missing or conflicting derived receipt bytes are reconstructed only from the valid anchor and exact ledger through the same admitted bound receipt/read/quarantine owner. Boundary/native acquisition failures remain visible; byte mismatch keeps its existing atomic-byte diagnostic. Published bytes are never cleaned to hide a failure.
+
+Native Windows receiving covers the bound write and recovery routes. The observed POSIX public workflow used Windows Subsystem for Linux on a Windows-mounted filesystem; it is not ext4, macOS or all-POSIX adversarial proof. Relative directory effects do not promise atomic absolute-path containment against privileged reparenting, and returned/reaped child processes do not prove physical release of a borrowed host context.
 
 ### Revoke before physical transition
 
@@ -652,21 +669,21 @@ The command delegates to the existing transition recovery owner and reports
 `--apply` or naming a non-pending operation changes no bytes. Do not use audit
 as a batch recovery command.
 
-The generated README is a diagnostic view, not a global acceptance verdict.
-Readable invalid current statuses in unrelated backlog, active, or Version 1
-roadmap records appear as unchecked `Blockers` with their original failure
-identifier, parsed status value, source link, and source SHA-256 digest. Their
-bytes are not normalized or repaired. Valid selected lifecycle changes may
-commit and refresh this view despite those unrelated discrepancies; receipts
-still bind the complete generated README. Direct, shadow, and precomputed views
-use the same collector and renderer.
+The generated README is a diagnostic view, not a global acceptance verdict. The lifecycle owner's single typed `ArchiveEntityInventory` supplies archive candidate projection, lookup, board rendering, observation and audit. Existing work-item and supported legacy readers retain their admitted rules; canonical empty or owned-input work-item candidates missing evidence keep their original strict failures. Unknown physical collections do not become work-items or terminal records from their name, month, extension, title or status word.
 
-Selected candidate, start, import, and close inputs remain strictly validated
-before mutation, including existing missing/empty legacy-status rules. Full
-`audit` still exits nonzero on invalid current statuses after a diagnostic
-refresh. Unreadable data, uncertain relations, duplicate identities, archive
-status/evidence, marker checks, receipt/replay binding, and rollback remain
-strict. Non-Version-1 roadmap records keep their existing projection exclusion.
+Within the existing canonical-month candidate domain, an acquired nonempty ordinary flat collection without work-item-owned inputs is unbound. The board shows an unchecked `Blockers` row for its container and EVERY leaf, with physical links, `WI-ARCHIVE-ENTITY-UNBOUND` and creator/format recovery guidance; exact leaf hashes belong to the structured `archiveInventory` observation and its aggregate `inputDigest` binding. The view key `archive-observation:<relative-path>` is not a category or lifecycle reference. Mixed, nested, unsafe, unreadable or drifting in-domain input retains explicit refusal/unverified state; no skipped leaf or fallback empty inventory. In a noncanonical outer collection, only immediate lexical owned inputs admit an immediate directory to the existing work-item candidate domain. Noncanonical direct evidence and attachment-only directories without those inputs remain non-owning historical evidence; do not scan/promote their bodies, create board rows or infer a readiness veto. Malformed or linked owned inputs still enter strict checks. This is owner-domain classification, not a folder-name ignore rule or new category authority.
+
+Readable invalid current statuses in unrelated backlog, active or Version 1 roadmaps remain unchecked diagnostics with their original failure, parsed status, physical link and source digest; no normalization. Unrelated admitted operations may commit and refresh despite unknown collections, but a selected unbound physical container/leaf or selected work-item identity colliding with unresolved in-domain data refuses `WI-ARCHIVE-ENTITY-UNBOUND`; known logical duplicates still refuse. Selected start/import/close/migration inputs keep all existing evidence, hash, link, UTC and missing/empty-status admission guards. Archive bytes/identities remain immutable; history recovery requires its existing owner and actual authority, not inferred terminal dates.
+
+Read-only `observe_readme` retains byte-currentness fields and adds `archiveInventory` from the SAME acquired rendering inventory:
+
+```json
+{"schemaVersion":1,"acquisitionComplete":true,"classificationComplete":false,"unbound":[{"path":"<work-items-relative-path>","container":"<container-relative-path>","kind":"leaf","sha256":"<captured-leaf-sha256>","diagnostic":"WI-ARCHIVE-ENTITY-UNBOUND"}]}
+```
+
+Rows are sorted; kinds are `container` or `leaf`, container hash is null, leaf hash exact. Acquisition and classification are separate: acquired ordinary unknowns may produce the useful board while classification remains incomplete. The two-read observation must agree on membership, source hashes and expected bytes and performs no writes. Goal/root readiness requires this typed version-1 inventory, complete acquisition AND classification, and empty unbound rows in addition to existing scope/proof checks. Missing/null/ill-typed fields or mixed-version producer/consumer pairs are unavailable/unverified, never clean-empty. Preservation-only root applicability remains governed by the admitted Goal topology; no phantom task domain or universal gate is added.
+
+All public refresh paths, including explicit static-guide reset, publish the current diagnostic board with sorted `INFO WI-ARCHIVE-ENTITY-UNBOUND` lines and operational success when ordinary unknowns were acquired. This is the explicit operational exit migration; it is not silent fail-quiet output or a full validity PASS. `check_readme` certifies byte currency only. Full `audit` still exits nonzero for unresolved archive classification or invalid current statuses, and Goal completion remains unverified/ineligible. Marker/acquisition/receipt/replay/rollback checks and malformed canonical candidates remain strict; non-Version-1 roadmap projection exclusion is unchanged. Direct, shadow and precomputed boards share the owner, and receipts bind the complete board. Deploy the matching owner/receiver pair; older coherent pairs keep their prior behavior, not a bypass.
 
 If `start`, `update`, or `reopen` reports `WI-README-STALE` after saying the
 canonical state committed, do not retry that operation. Run `refresh`, then

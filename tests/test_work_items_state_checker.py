@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import copy
 from dataclasses import replace
 from pathlib import Path
 
@@ -106,6 +107,7 @@ def valid_status() -> str:
     return "\n".join(
         [
             "# Status",
+            "status: active",
             "",
             "## Current state",
             "**Primary task status**: open",
@@ -195,6 +197,370 @@ def write_staged_item(
         encoding="utf-8",
     )
     return item
+
+
+def _goal_fixture(tmp_path: Path, *, criterion_ids=("alpha", "omega", "useful"), legacy=False, preservation=False):
+    """Accepted synthetic admission; actual lifecycle calls are runtime-only."""
+    checker = load_checker_module()
+    owner = checker.load_lifecycle_owner()
+    roots = {key: tmp_path / key for key in ("A", "B")}
+    for rid, root in roots.items():
+        root.mkdir()
+        if not preservation or rid != "B":
+            (root / "work-items" / "epics").mkdir(parents=True)
+        (root / "inputs").mkdir()
+    record = roots["A"] / "work-items" / "epics" / "goal-epic.md"
+    record.write_text("status: active\nlabel: Synthetic goal.\n", encoding="utf-8")
+    for rid, slug in (("A", "a"), ("B", "b"), ("A", "g")):
+        if preservation and rid == "B":
+            continue
+        owner.create_candidate(roots[rid], slug, f"Task: {slug}\nNext action: Start.\nupdated: 2026-10-08T00:00:00Z\n".encode())
+        status = ("---\ntemplate: quick-fix\nstatus: active\nstarted: 2026-10-08T00:00:00Z\n"
+                  "updated: 2026-10-08T00:00:00Z\n---\n- **Task**: Useful fixture.\n- **Current step**: Verify.\n"
+                  "- **Last result**: Fixture ready.\n- **Next action**: Complete.\n")
+        owner.start_item(roots[rid], slug, status.encode())
+        item = roots[rid] / "work-items" / "active" / slug
+        (item / "outcome.md").write_text("Accepted useful synthetic outcome/oracle.\n", encoding="utf-8")
+    def ref(rid: str, path: str, item=None):
+        base = roots[rid] if item is None else next(path for path in owner._category_locations(roots[rid], owner.CATEGORIES["work-item"], item))
+        return {"rootId": rid, "workItem": item, "path": path,
+                "sha256": hashlib.sha256((base / path).read_bytes()).hexdigest()}
+    for name in ("root", "accepted", "checks", "source", "inventory", "audit"):
+        (roots["A"] / "inputs" / f"{name}.md").write_text(f"Accepted fixture {name}.\n", encoding="utf-8")
+    acceptance = ref("A", "inputs/accepted.md")
+    rules = {"emptyActiveCriterion": criterion_ids[0], "settlementCriterion": criterion_ids[1]}
+    members = [{"rootId": rid, "slug": slug, "outcome": "delivered", "acceptance": ref(rid, "outcome.md", slug), "receipt": None}
+               for rid, slug in (("A", "a"), ("B", "b"), ("A", "g")) if not preservation or rid != "B"]
+    if legacy:
+        historical = roots["A"] / "work-items" / "archive" / "2026-06" / "historical-member"
+        historical.mkdir(parents=True)
+        (historical / "closure.md").write_text("Closed: 2026-06-01\nOutcome: Accepted historical useful result.\n", encoding="utf-8")
+        (historical / "outcome.md").write_text("Original accepted outcome and applicable checks.\n", encoding="utf-8")
+        members.append({"rootId": "A", "slug": historical.name, "outcome": "delivered", "acceptance": ref("A", "outcome.md", historical.name), "receipt": None})
+    admission = {"schema": "orchestrarium-goal-admission", "version": 1, "admissionId": "synthetic-admission",
+        "revision": 1, "humanSha256": None, "previousAdmission": None, "amendment": None,
+        "criterionIds": list(criterion_ids), "rootIds": list(roots), "goalItem": {"rootId": "A", "slug": "g"},
+        "originalMembers": [{"rootId": row["rootId"], "slug": row["slug"]} for row in members],
+        "unresolvedRoots": [], "rules": rules}
+    human = ("Original synthetic criteria: " + ",".join(criterion_ids) + "; roots A,B; members "
+             + ",".join(f"{row['rootId']}/{row['slug']}" for row in members) + ".\n").encode()
+    admission["humanSha256"] = hashlib.sha256(human).hexdigest()
+    brief = roots["A"] / "inputs" / "brief.md"
+    brief.write_bytes(human + b"<!-- orchestrarium-goal-admission:v1 -->\n" + json.dumps(admission).encode()
+                      + b"\n<!-- /orchestrarium-goal-admission:v1 -->\n")
+    goal = {"schema": "orchestrarium-goal-completion", "version": 1, "admissionId": admission["admissionId"],
+        "admission": ref("A", "inputs/brief.md"), "criterionIds": list(criterion_ids), "coordinatorRootId": "A",
+        "roots": [{"id": key, "locator": str(root), "identity": str(root.resolve()), "admission": ref("A", "inputs/root.md")}
+                  for key, root in roots.items()], "goalItem": admission["goalItem"], "members": members,
+        "criteria": [{"id": cid, "state": "verified", "acceptance": acceptance,
+                      "checks": [ref("A", "inputs/checks.md")], "sourcePins": [ref("A", "inputs/source.md")], "actions": []}
+                     for cid in criterion_ids], "rules": rules,
+        "coverage": {"inventory": ref("A", "inputs/inventory.md"), "audit": ref("A", "inputs/audit.md"), "pending": []}}
+    def write_goal(terminal=False):
+        nonlocal record
+        prefix = b"status: active\nlabel: Synthetic goal.\n"
+        if terminal:
+            destination = roots["A"] / "work-items" / "epics" / "archive" / "2026-10" / record.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if record != destination:
+                record.unlink()
+            record = destination
+            prefix = b"status: closed\nclosed: 2026-10-08T00:05:00Z\noutcome: Delivered.\nevidence: Accepted fixture.\n"
+        record.write_bytes(prefix + b"<!-- orchestrarium-goal-contract:v1 -->\n" + json.dumps(goal).encode()
+                           + b"\n<!-- /orchestrarium-goal-contract:v1 -->\n")
+        for root in roots.values():
+            if (root / "work-items").is_dir():
+                owner.refresh_readme(root)
+        return record
+    def close_member(rid, slug):
+        item = roots[rid] / "work-items" / "active" / slug
+        instant = "2026-10-08T00:05:00Z"
+        (item / "bug-dispositions.json").write_text(json.dumps({"schemaVersion": 1, "workItem": slug, "closedAt": instant, "bugs": []}), encoding="utf-8")
+        archived = owner.close_item(roots[rid], slug,
+            f"Closed: {instant}\nOutcome: Useful delivered fixture.\nEvidence: Accepted synthetic oracle.\nResidual risk: None.\n".encode(), instant)
+        next(row for row in goal["members"] if (row["rootId"], row["slug"]) == (rid, slug))["receipt"] = ref(rid, owner.BUG_DISPOSITIONS_RECEIPT, slug)
+        return archived
+    write_goal()
+    return checker, owner, roots, goal, write_goal, close_member
+
+
+def test_goal_progress_preclose_and_owner_closed_final_are_distinct(tmp_path: Path):
+    checker, owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path)
+    close_member("A", "a")
+    record = write_goal()
+    progress = checker.evaluate_goal_completion(roots["A"], record)
+    assert progress["decision"] == "continue"
+    assert next(row for row in progress["roots"] if row["id"] == "B")["active"] == ["b"]
+    close_member("B", "b")
+    for row in goal["criteria"][:2]:
+        row["state"] = "pending"
+    goal["criteria"][1]["actions"] = [{"id": "last-close", "kind": "item-close", "rootId": "A", "item": "g", "state": "pending", "evidence": None}]
+    record = write_goal()
+    snapshot = {str(path): path.read_bytes() for root in roots.values() for path in root.rglob("*") if path.is_file()}
+    assert checker.evaluate_goal_completion(roots["A"], record, phase="preclose")["decision"] == "ready-for-last-close"
+    assert checker.evaluate_goal_completion(roots["A"], record, phase="final")["decision"] == "continue"
+    assert snapshot == {str(path): path.read_bytes() for root in roots.values() for path in root.rglob("*") if path.is_file()}
+    close_member("A", "g")
+    for row in goal["criteria"]:
+        row["state"] = "verified"
+        row["actions"] = []
+    record = write_goal(terminal=True)
+    final = checker.evaluate_goal_completion(roots["A"], record, phase="final")
+    assert final["decision"] == "eligible", final
+    assert [row["id"] for row in final["criteria"]] == ["alpha", "omega", "useful"]
+    assert all(row["state"] == "delivered-closed" and row["proofProfile"] == "modern" for row in final["members"])
+
+
+def test_goal_equal_readme_with_unbound_archive_is_not_completion(tmp_path: Path):
+    checker, owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path)
+    for rid, slug in (("A", "a"), ("B", "b"), ("A", "g")):
+        close_member(rid, slug)
+    unknown = roots["B"] / "work-items" / "archive" / "2026-07" / "unknown"
+    unknown.mkdir(parents=True)
+    (unknown / "leaf.any").write_bytes(b"CLOSED without admitted authority")
+    record = write_goal(terminal=True)
+    assert owner.observe_readme(roots["B"])["matches"] is True
+    before = {str(path): path.read_bytes() for root in roots.values() for path in root.rglob("*") if path.is_file()}
+    result = checker.evaluate_goal_completion(roots["A"], record, phase="final")
+    assert result["decision"] == "unverified", result
+    assert any(row["code"] == "GC-REFERENCE" and "WI-ARCHIVE-ENTITY-UNBOUND" in row["detail"] for row in result["causes"]), result
+    assert before == {str(path): path.read_bytes() for root in roots.values() for path in root.rglob("*") if path.is_file()}
+
+
+def test_goal_archive_inventory_missing_and_illtyped_are_not_inferred_clean():
+    checker = load_checker_module()
+    valid = {"schemaVersion": 1, "acquisitionComplete": True, "classificationComplete": True, "unbound": []}
+    checker._require_complete_archive_inventory({"archiveInventory": valid}, "root-id")
+    for value in (None, {}, {**valid, "schemaVersion": True}, {**valid, "acquisitionComplete": None},
+                  {**valid, "classificationComplete": False}, {**valid, "unbound": None}):
+        try:
+            checker._require_complete_archive_inventory({"archiveInventory": value}, "root-id")
+        except checker.GoalInputError as error:
+            assert error.code == "GC-REFERENCE" and "WI-ARCHIVE-ENTITY-UNBOUND" in str(error)
+        else:
+            raise AssertionError(f"invalid observation admitted: {value}")
+
+
+def test_goal_original_projection_cannot_be_reduced(tmp_path: Path):
+    checker, _owner, roots, goal, write_goal, _close = _goal_fixture(tmp_path)
+    original = copy.deepcopy(goal)
+    for mode in ("criterion", "root", "member"):
+        goal.clear()
+        goal.update(copy.deepcopy(original))
+        if mode == "criterion":
+            goal["criterionIds"].pop()
+            goal["criteria"].pop()
+        elif mode == "root":
+            goal["roots"].pop()
+            goal["members"] = [row for row in goal["members"] if row["rootId"] != "B"]
+        else:
+            goal["members"].pop()
+        observation = checker.evaluate_goal_completion(roots["A"], write_goal(), phase="final")
+        assert observation["decision"] == "unverified"
+        assert any(row["code"] == "GC-SCOPE" for row in observation["causes"]), mode
+
+
+def test_goal_required_proof_and_reference_drift_remain_visible(tmp_path: Path):
+    checker, _owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path)
+    for rid, slug in (("A", "a"), ("B", "b"), ("A", "g")):
+        close_member(rid, slug)
+    record = write_goal(terminal=True)
+    receipt = goal["members"][0]["receipt"]
+    goal["members"][0]["receipt"] = None
+    observation = checker.evaluate_goal_completion(roots["A"], write_goal(terminal=True), phase="final")
+    assert any(row["code"] == "GC-RECEIPT" for row in observation["causes"])
+    goal["members"][0]["receipt"] = receipt
+    (roots["A"] / "inputs" / "source.md").write_text("Changed pinned source.\n", encoding="utf-8")
+    observation = checker.evaluate_goal_completion(roots["A"], record, phase="final")
+    assert observation["decision"] == "unverified"
+    assert any(row["code"] == "GC-DRIFT" and row["ref"] is not None for row in observation["causes"])
+
+
+def test_goal_cli_requires_explicit_scope_and_preserves_default_route(tmp_path: Path):
+    for args in (("--goal", "epic.md", "--json"), ("--root", str(tmp_path), "--goal", "epic.md", "--json", "--active-only")):
+        result = subprocess.run([sys.executable, "-B", str(CHECKER), *args], capture_output=True, text=True, timeout=30)
+        assert result.returncode != 0 and "error:" in result.stderr
+    item = write_staged_item(tmp_path)
+    result = run_checker(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "valid state only, NOT completion" in result.stdout and item.name in result.stdout
+
+
+def test_goal_legacy_receipt_applicability_and_variable_criteria(tmp_path: Path):
+    checker, _owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path, criterion_ids=("scope", "settlement"), legacy=True)
+    for rid, slug in (("A", "a"), ("B", "b"), ("A", "g")):
+        close_member(rid, slug)
+    record = write_goal(terminal=True)
+    observation = checker.evaluate_goal_completion(roots["A"], record, phase="final")
+    assert observation["decision"] == "eligible", observation
+    legacy = next(row for row in observation["members"] if row["slug"] == "historical-member")
+    assert legacy["proofProfile"] == "legacy-read-compatible" and legacy["state"] == "delivered-closed"
+    assert [row["id"] for row in observation["criteria"]] == ["scope", "settlement"]
+
+
+def test_goal_invalid_bindings_and_pending_duties_cannot_become_eligible(tmp_path: Path):
+    checker, _owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path)
+    for rid, slug in (("A", "a"), ("B", "b"), ("A", "g")):
+        close_member(rid, slug)
+    original = copy.deepcopy(goal)
+    for mode, expected_code in (("version", "GC-SCOPE"), ("identity", "GC-SCOPE"),
+                                ("missing-root", "GC-REFERENCE"), ("escape", "GC-REFERENCE"),
+                                ("coverage", "GC-CRITERION"), ("resource", "GC-CRITERION")):
+        goal.clear()
+        goal.update(copy.deepcopy(original))
+        if mode == "version":
+            goal["version"] = 2
+        elif mode == "identity":
+            goal["roots"][1]["locator"] = goal["roots"][0]["locator"]
+            goal["roots"][1]["identity"] = goal["roots"][0]["identity"]
+        elif mode == "missing-root":
+            missing = tmp_path / "unavailable"
+            goal["roots"][1]["locator"] = goal["roots"][1]["identity"] = str(missing.resolve())
+        elif mode == "escape":
+            goal["coverage"]["audit"]["path"] = "../outside.md"
+        elif mode == "coverage":
+            goal["coverage"]["pending"] = ["original-unchecked-variant"]
+        else:
+            goal["criteria"][1]["actions"] = [{"id": "resource-teardown", "kind": "resource", "rootId": "A", "item": "g", "state": "pending", "evidence": None}]
+        observation = checker.evaluate_goal_completion(roots["A"], write_goal(terminal=True), phase="final")
+        assert observation["decision"] != "eligible", mode
+        assert any(row["code"] == expected_code for row in observation["causes"]), (mode, observation)
+
+
+def test_goal_admission_amendment_is_additive_and_retains_discovered_member(tmp_path: Path):
+    checker, owner, roots, goal, write_goal, _close = _goal_fixture(tmp_path)
+    root = roots["A"]
+    brief = root / "inputs" / "brief.md"
+    original_bytes = brief.read_bytes()
+    previous = root / "inputs" / "brief-v1.md"
+    previous.write_bytes(original_bytes)
+    validator = checker.load_validator()
+    admission, prefix = checker._goal_block(original_bytes, "admission", validator)
+    owner.create_candidate(root, "c", b"Task: Discovered scope.\nNext action: Start.\nupdated: 2026-10-08T00:00:00Z\n")
+    owner.start_item(root, "c", (root / "work-items" / "active" / "g" / "status.md").read_bytes())
+    admission["revision"] = 2
+    admission["previousAdmission"] = {"rootId": "A", "workItem": None, "path": "inputs/brief-v1.md", "sha256": hashlib.sha256(original_bytes).hexdigest()}
+    admission["amendment"] = copy.deepcopy(goal["criteria"][0]["acceptance"])
+    admission["criterionIds"].append("added-duty")
+    admission["originalMembers"].append({"rootId": "A", "slug": "c"})
+    goal["criterionIds"] = admission["criterionIds"][:]
+    added = copy.deepcopy(goal["criteria"][0])
+    added["id"] = "added-duty"
+    goal["criteria"].append(added)
+    goal["members"].append({"rootId": "A", "slug": "c", "outcome": "pending", "acceptance": None, "receipt": None})
+    def update_admission():
+        brief.write_bytes(prefix + b"<!-- orchestrarium-goal-admission:v1 -->\n" + json.dumps(admission).encode()
+                          + b"\n<!-- /orchestrarium-goal-admission:v1 -->\n")
+        goal["admission"]["sha256"] = hashlib.sha256(brief.read_bytes()).hexdigest()
+    update_admission()
+    observation = checker.evaluate_goal_completion(root, write_goal())
+    assert observation["decision"] == "continue", observation
+    assert any(row["slug"] == "c" for row in observation["members"])
+    admission["criterionIds"].remove("useful")
+    goal["criterionIds"].remove("useful")
+    goal["criteria"] = [row for row in goal["criteria"] if row["id"] != "useful"]
+    update_admission()
+    refused = checker.evaluate_goal_completion(root, write_goal())
+    assert refused["decision"] == "unverified"
+    assert any(row["code"] == "GC-SCOPE" for row in refused["causes"])
+
+
+def test_goal_preservation_root_retains_identity_and_authority_without_task_artifacts(tmp_path: Path):
+    checker, _owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path, preservation=True)
+    close_member("A", "a")
+    before = {str(p): p.read_bytes() if p.is_file() else None for p in roots["B"].rglob("*")}
+    observation = checker.evaluate_goal_completion(roots["A"], write_goal())
+    assert observation["decision"] == "continue", observation
+    assert [row["id"] for row in observation["roots"]] == ["A", "B"]
+    assert observation["roots"][1] == {"id": "B", "identity": str(roots["B"].resolve()), "active": [], "taskDomain": "preservation-only"}
+    assert before == {str(p): p.read_bytes() if p.is_file() else None for p in roots["B"].rglob("*")}
+    assert not (roots["B"] / "work-items").exists() and not (roots["B"] / ".scratch").exists()
+    close_member("A", "g")
+    record = write_goal(terminal=True)
+    result = subprocess.run([sys.executable, "-B", str(CHECKER), "--root", str(roots["A"]), "--goal", str(record),
+                             "--goal-phase", "final", "--json"], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["decision"] == "eligible"
+
+
+def test_goal_taskless_domain_expectations_and_recheck_are_not_missing_equals_empty(tmp_path: Path):
+    checker, owner, roots, goal, write_goal, _close = _goal_fixture(tmp_path, preservation=True)
+    original = copy.deepcopy(goal)
+    for mode in ("item-action", "task-ref", "file-domain"):
+        goal.clear()
+        goal.update(copy.deepcopy(original))
+        if mode == "item-action":
+            goal["criteria"][0]["actions"] = [{"id": "B-close", "kind": "item-close", "rootId": "B", "item": "b", "state": "pending", "evidence": None}]
+        elif mode == "task-ref":
+            goal["criteria"][0]["sourcePins"] = [{"rootId": "B", "workItem": None, "path": "work-items/status.md", "sha256": "0" * 64}]
+        else:
+            (roots["B"] / "work-items").write_bytes(b"Not a directory.\n")
+        result = checker.evaluate_goal_completion(roots["A"], write_goal())
+        assert result["decision"] == "unverified", mode
+        assert any(row["code"] == "GC-REFERENCE" for row in result["causes"]), result
+    (roots["B"] / "work-items").unlink()
+    goal.clear()
+    goal.update(copy.deepcopy(original))
+    original_profile = checker._goal_root_profile
+    counts = {"B": 0}
+    def acquire_then_appear(*args):
+        result = original_profile(*args)
+        if args[1] == "B":
+            counts["B"] += 1
+            if counts["B"] == 1:
+                (roots["B"] / "work-items").mkdir()
+        return result
+    checker._goal_root_profile = acquire_then_appear
+    observed = checker.evaluate_goal_completion(roots["A"], write_goal())
+    assert observed["decision"] == "unverified"
+    assert any(row["code"] == "GC-DRIFT" for row in observed["causes"]), observed
+    assert observed["roots"][1]["taskDomain"] == "unverified"
+
+
+def _rewrite_goal_admission(checker, root, goal, update):
+    brief = root / "inputs" / "brief.md"
+    value, prefix = checker._goal_block(brief.read_bytes(), "admission", checker.load_validator())
+    update(value)
+    brief.write_bytes(prefix + b"<!-- orchestrarium-goal-admission:v1 -->\n" + json.dumps(value).encode()
+                      + b"\n<!-- /orchestrarium-goal-admission:v1 -->\n")
+    goal["admission"]["sha256"] = hashlib.sha256(brief.read_bytes()).hexdigest()
+
+
+def test_goal_unresolved_managed_authority_cannot_complete(tmp_path: Path):
+    checker, _owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path)
+    for rid, slug in (("A", "a"), ("B", "b"), ("A", "g")):
+        close_member(rid, slug)
+    authority = copy.deepcopy(goal["roots"][1]["admission"])
+    _rewrite_goal_admission(checker, roots["A"], goal,
+        lambda admission: admission["unresolvedRoots"].append({"id": "B", "authority": authority}))
+    result = checker.evaluate_goal_completion(roots["A"], write_goal(terminal=True), phase="final")
+    assert result["decision"] == "unverified", result
+    assert any(row["code"] == "GC-SCOPE" and row["rootId"] == "B" for row in result["causes"])
+
+
+def test_goal_null_rules_admit_only_pending_coordinator_close_and_preserve_proof_requirements(tmp_path: Path):
+    checker, _owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path)
+    close_member("A", "a")
+    close_member("B", "b")
+    goal["rules"] = {"emptyActiveCriterion": None, "settlementCriterion": None}
+    _rewrite_goal_admission(checker, roots["A"], goal, lambda admission: admission.update(rules=goal["rules"]))
+    last_close = {"id": "last-close", "kind": "item-close", "rootId": "A", "item": "g", "state": "pending", "evidence": None}
+    goal["criteria"][0]["actions"] = [last_close]
+    record = write_goal()
+    observed = checker.evaluate_goal_completion(roots["A"], record, phase="preclose")
+    assert observed["decision"] == "ready-for-last-close", observed
+    assert observed["criteria"][0]["state"] == "pending"  # Pending action remains visible.
+    assert checker.evaluate_goal_completion(roots["A"], record, phase="final")["decision"] != "eligible"
+    goal["criteria"][0]["actions"] = []
+    assert checker.evaluate_goal_completion(roots["A"], write_goal(), phase="preclose")["decision"] == "ready-for-last-close"
+    for kind in ("check", "git", "resource"):
+        other = dict(last_close, id=kind, kind=kind)
+        goal["criteria"][0]["actions"] = [last_close, other]
+        assert checker.evaluate_goal_completion(roots["A"], write_goal(), phase="preclose")["decision"] == "continue", kind
+    goal["criteria"][0]["actions"] = [last_close]
+    goal["criteria"][0]["acceptance"] = None
+    missing = checker.evaluate_goal_completion(roots["A"], write_goal(), phase="preclose")
+    assert missing["decision"] == "unverified" and any(row["code"] == "GC-CRITERION" for row in missing["causes"])
 
 
 REQUIRED_SENTINEL_STUB = """\
@@ -448,7 +814,8 @@ def test_checker_validates_all_active_items(tmp_path: Path):
     assert result.returncode == 1
     assert "PASS valid-item" in result.stdout
     assert "FAIL bad-item" in result.stdout
-    assert "missing ledger" in result.stdout
+    assert "cannot read ledger" in result.stdout
+    assert "ledger has no events" not in result.stdout
 
 
 def test_checker_rejects_unapplied_active_bug_disposition_manifest(

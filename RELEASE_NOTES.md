@@ -2,6 +2,14 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-09
+
+- **Unknown archive collections stay visible without blocking unrelated work.** One lifecycle-owned typed inventory now preserves existing candidate-domain and malformed-item guards while rendering acquired ordinary unbound containers and every leaf as unchecked diagnostics. Refresh and explicit guide reset report operational success plus sorted INFO findings; selected related ambiguity still refuses, full audit stays nonzero and Goal readiness requires complete typed acquisition/classification with no unbound entries. Noncanonical evidence outside the owned candidate domain gains no task or terminal authority. Historical bytes, explicit recovery and publication gates remain unchanged; missing producer fields and mixed-version receivers are not clean observations.
+
+- **Lifecycle effects bind their write targets before commitment.** Atomic lifecycle writes and migration receipt/read/quarantine paths now share retained native parent/leaf authority, admitting receipt conflicts before a ledger anchor while preserving late committed pending state and exact replay. Cleanup composition retains the primary failure and distinct repeated cleanup causes without changing public schemas or flags. Native Windows and a limited Windows-mounted POSIX workflow were verified; no all-platform containment or borrowed-host teardown claim is made.
+
+- **Full-goal completion follows the original admitted outcome.** Lead documentation now binds enrolled project Goals to their original roots, criteria and native identity, consumes the public evaluator before delivered coordinator/epic close and fresh final eligibility, and requires supported native completion plus same-target readback. Ordinary closes remain valid; checkpoints and stage PASS do not complete a wider Goal. This is a Root workflow contract, with publication authority and unverified host interception unchanged.
+
 ## 2026-10-08
 
 - **Mid-turn reminders prompt useful parallel work and timely resource settlement.** The existing Codex root advisory now asks Lead to fill useful independent capacity, select fresh fitting Model Context Protocol (MCP) tools, and verify creator-owned process cleanup immediately after terminal, failed, cancelled or timed-out launches and before checkpoints and handoffs. It preserves user/shared/uncertain resources, forbids PID/ancestry-only termination, and records unavailable physical host teardown without claiming cleanup; trigger, mode, leaf and nonblocking behavior remain unchanged.

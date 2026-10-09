@@ -255,6 +255,196 @@ def seed_context_bug(root: Path, item_slug: str, bug_slug: str) -> Path:
     return target
 
 
+@pytest.mark.parametrize("state", ["matching", "stale", "missing", "invalid"])
+def test_observe_readme_is_byte_no_write_without_scratch_and_with_epic_relation(tmp_path: Path, state: str):
+    module = load_module()
+    root = tmp_path / "repo"
+    item = root / "work-items" / "active" / "read-model-item"
+    write(item / "status.md", "status: active\nTask: Current fixture.\nCurrent step: Check.\nEpic: read-model-epic\n")
+    write(root / "work-items" / "epics" / "read-model-epic.md", "status: active\n")
+    readme = root / "work-items" / "README.md"
+    expected = module._render_readme_bytes(root)
+    if state == "matching":
+        readme.write_bytes(expected)
+    elif state == "stale":
+        readme.write_bytes(expected.replace(b"Current fixture.", b"Old fixture."))
+    elif state == "invalid":
+        readme.write_bytes(b"Unmarked invalid read model.\n")
+    before = {str(p.relative_to(root)): (p.lstat().st_ino, p.read_bytes() if p.is_file() else None)
+              for p in root.rglob("*")}
+    if state == "invalid":
+        with pytest.raises(module.LifecycleError):
+            module.observe_readme(root)
+    else:
+        observation = module.observe_readme(root)
+        assert set(observation) == {"matches", "observedSha256", "expectedSha256", "inputDigest", "archiveInventory"}
+        assert observation["archiveInventory"] == {"schemaVersion": 1,
+            "acquisitionComplete": True, "classificationComplete": True, "unbound": []}
+        assert observation["matches"] == (state == "matching")
+        assert observation["expectedSha256"] == hashlib.sha256(expected).hexdigest()
+        assert (observation["observedSha256"] is None) == (state == "missing")
+    after = {str(p.relative_to(root)): (p.lstat().st_ino, p.read_bytes() if p.is_file() else None)
+             for p in root.rglob("*")}
+    assert before == after and not (root / ".scratch").exists()
+
+
+def test_observe_readme_detects_injected_input_drift_without_writer_lock(tmp_path: Path):
+    module = load_module()
+    root = tmp_path / "repo"
+    status = root / "work-items" / "active" / "drift-item" / "status.md"
+    write(status, "status: active\nTask: Original.\n")
+    readme = root / "work-items" / "README.md"
+    readme.write_bytes(module._render_readme_bytes(root))
+    original = module._render_readme_bytes
+    calls = 0
+    def render_then_change(*args, **kwargs):
+        nonlocal calls
+        data = original(*args, **kwargs)
+        calls += 1
+        if calls == 1:
+            status.write_bytes(status.read_bytes().replace(b"Original.", b"Concurrent."))
+        return data
+    module._render_readme_bytes = render_then_change
+    with pytest.raises(module.LifecycleError) as drift:
+        module.observe_readme(root)
+    assert drift.value.failure_id == "WI-README-STALE"
+    assert b"Concurrent." in status.read_bytes() and not (root / ".scratch").exists()
+
+
+def test_unbound_archive_inventory_projects_every_leaf_and_preserves_selected_authority(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    archive = root / "work-items" / "archive"
+    for name in ("ordinary-collection", "other-collection"):
+        collection = archive / "2026-07" / name
+        collection.mkdir(parents=True)
+        (collection / "record.any").write_bytes(b"Narrative CLOSED 2026-07-09\n")
+        (collection / "binary-leaf").write_bytes(b"\xff\x00unknown")
+    original = tree_file_bytes(archive)
+    observations = []
+    module.refresh_readme(root, allow_marker_bootstrap=True, archive_inventory_out=observations)
+    inventory = observations[0]
+    assert inventory["acquisitionComplete"] is True and inventory["classificationComplete"] is False
+    assert len(inventory["unbound"]) == 6
+    board = (root / "work-items" / "README.md").read_text(encoding="utf-8")
+    for row in inventory["unbound"]:
+        assert f"- [ ] [{row['path']}]({row['path']})" in board
+        assert row["diagnostic"] == "WI-ARCHIVE-ENTITY-UNBOUND"
+        if row["kind"] == "leaf":
+            assert row["sha256"] == hashlib.sha256((root / "work-items" / row["path"]).read_bytes()).hexdigest()
+    before = tree_file_bytes(root)
+    assert module.observe_readme(root)["archiveInventory"] == inventory
+    module.check_readme(root)
+    assert tree_file_bytes(root) == before
+    with pytest.raises(module.LifecycleError, match="unresolved archive entities"):
+        module.audit(root)
+    for reference in ("work-item:ordinary-collection", "work-item:record"):
+        with pytest.raises(module.LifecycleError) as failure:
+            module.resolve_category(root, reference)
+        assert failure.value.failure_id == "WI-ARCHIVE-ENTITY-UNBOUND"
+    with pytest.raises(module.LifecycleError) as selected:
+        module.resolve_legacy_path(root, "work-items/archive/2026-07/ordinary-collection/record.any")
+    assert selected.value.failure_id == "WI-ARCHIVE-ENTITY-UNBOUND"
+    module.create_candidate(root, "unrelated", b"Task: Unrelated admitted work.\n")
+    module.start_item(root, "unrelated", quick_status("unrelated").encode())
+    assert tree_file_bytes(archive) == original
+
+
+def test_archive_membership_uses_exact_name_order_and_still_rejects_real_drift(tmp_path: Path) -> None:
+    from pathlib import PureWindowsPath
+    module = load_module()
+    root = tmp_path / "repo"
+    collection = root / "work-items" / "archive" / "2026-07" / "collection"
+    collection.mkdir(parents=True)
+    names = ("alpha.md", "Zeta.md", "Beta.md", "beta.md")
+    # Casefold ties must have an exact-name total order, even on a host that
+    # cannot create both names physically in this fixture directory.
+    expected = sorted(names)
+    assert [p.name for p in sorted(map(PureWindowsPath, reversed(names)), key=lambda p: p.name)] == expected
+    for name in names:
+        try:
+            with (collection / name).open("xb") as stream:
+                stream.write(name.encode())
+        except FileExistsError:
+            assert name == "beta.md" and (collection / "Beta.md").is_file()
+    inventory = module._archive_entity_inventory(root)
+    inventory.verify()
+    captured = next(row[2] for row in inventory.directories if row[0] == collection)
+    assert captured == tuple(sorted(path.name for path in collection.iterdir()))
+    (collection / "Zeta.md").unlink()
+    with pytest.raises(module.LifecycleError) as removal:
+        inventory.verify()
+    assert removal.value.failure_id == "WI-README-STALE"
+    (collection / "Zeta.md").write_bytes(b"Zeta.md")
+    inventory = module._archive_entity_inventory(root)
+    (collection / "alpha.md").rename(collection / "renamed-leaf")
+    with pytest.raises(module.LifecycleError) as rename:
+        inventory.verify()
+    assert rename.value.failure_id == "WI-README-STALE"
+    (collection / "renamed-leaf").rename(collection / "alpha.md")
+    inventory = module._archive_entity_inventory(root)
+    collection.rename(root / "held-collection")
+    collection.mkdir()
+    for path in (root / "held-collection").iterdir():
+        (collection / path.name).write_bytes(path.read_bytes())
+    with pytest.raises(module.LifecycleError) as identity:
+        inventory.verify()
+    assert identity.value.failure_id == "WI-README-STALE"
+
+
+def test_archive_inventory_rejects_direct_leaf_and_detects_membership_drift(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    collection = root / "work-items" / "archive" / "2026-07" / "collection"
+    collection.mkdir(parents=True)
+    (collection / "leaf").write_bytes(b"original")
+    inventory = module._archive_entity_inventory(root)
+    (collection / "new-leaf").write_bytes(b"new")
+    with pytest.raises(module.LifecycleError) as drift:
+        inventory.verify()
+    assert drift.value.failure_id == "WI-README-STALE"
+    (collection / "new-leaf").unlink()
+    (collection / "leaf").write_bytes(b"concurrent leaf bytes")
+    with pytest.raises(module.LifecycleError) as byte_drift:
+        inventory.verify()
+    assert byte_drift.value.failure_id == "WI-README-STALE"
+    direct = collection.parent / "unexpected"
+    direct.write_bytes(b"unsupported direct data")
+    before = tree_file_bytes(root)
+    with pytest.raises(module.LifecycleError) as unsupported:
+        module.observe_readme(root)
+    assert unsupported.value.failure_id == "WI-ARCHIVE-ENTITY-UNBOUND"
+    assert tree_file_bytes(root) == before
+    direct.unlink()
+    (collection / "nested").mkdir()
+    before = tree_file_bytes(root)
+    with pytest.raises(module.LifecycleError) as mixed:
+        module.observe_readme(root)
+    assert mixed.value.failure_id == "WI-ARCHIVE-ENTITY-UNBOUND"
+    assert tree_file_bytes(root) == before
+
+
+def test_noncanonical_evidence_domain_is_lexical_and_owned_input_still_refuses(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    outer = root / "work-items" / "archive" / "arbitrary-evidence-tree"
+    write(outer / "direct.any", "Non-owning evidence.\n")
+    child = outer / "attachments"
+    write(child / "anything", "Not lifecycle authority.\n")
+    write(child / "nested" / "closure.md", "Nested attachment only.\n")
+    before = tree_file_bytes(outer)
+    assert module.collect_readme_entries(root) == []
+    module.refresh_readme(root)
+    assert module.audit(root) == ()
+    assert module._category_locations(root, module.CATEGORIES["work-item"], child.name) == []
+    assert tree_file_bytes(outer) == before
+    write(child / "status.md", marked_status())
+    assert module._category_locations(root, module.CATEGORIES["work-item"], child.name) == [child]
+    with pytest.raises(module.LifecycleError) as failure:
+        module.collect_readme_entries(root)
+    assert failure.value.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+
+
 def _unrelated_current_status_record(root: Path, kind: str) -> tuple[Path, str, str]:
     if kind == "backlog":
         path = root / "work-items" / "backlog" / "distant-candidate.md"
@@ -1174,6 +1364,405 @@ def write_bug_dispositions(
 
 def write_empty_bug_dispositions(root: Path, item_slug: str, instant: str) -> Path:
     return write_bug_dispositions(root, item_slug, instant, [])
+
+
+def test_ordinary_close_updates_standalone_incoming_evidence_links(tmp_path: Path) -> None:
+    """NCL1: public close preserves both targets and every non-URI byte."""
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-10-08-fixture-parent"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    documents = {"evidence.md": b"# check\nUseful outcome verified.\n",
+                 "stewardship.md": b"Receiving responsibilities verified.\n"}
+    for name, data in documents.items():
+        (active / name).write_bytes(data)
+    bug = seed_context_bug(root, "standalone", "2026-10-08-unselected-open")
+    hrefs = [f"../active/{slug}/evidence.md#check", f"../active/{slug}/stewardship.md"]
+    before = bug.read_bytes() + (f"\n[Evidence]({hrefs[0]})\n[Stewardship]({hrefs[1]})\n").encode()
+    bug.write_bytes(before)
+    write_empty_bug_dispositions(root, slug, instant)
+    module.refresh_readme(root)
+    closure_file = root / "closure-input.md"
+    closure_file.write_text(closure(instant), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-B", str(SCRIPT), "close", "--root", str(root),
+         "--slug", slug, "--closure-file", str(closure_file), "--terminal-instant", instant],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    archived = root / "work-items" / "archive" / "2026-10" / slug
+    assert not active.exists()
+    expected = before
+    for href in hrefs:
+        relocated = href.replace("../active/", "../archive/2026-10/", 1)
+        expected = expected.replace(href.encode(), relocated.encode())
+        assert (bug.parent / relocated.split("#", 1)[0]).is_file()
+    assert bug.read_bytes() == expected
+    for name, data in documents.items():
+        assert (archived / name).read_bytes() == data
+    module.check_readme(root)
+    receipt = json.loads((archived / module.BUG_DISPOSITIONS_RECEIPT).read_bytes())
+    assert receipt["bugs"] == []
+    assert receipt["linkMaintenance"]["consumers"][0]["authority"] == "current-metadata"
+
+
+def test_close_protected_uri_opt_in_is_bound_and_does_not_freeze_later_authoring(tmp_path: Path) -> None:
+    module = load_module()
+    root, slug, bug_slug = tmp_path / "repo", "link-preservation", "2026-10-08-protected"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    write(active / "evidence.md", "Verified target.\n")
+    bug = seed_context_bug(root, slug, bug_slug)
+    before = bug.read_bytes() + f"[Evidence](../active/{slug}/evidence.md#check)\n".encode()
+    bug.write_bytes(before)
+    write_bug_dispositions(root, slug, instant, [{
+        "id": bug_slug, "action": "preserve-current", "inputSha256": hashlib.sha256(before).hexdigest(),
+        "status": "open", "reason": "Still useful current finding.", "evidence": "Original evidence retained.",
+    }])
+    module.refresh_readme(root)
+    readme_before = (root / "work-items" / "README.md").read_bytes()
+    with pytest.raises(module.LifecycleError) as omitted:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    assert omitted.value.failure_id == "WI-CLOSE-LINK-PRESERVATION"
+    assert bug.read_bytes() == before and active.is_dir()
+    assert (root / "work-items" / "README.md").read_bytes() == readme_before
+    archived = module.close_item(root, slug, closure(instant).encode(), instant, allow_protected_uri_updates=True)
+    expected = before.replace(f"../active/{slug}/".encode(), f"../archive/2026-10/{slug}/".encode())
+    assert bug.read_bytes() == expected
+    receipt_path = archived / module.BUG_DISPOSITIONS_RECEIPT
+    receipt_before = receipt_path.read_bytes()
+    receipt = json.loads(receipt_before)
+    assert receipt["bugs"][0]["afterSha256"] == hashlib.sha256(expected).hexdigest()
+    assert receipt["linkMaintenance"]["consumers"][0]["authority"] == "protected-uri-maintenance"
+    later = expected + b"Later authorized current authoring.\n"
+    bug.write_bytes(later)
+    assert module.close_item(root, slug, closure(instant).encode(), instant) == archived
+    assert bug.read_bytes() == later and receipt_path.read_bytes() == receipt_before
+    for corruption in ("flag", "version", "duplicate", "href"):
+        damaged = json.loads(receipt_before)
+        maintenance = damaged["linkMaintenance"]
+        if corruption == "flag":
+            maintenance["allowProtectedUriUpdates"] = False
+        elif corruption == "version":
+            maintenance["version"] = 2
+        elif corruption == "duplicate":
+            maintenance["consumers"].append(copy.deepcopy(maintenance["consumers"][0]))
+        else:
+            maintenance["consumers"][0]["uriChanges"][0]["to"] = "../../private.md?seeded-secret"
+        receipt_path.write_text(json.dumps(damaged), encoding="utf-8")
+        with pytest.raises(module.LifecycleError) as invalid:
+            module.close_item(root, slug, closure(instant).encode(), instant)
+        assert invalid.value.failure_id == "WI-IMMUTABLE-ARCHIVE", corruption
+        assert "seeded-secret" not in str(invalid.value)
+        assert bug.read_bytes() == later
+    receipt_path.write_bytes(receipt_before)
+
+
+def test_close_descendant_links_preserve_suffixes_bom_crlf_and_sibling(tmp_path: Path) -> None:
+    module = load_module()
+    root, slug = tmp_path / "repo", "descendant-parent"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    write(active / "nested" / "evidence.md", "Nested target.\n")
+    seed_active(module, root, slug + "-other")
+    sibling = root / "work-items" / "active" / (slug + "-other") / "evidence.md"
+    write(sibling, "Sibling target.\n")
+    evidence_before = (active / "nested" / "evidence.md").read_bytes()
+    sibling_before = sibling.read_bytes()
+    bug = seed_context_bug(root, "standalone", "2026-10-08-suffixes")
+    href = f"../active/{slug}/nested/evidence.md?check=1#section"
+    noise = f"../active/{slug}-other/evidence.md"
+    before = b"\xef\xbb\xbf" + bug.read_bytes().replace(b"\n", b"\r\n")
+    before += f"[Проверка]({href})\r\n[Repeat]({href})\r\n[Sibling]({noise})\r\n".encode()
+    bug.write_bytes(before)
+    write_empty_bug_dispositions(root, slug, instant)
+    module.refresh_readme(root)
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+    relocated = href.replace("../active/", "../archive/2026-10/", 1)
+    assert bug.read_bytes() == before.replace(href.encode(), relocated.encode())
+    assert (archived / "nested" / "evidence.md").read_bytes() == evidence_before
+    assert sibling.read_bytes() == sibling_before
+    receipt = json.loads((archived / module.BUG_DISPOSITIONS_RECEIPT).read_bytes())
+    assert receipt["linkMaintenance"]["consumers"][0]["uriChanges"] == [
+        {"from": href, "to": relocated}, {"from": href, "to": relocated}
+    ]
+
+
+def test_close_terminalize_link_overlap_uses_final_consumer_location(tmp_path: Path) -> None:
+    module = load_module()
+    root, slug, bug_slug = tmp_path / "repo", "composed-close", "2026-10-08-composed"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    write(active / "evidence.md", "Delivered evidence.\n")
+    bug = seed_context_bug(root, slug, bug_slug)
+    before = bug.read_bytes() + f"[Proof](../active/{slug}/evidence.md#check)\n".encode()
+    bug.write_bytes(before)
+    write_bug_dispositions(root, slug, instant, [{
+        "id": bug_slug, "action": "terminalize", "inputSha256": hashlib.sha256(before).hexdigest(),
+        "status": "fixed", "resolution": "Verified outcome.", "evidence": "Accepted QA evidence.",
+    }])
+    module.refresh_readme(root)
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+    final_bug = root / "work-items" / "bugs" / "archive" / "2026-10" / bug.name
+    href = f"../../../archive/2026-10/{slug}/evidence.md#check"
+    assert href in final_bug.read_text(encoding="utf-8")
+    assert (final_bug.parent / href.split("#")[0]).resolve() == archived / "evidence.md"
+    assert module._parse_fields(final_bug.read_text(encoding="utf-8"))["status"] == "fixed"
+    receipt = json.loads((archived / module.BUG_DISPOSITIONS_RECEIPT).read_bytes())
+    assert receipt["bugs"][0]["afterSha256"] == hashlib.sha256(final_bug.read_bytes()).hexdigest()
+    assert receipt["linkMaintenance"]["consumers"][0]["authority"] == "selected-terminalize"
+    assert module.close_item(root, slug, closure(instant).encode(), instant) == archived
+
+
+@pytest.mark.parametrize("concurrent_authoring", [False, True])
+def test_close_uri_rollback_restores_owned_bytes_or_preserves_concurrent_authoring(
+    tmp_path: Path, concurrent_authoring: bool,
+) -> None:
+    module = load_module()
+    root, slug = tmp_path / "repo", "rollback-links"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    write(active / "evidence.md", "Original target.\n")
+    bug = seed_context_bug(root, "standalone", "2026-10-08-rollback-link")
+    before = bug.read_bytes() + f"[Proof](../active/{slug}/evidence.md)\n".encode()
+    bug.write_bytes(before)
+    write_empty_bug_dispositions(root, slug, instant)
+    module.refresh_readme(root)
+    status_before, readme_before = (active / "status.md").read_bytes(), (root / "work-items" / "README.md").read_bytes()
+    original_refresh = module.refresh_readme
+    concurrent = None
+    def fail_after_move(_root):
+        nonlocal concurrent
+        if concurrent_authoring:
+            concurrent = bug.read_bytes() + b"Concurrent user bytes.\n"
+            bug.write_bytes(concurrent)
+        raise module.LifecycleError("WI-README-STALE", "controlled failure after URI write and item move")
+    module.refresh_readme = fail_after_move
+    try:
+        with pytest.raises(module.LifecycleError) as failure:
+            module.close_item(root, slug, closure(instant).encode(), instant)
+    finally:
+        module.refresh_readme = original_refresh
+    assert failure.value.failure_id == ("WI-BUG-DISPOSITIONS-ROLLBACK" if concurrent_authoring else "WI-README-STALE")
+    assert bug.read_bytes() == (concurrent if concurrent_authoring else before)
+    assert active.is_dir() and (active / "status.md").read_bytes() == status_before
+    assert not (root / "work-items" / "archive" / "2026-10" / slug).exists()
+    assert (root / "work-items" / "README.md").read_bytes() == readme_before
+
+
+def test_close_uri_preflight_drift_refuses_without_overwriting_consumer(tmp_path: Path) -> None:
+    module = load_module()
+    root, slug = tmp_path / "repo", "preflight-link-drift"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    write(active / "evidence.md", "Original target.\n")
+    bug = seed_context_bug(root, "standalone", "2026-10-08-preflight-link")
+    before = bug.read_bytes() + f"[Proof](../active/{slug}/evidence.md)\n".encode()
+    bug.write_bytes(before)
+    write_empty_bug_dispositions(root, slug, instant)
+    module.refresh_readme(root)
+    original = module._close_link_authority
+    changed = before + b"Concurrent current authoring.\n"
+    def classify_then_change(*args):
+        authority = original(*args)
+        bug.write_bytes(changed)
+        return authority
+    module._close_link_authority = classify_then_change
+    with pytest.raises(module.LifecycleError) as failure:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    assert failure.value.failure_id == "WI-CLOSE-LINK-DRIFT"
+    assert bug.read_bytes() == changed and active.is_dir()
+    assert not (root / "work-items" / "archive" / "2026-10" / slug).exists()
+
+
+def test_close_v2_unselected_placeholder_requires_public_positive_uri_flag(tmp_path: Path) -> None:
+    module = load_module()
+    root, slug = tmp_path / "repo", "v2-placeholder-links"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    write(active / "evidence.md", "Original evidence.\n")
+    bug = seed_context_bug(root, "standalone", "2026-10-08-v2-unselected")
+    before = bug.read_bytes() + f"[Proof](../active/{slug}/evidence.md#check)\n".encode()
+    bug.write_bytes(before)
+    manifest_path = write_empty_bug_dispositions(root, slug, instant)
+    manifest = json.loads(manifest_path.read_bytes())
+    manifest["schemaVersion"] = 2
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    module.refresh_readme(root)
+    with pytest.raises(module.LifecycleError) as omitted:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    assert omitted.value.failure_id == "WI-CLOSE-LINK-PRESERVATION"
+    assert bug.read_bytes() == before and active.is_dir()
+    input_closure = root / "closure-input.md"
+    input_closure.write_text(closure(instant), encoding="utf-8")
+    result = subprocess.run([
+        sys.executable, "-B", str(SCRIPT), "close", "--root", str(root), "--slug", slug,
+        "--closure-file", str(input_closure), "--terminal-instant", instant,
+        "--allow-protected-uri-updates",
+    ], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    archived = root / "work-items" / "archive" / "2026-10" / slug
+    expected = before.replace(f"../active/{slug}/".encode(), f"../archive/2026-10/{slug}/".encode())
+    assert bug.read_bytes() == expected
+    receipt = json.loads((archived / module.BUG_DISPOSITIONS_RECEIPT).read_bytes())
+    assert receipt["bugs"] == []
+    assert receipt["linkMaintenance"]["allowProtectedUriUpdates"] is True
+    assert receipt["linkMaintenance"]["consumers"][0]["authority"] == "protected-uri-maintenance"
+
+
+def test_close_uri_failure_after_receipt_restores_preimages(tmp_path: Path) -> None:
+    module = load_module()
+    root, slug = tmp_path / "repo", "post-receipt-links"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    write(active / "evidence.md", "Target before move.\n")
+    bug = seed_context_bug(root, "standalone", "2026-10-08-post-receipt")
+    before = bug.read_bytes() + f"[Proof](../active/{slug}/evidence.md)\n".encode()
+    bug.write_bytes(before)
+    write_empty_bug_dispositions(root, slug, instant)
+    module.refresh_readme(root)
+    readme_before = (root / "work-items" / "README.md").read_bytes()
+    original_verify = module._verify_archived_bug_dispositions
+    def reject_written_receipt(*args):
+        original_verify(*args)
+        assert (args[1] / module.BUG_DISPOSITIONS_RECEIPT).is_file()
+        raise module.LifecycleError("WI-CLOSE-LINK-VERIFY", "controlled failure after verified receipt")
+    module._verify_archived_bug_dispositions = reject_written_receipt
+    with pytest.raises(module.LifecycleError) as failure:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    assert failure.value.failure_id == "WI-CLOSE-LINK-VERIFY"
+    assert bug.read_bytes() == before and active.is_dir()
+    assert not (active / module.BUG_DISPOSITIONS_RECEIPT).exists()
+    assert not (root / "work-items" / "archive" / "2026-10" / slug).exists()
+    assert (root / "work-items" / "README.md").read_bytes() == readme_before
+
+
+@pytest.mark.parametrize("state,with_uri", [
+    ("occupied-source", True), ("occupied-source", False),
+    ("drifted-target", True), ("drifted-source-before-move", False),
+])
+def test_close_bug_compensation_preserves_unowned_source_and_target_images(
+    tmp_path: Path, state: str, with_uri: bool,
+) -> None:
+    """S1 and distinct moved/unmoved compensation states, including legacy no-URI."""
+    module = load_module()
+    root, slug, bug_slug = tmp_path / "repo", "compensation-images", "2026-10-08-compensation"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    write(active / "evidence.md", "Delivered target.\n")
+    bug = seed_context_bug(root, slug, bug_slug)
+    before = bug.read_bytes()
+    if with_uri:
+        before += f"[Proof](../active/{slug}/evidence.md#check)\n".encode()
+    bug.write_bytes(before)
+    write_bug_dispositions(root, slug, instant, [{
+        "id": bug_slug, "action": "terminalize", "inputSha256": hashlib.sha256(before).hexdigest(),
+        "status": "fixed", "resolution": "Verified fix.", "evidence": "Accepted synthetic QA.",
+    }])
+    module.refresh_readme(root)
+    archived_bug = root / "work-items" / "bugs" / "archive" / "2026-10" / bug.name
+    concurrent = b"Distinct concurrent author bytes; preserve exactly.\n"
+    archived_before_failure = None
+    original_refresh, original_replace = module.refresh_readme, module.os.replace
+    def fail_after_move(_root):
+        nonlocal archived_before_failure
+        archived_before_failure = archived_bug.read_bytes()
+        if state == "occupied-source":
+            bug.write_bytes(concurrent)
+        elif state == "drifted-target":
+            archived_bug.write_bytes(concurrent)
+        raise module.LifecycleError("WI-README-STALE", "S1 controlled failure after bug and parent moves")
+    def fail_bug_move(source, target):
+        if Path(source) == bug and Path(target) == archived_bug:
+            bug.write_bytes(concurrent)
+            raise OSError("controlled failure before bug archive move")
+        return original_replace(source, target)
+    if state == "drifted-source-before-move":
+        module.os.replace = fail_bug_move
+    else:
+        module.refresh_readme = fail_after_move
+    try:
+        with pytest.raises(module.LifecycleError) as failure:
+            module.close_item(root, slug, closure(instant).encode(), instant)
+    finally:
+        module.refresh_readme, module.os.replace = original_refresh, original_replace
+    assert failure.value.failure_id == "WI-BUG-DISPOSITIONS-ROLLBACK"
+    assert failure.value.__cause__ is not None
+    if state == "occupied-source":
+        assert bug.read_bytes() == concurrent
+        assert archived_bug.read_bytes() == archived_before_failure
+    elif state == "drifted-target":
+        assert not bug.exists()
+        assert archived_bug.read_bytes() == concurrent
+    else:
+        assert bug.read_bytes() == concurrent
+        assert not archived_bug.exists()
+    assert active.is_dir()
+
+
+@pytest.mark.parametrize("state", ["dual-locations", "target-before-image", "known-before-only"])
+def test_successor_recovery_rejects_ambiguous_bug_location_images(tmp_path: Path, state: str) -> None:
+    """Supported recover-transition must retain ambiguous data and its intent."""
+    module = load_module()
+    root, parent, bug_slug = tmp_path / "repo", "recovery-parent", "2026-10-08-recovery-bug"
+    seed_active(module, root, parent)
+    item = root / "work-items" / "active" / parent
+    recorded = run_ledger(item, "append", "--run-id", "recovery-synthetic-terminal", "--role", "qa-engineer",
+        "--execution-role", "internal", "--status", "completed", "--gate", "none", "--scope", "synthetic recovery",
+        "--started-at", "2026-10-08T00:00:00Z", "--updated-at", "2026-10-08T00:00:00Z")
+    assert recorded.returncode == 0, recorded.stdout
+    bug = seed_context_bug(root, parent, bug_slug)
+    before = bug.read_bytes()
+    instant, operation = "2026-10-08T00:05:00Z", "recovery-image-operation"
+    write_bug_dispositions(root, parent, instant, [{
+        "id": bug_slug, "action": "terminalize", "inputSha256": hashlib.sha256(before).hexdigest(),
+        "status": "fixed", "resolution": "Verified fix.", "evidence": "Accepted synthetic evidence.",
+    }])
+    module.refresh_readme(root)
+    ledger_sha = hashlib.sha256((item / "agent-runs.jsonl").read_bytes()).hexdigest()
+    readme_sha = hashlib.sha256((root / "work-items" / "README.md").read_bytes()).hexdigest()
+    successor = (f"Task: Continue independent scope.\nContinues: {parent}\nObligation-transfer: {operation}\n"
+                 "Next action: Inspect scope.\nupdated: 2026-10-08T00:05:00Z\n").encode()
+    transfer = json.dumps({"schemaVersion": 1, "sourceWorkItem": parent, "successorWorkItem": "recovery-successor",
+        "expectedSourceLedgerSha256": ledger_sha, "obligations": []}).encode()
+    with pytest.raises(module.LifecycleError) as interrupted:
+        module.archive_with_successor(root, parent, closure(instant).encode(), instant, "recovery-successor",
+            successor, operation, ledger_sha, readme_sha, obligation_transfer_data=transfer,
+            inject_failure_at="T0" if state == "known-before-only" else "T1")
+    assert interrupted.value.failure_id == "WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE"
+    archived_bug = root / "work-items" / "bugs" / "archive" / "2026-10" / bug.name
+    if state == "dual-locations":
+        bug.write_bytes(before)  # Occupied source even though its bytes match a known image.
+    elif state == "target-before-image":
+        archived_bug.write_bytes(before)  # Wrong image at the moved target is not ownership.
+    source_before = bug.read_bytes() if bug.exists() else None
+    target_before = archived_bug.read_bytes() if archived_bug.exists() else None
+    source_identity = module._lifecycle_file_identity(bug.lstat()) if bug.exists() else None
+    intent = module._transition_intent_path(root, operation)
+    intent_before = intent.read_bytes()
+    result = subprocess.run([sys.executable, "-B", str(SCRIPT), "recover-transition", "--root", str(root),
+                             "--operation-id", operation, "--apply"], capture_output=True, text=True, timeout=30)
+    if state == "known-before-only":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "outcome=rolled-back" in result.stdout and not intent.exists()
+        assert bug.read_bytes() == before and not archived_bug.exists()
+        assert module._lifecycle_file_identity(bug.lstat()) == source_identity
+        return
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE" in result.stderr + result.stdout
+    assert (bug.read_bytes() if bug.exists() else None) == source_before
+    assert archived_bug.read_bytes() == target_before
+    assert intent.read_bytes() == intent_before
 
 
 def seed_retained_scratch_manifest(
@@ -5015,6 +5604,63 @@ def test_valid_human_static_guide_is_preserved_by_ordinary_refresh(
     assert refreshed.startswith(human_guide)
     assert refreshed.count(module.README_BEGIN) == 1
     assert refreshed.count(module.README_END) == 1
+
+
+def test_static_guide_reset_propagates_verified_inventory_on_every_success(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    archive = root / "work-items" / "archive"
+    for name in ("first-collection", "second-collection"):
+        write(archive / "2026-07" / name / "record.any", "Unbound narrative.\n")
+        (archive / "2026-07" / name / "binary-leaf").write_bytes(b"\xff\x00")
+    before = tree_file_bytes(archive)
+    module.refresh_readme(root)
+    readme = root / "work-items" / "README.md"
+    readme.write_bytes(readme.read_bytes().replace(b"# Work items", b"# Retained old guide", 1))
+    targeted = hashlib.sha256(readme.read_bytes()).hexdigest()
+    inventory = module.observe_readme(root)["archiveInventory"]
+    received = []
+    repaired_hash = module.reset_readme_static_guide(root, targeted, archive_inventory_out=received)
+    assert received == [inventory]
+    for expected_hash in (targeted, repaired_hash):
+        received = []
+        assert module.reset_readme_static_guide(root, expected_hash, archive_inventory_out=received) == repaired_hash
+        assert received == [inventory]
+    public = run_cli("refresh", "--root", str(root), "--reset-static-guide",
+                     "--expected-readme-sha256", repaired_hash)
+    assert public.returncode == 0, public.stdout
+    assert [line for line in public.stdout.splitlines() if line.startswith("INFO ")] == [
+        f"INFO WI-ARCHIVE-ENTITY-UNBOUND: {row['path']}" for row in inventory["unbound"]]
+    assert len(inventory["unbound"]) == 6
+    assert f"README-SHA256: {repaired_hash}" in public.stdout
+    assert module.observe_readme(root)["archiveInventory"]["classificationComplete"] is False
+    assert tree_file_bytes(archive) == before
+
+
+def test_static_guide_reset_withholds_inventory_on_idempotent_input_drift(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    leaf = root / "work-items" / "archive" / "2026-07" / "unknown" / "leaf"
+    write(leaf, "Original unbound bytes.\n")
+    module.refresh_readme(root)
+    readme = root / "work-items" / "README.md"
+    before = readme.read_bytes()
+    render = module._render_readme_bytes
+    calls = 0
+    def render_then_drift(*args, **kwargs):
+        nonlocal calls
+        rendered = render(*args, **kwargs)
+        calls += 1
+        if calls == 1:
+            leaf.write_bytes(b"Concurrent unbound bytes.\n")
+        return rendered
+    module._render_readme_bytes = render_then_drift
+    received = []
+    with pytest.raises(module.LifecycleError) as failure:
+        module.reset_readme_static_guide(root, hashlib.sha256(before).hexdigest(), archive_inventory_out=received)
+    assert failure.value.failure_id == "WI-README-STALE"
+    assert received == [] and readme.read_bytes() == before
+    assert leaf.read_bytes() == b"Concurrent unbound bytes.\n"
 
 
 def test_explicit_static_guide_reset_adopts_retained_legacy_board(
@@ -12887,7 +13533,14 @@ def test_caught_inverse_error_cannot_complete_unsettled_rollback(tmp_path: Path,
 def _adapt_test(function):
     def method(self):
         with tempfile.TemporaryDirectory() as directory:
-            function(Path(directory))
+            # Use the existing public pytest runner for parameter/fixture binding.
+            # Selecting one function expands its declared cases without a copied
+            # argument matrix or a unittest-only fixture implementation.
+            result = pytest.main([
+                f"{Path(__file__).resolve()}::{function.__name__}",
+                "--basetemp", directory, "-p", "no:cacheprovider", "-q",
+            ])
+            self.assertEqual(result, 0, f"pytest adapter failed: {function.__name__}")
 
     method.__name__ = function.__name__
     return method
@@ -13104,3 +13757,402 @@ def test_successor_archive_preserves_terminal_bug_with_shared_owner(tmp_path):
     snapshot = tree_file_bytes(root)
     assert module.archive_with_successor(*args, obligation_transfer_data=transfer) == receipt
     assert tree_file_bytes(root) == snapshot
+
+
+def test_legacy_parent_archive_repairs_descendant_uris_and_compensates_conflict(tmp_path: Path, monkeypatch) -> None:
+    module = load_module()
+    root = tmp_path / "legacy-parent-links"
+    parent = "legacy-parent"
+    item = root / "work-items" / "active" / parent
+    instant = "2026-10-08T15:00:00Z"
+    write(item / "status.md", quick_status())
+    write(item / "closure.md", closure(instant))
+    write(item / "evidence.md", "Accepted legacy evidence.\n")
+    evidence_before = (item / "evidence.md").read_bytes()
+    consumer = seed_context_bug(root, "standalone", "legacy-consumer")
+    before = consumer.read_bytes() + b"[evidence](../active/legacy-parent/evidence.md#case)\n[status](../active/legacy-parent/status.md)\n"
+    consumer.write_bytes(before)
+    inventory = root / "incoming.json"
+    write(inventory, json.dumps({"reference": f"work-item:{parent}"}))
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    with pytest.raises(module.LifecycleError) as missing:
+        module.migrate_legacy(root, f"work-item:{parent}", incoming_links_inventory=None)
+    assert missing.value.failure_id == "WI-LEGACY-LINK-UNMAPPED"
+    original_refresh = module.refresh_readme
+    def fail_refresh(target):
+        consumer.write_bytes(b"Concurrent author bytes.\n")
+        raise module.LifecycleError("WI-README-STALE", "synthetic readback failure")
+    monkeypatch.setattr(module, "refresh_readme", fail_refresh)
+    with pytest.raises(module.LifecycleError) as conflict:
+        module.migrate_legacy(root, f"work-item:{parent}", incoming_links_inventory=inventory)
+    assert conflict.value.failure_id == "WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE"
+    assert consumer.read_bytes() == b"Concurrent author bytes.\n" and item.is_dir()
+    monkeypatch.setattr(module, "refresh_readme", original_refresh)
+    consumer.write_bytes(before)
+    archived = module.migrate_legacy(root, f"work-item:{parent}", incoming_links_inventory=inventory)
+    assert consumer.read_bytes() == before.replace(b"../active/legacy-parent/", b"../archive/2026-10/legacy-parent/")
+    assert (archived / "evidence.md").read_bytes() == evidence_before
+    assert not (archived / "bug-dispositions-receipt.json").exists()
+    assert module.migrate_legacy(root, f"work-item:{parent}", incoming_links_inventory=inventory) == archived
+
+
+def _parent_successor_link_fixture(tmp_path: Path):
+    spec = importlib.util.spec_from_file_location("parent_transition_fixtures", SCRIPT.parent.parent / "tests" / "test_legacy_obligation_migration.py")
+    helpers = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helpers)
+    fixture = helpers.native_transfer_fixture(tmp_path)
+    module, item = fixture["lifecycle"], fixture["item"]
+    write(item / "evidence.md", "Original referenced evidence.\n")
+    bug = seed_context_bug(tmp_path, "standalone", "parent-uri-consumer")
+    before = bug.read_bytes() + f"[evidence](../active/{item.name}/evidence.md#case)\n[status](../active/{item.name}/status.md)\n[closure](../active/{item.name}/closure.md)\n".encode()
+    bug.write_bytes(before)
+    module.refresh_readme(tmp_path)
+    fixture["readmeSha"] = hashlib.sha256((tmp_path / "work-items" / "README.md").read_bytes()).hexdigest()
+    fixture.update(consumer=bug, consumerBefore=before, evidenceBefore=(item / "evidence.md").read_bytes())
+    return fixture, helpers
+
+
+def test_parent_successor_uri_restart_binds_original_targets_and_preserves_duty(tmp_path: Path) -> None:
+    fixture, helpers = _parent_successor_link_fixture(tmp_path)
+    module = fixture["lifecycle"]
+    with pytest.raises(module.LifecycleError):
+        helpers.run_transfer(fixture, inject="T3")
+    intent = module._transition_intent_path(tmp_path, fixture["operationId"])
+    payload = json.loads(intent.read_bytes())
+    evidence = next(row for row in payload["uriTargetBindings"]["rows"] if row["source"].endswith("/evidence.md"))
+    assert evidence["beforeSha256"] == evidence["afterSha256"]
+    closure_target = next(row for row in payload["uriTargetBindings"]["rows"] if row["source"].endswith("/closure.md"))
+    assert closure_target["beforeSha256"] is None
+    assert len(payload["uriConsumers"]["rows"]) == 1
+    receipt = module._recover_transition(tmp_path, intent)
+    archive = tmp_path / receipt["archivePath"]
+    assert (archive / "agent-runs.jsonl").read_bytes() == fixture["ledgerBefore"]
+    assert len(receipt["obligations"]) == 1 and not intent.exists()
+    assert (archive / "evidence.md").read_bytes() == fixture["evidenceBefore"]
+    expected = fixture["consumerBefore"].replace(f"../active/{fixture['slug']}/".encode(), f"../archive/2026-08/{fixture['slug']}/".encode())
+    assert fixture["consumer"].read_bytes() == expected
+    fixture["consumer"].write_bytes(expected + b"Later authoring.\n")
+    assert helpers.run_transfer(fixture) == receipt
+    assert fixture["consumer"].read_bytes().endswith(b"Later authoring.\n")
+
+
+@pytest.mark.parametrize("phase", ["T1", "T3"])
+def test_parent_successor_uri_target_drift_stops_before_recovery_effects(tmp_path: Path, phase: str) -> None:
+    fixture, helpers = _parent_successor_link_fixture(tmp_path)
+    module = fixture["lifecycle"]
+    with pytest.raises(module.LifecycleError):
+        helpers.run_transfer(fixture, inject=phase)
+    intent = module._transition_intent_path(tmp_path, fixture["operationId"])
+    payload = json.loads(intent.read_bytes())
+    path = fixture["item"] if phase == "T1" else tmp_path / payload["archivePath"]
+    (path / "evidence.md").write_bytes(b"Concurrent target evidence.\n")
+    before = tree_file_bytes(tmp_path)
+    with pytest.raises(module.LifecycleError) as refused:
+        module._recover_transition(tmp_path, intent)
+    assert refused.value.failure_id == ("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE" if phase == "T1" else "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE")
+    assert tree_file_bytes(tmp_path) == before and intent.exists()
+
+
+@pytest.mark.parametrize("missing", ["uriConsumers", "uriTargetBindings", "linkMaintenance", "target-row", "null-status"])
+def test_parent_successor_uri_omission_cannot_downgrade_historical_profile(tmp_path: Path, missing: str) -> None:
+    fixture, helpers = _parent_successor_link_fixture(tmp_path)
+    module = fixture["lifecycle"]
+    with pytest.raises(module.LifecycleError):
+        helpers.run_transfer(fixture, inject="T0")
+    intent = module._transition_intent_path(tmp_path, fixture["operationId"])
+    payload = json.loads(intent.read_bytes())
+    if missing == "null-status":
+        payload["statusBefore"] = None
+        next(row for row in payload["uriTargetBindings"]["rows"] if row["source"].endswith("/status.md"))["beforeSha256"] = None
+    elif missing == "linkMaintenance":
+        receipt = json.loads(module._unb64(payload["bugReceiptAfter"]))
+        receipt.pop(missing)
+        payload["bugReceiptAfter"] = module._b64(json.dumps(receipt).encode())
+    elif missing == "target-row":
+        payload["uriTargetBindings"]["rows"].pop()
+    else:
+        payload.pop(missing)
+    intent.write_bytes(module._migration_receipt_bytes(payload))
+    before = tree_file_bytes(tmp_path)
+    with pytest.raises(module.LifecycleError):
+        module._recover_transition(tmp_path, intent)
+    assert tree_file_bytes(tmp_path) == before
+
+
+def test_parent_successor_uri_intent_overflow_is_pre_effect(tmp_path: Path) -> None:
+    fixture, helpers = _parent_successor_link_fixture(tmp_path)
+    module = fixture["lifecycle"]
+    consumer = fixture["consumer"]
+    consumer.write_bytes(consumer.read_bytes() + b"Private synthetic body. " * 7000)
+    module.refresh_readme(tmp_path)
+    fixture["readmeSha"] = hashlib.sha256((tmp_path / "work-items" / "README.md").read_bytes()).hexdigest()
+    before = tree_file_bytes(tmp_path)
+    with pytest.raises(module.LifecycleError) as refused:
+        helpers.run_transfer(fixture)
+    assert refused.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+    assert tree_file_bytes(tmp_path) == before
+    assert not module._transition_intent_path(tmp_path, fixture["operationId"]).exists()
+
+
+@pytest.mark.parametrize("phase", ["T1", "T4", "T6"])
+def test_parent_successor_uri_owned_images_recover_at_distinct_boundaries(tmp_path: Path, phase: str) -> None:
+    fixture, helpers = _parent_successor_link_fixture(tmp_path)
+    module = fixture["lifecycle"]
+    with pytest.raises(module.LifecycleError):
+        helpers.run_transfer(fixture, inject=phase)
+    intent = module._transition_intent_path(tmp_path, fixture["operationId"])
+    outcome = module._recover_transition(tmp_path, intent)
+    if phase == "T1":
+        assert outcome is None and fixture["item"].is_dir()
+        assert fixture["consumer"].read_bytes() == fixture["consumerBefore"]
+        assert not (fixture["item"] / "closure.md").exists()
+    else:
+        assert outcome["status"] == "settled" and len(outcome["obligations"]) == 1
+        assert b"../active/" not in fixture["consumer"].read_bytes()
+    assert not intent.exists()
+
+
+def test_parent_successor_recreated_uri_directory_refuses_restart(tmp_path: Path) -> None:
+    fixture, helpers = _parent_successor_link_fixture(tmp_path)
+    module, item = fixture["lifecycle"], fixture["item"]
+    directory = item / "assets"
+    directory.mkdir()
+    fixture["consumer"].write_bytes(fixture["consumer"].read_bytes() + f"[assets](../active/{item.name}/assets)\n".encode())
+    module.refresh_readme(tmp_path)
+    fixture["readmeSha"] = hashlib.sha256((tmp_path / "work-items" / "README.md").read_bytes()).hexdigest()
+    with pytest.raises(module.LifecycleError):
+        helpers.run_transfer(fixture, inject="T3")
+    intent = module._transition_intent_path(tmp_path, fixture["operationId"])
+    payload = json.loads(intent.read_bytes())
+    row = next(row for row in payload["uriTargetBindings"]["rows"] if row["kind"] == "directory")
+    target = tmp_path / row["target"]
+    target.rename(target.with_name("retained-original-assets"))
+    target.mkdir()
+    before = tree_file_bytes(tmp_path)
+    with pytest.raises(module.LifecycleError) as refused:
+        module._recover_transition(tmp_path, intent)
+    assert refused.value.failure_id == "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
+    assert tree_file_bytes(tmp_path) == before and intent.exists()
+    # A captured zero native identity is representable; parser does not replace it with unknown.
+    row["identity"] = ["0", "0"]
+    module._transition_parent_uri_images(tmp_path, payload)
+
+
+@pytest.mark.parametrize("case", ["target-drift", "matching", "mismatched-caller", "mismatched-pending-caller", "no-intent-authoring"])
+def test_parent_successor_public_replay_enforces_pending_t6_before_committed(tmp_path: Path, case: str) -> None:
+    fixture, helpers = _parent_successor_link_fixture(tmp_path)
+    module = fixture["lifecycle"]
+    with pytest.raises(module.LifecycleError):
+        helpers.run_transfer(fixture, inject="T3" if case == "mismatched-pending-caller" else "T6")
+    intent = module._transition_intent_path(tmp_path, fixture["operationId"])
+    archive = tmp_path / "work-items" / "archive" / "2026-08" / fixture["slug"]
+    assert intent.exists()
+    assert (archive / "lifecycle-transition-receipt.json").exists() == (case != "mismatched-pending-caller")
+    if case == "no-intent-authoring":
+        module._recover_transition(tmp_path, intent)
+        assert not intent.exists()
+    if case in {"target-drift", "no-intent-authoring"}:
+        (archive / "evidence.md").write_bytes(b"Later referenced evidence authoring.\n")
+    successor = fixture["successor"] + b"Mismatched request.\n" if case in {"mismatched-caller", "mismatched-pending-caller"} else fixture["successor"]
+    for name, data in (("closure-input.md", fixture["closure"]), ("successor-input.md", successor), ("transfer-input.json", fixture["transfer"])):
+        (tmp_path / name).write_bytes(data)
+    before = tree_file_bytes(tmp_path)
+    result = subprocess.run([sys.executable, "-B", str(SCRIPT), "archive-with-successor", "--root", str(tmp_path),
+        "--slug", fixture["slug"], "--closure-file", str(tmp_path / "closure-input.md"),
+        "--terminal-instant", fixture["instant"], "--successor-slug", fixture["successorSlug"],
+        "--successor-file", str(tmp_path / "successor-input.md"), "--operation-id", fixture["operationId"],
+        "--expected-ledger-sha256", fixture["ledgerSha"], "--expected-readme-sha256", fixture["readmeSha"],
+        "--obligation-transfer-file", str(tmp_path / "transfer-input.json")], capture_output=True, text=True, timeout=30)
+    if case in {"target-drift", "mismatched-caller", "mismatched-pending-caller"}:
+        assert result.returncode != 0 and "COMMITTED" not in result.stdout
+        expected = "ROLLFORWARD-INDETERMINATE" if case == "target-drift" else "SETTLEMENT-MISMATCH"
+        assert expected in result.stdout + result.stderr
+        assert intent.exists() and tree_file_bytes(tmp_path) == before
+    else:
+        assert result.returncode == 0 and "WI-LIFECYCLE-TRANSITION-COMMITTED" in result.stdout
+        assert not intent.exists()
+        if case == "no-intent-authoring":
+            assert tree_file_bytes(tmp_path) == before
+
+
+def test_atomic_write_target_native_parent_effect_and_release(tmp_path: Path, monkeypatch) -> None:
+    module = load_module()
+    parent, outside = tmp_path / "ordinary", tmp_path / "outside"
+    parent.mkdir(); outside.mkdir()
+    path = parent / "target.bin"
+    path.write_bytes(b"before")
+    (outside / "sentinel").write_bytes(b"outside unchanged")
+    original = module.LifecycleWriteTarget._file
+    def inner_swap(target, leaf, *, create=False, delete=False):
+        if create:
+            try:
+                parent.rename(tmp_path / "retained")
+            except OSError:
+                if os.name != "nt":
+                    raise
+                raise OSError("native pinned parent denied injected rename")
+            parent.symlink_to(outside, target_is_directory=True)
+        return original(target, leaf, create=create, delete=delete)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_file", inner_swap)
+    with pytest.raises(module.LifecycleError) as refused:
+        module._atomic_write(path, b"after")
+    assert refused.value.failure_id == "WI-LIFECYCLE-WRITE-BOUNDARY"
+    assert sorted(p.name for p in outside.iterdir()) == ["sentinel"]
+    assert (outside / "sentinel").read_bytes() == b"outside unchanged"
+    retained = parent if os.name == "nt" else tmp_path / "retained"
+    assert (retained / "target.bin").read_bytes() == b"before"
+    assert sorted(p.name for p in retained.iterdir()) == ["target.bin"]
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_file", original)
+    if os.name == "nt":
+        parent.rename(tmp_path / "released")  # Actual handle release permits the ordinary move.
+
+
+def test_atomic_write_target_kind_admission_keeps_large_replacement(tmp_path: Path) -> None:
+    module = load_module()
+    path = tmp_path / "large.bin"
+    path.write_bytes(b"x" * (4 * 1024 * 1024 + 1))
+    module._atomic_write(path, b"replacement")
+    assert path.read_bytes() == b"replacement"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native handle receiving")
+def test_atomic_write_native_partial_acquisition_releases_handles_and_temp(tmp_path: Path, monkeypatch) -> None:
+    import ctypes
+    module = load_module()
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetProcessHandleCount.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+    kernel.GetProcessHandleCount.restype = ctypes.c_int
+    def count():
+        value = ctypes.c_ulong()
+        assert kernel.GetProcessHandleCount(ctypes.c_void_p(-1), ctypes.byref(value))
+        return value.value
+    # Warm the loader and both actual native resource paths before baseline measurement.
+    module._atomic_write(tmp_path / "warm.bin", b"warm")
+    original_identity = module.LifecycleWriteTarget._identity
+    before = count()
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_identity", lambda self, h: (_ for _ in ()).throw(OSError("identity probe")))
+    with pytest.raises(module.LifecycleError):
+        module._atomic_write(tmp_path / "failed.bin", b"no publication")
+    assert count() == before and not (tmp_path / "failed.bin").exists()
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_identity", original_identity)
+    original_check = module.LifecycleWriteTarget._windows_check
+    def child_failure(target, handle, *, directory):
+        if not directory:
+            raise OSError("child attributes probe")
+        return original_check(target, handle, directory=directory)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_windows_check", child_failure)
+    with pytest.raises(module.LifecycleError):
+        module._atomic_write(tmp_path / "child-failed.bin", b"no publication")
+    assert count() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["warm.bin"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native read-only replacement signal")
+def test_atomic_write_native_readonly_refusal_keeps_original_and_cleans_temp(tmp_path: Path) -> None:
+    import stat
+    module = load_module()
+    path = tmp_path / "readonly.bin"
+    path.write_bytes(b"original readonly bytes")
+    path.chmod(stat.S_IREAD)
+    try:
+        with pytest.raises(module.LifecycleError) as refused:
+            module._atomic_write(path, b"replacement")
+        assert refused.value.failure_id == "WI-LIFECYCLE-WRITE-BOUNDARY"
+        assert "rename" in str(refused.value)
+        assert path.read_bytes() == b"original readonly bytes"
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["readonly.bin"]
+    finally:
+        path.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+def test_write_cleanup_composer_repeated_causes_bounded_projection_and_strict_old_slots() -> None:
+    module = load_module()
+    composer = module.LifecycleOutcomeComposer()
+    first, second = OSError(5, "first-close-cause"), OSError(6, "second-close-cause")
+    for index, cause in enumerate((first, second)):
+        composer.record_write_cleanup(phase="write-target-release", failure_id="WI-LIFECYCLE-WRITE-BOUNDARY",
+            resource=f"directory-{index}", diagnostic="close failed", cause=cause)
+    bundle = composer.finalize()
+    assert bundle == composer.finalize()
+    assert len(bundle.cleanup_failures) == 1
+    assert "occurrences=2" in bundle.cleanup_failures[0].diagnostic
+    assert all(cause.strerror in bundle.cleanup_failures[0].diagnostic for cause in (first, second))
+    assert composer._write_cleanup["write-target-release"][0][1] is first
+    assert module.LifecycleOutcomeComposer.top_level(bundle) is not None
+    primary = module.LifecycleError("primary", "original primary")
+    composer.capture_primary(primary)
+    assert composer.top_level(composer.finalize()) is primary
+    composer.record_cleanup(phase="transaction-release", failure_id="cleanup", resource=None, diagnostic="old slot")
+    with pytest.raises(ValueError):
+        composer.record_cleanup(phase="transaction-release", failure_id="cleanup", resource=None, diagnostic="duplicate")
+    with pytest.raises(ValueError):
+        composer.record_write_cleanup(phase="transaction-release", failure_id="cleanup", resource=None, diagnostic="wrong owner")
+    for index in range(10):
+        composer.record_write_cleanup(phase="write-temp-cleanup", failure_id="WI-LIFECYCLE-WRITE-BOUNDARY",
+            resource=f"write-{index}", diagnostic="x" * 500, cause=OSError(f"cause-{index}"))
+    output = next(row for row in composer.finalize().cleanup_failures if row.phase == "write-temp-cleanup")
+    assert len(output.diagnostic) <= 512 and "occurrences=10" in output.diagnostic and "omitted-details=" in output.diagnostic
+    assert len(composer._write_cleanup["write-temp-cleanup"]) == 10
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows write cleanup receiving")
+def test_public_write_failure_preserves_primary_and_all_cleanup_attempts(tmp_path: Path, monkeypatch) -> None:
+    import ctypes
+    module = load_module()
+    (tmp_path / "work-items").mkdir()
+    module._atomic_write(tmp_path / "warm", b"warm")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetProcessHandleCount.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+    kernel.GetProcessHandleCount.restype = ctypes.c_int
+    def handles():
+        count = ctypes.c_ulong(); assert kernel.GetProcessHandleCount(ctypes.c_void_p(-1), ctypes.byref(count)); return count.value
+    before = handles()
+    original_close = module.LifecycleWriteTarget._close
+    close_attempts = []
+    def close_with_two_causes(target, handle):
+        original_close(target, handle)  # Real native creator handle is settled before injecting its diagnostic fault.
+        close_attempts.append(handle)
+        if len(close_attempts) <= 2:
+            raise OSError(5 + len(close_attempts), f"native-close-cause-{len(close_attempts)}")
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_write_handle", lambda self,h,data: (_ for _ in ()).throw(OSError("primary-write-cause")))
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_windows_delete", lambda self,h: (_ for _ in ()).throw(OSError("temp-cleanup-cause")))
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_close", close_with_two_causes)
+    observer = module.LifecycleDiagnosticObserver()
+    with pytest.raises(module.LifecycleError) as refused:
+        module.refresh_readme(tmp_path, allow_marker_bootstrap=True, diagnostic_observer=observer)
+    assert "primary-write-cause" in str(refused.value)
+    assert observer.state == "delivered" and observer.snapshot.primaryFailureId == refused.value.failure_id
+    diagnostics = " ".join(row.diagnostic for row in observer.snapshot.cleanupFailures)
+    assert "temp-cleanup-cause" in diagnostics and "native-close-cause-1" in diagnostics and "native-close-cause-2" in diagnostics
+    assert handles() == before and len(close_attempts) > 2
+    assert not (tmp_path / "work-items" / "README.md").exists()
+    assert len(list((tmp_path / "work-items").glob(".*.tmp"))) == 1
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native cleanup-only repeated-write receiving")
+def test_public_repeated_writes_keep_cleanup_only_failure_nonzero(tmp_path: Path, monkeypatch) -> None:
+    module = load_module()
+    original_close = module.LifecycleWriteTarget._close
+    original_write = module.LifecycleWriteTarget._write_handle
+    written = set()
+    raised = set()
+    def write_and_track(target, handle, data):
+        original_write(target, handle, data)
+        written.add(target.leaf)
+    def close_and_report(target, handle):
+        original_close(target, handle)
+        if target.leaf in written and target.leaf not in raised:
+            raised.add(target.leaf)
+            raise OSError(f"cleanup-only-after-{target.leaf}")
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_write_handle", write_and_track)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_close", close_and_report)
+    observer = module.LifecycleDiagnosticObserver()
+    with pytest.raises(module.LifecycleError) as refused:
+        module.create_candidate(tmp_path, "repeated-write", b"Task: Synthetic repeated writes.\nNext action: Inspect.\n", diagnostic_observer=observer)
+    assert refused.value.failure_id == "WI-LIFECYCLE-WRITE-BOUNDARY"
+    assert observer.snapshot.primaryKind == "none"
+    cleanup = next(row for row in observer.snapshot.cleanupFailures if row.phase == "write-target-release")
+    assert len(raised) >= 2 and f"occurrences={len(raised)}" in cleanup.diagnostic
+    assert all(f"cleanup-only-after-{leaf}" in cleanup.diagnostic for leaf in raised)
+    assert (tmp_path / "work-items" / "backlog" / "repeated-write.md").is_file()
+    assert (tmp_path / "work-items" / "README.md").is_file()
