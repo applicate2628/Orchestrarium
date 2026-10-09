@@ -106,6 +106,17 @@ unknown; it is otherwise outside the built-in item lifecycle. Close and reopen
 continue to move only the owning work-item records, and README remains a
 derived view rather than a topology source.
 
+Ordinary direct files at the built-in work-item archive root or a canonical
+month are nonauthorizing archive metadata, acquired through the lifecycle
+owner's bounded no-follow snapshots. Their exact bytes feed the same board
+input digest and currentness checks; a conditional `Archive metadata` section
+shows each physical link and SHA-256 without a task checkbox. Filenames,
+extensions, prose and date/status fields supply no logical identity, terminal
+time, completion or obligation authority. A real captured empty file is valid;
+missing/unsafe acquisition is not. Existing malformed work-item, unbound
+collection, selected-identity and noncanonical evidence contracts remain
+strict. This classification adds no topology declaration or lifecycle category.
+
 Directory relocation belongs to the existing lifecycle transaction. After a
 native move, the owner proves the same ordinary directory and the complete
 rebased parent chains while retaining captured leaf identities and bytes.
@@ -138,6 +149,8 @@ already archived item and instead uses the ordinary explicit successor/reopen
 path.
 
 ## Terms and Abbreviations
+
+- `SHA-256`: Secure Hash Algorithm with a 256-bit byte-content digest.
 
 - `auxiliary root`: a declared project-owned top-level `work-items/` directory
   with the `flat-json` kind.

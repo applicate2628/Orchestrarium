@@ -392,7 +392,7 @@ def test_archive_membership_uses_exact_name_order_and_still_rejects_real_drift(t
     assert identity.value.failure_id == "WI-README-STALE"
 
 
-def test_archive_inventory_rejects_direct_leaf_and_detects_membership_drift(tmp_path: Path) -> None:
+def test_archive_inventory_detects_drift_and_rejects_mixed_collection(tmp_path: Path) -> None:
     module = load_module()
     root = tmp_path / "repo"
     collection = root / "work-items" / "archive" / "2026-07" / "collection"
@@ -411,9 +411,10 @@ def test_archive_inventory_rejects_direct_leaf_and_detects_membership_drift(tmp_
     direct = collection.parent / "unexpected"
     direct.write_bytes(b"unsupported direct data")
     before = tree_file_bytes(root)
-    with pytest.raises(module.LifecycleError) as unsupported:
-        module.observe_readme(root)
-    assert unsupported.value.failure_id == "WI-ARCHIVE-ENTITY-UNBOUND"
+    observed = module.observe_readme(root)
+    assert observed["archiveInventory"]["classificationComplete"] is False
+    assert any(entity.kind == "archive-metadata" and entity.path == direct
+               for entity in module._archive_entity_inventory(root).entities)
     assert tree_file_bytes(root) == before
     direct.unlink()
     (collection / "nested").mkdir()
@@ -443,6 +444,148 @@ def test_noncanonical_evidence_domain_is_lexical_and_owned_input_still_refuses(t
     with pytest.raises(module.LifecycleError) as failure:
         module.collect_readme_entries(root)
     assert failure.value.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+
+
+def test_direct_archive_metadata_restores_public_resolve_board_and_close(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    seed_active(module, root, "selected-item")
+    archive = root / "work-items" / "archive"
+    month = archive / "2026-06"
+    month.mkdir(parents=True)
+    baseline = (root / "work-items" / "README.md").read_bytes()
+    monthly = month / "README.md"
+    monthly.write_bytes(b"# Monthly archive guide\n\nSynthetic prose metadata; no terminal authority.\n")
+    assert hashlib.sha256(monthly.read_bytes()).hexdigest() == "18077d573cfca832a938e2b70df63feee1d127c5d076190e73349b54990c69e4"
+    (archive / "selected-item.md").write_bytes(b"\xff\x00opaque")
+    (archive / "empty-data").write_bytes(b"")
+    (month / "task-shaped.data").write_bytes(b"Closed: 2099-01-01T00:00:00Z\nUpdated: 2099-01-01T00:00:00Z\nstatus: completed\n")
+    before = tree_file_bytes(archive)
+    identities = {path: (path.lstat().st_dev, path.lstat().st_ino) for path in archive.rglob("*")}
+    for selection in (("--reference", "work-item:selected-item"), ("--legacy-path", "work-items/active/selected-item")):
+        result = run_cli("resolve", "--root", str(root), *selection)
+        assert result.returncode == 0, result.stdout
+        expected_prefix = "WI-LEGACY-READ-COMPAT " if selection[0] == "--legacy-path" else ""
+        assert result.stdout.strip() == expected_prefix + str(root / "work-items" / "active" / "selected-item")
+    refreshed = run_cli("refresh", "--root", str(root))
+    assert refreshed.returncode == 0, refreshed.stdout
+    board = (root / "work-items" / "README.md").read_bytes()
+    assert b"## Archive metadata" not in baseline and b"## Archive metadata" in board
+    assert next(line for line in baseline.splitlines() if line.startswith(b"Canonical changes through:")) == next(
+        line for line in board.splitlines() if line.startswith(b"Canonical changes through:"))
+    section = board.decode().split("## Archive metadata\n", 1)[1]
+    assert "- [ ]" not in section and "- [x]" not in section
+    for relative, data in before.items():
+        link = "archive/" + Path(relative).as_posix()
+        assert f"[{link}]({link})" in section and hashlib.sha256(data).hexdigest() in section
+    observation = module.observe_readme(root)
+    assert observation["matches"] is True
+    assert observation["archiveInventory"] == {"schemaVersion": 1, "acquisitionComplete": True,
+        "classificationComplete": True, "unbound": []}
+    # Bind the independently known fixture inputs, so omitted metadata source
+    # paths cannot pass by comparing the producer with itself.
+    inputs = {"active/selected-item/status.md": (root / "work-items" / "active" / "selected-item" / "status.md").read_bytes()}
+    inputs.update({"archive/" + Path(relative).as_posix(): data for relative, data in before.items()})
+    expected_digest = hashlib.sha256()
+    for relative, data in sorted(inputs.items()):
+        encoded = relative.encode()
+        expected_digest.update(len(encoded).to_bytes(8, "big") + encoded + len(data).to_bytes(8, "big") + data)
+    assert observation["inputDigest"] == expected_digest.hexdigest()
+    module.check_readme(root)
+    assert module.audit(root) == ()
+    assert identities == {path: (path.lstat().st_dev, path.lstat().st_ino) for path in archive.rglob("*")}
+    module.reset_readme_static_guide(root, hashlib.sha256(board).hexdigest())
+    instant = "2026-08-11T10:07:00Z"
+    write_bug_dispositions(root, "selected-item", instant, [])
+    archived = module.close_item(root, "selected-item", closure(instant).encode(), instant)
+    assert archived.is_dir() and (archived / module.BUG_DISPOSITIONS_RECEIPT).is_file()
+    assert all((archive / relative).read_bytes() == data for relative, data in before.items())
+
+
+def test_observe_rejects_same_byte_metadata_identity_replacement_between_renders(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    metadata = root / "work-items" / "archive" / "2026-06" / "metadata"
+    write(metadata, "Closed: 2099-01-01T00:00:00Z\nNon-authorizing metadata.\n")
+    original = metadata.read_bytes()
+    old_identity = module._lifecycle_file_identity(metadata.lstat())
+    held = root / "held-original-metadata"
+    readme = root / "work-items" / "README.md"
+    readme.write_bytes(module._render_readme_bytes(root))
+    before = readme.read_bytes()
+    assert module.observe_readme(root)["matches"] is True
+    render = module._render_readme_bytes
+    calls = 0
+    def render_then_replace(*args, **kwargs):
+        nonlocal calls
+        data = render(*args, **kwargs)
+        calls += 1
+        if calls == 1:
+            metadata.rename(held)
+            metadata.write_bytes(original)
+            assert module._lifecycle_file_identity(held.lstat()) == old_identity
+            assert module._lifecycle_file_identity(metadata.lstat()) != old_identity
+        return data
+    module._render_readme_bytes = render_then_replace
+    with pytest.raises(module.LifecycleError) as changed:
+        module.observe_readme(root)
+    assert changed.value.failure_id == "WI-README-STALE" and calls == 2
+    assert metadata.read_bytes() == held.read_bytes() == original
+    assert readme.read_bytes() == before and not (root / ".scratch").exists()
+
+
+def test_archive_metadata_defaults_native_link_and_drift_stay_strict(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    leaf = root / "work-items" / "archive" / "empty"
+    leaf.parent.mkdir(parents=True)
+    leaf.write_bytes(b"")
+    inventory = module._archive_entity_inventory(root)
+    entity = inventory.entities[0]
+    assert entity.kind == "archive-metadata" and entity.snapshots[0].data == b""
+    for kind, reference, snapshots in (("archive-metadata", None, ()), ("unknown", None, entity.snapshots),
+            ("archive-metadata", "work-item:empty", entity.snapshots), ("archive-metadata", None, (None,))):
+        with pytest.raises(module.LifecycleError) as invalid:
+            module.ArchiveEntity(leaf, kind, reference, snapshots)
+        assert invalid.value.failure_id == "WI-ARCHIVE-ENTITY-UNBOUND"
+    with pytest.raises(module.LifecycleError) as migration:
+        module._validated_migration_payload_target(root, module.CATEGORIES["bug"], "empty", leaf)
+    assert migration.value.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+    leaf.write_bytes(b"concurrent bytes")
+    with pytest.raises(module.LifecycleError) as drift:
+        inventory.verify()
+    assert drift.value.failure_id == "WI-README-STALE"
+    render = module._render_readme_bytes
+    calls = 0
+    def render_then_change(*args, **kwargs):
+        nonlocal calls
+        data = render(*args, **kwargs)
+        calls += 1
+        if calls == 1:
+            leaf.write_bytes(b"late metadata bytes")
+        return data
+    module._render_readme_bytes = render_then_change
+    with pytest.raises(module.LifecycleError) as late:
+        module.observe_readme(root)
+    assert late.value.failure_id == "WI-README-STALE" and not (root / ".scratch").exists()
+    unsafe = tmp_path / "unsafe"
+    month = unsafe / "work-items" / "archive" / "2026-06"
+    month.mkdir(parents=True)
+    canary = tmp_path / "outside-canary"
+    canary.write_bytes(b"canary bytes")
+    (month / "README.md").symlink_to(canary)
+    captures = []
+    def profile(frame, event, arg):
+        if event == "call" and frame.f_code is module._capture_file_snapshot.__code__:
+            captures.append(frame.f_locals["path"])
+    sys.setprofile(profile)
+    try:
+        with pytest.raises(module.LifecycleError) as linked:
+            module._archive_entity_inventory(unsafe)
+    finally:
+        sys.setprofile(None)
+    assert linked.value.failure_id == "WI-ARCHIVE-ENTITY-UNBOUND" and captures == []
+    assert canary.read_bytes() == b"canary bytes"
 
 
 def _unrelated_current_status_record(root: Path, kind: str) -> tuple[Path, str, str]:

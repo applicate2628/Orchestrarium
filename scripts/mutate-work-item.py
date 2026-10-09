@@ -989,6 +989,21 @@ class ArchiveEntity:
     logical_reference: str | None
     snapshots: tuple[CapturedFileSnapshot, ...] = ()
 
+    def __post_init__(self) -> None:
+        if self.kind not in {"work-item", "invalid-work-item", "unbound-flat-container", "archive-metadata"}:
+            raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", "unknown archive entity kind")
+        if self.kind in {"work-item", "invalid-work-item"}:
+            if self.logical_reference != f"work-item:{self.path.name}":
+                raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", "archive task identity is contradictory")
+        elif self.logical_reference is not None:
+            raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", "archive data has no logical task authority")
+        if self.kind == "archive-metadata" and (
+            not isinstance(self.snapshots, tuple) or len(self.snapshots) != 1
+            or not isinstance(self.snapshots[0], CapturedFileSnapshot)
+            or self.snapshots[0].path != self.path
+        ):
+            raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", "archive metadata requires its exact captured file")
+
 
 @dataclass(frozen=True)
 class ArchiveEntityInventory:
@@ -3079,7 +3094,10 @@ def _archive_entity_inventory(root: Path) -> ArchiveEntityInventory:
 
     for container in children(archive):
         if not container.is_dir():
-            raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", f"unsupported direct archive leaf: {container}")
+            entities.append(ArchiveEntity(container, "archive-metadata", None, (
+                _capture_file_snapshot(container, failure_id="WI-ARCHIVE-ENTITY-UNBOUND",
+                                       maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP),)))
+            continue
         try:
             month = datetime.strptime(container.name, "%Y-%m")
         except ValueError:
@@ -3089,7 +3107,9 @@ def _archive_entity_inventory(root: Path) -> ArchiveEntityInventory:
         for item in children(container):
             if not item.is_dir():
                 if canonical_month:
-                    raise LifecycleError("WI-ARCHIVE-ENTITY-UNBOUND", f"unsupported direct archive leaf: {item}")
+                    entities.append(ArchiveEntity(item, "archive-metadata", None, (
+                        _capture_file_snapshot(item, failure_id="WI-ARCHIVE-ENTITY-UNBOUND",
+                                               maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP),)))
                 continue
             leaves = children(item, lexical_only=not canonical_month)
             owned = owned_inputs.intersection(path.name for path in leaves)
@@ -3570,9 +3590,14 @@ def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInven
             )
 
     for entity in inventory.entities:
-        if entity.logical_reference is not None:
+        if entity.kind in {"work-item", "invalid-work-item"}:
             entries.append(_archived_work_item_entry(entity.path))
-        else:
+        elif entity.kind == "archive-metadata":
+            relative = _relative_link(work_items, entity.path)
+            entries.append(ReadmeEntry("Archive metadata", f"archive-observation:{relative}", relative,
+                entity.path, False, "Non-authorizing archive data; sha256:" + _sha256_bytes(entity.snapshots[0].data),
+                [entity.path], "WI-ARCHIVE-METADATA"))
+        elif entity.kind == "unbound-flat-container":
             for path in (entity.path, *(snapshot.path for snapshot in entity.snapshots)):
                 relative = _relative_link(work_items, path)
                 entries.append(ReadmeEntry("Blockers", f"archive-observation:{relative}", relative,
@@ -3589,6 +3614,7 @@ def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInven
             )
         seen.add(entry.logical_reference)
     order = {section: index for index, section in enumerate(README_SECTIONS)}
+    order["Archive metadata"] = len(order)
     return sorted(entries, key=lambda entry: (order[entry.section], entry.logical_reference))
 
 
@@ -3616,7 +3642,7 @@ def _input_digest(entries: Iterable[ReadmeEntry], work_items: Path) -> str:
 def _canonical_timestamp(entries: Iterable[ReadmeEntry]) -> str:
     instants: list[str] = []
     for entry in entries:
-        if entry.classification == "WI-ARCHIVE-ENTITY-UNBOUND":
+        if entry.classification in {"WI-ARCHIVE-ENTITY-UNBOUND", "WI-ARCHIVE-METADATA"}:
             continue
         for path in entry.source_paths:
             if path.name == LEGACY_RETIREMENT_FILE:
@@ -3690,6 +3716,7 @@ def _render_readme_bytes(
     root: Path, *, allow_marker_bootstrap: bool = False,
     static_guide_override: str | None = None, input_digest_out: list[str] | None = None,
     archive_inventory_out: list[dict] | None = None,
+    archive_inventory_witness_out: list[ArchiveEntityInventory] | None = None,
 ) -> bytes:
     work_items = _work_items_root(root)
     inventory = _archive_entity_inventory(root)
@@ -3706,10 +3733,12 @@ def _render_readme_bytes(
         f"Canonical input digest: sha256:{input_digest}",
         "",
     ]
-    by_section = {section: [] for section in README_SECTIONS}
+    sections = README_SECTIONS + (("Archive metadata",) if any(
+        entry.section == "Archive metadata" for entry in entries) else ())
+    by_section = {section: [] for section in sections}
     for entry in entries:
         by_section[entry.section].append(entry)
-    for section in README_SECTIONS:
+    for section in sections:
         lines.extend((f"## {section}", ""))
         for entry in by_section[section]:
             marker = "x" if entry.checked else " "
@@ -3723,7 +3752,10 @@ def _render_readme_bytes(
                     part for part in (entry.detail, entry.classification) if part
                 ]
             detail = f" — {' — '.join(detail_parts)}" if detail_parts else ""
-            lines.append(f"- [{marker}] [{label}]({link}){detail}")
+            if section == "Archive metadata":
+                lines.append(f"- [{label}]({link}){detail}")
+            else:
+                lines.append(f"- [{marker}] [{label}]({link}){detail}")
         lines.append("")
     lines.append(README_END)
     static_guide = (
@@ -3742,6 +3774,8 @@ def _render_readme_bytes(
     inventory.verify()
     if archive_inventory_out is not None:
         archive_inventory_out.append(inventory.observation(work_items))
+    if archive_inventory_witness_out is not None:
+        archive_inventory_witness_out.append(inventory)
     return rendered
 
 
@@ -3759,7 +3793,9 @@ def observe_readme(root: Path) -> dict:
         snapshot = _capture_file_snapshot(readme, failure_id="WI-README-STALE")
     digests: list[str] = []
     inventories: list[dict] = []
-    expected = _render_readme_bytes(root, input_digest_out=digests, archive_inventory_out=inventories)
+    witnesses: list[ArchiveEntityInventory] = []
+    expected = _render_readme_bytes(root, input_digest_out=digests, archive_inventory_out=inventories,
+                                  archive_inventory_witness_out=witnesses)
     if snapshot is not None:
         _verify_captured_file(snapshot, "WI-README-STALE")
     elif _ledger_location_lexically_exists(readme):
@@ -3767,6 +3803,7 @@ def observe_readme(root: Path) -> dict:
     repeated_digests: list[str] = []
     repeated_inventories: list[dict] = []
     repeated = _render_readme_bytes(root, input_digest_out=repeated_digests, archive_inventory_out=repeated_inventories)
+    witnesses[0].verify()
     if repeated != expected or digests != repeated_digests or inventories != repeated_inventories:
         raise LifecycleError("WI-README-STALE", "README inputs drifted during observation")
     if snapshot is not None:
@@ -12908,8 +12945,11 @@ def _validated_migration_payload_target(
     slug: str,
     payload: Path,
 ) -> tuple[str, Path]:
-    _reject_unbound_archive_selection(_archive_entity_inventory(root), path=payload,
+    inventory = _archive_entity_inventory(root)
+    _reject_unbound_archive_selection(inventory, path=payload,
                                      slug=slug if category.current_kind == "work-item" else None)
+    if any(entity.kind == "archive-metadata" and entity.path == payload for entity in inventory.entities):
+        raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", "archive metadata supplies no category terminal authority")
     if category.name == "work-item":
         closure = payload / "closure.md"
         if not closure.is_file():

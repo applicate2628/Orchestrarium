@@ -327,6 +327,38 @@ def test_goal_equal_readme_with_unbound_archive_is_not_completion(tmp_path: Path
     assert before == {str(path): path.read_bytes() for root in roots.values() for path in root.rglob("*") if path.is_file()}
 
 
+def test_goal_direct_archive_metadata_keeps_real_receiving_and_pending_guards(tmp_path: Path):
+    checker, owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path)
+    for rid, slug in (("A", "a"), ("B", "b"), ("A", "g")):
+        close_member(rid, slug)
+    record = write_goal(terminal=True)
+    assert checker.evaluate_goal_completion(roots["A"], record, phase="final")["decision"] == "eligible"
+    metadata = roots["A"] / "work-items" / "archive" / "2026-10" / "arbitrary-metadata"
+    metadata.write_bytes(b"\xff\x00non-authorizing")
+    record = write_goal(terminal=True)
+    def receive():
+        result = subprocess.run([sys.executable, "-B", str(CHECKER), "--root", str(roots["A"]),
+            "--goal", str(record), "--goal-phase", "final", "--json"], text=True, capture_output=True, timeout=30)
+        return result, json.loads(result.stdout)
+    result, wire = receive()
+    assert result.returncode == 0 and wire["decision"] == "eligible", wire
+    assert owner.observe_readme(roots["A"])["archiveInventory"] == {
+        "schemaVersion": 1, "acquisitionComplete": True, "classificationComplete": True, "unbound": []}
+    goal["criteria"][-1]["state"] = "pending"
+    record = write_goal(terminal=True)
+    result, wire = receive()
+    assert result.returncode == 1 and wire["decision"] != "eligible", wire
+    goal["criteria"][-1]["state"] = "verified"
+    unknown = roots["B"] / "work-items" / "archive" / "2026-07" / "unknown"
+    unknown.mkdir(parents=True)
+    (unknown / "leaf").write_bytes(b"unbound data")
+    record = write_goal(terminal=True)
+    result, wire = receive()
+    assert result.returncode == 1 and wire["decision"] == "unverified", wire
+    assert any(row["code"] == "GC-REFERENCE" for row in wire["causes"])
+    assert metadata.read_bytes() == b"\xff\x00non-authorizing"
+
+
 def test_goal_archive_inventory_missing_and_illtyped_are_not_inferred_clean():
     checker = load_checker_module()
     valid = {"schemaVersion": 1, "acquisitionComplete": True, "classificationComplete": True, "unbound": []}
