@@ -4,12 +4,12 @@
   "files": {
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "8935660ea403ca25aa0f300eaa944a34064530eadec642415f1a2215529838fe",
+      "sha256": "a2a958a0def208d540201ea5dd8d41b82eff4578aa1ea03fecaed25de22fb655",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
       "source": "scripts/process_supervision/process_runner.py",
-      "sha256": "8fc92b79bbbc6f66bff8d5bf6524a8b212f75da3baa6129d9619726f0b04983d",
+      "sha256": "e98202abc5a11a522ee622175412a9ad0f3132548e3f39b92f6805df61585cb8",
       "destination": "scripts/process_supervision/process_runner.py"
     },
     "invoke-codex-prompt.py": {

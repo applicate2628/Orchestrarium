@@ -34,7 +34,9 @@ try:
         ProcessResultV1,
         ProcessRunnerV1,
         ProcessSupervisionError,
+        PreparedNativeWindowsLaunchV1,
         SettlePolicyV1,
+        WindowsParserContractV1,
         resolve_executable_identity,
     )
 except ModuleNotFoundError:
@@ -48,7 +50,9 @@ except ModuleNotFoundError:
         ProcessResultV1,
         ProcessRunnerV1,
         ProcessSupervisionError,
+        PreparedNativeWindowsLaunchV1,
         SettlePolicyV1,
+        WindowsParserContractV1,
         resolve_executable_identity,
     )
 
@@ -97,9 +101,6 @@ RESULT_MAX_BYTES_HARD = 16 * 1024 * 1024
 CAPTURE_MAX_BYTES_DEFAULT = 16 * 1024 * 1024
 CAPTURE_MAX_BYTES_HARD = 256 * 1024 * 1024
 RESULT_PREFIX = "ORCHESTRARIUM_PROVIDER_RESULT_V2="
-E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE = (
-    "E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE"
-)
 EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude", "kimi"})
 POLICY_BOUND_EXTERNAL_PROVIDERS = frozenset({"kimi", "grok"})
 _EXTERNAL_DISPATCH_DECISION_FIELDS = frozenset(
@@ -1692,6 +1693,41 @@ class ProviderAuthConfiguration:
 
 
 @dataclass(frozen=True)
+class ProviderOutputContext:
+    """Resolved ordinary-local output inputs; coverage is never login evidence."""
+
+    needles: tuple[bytes, ...]
+    destination: str = "ordinary-local"
+
+    def __post_init__(self) -> None:
+        if self.destination != "ordinary-local" or type(self.needles) is not tuple:
+            raise ValueError("E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE")
+        for needle in self.needles:
+            if type(needle) is not bytes or not needle or b"\x00" in needle:
+                raise ValueError("E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE")
+            needle.decode("utf-8", errors="strict")
+
+
+def resolve_provider_output_context(
+    auth: ProviderAuthConfiguration, selected_needles: tuple[bytes, ...] = ()
+) -> ProviderOutputContext:
+    if (
+        not isinstance(auth, ProviderAuthConfiguration)
+        or auth.mode not in {*PROVIDER_AUTH_SECRET_ENV_KEYS_V1, "kimi-user-session"}
+        or auth.output_scan_disposition not in {
+            AUTH_OUTPUT_SCAN_ENVIRONMENT_EXACT,
+            AUTH_OUTPUT_SCAN_CREDENTIAL_FILE_UNSCANNABLE,
+            AUTH_OUTPUT_SCAN_OPAQUE_PROVIDER_SESSION,
+        }
+    ):
+        raise ValueError("E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE")
+    # Validate each group before merging: malformed input is not empty coverage.
+    ProviderOutputContext(auth.needles)
+    ProviderOutputContext(selected_needles)
+    return ProviderOutputContext(_merge_credential_needles(auth.needles, selected_needles))
+
+
+@dataclass(frozen=True)
 class ClaudeUserSettingsSurface:
     root: Path
     settings_path: Path
@@ -2021,55 +2057,21 @@ class TerminalReceiptV1:
         import ctypes
         from ctypes import wintypes
 
-        GENERIC_READ = 0x80000000
-        GENERIC_WRITE = 0x40000000
         FILE_READ_ATTRIBUTES = 0x0080
-        SYNCHRONIZE = 0x00100000
         FILE_SHARE_READ = 0x00000001
         FILE_SHARE_WRITE = 0x00000002
         OPEN_EXISTING = 3
-        FILE_ATTRIBUTE_NORMAL = 0x00000080
         FILE_ATTRIBUTE_DIRECTORY = 0x00000010
         FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
         FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
         FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
         HANDLE_FLAG_INHERIT = 0x00000001
         INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-        OBJ_CASE_INSENSITIVE = 0x00000040
-        FILE_OPEN = 1
-        FILE_CREATE = 2
-        FILE_DIRECTORY_FILE = 0x00000001
-        FILE_WRITE_THROUGH = 0x00000002
-        FILE_SYNCHRONOUS_IO_NONALERT = 0x00000020
-        FILE_NON_DIRECTORY_FILE = 0x00000040
-        FILE_OPEN_REPARSE_POINT = 0x00200000
-        STATUS_OBJECT_NAME_COLLISION = ctypes.c_long(0xC0000035).value
 
-        class UNICODE_STRING(ctypes.Structure):
-            _fields_ = [
-                ("Length", wintypes.USHORT),
-                ("MaximumLength", wintypes.USHORT),
-                ("Buffer", wintypes.LPWSTR),
-            ]
 
-        class OBJECT_ATTRIBUTES(ctypes.Structure):
-            _fields_ = [
-                ("Length", wintypes.ULONG),
-                ("RootDirectory", wintypes.HANDLE),
-                ("ObjectName", ctypes.POINTER(UNICODE_STRING)),
-                ("Attributes", wintypes.ULONG),
-                ("SecurityDescriptor", ctypes.c_void_p),
-                ("SecurityQualityOfService", ctypes.c_void_p),
-            ]
 
-        class IO_STATUS_BLOCK(ctypes.Structure):
-            _fields_ = [
-                ("Status", ctypes.c_longlong),
-                ("Information", ctypes.c_size_t),
-            ]
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        ntdll = ctypes.WinDLL("ntdll")
         kernel32.CreateFileW.argtypes = [
             wintypes.LPCWSTR,
             wintypes.DWORD,
@@ -2090,20 +2092,6 @@ class TerminalReceiptV1:
         kernel32.CloseHandle.restype = wintypes.BOOL
         kernel32.LocalFree.argtypes = [ctypes.c_void_p]
         kernel32.LocalFree.restype = ctypes.c_void_p
-        ntdll.NtCreateFile.argtypes = [
-            ctypes.POINTER(wintypes.HANDLE),
-            wintypes.DWORD,
-            ctypes.POINTER(OBJECT_ATTRIBUTES),
-            ctypes.POINTER(IO_STATUS_BLOCK),
-            ctypes.c_void_p,
-            wintypes.ULONG,
-            wintypes.ULONG,
-            wintypes.ULONG,
-            wintypes.ULONG,
-            ctypes.c_void_p,
-            wintypes.ULONG,
-        ]
-        ntdll.NtCreateFile.restype = ctypes.c_long
 
         root = kernel32.CreateFileW(
             path.anchor,
@@ -2117,59 +2105,10 @@ class TerminalReceiptV1:
         if root == INVALID_HANDLE_VALUE:
             raise OSError(ctypes.get_last_error(), "CreateFileW(root)")
         held: list[int] = [int(root)]
+        open_relative = WindowsPrivateObjectOwnerV1.open_relative
         descriptor = None
         leaf = INVALID_HANDLE_VALUE
 
-        def open_relative(
-            parent: int,
-            name: str,
-            *,
-            directory: bool,
-            create: bool,
-            security_descriptor: int | None = None,
-        ) -> int:
-            buffer = ctypes.create_unicode_buffer(name)
-            object_name = UNICODE_STRING(
-                len(name.encode("utf-16-le")),
-                len(name.encode("utf-16-le")) + 2,
-                ctypes.cast(buffer, wintypes.LPWSTR),
-            )
-            attributes = OBJECT_ATTRIBUTES(
-                ctypes.sizeof(OBJECT_ATTRIBUTES),
-                wintypes.HANDLE(parent),
-                ctypes.pointer(object_name),
-                OBJ_CASE_INSENSITIVE,
-                security_descriptor,
-                None,
-            )
-            io_status = IO_STATUS_BLOCK()
-            opened = wintypes.HANDLE()
-            options = FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT | (
-                FILE_DIRECTORY_FILE if directory else FILE_NON_DIRECTORY_FILE | FILE_WRITE_THROUGH
-            )
-            desired = (
-                FILE_READ_ATTRIBUTES | SYNCHRONIZE
-                if directory
-                else GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE
-            )
-            status = ntdll.NtCreateFile(
-                ctypes.byref(opened),
-                desired,
-                ctypes.byref(attributes),
-                ctypes.byref(io_status),
-                None,
-                FILE_ATTRIBUTE_NORMAL,
-                FILE_SHARE_READ | FILE_SHARE_WRITE if directory else 0,
-                FILE_CREATE if create else FILE_OPEN,
-                options,
-                None,
-                0,
-            )
-            if status < 0:
-                if status == STATUS_OBJECT_NAME_COLLISION:
-                    raise FileExistsError(183, "NtCreateFile(receipt)", str(path))
-                raise OSError(f"NtCreateFile status=0x{status & 0xFFFFFFFF:08x}")
-            return int(opened.value)
 
         try:
             root_info = cls._windows_file_information(int(root))
@@ -2198,6 +2137,7 @@ class TerminalReceiptV1:
                 directory=False,
                 create=True,
                 security_descriptor=descriptor,
+                collision_path=path,
             )
             if not kernel32.SetHandleInformation(
                 wintypes.HANDLE(leaf), HANDLE_FLAG_INHERIT, 0
@@ -2684,6 +2624,118 @@ class WindowsPrivateObjectOwnerV1:
                     break
         finally:
             kernel32.FindClose(handle)
+
+    @staticmethod
+    def open_relative(
+        parent: int, name: str, *, directory: bool, create: bool,
+        security_descriptor: int | None = None,
+        read_control: bool = False, collision_path: Path | None = None,
+        missing_is_absent: bool = False,
+    ) -> int:
+        """Shared native operation; namespace/private-object policies stay callers'."""
+        import ctypes
+        from ctypes import wintypes
+        GENERIC_READ = 0x80000000
+        GENERIC_WRITE = 0x40000000
+        FILE_READ_ATTRIBUTES = 0x0080
+        SYNCHRONIZE = 0x00100000
+        FILE_SHARE_READ = 0x00000001
+        FILE_SHARE_WRITE = 0x00000002
+        FILE_ATTRIBUTE_NORMAL = 0x00000080
+        OBJ_CASE_INSENSITIVE = 0x00000040
+        FILE_OPEN = 1
+        FILE_CREATE = 2
+        FILE_DIRECTORY_FILE = 0x00000001
+        FILE_WRITE_THROUGH = 0x00000002
+        FILE_SYNCHRONOUS_IO_NONALERT = 0x00000020
+        FILE_NON_DIRECTORY_FILE = 0x00000040
+        FILE_OPEN_REPARSE_POINT = 0x00200000
+        STATUS_OBJECT_NAME_COLLISION = ctypes.c_long(0xC0000035).value
+
+        class UNICODE_STRING(ctypes.Structure):
+            _fields_ = [
+                ("Length", wintypes.USHORT),
+                ("MaximumLength", wintypes.USHORT),
+                ("Buffer", wintypes.LPWSTR),
+            ]
+        class OBJECT_ATTRIBUTES(ctypes.Structure):
+            _fields_ = [
+                ("Length", wintypes.ULONG),
+                ("RootDirectory", wintypes.HANDLE),
+                ("ObjectName", ctypes.POINTER(UNICODE_STRING)),
+                ("Attributes", wintypes.ULONG),
+                ("SecurityDescriptor", ctypes.c_void_p),
+                ("SecurityQualityOfService", ctypes.c_void_p),
+            ]
+        class IO_STATUS_BLOCK(ctypes.Structure):
+            _fields_ = [
+                ("Status", ctypes.c_longlong),
+                ("Information", ctypes.c_size_t),
+            ]
+
+        ntdll = ctypes.WinDLL("ntdll")
+        ntdll.NtCreateFile.argtypes = [
+            ctypes.POINTER(wintypes.HANDLE),
+            wintypes.DWORD,
+            ctypes.POINTER(OBJECT_ATTRIBUTES),
+            ctypes.POINTER(IO_STATUS_BLOCK),
+            ctypes.c_void_p,
+            wintypes.ULONG,
+            wintypes.ULONG,
+            wintypes.ULONG,
+            wintypes.ULONG,
+            ctypes.c_void_p,
+            wintypes.ULONG,
+        ]
+        ntdll.NtCreateFile.restype = ctypes.c_long
+
+        buffer = ctypes.create_unicode_buffer(name)
+        object_name = UNICODE_STRING(
+            len(name.encode("utf-16-le")),
+            len(name.encode("utf-16-le")) + 2,
+            ctypes.cast(buffer, wintypes.LPWSTR),
+        )
+        attributes = OBJECT_ATTRIBUTES(
+            ctypes.sizeof(OBJECT_ATTRIBUTES),
+            wintypes.HANDLE(parent),
+            ctypes.pointer(object_name),
+            OBJ_CASE_INSENSITIVE,
+            security_descriptor,
+            None,
+        )
+        io_status = IO_STATUS_BLOCK()
+        opened = wintypes.HANDLE()
+        options = FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT | (
+            FILE_DIRECTORY_FILE if directory else FILE_NON_DIRECTORY_FILE | FILE_WRITE_THROUGH
+        )
+        desired = (
+            FILE_READ_ATTRIBUTES | SYNCHRONIZE
+            if directory
+            else GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE
+        )
+        if read_control:
+            desired |= 0x00020000
+        status = ntdll.NtCreateFile(
+            ctypes.byref(opened),
+            desired,
+            ctypes.byref(attributes),
+            ctypes.byref(io_status),
+            None,
+            FILE_ATTRIBUTE_NORMAL,
+            FILE_SHARE_READ | FILE_SHARE_WRITE if directory else 0,
+            FILE_CREATE if create else FILE_OPEN,
+            options,
+            None,
+            0,
+        )
+        if status < 0:
+            if status == STATUS_OBJECT_NAME_COLLISION:
+                raise FileExistsError(183, "NtCreateFile(receipt)", str(collision_path) if collision_path is not None else None)
+            if missing_is_absent and status == ctypes.c_long(0xC0000034).value:
+                raise FileNotFoundError(2, "NtCreateFile status=0xc0000034")
+            raise OSError(f"NtCreateFile status=0x{status & 0xFFFFFFFF:08x}")
+        return int(opened.value)
+
 
 
 def fail(message: str, code: int = 1) -> int:
@@ -3760,7 +3812,7 @@ def _copy_provider_path_control(
 def resolve_provider_auth_configuration(
     provider: str, environment: dict[str, str] | None = None
 ) -> ProviderAuthConfiguration:
-    """Build the complete child auth surface and its exact raw-byte detector."""
+    """Resolve supported auth transport and known injected values, not login/complete coverage."""
 
     source = dict(os.environ if environment is None else environment)
     child = _child_environment_baseline(source)
@@ -3902,18 +3954,254 @@ def validate_no_reparse_components(path: Path) -> None:
             reject_link(current)
 
 
-def secure_output_dir(provider: str) -> Path:
-    if provider == "kimi":
-        root = _kimi_runtime_root() / "runs"
-        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+class _CaptureNamespaceBinding:
+    """Capture-owned namespace applicability and retained native bindings."""
+
+    def __init__(self) -> None:
+        self.root: Path | None = None
+        self.entries: list[tuple[Path, int, object]] = []
+        self.resources: list[int] = []
+        self._uncertain_closes: set[tuple[bool, int]] = set()
+        self._closed_resources: set[tuple[bool, int]] = set()
+        self._close_issues: tuple[str, ...] = ()
+
+    @staticmethod
+    def _posix_authority(metadata: list[os.stat_result], *, final: bool) -> None:
+        effective = os.geteuid()
+        protected = False
+        sticky_parent = False
+        for current in metadata:
+            mode = stat.S_IMODE(current.st_mode)
+            if not stat.S_ISDIR(current.st_mode) or _metadata_is_reparse(current):
+                raise OSError("capture namespace type unavailable")
+            if not protected:
+                if sticky_parent:
+                    if current.st_uid != effective or mode & 0o022:
+                        raise OSError("capture sticky transition is not owner-controlled")
+                    sticky_parent = False
+                elif current.st_uid not in {0, effective}:
+                    raise OSError("capture namespace owner unavailable")
+                elif mode & 0o022:
+                    if current.st_uid == 0 and mode & stat.S_ISVTX:
+                        sticky_parent = True
+                    else:
+                        raise OSError("capture namespace is exposed and writable")
+                if current.st_uid == effective and not mode & 0o033:
+                    protected = True
+        if final and (
+            not metadata or sticky_parent or metadata[-1].st_uid != effective
+            or stat.S_IMODE(metadata[-1].st_mode) & 0o022
+        ):
+            raise OSError("capture root must be owner-controlled")
+
+    @staticmethod
+    def _windows_identity(handle: int) -> tuple[int, int, int]:
+        info = TerminalReceiptV1._windows_file_information(handle)
+        if not info.dwFileAttributes & 0x10 or info.dwFileAttributes & 0x400:
+            raise OSError("capture namespace native type unavailable")
+        return (info.dwVolumeSerialNumber, info.nFileIndexHigh, info.nFileIndexLow)
+
+    @staticmethod
+    def _close_windows(handle: int) -> None:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        if not kernel32.CloseHandle(wintypes.HANDLE(handle)):
+            raise OSError(ctypes.get_last_error(), "capture binding close failed")
+
+    def _close_resource(self, resource: int, *, native: bool) -> None:
+        key = (native, resource)
+        if key in self._closed_resources:
+            return
+        if key in self._uncertain_closes:
+            raise OSError("capture resource close effect unknown")
+        self._uncertain_closes.add(key)
+        if native:
+            self._close_windows(resource)
+        else:
+            os.close(resource)
+        self._closed_resources.add(key)
+        self._uncertain_closes.discard(key)
+
+    def _forget_closed_resource(self, resource: int, *, native: bool) -> None:
+        # Consumers detach the observed-closed reference before acknowledgement.
+        self._closed_resources.discard((native, resource))
+
+    def close(self) -> tuple[str, ...]:
+        issues: list[str] = []
+        interruption: BaseException | None = None
+        for resource in reversed(tuple(self.resources)):
+            native = os.name == "nt"
+            if (native, resource) in self._uncertain_closes:
+                issues.append("capture-binding-close-effect-unknown")
+                continue
+            closed = False
+            try:
+                self._close_resource(resource, native=native)
+                closed = True
+                self.resources.remove(resource)
+                self._forget_closed_resource(resource, native=native)
+            except BaseException as failure:
+                if closed or (native, resource) in self._closed_resources:
+                    issues.append("capture-binding-close-bookkeeping-failed")
+                else:
+                    issues.extend(("capture-binding-close-failed", "capture-binding-close-effect-unknown"))
+                if not isinstance(failure, Exception) and interruption is None:
+                    interruption = failure
+        if self._uncertain_closes:
+            issues.append("capture-binding-close-effect-unknown")
+        if self._closed_resources:
+            issues.append("capture-binding-close-bookkeeping-failed")
+        if not self.resources and not self._uncertain_closes and not self._closed_resources:
+            self.entries.clear()
+        self._close_issues = tuple(issues)
+        if interruption is not None:
+            raise interruption
+        return self._close_issues
+
+    def acquire(self, root: Path) -> None:
+        if self.resources or self.root is not None:
+            raise ValueError("capture namespace already acquired")
+        self.root = root
         validate_no_reparse_components(root)
-        if not root.is_dir():
-            raise ValueError("E_KIMI_RUNTIME_STATE_INVALID")
-        return root
-    env_key = {
-        "codex": "CODEX_PROMPTS_DIR",
-        "claude": "CLAUDE_PROMPTS_DIR",
-    }.get(provider, "PROVIDER_PROMPTS_DIR")
+        if os.name == "nt":
+            self._acquire_windows(root)
+        else:
+            self._acquire_posix(root)
+        self.validate()
+
+    def _acquire_posix(self, root: Path) -> None:
+        required = (os.open, os.stat, os.mkdir, os.rmdir, os.unlink)
+        if (
+            any(operation not in os.supports_dir_fd for operation in required)
+            or not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY")
+        ):
+            raise OSError("capture namespace descriptor capability unavailable")
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        current = Path(root.anchor)
+        anchor = os.open(current, flags)
+        self.resources.append(anchor)
+        self.entries.append((current, anchor, os.fstat(anchor)))
+        self._posix_authority([entry[2] for entry in self.entries], final=False)
+        for name in root.parts[1:]:
+            parent = self.entries[-1][1]
+            self.validate(final=False)
+            try:
+                opened = os.open(name, flags, dir_fd=parent)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(name, 0o700, dir_fd=parent)
+                except FileExistsError:
+                    pass  # A concurrent root ensure is verified by the same open.
+                opened = os.open(name, flags, dir_fd=parent)
+            self.resources.append(opened)
+            current /= name
+            self.entries.append((current, opened, os.fstat(opened)))
+            self._posix_authority([entry[2] for entry in self.entries], final=False)
+
+    def _acquire_windows(self, root: Path) -> None:
+        import ctypes
+        current = Path(root.anchor)
+        opened = WindowsPrivateObjectOwnerV1._open_verified_handle(
+            current, directory=True, share_delete=False
+        )
+        self.resources.append(opened)
+        self.entries.append((current, opened, self._windows_identity(opened)))
+        for name in root.parts[1:]:
+            self.validate(final=False)
+            parent = self.entries[-1][1]
+            try:
+                opened = WindowsPrivateObjectOwnerV1.open_relative(
+                    parent, name, directory=True, create=False, missing_is_absent=True
+                )
+            except FileNotFoundError:
+                descriptor, expected_sddl = WindowsPrivateObjectOwnerV1.current_user_security_descriptor()
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+                try:
+                    try:
+                        opened = WindowsPrivateObjectOwnerV1.open_relative(
+                            parent, name, directory=True, create=True,
+                            security_descriptor=descriptor, read_control=True,
+                        )
+                    except FileExistsError:
+                        opened = WindowsPrivateObjectOwnerV1.open_relative(
+                            parent, name, directory=True, create=False
+                        )
+                    else:
+                        self.resources.append(opened)
+                        WindowsPrivateObjectOwnerV1.verify_handle_dacl(opened, expected_sddl)
+                        opened = None
+                finally:
+                    kernel32.LocalFree(descriptor)
+                if opened is None:
+                    opened = self.resources[-1]
+                else:
+                    self.resources.append(opened)
+            else:
+                self.resources.append(opened)
+            current /= name
+            self.entries.append((current, opened, self._windows_identity(opened)))
+
+    @property
+    def root_resource(self) -> int:
+        if not self.entries or self.root is None or self.entries[-1][0] != self.root:
+            raise OSError("capture root binding unavailable")
+        return self.entries[-1][1]
+
+    def validate(self, *, final: bool = True) -> None:
+        if self._uncertain_closes or self._closed_resources:
+            raise OSError("capture namespace close incomplete")
+        if not self.entries:
+            raise OSError("capture namespace binding unavailable")
+        metadata: list[os.stat_result] = []
+        for index, (path, resource, identity) in enumerate(self.entries):
+            if os.name == "nt":
+                current = WindowsPrivateObjectOwnerV1._open_verified_handle(
+                    path, directory=True, share_delete=False
+                )
+                self.resources.append(current)
+                primary: BaseException | None = None
+                try:
+                    if self._windows_identity(current) != identity or self._windows_identity(resource) != identity:
+                        raise OSError("capture root identity changed")
+                except BaseException as failure:
+                    primary = failure
+                    raise
+                finally:
+                    try:
+                        self._close_resource(current, native=True)
+                        self.resources.remove(current)
+                        self._forget_closed_resource(current, native=True)
+                    except BaseException:
+                        if primary is None:
+                            raise
+                        primary.add_note("capture binding close incomplete")
+            else:
+                held = os.fstat(resource)
+                current = (
+                    os.stat(path.name, dir_fd=self.entries[index - 1][1], follow_symlinks=False)
+                    if index else os.stat(path, follow_symlinks=False)
+                )
+                if (
+                    (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino)
+                    or (held.st_dev, held.st_ino) != (identity.st_dev, identity.st_ino)
+                ):
+                    raise OSError("capture root identity changed")
+                metadata.append(current)
+        if os.name != "nt":
+            self._posix_authority(metadata, final=final)
+
+
+def _capture_output_path(provider: str) -> Path:
+    """Resolve existing capture selection once; no directory/resource effects."""
+    if provider == "kimi":
+        return _kimi_runtime_root() / "runs"
+    env_key = {"codex": "CODEX_PROMPTS_DIR", "claude": "CLAUDE_PROMPTS_DIR"}.get(
+        provider, "PROVIDER_PROMPTS_DIR"
+    )
     configured = os.environ.get(env_key)
     if configured:
         output = Path(configured).expanduser()
@@ -3921,22 +4209,28 @@ def secure_output_dir(provider: str) -> Path:
             raise ValueError(f"{env_key} must name an absolute owner-controlled directory")
     else:
         output = Path.cwd() / ".scratch" / f"{provider}-prompts"
-    output = Path(os.path.abspath(output))
-    validate_no_reparse_components(output)
-    output.mkdir(mode=0o700, parents=True, exist_ok=True)
-    validate_no_reparse_components(output)
-    if not output.is_dir():
-        raise ValueError(f"capture root '{output}' is not a directory")
-    if configured and sys.platform != "win32":
-        metadata = output.lstat()
-        if (
-            metadata.st_uid != os.geteuid()
-            or stat.S_IMODE(metadata.st_mode) & (stat.S_IWGRP | stat.S_IWOTH)
-        ):
-            raise ValueError(
-                f"{env_key} configured capture root must be owner-controlled"
-            )
-    return output
+    return Path(os.path.abspath(output))
+
+
+def secure_output_dir(provider: str) -> Path:
+    """Legacy ensured-path API, consuming the same capture namespace actions."""
+    binding = _CaptureNamespaceBinding()
+    try:
+        binding.acquire(_capture_output_path(provider))
+        return binding.root
+    finally:
+        primary = sys.exception()
+        try:
+            issues = binding.close()
+        except BaseException:
+            if primary is None:
+                raise
+            primary.add_note("capture namespace close incomplete")
+        else:
+            if issues:
+                if primary is None:
+                    raise OSError("capture namespace close incomplete")
+                primary.add_note("capture namespace close incomplete")
 
 
 def _bounded_strict_utf8_snapshot(data: bytes, label: str) -> bytes:
@@ -4093,89 +4387,294 @@ def prompt_bytes(control: Control, *, external: bool = False) -> bytes:
 
 @dataclass
 class RunCaptureLifecycle:
-    root: Path
-    run_dir: Path
-    device: int
-    inode: int
-    prompt_path: Path
+    root: Path | None = None
+    run_dir: Path | None = None
+    device: int | None = None
+    inode: int | None = None
+    prompt_path: Path | None = None
+    _namespace: _CaptureNamespaceBinding | None = field(default=None, init=False)
+    _child_resource: int | None = field(default=None, init=False)
+    _child_created: bool = field(default=False, init=False)
+    _prompt_resource: int | None = field(default=None, init=False)
+    _prompt_native_resource: int | None = field(default=None, init=False)
+    _prompt_conversion_attempted: bool = field(default=False, init=False)
+    _prompt_identity: tuple[int, int] | None = field(default=None, init=False)
+    _settled: CleanupResult | None = field(default=None, init=False)
+    _close_issues: tuple[str, ...] = field(default=(), init=False)
 
     @staticmethod
     def release_provisional(run_dir: Path) -> CleanupResult:
-        """Release only an empty not-yet-owned directory; never recurse here."""
+        """Only empty directories with no transferred binding use this API."""
         try:
             os.rmdir(run_dir)
             return CleanupResult(())
         except FileNotFoundError:
             return CleanupResult(())
         except OSError as exc:
-            return CleanupResult((str(exc),), recovery_retained=True)
+            return CleanupResult((type(exc).__name__,), recovery_retained=True)
 
     @classmethod
     def create(cls, provider: str, slug: str) -> "RunCaptureLifecycle":
-        root = secure_output_dir(provider)
-        configured_root = provider != "kimi" and bool(
-            os.environ.get(
-                {"codex": "CODEX_PROMPTS_DIR", "claude": "CLAUDE_PROMPTS_DIR"}.get(
-                    provider, "PROVIDER_PROMPTS_DIR"
-                )
-            )
-        )
-        root_before = root.lstat() if configured_root else None
-        run_dir = Path(tempfile.mkdtemp(prefix=f"{slug}-", dir=root))
+        lifecycle = cls()
         try:
-            if configured_root:
-                root_after = root.lstat()
-                if (root_after.st_dev, root_after.st_ino) != (
-                    root_before.st_dev,
-                    root_before.st_ino,
-                ):
-                    raise OSError("configured capture root identity changed")
-            metadata = run_dir.lstat()
-            if not stat.S_ISDIR(metadata.st_mode) or run_dir.parent != root:
-                raise OSError("private capture directory creation escaped the configured root")
-            run_dir.chmod(0o700)
-            lifecycle = cls(
-                root=root,
-                run_dir=run_dir,
-                device=metadata.st_dev,
-                inode=metadata.st_ino,
-                prompt_path=run_dir / "prompt.md",
+            lifecycle._acquire(provider, slug)
+            return lifecycle
+        except BaseException as primary:
+            try:
+                cleanup = lifecycle._release_owned()
+            except BaseException:
+                primary.add_note("capture setup cleanup incomplete")
+            else:
+                if not cleanup.clean:
+                    primary.add_note("capture setup cleanup incomplete")
+            raise
+
+    def _acquire(self, provider: str, slug: str) -> None:
+        if self._namespace is not None:
+            raise ValueError("capture lifecycle already acquired")
+        self._namespace = _CaptureNamespaceBinding()
+        self.root = _capture_output_path(provider)
+        self._namespace.acquire(self.root)
+        name = f"{slug}-{secrets.token_hex(16)}"
+        if Path(name).name != name or any(value in name for value in ("/", "\\", "\0")):
+            raise ValueError("capture child must be one ordinary component")
+        self.run_dir = self.root / name
+        self.prompt_path = self.run_dir / "prompt.md"
+        self._namespace.validate()
+        if os.name == "nt":
+            import ctypes
+            descriptor, expected_sddl = WindowsPrivateObjectOwnerV1.current_user_security_descriptor()
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+            try:
+                self._child_resource = WindowsPrivateObjectOwnerV1.open_relative(
+                    self._namespace.root_resource, name, directory=True, create=True,
+                    security_descriptor=descriptor, read_control=True,
+                )
+                self._child_created = True
+                WindowsPrivateObjectOwnerV1.verify_handle_dacl(self._child_resource, expected_sddl)
+            finally:
+                kernel32.LocalFree(descriptor)
+        else:
+            os.mkdir(name, 0o700, dir_fd=self._namespace.root_resource)
+            self._child_created = True
+            self._child_resource = os.open(
+                name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=self._namespace.root_resource,
             )
-            lifecycle._validate_identity()
-        except (OSError, ValueError) as exc:
-            cleanup = cls.release_provisional(run_dir)
-            recovery = "; secure recovery evidence retained" if not cleanup.clean else ""
-            raise OSError(f"private capture directory hardening failed: {exc}{recovery}") from exc
-        return lifecycle
+        metadata = self.run_dir.lstat()
+        self.device, self.inode = metadata.st_dev, metadata.st_ino
+        self._validate_identity()
 
     def _validate_child(self, path: Path) -> None:
-        if path.parent != self.run_dir or path != self.prompt_path:
+        if self.run_dir is None or path.parent != self.run_dir or path != self.prompt_path:
             raise ValueError("capture path is outside the fixed private run directory")
 
-    def _validate_identity(self) -> None:
-        validate_no_reparse_components(self.root)
+    def _validate_identity(self, *, child_bound: bool = True) -> None:
+        if self._namespace is None or self.run_dir is None or self.device is None or self.inode is None:
+            raise OSError("capture lifecycle binding unavailable")
+        self._namespace.validate()
         if self.run_dir.parent != self.root:
             raise OSError("capture directory parent changed")
         reject_link(self.run_dir)
-        metadata = self.run_dir.lstat()
+        metadata = (
+            self.run_dir.lstat() if os.name == "nt" else os.stat(
+                self.run_dir.name, dir_fd=self._namespace.root_resource, follow_symlinks=False
+            )
+        )
         if (
             not stat.S_ISDIR(metadata.st_mode)
-            or metadata.st_dev != self.device
-            or metadata.st_ino != self.inode
+            or (metadata.st_dev, metadata.st_ino) != (self.device, self.inode)
         ):
             raise OSError("capture directory ownership changed")
+        if child_bound:
+            if self._child_resource is None:
+                raise OSError("capture child binding unavailable")
+            if os.name == "nt":
+                _CaptureNamespaceBinding._windows_identity(self._child_resource)
+            else:
+                held = os.fstat(self._child_resource)
+                if (held.st_dev, held.st_ino) != (self.device, self.inode):
+                    raise OSError("capture child binding identity changed")
+                if held.st_uid != os.geteuid() or stat.S_IMODE(held.st_mode) & 0o077:
+                    raise OSError("capture child privacy unavailable")
+
+    def _close_prompt(self) -> None:
+        if self._prompt_resource is not None:
+            self._prompt_native_resource = None  # A stored FD is the sole owner.
+            if self._namespace is None:
+                raise OSError("capture prompt close binding unavailable")
+            resource = self._prompt_resource
+            self._namespace._close_resource(resource, native=False)
+            self._prompt_resource = None
+            self._namespace._forget_closed_resource(resource, native=False)
+        elif self._prompt_native_resource is not None:
+            if self._prompt_conversion_attempted:
+                raise OSError("capture prompt transfer effect unknown")
+            if self._namespace is None:
+                raise OSError("capture prompt close binding unavailable")
+            resource = self._prompt_native_resource
+            self._namespace._close_resource(resource, native=True)
+            self._prompt_native_resource = None
+            self._namespace._forget_closed_resource(resource, native=True)
+
+    def _close_child(self) -> None:
+        if self._child_resource is not None:
+            if self._namespace is None:
+                raise OSError("capture child close binding unavailable")
+            resource = self._child_resource
+            native = os.name == "nt"
+            self._namespace._close_resource(resource, native=native)
+            self._child_resource = None
+            self._namespace._forget_closed_resource(resource, native=native)
+
+    def _close_bindings(self) -> tuple[str, ...]:
+        issues: list[str] = []
+        interruption: BaseException | None = None
+        for close in (self._close_prompt, self._close_child):
+            try:
+                close()
+            except BaseException as failure:
+                issues.append("capture-resource-close-failed")
+                if not isinstance(failure, Exception) and interruption is None:
+                    interruption = failure
+        if self._namespace is not None:
+            try:
+                issues.extend(self._namespace.close())
+            except BaseException as failure:
+                issues.append("capture-binding-close-failed")
+                issues.extend(self._namespace._close_issues)
+                if not isinstance(failure, Exception) and interruption is None:
+                    interruption = failure
+            if self._namespace._uncertain_closes:
+                issues.append("capture-resource-close-effect-unknown")
+            if self._namespace._closed_resources:
+                issues.append("capture-resource-close-bookkeeping-failed")
+        if self._prompt_native_resource is not None and self._prompt_conversion_attempted and self._prompt_resource is None:
+            issues.append("capture-prompt-transfer-effect-unknown")
+        self._close_issues = tuple(issues)
+        if interruption is not None:
+            raise interruption
+        return self._close_issues
+
+    def _has_unresolved_resources(self) -> bool:
+        return bool(
+            self._prompt_resource is not None or self._prompt_native_resource is not None
+            or self._child_resource is not None
+            or self._namespace is not None and (
+                self._namespace.resources or self._namespace._uncertain_closes
+                or self._namespace._closed_resources
+            )
+        )
 
     def write_new(self, path: Path, data: bytes) -> None:
         self._validate_identity()
         self._validate_child(path)
-        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
+        primary: BaseException | None = None
+        try:
+            if os.name == "nt":
+                import ctypes
+                import msvcrt
+                descriptor, expected_sddl = WindowsPrivateObjectOwnerV1.current_user_security_descriptor()
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+                try:
+                    self._prompt_native_resource = WindowsPrivateObjectOwnerV1.open_relative(
+                        self._child_resource, path.name, directory=False, create=True,
+                        security_descriptor=descriptor,
+                    )
+                    born = path.lstat()
+                    self._prompt_identity = (born.st_dev, born.st_ino)
+                    if not stat.S_ISREG(born.st_mode) or _metadata_is_reparse(born):
+                        raise OSError("capture prompt type unavailable")
+                    WindowsPrivateObjectOwnerV1.verify_handle_dacl(self._prompt_native_resource, expected_sddl)
+                    self._prompt_conversion_attempted = True
+                    self._prompt_resource = msvcrt.open_osfhandle(
+                        self._prompt_native_resource, os.O_WRONLY | os.O_BINARY
+                    )
+                finally:
+                    kernel32.LocalFree(descriptor)
+            else:
+                self._prompt_resource = os.open(
+                    path.name, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                    0o600, dir_fd=self._child_resource,
+                )
+            metadata = os.fstat(self._prompt_resource)
+            identity = (metadata.st_dev, metadata.st_ino)
+            if self._prompt_identity is not None and self._prompt_identity != identity:
+                raise OSError("capture prompt birth identity changed")
+            self._prompt_identity = identity
+            if not stat.S_ISREG(metadata.st_mode):
+                raise OSError("capture prompt type unavailable")
+            if os.name != "nt" and (
+                metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) & 0o077
+            ):
+                raise OSError("capture prompt privacy unavailable")
+            offset = 0
+            while offset < len(data):
+                count = os.write(self._prompt_resource, data[offset:])
+                if count <= 0:
+                    raise OSError("capture prompt write incomplete")
+                offset += count
+            os.fsync(self._prompt_resource)
+        except BaseException as failure:
+            primary = failure
+            raise
+        finally:
+            try:
+                self._close_prompt()
+            except BaseException:
+                if primary is None:
+                    raise
+                primary.add_note("capture prompt close incomplete")
 
     def initialize(self, prompt: bytes) -> None:
         self.write_new(self.prompt_path, prompt)
+
+    def _release_owned(self) -> CleanupResult:
+        if self._settled is not None:
+            return self._settled
+        issues: list[str] = []
+        retained = False
+        interruption: BaseException | None = None
+        try:
+            if self._child_created:
+                if self.device is None or self.inode is None:
+                    self._namespace.validate()
+                    metadata = self.run_dir.lstat()
+                    if not stat.S_ISDIR(metadata.st_mode) or _metadata_is_reparse(metadata):
+                        raise OSError("capture provisional identity unavailable")
+                    self.device, self.inode = metadata.st_dev, metadata.st_ino
+                self._validate_identity(child_bound=self._child_resource is not None)
+                self._close_prompt()
+                if self._prompt_identity is not None:
+                    payload = self.prompt_path.lstat()
+                    if (payload.st_dev, payload.st_ino) != self._prompt_identity:
+                        raise OSError("capture partial prompt identity changed")
+                    self._scrub_regular_payload(self.prompt_path, payload)
+                    self._unlink_regular_payload(self.prompt_path, payload)
+                self._close_child()
+                if os.name == "nt":
+                    os.rmdir(self.run_dir)
+                else:
+                    os.rmdir(self.run_dir.name, dir_fd=self._namespace.root_resource)
+                self._child_created = False
+        except BaseException as failure:
+            issues.extend(("capture-provisional-release-failed", "cleanup-retention-unknown"))
+            retained = self._child_created
+            if not isinstance(failure, Exception):
+                interruption = failure
+        finally:
+            try:
+                issues.extend(self._close_bindings())
+            except BaseException as failure:
+                issues.extend(self._close_issues)
+                if not isinstance(failure, Exception) and interruption is None:
+                    interruption = failure
+        self._settled = _bounded_cleanup_result(issues, recovery_retained=retained)
+        if interruption is not None:
+            raise interruption
+        return self._settled
 
     @staticmethod
     def _scan_no_reparse(root: Path) -> None:
@@ -4195,6 +4694,7 @@ class RunCaptureLifecycle:
                     if stat.S_ISDIR(metadata.st_mode):
                         pending.append(entry_path)
 
+
     @classmethod
     def _purge_tombstone(cls, root: Path) -> None:
         """Delete capture content without following a reparse point."""
@@ -4209,6 +4709,7 @@ class RunCaptureLifecycle:
             else:
                 os.unlink(path)
         os.rmdir(root)
+
 
     @staticmethod
     def _scrub_regular_payload(path: Path, expected: os.stat_result) -> None:
@@ -4233,6 +4734,7 @@ class RunCaptureLifecycle:
         finally:
             os.close(descriptor)
 
+
     @classmethod
     def _scrub_tombstone(cls, root: Path) -> tuple[str, ...]:
         """Best-effort all-file scrub; continue after every per-file failure."""
@@ -4241,7 +4743,7 @@ class RunCaptureLifecycle:
         for entry in list(os.scandir(root)):
             path = Path(entry.path)
             try:
-                metadata = entry.stat(follow_symlinks=False)
+                metadata = path.lstat()
                 if stat.S_ISLNK(metadata.st_mode) or _metadata_is_reparse(metadata):
                     raise OSError("capture scrub encountered link")
                 if stat.S_ISDIR(metadata.st_mode):
@@ -4253,6 +4755,7 @@ class RunCaptureLifecycle:
             except OSError as exc:
                 issues.append(type(exc).__name__)
         return tuple(issues)
+
 
     @staticmethod
     def _unlink_regular_payload(path: Path, expected: os.stat_result) -> None:
@@ -4267,6 +4770,7 @@ class RunCaptureLifecycle:
             os.close(descriptor)
         os.unlink(path)
 
+
     @classmethod
     def _unlink_owned_payloads(cls, root: Path) -> tuple[str, ...]:
         """Attempt every owned payload unlink even when a sibling operation fails."""
@@ -4275,7 +4779,7 @@ class RunCaptureLifecycle:
         for entry in list(os.scandir(root)):
             path = Path(entry.path)
             try:
-                metadata = entry.stat(follow_symlinks=False)
+                metadata = path.lstat()
                 if stat.S_ISLNK(metadata.st_mode) or _metadata_is_reparse(metadata):
                     os.unlink(path)
                 elif stat.S_ISDIR(metadata.st_mode):
@@ -4292,7 +4796,11 @@ class RunCaptureLifecycle:
                 issues.append("unlink")
         return tuple(issues)
 
+
     def _write_redacted_recovery(self, issue: str) -> None:
+        if self._namespace is None:
+            raise OSError("capture recovery binding unavailable")
+        self._namespace.validate()
         recovery = self.root / f".capture-recovery-{secrets.token_hex(16)}"
         os.mkdir(recovery, 0o700)
         record = json.dumps(
@@ -4305,11 +4813,15 @@ class RunCaptureLifecycle:
             stream.flush()
             os.fsync(stream.fileno())
 
-    def cleanup(self) -> CleanupResult:
+
+    def _cleanup_initialized(self) -> CleanupResult:
         tombstone: Path | None = None
         primary_issue = "cleanup-failed"
         try:
             self._validate_identity()
+            self._close_prompt()
+            self._close_child()
+            self._validate_identity(child_bound=False)
             tombstone = self.root / f".capture-tombstone-{secrets.token_hex(16)}"
             if os.path.lexists(tombstone):
                 raise OSError("random capture tombstone collision")
@@ -4376,12 +4888,60 @@ class RunCaptureLifecycle:
                             ),
                             recovery_retained=os.path.lexists(tombstone),
                         )
+            if tombstone is None and self._child_created:
+                try:
+                    self._validate_identity(child_bound=self._child_resource is not None)
+                except (OSError, ValueError):
+                    return _bounded_cleanup_result(
+                        (primary_issue, "cleanup-retention-unknown"),
+                        recovery_retained=False,
+                    )
+                try:
+                    scrub_issues = self._scrub_tombstone(self.run_dir)
+                except (OSError, ValueError):
+                    scrub_issues = ("scrub-enumeration-failed",)
+                # The proved original directory remains when pre-rename closure
+                # failed; retain truth and scrub through the existing owner.
+                return _bounded_cleanup_result(
+                    (primary_issue, *scrub_issues), recovery_retained=True
+                )
             # A failed purge leaves the tombstone quarantined and is never a
             # clean outcome. Its raw contents are never serialized as recovery.
             return _bounded_cleanup_result(
                 (primary_issue,),
                 recovery_retained=bool(tombstone and os.path.lexists(tombstone)),
             )
+
+
+    def cleanup(self) -> CleanupResult:
+        if self._settled is not None:
+            return self._settled
+        result = None
+        primary: BaseException | None = None
+        try:
+            result = self._cleanup_initialized()
+        except BaseException as failure:
+            primary = failure
+            result = _bounded_cleanup_result(
+                ("cleanup-owner-failed", "cleanup-retention-unknown"),
+                recovery_retained=self._child_created,
+            )
+        finally:
+            try:
+                close_issues = self._close_bindings()
+            except BaseException as failure:
+                close_issues = self._close_issues
+                if primary is None:
+                    primary = failure
+                else:
+                    primary.add_note("capture resource close incomplete")
+            self._settled = _bounded_cleanup_result(
+                (*result.issues, *close_issues),
+                recovery_retained=result.recovery_retained,
+            )
+        if primary is not None:
+            raise primary
+        return self._settled
 
 
 @dataclass
@@ -4394,6 +4954,29 @@ class ReservedExternalRunV1:
     finalized: bool = False
     _cleanup_result: CleanupResult | None = None
     _auxiliary_cleanup: list[object] = field(default_factory=list)
+    _output_context: ProviderOutputContext | None = field(default=None, init=False)
+    _attempted: bool | None = field(default=None, init=False)
+    _pending_capture: RunCaptureLifecycle | None = field(default=None, init=False)
+
+    def acquire_capture(self, provider: str, slug: str) -> RunCaptureLifecycle:
+        if self.state != "absent" or self.lifecycle is not None or self._pending_capture is not None:
+            raise ValueError("E_EXTERNAL_RESERVED_RUN_LIFECYCLE_ALREADY_OWNED")
+        lifecycle = RunCaptureLifecycle()
+        self._pending_capture = lifecycle  # Register before selection or any syscall.
+        try:
+            lifecycle._acquire(provider, slug)
+            self.adopt_lifecycle(lifecycle)
+            self._pending_capture = None  # Promotion association/state are complete.
+            return lifecycle
+        except BaseException as primary:
+            try:
+                cleanup = self.cleanup_once()
+            except BaseException:
+                primary.add_note("capture interruption cleanup incomplete")
+            else:
+                if not cleanup.clean:
+                    primary.add_note("capture interruption cleanup incomplete")
+            raise
 
     def adopt_lifecycle(self, lifecycle: RunCaptureLifecycle) -> None:
         if self.state != "absent" or self.lifecycle is not None:
@@ -4414,40 +4997,56 @@ class ReservedExternalRunV1:
     def cleanup_once(self) -> CleanupResult:
         if self._cleanup_result is not None:
             return self._cleanup_result
-        auxiliary_issues: list[str] = []
+        issues: list[str] = []
+        retained = False
+        interruption: BaseException | None = None
         for cleanup in reversed(self._auxiliary_cleanup):
             try:
                 cleanup()
-            except Exception:
-                auxiliary_issues.append("auxiliary-cleanup-failed")
+            except BaseException as exc:
+                issues.append("auxiliary-cleanup-failed")
+                if not isinstance(exc, Exception) and interruption is None:
+                    interruption = exc
         self._auxiliary_cleanup.clear()
-        try:
-            if self.state == "absent":
-                result = CleanupResult(())
-            elif self.state == "provisional" and self.lifecycle is not None:
-                result = RunCaptureLifecycle.release_provisional(
-                    self.lifecycle.run_dir
+        owners: list[RunCaptureLifecycle] = []
+        for lifecycle in (self._pending_capture, self.lifecycle):
+            if lifecycle is not None and all(lifecycle is not known for known in owners):
+                owners.append(lifecycle)
+        if len(owners) > 1:
+            issues.append("cleanup-state-invalid")
+        for lifecycle in owners:
+            try:
+                result = (
+                    lifecycle.cleanup()
+                    if lifecycle is self.lifecycle and self.state == "initialized"
+                    else lifecycle._release_owned()
                 )
-            elif self.state == "initialized" and self.lifecycle is not None:
-                result = self.lifecycle.cleanup()
-            else:
-                result = _bounded_cleanup_result(
-                    ("cleanup-state-invalid", "cleanup-retention-unknown"),
-                    recovery_retained=False,
-                )
-        except Exception:
-            result = _bounded_cleanup_result(
-                ("cleanup-owner-failed", "cleanup-retention-unknown"),
-                recovery_retained=False,
-            )
-        if auxiliary_issues:
-            result = _bounded_cleanup_result(
-                (*auxiliary_issues, *result.issues),
-                recovery_retained=result.recovery_retained,
-            )
-        self._cleanup_result = result
+                issues.extend(result.issues)
+                retained = retained or result.recovery_retained
+            except BaseException as exc:
+                issues.extend(("cleanup-owner-failed", "cleanup-retention-unknown"))
+                if lifecycle._settled is not None:
+                    issues.extend(lifecycle._settled.issues)
+                    retained = retained or lifecycle._settled.recovery_retained
+                else:
+                    try:
+                        issues.extend(lifecycle._close_bindings())
+                    except BaseException as close_failure:
+                        issues.extend(lifecycle._close_issues)
+                        if not isinstance(close_failure, Exception) and interruption is None and isinstance(exc, Exception):
+                            interruption = close_failure
+                    retained = retained or lifecycle._child_created
+                if not isinstance(exc, Exception) and interruption is None:
+                    interruption = exc
+        if not owners and self.state not in {"absent", "cleaned"}:
+            issues.extend(("cleanup-state-invalid", "cleanup-retention-unknown"))
+        self._cleanup_result = _bounded_cleanup_result(issues, recovery_retained=retained)
+        if self._pending_capture is not None and not self._pending_capture._has_unresolved_resources():
+            self._pending_capture = None
         self.state = "cleaned"
-        return result
+        if interruption is not None:
+            raise interruption
+        return self._cleanup_result
 
     def mark_finalized(self) -> None:
         if self.finalized:
@@ -4460,9 +5059,25 @@ class ReservedExternalRunV1:
         return self
 
     def __exit__(self, _type, _value, _traceback) -> None:
-        if not self.finalized:
-            self.cleanup_once()
-        self.receipt.close()
+        primary = _value
+        try:
+            if not self.finalized:
+                self.cleanup_once()
+        except BaseException as failure:
+            if primary is None:
+                primary = failure
+            else:
+                primary.add_note("reserved run cleanup incomplete")
+        finally:
+            try:
+                self.receipt.close()
+            except BaseException as failure:
+                if primary is None:
+                    primary = failure
+                else:
+                    primary.add_note("terminal receipt close incomplete")
+        if _value is None and primary is not None:
+            raise primary
 
 
 def _bounded_cleanup_result(
@@ -4827,6 +5442,7 @@ def run_provider_process(
     *,
     expected_executable_binding: ExecutableBindingV1 | None = None,
     dialogue: ProcessDialogueV1 | None = None,
+    prepared_native_launch: PreparedNativeWindowsLaunchV1 | None = None,
 ) -> tuple[ProcessResultV1, bytes, bytes]:
     """Run one provider through the sole process/tree/I-O lifecycle owner."""
 
@@ -4842,20 +5458,31 @@ def run_provider_process(
             EnvironmentRowV1(name, value) for name, value in child_environment.items()
         ),
         stdin_bytes=body,
-        deadline_monotonic=time.monotonic() + control.timeout_secs,
+        deadline_monotonic=(
+            prepared_native_launch.deadline_monotonic
+            if prepared_native_launch is not None else time.monotonic() + control.timeout_secs
+        ),
         capture_policy=provider_capture_policy(control.capture_max_bytes),
         capture_sink_binding=sink,
         settle_policy=SettlePolicyV1(5.0),
-        windows_argv_profile_id=provider_windows_argv_profile_id(
-            provider or "python-support", executable
+        windows_argv_profile_id=(
+            "native-parser-contract-v1" if prepared_native_launch is not None
+            else provider_windows_argv_profile_id(provider or "python-support", executable)
         ),
         expected_executable_binding=expected_executable_binding,
+        windows_parser_contract=(
+            prepared_native_launch.parser_contract
+            if prepared_native_launch is not None else None
+        ),
     )
-    result = (
-        runner.run(request, dialogue=dialogue)
-        if dialogue is not None
-        else runner.run(request)
-    )
+    if prepared_native_launch is not None:
+        result = runner.run(
+            request, dialogue=dialogue, prepared_native_launch=prepared_native_launch
+        )
+    elif dialogue is not None:
+        result = runner.run(request, dialogue=dialogue)
+    else:
+        result = runner.run(request)
     return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
 
 
@@ -4899,6 +5526,216 @@ def empty_provider_stream_result() -> StreamCaptureResult:
     return StreamCaptureResult(False, 0, 0, digest, ())
 
 
+_OUTPUT_CREDENTIAL_LABEL = r"(?:api[_-]?key|token|secret|password)"
+_OUTPUT_JSON_STRING = re.compile(r'"(?:\\.|[^"\\])*"')
+_OUTPUT_LABEL_VALUE = re.compile(
+    r'(?P<quoted>' + _OUTPUT_JSON_STRING.pattern + r')[ \t\r\n]*:[ \t\r\n]*'
+    r"|(?<![\w-])(?P<bare>" + _OUTPUT_CREDENTIAL_LABEL + r")[ \t]*[:=][ \t]*",
+    re.IGNORECASE,
+)
+_OUTPUT_AUTHORIZATION = re.compile(
+    r"(?<![\w-])Authorization\s*:\s*Bearer\s+([^\s,;]+)", re.IGNORECASE
+)
+_OUTPUT_TEMPLATE = re.compile(r"(?:<[^<>]*>|\$\{[^{}]+\}|%[^%]+%)")
+_OUTPUT_DRIVE_PATH = re.compile(r"""(?<![\w:/\\])[A-Za-z]:[/\\][^\s"'\x60,;]*""")
+
+
+def _output_value_is_concrete(value: object) -> bool:
+    if value is None or value == "" or value == [] or value == {}:
+        return False
+    if isinstance(value, str) and not value.strip():
+        return False
+    return not (
+        isinstance(value, str) and _OUTPUT_TEMPLATE.fullmatch(value.strip())
+    )
+
+
+def _output_credential_class_echo(
+    text: str, *, protocol_tokens: dict[int, str] | None = None
+) -> bool:
+    decoder = json.JSONDecoder()
+    literals = list(_OUTPUT_JSON_STRING.finditer(text))
+    visited_literals: set[int] = set()
+    literal_index = 0
+    previous_position = -1
+
+    def literal_outcome(position: int) -> bool | None:
+        nonlocal literal_index, previous_position
+        if position < previous_position:
+            literal_index = 0
+        previous_position = position
+        while literal_index < len(literals) and literals[literal_index].end() <= position:
+            literal_index += 1
+        if literal_index == len(literals):
+            return None
+        literal = literals[literal_index]
+        if not literal.start() < position < literal.end():
+            return None
+        if literal.start() in visited_literals:
+            return False
+        visited_literals.add(literal.start())
+        # Real serializer string boundaries, interpreted by the existing
+        # JSON decoder; no guessed escaping or dynamic-string exemption.
+        value = decoder.raw_decode(literal.group())[0]
+        return _output_credential_class_echo(value)
+
+    for match in _OUTPUT_AUTHORIZATION.finditer(text):
+        interpreted = literal_outcome(match.start())
+        if interpreted is not None:
+            if interpreted:
+                return True
+            continue
+        if _output_value_is_concrete(match.group(1)):
+            return True
+    for match in _OUTPUT_LABEL_VALUE.finditer(text):
+        interpreted = literal_outcome(match.start())
+        if interpreted is not None:
+            if interpreted:
+                return True
+            continue
+        label = (
+            json.loads(match.group("quoted"))
+            if match.group("quoted") is not None
+            else match.group("bare")
+        )
+        credential = re.fullmatch(_OUTPUT_CREDENTIAL_LABEL, label, re.IGNORECASE)
+        authorization = label.casefold() == "authorization"
+        if not credential and not authorization:
+            continue
+        quoted = match.group("quoted") is not None
+        rest = text[match.end():]
+        if not quoted:
+            lines = rest.splitlines()
+            rest = lines[0].strip(" \t") if lines else ""
+        if not quoted and not rest.strip():
+            continue
+        if quoted or rest.lstrip().startswith(('"', "{", "[")):
+            value, _end = decoder.raw_decode(rest.lstrip(" \t\r\n"))
+        else:
+            value = rest.split()[0].rstrip(",;")
+            if value.casefold() == "null":
+                value = None
+        if (
+            credential and label == "token" and protocol_tokens is not None
+            and protocol_tokens.get(match.start()) == value
+        ):
+            # Visit the actual value, interpreting only validated owner control slots.
+            continue
+        if credential and _output_value_is_concrete(value):
+            return True
+        if authorization and isinstance(value, str):
+            bearer = re.fullmatch(r"Bearer\s+(.+)", value.strip(), re.IGNORECASE)
+            if bearer and _output_value_is_concrete(bearer.group(1)):
+                return True
+    return False
+
+
+def _terminal_protocol_token_positions(text: str) -> dict[int, str]:
+    """Locate control slots in the actual JSON, never in field-name lookalikes."""
+    decoder = json.JSONDecoder()
+    positions: dict[int, str] = {}
+
+    def visit(index: int, path: tuple[object, ...]) -> int:
+        while text[index].isspace():
+            index += 1
+        if text[index] == "{":
+            index += 1
+            while True:
+                while text[index].isspace():
+                    index += 1
+                if text[index] == "}":
+                    return index + 1
+                start = index
+                key, index = decoder.raw_decode(text, index)
+                while text[index].isspace():
+                    index += 1
+                if text[index] != ":":
+                    raise ValueError("terminal JSON key")
+                index += 1
+                while text[index].isspace():
+                    index += 1
+                value, _end = decoder.raw_decode(text, index)
+                if path + (key,) in {("token",), ("primaryOutcome", "token")}:
+                    positions[start] = value
+                index = visit(index, path + (key,))
+                while text[index].isspace():
+                    index += 1
+                if text[index] == "}":
+                    return index + 1
+                if text[index] != ",":
+                    raise ValueError("terminal JSON object")
+                index += 1
+        if text[index] == "[":
+            index += 1
+            item = 0
+            while True:
+                while text[index].isspace():
+                    index += 1
+                if text[index] == "]":
+                    return index + 1
+                index = visit(index, path + (item,))
+                item += 1
+                while text[index].isspace():
+                    index += 1
+                if text[index] == "]":
+                    return index + 1
+                if text[index] != ",":
+                    raise ValueError("terminal JSON array")
+                index += 1
+        return decoder.raw_decode(text, index)[1]
+
+    visit(len(RESULT_PREFIX) if text.startswith(RESULT_PREFIX) else 0, ())
+    return positions
+
+
+def _terminal_credential_class_echo(text: str, payload: dict[str, object]) -> bool:
+    if _output_credential_class_echo(
+        text, protocol_tokens=_terminal_protocol_token_positions(text)
+    ):
+        return True
+    # The complete parsed subject is also visited, including every key/string and
+    # nested JSON string. Only genuine protocol slots had contextual interpretation.
+    pending: list[object] = [payload]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, str):
+            if any(_output_credential_class_echo(view) for view in _output_safety_texts(item)):
+                return True
+    return False
+
+
+def _output_safety_texts(value: object) -> list[str]:
+    """Inspect actual JSON leaves and nested JSON text without guessing escapes."""
+    pending = [value]
+    texts: list[str] = []
+    decoder = json.JSONDecoder()
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            texts.append(json.dumps(item, ensure_ascii=False))
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, str):
+            texts.append(item)
+            candidate = item.lstrip()
+            if candidate.startswith(('"', "{", "[")):
+                while candidate:
+                    try:
+                        decoded, end = decoder.raw_decode(candidate)
+                    except ValueError:
+                        break
+                    if decoded != item:
+                        pending.append(decoded)
+                    candidate = candidate[end:].lstrip()
+    return texts
+
+
 def _sanitized_diagnostic(
     message: str, lifecycle: RunCaptureLifecycle | None
 ) -> str:
@@ -4907,7 +5744,7 @@ def _sanitized_diagnostic(
         for path in (lifecycle.run_dir, lifecycle.root):
             sanitized = sanitized.replace(str(path), "<capture>")
     sanitized = re.sub(
-        r"(?i)\b(?:api[_-]?key|token|secret|password)\s*=\s*[^\s;]+",
+        r"(?i)\b" + _OUTPUT_CREDENTIAL_LABEL + r"\s*=\s*[^\s;]+",
         "<redacted>",
         sanitized,
     )
@@ -4924,6 +5761,10 @@ def credential_scan_terminal(
 
     if any(needle in stdout or needle in stderr for needle in needles):
         return "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    for stream in (stdout, stderr):
+        for text in _output_safety_texts(stream.decode("utf-8", errors="strict")):
+            if any(needle in text.encode("utf-8") for needle in needles) or _output_credential_class_echo(text):
+                return "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
     return None
 
 
@@ -4954,8 +5795,18 @@ def _machine_path_scan_terminal(stdout: bytes) -> str | None:
         finder = _machine_path_finder()
         if not callable(finder):
             return "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
-        if finder(stdout.decode("utf-8", errors="replace")):
-            return "E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"
+        for text in _output_safety_texts(stdout.decode("utf-8", errors="strict")):
+            uri_ranges = [
+                match.span() for match in re.finditer(
+                    r"""[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+""", text
+                )
+            ]
+            if any(
+                not _OUTPUT_TEMPLATE.search(match.group(0))
+                and not any(start <= match.start() < end for start, end in uri_ranges)
+                for match in _OUTPUT_DRIVE_PATH.finditer(text)
+            ) or finder(text):
+                return "E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"
     except Exception:
         return "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
     return None
@@ -4981,26 +5832,49 @@ def provider_output_safety_scan_terminal(
     if serialized_line:
         try:
             serialized = stdout.decode("utf-8", errors="strict")
-            projection = _provider_result_scan_projection(parse_provider_result(serialized))
+            payload = parse_provider_result(serialized)
+            projection = _provider_result_scan_projection(payload)
             selected_output = json.dumps(
                 projection, ensure_ascii=True, separators=(",", ":")
             ).encode("utf-8")
         except (UnicodeDecodeError, ValueError, TypeError):
             return "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
-        credential = credential_scan_terminal(
-            _merge_credential_needles(needles, escaped),
-            stdout=selected_output,
-            stderr=stderr,
-        )
+        exact = _merge_credential_needles(needles, escaped)
+        if any(
+            needle in view.encode("utf-8")
+            for view in _output_safety_texts(projection)
+            for needle in exact
+        ) or any(needle in selected_output or needle in stderr for needle in exact):
+            return "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+        if (
+            _terminal_credential_class_echo(serialized, payload)
+            or credential_scan_terminal(exact, stdout=b"", stderr=stderr) is not None
+        ):
+            return "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
     else:
         credential = credential_scan_terminal(
             _merge_credential_needles(needles, escaped), stdout=stdout, stderr=stderr
         )
-    if credential is not None:
-        return credential
-    if provider != "kimi" and not serialized_line:
-        return None
-    return _machine_path_scan_terminal(stdout)
+        if credential is not None:
+            return credential
+    path_outcome = _machine_path_scan_terminal(stdout) or _machine_path_scan_terminal(stderr)
+    if path_outcome is None and serialized_line:
+        path_outcome = _machine_path_scan_terminal(
+            json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        )
+    return path_outcome
+
+
+def _provider_terminal_line_safety(
+    provider: str, needles: tuple[bytes, ...], line: str
+) -> str | None:
+    try:
+        return provider_output_safety_scan_terminal(
+            provider, needles, stdout=line.encode("utf-8", errors="strict"),
+            stderr=b"", serialized_line=True,
+        )
+    except Exception:
+        return "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
 
 
 def classify_kimi_child_nonzero(stderr: bytes) -> str:
@@ -5211,16 +6085,16 @@ def serialized_safety_failure_outcome(
     """Return a path/detail-free blocked result after the public line fails scanning."""
 
     return FinalOutcome(
-        1,
+        outcome.exit_code if outcome.exit_code != 0 else 1,
         f"UNVERIFIED:{stable_id}",
         "blocked",
         "none",
         stable_id,
-        1,
-        f"UNVERIFIED:{stable_id}",
-        "blocked",
-        "none",
-        stable_id,
+        outcome.primary_exit_code,
+        outcome.primary_token,
+        outcome.primary_status,
+        outcome.primary_gate,
+        outcome.primary_note,
         outcome.cleanup_status,
         outcome.cleanup_issue_count,
         "",
@@ -5378,6 +6252,7 @@ def _provider_result_scan_projection(payload: dict[str, object]) -> dict[str, ob
 
     if not set(payload).issubset(_PROVIDER_RESULT_FIELD_PROVENANCE):
         raise ValueError("provider result field provenance unavailable")
+    _validate_provider_result_controls(payload)
     projection = {
         name: value
         for name, value in payload.items()
@@ -5398,6 +6273,58 @@ def _provider_result_scan_projection(payload: dict[str, object]) -> dict[str, ob
     return projection
 
 
+def _validate_provider_result_controls(payload: dict[str, object]) -> None:
+    """Bind contextual treatment to the existing producer's closed protocol."""
+    fixed = {
+        "schema": "orchestrarium.provider-result.v2", "authorizing": False,
+        "closesRunIds": [], "independentVerificationRequired": True,
+        "terminalClass": "external-nonauthorizing",
+    }
+    if any(type(payload.get(key)) is not type(value) or payload.get(key) != value
+           for key, value in fixed.items()):
+        raise ValueError("provider result fixed control source mismatch")
+    for controls in (payload, payload.get("primaryOutcome")):
+        if not isinstance(controls, dict):
+            raise ValueError("provider result primary field provenance unavailable")
+        token = controls.get("token")
+        if (
+            not isinstance(token, str)
+            or not (
+                token in {
+                    "COMPLETE:PASS", "COMPLETE:REVISE", "COMPLETE:BLOCKED",
+                    "COMPLETE:EXTERNAL_NONAUTHORIZING", "FAILED:nonzero-exit",
+                    "FAILED:capture-overflow", "FAILED:cleanup-incomplete",
+                    "UNVERIFIED:empty", "UNVERIFIED:err-markers",
+                    "UNVERIFIED:no-gate-line", "UNVERIFIED:result-materialization",
+                }
+                or re.fullmatch(r"UNVERIFIED:E_[A-Z0-9_]{1,127}", token, re.ASCII)
+            )
+            or controls.get("status") not in {"completed", "revise", "blocked"}
+            or controls.get("gate") not in {"PASS", "REVISE", "BLOCKED", "none"}
+            or type(controls.get("exitCode")) is not int
+        ):
+            raise ValueError("provider result control source mismatch")
+    if payload.get("cleanupStatus") not in {"complete", "incomplete"}:
+        raise ValueError("provider result cleanup source mismatch")
+    for key in ("cancelled", "timedOut", "captureRecoveryRetained", "captureOverflow"):
+        if key in payload and type(payload[key]) is not bool:
+            raise ValueError("provider result boolean source mismatch")
+    for key in ("stderrMarkerCount", "cleanupIssueCount", "captureObservedBytes",
+                "capturePersistedBytes", "captureIssueCount"):
+        if key in payload and (type(payload[key]) is not int or payload[key] < 0):
+            raise ValueError("provider result count source mismatch")
+    if "captureDigest" in payload and (
+        not isinstance(payload["captureDigest"], str)
+        or re.fullmatch(r"[a-f0-9]{64}", payload["captureDigest"], re.ASCII) is None
+    ):
+        raise ValueError("provider result capture source mismatch")
+    if "childNonzeroCategory" in payload and (
+        payload["childNonzeroCategory"] not in KIMI_CHILD_NONZERO_CATEGORIES
+        or payload["primaryOutcome"].get("childNonzeroCategory") != payload["childNonzeroCategory"]
+    ):
+        raise ValueError("provider result child category source mismatch")
+
+
 def build_provider_result_line(
     provider: str,
     model: str,
@@ -5416,6 +6343,7 @@ def build_provider_result_line(
     launch_flags: tuple[str, ...] | list[str] | None = None,
     kimi_selected: dict[str, object] | None = None,
     kimi_observed: dict[str, object] | None = None,
+    process_result: ProcessResultV1 | None = None,
 ) -> str:
     if provenance is not None:
         provenance = require_exact_execution_provenance(
@@ -5485,6 +6413,14 @@ def build_provider_result_line(
         payload["selected"] = kimi_selected
         payload["observed"] = kimi_observed
     if stream is not None:
+        if stream != empty_provider_stream_result() and (
+            process_result is None
+            or stream not in (
+                provider_stream_result(process_result),
+                provider_stream_result(process_result, include_stderr=False),
+            )
+        ):
+            raise ValueError("provider result capture observation mismatch")
         payload.update(
             {
                 "captureOverflow": stream.overflow,
@@ -5515,6 +6451,7 @@ def build_minimal_provider_failure_line(
     cleanup_status: str = "complete",
     cleanup_issue_count: int = 0,
     recovery_retained: bool = False,
+    primary_outcome: FinalOutcome | None = None,
 ) -> str:
     """Build one detail-free V2 failure without depending on the full builder."""
 
@@ -5571,6 +6508,23 @@ def build_minimal_provider_failure_line(
         "assignedRole": "none",
         "executionRole": "none",
     }
+    if primary_outcome is not None:
+        # Preserve the producing failure/result identity without copying rejected
+        # dynamic detail into the replacement line. It receives the same scanners.
+        primary_note = (
+            f"oracle: nonzero exit ({primary_outcome.primary_exit_code})"
+            if primary_outcome.primary_exit_code != 0
+            else primary_outcome.primary_token.partition(":")[2]
+            if primary_outcome.primary_token.startswith("UNVERIFIED:E_")
+            else ""
+        )
+        payload["primaryOutcome"] = {
+            "exitCode": primary_outcome.primary_exit_code,
+            "token": primary_outcome.primary_token,
+            "status": primary_outcome.primary_status,
+            "gate": primary_outcome.primary_gate,
+            "note": primary_note,
+        }
     return RESULT_PREFIX + json.dumps(
         payload, ensure_ascii=True, separators=(",", ":")
     ) + "\n"
@@ -5853,6 +6807,8 @@ def finalize_reserved_run_once(
     realization: dict[str, object] | None = None,
     credential_needles: tuple[bytes, ...] = (),
     auth_output_scan_disposition: str | None = None,
+    output_context: ProviderOutputContext | None = None,
+    attempted: bool | None = None,
     role_provenance: ExternalRoleProvenance | None = None,
     provenance: ExecutionProvenance | None = None,
     raw_stdout: bytes | None = None,
@@ -5865,6 +6821,11 @@ def finalize_reserved_run_once(
 ) -> int:
     terminal_receipt = reserved_run.receipt
     lifecycle = reserved_run.lifecycle
+    if output_context is None and reserved_run._output_context is not None:
+        output_context = reserved_run._output_context
+        credential_needles = output_context.needles
+    if attempted is None:
+        attempted = reserved_run._attempted
     if terminal_receipt.committed:
         print("FAIL: terminal receipt was already committed", file=sys.stderr)
         return 1
@@ -5882,6 +6843,10 @@ def finalize_reserved_run_once(
             cleanup_issue_count=len(cleanup.issues),
             recovery_retained=cleanup.recovery_retained,
         )
+        minimal_scan = _provider_terminal_line_safety(provider, credential_needles, line)
+        if minimal_scan is not None:
+            print(f"FAIL: {minimal_scan}", file=sys.stderr)
+            return 130 if cancelled else 124 if timed_out else exit_code if exit_code != 0 else 1
         try:
             terminal_receipt.commit(line.encode("utf-8", errors="strict"))
         except (OSError, ValueError) as exc:
@@ -5932,53 +6897,50 @@ def finalize_reserved_run_once(
         and raw_stderr is not None
     )
     scan_outcome: str | None = None
-    credential_coverage_unavailable = (
-        provider != "kimi"
-        and process_result is not None
-        and (
-            auth_output_scan_disposition != AUTH_OUTPUT_SCAN_ENVIRONMENT_EXACT
-            or not credential_needles
-        )
-    )
-    scan_required = (
-        provider == "kimi" or credential_coverage_unavailable or bool(credential_needles)
-    )
-    scan_unavailable = (
-        "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
-        if provider == "kimi"
-        else "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
-    )
-    kimi_prechild_setup_failure = (
-        provider == "kimi"
-        and launch_error == "E_KIMI_ACP_SETUP"
+    scan_unavailable = "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+    prechild_setup_failure = (
+        attempted is False
+        and launch_error is not None
         and process_result is None
         and stream is None
         and raw_stdout is None
         and raw_stderr is None
     )
-    if credential_coverage_unavailable:
-        scan_outcome = "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
-    elif scan_required:
+    context_valid = isinstance(output_context, ProviderOutputContext)
+    if context_valid:
+        try:
+            output_context.__post_init__()
+            context_valid = credential_needles == output_context.needles
+        except (ValueError, UnicodeDecodeError):
+            context_valid = False
+    if not context_valid:
+        scan_outcome = scan_unavailable
+    else:
         try:
             scan_outcome = (
                 provider_output_safety_scan_terminal(
                     provider,
                     credential_needles,
-                    stdout=b"" if kimi_prechild_setup_failure else raw_stdout,
-                    stderr=b"" if kimi_prechild_setup_failure else raw_stderr,
+                    stdout=b"" if prechild_setup_failure else raw_stdout,
+                    stderr=b"" if prechild_setup_failure else raw_stderr,
                 )
-                if raw_streams_settled or kimi_prechild_setup_failure
+                if (raw_streams_settled and attempted is not False) or prechild_setup_failure
                 else scan_unavailable
             )
         except Exception:
             scan_outcome = scan_unavailable
     if (
-        scan_required
-        and stream is not None
+        stream is not None
         and stream.overflow
         and not complete_kimi_stdout_overflow
     ):
         scan_outcome = scan_unavailable
+    if process_result is not None:
+        observed_stream = provider_stream_result(process_result)
+        if stream != observed_stream:
+            scan_outcome = scan_unavailable
+        # Computed public capture metadata is taken from the actual observation.
+        stream = observed_stream
     child_nonzero_category = None
     if (
         provider == "kimi"
@@ -6005,7 +6967,7 @@ def finalize_reserved_run_once(
         )
     primary_terminal: TerminalResult | None = None
     combined_exit = exit_code
-    if kimi_prechild_setup_failure and scan_outcome is None:
+    if prechild_setup_failure and scan_outcome is None:
         result_text = ""
         terminal = output_safety_scan_failure_terminal(lifecycle, launch_error)
         primary_terminal = terminal
@@ -6019,6 +6981,14 @@ def finalize_reserved_run_once(
             and not complete_kimi_stdout_overflow
         ):
             primary_terminal = capture_overflow_terminal(stream)
+        elif launch_error or cancelled or timed_out or exit_code != 0:
+            primary_terminal = TerminalResult(
+                lifecycle.prompt_path, "blocked", "none",
+                "supervision: cancelled" if cancelled else "supervision: timeout" if timed_out
+                else _sanitized_diagnostic(launch_error, lifecycle) if launch_error
+                else f"oracle: nonzero exit ({exit_code})",
+                "FAILED:nonzero-exit", 0,
+            )
         combined_exit = exit_code if exit_code != 0 else 1
     elif (
         stream is not None
@@ -6109,6 +7079,7 @@ def finalize_reserved_run_once(
             launch_flags=launch_flags,
             kimi_selected=kimi_selected_evidence,
             kimi_observed=kimi_observed_evidence,
+            process_result=process_result,
         )
     except Exception:
         terminal_outcome = serialized_safety_failure_outcome(
@@ -6119,23 +7090,16 @@ def finalize_reserved_run_once(
             model,
             effort,
             stable_id="E_EXTERNAL_PROVIDER_TERMINAL_BUILD_FAILED",
+            exit_code=terminal_outcome.exit_code,
             cancelled=cancelled,
             timed_out=timed_out,
             cleanup_status=outcome.cleanup_status,
             cleanup_issue_count=outcome.cleanup_issue_count,
             recovery_retained=outcome.recovery_retained,
+            primary_outcome=terminal_outcome,
         )
 
-    try:
-        serialized_scan = provider_output_safety_scan_terminal(
-            provider,
-            credential_needles,
-            stdout=line.encode("utf-8", errors="strict"),
-            stderr=b"",
-            serialized_line=True,
-        )
-    except Exception:
-        serialized_scan = "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+    serialized_scan = _provider_terminal_line_safety(provider, credential_needles, line)
     if serialized_scan is not None:
         result_text = ""
         public_stream = None
@@ -6145,12 +7109,18 @@ def finalize_reserved_run_once(
             model,
             effort,
             stable_id=serialized_scan,
+            exit_code=terminal_outcome.exit_code,
             cancelled=cancelled,
             timed_out=timed_out,
             cleanup_status=outcome.cleanup_status,
             cleanup_issue_count=outcome.cleanup_issue_count,
             recovery_retained=outcome.recovery_retained,
+            primary_outcome=terminal_outcome,
         )
+        replacement_scan = _provider_terminal_line_safety(provider, credential_needles, line)
+        if replacement_scan is not None:
+            print(f"FAIL: {replacement_scan}", file=sys.stderr)
+            return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
 
     try:
         terminal_receipt.commit(line.encode("utf-8", errors="strict"))
@@ -6198,7 +7168,12 @@ def finalize_reserved_run_once(
     return terminal_outcome.exit_code
 
 
-def launch(provider: str, argv: list[str]) -> int:
+def launch(
+    provider: str,
+    argv: list[str],
+    *,
+    native_parser_contract: WindowsParserContractV1 | None = None,
+) -> int:
     """Provider-launch composition root and sole owner of the injected runner."""
 
     try:
@@ -6253,6 +7228,7 @@ def launch(provider: str, argv: list[str]) -> int:
                     prevalidated=prevalidated,
                     reserved_run=reserved_run,
                     kimi_observed_budget=kimi_observed_budget,
+                    native_parser_contract=native_parser_contract,
                 )
         except KeyboardInterrupt:
             if receipt.committed:
@@ -6275,6 +7251,7 @@ def launch(provider: str, argv: list[str]) -> int:
                     else prevalidated.flags
                 ),
                 stable_failure_id="E_EXTERNAL_PROVIDER_CANCELLED",
+                launch_error="E_EXTERNAL_PROVIDER_CANCELLED",
             )
         except Exception:
             if receipt.committed:
@@ -6296,6 +7273,7 @@ def launch(provider: str, argv: list[str]) -> int:
                     else prevalidated.flags
                 ),
                 stable_failure_id="E_EXTERNAL_PROCESS_RUNNER_UNAVAILABLE",
+                launch_error="E_EXTERNAL_PROCESS_RUNNER_UNAVAILABLE",
             )
 
 
@@ -6358,10 +7336,6 @@ def kimi_main(argv: list[str]) -> int:
     return fail("E_KIMI_MAINTENANCE_ARGUMENTS_INVALID")
 
 
-def _requires_early_native_windows_refusal(provider: str) -> bool:
-    return os.name == "nt" and provider in {"codex", "claude"}
-
-
 def _resolve_launch_provider_command(
     provider: str, query_cwd: Path
 ) -> tuple[list[str], ExecutableBindingV1 | None]:
@@ -6388,6 +7362,7 @@ def _launch_with_runner(
     prevalidated: PolicyBoundLaunch,
     reserved_run: ReservedExternalRunV1,
     kimi_observed_budget: int | None = None,
+    native_parser_contract: WindowsParserContractV1 | None = None,
 ) -> int:
     control = prevalidated.control
     topic = prevalidated.topic
@@ -6397,8 +7372,16 @@ def _launch_with_runner(
     role_provenance = prevalidated.role_provenance
     provenance = prevalidated.provenance
     launch_flags = provenance.launch_flags if provenance is not None else tuple(flags)
+    prepared_native_launch: PreparedNativeWindowsLaunchV1 | None = None
+    output_context: ProviderOutputContext | None = None
+    reserved_run._attempted = False
 
     def reserved_failure(stable_id: str, *, code: int = 1) -> int:
+        if prepared_native_launch is not None:
+            try:
+                prepared_native_launch.close()
+            except ProcessSupervisionError:
+                stable_id = "PSV1-RESOURCE-CLOSE"
         print(f"FAIL: {stable_id}", file=sys.stderr)
         return finalize_reserved_run_once(
             replace(control, ledger=None),
@@ -6410,6 +7393,9 @@ def _launch_with_runner(
             reserved_run,
             code,
             stable_failure_id=stable_id,
+            output_context=output_context,
+            credential_needles=output_context.needles if output_context is not None else (),
+            attempted=False,
         )
 
     try:
@@ -6423,19 +7409,6 @@ def _launch_with_runner(
                 exc, "E_EXTERNAL_PROVIDER_COMMAND_UNAVAILABLE"
             )
         )
-
-    if _requires_early_native_windows_refusal(provider):
-        executable = Path(command[0])
-        try:
-            identity_available = (
-                executable.is_absolute()
-                and executable.is_file()
-                and bool(resolve_executable_identity(executable))
-            )
-        except Exception:
-            identity_available = False
-        if identity_available and len(command) == 1:
-            return reserved_failure(E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE)
 
     try:
         auth_configuration = resolve_provider_auth_configuration(provider)
@@ -6455,24 +7428,41 @@ def _launch_with_runner(
                 exc, "E_EXTERNAL_PROVIDER_AUTH_UNAVAILABLE"
             )
         )
-    if (
-        provider != "kimi"
-        and (
-            auth_configuration.output_scan_disposition
-            != AUTH_OUTPUT_SCAN_ENVIRONMENT_EXACT
-            or not auth_configuration.needles
-        )
-    ):
-        return reserved_failure("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE")
     try:
-        credential_needles = _merge_credential_needles(
-            auth_configuration.needles,
+        auth_configuration = replace(
+            auth_configuration, child_environment=dict(auth_configuration.child_environment)
+        )
+        output_context = resolve_provider_output_context(
+            auth_configuration,
             _kimi_mcp_credential_needles(control.kimi_capabilities)
             if provider == "kimi"
             else (),
         )
-    except ValueError:
+        credential_needles = output_context.needles
+        reserved_run._output_context = output_context
+    except (ValueError, TypeError):
         return reserved_failure("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE")
+
+    provider_args = (
+        ["exec", "--skip-git-repo-check", "--json", *flags]
+        if provider == "codex"
+        else kimi_provider_args() if provider == "kimi" else flags
+    )
+    if os.name == "nt" and provider in {"codex", "claude"} and len(command) == 1:
+        if native_parser_contract is None:
+            return reserved_failure("PSV1-ARGV-CODEC-UNSUPPORTED")
+        executable = Path(os.path.abspath(command[0]))
+        try:
+            prepared_native_launch = runner.prepare_native_windows_launch(
+                argv=(str(executable), *command[1:], *provider_args),
+                deadline_monotonic=time.monotonic() + control.timeout_secs,
+                parser_contract=native_parser_contract,
+                expected_executable_binding=expected_executable_binding,
+            )
+        except ProcessSupervisionError as exc:
+            return reserved_failure(exc.failure_id)
+    elif native_parser_contract is not None:
+        return reserved_failure("PSV1-ARGV-ATTESTATION")
 
     try:
         body = assemble_external_prompt(prompt_bytes(control, external=True))
@@ -6502,12 +7492,18 @@ def _launch_with_runner(
     try:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         slug = f"{topic}-{timestamp}-{secrets.token_hex(4)}"
-        lifecycle = RunCaptureLifecycle.create(provider, slug)
-        reserved_run.adopt_lifecycle(lifecycle)
+        lifecycle = reserved_run.acquire_capture(provider, slug)
         lifecycle.initialize(body)
         reserved_run.mark_initialized(lifecycle)
         lifecycle_initialized = True
+        if prepared_native_launch is not None:
+            reserved_run.adopt_auxiliary_cleanup(prepared_native_launch.close)
     except Exception:
+        if prepared_native_launch is not None:
+            try:
+                prepared_native_launch.close()
+            except ProcessSupervisionError:
+                return reserved_failure("PSV1-RESOURCE-CLOSE")
         if lifecycle is None:
             return reserved_failure("E_EXTERNAL_CAPTURE_SETUP")
         return finalize_reserved_run_once(
@@ -6522,6 +7518,8 @@ def _launch_with_runner(
             launch_error="E_EXTERNAL_CAPTURE_SETUP",
             credential_needles=credential_needles,
             auth_output_scan_disposition=auth_configuration.output_scan_disposition,
+            output_context=output_context,
+            attempted=False,
             runner=runner,
             role_provenance=role_provenance,
             provenance=provenance,
@@ -6563,6 +7561,8 @@ def _launch_with_runner(
                 ),
                 credential_needles=credential_needles,
                 auth_output_scan_disposition=auth_configuration.output_scan_disposition,
+                output_context=output_context,
+                attempted=False,
                 runner=runner,
                 role_provenance=role_provenance,
                 provenance=provenance,
@@ -6581,6 +7581,7 @@ def _launch_with_runner(
                 launch_error="E_EXTERNAL_LEDGER_HELPER_UNAVAILABLE", realization=realization, runner=runner,
                 role_provenance=role_provenance, provenance=provenance,
                 launch_flags=launch_flags, credential_needles=credential_needles,
+                output_context=output_context, attempted=False,
             )
         launch_run_id = (
             provenance.external_dispatch_id
@@ -6628,20 +7629,9 @@ def _launch_with_runner(
                 launch_error="E_EXTERNAL_LAUNCH_LEDGER_FAILED", realization=realization, runner=runner,
                 role_provenance=role_provenance, provenance=provenance,
                 launch_flags=launch_flags, credential_needles=credential_needles,
+                output_context=output_context, attempted=False,
             )
 
-    provider_args = (
-        [
-            "exec",
-            "--skip-git-repo-check",
-            "--json",
-            *flags,
-        ]
-        if provider == "codex"
-        else kimi_provider_args()
-        if provider == "kimi"
-        else flags
-    )
     child_environment = dict(auth_configuration.child_environment)
     if provider == "claude":
         child_environment["ORCHESTRARIUM_DISPATCHED_REVIEW"] = "1"
@@ -6660,6 +7650,7 @@ def _launch_with_runner(
     raw_stderr: bytes | None = None
     process_result: ProcessResultV1 | None = None
     try:
+        reserved_run._attempted = True
         process_result, raw_stdout, raw_stderr = run_provider_process(
             runner,
             command,
@@ -6670,6 +7661,7 @@ def _launch_with_runner(
             control,
             provider,
             expected_executable_binding=expected_executable_binding,
+            prepared_native_launch=prepared_native_launch,
             dialogue=(
                 ProcessDialogueV1(
                     KIMI_WINDOWS_PROFILE_V1.profile_id,
@@ -6721,6 +7713,8 @@ def _launch_with_runner(
         realization=realization,
         credential_needles=credential_needles,
         auth_output_scan_disposition=auth_configuration.output_scan_disposition,
+        output_context=output_context,
+        attempted=True,
         role_provenance=role_provenance,
         provenance=provenance,
         raw_stdout=raw_stdout,
