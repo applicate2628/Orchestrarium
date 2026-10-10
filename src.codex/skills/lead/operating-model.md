@@ -233,6 +233,8 @@ Do not:
 
 ## Design-panel and review-loop selection
 
+Use review-loop for an explicit user loop/full-review request, materially competing owner/contract/seam solutions, unresolved coupling without one falsifying oracle, repeated review/fix failure or moving same-class manifestations, or newly evidenced complexity. Resolve missing factual premises first. A verified one-owner local cause, settled contract and one clear falsifying oracle may use the bounded exact-delta route when no mandatory trigger applies. Record the reason at the decision boundary; file count and `design-decision` alone do not mandate a loop. Follow the operative review-loop binding for route admission.
+
 Two independence techniques exist at different stages; pick the one that matches the stage:
 
 - **Design-panel** (`$design-panel`, skill `skills/design-panel/`) is independence at **generation**: N>=2 independently-framed design lanes on one pinned problem, converged through one mandatory synthesis, BEFORE a single design exists. Use it for the two admitted triggers — a high-surface-count mechanical sweep, or an open architecture choice — not for an ordinary single-architect design.

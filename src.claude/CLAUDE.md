@@ -1,5 +1,7 @@
 @AGENTS.md
 
+Apply the shared **Assistance and owner-equivalent execution (binding)** contract. Working helpers remain preferred; a defective helper permits declared owner-equivalent execution with the same actual data, ownership, serialization, preimages, rollback, truthful provenance, independent readback and resource guarantees. No fabricated helper receipts or host-denial bypass.
+
 # Claude Code Pack
 
 `AGENTS.md` is the required shared-governance owner. This file contains only the Claude Code runtime delta.
@@ -40,7 +42,7 @@ Read per-key configuration in this order: project `.claude/.agents-mode.yaml`, l
 
 Team-template JSON files under `.claude/agents/team-templates/` are the sole owners of each chain, trigger, required role, and `requiresLead` value. Select the exact file after classification; apply the `requiresLead` rules above.
 
-`externalProvider: auto | codex | claude | kimi | grok` is the policy vocabulary. Shipped `auto` uses only Codex/Claude. Kimi is explicit-only through the approved thin wrapper; its installed external-dispatch contract owns admitted read-only/engineering capabilities, independent verification, and the independently verified and nonauthorizing result. Grok remains unavailable in 1.x and is not launched or probed.
+`externalProvider: auto | codex | claude | kimi | grok` is the policy vocabulary. Shipped `auto` uses only Codex/Claude. Kimi selection is explicit-only; prefer the working approved thin wrapper or declared owner-equivalent launch when defective under the shared assistance contract; its installed external-dispatch contract owns admitted read-only/engineering capabilities, independent verification, and the independently verified and nonauthorizing result. Grok remains unavailable in 1.x and is not launched or probed.
 
 ## Slash command routing
 
