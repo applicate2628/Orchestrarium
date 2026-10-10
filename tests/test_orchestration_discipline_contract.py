@@ -14,9 +14,89 @@ from __future__ import annotations
 
 import json
 import unittest
+import re
 from pathlib import Path
+from policy_text_contract import identifier_present, lexical, relationships, selected_unit
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+class TestOwnerEquivalentExecutionContract(unittest.TestCase):
+    def test_external_launch_consumers_do_not_retain_helper_monopolies(self):
+        retired = {
+            "src.codex/skills/lead/external-dispatch.md": (
+                "is the only approved Kimi launch surface",
+                "Substantive raw provider Command-Line Interface (CLI) prompt routes are unsupported: use",
+                "remains the only substantive transport source",
+                "engineering through the canonical fixed `kimi-code/k3` wrapper",
+            ),
+            "src.claude/agents/contracts/external-dispatch.md": (
+                "is the only approved Kimi launch surface",
+                "Substantive raw provider Command-Line Interface (CLI) prompt routes are unsupported: use",
+            ),
+            "src.codex/skills/review-loop/SKILL.md": (
+                "Every dispatched external angle on a TRACKED work-item uses the approved thin wrapper",
+            ),
+            "src.claude/commands/agents-review-loop.md": (
+                "each external-provider lane uses the approved thin wrapper",
+            ),
+            "src.claude/CLAUDE.md": (
+                "Kimi is explicit-only through the approved thin wrapper",
+            ),
+        }
+        for relative, monopolies in retired.items():
+            text = (REPO_ROOT / relative).read_text(encoding="utf-8")
+            with self.subTest(relative=relative):
+                self.assertIn("owner-equivalent launch", text)
+                for monopoly in monopolies:
+                    self.assertNotIn(monopoly, text)
+        for relative in tuple(retired)[:2]:
+            text = (REPO_ROOT / relative).read_text(encoding="utf-8")
+            for preserved in (
+                "exact fixed `kimi-code/k3` model", "authentication/capability controls",
+                "unchanged file/stdin prompt and governance inputs", "output/resource bounds",
+                "timeout/cancellation and real terminal oracle", "never a reserved wrapper frame",
+                "task prompts in argv (`kimi --prompt`)",
+                "independently invented `--auto` controls remain prohibited",
+                "same snapshot and inclusion of the canonical governance projection",
+            ):
+                with self.subTest(relative=relative, preserved=preserved):
+                    self.assertIn(preserved, text)
+
+    def test_manual_equivalence_preserves_data_and_denial_guarantees(self):
+        text = (REPO_ROOT / "shared/AGENTS.shared.md").read_text(encoding="utf-8")
+        start = text.index("### Assistance and owner-equivalent execution (binding)")
+        contract = text[start:text.index("## Artifact persistence", start)]
+        for guarantee in (
+            "accepted inputs and actual preimages", "exclusive ownership",
+            "serialize affected readers/writers", "existing canonical schema",
+            "rollback and replay protection", "independently read back",
+            "settle owned resources on every exit", "actual observed launch and terminal identities",
+            "exact open obligations and typed closers", "failed attempt never gains a result",
+            "strict terminal instant", "exact dispositions and all incoming links",
+            "archive identity, active absence, dispositions, links, receipt and README together",
+            "never impersonates a reserved engine/wrapper completion frame",
+            "cannot retry or bypass an actual host-denied action",
+            "weaken exact-runtime/model corridors or commission diversity",
+            "replace human publication review/approval",
+        ):
+            with self.subTest(guarantee=guarantee):
+                self.assertIn(guarantee, contract)
+        self.assertNotIn("only via the validated public ledger writer", text)
+
+    def test_lifecycle_and_launch_projections_apply_one_shared_contract(self):
+        for relative in (
+            "src.codex/skills/lead/SKILL.md", "src.claude/skills/lead/SKILL.md",
+            "src.codex/skills/lead/subagent-contracts.md",
+            "src.claude/agents/contracts/subagent-contracts.md",
+            "src.codex/skills/lead/external-dispatch.md",
+            "src.claude/agents/contracts/external-dispatch.md",
+        ):
+            with self.subTest(relative=relative):
+                text = (REPO_ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn("Assistance and owner-equivalent execution (binding)", text)
+                self.assertNotIn("Lead never manually recontextualizes a bug", text)
+                self.assertNotIn("a failed append stops scheduling", text)
 
 SPINE = "shared/AGENTS.shared.md"
 CLAUDE_QUICK_FIX_TEMPLATE = "src.claude/agents/team-templates/quick-fix.json"
@@ -74,8 +154,9 @@ STATUS_ACCEPTANCE_CARRIER_FRAGMENTS = (
     "the oracle in `Evidence gate`",
 )
 
-# --- per-gap normative substrings and the owner files that MUST contain them ---
-# (gap-id, substring, [owner files])
+# Per-gap owner inventory. Unchanged owners retain exact sentence pins;
+# the selected shared-spine rows use named structural duty predicates.
+# (gap-id, sentence pin or None for a structural shared duty, [owner files])
 PINS = [
     # Repository-orientation Bootstrap checkpoint — both installed provider roots.
     ("orientation-a0", "**(a0) Pre-action orientation trigger**",
@@ -92,8 +173,8 @@ PINS = [
     ("P4-op", "**Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, STOP all edits.",
      ["src.claude/commands/agents-bugfix.md", "src.codex/skills/bug-hunting/SKILL.md"]),
 
-    # A5 — spine dead-lane / fail-closed sentence
-    ("A5-spine", "An errored/died/limit-hit lane is UNVERIFIED", [SPINE]),
+    # A5 — shared dead-lane and missing-verdict duties
+    ("A5-spine", None, [SPINE]),
 
     # P3 — N independent roots (both bug-hunting SKILLs)
     ("P3", "When N symptoms or failing cases are reported, keep N independent root hypotheses",
@@ -236,7 +317,7 @@ PINS = [
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
 
     # Resource cleanup ownership — shared lifecycle invariant plus one exact field/echo in both packs.
-    ("cleanup-spine", "Any resource (handle, connection, subscription, lock, transaction, owned child process/process tree, temp file, external state) needs explicit cleanup/release on success, failure, cancellation, and timeout paths.",
+    ("cleanup-spine", None,
      [SPINE]),
     ("cleanup-echo", "report the Cleanup disposition for owned child process trees, temp/capture paths, and isolation worktrees as `cleaned`, `preserved` with its reason, or `none`",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
@@ -388,12 +469,106 @@ SHARED_MODEL_EFFORT_TRUTH = (
     "runtime metadata is absent, record `unspecified by runtime`."
 )
 
-CODEX_MODEL_EFFORT_TRUTH = (
-    "Codex native role TOMLs declare the installed default profile; role policy owns "
-    "every effort floor and corridor. Claim an override only when the host explicitly "
-    "supports it and returned actual runtime metadata confirms the effective model and "
-    "effort; otherwise record `unspecified by runtime`."
-)
+def evidence_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Verification and decision discipline", "Evidence-based completion:")
+    duties = relationships(unit, {
+        "dead-lane-unverified": "Errored/died/limit-hit lane is UNVERIFIED: re-dispatch/report",
+        "missing-verdict-rejection": "missing verdict NOT-clean (fail-closed)",
+    })
+    duties["dead-lane-unverified"] &= identifier_present(unit, "UNVERIFIED")
+    return duties
+
+
+def cleanup_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Operational and environment safety", "Resource lifecycle hygiene:")
+    termination = "Termination requires creator-retained process/Job handles or equivalent stable identity-bound ownership"
+    return relationships(unit, {
+        "all-exit-release": "Release owned resources on success/failure/cancellation/timeout",
+        "retained-termination-owner": termination,
+        "identifier-only-termination-refused": termination + ", never PID/ParentProcessId ancestry alone",
+    })
+
+
+def baseline_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Core delegation principles", "Keep phase flow;")
+    duties = relationships(unit, {
+        "producing-scope-baseline": "Judge claims/verdicts by producing scope/accepted baseline",
+        "independent-delta-review": "independently owned later deltas get own review, not retroactive falsification",
+        "material-upstream-invalidation": "Material accepted-upstream revision invalidates dependent PASS and triggers re-review",
+    })
+    duties["material-upstream-invalidation"] &= identifier_present(unit, "PASS")
+    return duties
+
+
+SHARED_DUTY_CHECKS = {
+    "A5-spine": evidence_duties,
+    "cleanup-spine": cleanup_duties,
+    "cross-lane-review-baseline": baseline_duties,
+}
+
+
+def _native_contradiction(unit: str) -> bool:
+    # Refuse explicit contrary actor/action relations in the complete selected clause.
+    # This is bounded lexical checking, not interpretation of arbitrary prose.
+    return any(re.search(pattern, lexical(unit)) for pattern in (
+        r"\bgeneric (?:fallback(?: toml)?|(?:default )?carrier) (?:binds|declares|requires|must declare) (?:a |the )?(?:fixed )?(?:model|effort|profile)\b",
+        r"\b(?:every|all) (?:codex )?native (?:role )?tomls (?:must )?declare (?:a )?(?:fixed|installed default) profile\b",
+        r"\bbare default calls (?:guarantee|always use) (?:the )?policy tuple\b",
+        r"\brequested profile (?:proves|confirms) (?:the )?actual runtime (?:model|effort)\b",
+    ))
+
+
+def native_route_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Native Astra task-dependent route", "For ordinary native and skill-only roles,")
+    requested = "The caller invokes the native host tool, records requested and resolved controls separately from actual runtime metadata"
+    missing = requested + ", treats missing actual metadata as unspecified by runtime"
+    duties = relationships(unit, {
+        "ordinary-selectors": "For ordinary native and skill-only roles, callers first use describe_ordinary_native_role_options, then resolve_ordinary_native_dispatch",
+        "fixed-role-discovery": "An omitted choice for a fixed native specialist uses its registered role and TOML default only when current host discovery does not report that agent type absent",
+        "generic-unbound": "The generic fallback default.toml binds neither model nor effort",
+        "explicit-selector-tuple": 'The generic fallback default.toml binds neither model nor effort: when the default profession omits its choice, the selector emits the existing policy default tuple explicitly through a generic spawn with fork_turns="none" and no agent_type',
+        "bare-default-inheritance": "A direct bare agent_type=default call without a tuple instead inherits provider subagent defaults or parent settings",
+        "policy-tuple-selector": "callers requiring the policy tuple must use the ordinary selector",
+        "skill-only-generic": "A skill-only role has no TOML: its omitted default is still an explicit generic spawn using the policy default, the current installed skill identity",
+        "explicit-unpinned-route": "Any explicit policy-admissible model/effort tuple takes the same generic route, omitting agent_type, and is honored by an unpinned fallback carrier",
+        "custom-pin-no-bypass": "Omitting the type alone does not bypass higher-precedence model/effort fields in a custom default carrier",
+        "custom-pin-local-conflict": "a known conflicting pin is a configuration conflict for that invocation, not universal model unavailability",
+        "named-discovery-denial": "Absent lists mean capability-unknown, while a reported agent-type list that omits the fixed named role required by the selected invocation denies that route with no fallback",
+        "selector-nonexecution": "The selector launches nothing",
+        "requested-vs-actual": requested,
+        "missing-actual": missing,
+        "drift-refusal": missing + ", and treats host rejection or returned model/effort drift as nonauthorizing with no fallback",
+    })
+    duties["exact-route-identifiers"] = all(identifier_present(unit, atom) for atom in (
+        "describe_ordinary_native_role_options", "resolve_ordinary_native_dispatch", "default.toml", "fork_turns", "agent_type", "unspecified by runtime",
+    ))
+    duties["no-contrary-route"] = not _native_contradiction(unit)
+    return duties
+
+
+def native_consumer_duties(text: str, section: str, marker: str, *, referral_only: bool = False) -> dict[str, bool]:
+    unit = selected_unit(text, section, marker)
+    duties = relationships(unit, {
+        "actual-override-evidence": "Claim an override only when the host explicitly supports it and returned actual runtime metadata confirms the effective model and effort; otherwise record unspecified by runtime",
+        "floors-corridors": "role policy owns every effort floor and corridor" if referral_only else "Role policy still owns every effort floor and corridor",
+    })
+    if referral_only:
+        duties.update(relationships(unit, {
+            "qualified-defaults": "Fixed native defaults are candidates rather than blanket authority when an explicit generic policy-admissible profile is available",
+            "authoritative-referral": "For the optional Astra native-host path, apply Native Astra task-dependent route from the installed AGENTS.md; do not restate or widen that owner here",
+        }))
+    else:
+        generic = "the generic fallback TOML binds no model or effort"
+        duties.update(relationships(unit, {
+            "fixed-specialists": "Fixed Codex native specialist TOMLs declare their installed default profiles",
+            "generic-unbound": generic,
+            "selector-tuple": generic + ", and the ordinary selector explicitly emits its omitted-choice tuple from the sole policy default owner",
+            "bare-default-inheritance": "Direct bare default calls inherit provider/parent settings instead; policy-requiring callers use the selector",
+            "authoritative-referral": "the installed Native Astra task-dependent route owns explicit-tuple and custom-pin conflict semantics",
+        }))
+    duties["actual-metadata-identifier"] = identifier_present(unit, "unspecified by runtime")
+    duties["no-contrary-route"] = not _native_contradiction(unit)
+    return duties
 
 CLAUDE_MODEL_EFFORT_TRUTH = (
     "Claude internal Agent model and effort are host-selected; role definitions declare "
@@ -470,15 +645,134 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             self._cache[rel] = text
         return self._cache[rel]
 
+    def test_shared_duty_guards_reject_distinct_evidence_cleanup_and_baseline_losses(self) -> None:
+        text = self._read(SPINE)
+        cases = (
+            (evidence_duties, "Verification and decision discipline", "Evidence-based completion:", "dead-lane-unverified", "UNVERIFIED: re-dispatch/report", "CLEAN: no report required"),
+            (evidence_duties, "Verification and decision discipline", "Evidence-based completion:", "missing-verdict-rejection", "missing verdict NOT-clean (fail-closed)", "missing verdict clean (fail-open)"),
+            (cleanup_duties, "Operational and environment safety", "Resource lifecycle hygiene:", "all-exit-release", "/cancellation/timeout", "/timeout"),
+            (cleanup_duties, "Operational and environment safety", "Resource lifecycle hygiene:", "all-exit-release", "/cancellation/timeout", "/cancellation"),
+            (cleanup_duties, "Operational and environment safety", "Resource lifecycle hygiene:", "retained-termination-owner", "creator-retained process/Job handles or equivalent stable identity-bound ownership", "a process identifier"),
+            (cleanup_duties, "Operational and environment safety", "Resource lifecycle hygiene:", "identifier-only-termination-refused", "never PID/ParentProcessId ancestry alone", "PID/ParentProcessId ancestry alone is sufficient"),
+            (baseline_duties, "Core delegation principles", "Keep phase flow;", "producing-scope-baseline", "producing scope/accepted baseline", "the aggregate worktree"),
+            (baseline_duties, "Core delegation principles", "Keep phase flow;", "independent-delta-review", "get own review, not retroactive falsification", "retroactively falsify earlier work"),
+            (baseline_duties, "Core delegation principles", "Keep phase flow;", "material-upstream-invalidation", "invalidates dependent `PASS`", "preserves dependent `PASS`"),
+        )
+        for check, section, marker, duty, old, new in cases:
+            with self.subTest(duty=duty, loss=old):
+                unit = selected_unit(text, section, marker)
+                self.assertEqual(unit.count(old), 1)
+                self.assertFalse(check(text.replace(unit, unit.replace(old, new, 1), 1))[duty])
+
+    def test_native_owner_guards_reject_distinct_route_collapses(self) -> None:
+        text = self._read("src.codex/AGENTS.codex.md")
+        unit = selected_unit(text, "Native Astra task-dependent route", "For ordinary native and skill-only roles,")
+        cases = (
+            ("ordinary-selectors", "describe_ordinary_native_role_options", "guess_role_options"),
+            ("fixed-role-discovery", "only when current host discovery does not report that agent type absent", "even when current host discovery reports that agent type absent"),
+            ("generic-unbound", "binds neither model nor effort", "binds a model and effort"),
+            ("explicit-selector-tuple", "tuple explicitly through a generic spawn", "tuple implicitly through inherited settings"),
+            ("bare-default-inheritance", "instead inherits provider subagent defaults or parent settings", "instead guarantees the policy tuple"),
+            ("policy-tuple-selector", "callers requiring the policy tuple must use the ordinary selector", "callers requiring the policy tuple may omit the selector"),
+            ("skill-only-generic", "A skill-only role has no TOML", "A skill-only role requires a fixed TOML"),
+            ("explicit-unpinned-route", "an unpinned fallback carrier", "a pinned fallback carrier"),
+            ("custom-pin-no-bypass", "does not bypass higher-precedence", "bypasses higher-precedence"),
+            ("custom-pin-local-conflict", "not universal model unavailability", "universal model unavailability"),
+            ("named-discovery-denial", "denies that route with no fallback", "admits that route through fallback"),
+            ("selector-nonexecution", "The selector launches nothing", "The selector launches the worker"),
+            ("requested-vs-actual", "requested and resolved controls separately from actual runtime metadata", "requested and resolved controls as actual runtime metadata"),
+            ("missing-actual", "treats missing actual metadata as `unspecified by runtime`", "treats missing actual metadata as the requested profile"),
+            ("drift-refusal", "drift as nonauthorizing with no fallback", "drift as authorizing with a fallback"),
+        )
+        for duty, old, new in cases:
+            with self.subTest(duty=duty):
+                self.assertEqual(unit.count(old), 1)
+                self.assertFalse(native_route_duties(text.replace(unit, unit.replace(old, new, 1), 1))[duty])
+
+    def test_native_consumer_checks_the_complete_referral_context(self) -> None:
+        text = self._read("src.codex/skills/lead/SKILL.md")
+        unit = selected_unit(text, "Parallelism rule", "Dispatch economics:")
+        for duty, old, new in (
+            ("qualified-defaults", "candidates rather than blanket authority", "exclusive blanket authority"),
+            ("floors-corridors", "every effort floor and corridor", "selected effort settings"),
+            ("actual-override-evidence", "returned actual runtime metadata confirms", "the requested profile confirms"),
+            ("authoritative-referral", "apply `Native Astra task-dependent route` from the installed `AGENTS.md`; do not restate or widen that owner here", "apply the local default profile"),
+        ):
+            with self.subTest(duty=duty):
+                self.assertEqual(unit.count(old), 1)
+                changed = text.replace(unit, unit.replace(old, new, 1), 1)
+                self.assertFalse(native_consumer_duties(changed, "Parallelism rule", "Dispatch economics:", referral_only=True)[duty])
+        for contrary in (
+            " The generic fallback TOML declares a fixed profile.",
+            " All Codex native role TOMLs must declare a fixed profile.",
+            " The requested profile proves actual runtime model and effort.",
+        ):
+            with self.subTest(contrary=contrary):
+                # The genuine AGENTS referral and all positive duties remain present.
+                changed = text.replace(unit, unit + contrary, 1)
+                duties = native_consumer_duties(changed, "Parallelism rule", "Dispatch economics:", referral_only=True)
+                self.assertTrue(duties["authoritative-referral"])
+                self.assertFalse(duties["no-contrary-route"])
+        projected = self._read("src.codex/skills/lead/operating-model.md")
+        marker = "Resolve the requested route before launch"
+        unit = selected_unit(projected, "External routing order", marker)
+        for duty, old, new in (
+            ("generic-unbound", "generic fallback TOML binds no model or effort", "generic fallback TOML binds a fixed model and effort"),
+            ("selector-tuple", "ordinary selector explicitly emits", "ordinary selector implicitly inherits"),
+            ("bare-default-inheritance", "Direct bare `default` calls inherit provider/parent settings instead", "Direct bare `default` calls guarantee the policy tuple instead"),
+            ("authoritative-referral", "installed `Native Astra task-dependent route` owns explicit-tuple and custom-pin conflict semantics", "the local default profile owns all route semantics"),
+        ):
+            with self.subTest(projected_duty=duty):
+                self.assertEqual(unit.count(old), 1)
+                changed = projected.replace(unit, unit.replace(old, new, 1), 1)
+                self.assertFalse(native_consumer_duties(changed, "External routing order", marker)[duty])
+
+    def test_native_scope_and_identifiers_allow_only_bounded_formatting(self) -> None:
+        text = self._read("src.codex/AGENTS.codex.md")
+        formatted = text.replace("An omitted choice", "**AN**   OMITTED CHOICE").replace("Claim an override", "CLAIM an override").replace(
+            "For ordinary native and skill-only roles", "**FOR** ordinary native and skill-only   roles"
+        )
+        self.assertTrue(all(native_route_duties(formatted).values()))
+        for missing in ("", text.replace("## Native Astra task-dependent route", "## Unrelated route"),
+                        text + "\n## Native Astra task-dependent route\nDuplicate\n"):
+            with self.subTest(case="missing-or-duplicate-native-owner"):
+                with self.assertRaises(AssertionError):
+                    native_route_duties(missing)
+        shared = self._read(SPINE)
+        unit = selected_unit(shared, "Verification and decision discipline", "Evidence-based completion:")
+        lower_status = shared.replace(unit, unit.replace("UNVERIFIED", "unverified"), 1)
+        self.assertFalse(evidence_duties(lower_status)["dead-lane-unverified"])
+        for atom, invalid in (
+            ("resolve_ordinary_native_dispatch", "Resolve_ordinary_native_dispatch"),
+            ("default.toml", "default.toml.old"),
+            ("UNVERIFIED", "UNVERIFIED—legacy"),
+            ("UNVERIFIED", "**UNVERIFIED**"),
+            ("UNVERIFIED", "__UNVERIFIED__"),
+            ("unspecified by runtime", "unspecified  by runtime"),
+        ):
+            with self.subTest(case="exact-atom", atom=atom, invalid=invalid):
+                self.assertTrue(identifier_present(f"`{atom}`", atom))
+                self.assertFalse(identifier_present(f"`{invalid}`", atom))
+        for formatted in ("`UNVERIFIED`", "**UNVERIFIED**", "_UNVERIFIED_", "__UNVERIFIED__"):
+            with self.subTest(case="outer-markup", formatted=formatted):
+                self.assertTrue(identifier_present(formatted, "UNVERIFIED"))
+        self.assertFalse(identifier_present("", ""))
+
     def test_normative_sentences_present_in_every_owner(self) -> None:
+        """Preserve other pins and independently diagnose the three shared duty families."""
         for gap_id, substring, owners in PINS:
             for owner in owners:
                 with self.subTest(gap=gap_id, owner=owner):
                     text = self._read(owner)
-                    self.assertIn(
-                        substring, text,
-                        f"[{gap_id}] normative sentence missing from {owner}",
-                    )
+                    if owner == SPINE and gap_id in SHARED_DUTY_CHECKS:
+                        for duty, present in SHARED_DUTY_CHECKS[gap_id](text).items():
+                            with self.subTest(gap=gap_id, owner=owner, duty=duty):
+                                self.assertTrue(present, f"[{gap_id}] {owner}: missing or inverted duty {duty}")
+                    else:
+                        self.assertIn(
+                            substring, text,
+                            f"[{gap_id}] normative sentence missing from {owner}",
+                        )
 
     def test_p7_not_in_spine(self) -> None:
         spine = self._read(SPINE)
@@ -571,14 +865,22 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         self.assertNotIn("Native role definitions supply fixed installed profiles", shared)
 
     def test_codex_model_and_effort_truth_is_toml_and_policy_backed(self) -> None:
-        owners = (
-            "src.codex/skills/lead/SKILL.md",
-            "src.codex/skills/lead/operating-model.md",
-            "references-codex/subagent-operating-model.md",
+        """Keep fixed, generic-selector, bare-default and actual-metadata routes distinct."""
+        authoritative = "src.codex/AGENTS.codex.md"
+        for duty, present in native_route_duties(self._read(authoritative)).items():
+            with self.subTest(owner=authoritative, duty=duty):
+                self.assertTrue(present, f"{authoritative}: missing or contradicted native route {duty}")
+        consumers = (
+            ("src.codex/skills/lead/SKILL.md", "Parallelism rule", "Dispatch economics:", True),
+            ("src.codex/skills/lead/operating-model.md", "External routing order", "Resolve the requested route before launch", False),
+            ("references-codex/subagent-operating-model.md", "Codex-specific runtime notes", "Fixed Codex native specialist TOMLs", False),
         )
-        for owner in owners:
-            with self.subTest(owner=owner):
-                self.assertIn(CODEX_MODEL_EFFORT_TRUTH, self._read(owner))
+        for owner, section, marker, referral_only in consumers:
+            for duty, present in native_consumer_duties(
+                self._read(owner), section, marker, referral_only=referral_only
+            ).items():
+                with self.subTest(owner=owner, duty=duty):
+                    self.assertTrue(present, f"{owner}: missing or contradicted native consumer duty {duty}")
 
     def test_claude_model_and_effort_truth_is_host_selected_without_role_inference(self) -> None:
         owners = (

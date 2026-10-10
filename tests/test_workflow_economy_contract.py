@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import re
 import unittest
+from policy_text_contract import identifier_present, relationships, selected_section, selected_unit
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -110,6 +111,101 @@ RUNTIME_ROLE_CLAUSES = {
 RETIRED_MODEL_VIEW_RESET_RULE = "full reset is reserved for changes incremental signals cannot express"
 
 
+def workflow_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Core delegation principles", "Workflow economy (binding):")
+    return relationships(unit, {
+        "optional-review-evidence": "Optional review needs evidence",
+        "design-decision-gate": "design-decision=>one gate, not standing pre-implementation gate",
+        "triggered-mandatory-qa": "One final QA package of triggered mandatory risk owners",
+        "scoped-rereview": "Re-review open finding/changed delta only",
+        "full-review-trigger": "full only new defect class/material upstream revision",
+        "optional-advice-default": "Consultant/$external-brigade default off",
+        "advisory-readiness": "At readiness/decision Lead may choose Kimi",
+        "unavailable-provider": "Grok unavailable in 1.x; no launch/probe",
+        "quick-fix-ceremony": "Quick-fix: no pre-implementation review ceremony",
+        "specialist-artifact": "Per result: one canonical specialist artifact",
+        "root-ledger": "Per result: one canonical specialist artifact and one concise root ledger entry",
+        "progress-only-refusal": "No progress-only artifact/REVISE while safe implementation/validation remains",
+        "publication-preservation": "Never weaken human publication/leak gates",
+        "domain-gate-preservation": "Never weaken human publication/leak gates or security-, performance-, geometry-sensitive template requirements",
+    })
+
+
+def shared_advisory_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Core delegation principles", "Workflow economy (binding):")
+    duties = relationships(unit, {
+        "lead-optional-read-only": "At readiness/decision Lead may choose Kimi for bounded independent read-only ambiguity/options",
+        "no-call-or-skip": "At readiness/decision Lead may choose Kimi for bounded independent read-only ambiguity/options, else no call/skip",
+        "no-auto-gate-counter": "Kimi: not auto/gate/counter",
+        "availability-evidence": "availability/quota evidence",
+        "fixed-wrapper": "fixed kimi-code/k3 wrapper",
+        "independent-verification": "independent verification; nonauthorizing",
+    })
+    duties["fixed-wrapper"] &= identifier_present(unit, "kimi-code/k3")
+    return duties
+
+
+def projected_advisory_duties(text: str) -> dict[str, bool]:
+    unit = selected_section(text, "Workflow economy projection")
+    readiness = "At a natural readiness or decision point, if a bounded independent read-only alternative view would materially reduce unresolved ambiguity or compare consequential options"
+    availability = "current availability or quota claims require evidence"
+    duties = relationships(unit, {
+        "readiness-condition": readiness,
+        "lead-optional-selection": readiness + ", Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder",
+        "no-call-or-skip": "Otherwise no Kimi call or skip record is required",
+        "no-auto-gate-counter": "Selection never enters auto or creates a gate or counter",
+        "availability-evidence": availability,
+        "fixed-wrapper": availability + ", and the existing wrapper-only fixed kimi-code/k3",
+        "independent-verification": availability + ", and the existing wrapper-only fixed kimi-code/k3, independently verified, nonauthorizing",
+    })
+    duties["fixed-wrapper"] &= identifier_present(unit, "kimi-code/k3")
+    return duties
+
+
+def readability_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Scope and ownership discipline", "Readability:")
+    duties = relationships(unit, {
+        "clear-owner-flow": "clear names/flow/invariants/ownership/abstraction",
+        "conditional-separation": "separate scenario from parse/storage/transport only if mixing harms local/independent reasoning/change",
+        "operations": "Operations, not pass-throughs",
+        "no-forced-fragmentation": "No forced wrappers/fragmentation/length limits or atomic-invariant/measured-hot-path splits",
+        "needed-reads": "Read all needed; minimize edits, not reads",
+    })
+    general = selected_unit(text, "Scope and ownership discipline", "General-case over local symptoms:")
+    duties.update(relationships(general, {"abstraction-owner": "find the correct concept/abstraction level"}))
+    return duties
+
+
+def continuation_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Core delegation principles", "One task across questions/updates/compaction:")
+    return relationships(unit, {
+        "task-free-only": "task-free questions may end, no closeout while work remains",
+        "independent-continuation": "Decisions pause dependents; independent ready work continues",
+        "authorized-remainder": "end only with all authorized remainder concretely blocked",
+    })
+
+
+def projected_continuation_duties(text: str, primary_section: str) -> dict[str, bool]:
+    primary = selected_unit(text, primary_section, "For a question, status check, or clarification,")
+    duties = relationships(primary, {
+        "dependent-decision-only": "a required user decision pauses only dependent work; independent ready work continues; stopping requires every remaining authorized action be concretely blocked",
+    })
+    waiting = selected_unit(text, "Bootstrap - first action", "Wait only for an artifact or gate decision")
+    duties.update(relationships(waiting, {
+        "dependent-wait-only": "Wait only for an artifact or gate decision that blocks a dependent next action; independent admitted work continues",
+    }))
+    settling = selected_unit(text, "Bootstrap - first action", "Settle and continue:")
+    accepted = "on an accepted terminal result, verify its accepted gate"
+    logical = accepted + ", settle the existing ledger/status and logical phase"
+    duties.update(relationships(settling, {
+        "accepted-gate": accepted,
+        "logical-settlement": logical,
+        "supported-release-and-continue": logical + ", then apply supported host release/accounting, and execute the next admitted action",
+        "no-repeat-closeout": "do not repeat verdict or polish unless evidence is incomplete",
+    }))
+    return duties
+
+
 class TestWorkflowEconomyContract(unittest.TestCase):
     def _read(self, relative: str) -> str:
         path = REPO_ROOT / relative
@@ -129,6 +225,122 @@ class TestWorkflowEconomyContract(unittest.TestCase):
 
     def _assert_retired_rule_absent(self, relative: str, text: str, retired: str) -> None:
         self.assertTrue(retired not in text, f"{relative} retains retired rule: {retired!r}")
+
+    def test_scoped_duties_accept_formatting_and_reject_wrong_locations(self) -> None:
+        text = self._read(SPINE)
+        formatted = text.replace("Optional review", "**OPTIONAL**   REVIEW").replace(
+            "Re-review", "Re—review"
+        ).replace("No forced", "_NO_    FORCED").replace(
+            "## Core delegation principles", "  ## **CORE DELEGATION PRINCIPLES**"
+        )
+        for check in (workflow_duties, shared_advisory_duties, readability_duties, continuation_duties):
+            with self.subTest(check=check.__name__, case="formatting"):
+                self.assertTrue(all(check(formatted).values()))
+        qualified = text.replace("At readiness/decision Lead may choose", "**AT** readiness/decision   Lead may choose")
+        with self.subTest(case="intact-governing-advisory-condition"):
+            self.assertTrue(shared_advisory_duties(qualified)["no-call-or-skip"])
+        for malformed in ("", "## Core delegation principles\n", text.replace("## Core delegation principles", "## Unrelated"),
+                          text + "\n## Core delegation principles\n- Duplicate owner\n"):
+            with self.subTest(case="missing-empty-or-duplicate"):
+                with self.assertRaises(AssertionError):
+                    workflow_duties(malformed)
+        unit = selected_unit(text, "Core delegation principles", "Workflow economy (binding):")
+        with self.subTest(case="duplicate-normative-unit"):
+            with self.assertRaises(AssertionError):
+                workflow_duties(text.replace(unit, unit + "\n- **Workflow economy (binding):** " + unit, 1))
+        clause = "One final QA package of triggered mandatory risk owners;"
+        moved = text.replace(unit, unit.replace(clause, "", 1), 1) + "\n## Examples\n" + clause
+        self.assertFalse(workflow_duties(moved)["triggered-mandatory-qa"])
+
+    def test_workflow_duties_reject_distinct_loss_and_polarity_mutations(self) -> None:
+        text = self._read(SPINE)
+        unit = selected_unit(text, "Core delegation principles", "Workflow economy (binding):")
+        cases = (
+            (workflow_duties, "optional-review-evidence", "Optional review needs evidence", "Optional review needs no evidence"),
+            (workflow_duties, "design-decision-gate", "not standing pre-implementation gate", "a standing pre-implementation gate"),
+            (workflow_duties, "triggered-mandatory-qa", "One final QA", "One preliminary QA"),
+            (workflow_duties, "triggered-mandatory-qa", "One final QA", "Optional one final QA"),
+            (workflow_duties, "triggered-mandatory-qa", "One final QA", "Optional: One final QA"),
+            (workflow_duties, "triggered-mandatory-qa", "One final QA", "Optionally, One final QA"),
+            (workflow_duties, "triggered-mandatory-qa", "One final QA", "Not required: One final QA"),
+            (workflow_duties, "triggered-mandatory-qa", "One final QA", "Informative: One final QA"),
+            (workflow_duties, "triggered-mandatory-qa", "triggered mandatory risk", "mandatory risk"),
+            (workflow_duties, "triggered-mandatory-qa", "triggered mandatory risk", "triggered optional risk"),
+            (workflow_duties, "scoped-rereview", "open finding/changed delta only", "all findings and unchanged deltas"),
+            (workflow_duties, "full-review-trigger", "full only new defect class/material upstream revision", "full on every local edit"),
+            (workflow_duties, "optional-advice-default", "default off", "default on"),
+            (workflow_duties, "specialist-artifact", "one canonical specialist artifact", "two canonical specialist artifacts"),
+            (workflow_duties, "root-ledger", "one concise root ledger entry", "an optional root ledger entry"),
+            (workflow_duties, "progress-only-refusal", "while safe implementation/validation remains", "after all implementation/validation is blocked"),
+            (workflow_duties, "publication-preservation", "human publication/leak gates", "publication/leak gates"),
+            (workflow_duties, "publication-preservation", "human publication/leak gates", "human publication gates"),
+            (workflow_duties, "domain-gate-preservation", "security-, performance-, geometry-sensitive", "performance-, geometry-sensitive"),
+            (workflow_duties, "domain-gate-preservation", "security-, performance-, geometry-sensitive", "security-, geometry-sensitive"),
+            (workflow_duties, "domain-gate-preservation", "security-, performance-, geometry-sensitive", "security-, performance-sensitive"),
+            (shared_advisory_duties, "lead-optional-read-only", "Lead may choose Kimi", "Lead must choose Kimi"),
+            (shared_advisory_duties, "lead-optional-read-only", "bounded independent read-only", "bounded independent read-write"),
+            (shared_advisory_duties, "no-call-or-skip", "else no call/skip", "else a skip record is mandatory"),
+            (shared_advisory_duties, "no-auto-gate-counter", "not `auto`/gate/counter", "use `auto`/gate/counter"),
+            (shared_advisory_duties, "availability-evidence", "availability/quota evidence", "availability/quota assumptions"),
+            (shared_advisory_duties, "fixed-wrapper", "kimi-code/k3", "kimi-code/k4"),
+            (shared_advisory_duties, "independent-verification", "independent verification; nonauthorizing", "independent verification; authorizing"),
+            (shared_advisory_duties, "independent-verification", "independent verification; nonauthorizing", "self-verification; nonauthorizing"),
+        )
+        for check, duty, old, new in cases:
+            with self.subTest(duty=duty, loss=old, changed_to=new):
+                self.assertEqual(unit.count(old), 1)
+                mutated = text.replace(unit, unit.replace(old, new, 1), 1)
+                self.assertFalse(check(mutated)[duty], f"mutation retained {duty}")
+
+    def test_readability_and_continuation_guards_reject_distinct_losses(self) -> None:
+        text = self._read(SPINE)
+        cases = (
+            (readability_duties, "Scope and ownership discipline", "Readability:", "conditional-separation", "only if mixing harms", "whether or not mixing harms"),
+            (readability_duties, "Scope and ownership discipline", "Readability:", "operations", "Operations, not pass-throughs", "Pass-throughs, not operations"),
+            (readability_duties, "Scope and ownership discipline", "Readability:", "no-forced-fragmentation", "No forced wrappers", "Mandatory wrappers"),
+            (readability_duties, "Scope and ownership discipline", "Readability:", "no-forced-fragmentation", "atomic-invariant/measured-hot-path splits", "unmeasured splits"),
+            (readability_duties, "Scope and ownership discipline", "Readability:", "needed-reads", "minimize edits, not reads", "minimize reads, not edits"),
+            (continuation_duties, "Core delegation principles", "One task across questions/updates/compaction:", "task-free-only", "no closeout while work remains", "closeout while work remains"),
+            (continuation_duties, "Core delegation principles", "One task across questions/updates/compaction:", "independent-continuation", "independent ready work continues", "independent ready work stops"),
+            (continuation_duties, "Core delegation principles", "One task across questions/updates/compaction:", "authorized-remainder", "all authorized remainder concretely blocked", "any authorized action blocked"),
+        )
+        for check, section, marker, duty, old, new in cases:
+            with self.subTest(duty=duty, loss=old):
+                unit = selected_unit(text, section, marker)
+                self.assertEqual(unit.count(old), 1)
+                self.assertFalse(check(text.replace(unit, unit.replace(old, new, 1), 1))[duty])
+        projected = self._read(LEAD_SKILL_PROJECTIONS[0])
+        unit = selected_unit(projected, "Bootstrap - first action", "Settle and continue:")
+        for duty, old, new in (
+            ("accepted-gate", "verify its accepted gate", "assume its gate"),
+            ("logical-settlement", "ledger/status and logical phase", "ledger/status only"),
+            ("supported-release-and-continue", "supported host release/accounting", "forced host termination"),
+            ("no-repeat-closeout", "unless evidence is incomplete", "even when evidence is complete"),
+        ):
+            with self.subTest(projection=LEAD_SKILL_PROJECTIONS[0], duty=duty):
+                self.assertEqual(unit.count(old), 1)
+                changed = projected.replace(unit, unit.replace(old, new, 1), 1)
+                self.assertFalse(projected_continuation_duties(changed, "Flow-continuity rule")[duty])
+
+    def test_advisory_projection_rejects_lost_optional_duties(self) -> None:
+        text = self._read(KIMI_WORKFLOW_PROJECTIONS[0])
+        for duty, old, new in (
+            ("lead-optional-selection", "may explicitly select Kimi", "must explicitly select Kimi"),
+            ("no-call-or-skip", "Otherwise no Kimi call or skip record is required", "Otherwise a Kimi call or skip record is required"),
+            ("availability-evidence", "current availability or quota claims require evidence", "availability and quota claims need no evidence"),
+            ("fixed-wrapper", "kimi-code/k3", "kimi-code/k4"),
+            ("independent-verification", "independently verified, nonauthorizing", "independently verified, authorizing"),
+        ):
+            with self.subTest(duty=duty):
+                section = selected_section(text, "Workflow economy projection")
+                self.assertEqual(section.count(old), 1)
+                self.assertFalse(projected_advisory_duties(text.replace(section, section.replace(old, new, 1), 1))[duty])
+        shared = self._read(SPINE)
+        unit = selected_unit(shared, "Core delegation principles", "Workflow economy (binding):")
+        with self.subTest(case="exact-wrapper-characters"):
+            changed = shared.replace(unit, unit.replace("kimi-code/k3", "kimi—code/k3", 1), 1)
+            self.assertNotIn("kimi-code/k3", selected_unit(changed, "Core delegation principles", "Workflow economy (binding):"))
+            self.assertFalse(shared_advisory_duties(changed)["fixed-wrapper"])
 
     def test_codex_lead_routes_settled_demanding_decision_no_solve_before_next_dispatch(self) -> None:
         checkpoint = self._section(
@@ -226,84 +438,37 @@ class TestWorkflowEconomyContract(unittest.TestCase):
 
     def test_canonical_rule_keeps_evidence_gates_and_minimizes_ceremony(self) -> None:
         spine = self._read(SPINE)
-        for required in (
-            "**Workflow economy (binding):**",
-            "Optional review needs evidence",
-            "`design-decision`",
-            "one final QA package of triggered mandatory risk owners",
-            "Re-review only open finding/changed delta",
-            "new defect class/material upstream revision",
-            "Consultant and `$external-brigade` default off",
-            "At readiness/decision",
-            "Grok unavailable in 1.x",
-            "Quick-fix: no pre-implementation review ceremony",
-            "one canonical artifact",
-            "root: concise ledger entry; one per result",
-            "progress-only artifact",
-            "progress-only artifact/`REVISE`",
-            "human publication/leak-check gates",
-            "security-, performance-, or geometry-sensitive template",
-        ):
-            with self.subTest(required=required):
-                self.assertIn(required, spine)
+        for duty, present in workflow_duties(spine).items():
+            with self.subTest(owner=SPINE, duty=duty):
+                self.assertTrue(present, f"{SPINE}: missing or inverted workflow duty {duty}")
 
     def test_targeted_continuation_and_abstraction_clarifications_preserve_existing_gates(self) -> None:
         spine = self._read(SPINE)
-        self.assertIn(
-            "clear names/flow/invariants/ownership",
-            spine,
-        )
-        self.assertIn(
-            "abstraction level",
-            spine,
-        )
-        self.assertIn("local/independent reasoning/change", spine)
-        self.assertIn("operations—not pass-through helpers", spine)
-        self.assertIn("no forced wrappers/fragmentation/length limits/splits", spine)
-        self.assertIn("atomic invariants/measured hot paths", spine)
-        self.assertIn("read all needed; minimize edits, not reads", spine)
-        for required in (
-            "Task-free questions may end.",
-            "Decisions pause dependents; independent ready work continues",
-            "end only when remaining authorized work is concretely blocked.",
-        ):
-            self.assertIn(required, spine)
-        self.assertNotIn(
-            "required user decision overrides",
-            spine,
-        )
+        for check in (readability_duties, continuation_duties):
+            for duty, present in check(spine).items():
+                with self.subTest(owner=SPINE, duty=duty):
+                    self.assertTrue(present, f"{SPINE}: missing or inverted duty {duty}")
+        with self.subTest(owner=SPINE, duty="no-dependent-decision-stop-override"):
+            self.assertNotIn("required user decision overrides", spine)
 
         for relative in LEAD_SKILL_PROJECTIONS:
             text = self._read(relative)
-            self.assertIn(
-                "a required user decision pauses only dependent work; independent ready work continues; stopping requires every remaining authorized action be concretely blocked",
-                text,
-                relative,
-            )
-            self.assertNotIn("genuine user-required decision overrides", text, relative)
-            self.assertIn(
-                "**Wait** only for an artifact or gate decision that blocks a dependent next action; independent "
-                "admitted work continues.",
-                text,
-                relative,
-            )
-            self.assertIn(
-                "verify its accepted gate, settle the existing ledger/status, close the specialist, and execute "
-                "the next admitted action",
-                text,
-                relative,
-            )
-            self.assertIn("do not repeat verdict or polish unless evidence is incomplete", text, relative)
+            primary_section = "Flow-continuity rule" if relative.startswith("src.codex/") else "Primary-task lock"
+            for duty, present in projected_continuation_duties(text, primary_section).items():
+                with self.subTest(owner=relative, duty=duty):
+                    self.assertTrue(present, f"{relative}: missing or inverted continuation duty {duty}")
+            with self.subTest(owner=relative, duty="no-dependent-decision-stop-override"):
+                self.assertNotIn("genuine user-required decision overrides", text, relative)
 
         for relative in ARCHITECTURE_REVIEWER_PROJECTIONS:
             text = self._read(relative)
-            self.assertIn(
+            for required in (
                 "Run this check only inside an already-triggered Architecture Reviewer gate; it creates no "
                 "reviewer, lane, artifact, engine, or review loop.",
-                text,
-                relative,
-            )
-            self.assertIn("any `PILED` class maps to `REVISE`", text, relative)
+                "any `PILED` class maps to `REVISE`",
+            ):
+                with self.subTest(owner=relative, duty=required):
+                    self.assertIn(required, text, relative)
 
     def test_functional_first_policy_keeps_the_approved_boundaries(self) -> None:
         spine = self._read(SPINE)
@@ -448,34 +613,13 @@ class TestWorkflowEconomyContract(unittest.TestCase):
                 )
 
     def test_kimi_advisory_selection_is_optional_and_lead_selectable(self) -> None:
-        shared_required = (
-            "At readiness/decision",
-            "Lead may choose Kimi",
-            "bounded independent read-only ambiguity/option comparison",
-            "otherwise no Kimi call/skip",
-            "not `auto`/gate/counter",
-            "availability/quota evidence",
-            "fixed wrapper `kimi-code/k3`",
-            "independent verification; nonauthorizing",
-        )
-        for fragment in shared_required:
-            self.assertIn(fragment, self._read(SPINE))
-
-        projection_required = (
-            "At a natural readiness or decision point",
-            "bounded independent read-only alternative view",
-            "Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder",
-            "Otherwise no Kimi call or skip record is required",
-            "never enters `auto` or creates a gate or counter",
-            "current availability or quota claims require evidence",
-            "wrapper-only fixed `kimi-code/k3`",
-            "independently verified, nonauthorizing",
-        )
+        for duty, present in shared_advisory_duties(self._read(SPINE)).items():
+            with self.subTest(owner=SPINE, duty=duty):
+                self.assertTrue(present, f"{SPINE}: missing or inverted advisory duty {duty}")
         for relative in KIMI_WORKFLOW_PROJECTIONS:
-            text = self._read(relative)
-            with self.subTest(relative=relative):
-                for fragment in projection_required:
-                    self.assertIn(fragment, text)
+            for duty, present in projected_advisory_duties(self._read(relative)).items():
+                with self.subTest(owner=relative, duty=duty):
+                    self.assertTrue(present, f"{relative}: missing or inverted advisory duty {duty}")
 
     def test_profession_conditions_are_paired_and_evidence_triggered(self) -> None:
         for role in PROFESSION_ROLES:
@@ -675,22 +819,29 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         self.assertNotIn("Проза `.out` ревьюера", text)
         self.assertNotIn("обёртка `--ledger`", text)
 
-    def test_codex_review_loop_defaults_to_two_explicit_standard_codex_verdicts(self) -> None:
+    def test_review_loop_selects_supported_initial_routes_without_weakening_provenance(self) -> None:
+        for path in ("src.codex/skills/review-loop/SKILL.md", "src.claude/agents/contracts/review-loop.md"):
+            text = self._read(path)
+            for required in (
+                "supported initial route", "external-only selection remains external-only",
+                "No route switch after a failed launch", "unspecified by runtime",
+                "materially competing owner/contract/seam solutions",
+                "one clear falsifying oracle", "nonauthoring",
+            ):
+                with self.subTest(path=path, required=required):
+                    self.assertIn(required, text)
         text = self._read("src.codex/skills/review-loop/SKILL.md")
-        for required in (
-            "two fresh explicit external Codex processes",
-            "`externalProvider: codex`",
-            "distinct attempt IDs, prompt files, and committed receipts",
-            "never `auto` or Claude",
-            "must not request `fast`, `priority`, or `ultrafast`",
-            "explicitly user-selected approved API-key route",
-            "never a fallback",
-            "Kimi may be explicitly selected for the deep/wide angle",
-            "failed Kimi lane remains UNVERIFIED",
-        ):
-            with self.subTest(required=required):
-                self.assertIn(required, text)
-        self.assertNotIn("`auto` resolves to Claude on the Codex line", text)
+        for preserved in ("existing ordinary selector", "exact discovered task tools",
+                          "strict V2 parser", "full external-nonauthorizing tuple",
+                          "untrusted/potentially-sensitive resultText",
+                          "must not request `fast`, `priority`, or `ultrafast`",
+                          "explicitly user-selected approved API-key route", "never a fallback",
+                          "Kimi may be explicitly selected for the deep/wide angle",
+                          "failed Kimi lane remains UNVERIFIED"):
+            self.assertIn(preserved, text)
+        for retired in ("two fresh explicit external Codex processes", "never `auto` or Claude",
+                        "A shipped formal loop MUST use the installed"):
+            self.assertNotIn(retired, text)
 
     def test_provenance_templates_keep_kimi_explicit_and_grok_unavailable(self) -> None:
         for relative in PROVENANCE_PROVIDER_TEMPLATES:
@@ -719,7 +870,8 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         principles = self._read("shared/references/spine/delegation-principles.md")
         self.assertIn("fixed synthetic non-substantive smoke token", reference)
         self.assertNotIn("documented provider limitations", reference)
-        self.assertIn("approved prompt wrapper or fail/reroute", principles)
+        self.assertIn("establish the same admitted execution guarantees manually", principles)
+        self.assertIn("never bypass host denial or an explicit route requirement", principles)
         self.assertNotIn("An inline fallback", principles)
 
 
