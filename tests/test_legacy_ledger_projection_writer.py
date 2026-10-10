@@ -129,17 +129,163 @@ class LegacyLedgerProjectionWriterTests(unittest.TestCase):
         )
 
     def test_dry_run_has_empty_byte_inventory_and_creates_no_lock_or_temp(self):
+        import subprocess
         module = load_writer()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory) / "work-items"
             item, ledger_before, manifest = self._fixture(root)
-            before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
-            result = self._apply(module, root, manifest, dry_run=True)
-            after = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
-            self.assertTrue(result["dryRun"])
-            self.assertEqual({}, result["byteInventory"])
-            self.assertEqual(before, after)
+            manifest_path = root / "manifest.json"
+            manifest_path.write_bytes(manifest)
+            common = [
+                sys.executable, "-B", str(SCRIPT), "apply-legacy-ledger-projection",
+                "--manifest-file", str(manifest_path), "--manifest-entry-id", "entry-001",
+                "--raw-line-ordinal", "1", "--expected-registry-sha256", sha(b""),
+                "--operation-id", "projection-cli-dry-001", "--recorded-at", "2026-08-01T00:00:02Z",
+                "--dry-run",
+            ]
+            def run(alias):
+                return subprocess.run(common + ["--root", str(alias)], cwd=ROOT,
+                                      capture_output=True, text=True, timeout=30)
+            def inventory():
+                return {p.relative_to(root): ("directory" if p.is_dir() else p.read_bytes())
+                        for p in root.rglob("*")}
+            before = inventory()
+            responses = []
+            for alias in (root, root / "work-items"):
+                completed = run(alias)
+                self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+                response = json.loads(completed.stdout)
+                self.assertTrue(response["dryRun"])
+                self.assertEqual({}, response["byteInventory"])
+                self.assertEqual(["projection-cli-dry-001"], response["operationIds"])
+                responses.append(response)
+                self.assertEqual(before, inventory())
+                self.assertFalse((root / ".scratch").exists())
+                print("PROJECTION_DRY_ROOT_CLI", "R" if alias == root else "W", completed.returncode, completed.stdout.strip())
+            self.assertEqual(responses[0], responses[1])
             self.assertEqual(ledger_before, (item / "agent-runs.jsonl").read_bytes())
+            invalid = json.loads(manifest)
+            invalid["entries"][0]["ledgerSha256"] = "0" * 64
+            manifest_path.write_bytes(canonical(invalid))
+            invalid_before = inventory()
+            refused = run(root / "work-items")
+            self.assertEqual(refused.returncode, 1)
+            self.assertIn("WI-LEDGER-MIGRATION-LEDGER-DRIFT", refused.stdout)
+            self.assertEqual(invalid_before, inventory())
+            self.assertFalse((root / ".scratch").exists())
+            manifest_path.write_bytes(manifest)
+            linked = Path(directory) / "linked-root"
+            linked.symlink_to(root, target_is_directory=True)
+            try:
+                refused = run(linked)
+                self.assertEqual(refused.returncode, 1)
+                self.assertIn("WI-LEDGER-MIGRATION-TARGET-IDENTITY", refused.stdout)
+                self.assertEqual(before, inventory())
+                self.assertFalse((root / ".scratch").exists())
+            finally:
+                linked.unlink()
+
+    def test_root_acquisition_rejects_dual_subject_before_digest(self):
+        module = load_writer()
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "work-items"
+            _item, _ledger, manifest = self._fixture(root)
+            other_item, _other_ledger, _other_manifest = self._fixture(parent)
+            event = json.loads((other_item / "agent-runs.jsonl").read_bytes())
+            event["evidence"] = "Other valid legacy evidence"
+            (other_item / "agent-runs.jsonl").write_bytes(canonical(event) + b"\n")
+            before = {p: p.read_bytes() for p in parent.rglob("*") if p.is_file()}
+            for dry_run in (True, False):
+                with self.assertRaises(module.LifecycleError) as ambiguous:
+                    self._apply(module, root, manifest, dry_run=dry_run)
+                self.assertIn("acquisition ambiguous", str(ambiguous.exception))
+                self.assertEqual(before, {p: p.read_bytes() for p in parent.rglob("*") if p.is_file()})
+                self.assertFalse((root / ".scratch").exists())
+                self.assertFalse((parent / ".scratch").exists())
+
+    def test_unique_binding_retains_digest_missing_and_unsafe_failures(self):
+        module = load_writer()
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "work-items"
+            item, ledger_before, manifest = self._fixture(root)
+            wrong = json.loads(manifest)
+            wrong["entries"][0]["ledgerSha256"] = "0" * 64
+            with self.assertRaises(module.LifecycleError) as digest:
+                self._apply(module, root, canonical(wrong), dry_run=True)
+            self.assertEqual("WI-LEDGER-MIGRATION-LEDGER-DRIFT", digest.exception.failure_id)
+            self.assertFalse((root / ".scratch").exists())
+            ledger = item / "agent-runs.jsonl"
+            ledger.unlink()
+            with self.assertRaises(module.LifecycleError) as missing:
+                self._apply(module, root, manifest, dry_run=True)
+            self.assertEqual("WI-LEDGER-MIGRATION-TARGET-IDENTITY", missing.exception.failure_id)
+            self.assertNotIn("acquisition unbound", str(missing.exception))
+            ledger.write_bytes(ledger_before)
+            from unittest.mock import patch
+            with patch.object(module, "_open_readonly_nofollow", side_effect=PermissionError("bounded acquisition unreadable")):
+                with self.assertRaises(module.LifecycleError) as unavailable:
+                    self._apply(module, root, manifest, dry_run=True)
+            self.assertIsInstance(unavailable.exception.__cause__, PermissionError)
+            ledger.unlink()
+            ledger.mkdir()
+            with self.assertRaises(module.LifecycleError) as corrupt:
+                self._apply(module, root, manifest, dry_run=True)
+            self.assertEqual("WI-LEDGER-MIGRATION-TARGET-IDENTITY", corrupt.exception.failure_id)
+            self.assertNotIn("acquisition unbound", str(corrupt.exception))
+            ledger.rmdir()
+            ledger.write_bytes(ledger_before)
+            malformed = json.loads(manifest)
+            del malformed["entries"][0]["ledgerPath"]
+            with self.assertRaises(module.LifecycleError) as missing_field:
+                self._apply(module, root, canonical(malformed), dry_run=True)
+            self.assertEqual("WI-LEDGER-MIGRATION-MANIFEST-INVALID", missing_field.exception.failure_id)
+            # The other protocol interpretation is unsafe: never promote the safe binding.
+            (root / "active").symlink_to(root / "work-items" / "active", target_is_directory=True)
+            try:
+                with self.assertRaises(module.LifecycleError) as unsafe:
+                    self._apply(module, root, manifest, dry_run=True)
+                self.assertIn("acquisition unsafe", str(unsafe.exception))
+                self.assertFalse((root / ".scratch").exists())
+            finally:
+                (root / "active").unlink()
+
+    def test_acquired_projection_revalidates_before_operation_write(self):
+        from unittest.mock import patch
+        module = load_writer()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "work-items"
+            item, ledger_before, manifest = self._fixture(root)
+            original_enter = module.LifecycleTransaction.__enter__
+            def drift_after_acquisition(transaction):
+                (item / "agent-runs.jsonl").write_bytes(ledger_before + b" ")
+                return original_enter(transaction)
+            with patch.object(module.LifecycleTransaction, "__enter__", drift_after_acquisition):
+                with self.assertRaises(module.LifecycleError) as drift:
+                    self._apply(module, root, manifest)
+            self.assertEqual("WI-LIFECYCLE-LOCK-IDENTITY", drift.exception.failure_id)
+            self.assertFalse((root / "work-items" / "legacy-ledger-projections.jsonl").exists())
+            self.assertIsNone(module._CURRENT_LIFECYCLE_TRANSACTION.get())
+            self.assertIsNone(module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get())
+
+    def test_readonly_logical_locator_preserves_proved_repository_role(self):
+        module = load_writer()
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "work-items"
+            item, _ledger, _manifest = self._fixture(root)
+            self._fixture(parent)
+            validator = module._validator_module()
+            errors = []
+            target = validator.classify_legacy_projection_target(item, item / "agent-runs.jsonl", errors, require_ledger=True)
+            self.assertEqual([], errors)
+            with self.assertRaises(module.LifecycleError) as raw:
+                module.resolve_work_item_ledger_location(root, logical_work_item=target[1], logical_ledger_path=target[1] + "/agent-runs.jsonl")
+            self.assertIn("acquisition ambiguous", str(raw.exception))
+            location = module.resolve_work_item_ledger_location(target[0], logical_work_item=target[1], logical_ledger_path=target[1] + "/agent-runs.jsonl", input_role="repository-root")
+            self.assertEqual("active", location.phase)
+            self.assertEqual(target[1], location.physical_work_item)
             self.assertFalse((root / ".scratch").exists())
 
     def test_manifest_create_exact_replay_and_collision_are_fail_closed(self):
@@ -153,11 +299,19 @@ class LegacyLedgerProjectionWriterTests(unittest.TestCase):
             self.assertTrue(second["replay"])
             manifest_path = root / "work-items" / "legacy-ledger-projection-manifests" / "manifest-001.json"
             self.assertEqual(manifest, manifest_path.read_bytes())
+            missing_selection = json.loads(manifest)
+            missing_selection["entries"][0]["entryId"] = "entry-other"
+            with self.assertRaises(module.LifecycleError) as missing:
+                self._apply(module, root, canonical(missing_selection), operation="missing-selection")
+            self.assertEqual("WI-LEDGER-MIGRATION-TARGET-IDENTITY", missing.exception.failure_id)
+            self.assertEqual(manifest, manifest_path.read_bytes())
             altered = json.loads(manifest)
-            altered["entries"][0]["entryId"] = "entry-other"
+            altered["entries"].append({**altered["entries"][0], "entryId": "entry-other"})
             with self.assertRaises(module.LifecycleError) as caught:
                 self._apply(module, root, canonical(altered), operation="projection-apply-002")
             self.assertEqual("WI-LEDGER-MIGRATION-MANIFEST-INVALID", caught.exception.failure_id)
+            self.assertIn("create-only manifest bytes differ", str(caught.exception))
+            self.assertEqual(manifest, manifest_path.read_bytes())
 
     def test_registry_cas_operation_conflict_and_ledger_immutability(self):
         module = load_writer()
@@ -341,15 +495,25 @@ class LegacyLedgerProjectionWriterTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            _item, _ledger, manifest = self._fixture(root)
-            with self.assertRaises(module.LifecycleError) as dual_root:
-                self._apply(module, root / "work-items", manifest)
-            self.assertEqual("WI-LEDGER-MIGRATION-TARGET-IDENTITY", dual_root.exception.failure_id)
+            item, ledger, manifest = self._fixture(root)
+            accepted = self._apply(module, root / "work-items", manifest)
+            self.assertFalse(accepted["replay"])
+            self.assertEqual(ledger, (item / "agent-runs.jsonl").read_bytes())
             escaped = json.loads(manifest)
             escaped["entries"][0]["workItem"] = "../escape"
             with self.assertRaises(module.LifecycleError) as path_escape:
                 self._apply(module, root, canonical(escaped), operation="path-escape")
             self.assertEqual("WI-LEDGER-MIGRATION-TARGET-IDENTITY", path_escape.exception.failure_id)
+
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "work-items"
+            _item, _ledger, manifest = self._fixture(root)
+            self._fixture(parent)
+            with self.assertRaises(module.LifecycleError) as dual_root:
+                self._apply(module, root, manifest)
+            self.assertEqual("WI-LEDGER-MIGRATION-TARGET-IDENTITY", dual_root.exception.failure_id)
+            self.assertIn("acquisition ambiguous", str(dual_root.exception))
 
     def test_projection_dead_schemas_are_absent(self):
         self.assertFalse((ROOT / "shared" / "schemas" / "legacy-ledger-projection-manifest.schema.json").exists())

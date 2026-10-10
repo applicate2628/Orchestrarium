@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -1194,3 +1195,69 @@ def test_frozen_absence_refuses_required_candidate_and_inconsistent_selection(tm
     acquired = []
     errors = module.validate_work_item(item, selected_ledger_absent=True, ledger_acquisition_complete_out=acquired)
     assert any("missing ledger:" in value for value in errors) and acquired == [False]
+
+
+def test_archive_authority_preserves_migrated_review_and_neutral_settlement(tmp_path):
+    module = load_validator_module()
+    events = [
+        ledger_event(schemaVersion=2, runId="authority-launch", eventKind="launch", status="running", gate="none"),
+        ledger_event(schemaVersion=2, runId="authority-migrated-review", eventKind="terminal", launchRunId="authority-launch", status="revise", gate="REVISE"),
+        ledger_event(schemaVersion=2, runId="authority-neutral-terminal", eventKind="terminal", launchRunId="authority-launch", gate="none"),
+    ]
+    rows = list(module._runtime_rows_from_events(events))
+    rows[1] = replace(rows[1], epoch="migration-replaced")
+    masks = module._derive_authority_masks(rows, [True] * 3, tmp_path, policy="archive")
+    assert masks[0].launch_eligible
+    assert tuple(vars(masks[1]).values()) == (False, False, True, False, False)
+    assert masks[2].terminal_eligible
+    assert masks == module._derive_authority_masks(rows, [True] * 3, tmp_path)
+    assert not any(
+        any(vars(mask).values())
+        for mask in module._derive_authority_masks(rows, [False] * 3, tmp_path, policy="archive")
+    )
+
+
+@pytest.mark.parametrize("epoch", ["sealed-prefix", "transferred", "historical-custody"])
+def test_archive_authority_has_no_historical_uplift(tmp_path, epoch):
+    module = load_validator_module()
+    event = ledger_event(schemaVersion=2, runId="historical-launch", eventKind="launch", status="running", gate="none", workItem=tmp_path.name)
+    row = replace(
+        module._runtime_rows_from_events([event])[0], epoch=epoch,
+        authority=module.LedgerAuthorityV1(True, True, True, True, True),
+    )
+    assert module._derive_authority_masks([row], [False], tmp_path)[0].launch_eligible
+    archive_mask = module._derive_authority_masks([row], [False], tmp_path, policy="archive")[0]
+    assert not any(vars(archive_mask).values())
+
+
+@pytest.mark.parametrize("transformation,profile,epoch", [
+    ("migration-replaced", None, "migration-replaced"),
+    ("manifest-projected", ("identity-ledger-v1-string", 1), "raw"),
+    ("manifest-projected", ("identity-record-v0", 1), "manifest-profile"),
+])
+def test_boolean_compatibility_cannot_reconstruct_projected_authority(transformation, profile, epoch):
+    module = load_validator_module()
+    event = ledger_event(schemaVersion=2, eventKind="standalone", gate="none")
+    projected = module.LedgerProjectionRowV1(event, 1, "a" * 64, "b" * 64, transformation, projection_profile=profile)
+    rows = module._runtime_rows_from_projection([projected])
+    assert rows[0].epoch == epoch
+    assert rows[0].projection_transformation == transformation
+    assert rows[0] == replace(rows[0], projection_transformation="raw")
+    assert dict(rows[0].event) == event
+    assert rows[0].projected_event_sha256 == hashlib.sha256(module._canonical_projection_bytes(event)).hexdigest()
+    errors = []
+    assert module._validate_closure_authority(rows, errors, event_validity=[True]) == ([], [])
+    assert len(errors) == 1 and "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS" in errors[0]
+
+
+def test_boolean_compatibility_preserves_unprojected_raw_and_strict_suffix_rows():
+    module = load_validator_module()
+    event = ledger_event(schemaVersion=2, eventKind="standalone", gate="none")
+    raw_errors = []
+    assert module._validate_closure_authority([event], raw_errors, event_validity=[True]) == ([], [])
+    assert raw_errors == []
+    row = module._runtime_rows_from_events([event])[0]
+    for epoch in ("raw", "strict-suffix"):
+        errors = []
+        assert module._validate_closure_authority([replace(row, epoch=epoch)], errors, event_validity=[True]) == ([], [])
+        assert errors == []

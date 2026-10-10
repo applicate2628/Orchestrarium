@@ -12,6 +12,20 @@ use schema Version 2.
 
 ## Exact schema
 
+Initial V0 decision admission is owned by `scripts/mutate-work-item.py` through
+`admit_current_decision_v0` / `admit-current-decision-v0`, using the same bound
+repository/work-items root and lifecycle transaction. It captures without
+authority, then creates `work-items/decision-v0-compatibility.json` only after
+explicit current accepted V1 policy binding and fresh expected byte hashes.
+Historical records and README remain untouched. The caller selects an ordinary
+repository-relative `.scratch/` settlement receipt; its `.pending` sibling
+binds actual staged identities for same-operation recovery, not a new registry
+or declaration authority. Existing strict reader, cutover and retirement rules
+remain authoritative. A valid historical replay separately validates present
+compatibility and tolerates lawful retirement/README advancement. A controlled
+owner-executed manual equivalent must retain the same binding, create-only
+publication, recovery, readback and foreign-byte-preservation guarantees.
+
 The contract is optional. When present, it is a regular UTF-8 JavaScript Object
 Notation (JSON) file at the repository-relative path
 `work-items/root-contract.json`. The narrow profile has exactly these keys:
@@ -106,6 +120,52 @@ unknown; it is otherwise outside the built-in item lifecycle. Close and reopen
 continue to move only the owning work-item records, and README remains a
 derived view rather than a topology source.
 
+The lifecycle transaction retains separate canonical repository and work-items
+roles after validating the original caller path. Wrapped operations and nested
+same-repository checks consume those held roles; topology never reinterprets an
+already-proved repository from its basename. Repository-relative scratch,
+receipt and retention paths therefore use the same repository for either
+documented root spelling. Foreign roots and original linked/reparse inputs
+cannot borrow a held transaction's authority. The shared identity owner distinguishes raw acquisition from proved-role
+normalization. The declared request category/slug or transition operation
+is observed before generic namespace identity; a different neighboring subject
+is not a competing binding. A same-subject dual root refuses, while multiple
+locations within one root remain the domain owner’s duplicate-location error. Untyped roots bind through the selected subject or canonical-W
+namespace owner; protocol candidates are evaluated together before domain/digest
+admission, with ambiguous/unbound/unsafe/unavailable inputs remaining failures.
+The existing optional contract may supply typed identity when present; it is
+never required as a new marker. Proved repository-root/work-items-root inputs
+return plain paths without rereading this contract or granting authority.
+The checker keeps its configured selected namespace separate from its base;
+existing scope equations prove the base role, which audit, transfer and dependency
+consumers receive through the same owner. Component selection never rebases it.
+Readonly H1 location acquisition defaults to caller-root; bound consumers carry
+the repository-root role explicitly across module boundaries. Public transition
+recovery admits the original caller path once into the existing transaction,
+which encloses intent selection, recovery and nested README/receipt readback.
+The command-line positive `--apply` gate remains required.
+
+Settlement and mixed recovery bind their parsed logical work-item before receipt
+or target lookup, then forward the acquired repository role through existing
+readers. Settlement rechecks readonly binding before output and carries original
+input/evidence into its existing transaction. Mixed recovery rechecks under its
+existing ledger lock before staging; no-apply keeps its existing staging cleanup
+and rechecks binding before output. No additional readonly lock/context is used.
+
+Identity observation consumes plain structural rows from that same archive
+classifier and reads no unrelated metadata/retained bodies. Full inventory alone
+constructs complete entities with exact bounded file snapshots; structural
+identity/stat observations do not claim content proof.
+
+The readonly `archive_entity_inventory` API exposes the same physical owner
+model and its `logical_work_item_paths`, including invalid known tasks. The
+default checker validates only each selected task's immediate canonical ledger;
+nested retained ledger snapshots remain data. Lexical presence preserves
+dangling, directory and unreadable-ledger failure rather than skipping them.
+Requested archive scope and captured currentness must agree; unavailable or
+drifting owner acquisition is not clean-empty. Real current and archived review
+obligations retain their existing validator and failure semantics.
+
 Ordinary direct files at the built-in work-item archive root or a canonical
 month are nonauthorizing archive metadata, acquired through the lifecycle
 owner's bounded no-follow snapshots. Their exact bytes feed the same board
@@ -138,7 +198,13 @@ README in a settlement receipt. See the operator command in
 `docs/work-item-execution-tracking.md`.
 
 If no contract exists, the prior built-in-root-only behavior is preserved for
-compatibility. The narrow profile remains accepted. If a contract is malformed,
+compatibility. Subjectless topology observation outside a transaction, without
+a proved root role, may read a repository or work-items namespace alias only
+when the contract entry is absent. A namespace alias retains its selected
+repository association. This observation supplies no lifecycle, held-root, or
+mutation authority; those acquisitions still validate the original caller path
+without following links. A present, linked, unreadable, or malformed contract
+never becomes absence. The narrow profile remains accepted. If a contract is malformed,
 has an unknown schema or version, or declares an unsafe, reserved, linked,
 reparse, unconfined, or non-directory
 root, lifecycle operations fail closed with

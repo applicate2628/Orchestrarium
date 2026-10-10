@@ -20,6 +20,47 @@ LIFECYCLE = ROOT / "scripts" / "mutate-work-item.py"
 FIXTURE = ROOT / "tests" / "fixtures" / "agent-run-ledger" / "legacy-obligation-migration-v2"
 
 
+def test_legacy_parent_owner_drift_refuses_before_lifecycle_writes(tmp_path: Path) -> None:
+    helpers = load_script(ROOT / "tests" / "test_mutate_work_item.py", "legacy_parent_prewrite_helpers")
+    lifecycle = helpers.load_module()
+    root = tmp_path / "repo"
+    slug, owner_slug = "legacy-parent", "canonical-owner"
+    instant = "2026-10-08T15:00:00Z"
+    helpers.seed_active(lifecycle, root, slug)
+    helpers.seed_active(lifecycle, root, owner_slug)
+    item = root / "work-items" / "active" / slug
+    owner = root / "work-items" / "active" / owner_slug
+    helpers.write(item / "closure.md", helpers.closure(instant))
+    helpers.write(item / "evidence.md", "Accepted evidence.\n")
+    helpers.write(owner / "result.md", f"[Evidence](../{slug}/evidence.md)\n")
+    inventory = root / "incoming.json"
+    helpers.write(inventory, json.dumps({"reference": f"work-item:{slug}"}))
+    lifecycle.refresh_readme(root)
+    protected = (item / "status.md", item / "closure.md", root / "work-items" / "README.md")
+    identities_before = [(path.stat().st_dev, path.stat().st_ino) for path in protected]
+    tree_before = helpers.tree_file_bytes(root)
+    original = lifecycle._plan_parent_archive_links
+
+    def change_owner_after_plan(*args, **kwargs):
+        plan = original(*args, **kwargs)
+        status = owner / "status.md"
+        status.write_bytes(status.read_bytes() + b"New owner state.\n")
+        return plan
+
+    lifecycle._plan_parent_archive_links = change_owner_after_plan
+    with pytest.raises(lifecycle.LifecycleError) as failed:
+        lifecycle.migrate_legacy(root, f"work-item:{slug}", incoming_links_inventory=inventory)
+    assert failed.value.failure_id == "WI-CLOSE-LINK-DRIFT"
+    assert item.is_dir()
+    assert not (root / "work-items" / "archive" / "2026-10" / slug).exists()
+    assert [(path.stat().st_dev, path.stat().st_ino) for path in protected] == identities_before
+    owner_status = (owner / "status.md").relative_to(root).as_posix()
+    tree_after = helpers.tree_file_bytes(root)
+    assert {key: value for key, value in tree_after.items() if key != owner_status} == {
+        key: value for key, value in tree_before.items() if key != owner_status
+    }
+
+
 def load_validator():
     spec = importlib.util.spec_from_file_location("legacy_obligation_validator", VALIDATOR)
     module = importlib.util.module_from_spec(spec)
@@ -287,6 +328,22 @@ def two_migration_transfer_fixture(tmp_path: Path):
         "migration-op-002",
         "2026-08-18T00:00:01Z",
     )
+    migrated_image = ledger_path.read_bytes()
+    migrated_events = [json.loads(line) for line in migrated_image.splitlines()]
+    for control in migrated_events:
+        if control.get("eventKind") != "legacy-obligation-migration" or control.get("migrationAction") != "apply":
+            continue
+        target = next(event for event in migrated_events if event.get("runId") == control["migratesRunId"])
+        settled = subprocess.run(
+            [sys.executable, "-B", str(LEDGER), "--work-item", str(item), "settle-launch",
+             "--launch-run-id", target["launchRunId"], "--run-id", f"{target['launchRunId']}-migration-neutral",
+             "--status", "completed", "--gate", "none",
+             "--started-at", "2026-08-18T00:00:02Z", "--updated-at", "2026-08-18T00:00:02Z"],
+            cwd=ROOT, capture_output=True, text=True, timeout=30,
+        )
+        assert settled.returncode == 0, settled.stdout + settled.stderr
+        assert "RESULT: PASS settle-launch" in settled.stdout, settled.stdout + settled.stderr
+    assert ledger_path.read_bytes().startswith(migrated_image)
     ledger_before = ledger_path.read_bytes()
     open_rows = lifecycle._inspect_transfer_obligations(tmp_path, item)
     assert [row.source_kind for row in open_rows] == [
@@ -1155,12 +1212,16 @@ def test_lifecycle_contention_uses_existing_lock_failure(tmp_path: Path) -> None
     lifecycle = load_script(LIFECYCLE, "migration_lifecycle_lock")
     before = (item / "agent-runs.jsonl").read_bytes()
     class Held:
-        def __init__(self, _root):
+        def __init__(self, _root, *, input_role, original_root, binding_evidence):
+            assert input_role == "repository-root"
+            assert original_root == tmp_path
+            assert binding_evidence is not None
             self._unsettled_relocations = ()
         def __enter__(self): raise lifecycle.LifecycleError("WI-LIFECYCLE-LOCK-HELD", "held")
     with patch.object(lifecycle, "LifecycleTransaction", Held), pytest.raises(lifecycle.LifecycleError) as caught:
         lifecycle.migrate_legacy_ledger_obligation(tmp_path, item.name, expected["targetRunId"], expected["targetRawSha256"], sha256(before), "migration-op-lock", "2026-08-18T00:00:00Z")
     assert caught.value.failure_id == "WI-LIFECYCLE-LOCK-HELD"
+    assert (item / "agent-runs.jsonl").read_bytes() == before
     item, expected, lifecycle, _, applied = committed_fixture(tmp_path / "shared-ledger-lock")
     ledger_owner = lifecycle._load_agent_run_ledger()
     ledger_path = item / "agent-runs.jsonl"
@@ -1673,6 +1734,41 @@ def test_archive_with_successor_hash_case_normalization_preserves_invalid_and_mi
         for path in replay_fixture["root"].rglob("*")
         if path.is_file()
     } == replay_before
+
+
+def test_native_transfer_updates_owned_canonical_document_uri(tmp_path: Path) -> None:
+    fixture = native_transfer_fixture(tmp_path)
+    lifecycle = fixture["lifecycle"]
+    owner_slug = "2026-08-18-canonical-owner"
+    lifecycle.create_candidate(tmp_path, owner_slug, (
+        f"Task: {owner_slug}\nNext action: Start.\nupdated: 2026-08-18T00:00:00Z\n"
+    ).encode())
+    lifecycle.start_item(tmp_path, owner_slug, (
+        "---\ntemplate: quick-fix\nstatus: active\n"
+        "started: 2026-08-18T00:00:00Z\nupdated: 2026-08-18T00:00:00Z\n---\n\n"
+        "- **Task**: Preserve a canonical document link.\n"
+        "- **Current step**: Complete the transfer.\n"
+        "- **Last result**: Owner admitted.\n"
+        "- **Next action**: Check the archived link.\n"
+    ).encode())
+    consumer = tmp_path / "work-items" / "active" / owner_slug / "analysis-results.md"
+    old_href = f"../{fixture['slug']}/status.md#task"
+    before = f"Revision: free-form\n[Result]({old_href})\n".encode()
+    consumer.write_bytes(before)
+    lifecycle.refresh_readme(tmp_path)
+    fixture["readmeSha"] = sha256((tmp_path / "work-items" / "README.md").read_bytes())
+
+    receipt = run_transfer(fixture)
+    archive = tmp_path / "work-items" / "archive" / "2026-08" / fixture["slug"]
+    new_href = f"../../archive/2026-08/{fixture['slug']}/status.md#task"
+    assert receipt["status"] == "settled"
+    assert consumer.read_bytes() == before.replace(old_href.encode(), new_href.encode())
+    assert (consumer.parent / new_href.split("#", 1)[0]).resolve() == archive / "status.md"
+    assert (archive / "agent-runs.jsonl").read_bytes() == fixture["ledgerBefore"]
+    maintenance = json.loads((archive / "bug-dispositions-receipt.json").read_bytes())["linkMaintenance"]
+    assert maintenance["consumers"][0]["source"] == f"active/{owner_slug}/analysis-results.md"
+    assert maintenance["consumers"][0]["authority"] == "current-metadata"
+    assert run_transfer(fixture) == receipt
 
 
 def test_archive_with_successor_transfer_exactly_once_across_activation_close_and_retransfer(
@@ -2598,3 +2694,100 @@ def test_migration_receipt_quarantine_collision_refuses_before_anchor(tmp_path: 
     assert refused.value.failure_id == "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH"
     assert (item / "agent-runs.jsonl").read_bytes() == before
     assert receipt.read_bytes() == b"existing conflicting receipt" and quarantine.read_bytes() == b"foreign quarantine image"
+
+
+@pytest.mark.parametrize("repository_name", ("repository", "work-items"))
+def test_successor_preserves_bound_repository_role(tmp_path: Path, repository_name: str) -> None:
+    setup = tmp_path / "setup"
+    fixture = transition_fixture(setup)
+    root = tmp_path / repository_name
+    setup.rename(root)
+    fixture["root"] = root / "work-items"
+    fixture["item"] = root / "work-items" / "active" / fixture["slug"]
+    result = run_transition(fixture)
+    archive = root / result["archivePath"]
+    receipt_path = archive / "lifecycle-transition-receipt.json"
+    assert json.loads(receipt_path.read_bytes()) == result
+    assert not fixture["item"].exists()
+    assert (root / result["successorPath"]).is_file()
+    assert result["successorSha256"] == sha256(fixture["successor"])
+    assert (root / "work-items" / "README.md").read_bytes() == fixture["lifecycle"].render_readme_bytes(root / "work-items")
+    receipt_before = receipt_path.read_bytes()
+    assert run_transition(fixture) == result
+    assert receipt_path.read_bytes() == receipt_before
+    assert not (tmp_path / ".scratch").exists()
+    print("ROOT_ROLE_SERIALIZED_SUCCESSOR", json.dumps({key: result[key] for key in ("archivePath", "successorPath")}, sort_keys=True))
+
+
+def test_transfer_receipts_preserve_bound_repository_during_recovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    setup = tmp_path / "setup"
+    fixture = transfer_fixture(setup)
+    root = tmp_path / "work-items"
+    setup.rename(root)
+    fixture["root"] = root / "work-items"
+    fixture["item"] = root / "work-items" / "active" / fixture["slug"]
+    lifecycle = fixture["lifecycle"]
+    with pytest.raises(lifecycle.LifecycleError):
+        run_transfer(fixture, inject="T4")
+    intent = root / ".scratch" / "work-items-lifecycle-transitions" / (fixture["operationId"] + ".json")
+    assert intent.is_file()
+    assert lifecycle.main(["recover-transition", "--root", str(root / "work-items"), "--operation-id", fixture["operationId"]]) == 1
+    enters = []
+    original_enter = lifecycle.LifecycleTransaction.__enter__
+    def enter(transaction):
+        enters.append(transaction.repository_root)
+        return original_enter(transaction)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(lifecycle.LifecycleTransaction, "__enter__", enter)
+        assert lifecycle.main(["recover-transition", "--root", str(root / "work-items"), "--operation-id", fixture["operationId"], "--apply"]) == 0
+    assert enters == [root]
+    assert lifecycle._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+    assert lifecycle._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get() is None
+    assert not (root / "README.md").exists()
+    assert (root / "work-items" / "README.md").read_bytes() == lifecycle.render_readme_bytes(root / "work-items")
+    result = run_transfer(fixture)
+    assert len(result["migrationReceipts"]) == 1
+    for binding in result["migrationReceipts"]:
+        assert binding["path"].startswith(result["archivePath"] + "/ledger-migration-receipts/")
+        assert sha256((root / binding["path"]).read_bytes()) == binding["sha256"]
+    assert json.loads((root / result["archivePath"] / "lifecycle-transition-receipt.json").read_bytes()) == result
+    assert run_transfer(fixture) == result
+    assert not intent.exists() and not (tmp_path / ".scratch").exists()
+    print("ROOT_ROLE_SERIALIZED_TRANSFER", json.dumps({key: result[key] for key in ("archivePath", "successorPath", "migrationReceipts")}, sort_keys=True))
+
+
+def test_selected_recovery_ignores_other_intent_and_rejects_same_operation(tmp_path: Path) -> None:
+    prepared = tmp_path / "prepared"
+    fixture = transfer_fixture(prepared)
+    parent = tmp_path / "project"
+    parent.mkdir()
+    root = parent / "work-items"
+    prepared.rename(root)
+    fixture["root"] = root / "work-items"
+    fixture["item"] = root / "work-items/active" / fixture["slug"]
+    lifecycle = fixture["lifecycle"]
+    with pytest.raises(lifecycle.LifecycleError):
+        run_transfer(fixture, inject="T4")
+    selected_intent = root / ".scratch/work-items-lifecycle-transitions" / (fixture["operationId"] + ".json")
+    captured = selected_intent.read_bytes()
+    neighbor = transition_fixture(parent)
+    with pytest.raises(neighbor["lifecycle"].LifecycleError):
+        run_transition(neighbor, inject="T0")
+    neighbor_intent = parent / ".scratch/work-items-lifecycle-transitions" / (neighbor["operationId"] + ".json")
+    neighbor_before = neighbor_intent.read_bytes()
+    shadow = neighbor_intent.parent / selected_intent.name
+    shadow.write_bytes(captured)
+    before = selected_intent.read_bytes()
+    try:
+        with pytest.raises(lifecycle.LifecycleError) as ambiguous:
+            lifecycle.recover_transition(root, fixture["operationId"])
+        assert "acquisition ambiguous" in str(ambiguous.value)
+        assert selected_intent.read_bytes() == before
+    finally:
+        shadow.unlink()
+    assert lifecycle.main(["recover-transition", "--root", str(root), "--operation-id", fixture["operationId"], "--apply"]) == 0
+    assert not selected_intent.exists()
+    assert neighbor_intent.read_bytes() == neighbor_before
+    assert run_transfer(fixture)["migrationReceipts"]
+    neighbor["lifecycle"].recover_transition(parent, neighbor["operationId"])
+    assert not neighbor_intent.exists()

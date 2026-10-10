@@ -947,3 +947,42 @@ def test_selected_acquisition_uses_archived_h1_logical_identity(tmp_path):
     errors = reader.validate_work_item(selected, selected_ledger_absent=True, ledger_acquisition_complete_out=acquired, obligation_state_out=states, validate_status_file=False)
     assert any("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in value for value in errors)
     assert True not in acquired and states == []
+
+
+@pytest.mark.parametrize("boundary", ("after-member-2", "after-receipt"))
+def test_h1_repository_role_survives_dynamic_reader_and_recovery(tmp_path: Path, boundary: str) -> None:
+    setup = tmp_path / "setup"
+    support, writer, reader, request, _items, _paths = activated_relocation_fixture(setup)
+    root = tmp_path / "work-items"
+    setup.rename(root)
+    caller = root / "work-items"
+    before = support.tree_state(root)
+    assert writer.relocate_ledger_h1_artifact_set(caller, request)["applied"] is False
+    assert support.tree_state(root) == before
+    with pytest.raises(writer.LifecycleError) as interrupted:
+        writer.relocate_ledger_h1_artifact_set(caller, request, apply=True, inject_failure=boundary)
+    assert interrupted.value.failure_id == "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE"
+    if boundary == "after-member-2":
+        assert support.tree_state(root) == before
+    result = writer.relocate_ledger_h1_artifact_set(caller, request, apply=True)
+    location = reader._resolve_ledger_h1_artifact_set_location(root)
+    owner_location = writer.resolve_ledger_h1_artifact_set_location(root, input_role="repository-root")
+    assert location.physical_base == owner_location.physical_base == result["artifactBase"]
+    assert location.receipt_path == owner_location.receipt_path
+    assert location.phase == "settled-archive"
+    receipt = json.loads((root / location.receipt_path).read_bytes())
+    assert receipt["artifactBase"] == location.physical_base
+    settled = support.tree_state(root)
+    assert writer.relocate_ledger_h1_artifact_set(caller, request)["replay"] is True
+    assert writer.relocate_ledger_h1_artifact_set(caller, request, apply=True)["replay"] is True
+    assert support.tree_state(root) == settled
+    with pytest.raises(writer.LifecycleError):
+        writer.resolve_ledger_h1_artifact_set_location(caller, input_role=None)
+    with pytest.raises(writer.LifecycleError):
+        writer.resolve_ledger_h1_artifact_set_location(caller, input_role="unknown")
+    with pytest.raises(TypeError):
+        writer.resolve_ledger_h1_artifact_set_location(None)
+    assert writer.resolve_ledger_h1_artifact_set_location(root).physical_base == location.physical_base
+    assert writer._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+    assert not (tmp_path / ".scratch").exists()
+    print("ROOT_ROLE_SERIALIZED_H1", json.dumps({"physical_base": location.physical_base, "receipt_path": location.receipt_path}, sort_keys=True))

@@ -240,6 +240,156 @@ def seed_active(module, root: Path, slug: str) -> None:
     module.start_item(root, slug, status.read_bytes())
 
 
+def test_root_aliases_share_recorded_scratch_and_real_ownership_guards(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "root-binding-item"
+    seed_active(module, root, slug)
+    item = root / "work-items" / "active" / slug
+    write(item / "implementation.md", "Retained synthetic evidence pointer.\n")
+    retained = root / ".scratch" / "work-items" / slug / "scratch-terminal-001" / "evidence"
+    write(retained / "payload.txt", "Original retained bytes.\n")
+    entry = {"entryId": "evidence", "path": retained.relative_to(root).as_posix(), "disposition": "retain",
+             "reason": "Explicitly retained synthetic test evidence.", "canonicalPointer": "implementation.md"}
+    for run_id, status, gate, kind, extra in (
+        ("scratch-launch-001", "running", "none", "launch", []),
+        ("scratch-terminal-001", "completed", "PASS", "terminal", ["--artifact", "implementation.md",
+         "--evidence", "command:focused root contract", "--launch-run-id", "scratch-launch-001", "--scratch-evidence-json", json.dumps(entry)])):
+        result = run_ledger(item, "append", "--run-id", run_id, "--role", "platform-engineer", "--execution-role", "internal",
+            "--status", status, "--gate", gate, "--scope", "scratch lifecycle", "--event-kind", kind,
+            "--started-at", "2026-08-09T00:00:00Z", "--updated-at", "2026-08-09T00:00:00Z", *extra)
+        assert result.returncode == 0, result.stdout + result.stderr
+    instant = "2026-08-11T10:00:00Z"
+    write_bug_dispositions(root, slug, instant, [])
+    closure_file = root / "closure.md"
+    write(closure_file, closure(instant))
+    extra_root = root / ".scratch" / "work-items" / slug / "unclaimed"
+    write(extra_root / "payload.txt", "Undeclared owned fixture evidence.\n")
+    before = tree_file_bytes(item)
+    def close_at(alias):
+        return run_cli("close", "--root", str(alias), "--slug", slug, "--closure-file", str(closure_file), "--terminal-instant", instant)
+    for alias in (root, root / "work-items"):
+        failed = close_at(alias)
+        assert failed.returncode == 1 and "WI-SCRATCH-OWNERSHIP-INCOMPLETE" in failed.stdout, failed.stdout
+        assert tree_file_bytes(item) == before and retained.is_dir()
+    extra_root.rename(root / "held-unclaimed")
+    closed = close_at(root / "work-items")
+    archived = root / "work-items" / "archive" / "2026-08" / slug
+    assert closed.returncode == 0 and (archived / module.BUG_DISPOSITIONS_RECEIPT).is_file(), closed.stdout
+    assert close_at(root).returncode == 0
+    retained.rename(root / "held-retained")
+    missing = close_at(root / "work-items")
+    assert missing.returncode == 1 and "WI-SCRATCH-RETAINED-EVIDENCE-MISSING" in missing.stdout, missing.stdout
+    (root / "held-retained").rename(retained)
+    assert (retained / "payload.txt").read_text() == "Original retained bytes.\n"
+    zero = tmp_path / "zero-recorded"
+    seed_active(module, zero, "zero")
+    write_bug_dispositions(zero, "zero", instant, [])
+    write(zero / "closure.md", closure(instant))
+    write(zero / ".scratch" / "work-items" / "zero" / "unclaimed" / "data", "No declaration.\n")
+    for alias in (zero, zero / "work-items"):
+        failed = run_cli("close", "--root", str(alias), "--slug", "zero", "--closure-file", str(zero / "closure.md"), "--terminal-instant", instant)
+        assert failed.returncode == 1 and "WI-SCRATCH-OWNERSHIP-INCOMPLETE" in failed.stdout, failed.stdout
+        assert (zero / "work-items" / "active" / "zero").is_dir()
+
+
+def test_held_root_role_survives_supported_basename_and_nested_scope(tmp_path: Path) -> None:
+    module = load_module()
+    repository = tmp_path / "work-items"
+    work_items = repository / "work-items"
+    work_items.mkdir(parents=True)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    calls = []
+    @module._lifecycle_participant
+    def inner(root):
+        calls.append(root)
+        assert root == repository and module._work_items_root(root) == work_items
+        assert module._resolve_project_topology(root).repository_root == repository
+        return module._CURRENT_LIFECYCLE_TRANSACTION.get()
+    @module._lifecycle_participant
+    def outer(root):
+        held = module._CURRENT_LIFECYCLE_TRANSACTION.get()
+        assert held.work_items_root == work_items and root == repository
+        assert inner(work_items) is held and inner(repository) is held
+        with pytest.raises(module.LifecycleError) as wrong:
+            inner(foreign)
+        assert wrong.value.failure_id == "WI-LIFECYCLE-LOCK-IDENTITY"
+        token = module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.set(None)
+        try:
+            with pytest.raises(module.LifecycleError):
+                inner(work_items)
+        finally:
+            module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(token)
+        with pytest.raises(TypeError):
+            inner(work_items, diagnostic_observer=module.LifecycleDiagnosticObserver())
+    with pytest.raises(module.LifecycleError) as unbound:
+        outer(work_items)
+    assert "acquisition unbound" in str(unbound.value)
+    outer = module._lifecycle_participant(outer.__wrapped__, input_role="repository-root")
+    outer(repository)
+    assert calls == [repository, repository] and module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+    linked = tmp_path / "linked-root"
+    linked.symlink_to(work_items, target_is_directory=True)
+    with pytest.raises(module.LifecycleError) as unsafe:
+        outer(linked)
+    assert unsafe.value.failure_id == "WI-LIFECYCLE-LOCK-IDENTITY"
+    def seed_proved(_root):
+        seed_active(module, work_items, "role-variation-item")
+    module._lifecycle_participant(seed_proved, input_role="repository-root")(repository)
+    instant = "2026-08-11T10:00:00Z"
+    write_bug_dispositions(repository, "role-variation-item", instant, [])
+    write(tmp_path / "closure.md", closure(instant))
+    result = run_cli("close", "--root", str(work_items), "--slug", "role-variation-item", "--closure-file", str(tmp_path / "closure.md"), "--terminal-instant", instant)
+    assert result.returncode == 0, result.stdout
+    assert (work_items / "archive" / "2026-08" / "role-variation-item").is_dir() and not (repository / "active").exists()
+
+
+def test_transition_subject_syntax_is_independent_of_raw_held_and_proved_roots(tmp_path: Path, monkeypatch) -> None:
+    module = load_module()
+    repository = tmp_path / "work-items"
+    work_items = repository / "work-items"
+    work_items.mkdir(parents=True)
+    # The owner parser is pure even for a valid operation id, not only a failure.
+    with monkeypatch.context() as patch:
+        patch.setattr(module, "_resolve_project_root_identity", lambda *a, **k: pytest.fail("syntax resolved a root"))
+        module._validate_transition_operation_id("known-absent-intent")
+        with pytest.raises(module.LifecycleError, match="invalid transition operation id"):
+            module._validate_transition_operation_id("../bad")
+        with pytest.raises(TypeError):
+            module._validate_transition_operation_id(None)
+    def image():
+        return {p.relative_to(repository).as_posix(): (p.stat().st_dev, p.stat().st_ino,
+                p.stat().st_size,
+                p.read_bytes() if p.is_file() and p.name != "work-items-lifecycle-owner.lock" else None)
+                for p in repository.rglob("*")}
+    def body(root):
+        held = module._CURRENT_LIFECYCLE_TRANSACTION.get()
+        before = image()
+        for alias in (repository, work_items):
+            for role in ("caller-root", "repository-root" if alias == repository else "work-items-root"):
+                with pytest.raises(module.LifecycleError) as missing:
+                    module.recover_transition(alias, "known-absent-intent", _input_role=role)
+                assert missing.value.failure_id == "WI-LIFECYCLE-TRANSITION-RECOVERY-REQUIRED"
+                assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is held
+                assert image() == before
+            with pytest.raises(module.LifecycleError, match="invalid transition operation id"):
+                module.recover_transition(alias, "../bad")
+            with pytest.raises(TypeError):
+                module.recover_transition(alias, None)
+        assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is held
+    module._lifecycle_participant(body, input_role="repository-root")(repository)
+    assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+    assert module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get() is None
+    def seed(root):
+        seed_active(module, work_items, "selected-existing")
+    module._lifecycle_participant(seed, input_role="repository-root")(repository)
+    for alias in (repository, work_items):
+        with pytest.raises(module.LifecycleError) as missing:
+            module.recover_transition(alias, "known-absent-intent")
+        assert missing.value.failure_id == "WI-LIFECYCLE-TRANSITION-RECOVERY-REQUIRED"
+
+
 def seed_context_bug(root: Path, item_slug: str, bug_slug: str) -> Path:
     target = root / "work-items" / "bugs" / f"{bug_slug}.md"
     write(
@@ -1549,6 +1699,156 @@ def test_ordinary_close_updates_standalone_incoming_evidence_links(tmp_path: Pat
     receipt = json.loads((archived / module.BUG_DISPOSITIONS_RECEIPT).read_bytes())
     assert receipt["bugs"] == []
     assert receipt["linkMaintenance"]["consumers"][0]["authority"] == "current-metadata"
+
+
+def test_close_updates_owned_ordinary_documents_and_replays_after_owner_advances(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    target_slug, owner_slug = "2026-10-08-target", "2026-10-08-consumer"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, target_slug)
+    seed_active(module, root, owner_slug)
+    active = root / "work-items" / "active" / target_slug
+    owner = root / "work-items" / "active" / owner_slug
+    write(active / "evidence.md", "Accepted result.\n")
+    target_before = (active / "evidence.md").read_bytes()
+    direct = owner / "canonical-artifact-link-authority-design.md"
+    nested = owner / "results" / "renamed.MD"
+    old_direct = f"../{target_slug}/evidence.md?view=1#proof"
+    old_nested = f"../../{target_slug}/evidence.md#proof"
+    unrelated = "https://example.invalid/unchanged"
+    direct_before = (f"Owner: arbitrary\nRevision: draft-text\n[Proof]({old_direct})\n"
+                     f"[Repeat]({old_direct})\n[Other]({unrelated})\n").encode()
+    nested_before = b"\xef\xbb\xbf" + f"[Result]({old_nested})\r\nOther prose.\r\n".encode()
+    direct.write_bytes(direct_before)
+    nested.parent.mkdir()
+    nested.write_bytes(nested_before)
+    write_empty_bug_dispositions(root, target_slug, instant)
+    module.refresh_readme(root)
+
+    archived = module.close_item(root, target_slug, closure(instant).encode(), instant)
+    new_direct = f"../../archive/2026-10/{target_slug}/evidence.md?view=1#proof"
+    new_nested = f"../../../archive/2026-10/{target_slug}/evidence.md#proof"
+    direct_after = direct_before.replace(old_direct.encode(), new_direct.encode())
+    nested_after = nested_before.replace(old_nested.encode(), new_nested.encode())
+    assert direct.read_bytes() == direct_after
+    assert nested.read_bytes() == nested_after
+    assert (archived / "evidence.md").read_bytes() == target_before
+    assert (direct.parent / new_direct.split("?", 1)[0]).resolve() == archived / "evidence.md"
+    assert (nested.parent / new_nested.split("#", 1)[0]).resolve() == archived / "evidence.md"
+    module.check_readme(root)
+    receipt_path = archived / module.BUG_DISPOSITIONS_RECEIPT
+    receipt_before = receipt_path.read_bytes()
+    rows = json.loads(receipt_before)["linkMaintenance"]["consumers"]
+    assert [row["source"] for row in rows] == [
+        f"active/{owner_slug}/canonical-artifact-link-authority-design.md",
+        f"active/{owner_slug}/results/renamed.MD",
+    ]
+    assert all(row["authority"] == "current-metadata" for row in rows)
+    assert rows[0]["uriChanges"] == [{"from": old_direct, "to": new_direct}] * 2
+
+    direct.write_bytes(direct_after + b"Later legitimate authoring.\n")
+    assert module.close_item(root, target_slug, closure(instant).encode(), instant) == archived
+    owner_instant = "2026-10-08T11:15:00Z"
+    write_empty_bug_dispositions(root, owner_slug, owner_instant)
+    module.refresh_readme(root)
+    archived_owner = module.close_item(root, owner_slug, closure(owner_instant).encode(), owner_instant)
+    assert module.close_item(root, target_slug, closure(instant).encode(), instant) == archived
+    assert receipt_path.read_bytes() == receipt_before
+    for forged in ("path", "authority", "suffix"):
+        damaged = json.loads(receipt_before)
+        row = damaged["linkMaintenance"]["consumers"][0]
+        if forged == "path":
+            row["source"] = row["target"] = f"active/{owner_slug}/inputs/retained.md"
+        elif forged == "authority":
+            row["authority"] = "protected-uri-maintenance"
+            damaged["linkMaintenance"]["allowProtectedUriUpdates"] = True
+        else:
+            row["uriChanges"][0]["to"] += "-forged"
+        receipt_path.write_text(json.dumps(damaged), encoding="utf-8")
+        with pytest.raises(module.LifecycleError) as failure:
+            module.close_item(root, target_slug, closure(instant).encode(), instant)
+        assert failure.value.failure_id == "WI-IMMUTABLE-ARCHIVE", forged
+        assert (archived_owner / direct.name).read_bytes() == direct_after + b"Later legitimate authoring.\n"
+    receipt_path.write_bytes(receipt_before)
+
+
+def test_close_link_consumer_descriptor_preserves_typed_and_protected_boundaries() -> None:
+    module = load_module()
+    describe = module._close_link_consumer_descriptor
+    assert describe("active/valid-owner/results/renamed.MD")[:2] == (
+        "active-document", "active/valid-owner")
+    assert describe("bugs/valid-bug.md")[0] == "registry"
+    for path in (
+        "active/valid-owner/inputs/retained.md",
+        "active/valid-owner/review-artifact-custody/snapshot.md",
+        "active/valid-owner/notes/raw.json", "active/invalid owner/result.md",
+        "active/valid-owner/../other.md", "archive/2026-10/old/result.md",
+    ):
+        assert describe(path) is None
+
+
+def test_close_link_owner_refuses_missing_duplicate_status_and_native_bytes(tmp_path: Path) -> None:
+    module = load_module()
+    root, owner_slug = tmp_path / "repo", "2026-10-08-owner"
+    seed_active(module, root, owner_slug)
+    owner = root / "work-items" / "active" / owner_slug
+    consumer = owner / "result.md"
+    before = b"[Proof](../other/status.md)\n"
+    consumer.write_bytes(before)
+    assert module._close_link_authority(root, consumer, before, None, False, 1) == "current-metadata"
+    with pytest.raises(module.LifecycleError) as native:
+        module._close_link_authority(root, consumer, b"%PDF-1.7\n" + before, None, False, 1)
+    assert native.value.failure_id == "WI-CLOSE-LINK-AUTHORITY"
+    duplicate = root / "work-items" / "backlog" / f"{owner_slug}.md"
+    duplicate.write_bytes(b"Task: duplicate\n")
+    with pytest.raises(module.LifecycleError) as dual:
+        module._close_link_authority(root, consumer, before, None, False, 1)
+    assert dual.value.failure_id == "WI-CLOSE-LINK-AUTHORITY"
+    duplicate.unlink()
+    status = owner / "status.md"
+    status.unlink()
+    with pytest.raises(module.LifecycleError) as missing:
+        module._close_link_authority(root, consumer, before, None, False, 1)
+    assert missing.value.failure_id == "WI-CATEGORY-STATUS-INVALID"
+
+
+def test_close_refuses_changed_consumer_parent_before_any_lifecycle_write(tmp_path: Path) -> None:
+    module = load_module()
+    root, slug, owner_slug = tmp_path / "repo", "2026-10-08-target", "2026-10-08-owner"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, slug)
+    seed_active(module, root, owner_slug)
+    active = root / "work-items" / "active" / slug
+    owner = root / "work-items" / "active" / owner_slug
+    write(active / "evidence.md", "Accepted result.\n")
+    consumer = owner / "result.md"
+    consumer_before = f"[Proof](../{slug}/evidence.md)\n".encode()
+    consumer.write_bytes(consumer_before)
+    write_empty_bug_dispositions(root, slug, instant)
+    module.refresh_readme(root)
+    readme_before = (root / "work-items" / "README.md").read_bytes()
+    protected = (active / "status.md", root / "work-items" / "README.md")
+    identities_before = [(path.stat().st_dev, path.stat().st_ino) for path in protected]
+    tree_before = tree_file_bytes(root)
+    original = module._plan_parent_archive_links
+    def change_owner_after_plan(*args, **kwargs):
+        plan = original(*args, **kwargs)
+        (owner / "status.md").write_bytes((owner / "status.md").read_bytes() + b"New owner state.\n")
+        return plan
+    module._plan_parent_archive_links = change_owner_after_plan
+    with pytest.raises(module.LifecycleError) as failed:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    assert failed.value.failure_id == "WI-CLOSE-LINK-DRIFT"
+    assert active.is_dir() and consumer.read_bytes() == consumer_before
+    assert (root / "work-items" / "README.md").read_bytes() == readme_before
+    assert not (root / "work-items" / "archive" / "2026-10" / slug).exists()
+    assert [(path.stat().st_dev, path.stat().st_ino) for path in protected] == identities_before
+    owner_status = (owner / "status.md").relative_to(root).as_posix()
+    tree_after = tree_file_bytes(root)
+    assert {key: value for key, value in tree_after.items() if key != owner_status} == {
+        key: value for key, value in tree_before.items() if key != owner_status
+    }
 
 
 def test_close_protected_uri_opt_in_is_bound_and_does_not_freeze_later_authoring(tmp_path: Path) -> None:
@@ -6221,20 +6521,29 @@ def test_index_is_compatibility_only_and_cannot_change_render(tmp_path: Path) ->
 
 
 def test_decision_promotion_supersedes_proposed_guard(tmp_path: Path) -> None:
-    module = load_module()
-    root = tmp_path / "repo"
-    decision = root / "work-items" / "decisions" / "physical-lifecycle-v1.md"
-    write(decision, "---\nstatus: proposed\n---\n")
+    module, root, _captured, request = _initial_v0_public_fixture(
+        tmp_path, names=("physical-lifecycle-v1",), status="proposed"
+    )
+    module.admit_current_decision_v0(root, **request)
+    decision = root / "work-items" / "decisions" / "2026-08-01-physical-lifecycle-v1.md"
+    reference = f"decision:{decision.stem}"
     before = decision.read_bytes()
     inventory = root / "incoming.json"
     write(
         inventory,
-        json.dumps({"reference": "decision:physical-lifecycle-v1", "incomingLinks": []}),
+        json.dumps({
+            "reference": reference,
+            "expectedSourceSha256": hashlib.sha256(before).hexdigest().upper(),
+            "archivedAt": "2026-08-18T00:00:00Z",
+            "rationale": "Synthetic nonterminal promotion probe.",
+            "evidence": "The proposed decision must remain current and byte-identical.",
+            "incomingLinks": [],
+        }),
     )
     try:
         module.migrate_legacy(
             root,
-            "decision:physical-lifecycle-v1",
+            reference,
             incoming_links_inventory=inventory,
         )
     except module.LifecycleError as exc:
@@ -6242,7 +6551,7 @@ def test_decision_promotion_supersedes_proposed_guard(tmp_path: Path) -> None:
     else:
         raise AssertionError("a non-terminal proposed decision was promoted")
     assert decision.read_bytes() == before
-    assert module.resolve_category(root, "decision:physical-lifecycle-v1") == decision.resolve()
+    assert module.resolve_category(root, reference) == decision.resolve()
 
 
 def _terminal_record(
@@ -8369,6 +8678,97 @@ def test_no_contract_preserves_linked_repository_and_work_items_read_compatibili
 
     assert module._work_items_root(repository_link) == repository / "work-items"
     assert module._work_items_root(work_items_link_repository).resolve() == work_items_target
+
+
+def test_no_contract_alias_observation_keeps_repository_and_mutation_authority_separate(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    repository = tmp_path / "repository"
+    write(repository / "work-items" / "sentinel", "Preserved observation bytes.\n")
+    alias = tmp_path / "repository-alias"
+    namespace_repository = tmp_path / "namespace-repository"
+    namespace_repository.mkdir()
+    namespace_target = tmp_path / "external" / "namespace-target"
+    namespace_target.mkdir(parents=True)
+    alias.symlink_to(repository, target_is_directory=True)
+    (namespace_repository / "work-items").symlink_to(namespace_target, target_is_directory=True)
+    before = tree_file_bytes(tmp_path)
+    entries = sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*"))
+    topology = module._resolve_project_topology(alias)
+    assert topology.repository_root == repository
+    linked_namespace = module._resolve_project_topology(namespace_repository)
+    assert linked_namespace.repository_root == namespace_repository
+    assert linked_namespace.work_items == namespace_repository / "work-items"
+    assert linked_namespace.work_items.resolve() == namespace_target
+    assert not topology.root_contract_present and not linked_namespace.auxiliary_roots
+    with pytest.raises(module.LifecycleError):
+        module._resolve_project_root_identity(alias)
+    with pytest.raises(module.LifecycleError):
+        module._work_items_root(alias, input_role="repository-root")
+    for bound in ({"input_role": "repository-root"}, {"selected_reference": ("work-item", "target")},
+                  {"binding_evidence_out": []}):
+        with pytest.raises(module.LifecycleError, match="incompatible project topology observation context"):
+            module._resolve_project_root_identity(alias, acquisition_purpose="topology-observation", **bound)
+    with pytest.raises(module.LifecycleError, match="unknown project root acquisition purpose"):
+        module._resolve_project_root_identity(repository, acquisition_purpose="unknown")
+    with pytest.raises(module.LifecycleError) as mutation:
+        module.create_candidate(alias, "target", b"Task: Refused original alias.\nNext action: Check.\nupdated: 2026-08-11T10:00:00Z\n")
+    assert mutation.value.failure_id == "WI-LIFECYCLE-LOCK-IDENTITY"
+    assert tree_file_bytes(tmp_path) == before
+    assert sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")) == entries
+    def held(_root):
+        with pytest.raises(module.LifecycleError):
+            module._work_items_root(alias)
+        with pytest.raises(module.LifecycleError, match="incompatible project topology observation context"):
+            module._resolve_project_root_identity(repository, acquisition_purpose="topology-observation")
+    module._lifecycle_participant(held, input_role="repository-root")(repository)
+    assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+
+
+def test_topology_observation_preserves_contract_presence_and_read_failure(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    module = load_module()
+    repository = tmp_path / "repository"
+    write_root_contract(repository, {})
+    alias = tmp_path / "repository-alias"
+    alias.symlink_to(repository, target_is_directory=True)
+    namespace_repository = tmp_path / "namespace-repository"
+    namespace_repository.mkdir()
+    (namespace_repository / "work-items").symlink_to(repository / "work-items", target_is_directory=True)
+    for root in (alias, namespace_repository):
+        with pytest.raises(module.LifecycleError):
+            module._resolve_project_topology(root)
+    contract = repository / "work-items" / "root-contract.json"
+    contract.write_bytes(b"{\n")
+    with pytest.raises(module.LifecycleError) as malformed:
+        module._resolve_project_topology(repository)
+    assert malformed.value.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID"
+    original_lstat = Path.lstat
+    def unavailable_entry(path, *args, **kwargs):
+        if path == contract:
+            raise PermissionError("synthetic declaration inspection refusal")
+        return original_lstat(path, *args, **kwargs)
+    with monkeypatch.context() as inspection:
+        inspection.setattr(Path, "lstat", unavailable_entry)
+        with pytest.raises(module.LifecycleError, match="root contract entry cannot be inspected") as unavailable:
+            module._resolve_project_topology(repository)
+        assert isinstance(unavailable.value.__cause__, PermissionError)
+    real_read = Path.read_text
+    def unreadable_entry(path, *args, **kwargs):
+        if path == contract:
+            raise PermissionError("synthetic declaration read refusal")
+        return real_read(path, *args, **kwargs)
+    with monkeypatch.context() as reading:
+        reading.setattr(Path, "read_text", unreadable_entry)
+        with pytest.raises(module.LifecycleError, match="root contract must be valid UTF-8 JSON") as unreadable:
+            module._resolve_project_topology(repository)
+        assert isinstance(unreadable.value.__cause__, PermissionError)
+    contract.unlink()
+    contract.symlink_to(repository / "missing-contract.json")
+    with pytest.raises(module.LifecycleError, match="root contract contains a link or reparse point"):
+        module._resolve_project_topology(repository)
 
 
 def test_contract_unknown_root_rejects_lifecycle_and_read_model_before_work_items_mutation(
@@ -10631,6 +11031,446 @@ def _decision_v0_baseline(entries: list[dict[str, str]]) -> str:
     return hashlib.sha256(payload).hexdigest().upper()
 
 
+def _initial_v0_public_fixture(tmp_path: Path, *, names=("alpha", "beta"), status="accepted"):
+    module = load_module()
+    root = tmp_path / "repo"
+    for name in reversed(names):
+        write(root / "work-items" / "decisions" / f"2026-08-01-{name}.md", _legacy_v0_decision_record(status=status))
+    write(root / "work-items" / "README.md", "Independent static guide.\n")
+    captured = module.admit_current_decision_v0(root)
+    policy_slug = "2026-08-18-present-owner-policy"
+    policy = root / "work-items" / "decisions" / f"{policy_slug}.md"
+    # Synthetic current-owner acceptance for this exact public capture; no manifest fixture writer.
+    write(policy, _accepted_v0_policy_record(policy_slug, captured["baselineSha256"]) +
+          "\nSynthetic current acceptance of preserved bytes; old approval/review facts are unknown.\n")
+    request = {"policy_decision": policy_slug, "cutover_date": "2026-08-18",
+               "expected_baseline_sha256": captured["baselineSha256"],
+               "expected_policy_sha256": hashlib.sha256(policy.read_bytes()).hexdigest().upper(),
+               "operation_id": "initial-owner-case", "receipt": ".scratch/initial-owner-receipt.json", "apply": True}
+    return module, root, captured, request
+
+
+def _initial_v0_cli_args(root: Path, request: dict) -> list[str]:
+    return ["admit-current-decision-v0", "--root", str(root), "--apply", *[
+        part for key, value in request.items() if key != "apply" for part in ("--" + key.replace("_", "-"), str(value))]]
+
+
+@pytest.mark.parametrize("names,status", [(("alpha", "beta", "gamma", "delta", "epsilon"), "accepted"), (("unusual", "another", "third"), "historical-pending")])
+def test_initial_v0_public_cli_complete_capture_apply_and_replay(tmp_path: Path, names, status) -> None:
+    module, root, captured, request = _initial_v0_public_fixture(tmp_path, names=names, status=status)
+    before = {path: path.read_bytes() for path in (root / "work-items").rglob("*") if path.is_file()}
+    preview = module.admit_current_decision_v0(root, policy_decision=request["policy_decision"], cutover_date=request["cutover_date"])
+    assert preview["state"] == "prepared" and preview["receipt"] is None
+    assert not (root / "work-items" / "decision-v0-compatibility.json").exists()
+    applied = run_cli(*_initial_v0_cli_args(root, request))
+    assert applied.returncode == 0, applied.stdout
+    result = json.loads(applied.stdout)
+    assert result["state"] == "applied" and result["entries"] == captured["entries"]
+    assert [row["path"] for row in result["entries"]] == sorted(row["path"] for row in result["entries"])
+    assert all(path.read_bytes() == data for path, data in before.items())
+    admitted = module._preflight_current_decision_v0(root)
+    assert len(admitted) == len(names)
+    if status == "historical-pending":
+        assert all(row.admitted_current_status is None for row in admitted.values())
+    receipt = root / request["receipt"]
+    receipt_before = receipt.read_bytes()
+    assert json.loads(receipt_before)["settlement"] == "initial"
+    write(root / "work-items" / "README.md", "Legitimate independently advanced static guide.\n")
+    assert module.admit_current_decision_v0(root / "work-items", **request)["state"] == "replayed"
+    assert receipt.read_bytes() == receipt_before
+    assert not receipt.with_name(receipt.name + ".pending").exists()
+    assert not list(root.rglob("*.tmp"))
+
+
+def test_initial_v0_capture_unknown_and_degraded_apply_inputs(tmp_path: Path) -> None:
+    module, root, captured, request = _initial_v0_public_fixture(tmp_path)
+    assert captured["policy"] is None and captured["cutoverDate"] is None
+    manifest = root / "work-items" / "decision-v0-compatibility.json"
+    for delta in ({"apply": 1}, {"apply": "true"}, {"expected_policy_sha256": None},
+                  {"expected_baseline_sha256": ""}, {"expected_baseline_sha256": 0},
+                  {"operation_id": None}, {"receipt": "../foreign.json"}, {"cutover_date": "2026-02-30"}):
+        with pytest.raises(module.LifecycleError) as failure:
+            module.admit_current_decision_v0(root, **{**request, **delta})
+        assert failure.value.failure_id == "WI-DECISION-V0-ADMISSION-INPUT"
+        assert not manifest.exists()
+    missing = module.admit_current_decision_v0(root, policy_decision="2026-08-18-missing", cutover_date="2026-08-18")
+    assert missing["state"] == "prepared" and missing["policy"]["sha256"] is None
+
+
+@pytest.mark.parametrize("cause", ["late-member", "policy-bytes", "not-accepted", "wrong-binding", "missing-status", "same-day"])
+def test_initial_v0_strict_stale_authority_and_historical_guards(tmp_path: Path, cause: str) -> None:
+    module, root, captured, request = _initial_v0_public_fixture(tmp_path)
+    policy = root / "work-items" / "decisions" / f"{request['policy_decision']}.md"
+    if cause == "late-member":
+        write(policy.parent / "2026-08-01-late.md", _legacy_v0_decision_record())
+    elif cause == "policy-bytes":
+        policy.write_bytes(policy.read_bytes() + b"Changed owner scope.\n")
+    elif cause in ("not-accepted", "wrong-binding"):
+        text = policy.read_text(encoding="utf-8").replace("- status: accepted", "- status: proposed") if cause == "not-accepted" else policy.read_text(encoding="utf-8").replace("- v0-cutover-date: 2026-08-18", "- v0-cutover-date: 2026-08-19")
+        write(policy, text)
+        request["expected_policy_sha256"] = hashlib.sha256(policy.read_bytes()).hexdigest().upper()
+    elif cause == "missing-status":
+        source = policy.parent / "2026-08-01-alpha.md"
+        source.write_bytes(b"---\n---\nHistorical body.\n")
+        recapture = module.admit_current_decision_v0(root)
+        request["expected_baseline_sha256"] = recapture["baselineSha256"]
+        write(policy, _accepted_v0_policy_record(request["policy_decision"], recapture["baselineSha256"]))
+        request["expected_policy_sha256"] = hashlib.sha256(policy.read_bytes()).hexdigest().upper()
+    else:
+        request["cutover_date"] = "2026-08-01"
+        write(policy, _accepted_v0_policy_record(request["policy_decision"], captured["baselineSha256"], cutover_date="2026-08-01"))
+        request["expected_policy_sha256"] = hashlib.sha256(policy.read_bytes()).hexdigest().upper()
+    with pytest.raises(module.LifecycleError):
+        module.admit_current_decision_v0(root, **request)
+    assert not (root / "work-items" / "decision-v0-compatibility.json").exists()
+    assert not (root / request["receipt"]).exists()
+
+
+@pytest.mark.parametrize("collision", ["manifest", "receipt"])
+def test_initial_v0_create_only_foreign_collision_preserved(tmp_path: Path, monkeypatch, collision: str) -> None:
+    module, root, _captured, request = _initial_v0_public_fixture(tmp_path)
+    original = module.LifecycleWriteTarget.promote_create
+    foreign = None
+    def appear(target, image):
+        nonlocal foreign
+        selected = target.leaf == (module.DECISION_V0_MANIFEST if collision == "manifest" else Path(request["receipt"]).name)
+        if selected:
+            foreign = target.path
+            # Equal bytes still have a foreign identity and must not be replaced or deleted.
+            foreign.write_bytes(base64.b64decode(image["data"]))
+        return original(target, image)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "promote_create", appear)
+    with pytest.raises(module.LifecycleError):
+        module.admit_current_decision_v0(root, **request)
+    assert foreign is not None and foreign.exists()
+    pending = root / (request["receipt"] + ".pending")
+    assert pending.exists()
+    before = {path: path.read_bytes() for path in (root / "work-items", root / ".scratch") for path in path.rglob("*") if path.is_file()}
+    monkeypatch.setattr(module.LifecycleWriteTarget, "promote_create", original)
+    with pytest.raises(module.LifecycleError):
+        module.admit_current_decision_v0(root, **request)
+    assert all(path.read_bytes() == data for path, data in before.items())
+
+
+def test_initial_v0_caught_pre_receipt_compensation_restores_absence(tmp_path: Path, monkeypatch) -> None:
+    module, root, _captured, request = _initial_v0_public_fixture(tmp_path)
+    original = module.LifecycleWriteTarget.stage_create
+    def fail_receipt(target, data):
+        if target.leaf == Path(request["receipt"]).name:
+            raise RuntimeError("synthetic receipt-stage failure")
+        return original(target, data)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "stage_create", fail_receipt)
+    with pytest.raises(RuntimeError, match="synthetic receipt-stage failure"):
+        module.admit_current_decision_v0(root, **request)
+    assert not (root / "work-items" / "decision-v0-compatibility.json").exists()
+    assert not (root / (request["receipt"] + ".pending")).exists()
+    assert not list(root.rglob("*.tmp"))
+
+
+def _initial_v0_interrupt_child(root: Path, request: dict, point: str) -> None:
+    code = '''import importlib.util,json,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location("initial_v0_child",sys.argv[1])
+m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)
+root=Path(sys.argv[2]);request=json.loads(sys.argv[3]);point=sys.argv[4]
+original=m.LifecycleWriteTarget.promote_create
+def pause(target,image):
+    selected=(point=="pending" and target.leaf==Path(request["receipt"]+".pending").name) or (point=="manifest" and target.leaf==m.DECISION_V0_MANIFEST) or (point in ("receipt-stage","receipt") and target.leaf==Path(request["receipt"]).name)
+    if selected and point=="receipt-stage":
+        print("OWNED_INTERRUPT_READY",flush=True);sys.stdin.read()
+    result=original(target,image)
+    if selected and point!="receipt-stage":
+        print("OWNED_INTERRUPT_READY",flush=True);sys.stdin.read()
+    return result
+m.LifecycleWriteTarget.promote_create=pause
+sys.exit(m.main(["admit-current-decision-v0","--root",str(root),"--apply"]+[part for key,value in request.items() if key!="apply" for part in ("--"+key.replace("_","-"),str(value))]))
+'''
+    # Popen retains the creator's native process handle; no PID discovery or ancestry kill.
+    child = subprocess.Popen([sys.executable, "-u", "-c", code, str(SCRIPT), str(root), json.dumps(request), point], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            marker = executor.submit(child.stdout.readline)
+            try:
+                assert marker.result(timeout=20).strip() == "OWNED_INTERRUPT_READY"
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=10)
+        assert child.returncode != 0
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.communicate(timeout=10)
+
+
+@pytest.mark.parametrize("point", ["pending", "manifest", "receipt-stage", "receipt"])
+def test_initial_v0_abrupt_owned_process_death_fresh_public_reentry(tmp_path: Path, point: str) -> None:
+    module, root, _captured, request = _initial_v0_public_fixture(tmp_path)
+    before = {path: path.read_bytes() for path in (root / "work-items").rglob("*") if path.is_file()}
+    _initial_v0_interrupt_child(root, request, point)
+    pending = root / (request["receipt"] + ".pending")
+    assert pending.exists()
+    assert (root / "work-items" / "decision-v0-compatibility.json").exists() == (point != "pending")
+    receipt = root / request["receipt"]
+    historical = receipt.read_bytes() if receipt.exists() else None
+    resumed = run_cli(*_initial_v0_cli_args(root, request))
+    assert resumed.returncode == 0, resumed.stdout
+    result = json.loads(resumed.stdout)
+    assert result["state"] == ("replayed" if point == "receipt" else "recovered")
+    actual = json.loads(receipt.read_bytes())
+    assert actual["settlement"] == ("initial" if point == "receipt" else "recovered")
+    assert actual["readback"] == {"manifestVerified": True, "legacyBytesUnchanged": True, "policyUnchanged": True}
+    if historical is not None:
+        assert receipt.read_bytes() == historical
+    assert all(path.read_bytes() == data for path, data in before.items())
+    assert module._preflight_current_decision_v0(root)
+    assert not pending.exists() and not list(root.rglob("*.tmp"))
+
+
+@pytest.mark.parametrize("damage", ["request", "corrupt-pending", "lost-pending", "foreign-equal-manifest", "foreign-policy", "lost-receipt-stage"])
+def test_initial_v0_interrupted_foreign_or_incomplete_state_preserved(tmp_path: Path, damage: str) -> None:
+    module, root, _captured, request = _initial_v0_public_fixture(tmp_path)
+    _initial_v0_interrupt_child(root, request, "receipt-stage")
+    pending = root / (request["receipt"] + ".pending")
+    if damage == "request":
+        request["operation_id"] = "wrong-operation"
+    elif damage == "corrupt-pending":
+        pending.write_bytes(b'{"schemaVersion":1,"schemaVersion":1}')
+    elif damage == "lost-pending":
+        pending.unlink()
+    elif damage == "foreign-equal-manifest":
+        manifest = root / "work-items" / "decision-v0-compatibility.json"
+        other = manifest.with_suffix(".foreign")
+        other.write_bytes(manifest.read_bytes())
+        os.replace(other, manifest)
+    elif damage == "foreign-policy":
+        policy = root / "work-items" / "decisions" / f"{request['policy_decision']}.md"
+        policy.write_bytes(policy.read_bytes() + b"Changed owner scope.\n")
+    else:
+        state = json.loads(pending.read_bytes())
+        stage = next(row for row in state["outputs"] if row["path"] == request["receipt"])["ownedAfter"]["stagePath"]
+        (root / stage).unlink()
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    resumed = run_cli(*_initial_v0_cli_args(root, request))
+    assert resumed.returncode != 0 and "WI-DECISION-V0-ADMISSION-" in resumed.stdout
+    assert all(path.exists() and path.read_bytes() == data for path, data in before.items())
+    assert not (root / request["receipt"]).exists()
+
+
+def test_initial_v0_empty_capture_never_admits_empty_manifest(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    (root / "work-items").mkdir(parents=True)
+    empty = module.admit_current_decision_v0(root)
+    assert empty == {"schemaVersion": 1, "state": "captured", "entries": [], "baselineSha256": None,
+                     "policy": None, "cutoverDate": None, "manifest": None, "receipt": None}
+    assert module._preflight_current_decision_v0(root) == {}
+    with pytest.raises(module.LifecycleError) as failure:
+        module.admit_current_decision_v0(root, policy_decision="2026-08-18-empty-policy", cutover_date="2026-08-18",
+            expected_baseline_sha256="A" * 64, expected_policy_sha256="B" * 64, operation_id="empty", receipt=".scratch/empty.json", apply=True)
+    assert failure.value.failure_id == "WI-DECISION-V0-ADMISSION-EMPTY"
+
+
+def test_initial_v0_lost_manifest_stage_releases_only_bound_pending_then_refuses(tmp_path: Path) -> None:
+    module, root, _captured, request = _initial_v0_public_fixture(tmp_path)
+    _initial_v0_interrupt_child(root, request, "pending")
+    pending = root / (request["receipt"] + ".pending")
+    record = json.loads(pending.read_bytes())
+    stage = next(row for row in record["outputs"] if row["path"].startswith("work-items/"))["ownedAfter"]["stagePath"]
+    (root / stage).unlink()
+    with pytest.raises(module.LifecycleError) as failure:
+        module.admit_current_decision_v0(root, **request)
+    assert failure.value.failure_id == "WI-DECISION-V0-ADMISSION-RECOVERY-INCOMPLETE"
+    assert not pending.exists() and not (root / "work-items" / "decision-v0-compatibility.json").exists()
+    assert module.admit_current_decision_v0(root, **request)["state"] == "applied"
+
+
+def test_initial_v0_replay_after_real_retirement_and_present_failure(tmp_path: Path) -> None:
+    module, root, _captured, request = _initial_v0_public_fixture(tmp_path, names=("terminal",), status="superseded")
+    result = module.admit_current_decision_v0(root, **request)
+    receipt = root / request["receipt"]
+    receipt_before = receipt.read_bytes()
+    source = root / "work-items" / "decisions" / "2026-08-01-terminal.md"
+    instant = "2026-10-10T00:00:00Z"
+    inventory = root / ".scratch" / "retirement-input.json"
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    write(inventory, json.dumps({"reference": "decision:2026-08-01-terminal", "expectedSourceSha256": hashlib.sha256(source.read_bytes()).hexdigest().upper(),
+          "archivedAt": instant, "rationale": "Current synthetic owner confirms superseded historical bytes.",
+          "evidence": "Synthetic exact source and current terminal status.", "incomingLinks": []}))
+    archived = module.migrate_legacy(root, "decision:2026-08-01-terminal", incoming_links_inventory=inventory)
+    assert archived.is_file() and not source.exists()
+    manifest = root / "work-items" / "decision-v0-compatibility.json"
+    assert json.loads(manifest.read_bytes())["schemaVersion"] == 2
+    manifest_before = manifest.read_bytes()
+    assert module.admit_current_decision_v0(root, **request)["state"] == "replayed"
+    assert manifest.read_bytes() == manifest_before and receipt.read_bytes() == receipt_before
+    # A real historical receipt cannot make a broken present reader pass.
+    manifest.write_bytes(b"{}")
+    with pytest.raises(module.LifecycleError) as failure:
+        module.admit_current_decision_v0(root, **request)
+    assert failure.value.failure_id == "WI-DECISION-V0-MANIFEST-INVALID"
+    assert manifest.read_bytes() == b"{}" and receipt.read_bytes() == receipt_before
+
+
+def test_initial_v0_public_producer_then_ordinary_audit_and_stale_readme(tmp_path: Path) -> None:
+    module, root, _captured, request = _initial_v0_public_fixture(tmp_path)
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    readme = root / "work-items" / "README.md"
+    before = readme.read_bytes()
+    with pytest.raises(module.LifecycleError) as original:
+        module.audit(root)
+    assert original.value.failure_id == "WI-DECISION-V0-MANIFEST-MISSING"
+    module.admit_current_decision_v0(root, **request)
+    module.audit_categories(root)
+    module.audit(root)
+    assert readme.read_bytes() == before
+    readme.write_bytes(before.replace(module.README_END.encode(), b"independently stale derived board\n" + module.README_END.encode()))
+    stale = readme.read_bytes()
+    assert module.admit_current_decision_v0(root, **request)["state"] == "replayed"
+    with pytest.raises(module.LifecycleError) as ordinary:
+        module.audit(root)
+    assert ordinary.value.failure_id == "WI-README-STALE"
+    assert readme.read_bytes() == stale
+
+
+@pytest.mark.parametrize("damage", ["pending-scalar", "replay-pending-scalar", "foreign-stage-bytes", "foreign-stage-identity", "pending-overcap", "receipt-overcap"])
+def test_initial_v0_preservation_carrier_and_stage_states(tmp_path: Path, damage: str) -> None:
+    module, root, _captured, request = _initial_v0_public_fixture(tmp_path)
+    pending = root / (request["receipt"] + ".pending")
+    if damage == "replay-pending-scalar" or damage == "receipt-overcap":
+        module.admit_current_decision_v0(root, **request)
+    if damage.endswith("pending-scalar"):
+        pending.write_bytes(b"null")
+    elif damage.startswith("foreign-stage"):
+        _initial_v0_interrupt_child(root, request, "pending")
+        record = json.loads(pending.read_bytes())
+        image = next(row for row in record["outputs"] if row["path"].startswith("work-items/"))["ownedAfter"]
+        stage = root / image["stagePath"]
+        if damage == "foreign-stage-bytes":
+            stage.write_bytes(stage.read_bytes() + b"Changed unowned bytes.\n")
+        else:
+            replacement = stage.with_suffix(".replacement")
+            replacement.write_bytes(stage.read_bytes())
+            previous_identity = stage.stat().st_ino
+            os.replace(replacement, stage)
+            assert stage.stat().st_ino != previous_identity
+    else:
+        if damage == "pending-overcap":
+            _initial_v0_interrupt_child(root, request, "manifest")
+        carrier = pending if damage == "pending-overcap" else root / request["receipt"]
+        carrier.write_bytes(b" " * (module._INITIAL_V0_MAX_BYTES + 1))
+    before = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    with pytest.raises(module.LifecycleError) as refused:
+        module.admit_current_decision_v0(root, **request)
+    assert {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+    if damage.endswith("overcap"):
+        assert refused.value.failure_id == "WI-LIFECYCLE-WRITE-BOUNDARY"
+        assert isinstance(refused.value.__cause__, OSError)
+    elif damage.endswith("pending-scalar"):
+        assert refused.value.failure_id == "WI-DECISION-V0-ADMISSION-RECOVERY-INVALID"
+    else:
+        assert refused.value.failure_id == "WI-DECISION-V0-ADMISSION-RECOVERY-CONFLICT"
+
+
+@pytest.mark.parametrize("fault", ["aggregate-cap", "native-identity", "stage-readback", "manifest-at-receipt-stage", "manifest-after-pending-update", "manifest-after-receipt-promotion"])
+def test_initial_v0_owned_stage_lifetime_and_settlement(tmp_path: Path, monkeypatch, fault: str) -> None:
+    module, root, _captured, request = _initial_v0_public_fixture(tmp_path)
+    before = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    if fault == "aggregate-cap":
+        source = root / "work-items" / "decisions" / "2026-08-01-alpha.md"
+        source.write_bytes(b"---\nstatus: accepted\n---\n" + b"x" * (3200 * 1024) + b"\n")
+        captured = module.admit_current_decision_v0(root)
+        policy = root / "work-items" / "decisions" / f"{request['policy_decision']}.md"
+        write(policy, _accepted_v0_policy_record(request["policy_decision"], captured["baselineSha256"]))
+        request["expected_baseline_sha256"] = captured["baselineSha256"]
+        request["expected_policy_sha256"] = hashlib.sha256(policy.read_bytes()).hexdigest().upper()
+        before = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+        with pytest.raises(module.LifecycleError) as refused:
+            module.admit_current_decision_v0(root, **request)
+        assert refused.value.failure_id == "WI-DECISION-V0-ADMISSION-RECOVERY-INVALID"
+        assert {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+    elif fault in ("native-identity", "stage-readback"):
+        original_open = module.LifecycleWriteTarget._file
+        original_identity = module.LifecycleWriteTarget._identity
+        original_image = module.LifecycleWriteTarget.owned_image
+        original_close = module.LifecycleWriteTarget._close
+        created, closed = [], []
+        def capture(target, leaf, **kwargs):
+            handle = original_open(target, leaf, **kwargs)
+            if kwargs.get("create"):
+                created.append((target, handle, leaf))
+            return handle
+        def fail_identity(target, handle):
+            if fault == "native-identity" and any(owned == handle for _target, owned, _leaf in created):
+                raise OSError("synthetic native stage identity acquisition failure")
+            return original_identity(target, handle)
+        def fail_readback(target, leaf=None, **kwargs):
+            if fault == "stage-readback" and any(owned_target is target and owned_leaf == leaf for owned_target, _handle, owned_leaf in created):
+                raise OSError("synthetic native stage readback failure")
+            return original_image(target, leaf, **kwargs)
+        def observe_close(target, handle):
+            closed.append(handle)
+            return original_close(target, handle)
+        monkeypatch.setattr(module.LifecycleWriteTarget, "_file", capture)
+        monkeypatch.setattr(module.LifecycleWriteTarget, "_identity", fail_identity)
+        monkeypatch.setattr(module.LifecycleWriteTarget, "owned_image", fail_readback)
+        monkeypatch.setattr(module.LifecycleWriteTarget, "_close", observe_close)
+        try:
+            with pytest.raises(OSError, match="synthetic native stage"):
+                module.admit_current_decision_v0(root, **request)
+            assert len(created) == 1
+            assert all(handle in closed for _target, handle, _leaf in created)
+            assert {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+        finally:
+            # Harness release prevents a failed assertion from escaping its exact
+            # creator handle; it cannot make a product lifetime assertion pass.
+            for target, handle, _leaf in created:
+                if handle not in closed:
+                    original_close(target, handle)
+    else:
+        manifest = root / "work-items" / "decision-v0-compatibility.json"
+        foreign_bytes, foreign_identity = None, None
+        def replace_manifest():
+            nonlocal foreign_bytes, foreign_identity
+            old_identity = manifest.stat().st_ino
+            foreign_bytes = manifest.read_bytes()
+            replacement = manifest.with_suffix(".replacement")
+            replacement.write_bytes(foreign_bytes)
+            foreign_identity = replacement.stat().st_ino
+            assert old_identity != foreign_identity
+            os.replace(replacement, manifest)
+        if fault == "manifest-at-receipt-stage":
+            original = module.LifecycleWriteTarget.stage_create
+            def drift(target, data):
+                if target.path == root / request["receipt"]:
+                    replace_manifest()
+                return original(target, data)
+            monkeypatch.setattr(module.LifecycleWriteTarget, "stage_create", drift)
+        elif fault == "manifest-after-pending-update":
+            original = module.LifecycleWriteTarget.publish
+            def drift(target, data):
+                result = original(target, data)
+                if target.path == root / (request["receipt"] + ".pending"):
+                    replace_manifest()
+                return result
+            monkeypatch.setattr(module.LifecycleWriteTarget, "publish", drift)
+        else:
+            original = module.LifecycleWriteTarget.promote_create
+            def drift(target, image):
+                result = original(target, image)
+                if target.path == root / request["receipt"]:
+                    replace_manifest()
+                return result
+            monkeypatch.setattr(module.LifecycleWriteTarget, "promote_create", drift)
+        with pytest.raises(module.LifecycleError) as refused:
+            module.admit_current_decision_v0(root, **request)
+        assert refused.value.failure_id == "WI-DECISION-V0-ADMISSION-RECOVERY-CONFLICT"
+        assert manifest.stat().st_ino == foreign_identity and manifest.read_bytes() == foreign_bytes
+        assert (root / (request["receipt"] + ".pending")).exists()
+        assert (root / request["receipt"]).exists() == (fault == "manifest-after-receipt-promotion")
+
+
 def _write_decision_v0_manifest(
     root: Path,
     entries: list[dict[str, str]],
@@ -12224,6 +13064,8 @@ class LifecycleTransactionTests(unittest.TestCase):
             "terminalize_v1_inventory",
             "apply_migration_inventory",
             "recover_partial_migration_v1",
+            "recover_transition",
+            "admit_current_decision_v0",
             "verify_migration_inventory",
             "reopen_category_record",
             "run_trial",
@@ -12965,7 +13807,11 @@ class PartialMigrationRecoveryCliTests(unittest.TestCase):
         )
         composer = module.LifecycleOutcomeComposer()
         composer.capture_primary(primary)
-        for index, phase in enumerate(module.LIFECYCLE_CLEANUP_PHASES, start=1):
+        generic_phases = tuple(
+            phase for phase in module.LIFECYCLE_CLEANUP_PHASES
+            if phase not in module.LIFECYCLE_WRITE_CLEANUP_PHASES
+        )
+        for index, phase in enumerate(generic_phases, start=1):
             composer.record_cleanup(
                 phase=phase,
                 failure_id="WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED",
@@ -12979,12 +13825,27 @@ class PartialMigrationRecoveryCliTests(unittest.TestCase):
         self.assertIs(bundle.primary, primary)
         self.assertEqual(
             tuple(record.phase for record in bundle.cleanup_failures),
-            module.LIFECYCLE_CLEANUP_PHASES,
+            generic_phases,
         )
         self.assertEqual(len(bundle.cleanup_failures), 8)
         self.assertEqual(bundle.rollback, "incomplete")
         with self.assertRaises(Exception):
             bundle.cleanup_failures += ()
+
+        for index, phase in enumerate(module.LIFECYCLE_WRITE_CLEANUP_PHASES, start=1):
+            composer.record_write_cleanup(
+                phase=phase,
+                failure_id="WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED",
+                resource=f"write-resource-{index}",
+                diagnostic=f"write-cleanup-{index}",
+            )
+        combined = composer.finalize()
+        self.assertIs(combined.primary, primary)
+        self.assertEqual(tuple(record.phase for record in combined.cleanup_failures),
+                         module.LIFECYCLE_CLEANUP_PHASES)
+        self.assertEqual(combined.rollback, "incomplete")
+        with self.assertRaises(Exception):
+            combined.cleanup_failures += ()
 
     def test_reusable_api_observer_preserves_control_flow_identity_and_zero_streams(self):
         module = load_module()
@@ -14299,3 +15160,190 @@ def test_public_repeated_writes_keep_cleanup_only_failure_nonzero(tmp_path: Path
     assert all(f"cleanup-only-after-{leaf}" in cleanup.diagnostic for leaf in raised)
     assert (tmp_path / "work-items" / "backlog" / "repeated-write.md").is_file()
     assert (tmp_path / "work-items" / "README.md").is_file()
+
+
+def test_projection_apply_revoke_preserves_bound_repository_role(tmp_path: Path) -> None:
+    fixture_path = ROOT / "tests" / "test_legacy_ledger_projection_writer.py"
+    spec = importlib.util.spec_from_file_location("root_role_projection_fixture", fixture_path)
+    support = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(support)
+    case = support.LegacyLedgerProjectionWriterTests()
+    module = load_module()
+    root = tmp_path / "work-items"
+    item, ledger_before, manifest = case._fixture(root)
+    caller = root / "work-items"
+    assert case._apply(module, root, manifest, dry_run=True)["dryRun"] is True
+    applied = case._apply(module, caller, manifest)
+    registry = caller / "legacy-ledger-projections.jsonl"
+    with pytest.raises(module.LifecycleError) as mismatch:
+        module.revoke_legacy_ledger_projection(caller, "projection-apply-001", "0" * 64, support.sha(registry.read_bytes()), "projection-revoke-bad", "2026-08-01T00:00:03Z")
+    assert mismatch.value.failure_id == "WI-LEDGER-MIGRATION-TARGET-DIGEST"
+    revoked = module.revoke_legacy_ledger_projection(caller, "projection-apply-001", applied["recordSha256"], support.sha(registry.read_bytes()), "projection-revoke-001", "2026-08-01T00:00:03Z")
+    assert not revoked["replay"]
+    replay = module.revoke_legacy_ledger_projection(caller, "projection-apply-001", applied["recordSha256"], support.sha(registry.read_bytes()), "projection-revoke-001", "2026-08-01T00:00:03Z")
+    assert replay["replay"] and (item / "agent-runs.jsonl").read_bytes() == ledger_before
+    assert not (tmp_path / ".scratch").exists()
+    assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+
+
+def test_partial_recovery_relative_inputs_preserve_bound_repository_role(tmp_path: Path) -> None:
+    module = load_module()
+    case = PartialMigrationRecoveryBehaviorTests()
+    root = tmp_path / "work-items"
+    caller = root / "work-items"
+    @module._lifecycle_participant
+    def build(bound_root):
+        return case._fixture(module, bound_root)
+    build = module._lifecycle_participant(build.__wrapped__, input_role="repository-root")
+    fixture = build(root)
+    fixture["inventory"] = fixture["inventory"].relative_to(root)
+    fixture["receipt"] = fixture["receipt"].relative_to(root)
+    result = case._run(module, caller, fixture)
+    assert result.audit == "PASS" and not result.replay
+    receipt = root / fixture["receipt"]
+    before = receipt.read_bytes()
+    assert case._run(module, caller, fixture).replay
+    assert receipt.read_bytes() == before
+    assert (caller / "README.md").read_bytes() == module.render_readme_bytes(caller)
+    assert not (tmp_path / ".scratch").exists()
+    assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+
+
+def _selected_owner_fixture(root: Path, selected: str = "selected-target"):
+    module = load_module()
+    work_items = root / "work-items"
+    def prepare(_root):
+        seed_active(module, work_items, selected)
+    module._lifecycle_participant(prepare, input_role="repository-root")(root)
+    return module, work_items
+
+
+@pytest.mark.parametrize("root_form", ("R", "W"))
+def test_selected_close_ignores_different_neighbor_identity(tmp_path: Path, root_form: str) -> None:
+    parent = tmp_path / "project"
+    root = parent / "work-items"
+    module, work_items = _selected_owner_fixture(root)
+    seed_active(module, parent, "different-neighbor")
+    neighbor = root / "active" / "different-neighbor"
+    before = {path.relative_to(neighbor): (path.stat().st_dev, path.stat().st_ino, path.read_bytes())
+              for path in neighbor.rglob("*") if path.is_file()}
+    write_bug_dispositions(root, "selected-target", "2026-08-11T10:00:00Z", [])
+    supplied = tmp_path / "closure.md"
+    supplied.write_text(closure("2026-08-11T10:00:00Z"), encoding="utf-8")
+    result = run_cli("close", "--root", str(root if root_form == "R" else work_items),
+        "--slug", "selected-target", "--closure-file", str(supplied), "--terminal-instant", "2026-08-11T10:00:00Z")
+    assert result.returncode == 0, result.stdout
+    assert (work_items / "archive/2026-08/selected-target/bug-dispositions-receipt.json").is_file()
+    assert not (work_items / "active/selected-target").exists()
+    assert before == {path.relative_to(neighbor): (path.stat().st_dev, path.stat().st_ino, path.read_bytes())
+                      for path in neighbor.rglob("*") if path.is_file()}
+
+
+def test_declared_subject_direct_keyword_dual_invalid_and_absent(tmp_path: Path) -> None:
+    parent = tmp_path / "project"
+    root = parent / "work-items"
+    module, work_items = _selected_owner_fixture(root, "dotted-task.md")
+    seed_active(module, parent, "different-task")
+    assert module.work_item_dependency_state(root=root, slug="dotted-task.md") == "open"
+    assert module.work_item_dependency_state(root, "dotted-task.md") == "open"
+    # A genuinely identical selected identity in both roots is ambiguous.
+    seed_active(module, parent, "dotted-task.md")
+    with pytest.raises(module.LifecycleError) as same_subject:
+        module.work_item_dependency_state(root, "dotted-task.md")
+    assert "acquisition ambiguous" in str(same_subject.value)
+    # Same-root duplicate is domain DUAL, not root ambiguity.
+    one = tmp_path / "single/work-items"
+    own, ow = _selected_owner_fixture(one, "dual")
+    write(ow / "backlog/dual.md", "status: candidate\n")
+    with pytest.raises(own.LifecycleError) as dual:
+        own.work_item_dependency_state(one, "dual")
+    assert dual.value.failure_id == "WI-CATEGORY-DUAL-LOCATION"
+    invalid = ow / "active/invalid-known"
+    invalid.mkdir()
+    with pytest.raises((own.LifecycleError, FileNotFoundError)) as invalid_domain:
+        own.close_item(one, "invalid-known", closure("2026-08-11T10:00:00Z").encode(), "2026-08-11T10:00:00Z")
+    assert "acquisition" not in str(invalid_domain.value)
+    with pytest.raises(own.LifecycleError) as missing:
+        own.work_item_dependency_state(one, "missing-target")
+    assert missing.value.failure_id == "WI-REFERENCE-MISSING"
+    creation = tmp_path / "creation/work-items"
+    creator, cw = _selected_owner_fixture(creation, "existing")
+    creator.create_candidate(creation, "new-target", b"Task: New selected creation.\nNext action: Check.\nupdated: 2026-08-11T10:00:00Z\n")
+    assert (cw / "backlog/new-target.md").is_file()
+    with pytest.raises((own.LifecycleError, TypeError)):
+        own.work_item_dependency_state(one, "")
+
+
+def test_structural_archive_metadata_identity_and_currentness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "work-items"
+    module, work_items = _selected_owner_fixture(root, "identity-task")
+    archive = work_items / "archive"
+    archive.mkdir()
+    direct = archive / "ordinary-note.bin"
+    direct.write_bytes(b"Direct metadata bytes.\n")
+    dated = archive / "2026-10"
+    dated.mkdir()
+    month_file = dated / "metadata.bin"
+    month_file.write_bytes(b"Month metadata bytes.\n")
+    metadata = {direct, month_file}
+    read_ids = {(p.stat().st_dev, p.stat().st_ino) for p in metadata}
+    read_count = []
+    original = module.os.fdopen
+    class Observed:
+        def __init__(self, stream, monitored): self.stream, self.monitored = stream, monitored
+        def __enter__(self): self.stream.__enter__(); return self
+        def __exit__(self, *args): return self.stream.__exit__(*args)
+        def __getattr__(self, name): return getattr(self.stream, name)
+        def read(self, *args):
+            if self.monitored: read_count.append(1)
+            return self.stream.read(*args)
+    def observe(fd, *args, **kwargs):
+        info = os.fstat(fd)
+        return Observed(original(fd, *args, **kwargs), (info.st_dev, info.st_ino) in read_ids)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(module.os, "fdopen", observe)
+        for alias in (root, work_items):
+            assert module.project_root_identity(alias)[:2] == (root, work_items)
+        assert read_count == []
+        full = module.archive_entity_inventory(root, input_role="repository-root")
+        assert read_count and all(len(entity.snapshots) == 1 for entity in full.entities if entity.kind == "archive-metadata")
+    for path in metadata:
+        assert path.read_bytes() in (b"Direct metadata bytes.\n", b"Month metadata bytes.\n")
+    with pytest.raises(module.LifecycleError):
+        module.ArchiveEntity(direct, "archive-metadata", None, ())
+    _r, _w, evidence = module.project_root_identity(root)
+    direct.rename(archive / "held-old-metadata.bin")
+    direct.write_bytes(b"Direct metadata bytes.\n")
+    with pytest.raises(module.LifecycleError):
+        module._verify_project_binding_evidence(evidence, "WI-README-STALE")
+    module.refresh_readme(work_items)
+    assert direct.read_bytes() == b"Direct metadata bytes.\n"
+    full = module.archive_entity_inventory(root, input_role="repository-root")
+    month_file.write_bytes(b"Changed month bytes.\n")
+    with pytest.raises(module.LifecycleError): full.verify()
+
+
+def test_selected_absence_and_parent_replacement_revalidate_under_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parent = tmp_path / "project"
+    root = parent / "work-items"
+    module, work_items = _selected_owner_fixture(root, "target")
+    seed_active(module, parent, "neighbor")
+    original_enter = module.LifecycleTransaction.__enter__
+    def competing_subject(transaction):
+        (root / "active/target").mkdir()
+        return original_enter(transaction)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(module.LifecycleTransaction, "__enter__", competing_subject)
+        with pytest.raises(module.LifecycleError) as appeared:
+            module.work_item_dependency_state(root, "target")
+    assert "absence changed" in str(appeared.value)
+    assert (work_items / "active/target").is_dir()
+    assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+    (root / "active/target").rmdir()
+    evidence = []
+    module._observe_project_path_at(root / "active/missing", "directory", evidence, "WI-README-STALE")
+    (root / "active").rename(root / "held-active")
+    (root / "active").mkdir()
+    with pytest.raises(module.LifecycleError):
+        module._verify_project_binding_evidence(tuple(evidence), "WI-README-STALE")

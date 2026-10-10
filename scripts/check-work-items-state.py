@@ -231,6 +231,7 @@ def blocked_by_notes(
     root: Path,
     lifecycle: Any,
     is_valid_slug: Any,
+    *, root_input_role: str = "caller-root", original_root: Path | None = None, binding_evidence: tuple = (),
 ) -> list[str]:
     """Informational: open Depends-on blockers + dangling targets for an active
     item. A blocked item is EXPECTED state, NOT a failure (so this never flips the
@@ -256,7 +257,11 @@ def blocked_by_notes(
             invalid.append(slug)
             continue
         try:
-            state = lifecycle.work_item_dependency_state(root, slug)
+            if root_input_role == "caller-root" and original_root is None and not binding_evidence:
+                state = lifecycle.work_item_dependency_state(root, slug)
+            else:
+                state = lifecycle.work_item_dependency_state(root, slug, _input_role=root_input_role,
+                    _original_root=root if original_root is None else original_root, _binding_evidence=binding_evidence)
         except lifecycle.LifecycleError as exc:
             if exc.failure_id == "WI-REFERENCE-MISSING":
                 unresolved_targets.append(slug)
@@ -416,18 +421,27 @@ def command_check(args: argparse.Namespace) -> int:
     failed = 0
     lifecycle = load_lifecycle_owner()
     is_valid_slug = lifecycle.is_valid_slug
+    base_root = None
+    base_evidence = ()
     try:
-        lifecycle.audit_categories(root)
+        identity = getattr(lifecycle, "project_root_identity", None)
+        if not callable(identity):
+            raise lifecycle.LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "paired project identity API unavailable")
+        base_root, _base_work_items, base_evidence = identity(args.root,
+            known_work_items_root=(args.root / args.active_dir).parent)
+        lifecycle.audit_categories(base_root, _input_role="repository-root",
+            _original_root=args.root, _binding_evidence=base_evidence)
     except lifecycle.LifecycleError as exc:
         failed += 1
         print(f"FAIL category lifecycle: {exc.failure_id}: {exc}")
 
-    transfer_errors = validator.validate_obligation_transfer_ownership(root)
-    if transfer_errors:
-        failed += 1
-        print("FAIL obligation transfer ownership:")
-        for error in transfer_errors:
-            print(f"  - {error}")
+    if base_root is not None:
+        transfer_errors = validator.validate_obligation_transfer_ownership(base_root)
+        if transfer_errors:
+            failed += 1
+            print("FAIL obligation transfer ownership:")
+            for error in transfer_errors:
+                print(f"  - {error}")
 
     global_notes = epic_adoption_notes(items, active_dir)
     sentinel_dependency = load_required_sentinels()
@@ -448,7 +462,9 @@ def command_check(args: argparse.Namespace) -> int:
         if callable(resolver):
             errors.extend(epic_link_notes(item, active_dir, resolver, is_valid_slug))
         notes = item_aging_notes(item, today, args.max_age_days)
-        notes.extend(blocked_by_notes(item, root, lifecycle, is_valid_slug))
+        if base_root is not None:
+            notes.extend(blocked_by_notes(item, base_root, lifecycle, is_valid_slug,
+                root_input_role="repository-root", original_root=args.root, binding_evidence=base_evidence))
         label = item.name
         if errors:
             failed += 1
@@ -492,20 +508,37 @@ def command_check(args: argparse.Namespace) -> int:
                 )
 
     if not args.no_strict_revise and not args.active_only:
-        for ledger in sorted(archive_dir.rglob("agent-runs.jsonl")):
-            arch_errors, open_revise, _open_launches = validator.validate_archived_ledger_obligations(
-                ledger.parent, telemetry=telemetry
-            )
-            if open_revise or arch_errors:
-                failed += 1
-                print(f"FAIL {ledger.parent.name} (ARCHIVED):")
-                for error in arch_errors:
-                    print(f"  - {error}")
-                for event in open_revise:
-                    print(
-                        f"  - open REVISE obligation survived archival: {event.get('runId')} "
-                        f"(lane={event.get('lane')!r}) — archival does not discharge a review verdict"
-                    )
+        try:
+            acquire = getattr(lifecycle, "archive_entity_inventory", None)
+            if not callable(acquire):
+                raise RuntimeError("paired lifecycle archive inventory API is unavailable")
+            inventory = acquire((args.root / args.active_dir).parent, input_role="work-items-root")
+            if not isinstance(inventory, lifecycle.ArchiveEntityInventory):
+                raise RuntimeError("lifecycle archive inventory contract is unavailable")
+            observed_archive = inventory.archive_absent if inventory.archive_absent is not None else inventory.directories[0][0]
+            if observed_archive != archive_dir:
+                raise RuntimeError("lifecycle archive inventory does not match the requested archive scope")
+            for item in inventory.logical_work_item_paths:
+                ledger = item / "agent-runs.jsonl"
+                if not lifecycle._ledger_location_lexically_exists(ledger):
+                    continue
+                arch_errors, open_revise, _open_launches = validator.validate_archived_ledger_obligations(
+                    item, telemetry=telemetry
+                )
+                if open_revise or arch_errors:
+                    failed += 1
+                    print(f"FAIL {item.name} (ARCHIVED):")
+                    for error in arch_errors:
+                        print(f"  - {error}")
+                    for event in open_revise:
+                        print(
+                            f"  - open REVISE obligation survived archival: {event.get('runId')} "
+                            f"(lane={event.get('lane')!r}) — archival does not discharge a review verdict"
+                        )
+            inventory.verify()
+        except (lifecycle.LifecycleError, OSError, AttributeError, IndexError, RuntimeError) as exc:
+            failed += 1
+            print(f"FAIL archived lifecycle inventory: {getattr(exc, 'failure_id', type(exc).__name__)}: {exc}")
 
     if args.telemetry and telemetry:
         counters = ", ".join(f"{k}={v}" for k, v in sorted(telemetry.items()))

@@ -1540,6 +1540,7 @@ class RuntimeLedgerRowV1:
         "historical-custody",
     ]
     authority: LedgerAuthorityV1
+    projection_transformation: str = field(default="raw", compare=False)
 
 
 @dataclass(frozen=True)
@@ -1696,6 +1697,7 @@ def _runtime_rows_from_projection(
                 False,
                 False,
             ),
+            projection_transformation=row.transformation,
         ))
     return tuple(result)
 
@@ -2408,8 +2410,14 @@ def _launch_profile_is_exact(event: Mapping[str, object]) -> bool:
 def _derive_authority_masks(
     rows: Sequence[RuntimeLedgerRowV1], current_validity: Sequence[bool], item: Path,
     historical_pass_custody: Mapping[tuple[int, str, str, str], str] | None = None,
+    *,
+    policy: Literal["current", "archive"] = "current",
 ) -> tuple[LedgerAuthorityV1, ...]:
-    """Derive five independent authority axes from exact raw event fields."""
+    """Derive five axes from validated eligibility under one internal policy."""
+
+    if policy not in {"current", "archive"}:
+        raise ValueError("unsupported internal ledger authority policy")
+    current_policy = policy == "current"
 
     positions: dict[str, list[int]] = {}
     for pos, row in enumerate(rows):
@@ -2422,7 +2430,7 @@ def _derive_authority_masks(
         event = row.event
         run_id = event.get("runId")
         current_ok = pos < len(current_validity) and current_validity[pos]
-        historical_ok = row.epoch in {"sealed-prefix", "transferred"}
+        historical_ok = current_policy and row.epoch in {"sealed-prefix", "transferred"}
         launch_eligible[pos] = bool(
             (current_ok or historical_ok)
             and isinstance(run_id, str)
@@ -2434,7 +2442,7 @@ def _derive_authority_masks(
             and "launchRunId" not in event
             and _launch_profile_is_exact(event)
         )
-        if row.epoch == "historical-custody":
+        if current_policy and row.epoch == "historical-custody":
             launch_eligible[pos] = row.authority.launch_eligible
 
     terminal_eligible = [False] * len(rows)
@@ -2444,7 +2452,7 @@ def _derive_authority_masks(
         run_id = event.get("runId")
         launch_id = event.get("launchRunId")
         current_ok = pos < len(current_validity) and current_validity[pos]
-        historical_ok = row.epoch in {"sealed-prefix", "transferred"}
+        historical_ok = current_policy and row.epoch in {"sealed-prefix", "transferred"}
         launch_positions = positions.get(launch_id, ()) if isinstance(launch_id, str) else ()
         target_pos = launch_positions[0] if len(launch_positions) == 1 else None
         target = rows[target_pos].event if target_pos is not None else None
@@ -2474,7 +2482,7 @@ def _derive_authority_masks(
             and flags_match
         )
         terminal_eligible[pos] = eligible
-        if row.epoch == "historical-custody":
+        if current_policy and row.epoch == "historical-custody":
             terminal_eligible[pos] = row.authority.terminal_eligible
             eligible = terminal_eligible[pos]
         if eligible:
@@ -2484,13 +2492,13 @@ def _derive_authority_masks(
     for pos, row in enumerate(rows):
         event = row.event
         current_ok = pos < len(current_validity) and current_validity[pos]
-        if row.epoch == "historical-custody":
+        if current_policy and row.epoch == "historical-custody":
             masks.append(row.authority)
             continue
         if event.get("eventKind") == "closure-invalidation":
             masks.append(_NO_LEDGER_AUTHORITY)
             continue
-        if row.epoch == "sealed-prefix":
+        if current_policy and row.epoch == "sealed-prefix":
             isolated_errors: list[str] = []
             individually_current = _validate_event(
                 dict(event), item, set(), isolated_errors,
@@ -2502,9 +2510,9 @@ def _derive_authority_masks(
         else:
             individually_current = current_ok
         revise = bool(
-            row.authority.revise_target_eligible
+            (current_policy and row.authority.revise_target_eligible)
             or (
-                (current_ok or row.epoch in {"sealed-prefix", "transferred"})
+                (current_ok or (current_policy and row.epoch in {"sealed-prefix", "transferred"}))
                 and event.get("schemaVersion") == 2
                 and event.get("gate") == "REVISE"
                 and isinstance(event.get("runId"), str)
@@ -2683,6 +2691,13 @@ def _validate_closure_authority(
     if validity is None:
         validity = event_validity
     if validity is not None and validity and isinstance(validity[0], bool):
+        if any(
+            row.projection_transformation != "raw"
+            or row.epoch not in {"raw", "strict-suffix"}
+            for row in rows
+        ):
+            fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: projected rows require typed validity")
+            return [], []
         validity = _validity_from_boolean_events(rows, validity)
     if validity is None:
         fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: typed validity is required")
@@ -3294,7 +3309,9 @@ def _ledger_h1_live_participants_exist(root: Path) -> bool:
 def _resolve_ledger_h1_artifact_set_location(root: Path):
     lifecycle = load_lifecycle_owner()
     try:
-        return lifecycle.resolve_ledger_h1_artifact_set_location(root)
+        return lifecycle.resolve_ledger_h1_artifact_set_location(
+            root, input_role="repository-root",
+        )
     except lifecycle.LifecycleError as exc:
         raise _LedgerH1AcquisitionError(
             exc.failure_id,
@@ -3882,14 +3899,10 @@ def _apply_active_suffix_dispositions(
     notices: list[SuffixDispositionNoticeV1] = []
     for target_position, (disposition_position, disposition_event) in targets.items():
         target = rows[target_position]
-        effective[target_position] = RuntimeLedgerRowV1(
-            target.event,
-            target.raw_line_ordinal,
-            target.raw_line_sha256,
-            target.raw_body_sha256,
-            target.projected_event_sha256,
-            "disposed-raw" if raw_v2 else "disposed-suffix",
-            _NO_LEDGER_AUTHORITY,
+        effective[target_position] = replace(
+            target,
+            epoch="disposed-raw" if raw_v2 else "disposed-suffix",
+            authority=_NO_LEDGER_AUTHORITY,
         )
         notices.append(
             SuffixDispositionNoticeV1(
@@ -4337,6 +4350,7 @@ def _ledger_h1_candidate_group(
                     root,
                     logical_work_item=work_item,
                     logical_ledger_path=path,
+                    input_role="repository-root",
                 )
             except lifecycle.LifecycleError as exc:
                 reject(
@@ -4722,6 +4736,7 @@ def _load_live_ledger_h1_artifacts(
                     root,
                     logical_work_item=logical_work_item,
                     logical_ledger_path=ledger_relative,
+                    input_role="repository-root",
                 )
             except lifecycle.LifecycleError as exc:
                 raise _LedgerH1AcquisitionError(
@@ -5255,11 +5270,9 @@ def _ordinary_current_disposition_rows(
         for ordinal, line in enumerate(ledger_bytes.splitlines(keepends=True), start=1)
     }
     runtime_rows = tuple(
-        RuntimeLedgerRowV1(
-            row.event, row.raw_line_ordinal,
-            physical_hashes.get(row.raw_line_ordinal, ""),
-            row.raw_body_sha256, row.projected_event_sha256,
-            row.epoch, row.authority,
+        replace(
+            row,
+            raw_line_sha256=physical_hashes.get(row.raw_line_ordinal, ""),
         )
         for row in runtime_rows
     )
@@ -7308,15 +7321,30 @@ def validate_archived_ledger_obligations(
         historical_pass_custody=historical_pass_custody,
         telemetry=telemetry,
     )
-    typed_closure_validity = _validity_from_boolean_events(
-        runtime_rows, closure_validity
+    projected_archive = any(
+        row.transformation != "raw" or row.projection_profile is not None
+        for row in effective_rows
     )
+    if projected_archive:
+        archive_masks = _derive_authority_masks(
+            runtime_rows, closure_validity, item, policy="archive"
+        )
+        typed_closure_validity = tuple(
+            LedgerEventValidityV1(eligible, mask)
+            for eligible, mask in zip(closure_validity, archive_masks)
+        )
+    else:
+        typed_closure_validity = _validity_from_boolean_events(
+            runtime_rows, closure_validity
+        )
     archived_validity = list(typed_closure_validity)
+    historical_target_positions: set[int] = set()
     for position, row in enumerate(runtime_rows):
         if row.epoch == "manifest-profile" and row.authority.revise_target_eligible:
             archived_validity[position] = LedgerEventValidityV1(
                 False, LedgerAuthorityV1(False, False, True, False, False)
             )
+            historical_target_positions.add(position)
     # Numeric V1 remains historical, except as the exact target of a later V2
     # closure relation in this immutable archive. No other authority is gained.
     positions_by_run_id: dict[str, list[int]] = {}
@@ -7363,6 +7391,7 @@ def validate_archived_ledger_obligations(
         archived_validity[position] = LedgerEventValidityV1(
             False, LedgerAuthorityV1(False, False, True, False, False)
         )
+        historical_target_positions.add(position)
     typed_closure_validity = tuple(archived_validity)
     inactive = resolve_closure_invalidations(
         runtime_rows,
@@ -7380,6 +7409,20 @@ def validate_archived_ledger_obligations(
     active_validity = tuple(
         typed_closure_validity[pos] for pos in active_positions
     )
+    if projected_archive:
+        active_masks = _derive_authority_masks(
+            active_rows, [closure_validity[pos] for pos in active_positions],
+            item, policy="archive",
+        )
+        # Preserve the exact target-only proofs established above, including
+        # a target whose faulty closer was invalidated. Recompute all other
+        # axes so removed settlements cannot suppress a surviving terminal.
+        active_validity = tuple(
+            typed_closure_validity[pos]
+            if pos in historical_target_positions
+            else LedgerEventValidityV1(closure_validity[pos], mask)
+            for pos, mask in zip(active_positions, active_masks)
+        )
     # Only this read-only monthly-archive reader may preserve the old C3 meaning
     # of raw V2 relations recorded before the lifecycle owner's terminal instant.
     preclose_v2_rows: set[int] = set()

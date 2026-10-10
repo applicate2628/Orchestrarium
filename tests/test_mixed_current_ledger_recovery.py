@@ -367,6 +367,68 @@ def test_no_apply_rebinds_and_preserves_files(tmp_path: Path) -> None:
     assert {path.name for path in item.iterdir()} == before_names
 
 
+def test_selected_mixed_aliases_and_under_lock_binding(tmp_path: Path, monkeypatch) -> None:
+    from contextlib import contextmanager
+    root = tmp_path / "work-items"
+    item = root / "work-items" / "active" / "mixed-item"
+    raw, request = _raw_mixed_request(item)
+    _raw_mixed_request(tmp_path / "work-items" / "active" / "different-neighbor")
+    request_path = tmp_path / "request.json"
+    request_path.write_bytes(_line(request))
+    def tree():
+        return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    def run(alias, apply=False):
+        argv = [sys.executable, "-B", str(LIFECYCLE), "recover-mixed-current-ledger",
+                "--root", str(alias), "--request-file", str(request_path)]
+        result = subprocess.run(argv + (["--apply-admitted"] if apply else []),
+                                capture_output=True, text=True, timeout=40)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return json.loads(result.stdout)
+    before = tree()
+    assert run(root) == run(root / "work-items")
+    assert tree() == before
+    assert run(root, True)["applied"]
+    after = tree()
+    assert run(root) == run(root / "work-items")
+    assert run(root, True) == run(root / "work-items", True)
+    assert tree() == after
+
+    lifecycle = load_script(LIFECYCLE, "mixed_selected_binding_guards")
+    for role in (None, "unknown"):
+        with pytest.raises(lifecycle.LifecycleError, match="unknown project root input role"):
+            lifecycle._active_migration_item(root, item.name, input_role=role)
+    competing = tmp_path / "work-items" / "active" / item.name
+    competing.mkdir()
+    with pytest.raises(lifecycle.LifecycleError, match="acquisition ambiguous"):
+        lifecycle.recover_mixed_current_ledger(root, _line(request))
+    competing.rmdir()
+    linked = tmp_path / "linked-root"
+    linked.symlink_to(root, target_is_directory=True)
+    try:
+        with pytest.raises(lifecycle.LifecycleError, match="link or reparse"):
+            lifecycle.recover_mixed_current_ledger(linked, _line(request))
+    finally:
+        linked.unlink()
+    writer = lifecycle._load_agent_run_ledger()
+    real_lock = writer.ledger_write_lock
+    staged = []
+    @contextmanager
+    def changed_binding(selected_item):
+        with real_lock(selected_item):
+            competing.mkdir()
+            try:
+                yield
+            finally:
+                competing.rmdir()
+    monkeypatch.setattr(writer, "ledger_write_lock", changed_binding)
+    monkeypatch.setattr(writer, "_write_exact_staging_file", lambda *args: staged.append(args))
+    monkeypatch.setattr(lifecycle, "_load_agent_run_ledger", lambda: writer)
+    with pytest.raises(lifecycle.LifecycleError, match="absent|changed"):
+        lifecycle.recover_mixed_current_ledger(root, _line(request))
+    assert staged == []
+    assert tree() == after
+
+
 def test_history_failure_cleanup_respects_ownership(tmp_path: Path) -> None:
     """Handled pre-append failure cannot orphan a newly owned history blob."""
     lifecycle = load_script(LIFECYCLE, "mixed_history_lifecycle")

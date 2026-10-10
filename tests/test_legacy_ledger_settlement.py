@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from dataclasses import replace
@@ -142,6 +143,37 @@ def test_identity_record_preserve_open_enrollment_and_replay_conserve_bytes(tmp_
     assert [row.run_id for row in obligations[0].open_revise] == [
         "historic-observation-2", "historic-observation-4",
     ]
+
+
+def test_selected_settlement_aliases_preserve_preflight_apply_and_replay(tmp_path: Path) -> None:
+    root = tmp_path / "work-items"
+    item, physical, _events, request = identity_record_fixture(root)
+    neighbor = tmp_path / "work-items" / "active" / "different-neighbor"
+    neighbor.mkdir(parents=True)
+    (neighbor / "status.md").write_text("# Different task\n", encoding="utf-8")
+    neighbor_before = tree_bytes(neighbor)
+    request_path = tmp_path / "request.json"
+    request_path.write_bytes(request)
+
+    def run(alias: Path, apply: bool = False) -> dict:
+        command = [sys.executable, "-B", str(OWNER), "settle-legacy-ledger",
+                   "--root", str(alias), "--request-file", str(request_path)]
+        result = subprocess.run(command + (["--apply-admitted"] if apply else []),
+                                cwd=ROOT, capture_output=True, text=True, timeout=40)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return json.loads(result.stdout)
+
+    before = tree_bytes(root)
+    assert run(root) == run(root / "work-items")
+    assert tree_bytes(root) == before
+    applied = run(root, True)
+    assert applied["applied"] and not applied["replay"]
+    settled = tree_bytes(root)
+    assert run(root) == run(root / "work-items")
+    assert run(root, True) == run(root / "work-items", True)
+    assert tree_bytes(root) == settled
+    assert (item / "agent-runs.jsonl").read_bytes() == physical
+    assert tree_bytes(neighbor) == neighbor_before
 
 
 def test_identity_record_optional_history_stays_inert_and_cannot_settle(tmp_path: Path) -> None:
@@ -586,6 +618,87 @@ def test_each_participant_failure_restores_exact_preimage(
     assert not (work_items / "legacy-ledger-projections.jsonl").exists()
     assert not (work_items / "legacy-ledger-projection-manifests").exists()
     assert not (work_items / "legacy-ledger-projection-receipts").exists()
+
+
+def test_archived_migration_neutral_settlement_keeps_review_debt_and_true_duplicates(tmp_path: Path) -> None:
+    fixture = ROOT / "tests" / "fixtures" / "agent-run-ledger" / "legacy-obligation-migration-v2"
+    item = tmp_path / "work-items" / "active" / fixture.name
+    shutil.copytree(fixture, item)
+    expected = json.loads((item / "expected.json").read_bytes())
+    owner = load_owner()
+    ledger = item / "agent-runs.jsonl"
+    owner.migrate_legacy_ledger_obligation(
+        tmp_path, item.name, expected["targetRunId"], expected["targetRawSha256"],
+        digest(ledger.read_bytes()), "archive-migration-001", "2026-08-18T00:00:00Z",
+    )
+    launch = json.loads(ledger.read_bytes().splitlines()[0])
+    writer = ROOT / "scripts" / "agent-run-ledger.py"
+    settled = subprocess.run(
+        [sys.executable, "-B", str(writer), "--work-item", str(item), "settle-launch",
+         "--launch-run-id", launch["runId"], "--run-id", "archive-neutral-terminal",
+         "--status", "completed", "--gate", "none",
+         "--started-at", "2026-08-18T00:00:01Z", "--updated-at", "2026-08-18T00:00:01Z"],
+        cwd=ROOT, capture_output=True, text=True, timeout=30,
+    )
+    assert settled.returncode == 0 and "RESULT: PASS settle-launch" in settled.stdout, settled.stdout + settled.stderr
+    archived = tmp_path / "work-items" / "archive" / "2026-08" / item.name
+    archived.parent.mkdir(parents=True)
+    shutil.move(str(item), str(archived))
+    validator = owner._load_agent_run_ledger().load_validator()
+    before = tree_bytes(archived)
+    errors, reviews, launches = validator.validate_archived_ledger_obligations(archived)
+    assert errors == []
+    assert [row["runId"] for row in reviews] == [expected["targetRunId"]]
+    assert launches == [] and tree_bytes(archived) == before
+
+    duplicate = json.loads((archived / "agent-runs.jsonl").read_bytes().splitlines()[-1])
+    duplicate["runId"] = "archive-real-duplicate-terminal"
+    with (archived / "agent-runs.jsonl").open("ab") as stream:
+        stream.write(canonical(duplicate) + b"\n")
+    invalid_before = tree_bytes(archived)
+    errors, _reviews, _launches = validator.validate_archived_ledger_obligations(archived)
+    assert any("duplicate terminal for launch" in error for error in errors)
+    assert any("migration target launch has duplicate or mismatched terminal" in error for error in errors)
+    assert tree_bytes(archived) == invalid_before
+
+
+def test_projected_archive_rederives_settlement_and_retains_proved_v1_target_after_invalidation(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    owner, validator, archived = archived_settlement_fixture(root)
+
+    def event(run_id: str, **fields) -> dict:
+        row = {
+            "schemaVersion": 2, "runId": run_id, "workItem": archived.name,
+            "role": "qa-engineer", "executionRole": "internal", "status": "completed",
+            "gate": "none", "scope": ["evidence.md"],
+            "startedAt": "2026-09-20T12:00:03Z", "updatedAt": "2026-09-20T12:00:03Z",
+        }
+        row.update(fields)
+        return row
+
+    review = event("archive-numeric-v1-review", schemaVersion=1, status="revise", gate="REVISE", artifact="evidence.md")
+    launch = event("archive-invalidation-launch", eventKind="launch", status="running")
+    faulty_closer = event(
+        "archive-invalid-terminal-closer", eventKind="terminal", launchRunId=launch["runId"],
+        gate="PASS", artifact="evidence.md", closesRunIds=[review["runId"], "archive-missing-review"],
+        evidence=[{"kind": "manual-check", "ref": "candidate relation"}],
+    )
+    neutral = event("archive-surviving-neutral", eventKind="terminal", launchRunId=launch["runId"])
+    recovery = event(
+        "archive-terminal-invalidation", role="lead", executionRole="main", eventKind="closure-invalidation",
+        scope=["ledger-recovery:closure-invalidation"], invalidatesRunId=faulty_closer["runId"],
+        invalidatesEventSha256=digest(canonical(faulty_closer)),
+        evidence=[{"kind": "manual-check", "ref": f"{faulty_closer['runId']} {digest(canonical(faulty_closer))}"}],
+    )
+    with (archived / "agent-runs.jsonl").open("ab") as stream:
+        for row in (review, launch, faulty_closer, neutral, recovery):
+            stream.write(canonical(row) + b"\n")
+    apply_archive_projection(owner, root, archived)
+    before = tree_bytes(archived)
+    errors, reviews, launches = validator.validate_archived_ledger_obligations(archived)
+    assert errors == []
+    assert [row["runId"] for row in reviews] == [review["runId"]]
+    assert launches == [] and tree_bytes(archived) == before
 
 
 def test_zero_open_obligations_flow_through_ordinary_close_receipt_and_readme(

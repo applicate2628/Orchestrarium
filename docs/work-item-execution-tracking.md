@@ -6,6 +6,8 @@ Use it when a repository keeps active task memory under `work-items/active/<slug
 
 Only the root main conversation holding Lead writes `agent-runs.jsonl`; a validated helper or wrapper may perform that write on the root's behalf. Specialists return their artifact, evidence, and gate result to that owner rather than appending their own events.
 
+Lifecycle commands accept the documented repository or work-items root spelling. The shared identity owner acquires an untyped root from the selected lifecycle subject or existing canonical namespace, evaluates both supported interpretations together, and refuses ambiguous or unbound inputs. The actual declared request subject takes precedence over unrelated namespace tasks; same-subject cross-root ambiguity still refuses. Archive identity uses the existing classifier’s structural observation without reading unrelated bodies, while full inventory retains exact snapshots and validation. Proved repository/work-items roles normalize cheaply and travel explicitly across direct helpers and independently loaded H1 readers. Identity acquisition supplies no completion or mutation authority; digest, record and operation admission follow one unique binding. Subjectless topology observation outside a transaction, without a proved root role and with an absent contract, may read a directory alias; a linked namespace keeps its selected repository association. That returned path supplies no acquisition authority. Lifecycle and bound acquisition still validate the original path without following links before lock acquisition; the existing transaction then retains canonical repository/work-items roles and forwards the repository role to outer and nested operations. Repository-relative scratch, retention and receipt joins do not change with spelling or reinterpret a proved repository by its basename. Command-line transition recovery forwards the original caller path into one outer lifecycle participant before intent selection, recovery and nested README/receipt readback; positive `--apply` remains required. The state checker preserves its configured active/archive namespace while separately acquiring its base repository from the existing scope equations. Category, transfer and dependency checks use that same base; a selected component never replaces it. A different or unsafe caller root cannot borrow the held scope; original admission, missing-evidence, ownership and failure/cleanup guards still apply.
+
 ## Files
 
 Each active work item should keep these files together:
@@ -677,6 +679,8 @@ Within the existing canonical-month candidate domain, an acquired nonempty ordin
 
 Readable invalid current statuses in unrelated backlog, active or Version 1 roadmaps remain unchecked diagnostics with their original failure, parsed status, physical link and source digest; no normalization. Unrelated admitted operations may commit and refresh despite unknown collections, but a selected unbound physical container/leaf or selected work-item identity colliding with unresolved in-domain data refuses `WI-ARCHIVE-ENTITY-UNBOUND`; known logical duplicates still refuse. Selected start/import/close/migration inputs keep all existing evidence, hash, link, UTC and missing/empty-status admission guards. Archive bytes/identities remain immutable; history recovery requires its existing owner and actual authority, not inferred terminal dates.
 
+The separate readonly `archive_entity_inventory(root)` API exposes that owner's logical archived work-item paths, including invalid known tasks, without a writer lock or new files. The default archived-ledger check consumes this model for the actual configured archive scope and validates only immediate canonical `agent-runs.jsonl` entries. Nonlogical nested snapshots never become tasks by filename. Lexical presence retains dangling/directory/unreadable failures; paired API/acquisition/currentness mismatch remains visible and non-clean. Actual current/archived review and historical-custody rules stay in the unchanged validator; active-only and no-strict-revise modes keep their existing boundaries.
+
 Read-only `observe_readme` retains byte-currentness fields and adds `archiveInventory` from the SAME acquired rendering inventory:
 
 ```json
@@ -751,6 +755,48 @@ as one atomic group. After a valid anchor, reader/projection support and the
 operator contract are forward-only. Before archive movement, operational
 rollback is the exact revoke command; after archive movement, recovery is
 forward-only to one exact successor, README, bug receipt, and settled receipt.
+
+## Initial legacy-decision byte admission
+
+`mutate-work-item.py admit-current-decision-v0 --root <repository>` captures the
+complete direct set of legacy frontmatter (V0) decisions without admitting it.
+The callable `admit_current_decision_v0` uses the same lifecycle owner. Optional
+`--policy-decision <slug>` and `--cutover-date YYYY-MM-DD` render the existing
+five-field manifest candidate; an absent policy digest remains unknown. Capture
+does not create a manifest or receipt and never supplies historical consent.
+
+The actual current policy owner must first accept a canonical Version 1 (V1)
+decision binding that exact baseline, manifest path and cutover. Its acceptance
+describes preservation of historical bytes and unknown historical approval or
+review facts. A truthful owner-executed manual equivalent is valid under the
+same contract; no helper marker grants authority. Apply never accepts or edits
+the policy on the owner's behalf.
+
+After verifying that current acceptance, use the captured baseline and actual
+policy byte hash with `--apply --policy-decision <slug> --cutover-date YYYY-MM-DD
+--expected-baseline-sha256 <UPPERCASE64HEX>
+--expected-policy-sha256 <UPPERCASE64HEX> --operation-id <id>
+--receipt .scratch/<receipt>.json`. All apply inputs are required. The owner
+recaptures the full set, validates it through the existing strict reader, and
+creates the first manifest and settlement receipt without replacing a foreign
+destination. Historical omissions and raw statuses remain unchanged; admission
+neither retires a decision nor closes review obligations. Empty first apply
+refuses. README is outside this operation and keeps its independent audit.
+
+Repeat the same positive apply request after interruption. The receipt sibling
+`<receipt>.json.pending` retains actual input bytes, root bindings and flushed
+stage identities before manifest promotion. Matching unfinished state is
+revalidated and receives a fresh `recovered` settlement receipt; it never
+claims the interrupted process succeeded. Invalid, missing or conflicting
+evidence refuses while preserving foreign or uncertain state. Caught safe
+pre-receipt failures compensate owned effects; that does not promise crash or
+power-loss rollback. A crash before durable pending publication can leave an
+ambiguous stage requiring owner reconciliation.
+
+A real matching settled receipt returns historical `replayed` after a separate
+present strict-reader check. Lawful later retirement or README changes do not
+require the old after-images to remain current. Present reader errors remain
+visible, and the receipt is never rewritten to imply fresh historical consent.
 
 ## Physical lifecycle V1
 

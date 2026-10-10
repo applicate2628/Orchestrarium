@@ -834,6 +834,21 @@ def test_checker_passes_when_no_active_directory_exists(tmp_path: Path):
     assert result.returncode == 0, result.stderr
     assert "no active work-items" in result.stdout
 
+    repo = tmp_path / "known-empty-base"
+    work_items = repo / "work-items"
+    work_items.mkdir(parents=True)
+    owner = load_checker_module().load_lifecycle_owner()
+    before = list(work_items.iterdir())
+    base, selected, evidence = owner.project_root_identity(work_items, known_work_items_root=work_items)
+    assert (base, selected) == (repo, work_items)
+    assert list(work_items.iterdir()) == before and not (repo / ".scratch").exists()
+    for alias, active in ((repo, "work-items/active"), (work_items, "active")):
+        checked = run_checker(alias, "--active-dir", active)
+        assert checked.returncode == 0, checked.stdout + checked.stderr
+        assert "no active work-items" in checked.stdout
+        assert not (work_items / ".scratch").exists()
+    assert (repo / ".scratch" / "work-items-lifecycle-owner.lock").is_file()
+
 
 def test_checker_validates_all_active_items(tmp_path: Path):
     write_valid_item(tmp_path, "valid-item")
@@ -915,7 +930,7 @@ def test_next_actionable_heading_does_not_false_match(tmp_path: Path):
     '## Next action' section (codex ff-review — the old startswith accepted it)."""
     item = write_valid_item(tmp_path, "actionable-item")
     (item / "status.md").write_text(
-        "# Status\n\n## Current state\n**Primary task status**: open\n\n"
+        "# Status\nstatus: active\n\n## Current state\n**Primary task status**: open\n\n"
         "## Active agents\n- none\n\n## Completed agents\n- none\n\n"
         "## Next actionable\nWRONG heading content\n\n"
         "## Next action\nCORRECT action content\n",
@@ -1275,6 +1290,10 @@ def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Pat
         item_name = f"archived-{case_name}"
         item = root / "work-items" / "archive" / "2026-07" / item_name
         (item / "reviews").mkdir(parents=True)
+        (item / "closure.md").write_text(
+            "Closed: 2026-07-01\nOutcome: Synthetic archived review fixture.\n",
+            encoding="utf-8",
+        )
         (item / "reviews" / "security.md").write_text("PASS\n", encoding="utf-8")
         target_id = f"run-archive-{case_name}-target"
         waiver_id = f"run-archive-{case_name}-waiver"
@@ -1367,10 +1386,79 @@ def raw_v2_archived_review_events(item_name: str) -> tuple[dict, dict]:
     return target, closer
 
 
+def test_default_archive_scan_uses_logical_owner_not_retained_ledger_basename(tmp_path: Path) -> None:
+    checker, owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path)
+    close_member("A", "a")
+    close_member("A", "g")
+    record = write_goal(terminal=True)
+    root = roots["A"]
+    archived = owner.resolve_category(root, "work-item:a")
+    baseline = run_checker(root)
+    assert baseline.returncode == 0, baseline.stdout
+    before = owner.observe_readme(root)
+    snapshot = archived / "ordinary-attachments" / "retained-copy" / "agent-runs.jsonl"
+    snapshot.parent.mkdir(parents=True)
+    target, _closer = raw_v2_archived_review_events("retained-copy")
+    snapshot.write_text(json.dumps(target) + "\n", encoding="utf-8")
+    bytes_before = snapshot.read_bytes()
+    result = run_checker(root)
+    assert result.returncode == 0 and "retained-copy (ARCHIVED)" not in result.stdout, result.stdout
+    assert owner.observe_readme(root) == before and snapshot.read_bytes() == bytes_before
+    model = owner.archive_entity_inventory(root / "work-items")
+    assert archived in model.logical_work_item_paths and snapshot.parent not in model.logical_work_item_paths
+    model.verify()
+    ledger = archived / "agent-runs.jsonl"
+    target, _closer = raw_v2_archived_review_events(archived.name)
+    ledger.write_text(json.dumps(target) + "\n", encoding="utf-8")
+    result = run_checker(root)
+    assert result.returncode == 1 and f"open REVISE obligation survived archival: {target['runId']}" in result.stdout, result.stdout
+    ledger.unlink()
+    ledger.mkdir()
+    result = run_checker(root)
+    assert result.returncode == 1 and "a (ARCHIVED)" in result.stdout, result.stdout
+    ledger.rmdir()
+    ledger.symlink_to(root / "missing-canonical-ledger")
+    result = run_checker(root)
+    assert result.returncode == 1, result.stdout
+    assert snapshot.read_bytes() == bytes_before
+
+
+def test_readonly_archive_owner_contract_is_unavailable_or_current_never_empty_fallback(tmp_path: Path) -> None:
+    owner = load_checker_module().load_lifecycle_owner()
+    root = tmp_path / "repo"
+    root.mkdir()
+    before = list(root.iterdir())
+    absent = owner.archive_entity_inventory(root)
+    assert absent.logical_work_item_paths == ()
+    absent.verify()
+    assert list(root.iterdir()) == before and not (root / ".scratch").exists()
+    archive = root / "work-items" / "archive"
+    archive.mkdir(parents=True)
+    try:
+        absent.verify()
+    except owner.LifecycleError as error:
+        assert error.failure_id == "WI-README-STALE"
+    else:
+        raise AssertionError("absent archive appearance lost")
+    acquired = owner.archive_entity_inventory(root)
+    (archive / "2026-10").mkdir()
+    try:
+        acquired.verify()
+    except owner.LifecycleError as error:
+        assert error.failure_id == "WI-README-STALE"
+    else:
+        raise AssertionError("archive membership drift lost")
+    assert not (root / ".scratch").exists()
+
+
 def test_archive_scan_accepts_raw_v2_missing_legacy_review_pointer(tmp_path: Path) -> None:
     item_name = "archived-legacy-review-pointer"
     item = tmp_path / "work-items" / "archive" / "2026-07" / item_name
     item.mkdir(parents=True)
+    (item / "closure.md").write_text(
+        "Closed: 2026-07-01\nOutcome: Synthetic archived review fixture.\n",
+        encoding="utf-8",
+    )
     target, closer = raw_v2_archived_review_events(item_name)
     ledger = item / "agent-runs.jsonl"
     ledger.write_text(
@@ -1625,6 +1713,10 @@ def test_active_only_keeps_periodic_archive_failures_out_of_publication_scope(
     item_name = "archived-open-revise"
     item = tmp_path / "work-items" / "archive" / "2026-07" / item_name
     (item / "reviews").mkdir(parents=True)
+    (item / "closure.md").write_text(
+        "Closed: 2026-07-01\nOutcome: Synthetic archived review fixture.\n",
+        encoding="utf-8",
+    )
     (item / "reviews" / "qa.md").write_text("REVISE\n", encoding="utf-8")
     revise = ledger_event(
         schemaVersion=2,
@@ -2026,3 +2118,51 @@ def test_decision_schema_failure_reaches_repository_state_checker(tmp_path: Path
 
     assert result.returncode == 1
     assert "WI-DECISION-V0-SCHEMA-INVALID" in result.stdout
+
+
+def test_checker_configured_component_preserves_base_dependency_scope(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    component = base / "component"
+    write_valid_item(base, "dual-dep")
+    backlog = base / "work-items" / "backlog"
+    backlog.mkdir(parents=True)
+    (backlog / "dual-dep.md").write_text("status: candidate\n", encoding="utf-8")
+    write_valid_item(component, "dual-dep")
+    write_valid_item(component, "missing-dep")
+    write_item_with_status(component, "selected-item", status_with_depends("dual-dep, missing-dep"))
+    result = run_checker(base, "--active-dir", "component/work-items/active")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "WI-CATEGORY-DUAL-LOCATION" in result.stdout
+    assert "duplicate Depends-on: dual-dep" in result.stdout
+    assert "dangling Depends-on: missing-dep" in result.stdout
+    assert "PASS selected-item" in result.stdout
+
+
+def test_checker_aliases_validate_base_transfer_receipt(tmp_path: Path) -> None:
+    spec = importlib.util.spec_from_file_location("checker_base_transfer_fixture", ROOT / "tests" / "test_legacy_obligation_migration.py")
+    support = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(support)
+    base = tmp_path / "base"
+    fixture = support.transfer_fixture(base)
+    receipt = support.run_transfer(fixture)
+    receipt_path = base / receipt["archivePath"] / "lifecycle-transition-receipt.json"
+    original = receipt_path.read_bytes()
+    for alias, active in ((base, "work-items/active"), (base / "work-items", "active")):
+        full = run_checker(alias, "--active-dir", active)
+        assert full.returncode == 1, full.stdout + full.stderr
+        assert "open REVISE obligation survived archival" in full.stdout
+        assert "duplicate terminal" in full.stdout
+        assert "FAIL obligation transfer ownership" not in full.stdout
+        checked = run_checker(alias, "--active-dir", active, "--active-only")
+        assert checked.returncode == 0, checked.stdout + checked.stderr
+    changed = dict(receipt)
+    changed["workItem"] = "wrong-base-owner"
+    receipt_path.write_text(json.dumps(changed, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        for alias, active in ((base, "work-items/active"), (base / "work-items", "active")):
+            checked = run_checker(alias, "--active-dir", active, "--active-only")
+            assert checked.returncode == 1, checked.stdout + checked.stderr
+            assert "FAIL obligation transfer ownership" in checked.stdout
+    finally:
+        receipt_path.write_bytes(original)
