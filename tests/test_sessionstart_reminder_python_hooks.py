@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -99,6 +101,19 @@ def _decode_context(stdout: str) -> str:
 
 
 class McpUsageReminderPythonHookTest(unittest.TestCase):
+    def test_missing_required_sibling_is_silent_at_python_entry(self) -> None:
+        for script in MCP_PY_SCRIPTS:
+            with self.subTest(script=script), tempfile.TemporaryDirectory() as td:
+                isolated = Path(td) / script.name
+                shutil.copy2(script, isolated)
+                # The policy is present: only hook_common acquisition is broken.
+                shutil.copy2(script.with_name("mcp_continuity_policy.py"), Path(td) / "mcp_continuity_policy.py")
+                env = os.environ.copy()
+                env["PYTHONPATH"] = ""
+                env["PYTHONDONTWRITEBYTECODE"] = "1"
+                result = _run(isolated, cwd=td, env=env, stdin="")
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+
     def test_all_policy_projections_match_the_canonical_contexts(self) -> None:
         for index, policy_path in enumerate(MCP_POLICY_SCRIPTS[1:], start=1):
             with self.subTest(policy=str(policy_path.relative_to(ROOT))):
@@ -191,6 +206,26 @@ class McpUsageReminderPythonHookTest(unittest.TestCase):
 
 class AgentsModeReminderPythonHookTest(unittest.TestCase):
     """Drive the Python owner directly via sys.executable."""
+
+    def test_missing_required_sibling_is_silent_before_mode_resolution(self) -> None:
+        for script, sub, _pack in AGENTS_MODE_PY:
+            for missing in ("hook_common.py", "agents_mode_runtime.py"):
+                with self.subTest(script=script, missing=missing), tempfile.TemporaryDirectory() as td:
+                    isolated = Path(td) / script.name
+                    shutil.copy2(script, isolated)
+                    for sibling in ("hook_common.py", "agents_mode_runtime.py"):
+                        if sibling != missing:
+                            shutil.copy2(script.with_name(sibling), Path(td) / sibling)
+                    cfg = Path(td) / sub
+                    cfg.mkdir()
+                    (cfg / ".agents-mode.yaml").write_text("delegationMode: force\n", encoding="utf-8")
+                    env = os.environ.copy()
+                    env["USERPROFILE"] = td
+                    env["HOME"] = td
+                    env["PYTHONPATH"] = ""
+                    env["PYTHONDONTWRITEBYTECODE"] = "1"
+                    result = _run(isolated, cwd=td, env=env, stdin="")
+                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
 
     def test_force_and_auto_emit_exact_directive_manual_and_missing_are_silent(self) -> None:
         for script, sub, pack_key in AGENTS_MODE_PY:

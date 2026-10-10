@@ -96,6 +96,31 @@ def denies(p: subprocess.CompletedProcess) -> bool:
     return '"permissionDecision"' in p.stdout and '"deny"' in p.stdout
 
 
+def test_framed_patch_invocation_variants_share_code_guard() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        transcript = Path(directory) / "turn.jsonl"
+        transcript.write_text(
+            json.dumps(user("fix the broken renderer")) + "\n" +
+            json.dumps(assistant("Looking at the failure.")) + "\n",
+            encoding="utf-8",
+        )
+        markdown = "*** Begin Patch\n*** Update File: docs/guide.md\n@@\n-old\n+new\n*** End Patch"
+        code = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"
+        for script in HOOKS:
+            for name in ("apply_patch", "functions.apply_patch"):
+                for key in ("command", "patch", "input"):
+                    envelope = {"transcript_path": str(transcript), "tool_name": name, "tool_input": {key: markdown}}
+                    result = subprocess.run([sys.executable, "-B", str(script)], input=json.dumps(envelope),
+                                            capture_output=True, text=True, encoding="utf-8")
+                    assert result.returncode == 0 and result.stdout == "" and result.stderr == ""
+                for payload in ({"patch": code}, {"patch": markdown, "input": markdown},
+                                {"patch": markdown.replace("*** End Patch", "*** Update File: src/app.py\n@@\n+x\n*** End Patch")}):
+                    envelope = {"transcript_path": str(transcript), "tool_name": name, "tool_input": payload}
+                    result = subprocess.run([sys.executable, "-B", str(script)], input=json.dumps(envelope),
+                                            capture_output=True, text=True, encoding="utf-8")
+                    assert result.returncode == 0 and denies(result) and result.stderr == ""
+
+
 class TestBugfixDisciplineGenuineUser(unittest.TestCase):
     def assert_outcome(self, entries: list[dict], should_deny: bool, tool_name: str = "Edit") -> None:
         for script in HOOKS:

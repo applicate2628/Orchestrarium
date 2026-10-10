@@ -107,6 +107,71 @@ def parse_envelope(stdin_text: str) -> dict:
     return data
 
 
+class AcquiredToolInput(NamedTuple):
+    """Lossless invocation identity and supported payload facts, without policy."""
+
+    raw_name: str | None
+    operation: str | None
+    targets: tuple[str, ...]
+    command: str | None
+    resolved: bool
+
+
+_PATCH_FILE_HEADER = re.compile(r"^\*\*\* (?:Add|Update|Delete|Move) File: (.+)$")
+_PATCH_MOVE_HEADER = re.compile(r"^\*\*\* Move to: (.+)$")
+_DIRECT_FILE_TOOLS = frozenset({"edit", "write", "notebookedit"})
+_SHELL_TOOLS = frozenset({"bash", "powershell", "shell_command", "exec_command"})
+
+
+def _patch_targets(patch: str) -> tuple[str, ...] | None:
+    """Recognize the existing strict frame and affected paths, not full hunks."""
+    lines = patch.splitlines()
+    if len(lines) < 3 or lines[0] != "*** Begin Patch" or lines[-1] != "*** End Patch":
+        return None
+    targets: list[str] = []
+    in_file = False
+    for line in lines[1:-1]:
+        file_header = _PATCH_FILE_HEADER.fullmatch(line)
+        move_header = _PATCH_MOVE_HEADER.fullmatch(line)
+        if file_header or move_header:
+            if move_header and not in_file:
+                return None
+            target = (file_header or move_header).group(1)
+            if not target or target != target.strip():
+                return None
+            targets.append(target)
+            in_file = True
+        elif not in_file or not (line.startswith(("@@", "+", "-", " ")) or line == "*** End of File"):
+            return None
+    return tuple(targets) if targets else None
+
+
+def acquire_tool_input(name: object, payload: object) -> AcquiredToolInput:
+    """Acquire supported tool identity and payload without guessing on ambiguity."""
+    if not isinstance(name, str) or not name.strip() or not isinstance(payload, dict):
+        return AcquiredToolInput(name if isinstance(name, str) and name.strip() else None, None, (), None, False)
+    if any(not part or part != part.strip() for part in name.split(".")):
+        return AcquiredToolInput(name, None, (), None, False)
+    operation = name.rsplit(".", 1)[-1].lower()
+    if not operation or operation not in _DIRECT_FILE_TOOLS | _SHELL_TOOLS | {"apply_patch"}:
+        return AcquiredToolInput(name, None, (), None, False)
+    if operation == "apply_patch":
+        keys = [key for key in ("command", "patch", "input") if key in payload]
+        if len(keys) != 1 or not isinstance(payload[keys[0]], str):
+            return AcquiredToolInput(name, operation, (), None, False)
+        targets = _patch_targets(payload[keys[0]])
+        return AcquiredToolInput(name, operation, targets or (), None, targets is not None)
+    if operation in _SHELL_TOOLS:
+        keys = ("cmd", "command") if operation == "exec_command" else ("command",)
+        present = [key for key in keys if key in payload]
+        if len(present) != 1 or not isinstance(payload[present[0]], str) or not payload[present[0]].strip():
+            return AcquiredToolInput(name, operation, (), None, False)
+        return AcquiredToolInput(name, operation, (), payload[present[0]], True)
+    targets = tuple(value.strip() for key in ("file_path", "notebook_path", "path")
+                    if isinstance((value := payload.get(key)), str) and value.strip())
+    return AcquiredToolInput(name, operation, targets, None, bool(targets))
+
+
 HISTORY_STATUS_FOUND = "found"
 HISTORY_STATUS_ABSENT = "absent"
 HISTORY_STATUS_UNREADABLE = "unreadable"

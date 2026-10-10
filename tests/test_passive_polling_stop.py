@@ -73,6 +73,27 @@ def shell_receipt(**changes: object) -> dict:
 
 
 class TestPassivePollingStop(unittest.TestCase):
+    def test_predicate_local_polarity_and_mentions(self) -> None:
+        transcript = [entry("user", "continue the admitted work")]
+        for message in (
+            "I am not waiting for review; I will continue the ready implementation.",
+            "I am not waiting for CI; I will continue the admitted local change.",
+            'The instruction says "waiting for review"; implementation proceeds.',
+            "If review is pending, inspect the result.",
+            "Are we waiting for review? I will inspect the local result.",
+        ):
+            with self.subTest(message=message):
+                self.assert_allowed(self.run_hook(message=message, transcript_entries=transcript))
+        for message in (
+            "I am waiting for review.",
+            "Implementation ready; review pending.",
+            "I am not waiting for review; I am waiting for job completion.",
+            "I will continue the local change; I am waiting for CI.",
+            "Waiting for your response; I am waiting for review.",
+        ):
+            with self.subTest(message=message):
+                self.assert_passive_blocked(self.run_hook(message=message, transcript_entries=transcript))
+
     def run_hook(
         self,
         message: str | None = "Жду ответа бота",

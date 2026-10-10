@@ -49,6 +49,7 @@ import re
 import sys
 
 from hook_common import (
+    acquire_tool_input,
     CURRENT_TURN_BYTE_CAP,
     STATUS_FOUND,
     extract_assistant_prose,
@@ -177,37 +178,6 @@ BUGFIX_INVOCATION_REGEX = re.compile(r"agents-bugfix", re.IGNORECASE)
 EXEMPT_PATH_SEGMENTS = ("/.reports/", "/.scratch/", "/.plans/", "/work-items/", "/docs/")
 
 
-_PATCH_FILE_HEADER = re.compile(r"^\*\*\* (?:Add|Update|Delete|Move) File: (.+)$")
-_PATCH_MOVE_HEADER = re.compile(r"^\*\*\* Move to: (.+)$")
-
-
-def _apply_patch_targets(tool_input: dict) -> list[str] | None:
-    """Extract every affected path from a framed patch; unknown shapes stay guarded."""
-    carriers = [tool_input.get(key) for key in ("command", "patch") if key in tool_input]
-    if len(carriers) != 1 or not isinstance(carriers[0], str):
-        return None
-    lines = carriers[0].splitlines()
-    if len(lines) < 3 or lines[0] != "*** Begin Patch" or lines[-1] != "*** End Patch":
-        return None
-
-    targets: list[str] = []
-    in_file = False
-    for line in lines[1:-1]:
-        file_header = _PATCH_FILE_HEADER.fullmatch(line)
-        move_header = _PATCH_MOVE_HEADER.fullmatch(line)
-        if file_header or move_header:
-            if move_header and not in_file:
-                return None
-            target = (file_header or move_header).group(1)
-            if not target or target != target.strip():
-                return None
-            targets.append(target)
-            in_file = True
-        elif not in_file or not (line.startswith(("@@", "+", "-", " ")) or line == "*** End of File"):
-            return None
-    return targets or None
-
-
 def _exempt_path(raw: str) -> bool:
     norm = "/" + raw.replace("\\", "/").strip("/")
     if any(part in (".", "..") for part in norm.split("/")):
@@ -222,11 +192,13 @@ def _exempt_write_target(envelope: dict) -> bool:
     tool_input = envelope.get("tool_input")
     if not isinstance(tool_input, dict):
         return False
-    if envelope.get("tool_name") == "apply_patch":
-        targets = _apply_patch_targets(tool_input)
-        return targets is not None and all(
-            target.lower().endswith(".md") and _exempt_path(target) for target in targets
+    acquired = acquire_tool_input(envelope.get("tool_name"), tool_input)
+    if acquired.operation == "apply_patch":
+        return acquired.resolved and all(
+            target.lower().endswith(".md") and _exempt_path(target) for target in acquired.targets
         )
+    if acquired.operation not in {"edit", "write", "notebookedit"}:
+        return False
     raw = tool_input.get("file_path") or tool_input.get("notebook_path") or tool_input.get("path") or ""
     if not isinstance(raw, str) or not raw:
         return False

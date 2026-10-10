@@ -28,6 +28,7 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
 from hook_common import (  # noqa: E402
+    acquire_tool_input,
     CURRENT_TURN_BYTE_CAP,
     STATUS_FOUND,
     emit_advisory,
@@ -53,7 +54,6 @@ _RECORD_GRAMMAR = (
 )
 _EXEMPT_SEGMENTS = {".scratch", ".reports", ".plans", "work-items"}
 _STALE_SEGMENTS = {"archive": "archived", "deprecated": "deprecated", "superseded": "superseded", "frozen": "frozen"}
-_SHELL_TOOLS = {"bash", "shell_command", "exec_command"}
 _MUTATION_TOOLS = {"edit", "write", "notebookedit", "apply_patch"}
 _SEPARATORS = set(";|&()")
 _SHELL_KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "!"}
@@ -77,34 +77,6 @@ def _nearest_git_root(start: Path) -> Path | None:
             current = current.parent
     except Exception:
         return None
-
-
-def _target_strings(tool_input: dict, *, tool_name: str = "") -> list[str]:
-    targets: list[str] = []
-    for key in ("file_path", "notebook_path", "path"):
-        value = tool_input.get(key)
-        if isinstance(value, str) and value.strip():
-            targets.append(value.strip())
-    patch = tool_input.get("patch") or tool_input.get("input")
-    if not isinstance(patch, str) and tool_name == "apply_patch":
-        command = tool_input.get("command")
-        if isinstance(command, str):
-            lines = command.splitlines()
-            if (
-                len(lines) >= 2
-                and lines[0] == "*** Begin Patch"
-                and lines[-1] == "*** End Patch"
-            ):
-                patch = command
-    if isinstance(patch, str):
-        targets.extend(
-            match.group(1).strip()
-            for match in re.finditer(
-                r"(?m)^\*\*\* (?:(?:Add|Update|Delete) File|Move to):\s*(.+)$",
-                patch,
-            )
-        )
-    return targets
 
 
 def _as_path(value: str, cwd: Path) -> Path:
@@ -306,8 +278,9 @@ def main() -> int:
             return 0
         cwd_value = envelope.get("cwd")
         cwd = Path(cwd_value).resolve(strict=False) if isinstance(cwd_value, str) and cwd_value else Path.cwd().resolve()
-        tool_name = str(envelope.get("tool_name", "")).lower()
-        raw_targets = _target_strings(tool_input, tool_name=tool_name)
+        acquired = acquire_tool_input(envelope.get("tool_name"), tool_input)
+        tool_name = acquired.operation
+        raw_targets = acquired.targets if acquired.resolved else ()
         target_paths = [_as_path(value, cwd) for value in raw_targets]
         root = _nearest_git_root(target_paths[0] if target_paths else cwd) or _nearest_git_root(cwd)
         if root is None:
@@ -319,10 +292,9 @@ def main() -> int:
             repository_targets = [path for path in target_paths if _inside(path, root)]
             action_targets = [path for path in repository_targets if not _is_exempt(path, root)]
             risky = bool(action_targets)
-        elif tool_name in _SHELL_TOOLS:
-            command = tool_input.get("command")
-            if isinstance(command, str) and command:
-                risky, shell_target = _risky_shell_target(command, cwd, root)
+        elif acquired.command is not None:
+            if acquired.resolved:
+                risky, shell_target = _risky_shell_target(acquired.command, cwd, root)
                 action_targets = [shell_target]
         if not risky:
             return 0

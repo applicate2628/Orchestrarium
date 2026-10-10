@@ -21,8 +21,6 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agents_mode_runtime import resolve_scalar
-from hook_common import emit_session_start_context
 
 FORCE_CONTEXT = (
     '[Delegation posture - re-shown at session start and after every compaction]\nEffective delegationMode: FORCE. STANDING INSTRUCTION, not advisory: at the FIRST decision point of any non-trivial task (multi-step implementation, design, research, review, bug-fix), STOP - hold the $lead orchestration role in THIS conversation, classify the task, pick the team template, and route it via the Agent tool to the matching specialist subagents ($lead is the role you hold, not a subagent you spawn). Doing substantial work inline when a matching specialist and a viable tool path exist violates the active posture. When you launch any external provider (consultant / Codex / Claude) as $lead, take the launch flags from contracts/external-dispatch.md - file-based prompt, explicit model+effort, run-completion oracle, stall policy - never improvise them from memory. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION.'
@@ -34,14 +32,17 @@ AUTO_CONTEXT = (
 
 def _get_delegation_mode() -> str:
     """Compatibility wrapper for the SessionStart reminder contract."""
+    from agents_mode_runtime import resolve_scalar
     return resolve_scalar("delegationMode")
 
 
 def main() -> int:
     try:
+        from agents_mode_runtime import resolve_scalar
+        from hook_common import emit_session_start_context
         mode = _get_delegation_mode()
     except Exception:
-        mode = "unresolved"
+        return 0
     if mode == "force":
         emit_session_start_context(FORCE_CONTEXT)
     elif mode == "auto":

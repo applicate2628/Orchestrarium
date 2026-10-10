@@ -64,6 +64,28 @@ def _load_hook_common():
 hook_common = _load_hook_common()
 
 
+def test_tool_input_acquisition_keeps_identity_and_requires_one_strict_carrier() -> None:
+    patch = "*** Begin Patch\n*** Update File: docs/guide.md\n*** Move to: docs/new.md\n@@\n-old\n+new\n*** End Patch"
+    for name in ("apply_patch", "functions.apply_patch", "TOOLS.Apply_Patch"):
+        for key in ("command", "patch", "input"):
+            acquired = hook_common.acquire_tool_input(name, {key: patch})
+            assert acquired.raw_name == name
+            assert acquired.operation == "apply_patch"
+            assert acquired.resolved
+            assert acquired.targets == ("docs/guide.md", "docs/new.md")
+    for payload in ({"patch": patch, "input": patch}, {"patch": "unframed"}, {"patch": ""}):
+        assert not hook_common.acquire_tool_input("functions.apply_patch", payload).resolved
+    assert not hook_common.acquire_tool_input("mcp__other__apply_patch", {"patch": patch}).resolved
+    assert not hook_common.acquire_tool_input("tools..apply_patch", {"patch": patch}).resolved
+
+
+def test_shell_carrier_acquisition_has_no_priority_fallback() -> None:
+    assert hook_common.acquire_tool_input("functions.exec_command", {"cmd": "pytest -q"}).command == "pytest -q"
+    assert hook_common.acquire_tool_input("PowerShell", {"command": "pytest -q"}).command == "pytest -q"
+    for payload in ({"cmd": "", "command": "pytest -q"}, {"cmd": "pytest -q", "command": "pytest -q"}):
+        assert not hook_common.acquire_tool_input("exec_command", payload).resolved
+
+
 def test_dormant_delivery_activity_pipeline_is_retired() -> None:
     source = (CANON_DIR / "hook_common.py").read_text(encoding="utf-8")
     for retired in (

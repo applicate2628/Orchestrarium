@@ -11,7 +11,7 @@ Decision algorithm (fail-open on malformed envelopes and unreadable state):
   1. Read the Stop JSON envelope from stdin.
   2. If stop_hook_active is true -> exit 0 to avoid recursive Stop loops.
   3. Read last_assistant_message directly from the envelope.
-  4. Detect passive polling with strong and weak phrase tiers.
+  4. Acquire affirmative passive assertions with local predicate polarity.
   5. Within that passive branch, preserve the existing override, user-handoff,
      current-turn probe, and passive denial behavior.
   6. For non-passive messages, exit 0 silently.
@@ -51,32 +51,22 @@ def resolve_runtime_config(environ: Mapping[str, str]) -> StopRuntimeConfig:
 
 OVERRIDE_MARKER_REGEX = re.compile(r"\[acknowledge-passive-stop\]", re.IGNORECASE)
 
-USER_HANDOFF_REGEX = re.compile(
+PASSIVE_ASSERTION_REGEX = re.compile(
     r"(?ix)"
-    r"waiting\s+for\s+(your\s+)?(response|input|approval|confirmation|feedback|answer|decision)|"
-    r"waiting\s+for\s+your\s+(reply|review)|"
-    r"жду\s+(твоего\s+|вашего\s+)?(подтверждени|ответа\s+от\s+тебя|решени|реакц|инструкци|указани|команд|отмашк)|"
-    r"дай\s+знать|"
-    r"let\s+me\s+know\s+(if|when|whether)|"
-    r"когда\s+будешь\s+готов|"
-    r"i'?ll\s+continue\s+when\s+you"
+    r"\b(?:am|is|are|will|shall|be|i'm|we're)?\s*waiting\s+for\s+"
+    r"(?:bot|review|ci|build|job|notification|reply|deploy|pipeline)\b|"
+    r"\b(?:will|shall)\s+wait\b|"
+    r"\bexpecting\s+(?:response|reply|notification)\b|"
+    r"\b(?:review|ci)\s+(?:is\s+)?pending\b|"
+    r"\bshould\s+(?:respond|arrive|come|reply)\s+in\s+\d+|"
+    r"жду\s+(?:ответа\s+бота|уведомлен\w*)|"
+    r"буду\s+ждать\b|"
+    r"бот\s+ответит\b|должен\s+ответить\s+в"
 )
-
-STRONG_POLLING_REGEX = re.compile(
-    r"(?ix)"
-    r"жду\s+ответа\s+бота|"
-    r"жду\s+уведомлен|"
-    r"бот\s+ответит|"
-    r"waiting\s+for\s+(bot|review|CI|build|job|notification|reply|deploy|pipeline)|"
-    r"review.*pending|"
-    r"CI.*pending|"
-    r"expecting\s+(response|reply|notification)|"
-    r"должен\s+ответить\s+в|"
-    r"3-5\s*мин|"
-    r"should\s+(respond|arrive|come|reply)\s+in\s+\d+"
-)
-
-WEAK_POLLING_REGEX = re.compile(r"(?ix)waiting\s+for|will\s+wait|буду\s+ждать|жду\b")
+_CLAUSE_BREAK = re.compile(r"[;.!?\n]+|\b(?:but|and|however)\b|\b(?:но|и|однако)\b", re.IGNORECASE)
+_QUOTE_OR_CODE = re.compile(r"```.*?```|`[^`]*`|\"[^\"]*\"|“[^”]*”|(?<!\w)'[^'\n]+'", re.DOTALL)
+_NEGATION = re.compile(r"(?i)\b(?:not|never|no|don't|doesn't|won't|cannot|can't|isn't|aren't|wasn't|weren't|не|нет)\b")
+_UNRESOLVED_CLAUSE = re.compile(r"(?i)^\s*(?:if|when|unless|если|когда)\b|\b(?:said|says|reported|quoted|написал|сказал)\b")
 
 ASYNC_NOUN_REGEX = re.compile(
     r"(?ix)\b(bot|review|notification|task|job|pipeline|reply|webhook|event)\b|"
@@ -136,9 +126,6 @@ def main(config: StopRuntimeConfig) -> int:
         if _detect_passive_polling(last_message):
             if OVERRIDE_MARKER_REGEX.search(last_message):
                 return 0
-            if USER_HANDOFF_REGEX.search(last_message):
-                return 0
-
             transcript_path = envelope.get("transcript_path") or ""
             if not transcript_path:
                 return 0
@@ -170,11 +157,27 @@ def _is_truthy(value: object) -> bool:
 
 
 def _detect_passive_polling(text: str) -> bool:
-    if STRONG_POLLING_REGEX.search(text):
-        return True
-    if not WEAK_POLLING_REGEX.search(text):
-        return False
-    return bool(ASYNC_NOUN_REGEX.search(text) or TIME_ESTIMATE_REGEX.search(text))
+    # Remove mentions before splitting clauses; only the speaker's assertion
+    # can enter the existing current-turn probe gate.
+    visible = _QUOTE_OR_CODE.sub(lambda match: " " * len(match.group()), text)
+    # A question's predicate is mentioned, not asserted by the speaker.
+    visible = re.sub(r"[^;.!?\n]*\?", " ", visible)
+    for clause in _CLAUSE_BREAK.split(visible):
+        if not clause.strip() or _UNRESOLVED_CLAUSE.search(clause):
+            continue
+        for match in PASSIVE_ASSERTION_REGEX.finditer(clause):
+            prefix = clause[:match.start()]
+            # Negation belongs to this predicate, not an adjacent clause.
+            near = " ".join(prefix.split()[-4:])
+            negatives = list(_NEGATION.finditer(near))
+            if len(negatives) > 1 or negatives:
+                continue
+            candidate = match.group()
+            if re.search(r"(?i)\b(?:will|shall)\s+wait\b|буду\s+ждать", candidate):
+                if not (ASYNC_NOUN_REGEX.search(clause[match.start():]) or TIME_ESTIMATE_REGEX.search(clause[match.start():])):
+                    continue
+            return True
+    return False
 
 
 def _has_relevant_probe(entries: list[dict]) -> bool | None:

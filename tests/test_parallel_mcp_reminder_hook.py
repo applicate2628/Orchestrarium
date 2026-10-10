@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -165,10 +166,32 @@ def test_leaf_is_silent_even_when_both_modes_are_force(tmp_path: Path) -> None:
     assert result.stderr == ""
 
 
+def test_missing_dependency_stops_before_mode_or_classifier(tmp_path: Path) -> None:
+    hooks = tmp_path / "hooks"
+    scripts = tmp_path / "scripts"
+    hooks.mkdir()
+    scripts.mkdir()
+    isolated = hooks / HOOK.name
+    shutil.copy2(HOOK, isolated)
+    shutil.copy2(HOOK.parent.parent / "scripts" / "agents_mode_runtime.py", scripts / "agents_mode_runtime.py")
+    # No hook_common or orientation classifier: dependency acquisition must end
+    # before policy resolution or runpy can inspect another source tree.
+    env = os.environ.copy()
+    env["PYTHONPATH"] = ""
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["USERPROFILE"] = str(tmp_path)
+    env["HOME"] = str(tmp_path)
+    result = subprocess.run([sys.executable, "-B", str(isolated)], cwd=tmp_path, env=env,
+                            input=json.dumps(_envelope(tool_name="functions.exec_command",
+                                                       tool_input={"cmd": "python scripts/run.py"})),
+                            capture_output=True, text=True, encoding="utf-8")
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+
+
 @pytest.mark.parametrize(
     "tool_name,tool_input",
     (
-        ("apply_patch", {"file_path": "src/app.py"}),
+        ("apply_patch", {"patch": "*** Begin Patch\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"}),
         ("exec_command", {"command": "python scripts/run.py"}),
         ("Bash", {"command": "pytest tests/test_parallel_mcp_reminder_hook.py"}),
     ),

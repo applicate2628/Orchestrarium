@@ -138,6 +138,24 @@ def run_hook(
 
 
 class RepositoryOrientationHookTests(unittest.TestCase):
+    def test_namespaced_and_shell_carrier_variants_share_action_gate(self) -> None:
+        missing = [claude_user("run the project check")]
+        scoped = [claude_user("run the project check"), claude_assistant(orientation(scope="."))]
+        patch = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"
+        for name, payload in (
+            ("functions.Edit", {"file_path": "src/app.py"}),
+            ("functions.apply_patch", {"input": patch}),
+            ("tools.PowerShell", {"command": "python scripts/run.py"}),
+            ("functions.exec_command", {"cmd": "python scripts/run.py"}),
+            ("exec_command", {"command": "python scripts/run.py"}),
+        ):
+            with self.subTest(name=name):
+                self.assert_warns(missing, tool_name=name, tool_input=payload)
+                self.assert_silent(scoped, tool_name=name, tool_input=payload)
+        for payload in ({"cmd": "", "command": "python scripts/run.py"},
+                        {"cmd": "python scripts/run.py", "command": "python scripts/run.py"}):
+            self.assert_silent(missing, tool_name="functions.exec_command", tool_input=payload)
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.repo = Path(self.temp.name)
