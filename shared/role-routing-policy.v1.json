@@ -53,6 +53,12 @@
       "codexModel": "gpt-6.1-sol",
       "useCriteria": "Demanding work with caller-justified additional reasoning."
     },
+    "sol-5.6-xhigh": {
+      "modelTier": "frontier",
+      "effort": "xhigh",
+      "codexModel": "gpt-5.6-sol",
+      "useCriteria": "Explicit read-only architecture or security review at the historical frontier/xhigh floor; caller justifies task fit and preserves current profession, scope and gates; actual correlated receiving is required for final commission credit."
+    },
     "apex-max": {
       "modelTier": "apex",
       "effort": "max",
@@ -128,19 +134,19 @@
       "requiredModelTier": "balanced",
       "requiredEffort": "high",
       "mutationClass": "read-only",
-      "admissibleProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "admissibleProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "sol-5.6-xhigh"]
     },
     "critical-design": {
       "requiredModelTier": "frontier",
       "requiredEffort": "xhigh",
       "mutationClass": "read-only",
-      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
+      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max", "sol-5.6-xhigh"]
     },
     "critical-security": {
       "requiredModelTier": "frontier",
       "requiredEffort": "xhigh",
       "mutationClass": "read-only",
-      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
+      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max", "sol-5.6-xhigh"]
     },
     "recovery": {
       "requiredModelTier": "frontier",
@@ -184,7 +190,7 @@
     },
     "architecture-reviewer": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max", "sol-5.6-xhigh"]
     },
     "algorithm-scientist": {
       "defaultProfile": "frontier-xhigh",
@@ -200,7 +206,7 @@
     },
     "security-reviewer": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max", "sol-5.6-xhigh"]
     },
     "backend-engineer": {
       "defaultProfile": "frontier-high",

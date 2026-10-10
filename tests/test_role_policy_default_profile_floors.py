@@ -719,3 +719,108 @@ def test_invalid_task_shape_is_typed_denial_for_native_and_skill_only_roles() ->
         assert decision["status"] == "denied"
         assert decision["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
         assert decision["fallback"] == "none"
+
+
+@pytest.mark.parametrize("role,task", (
+    ("architecture-reviewer", "review"),
+    ("architecture-reviewer", "critical-design"),
+    ("security-reviewer", "review"),
+    ("security-reviewer", "critical-security"),
+))
+def test_historical_review_profile_resolves_only_exact_admitted_intersections(
+    role: str, task: str,
+) -> None:
+    host = {
+        **_unknown_astra_host(),
+        "reportedModels": ["gpt-5.6-sol", "gpt-6.1-sol"],
+        "reportedEfforts": ["xhigh"],
+        "reportedAgentTypes": [role],
+    }
+    description = RESOLVER.describe_ordinary_native_role_options(
+        role, task, host, repo_root=ROOT,
+    )
+    assert description["status"] == "available"
+    assert description["defaultProfile"] == "frontier-xhigh"
+    assert description["defaultModel"] == "gpt-6.1-sol"
+    assert description["defaultEffort"] == "xhigh"
+    option = next(option for option in description["options"]
+                  if option["profile"] == "sol-5.6-xhigh")
+    assert (option["modelTier"], option["model"], option["effort"],
+            option["hostCapability"]) == (
+        "frontier", "gpt-5.6-sol", "xhigh", "reported",
+    )
+    scope = {"authority": "parent-dispatcher-only", "changeSurface": []}
+    default = RESOLVER.resolve_ordinary_native_dispatch(
+        description, caller_rationale="Preserve the existing reviewer default.",
+        approved_execution_scope=scope,
+    )
+    explicit = RESOLVER.resolve_ordinary_native_dispatch(
+        description, requested_model="gpt-5.6-sol", requested_effort="xhigh",
+        caller_rationale="Explicit read-only review at the admitted historical floor.",
+        approved_execution_scope=scope,
+    )
+    assert default["invocation"] == {"mode": "named-role-default", "agentType": role}
+    assert default["resolvedModel"] == "gpt-6.1-sol"
+    assert explicit["status"] == "resolved"
+    assert explicit["resolvedProfile"] == "sol-5.6-xhigh"
+    assert explicit["invocation"]["mode"] == "generic-explicit-profile"
+    assert explicit["invocation"]["model"] == "gpt-5.6-sol"
+    assert explicit["invocation"]["reasoningEffort"] == "xhigh"
+    assert explicit["invocation"]["forkTurns"] == "none"
+    assert "agentType" not in explicit["invocation"]
+    assert explicit["profession"] == default["profession"]
+    assert explicit["failurePolicy"] == default["failurePolicy"]
+    assert explicit["fallback"] == "none"
+
+
+def test_historical_review_profile_does_not_expand_roles_tasks_or_efforts() -> None:
+    scope = {"authority": "parent-dispatcher-only", "changeSurface": []}
+    cases = (
+        ("qa-engineer", "review", "xhigh"),
+        ("architect", "critical-design", "xhigh"),
+        ("security-engineer", "critical-security", "xhigh"),
+        ("architecture-reviewer", "engineering", "xhigh"),
+        ("architecture-reviewer", "review", "high"),
+        ("architecture-reviewer", "review", "max"),
+    )
+    for role, task, effort in cases:
+        description = RESOLVER.describe_ordinary_native_role_options(
+            role, task, _unknown_astra_host(), repo_root=ROOT,
+        )
+        decision = RESOLVER.resolve_ordinary_native_dispatch(
+            description, requested_model="gpt-5.6-sol", requested_effort=effort,
+            caller_rationale="Probe outside the exact admitted intersection.",
+            approved_execution_scope=scope, user_approved_max=True,
+        )
+        assert decision["status"] == "denied", (role, task, effort)
+        assert decision["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
+        assert decision["fallback"] == "none"
+
+
+def test_historical_review_profile_keeps_policy_manifest_binding(
+    tmp_path: Path,
+) -> None:
+    policy = tmp_path / "shared/role-routing-policy.v1.json"
+    policy.parent.mkdir()
+    policy.write_bytes((ROOT / "shared/role-routing-policy.v1.json").read_bytes())
+    agents = tmp_path / "src.codex/agents"
+    agents.mkdir(parents=True)
+    for name in ("architecture-reviewer.toml", "orchestrarium-role-manifest.json"):
+        (agents / name).write_bytes((ROOT / "src.codex/agents" / name).read_bytes())
+    host = {**_unknown_astra_host(),
+            "reportedModels": ["gpt-5.6-sol"], "reportedEfforts": ["xhigh"]}
+    coherent = RESOLVER.describe_ordinary_native_role_options(
+        "architecture-reviewer", "review", host, repo_root=tmp_path,
+    )
+    assert coherent["status"] == "available"
+    assert [option["profile"] for option in coherent["options"]] == ["sol-5.6-xhigh"]
+    manifest_path = agents / "orchestrarium-role-manifest.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    manifest["policySha256"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    stale = RESOLVER.describe_ordinary_native_role_options(
+        "architecture-reviewer", "review", host, repo_root=tmp_path,
+    )
+    assert stale["status"] == "denied"
+    assert stale["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
+    assert stale["fallback"] == "none"
