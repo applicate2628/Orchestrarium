@@ -141,7 +141,8 @@ class KimiWindowsProfileV1:
 
 
 _WINDOWS_ARGV_PROFILES = _WINDOWS_ARGV_PROFILES | frozenset(
-    {KimiWindowsProfileV1.profile_id, KimiWindowsProfileV1.probe_profile_id}
+    {KimiWindowsProfileV1.profile_id, KimiWindowsProfileV1.probe_profile_id,
+     "native-parser-contract-v1"}
 )
 
 
@@ -216,7 +217,63 @@ class SettlePolicyV1:
 
 _WINDOWS_ARGV_ADMISSION_SEAL = object()
 _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL = object()
+_WINDOWS_PARSER_CONTRACT_SEAL = object()
 _WINDOWS_INTERNAL_PROBE_ADMISSION_SEAL = object()
+
+
+@dataclass(frozen=True)
+class WindowsParserContractV1:
+    """A trusted composition owner's declared parser premise, not child observation."""
+
+    schema_version: int
+    family: str
+    domain: str
+    codec: str
+    basis: str
+    origin: str
+    _seal: object = field(repr=False, compare=False)
+
+
+def accept_windows_parser_contract(
+    *, family: str, domain: str, codec: str, basis: str, origin: str
+) -> WindowsParserContractV1:
+    """Called by trusted installed integration/operator composition, never request decoding."""
+    contract = WindowsParserContractV1(
+        1, family, domain, codec, basis, origin, _WINDOWS_PARSER_CONTRACT_SEAL
+    )
+    _validate_windows_parser_contract(contract)
+    return contract
+
+
+def _validate_windows_parser_contract(contract: object) -> None:
+    if contract is None:
+        raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
+    if (
+        type(contract) is not WindowsParserContractV1
+        or contract._seal is not _WINDOWS_PARSER_CONTRACT_SEAL
+        or contract.schema_version != 1
+        or (contract.family, contract.domain, contract.codec)
+        != ("msvcrt-v1", "wide-utf16-v1", "msvcrt-v1")
+        or not isinstance(contract.origin, str)
+        or contract.origin not in {"installed-integration", "accepted-operator"}
+        or not isinstance(contract.basis, str)
+        or not contract.basis.strip()
+    ):
+        raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
+    try:
+        if len(contract.basis.encode("utf-8")) > 512:
+            raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
+    except UnicodeError as exc:
+        raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation") from exc
+
+
+def _parser_contract_sha256(contract: WindowsParserContractV1) -> str:
+    encoded = json.dumps(
+        (contract.schema_version, contract.family, contract.domain,
+         contract.codec, contract.basis, contract.origin),
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -230,16 +287,17 @@ class WindowsArgvAdmissionV1:
     actual_argv_sha256: str
     actual_argv_shape_sha256: str
     probe_kind: str
-    probe_requested_argv_sha256: str
-    probe_observed_argv_sha256: str
+    probe_requested_argv_sha256: str | None
+    probe_observed_argv_sha256: str | None
     expires_at_monotonic: float
     status: str
     _seal: object = field(repr=False, compare=False)
-    _child_evidence_seal: object = field(repr=False, compare=False)
+    _child_evidence_seal: object | None = field(repr=False, compare=False)
     prompt_file_canonical: str | None = None
     prompt_file_identity: str | None = None
     prompt_file_sha256: str | None = None
     executable_binding: "ExecutableBindingV1 | None" = None
+    parser_contract_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -541,6 +599,7 @@ class ProcessRequestV1:
     request_id: str | None = None
     policy_id: str | None = None
     expected_executable_binding: ExecutableBindingV1 | None = None
+    windows_parser_contract: WindowsParserContractV1 | None = None
 
 
 @dataclass(frozen=True)
@@ -697,7 +756,7 @@ class _LifecycleResourceV1:
 class RunLifecycleV1:
     """Sole per-run cancellation, worker, resource, and finalization owner."""
 
-    def __init__(self, run_id: RunTokenV1) -> None:
+    def __init__(self, run_id: RunTokenV1, *, native_preparation: bool = False) -> None:
         self.token = run_id
         self._cancel = threading.Event()
         self._settled = threading.Event()
@@ -705,6 +764,8 @@ class RunLifecycleV1:
         self._resources: list[_LifecycleResourceV1] = []
         self._workers: set[str] = set()
         self._state = "not-started"
+        self._native_preparation_phase = "preparing" if native_preparation else None
+        self._native_preparation: PreparedNativeWindowsLaunchV1 | None = None
         self._observation = FinalizerObservationV1("not-started", False, ())
 
     @property
@@ -742,6 +803,48 @@ class RunLifecycleV1:
 
     def request_cancel(self) -> None:
         self._cancel.set()
+
+    @property
+    def native_preparation_used(self) -> bool:
+        with self._condition:
+            return self._native_preparation_phase != "idle" or self._settled.is_set()
+
+    def finish_native_preparation(self, prepared: "PreparedNativeWindowsLaunchV1") -> None:
+        with self._condition:
+            if self._native_preparation_phase != "preparing":
+                raise ProcessSupervisionError("PSV1-INTERNAL", "request-validation")
+            if self.cancelled:
+                raise ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
+            self._native_preparation = prepared
+            self._native_preparation_phase = "idle"
+            self._condition.notify_all()
+
+    def consume_native_preparation(self, prepared: "PreparedNativeWindowsLaunchV1") -> bool:
+        with self._condition:
+            if (self._native_preparation is not prepared
+                or self._native_preparation_phase != "idle" or self._state != "not-started"):
+                return False
+            if self.cancelled:
+                raise ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
+            self._native_preparation_phase = "running"
+            return True
+
+    def finalize_idle_preparation(
+        self, deadline: float, *, wait_preparing: bool = True
+    ) -> FinalizerObservationV1 | None:
+        with self._condition:
+            while self._native_preparation_phase == "preparing" and not self._settled.is_set():
+                if not wait_preparing:
+                    return None
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._condition.wait(remaining)
+            if self._native_preparation_phase == "idle":
+                self._native_preparation_phase = "closing"
+            elif self._native_preparation_phase != "closing":
+                return None
+        return self.finalize_once(deadline)
 
     def register_worker(self, name: str) -> None:
         with self._condition:
@@ -827,6 +930,9 @@ class RunLifecycleV1:
                     self._condition.wait(max(0.0, deadline - time.monotonic()))
                 return self._observation
             self._state = "running"
+            if self._native_preparation_phase is not None:
+                self._native_preparation_phase = "closing"
+                self._condition.notify_all()
         issues = list(self._observation.cleanup_issues)
         for resource in tuple(reversed(self._resources)):
             if resource.state == "CLOSED":
@@ -852,6 +958,8 @@ class RunLifecycleV1:
 
     def mark_settled(self) -> None:
         self._settled.set()
+        with self._condition:
+            self._condition.notify_all()
 
     def wait_settled(self, deadline: float) -> bool:
         return self._settled.wait(max(0.0, deadline - time.monotonic()))
@@ -1513,7 +1621,22 @@ class WindowsArgvAdmissionOwnerV1:
         launch_owner = executable_launch_owner
         prompt_binding: tuple[str, str, str] | None = None
         executable_binding: ExecutableBindingV1 | None = None
-        if _is_kimi_executable_profile(profile_id):
+        contract = request.windows_parser_contract
+        if profile_id == "native-parser-contract-v1":
+            _validate_windows_parser_contract(contract)
+            executable_binding = launch_owner.binding
+            if executable_binding is None or launch_owner._closed or (
+                request.expected_executable_binding is not None
+                and not _expected_executable_binding_matches(
+                    request.expected_executable_binding, executable_binding
+                )
+            ):
+                raise ProcessSupervisionError(
+                    "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
+                )
+            identity = launch_owner.identity_sha256
+            version = launch_owner.version_sha256
+        elif _is_kimi_executable_profile(profile_id):
             executable_binding = launch_owner.binding
             if executable_binding is None or (
                 request.expected_executable_binding is not None
@@ -1531,7 +1654,10 @@ class WindowsArgvAdmissionOwnerV1:
         else:
             identity = launch_owner.identity_sha256
             version = launch_owner.version_sha256
-        if profile_id == "python-hook-health-v1":
+        if profile_id == "native-parser-contract-v1":
+            probe_kind = "parser-contract-v1"
+            requested = observed = None
+        elif profile_id == "python-hook-health-v1":
             if (
                 executable.resolve() != Path(sys.executable).resolve()
                 or len(request.argv) < 2
@@ -1584,7 +1710,7 @@ class WindowsArgvAdmissionOwnerV1:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
             )
-        if not hmac.compare_digest(requested, observed):
+        if profile_id != "native-parser-contract-v1" and not hmac.compare_digest(requested, observed):
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
@@ -1604,9 +1730,10 @@ class WindowsArgvAdmissionOwnerV1:
             expires,
             "pass",
             _WINDOWS_ARGV_ADMISSION_SEAL,
-            _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL,
+            None if profile_id == "native-parser-contract-v1" else _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL,
             *(prompt_binding or (None, None, None)),
             executable_binding,
+            _parser_contract_sha256(contract) if profile_id == "native-parser-contract-v1" else None,
         )
 
     def consume(
@@ -1616,6 +1743,8 @@ class WindowsArgvAdmissionOwnerV1:
         admission: WindowsArgvAdmissionV1,
         launch_owner: "_ExecutableLaunchOwnerV1",
     ) -> None:
+        if type(admission) is not WindowsArgvAdmissionV1:
+            raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
         executable = Path(request.resolved_executable)
         if (
             launch_owner._closed
@@ -1625,14 +1754,21 @@ class WindowsArgvAdmissionOwnerV1:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
+        generic = admission.profile_id == "native-parser-contract-v1"
+        if generic:
+            _validate_windows_parser_contract(request.windows_parser_contract)
         executable_binding = (
-            launch_owner.binding if _is_kimi_executable_profile(admission.profile_id) else None
+            launch_owner.binding if generic or _is_kimi_executable_profile(admission.profile_id) else None
         )
         if executable_binding is not None:
-            identity = executable_binding.sha256
-            version = hashlib.sha256(
-                f"kimi-release:{executable_binding.size}:{identity}".encode("ascii")
-            ).hexdigest()
+            if generic:
+                identity = launch_owner.identity_sha256
+                version = launch_owner.version_sha256
+            else:
+                identity = executable_binding.sha256
+                version = hashlib.sha256(
+                    f"kimi-release:{executable_binding.size}:{identity}".encode("ascii")
+                ).hexdigest()
         else:
             identity = launch_owner.identity_sha256
             version = launch_owner.version_sha256
@@ -1640,7 +1776,10 @@ class WindowsArgvAdmissionOwnerV1:
         valid = (
             type(admission) is WindowsArgvAdmissionV1
             and admission._seal is _WINDOWS_ARGV_ADMISSION_SEAL
-            and admission._child_evidence_seal is _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL
+            and (
+                (generic and admission._child_evidence_seal is None)
+                or (not generic and admission._child_evidence_seal is _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL)
+            )
             and admission.schema_version == 1
             and admission.run_token_sha256 == lifecycle.token.sha256
             and admission.profile_id == request.windows_argv_profile_id
@@ -1659,8 +1798,22 @@ class WindowsArgvAdmissionOwnerV1:
             )
             and admission.actual_argv_sha256 == _json_argv_sha256(request.argv)
             and admission.actual_argv_shape_sha256 == _argv_shape_sha256(request.argv)
-            and admission.probe_requested_argv_sha256
-            == admission.probe_observed_argv_sha256
+            and (
+                (generic and admission.probe_kind == "parser-contract-v1"
+                 and admission.probe_requested_argv_sha256 is None
+                 and admission.probe_observed_argv_sha256 is None
+                 and request.windows_parser_contract is not None
+                 and admission.parser_contract_sha256
+                 == _parser_contract_sha256(request.windows_parser_contract))
+                or (not generic and request.windows_parser_contract is None
+                    and admission.parser_contract_sha256 is None
+                    and isinstance(admission.probe_requested_argv_sha256, str)
+                    and isinstance(admission.probe_observed_argv_sha256, str)
+                    and _LOWER_HEX_64.fullmatch(admission.probe_requested_argv_sha256)
+                    and _LOWER_HEX_64.fullmatch(admission.probe_observed_argv_sha256)
+                    and admission.probe_requested_argv_sha256
+                    == admission.probe_observed_argv_sha256)
+            )
             and admission.status == "pass"
             and (
                 admission.prompt_file_canonical,
@@ -1838,13 +1991,18 @@ def _validate_request_shape_before_executable_acquisition(
 ) -> None:
     if not isinstance(request, ProcessRequestV1) or request.schema_version != 1:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+    if request.windows_argv_profile_id == "native-parser-contract-v1" and type(request.argv) is not tuple:
+        raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     if not 1 <= len(request.argv) <= MAX_ARGV_COUNT:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     aggregate = 0
     for item in request.argv:
         if not isinstance(item, str) or "\0" in item:
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        encoded = item.encode("utf-8")
+        try:
+            encoded = item.encode("utf-8")
+        except UnicodeError as exc:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation") from exc
         if len(encoded) > MAX_ARG_BYTES:
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
         aggregate += len(encoded) + 1
@@ -1881,7 +2039,8 @@ def validate_process_request(
         raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation") from exc
     expected_binding = request.expected_executable_binding
     if expected_binding is not None and (
-        not _is_kimi_executable_profile(request.windows_argv_profile_id)
+        not (_is_kimi_executable_profile(request.windows_argv_profile_id)
+             or request.windows_argv_profile_id == "native-parser-contract-v1")
         or executable_launch_owner is None
         or not _expected_executable_binding_matches(
             expected_binding, executable_launch_owner.binding
@@ -1902,8 +2061,18 @@ def validate_process_request(
             raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
         if request.windows_argv_profile_id not in _WINDOWS_ARGV_PROFILES:
             raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
-        command = serialize_msvcrt_argv(request.argv)
-        if len(command.encode("utf-16-le")) // 2 > MAX_WINDOWS_COMMAND_LINE_UNITS:
+        if request.windows_argv_profile_id == "native-parser-contract-v1":
+            _validate_windows_parser_contract(request.windows_parser_contract)
+            if executable_launch_owner is None or executable_launch_owner.binding is None:
+                raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation")
+        elif request.windows_parser_contract is not None:
+            raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
+        try:
+            command = serialize_msvcrt_argv(request.argv)
+            command_units = len(command.encode("utf-16-le")) // 2
+        except UnicodeError as exc:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation") from exc
+        if command_units > MAX_WINDOWS_COMMAND_LINE_UNITS:
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     elif basename in _POSIX_SHELL_HOSTS:
         raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
@@ -2282,6 +2451,33 @@ class _ExecutableLaunchOwnerV1:
             )
             if errors:
                 raise OSError("executable launch owner cleanup failed") from errors[0]
+
+
+@dataclass(frozen=True)
+class PreparedNativeWindowsLaunchV1:
+    """One held executable/lifecycle from capability preflight through final creation."""
+
+    runner: "ProcessRunnerV1"
+    lifecycle: RunLifecycleV1
+    executable_owner: _ExecutableLaunchOwnerV1
+    argv: tuple[str, ...]
+    deadline_monotonic: float
+    parser_contract: WindowsParserContractV1
+    expected_executable_binding: ExecutableBindingV1 | None
+
+    @property
+    def used(self) -> bool:
+        return self.lifecycle.native_preparation_used
+
+    def close(self) -> None:
+        observation = self.lifecycle.finalize_idle_preparation(
+            time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
+        )
+        if observation is None:
+            return
+        if not observation.resources_closed:
+            raise ProcessSupervisionError("PSV1-RESOURCE-CLOSE", "resource-cleanup")
+        self.runner._release_lifecycle(self.lifecycle)
 
 
 def _acquire_executable_launch_owner(
@@ -3412,18 +3608,65 @@ class ProcessRunnerV1:
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
-    def _begin_lifecycle(self) -> RunLifecycleV1:
+    def _begin_lifecycle(self, *, native_preparation: bool = False) -> RunLifecycleV1:
         with self._lock:
             if self._closed or self._next_counter >= MAX_RUN_COUNTER:
                 self._closed = True
                 raise ProcessSupervisionError("PSV1-RUNNER-CLOSED", "request-validation")
             self._next_counter += 1
             run_id = RunTokenV1(self._runner_nonce, self._next_counter)
-            lifecycle = RunLifecycleV1(run_id)
+            lifecycle = RunLifecycleV1(run_id, native_preparation=native_preparation)
             self._active[run_id] = lifecycle
             return lifecycle
 
+    def prepare_native_windows_launch(
+        self,
+        *,
+        argv: tuple[str, ...],
+        deadline_monotonic: float,
+        parser_contract: WindowsParserContractV1,
+        expected_executable_binding: ExecutableBindingV1 | None = None,
+    ) -> PreparedNativeWindowsLaunchV1:
+        """Validate capability before prompt access, retaining the same opened image."""
+        _validate_windows_parser_contract(parser_contract)
+        if os.name != "nt" or type(argv) is not tuple or not argv:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+        lifecycle = self._begin_lifecycle(native_preparation=True)
+        try:
+            request = ProcessRequestV1(
+                1, argv, Path(argv[0]), os.getcwd(), (), None,
+                deadline_monotonic,
+                CapturePolicyV1("native-parser-preflight-v1", 1, 0, 0, 1),
+                self.mint_memory_capture_sink(), SettlePolicyV1(5.0),
+                windows_argv_profile_id="native-parser-contract-v1",
+                expected_executable_binding=expected_executable_binding,
+                windows_parser_contract=parser_contract,
+            )
+            _validate_request_shape_before_executable_acquisition(request)
+            owner = _acquire_executable_launch_owner(
+                request.resolved_executable, lifecycle, windows_api=self._windows_api
+            )
+            validate_process_request(request, owner, argv_executable_prevalidated=True)
+            prepared = PreparedNativeWindowsLaunchV1(
+                self, lifecycle, owner, argv, deadline_monotonic,
+                parser_contract, expected_executable_binding,
+            )
+            lifecycle.finish_native_preparation(prepared)
+            return prepared
+        except BaseException:
+            observation = lifecycle.finalize_once(
+                time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
+            )
+            self._release_lifecycle(lifecycle)
+            if not observation.resources_closed:
+                raise ProcessSupervisionError(
+                    "PSV1-RESOURCE-CLOSE", "resource-cleanup"
+                )
+            raise
+
     def _release_lifecycle(self, lifecycle: RunLifecycleV1) -> None:
+        if lifecycle._native_preparation_phase is not None and not lifecycle.observation.resources_closed:
+            return
         lifecycle.mark_settled()
         with self._lock:
             self._active.pop(lifecycle.token, None)
@@ -3438,6 +3681,13 @@ class ProcessRunnerV1:
         settled: list[str] = []
         unsettled: list[str] = []
         for lifecycle in active:
+            observation = lifecycle.finalize_idle_preparation(deadline, wait_preparing=False)
+            if observation is not None and observation.resources_closed:
+                self._release_lifecycle(lifecycle)
+        for lifecycle in active:
+            observation = lifecycle.finalize_idle_preparation(deadline)
+            if observation is not None and observation.resources_closed:
+                self._release_lifecycle(lifecycle)
             if lifecycle.wait_settled(deadline):
                 settled.append(lifecycle.token.sha256)
                 continue
@@ -3459,9 +3709,21 @@ class ProcessRunnerV1:
         *,
         lifecycle: RunLifecycleV1 | None = None,
         dialogue: ProcessDialogueV1 | None = None,
+        prepared_native_launch: PreparedNativeWindowsLaunchV1 | None = None,
     ) -> ProcessResultV1:
         started = time.monotonic()
-        owned_lifecycle = lifecycle
+        if prepared_native_launch is not None:
+            if (type(prepared_native_launch) is not PreparedNativeWindowsLaunchV1
+                or prepared_native_launch.runner is not self
+                or prepared_native_launch.used):
+                return _request_failure(
+                    request,
+                    ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation"),
+                    started,
+                )
+        owned_lifecycle = (
+            prepared_native_launch.lifecycle if prepared_native_launch is not None else lifecycle
+        )
         if owned_lifecycle is None:
             try:
                 owned_lifecycle = self._begin_lifecycle()
@@ -3470,6 +3732,13 @@ class ProcessRunnerV1:
         validated_cwd: ValidatedCwdV1 | None = None
         executable_launch_owner: _ExecutableLaunchOwnerV1 | None = None
         try:
+            if prepared_native_launch is not None:
+                if not owned_lifecycle.consume_native_preparation(prepared_native_launch):
+                    return _request_failure(
+                        request,
+                        ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation"),
+                        started,
+                    )
             if not isinstance(request, ProcessRequestV1):
                 raise ProcessSupervisionError(
                     "PSV1-REQUEST-INVALID", "request-validation"
@@ -3515,11 +3784,25 @@ class ProcessRunnerV1:
                 raise ProcessSupervisionError(
                     "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
                 ) from exc
-            executable_launch_owner = _acquire_executable_launch_owner(
-                request.resolved_executable,
-                owned_lifecycle,
-                windows_api=self._windows_api,
-            )
+            if prepared_native_launch is not None:
+                if (
+                    request.argv != prepared_native_launch.argv
+                    or request.deadline_monotonic != prepared_native_launch.deadline_monotonic
+                    or request.windows_parser_contract != prepared_native_launch.parser_contract
+                    or request.expected_executable_binding
+                    != prepared_native_launch.expected_executable_binding
+                    or request.windows_argv_profile_id != "native-parser-contract-v1"
+                    or os.path.normcase(os.path.abspath(request.resolved_executable))
+                    != os.path.normcase(str(prepared_native_launch.executable_owner.path))
+                ):
+                    raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
+                executable_launch_owner = prepared_native_launch.executable_owner
+            else:
+                executable_launch_owner = _acquire_executable_launch_owner(
+                    request.resolved_executable,
+                    owned_lifecycle,
+                    windows_api=self._windows_api,
+                )
             validated_cwd = validate_process_request(
                 request,
                 executable_launch_owner,
@@ -3533,7 +3816,8 @@ class ProcessRunnerV1:
                 admission = None
         except _WindowsArgvProbeFailure as exc:
             observation = owned_lifecycle.finalize_once(
-                min(
+                time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
+                if prepared_native_launch is not None else min(
                     request.deadline_monotonic,
                     time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
                 )
@@ -3571,6 +3855,8 @@ class ProcessRunnerV1:
                     else None
                 ),
             )
+            if exc.failure_id == "PSV1-CANCELLED":
+                result = dataclasses.replace(result, cancelled=True)
             observation = owned_lifecycle.finalize_once(
                 time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
             )
@@ -3592,6 +3878,10 @@ class ProcessRunnerV1:
             return dataclasses.replace(
                 result, run_token_sha256=owned_lifecycle.token.sha256
             )
+        except BaseException:
+            owned_lifecycle.finalize_once(time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS)
+            self._release_lifecycle(owned_lifecycle)
+            raise
         duplicate_request_id = False
         with self._lock:
             if request.request_id is not None:
@@ -3606,12 +3896,15 @@ class ProcessRunnerV1:
                 started,
                 executable_identity_sha256=validated_cwd.executable_identity_sha256,
             )
-            owned_lifecycle.finalize_once(
+            observation = owned_lifecycle.finalize_once(
                 time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
             )
             self._release_lifecycle(owned_lifecycle)
             return dataclasses.replace(
-                result, run_token_sha256=owned_lifecycle.token.sha256
+                result, run_token_sha256=owned_lifecycle.token.sha256,
+                resources_closed=result.resources_closed and observation.resources_closed,
+                cleanup_uncertain=result.cleanup_uncertain or not observation.resources_closed,
+                cleanup_issues=tuple(dict.fromkeys((*result.cleanup_issues, *observation.cleanup_issues))),
             )
         try:
             owned_lifecycle.register_resource(
