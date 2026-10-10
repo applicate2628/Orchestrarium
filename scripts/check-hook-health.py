@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import queue
+import re
 import shlex
 import shutil
 import stat
@@ -17,6 +18,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Any, Iterable
 
 
@@ -758,15 +760,61 @@ def owned_canonical_identities(
     }
 
 
-def write_codex_inventory(
+def owned_definition_snapshots(
+    *, target: Path, platform: str, host_os: str, repo_root: Path,
+    stems: set[str] | None = None,
+) -> dict[str, tuple[tuple[int, int, str, str], ...]]:
+    """Observe complete owned definitions/positions, including literal legacy forms."""
+    data = _load(target)
+    expected = _manifest_stems(repo_root, platform) if stems is None else stems
+    snapshots: dict[str, list[tuple[int, int, str, str]]] = {}
+    for event, group_index, handler_index, group, handler, invocation in _owned_records(
+        data, expected, platform, host_os
+    ):
+        identity = canonical_identity(
+            event, list(invocation.argv), host_os,
+            matcher=group.get("matcher"), source_path=target,
+        )
+        # JSON preserves absent keys versus explicit null/empty values. Sibling
+        # bodies are excluded: their edits do not change this owned definition.
+        snapshot = (
+            group_index, handler_index,
+            json.dumps({key: value for key, value in group.items() if key != "hooks"}, sort_keys=True),
+            json.dumps(handler, sort_keys=True),
+        )
+        snapshots.setdefault(identity, []).append(snapshot)
+    return {identity: tuple(values) for identity, values in snapshots.items()}
+
+
+def touched_definition_identities(before: dict, after: dict) -> set[str]:
+    """Return only surviving identities with a newly observed definition/position."""
+    return {
+        identity for identity, snapshots in after.items()
+        if any(snapshot not in before.get(identity, ()) for snapshot in snapshots)
+    }
+
+
+@dataclass(frozen=True)
+class CodexInventoryPlan:
+    """Rendered inventory and its original, caller-owned publication binding.
+
+    The plan performs no write and conveys no creator or host-trust authority.
+    Its consumer must retain and recheck this acquired authority rather than
+    acquiring a new one after publication or adopting a later path occupant.
+    """
+
+    authority: _InventoryAuthority
+    content: bytes
+
+
+def plan_codex_inventory(
     *,
     target: Path,
     specs: Iterable[tuple[str, Path, str, str | None]],
     inventory_path: Path,
     host_os: str,
-) -> None:
-    """Atomically persist the generated Codex-only expected registration set."""
-    temporary: Path | None = None
+) -> CodexInventoryPlan:
+    """Validate and render the existing inventory without destination effects."""
     try:
         authority = _inventory_authority(target, inventory_path, for_write=True)
         spec_rows = list(specs)
@@ -815,15 +863,38 @@ def write_codex_inventory(
             "sourcePath": _source_identity(authority.target, host_os),
             "hooks": sorted(hooks, key=lambda item: item["stem"]),
         }
+        content = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        return CodexInventoryPlan(authority, content)
+    except _HookHealthFailure:
+        raise
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID", "inventory", str(exc)
+        ) from exc
+
+
+def write_codex_inventory(
+    *,
+    target: Path,
+    specs: Iterable[tuple[str, Path, str, str | None]],
+    inventory_path: Path,
+    host_os: str,
+) -> None:
+    """Atomically persist the generated Codex-only expected registration set."""
+    temporary: Path | None = None
+    try:
+        plan = plan_codex_inventory(
+            target=target, specs=specs, inventory_path=inventory_path, host_os=host_os
+        )
+        authority = plan.authority
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{authority.inventory.name}.",
             suffix=".tmp",
             dir=authority.inventory.parent,
         )
         temporary = Path(temporary_name)
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-            json.dump(payload, stream, indent=2, sort_keys=True)
-            stream.write("\n")
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(plan.content)
             stream.flush()
             os.fsync(stream.fileno())
         _recheck_inventory_authority(authority, for_write=True)
@@ -945,6 +1016,131 @@ def _command_argv(hook: dict[str, Any], platform: str, host_os: str) -> list[str
     )
 
 
+@dataclass(frozen=True)
+class HookInvocation:
+    kind: str
+    marker: str | None = None
+    argv: tuple[str, ...] = ()
+    target: str | None = None
+
+
+def _invoked_script(argv: list[str]) -> tuple[str | None, bool]:
+    """Locate a literal interpreter operand; never search non-target arguments."""
+    if not argv:
+        return None, False
+    executable = argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?", executable):
+        index = 1
+        while index < len(argv) and argv[index].startswith("-"):
+            option = argv[index]
+            if option == "--":
+                index += 1
+                break
+            if option in {"-c", "-m"}:
+                return None, False
+            if option in {"-W", "-X"}:
+                index += 2
+            elif option in {"-B", "-u", "-I", "-E", "-s", "-S", "-O", "-OO", "-q"} or option.startswith(("-W", "-X")):
+                index += 1
+            else:
+                return None, False
+        return (argv[index], True) if index < len(argv) else (None, False)
+    if executable in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
+        for index, option in enumerate(argv[1:], 1):
+            if option.lower() in {"-command", "-c", "-encodedcommand", "-enc"}:
+                return None, False
+            if option.lower() == "-file":
+                return (argv[index + 1], False) if index + 1 < len(argv) else (None, False)
+        return None, False
+    if executable in {"bash", "bash.exe", "sh", "sh.exe"}:
+        index = 1
+        while index < len(argv) and argv[index].startswith("-"):
+            option = argv[index]
+            if option == "--":
+                index += 1
+                break
+            if option.startswith("-") and "c" in option.lstrip("-"):
+                return None, False
+            if option in {"-l", "-e", "-u", "-x", "-n"}:
+                index += 1
+            else:
+                return None, False
+        return (argv[index], False) if index < len(argv) else (None, False)
+    if executable.endswith((".py", ".sh", ".ps1")):
+        return argv[0], False
+    return None, False
+
+
+def classify_hook_invocation(
+    hook: dict[str, Any], stems: set[str], platform: str, host_os: str,
+) -> HookInvocation:
+    """Pure ownership selection from the actual invocation's script operand."""
+    malformed = False
+    try:
+        argv = _command_argv(hook, "claude" if platform == "generic" else platform, host_os)
+    except ValueError:
+        malformed = True
+        command = hook.get("command")
+        if not isinstance(command, str) or not command:
+            return HookInvocation("foreign")
+        args = hook.get("args")
+        if platform == "codex":
+            try:
+                argv = _split_windows_command(command) if host_os == "windows" else shlex.split(command)
+            except ValueError:
+                return HookInvocation("foreign")
+        elif isinstance(args, str):
+            # A corrupted exec-form script operand remains an owned candidate.
+            argv = [command, args]
+        elif isinstance(args, list):
+            argv = [command]
+            for arg in args:
+                if not isinstance(arg, str):
+                    break
+                argv.append(arg)
+        else:
+            try:
+                argv = _split_windows_command(command) if host_os == "windows" else shlex.split(command)
+            except ValueError:
+                return HookInvocation("foreign")
+    target, direct_python = _invoked_script(argv)
+    if target is None:
+        return HookInvocation("foreign")
+    basename = target.replace("\\", "/").rsplit("/", 1)[-1]
+    matches = sorted(stem for stem in stems if stem in basename)
+    if not matches:
+        return HookInvocation("foreign")
+    if len(matches) > 1:
+        raise ValueError("ambiguous owned hook markers: " + ", ".join(matches))
+    literal_legacy_shell = malformed and not direct_python and "args" not in hook
+    kind = "malformed-owned" if malformed and not literal_legacy_shell else ("current-owned" if direct_python else "legacy-owned")
+    return HookInvocation(kind, matches[0], tuple(argv), target)
+
+
+def _owned_records(data: dict, stems: set[str], platform: str, host_os: str):
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        raise ValueError("'hooks' key is not an object")
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            raise ValueError(f"hooks.{event} is not an array")
+        for group_index, group in enumerate(entries):
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                continue
+            for handler_index, handler in enumerate(group["hooks"]):
+                if not isinstance(handler, dict):
+                    continue
+                invocation = classify_hook_invocation(handler, stems, platform, host_os)
+                if invocation.kind == "foreign":
+                    continue
+                if invocation.kind == "malformed-owned":
+                    raise ValueError("owned hook could not be parsed as this pack's exec shape: " + str(invocation.marker))
+                matcher = group.get("matcher")
+                if matcher is not None and not isinstance(matcher, str):
+                    raise ValueError(f"hooks.{event} matcher is not a string")
+                yield event, group_index, handler_index, group, handler, invocation
+
+
 def _iter_owned_hooks(
     data: dict[str, Any],
     stems: set[str] | None,
@@ -952,6 +1148,12 @@ def _iter_owned_hooks(
     host_os: str,
 ) -> Iterable[tuple[str, str, list[str], str | None]]:
     """Select owned stems, or every registered command with None (read-only)."""
+    if stems is not None:
+        for event, _group_index, _handler_index, group, _handler, invocation in _owned_records(data, stems, platform, host_os):
+            if invocation.kind != "current-owned":
+                raise ValueError("owned hook uses a legacy invocation: " + str(invocation.marker))
+            yield event, str(invocation.marker), list(invocation.argv), group.get("matcher")
+        return
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
         raise ValueError("'hooks' key is not an object")
@@ -976,52 +1178,7 @@ def _iter_owned_hooks(
                     if stems is None:
                         raise ValueError("registered command handler is not an object")
                     continue
-                # `_command_argv` enforces the exec shape this pack's own
-                # installer writes (Claude: `command` plus a string-array
-                # `args`). Third-party tools registering into the same
-                # settings.json need not use that shape -- a real one on this
-                # machine registers `{"command": "codegraph prompt-hook"}` with
-                # no `args` at all, which is valid for the runtime and simply
-                # not ours. Parsing used to run BEFORE the stem filter, so one
-                # foreign entry failed the whole health check and reported the
-                # operator's fully converted, working registration as broken.
-                # An entry `_command_argv` cannot parse is NOT proof it was
-                # never ours: a command-only entry with no `args` key -- the
-                # exact shape a foreign tool is allowed to use -- also fails
-                # to parse on the Claude platform even when its command
-                # string names one of THIS pack's own manifest stems (e.g. a
-                # mis-registered or hand-edited duplicate). Silently skipping
-                # that entry would let it fire this pack's own hook a second
-                # time without the duplicate check ever seeing it, because a
-                # skipped entry never becomes a counted row. So an unparseable
-                # entry is interrogated before it is skipped: the raw entry is
-                # serialized and searched for an owned manifest stem. Naming
-                # one is fatal (loud failure, naming the stem) precisely
-                # because it cannot be verified as safe; naming none means it
-                # cannot be ours and is skipped. This narrows what the checker
-                # polices to what the pack installs -- it does not weaken any
-                # check on an owned, parseable entry.
-                try:
-                    argv = _command_argv(command_hook, platform, host_os)
-                except ValueError:
-                    if stems is None:
-                        raise
-                    raw = json.dumps(command_hook)
-                    named_stems = sorted(stem for stem in stems if stem in raw)
-                    if named_stems:
-                        raise ValueError(
-                            "entry names owned hook stem(s) but could not be "
-                            "parsed as this pack's exec shape: "
-                            + ", ".join(named_stems)
-                        )
-                    continue
-                if stems is None:
-                    yield event, "", argv, matcher
-                    continue
-                joined = "\0".join(argv)
-                matches = sorted(stem for stem in stems if stem in joined)
-                if len(matches) == 1:
-                    yield event, matches[0], argv, matcher
+                yield event, "", _command_argv(command_hook, platform, host_os), matcher
 
 
 def _resolve_executable(value: str, host_os: str) -> Path:
@@ -1041,12 +1198,8 @@ def _resolve_executable(value: str, host_os: str) -> Path:
 
 
 def _target_path(argv: list[str]) -> Path | None:
-    for raw in reversed(argv[1:]):
-        value = raw.strip("'\"")
-        candidate = Path(value)
-        if candidate.suffix.lower() in {".py", ".ps1", ".sh"}:
-            return candidate
-    return None
+    target, _direct_python = _invoked_script(argv)
+    return Path(target) if target is not None else None
 
 
 def _synthetic_envelope(event: str, stem: str, scratch_root: Path) -> str:
