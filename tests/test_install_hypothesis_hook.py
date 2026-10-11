@@ -78,6 +78,65 @@ def load_json(path: Path) -> dict:
 
 class TestInstallHypothesisHook(unittest.TestCase):
 
+    def test_owned_handler_update_preserves_mixed_groups_and_codex_slots(self) -> None:
+        for matcher in ("Bash", "ChangedTool"):
+            with self.subTest(matcher=matcher):
+                owned = {"type": "command", "command": "python /hooks/check-bugfix-discipline.py",
+                         "statusMessage": "Old status", "timeout": 9}
+                foreign = {"command": "foreign-tool --label check-bugfix-discipline.py",
+                           "description": "check-bugfix-discipline", "custom": True}
+                later = {"matcher": "Later", "hooks": [{"command": "later-tool"}]}
+                data = {"hooks": {"PreToolUse": [
+                    {"matcher": "Bash", "groupMetadata": "keep", "hooks": [foreign, owned]},
+                    {"matcher": "Bash", "hooks": [dict(owned)]}, later,
+                ]}}
+                new = {"matcher": matcher, "hooks": [{"type": "command",
+                       "command": "python /hooks/check-bugfix-discipline.py", "statusMessage": "New status"}]}
+                self.assertTrue(HOOK_MODULE.install(data, new, "PreToolUse", "check-bugfix-discipline", platform="codex"))
+                groups = data["hooks"]["PreToolUse"]
+                self.assertEqual(groups[0]["groupMetadata"], "keep")
+                self.assertEqual(groups[0]["matcher"], "Bash")
+                self.assertEqual(groups[0]["hooks"][0], foreign)
+                self.assertEqual(groups[1], {"matcher": "Bash", "hooks": []})
+                self.assertEqual(groups[2], later)
+                current = groups[0]["hooks"][1] if matcher == "Bash" else groups[3]["hooks"][0]
+                self.assertEqual(current["timeout"], 9)
+                self.assertEqual(current["statusMessage"], "New status")
+                before = json.dumps(data, sort_keys=True)
+                self.assertFalse(HOOK_MODULE.install(data, new, "PreToolUse", "check-bugfix-discipline", platform="codex"))
+                self.assertEqual(json.dumps(data, sort_keys=True), before)
+
+    def test_malformed_owned_input_does_not_mutate_registration(self) -> None:
+        data = {"hooks": {"Stop": [{"hooks": [{"command": "python", "args": "/hooks/check-bugfix-discipline.py"}]}]}}
+        before = json.dumps(data)
+        with self.assertRaisesRegex(ValueError, "owned hook could not be parsed"):
+            HOOK_MODULE.install(data, {"hooks": [{"command": "python", "args": ["/hooks/check-bugfix-discipline.py"]}]},
+                                "Stop", "check-bugfix-discipline", platform="claude")
+        self.assertEqual(json.dumps(data), before)
+
+    def test_health_deployment_is_self_contained_and_writer_requires_its_owner(self) -> None:
+        health_path = self.tmpdir / "check-hook-health.py"
+        shutil.copyfile(REPO_ROOT / "scripts/check-hook-health.py", health_path)
+        health_spec = importlib.util.spec_from_file_location("isolated_health_owner", health_path)
+        health = importlib.util.module_from_spec(health_spec)
+        sys.modules[health_spec.name] = health
+        health_spec.loader.exec_module(health)
+        self.assertEqual(health.classify_hook_invocation(
+            {"command": "python /hooks/check-bugfix-discipline.py"}, {"check-bugfix-discipline"}, "codex", "posix"
+        ).kind, "current-owned")
+        isolated = self.tmpdir / "source-without-owner"
+        isolated.mkdir()
+        writer = isolated / HOOK_INSTALLER.name
+        shutil.copyfile(HOOK_INSTALLER, writer)
+        self.target.write_text('{"userMetadata":true}\n', encoding="utf-8")
+        before = self.target.read_bytes()
+        result = subprocess.run([sys.executable, "-B", str(writer), "--target", str(self.target),
+                                 "--platform", "claude", "--script-path", str(PY_SCRIPT_PATH)],
+                                capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("hook invocation owner could not be loaded", result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
+
     def setUp(self) -> None:
         self.tmpdir = Path(tempfile.mkdtemp(prefix="orch-hook-test-"))
         self.target = self.tmpdir / "settings.json"
@@ -424,7 +483,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         }, indent=2), encoding="utf-8")
         result = run_installer(self.target, "--remove", platform="codex", host_os="windows")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(self.target.exists())
+        self.assertEqual(load_json(self.target), {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}})
 
     def test_idempotent_reinstall(self) -> None:
         run_installer(self.target)
@@ -894,7 +953,8 @@ class TestInstallHypothesisHook(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         entries = load_json(self.target)["hooks"]["PreToolUse"]
-        self.assertEqual(len(entries), 1)
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[1], {"matcher": "Edit|Write|NotebookEdit|apply_patch", "hooks": []})
         command = entries[0]["hooks"][0]["command"].lower()
         self.assertNotIn("powershell", command)
         self.assertIn(".py", command)

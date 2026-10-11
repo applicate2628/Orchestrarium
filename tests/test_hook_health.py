@@ -180,7 +180,7 @@ def test_hook_health_rejects_silent_mcp_positive_probe(
 def test_missing_executable_and_missing_target_are_distinct(tmp_path: Path) -> None:
     executable_config = _config("claude")
     executable_config["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = str(
-        tmp_path / "missing-python"
+        tmp_path / "missing" / "python"
     )
     executable_json = tmp_path / "missing-executable.json"
     executable_json.write_text(json.dumps(executable_config), encoding="utf-8")
@@ -365,6 +365,89 @@ def test_corrupted_args_on_owned_entry_names_the_stem(tmp_path: Path) -> None:
     assert "missing registered hooks" not in str(excinfo.value)
 
 
+@pytest.mark.parametrize("platform", ("claude", "codex"))
+def test_ownership_ignores_metadata_and_foreign_arguments(platform: str) -> None:
+    stem = "check-bugfix-discipline"
+    foreign = [
+        {"type": "command", "command": "foreign-tool", "description": stem,
+         "statusMessage": stem, "custom": {"path": stem}},
+        {"type": "command", "command": "foreign-tool", "args": [stem + ".py"]},
+        {"type": "command", "command": "foreign-tool --label " + stem + ".py"},
+        {"type": "command", "command": "python /" + stem + "/foreign.py",
+         "args": ["/" + stem + "/foreign.py"]} if platform == "claude" else
+        {"type": "command", "command": "python /" + stem + "/foreign.py"},
+    ]
+    for handler in foreign:
+        assert CHECKER.classify_hook_invocation(handler, {stem}, platform, "posix").kind == "foreign"
+    data = {"hooks": {"PreToolUse": [{"matcher": {"foreign": True}, "hooks": foreign}]}}
+    assert list(CHECKER._iter_owned_hooks(data, {stem}, platform, "posix")) == []
+
+
+def test_invocation_grammar_runner_ambiguity_and_target_position() -> None:
+    marker = "check-git-push-gate"
+    handler = {"command": "python3.12 -B /hooks/check-git-push-gate-runner.py /other.py"}
+    invocation = CHECKER.classify_hook_invocation(handler, {marker}, "codex", "posix")
+    assert invocation.kind == "current-owned"
+    assert invocation.marker == marker
+    assert CHECKER._target_path(list(invocation.argv)) == Path("/hooks/check-git-push-gate-runner.py")
+    with pytest.raises(ValueError, match="ambiguous owned hook markers"):
+        CHECKER.classify_hook_invocation(handler, {marker, marker + "-runner"}, "codex", "posix")
+    for command in ("python -c print /hooks/check-git-push-gate.py",
+                    "bash -c /hooks/check-git-push-gate.sh"):
+        assert CHECKER.classify_hook_invocation({"command": command}, {marker}, "codex", "posix").kind == "foreign"
+    legacy = {"command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:/hooks/check-git-push-gate.ps1"}
+    assert CHECKER.classify_hook_invocation(legacy, {marker}, "codex", "windows").kind == "legacy-owned"
+    with pytest.raises(ValueError, match="legacy invocation"):
+        list(CHECKER._iter_owned_hooks({"hooks": {"Stop": [{"hooks": [legacy]}]}}, {marker}, "codex", "windows"))
+    malformed = {"command": 'python "C:/hooks/check-git-push-gate.py"', "args": []}
+    assert CHECKER.classify_hook_invocation(malformed, {marker}, "codex", "windows").kind == "malformed-owned"
+
+
+def test_definition_snapshots_distinguish_full_values_positions_and_survivors(tmp_path: Path) -> None:
+    target = tmp_path / "hooks.json"
+    marker = "check-bugfix-discipline"
+    handler = {"type": "command", "command": "python /hooks/" + marker + ".py"}
+    foreign = {"command": "foreign-tool", "metadata": "old"}
+    config = {"hooks": {"Stop": [{"hooks": [handler, foreign]}]}}
+
+    def snapshot():
+        target.write_text(json.dumps(config), encoding="utf-8")
+        return CHECKER.owned_definition_snapshots(
+            target=target, platform="codex", host_os="posix", repo_root=ROOT, stems={marker}
+        )
+
+    missing = snapshot()
+    identity = next(iter(missing))
+    assert CHECKER.touched_definition_identities({}, missing) == {identity}
+    foreign["metadata"] = "new"
+    assert CHECKER.touched_definition_identities(missing, snapshot()) == set()
+    previous = missing
+    for value in (None, "", "Check fix discipline"):
+        handler["statusMessage"] = value
+        current = snapshot()
+        assert set(current) == {identity}
+        assert CHECKER.touched_definition_identities(previous, current) == {identity}
+        assert CHECKER.touched_definition_identities(current, snapshot()) == set()
+        previous = current
+    config["hooks"]["Stop"][0]["groupMetadata"] = "custom"
+    metadata = snapshot()
+    assert CHECKER.touched_definition_identities(previous, metadata) == {identity}
+    config["hooks"]["Stop"][0]["hooks"].insert(0, dict(handler))
+    duplicate = snapshot()
+    assert len(duplicate[identity]) == 2
+    config["hooks"]["Stop"][0]["hooks"].pop(0)
+    assert CHECKER.touched_definition_identities(duplicate, snapshot()) == set()
+    config["hooks"]["Stop"][0]["hooks"].reverse()
+    assert CHECKER.touched_definition_identities(metadata, snapshot()) == {identity}
+    config["hooks"]["Stop"][0]["matcher"] = "Bash"
+    matcher = snapshot()
+    assert CHECKER.touched_definition_identities(metadata, matcher) == set(matcher)
+    handler["command"] += " --changed"
+    command = snapshot()
+    assert CHECKER.touched_definition_identities(matcher, command) == set(command)
+    assert CHECKER.touched_definition_identities(command, {}) == set()
+
+
 @pytest.mark.parametrize("pending_status", ("untrusted", "modified"))
 def test_hook_health_report_allows_only_touched_pending(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pending_status: str
@@ -420,6 +503,7 @@ def test_hook_health_report_allows_only_touched_pending(
             repo_root=ROOT,
             verify_fires=False,
             codex_trust_mode="require",
+            touched_identities={touched},
         )
     with pytest.raises(ValueError, match="CODEX_HOOK_TRUST_PREEXISTING_DRIFT"):
         CHECKER.verify_config(
