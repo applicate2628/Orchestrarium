@@ -1216,7 +1216,7 @@ class _SliceAMigratedFileRecord:
 
 @dataclass(frozen=True)
 class _CopySetterDiagnostic:
-    """Passive, value-free observations from one existing setter checkpoint."""
+    """Passive comparisons and bounded scalar evidence at one setter checkpoint."""
 
     operation: str
     direction: str
@@ -1230,13 +1230,43 @@ class _CopySetterDiagnostic:
     metadata_vs_projected: tuple[str, ...] | None
     identity_vs_old: tuple[str, ...] | None
     identity_vs_projected: tuple[str, ...] | None
+    scalar_values: tuple | None = field(default=None, compare=False, repr=False)
+    target_text: str | None = field(default=None, compare=False, repr=False)
 
     _metadata_fields = ("atime_ns", "mtime_ns", "flags", "xattrs")
     _identity_fields = ("device", "inode", "mode", "file_attributes")
+    _scalar_fields = (("atime_ns", "unix-epoch-ns"), ("mtime_ns", "unix-epoch-ns"),
+                      ("flags", "decimal-bitmask"))
+    _scalar_positive_limit = 10 ** 40 - 1
+    _scalar_negative_limit = -(10 ** 39 - 1)
+    _target_byte_limit = 131072
+    _detail_overflow = "values=unavailable;target-path-sha256=unavailable;detail-budget=exceeded"
+
+    @staticmethod
+    def _bounded_scalar(value, *, optional=False):
+        if value is None and optional:
+            return None
+        if (type(value) is int and _CopySetterDiagnostic._scalar_negative_limit <= value
+                <= _CopySetterDiagnostic._scalar_positive_limit):
+            return value
+        return ()
+
+    @staticmethod
+    def _bounded_target(value):
+        # Bound both encoding work and retained bytes without consulting a path.
+        if type(value) is not str or len(value) > _CopySetterDiagnostic._target_byte_limit:
+            return None
+        try:
+            encoded_size = len(str.encode(value, "utf-8", "surrogatepass"))
+        except BaseException:
+            return None  # Optional evidence cannot introduce a constructor refusal.
+        if encoded_size > _CopySetterDiagnostic._target_byte_limit:
+            return None
+        return value
 
     @classmethod
     def attach(cls, error, operation, restored, stage, ordinal, current, projected,
-               old_identity, projected_identity, actual=None, actual_identity=None):
+               old_identity, projected_identity, actual=None, actual_identity=None, *, participant=None):
         # This optional observation must never replace the original failure.
         if cls is not _CopySetterDiagnostic:
             _store_copy_setter_detail(error, ())
@@ -1284,13 +1314,21 @@ class _CopySetterDiagnostic:
                 return None if actual_identity is None else tuple(
                     name for name, old, new in zip(cls._identity_fields, reference, actual_identity)
                     if old != new)
+            scalar_values = tuple(tuple(
+                () if image is None else _CopySetterDiagnostic._bounded_scalar(image[index], optional=index == 2)
+                for image in (old_metadata, projected_metadata, actual_metadata)) for index in range(3))
+            target_text = None
+            if type(participant) is _CopyMetadataParticipant:
+                participant_storage = _passive_owner_storage(_CopyMetadataParticipant, participant)
+                if participant_storage is not None:
+                    target_text = _CopySetterDiagnostic._bounded_target(dict.get(participant_storage, "target_text"))
             context = cls(operation, "inverse" if restored else "forward", stage, ordinal,
                 None if actual_metadata is None else actual_metadata == old_metadata,
                 None if actual_metadata is None else actual_metadata == projected_metadata,
                 None if actual_identity is None else actual_identity == old_identity,
                 None if actual_identity is None else actual_identity == projected_identity,
                 metadata_difference(old_metadata), metadata_difference(projected_metadata),
-                identity_difference(old_identity), identity_difference(projected_identity))
+                identity_difference(old_identity), identity_difference(projected_identity), scalar_values, target_text)
         except BaseException:
             # An unavailable diagnostic is evidence, never a new refusal.
             context = ()
@@ -1331,12 +1369,39 @@ class _CopySetterDiagnostic:
             return "unavailable" if value is None else "true" if value else "false"
         def names(value):
             return "unavailable" if value is None else ",".join(value) if value else "none"
-        return "; ".join((f"operation={operation}", f"direction={direction}",
+        legacy = "; ".join((f"operation={operation}", f"direction={direction}",
             f"stage={stage}", f"ordinal={ordinal}",
             *(f"{name}={boolean(value)}" for name, value in zip(
                 ("metadata-current", "metadata-projected", "identity-old", "identity-projected"), booleans)),
             *(f"{name}={names(value)}" for name, value in zip(
                 ("metadata-vs-current", "metadata-vs-projected", "identity-vs-old", "identity-vs-projected"), differences))))
+        return legacy + "; " + _CopySetterDiagnostic._render_evidence(storage)
+
+    @staticmethod
+    def _render_evidence(storage):
+        values = dict.get(storage, "scalar_values")
+        fields = []
+        for index, (name, unit) in enumerate(_CopySetterDiagnostic._scalar_fields):
+            triple = values[index] if type(values) is tuple and len(values) == 3 else None
+            slots = triple if type(triple) is tuple and len(triple) == 3 else ((), (), ())
+            rendered = []
+            for label, value in zip(("before", "projected", "observed"), slots):
+                value = _CopySetterDiagnostic._bounded_scalar(value, optional=index == 2)
+                text = "none" if value is None else str(value) if type(value) is int else "unavailable"
+                rendered.append(label + ":" + text)
+            fields.append(f"{name}[{unit}]=" + ",".join(rendered))
+        target = _CopySetterDiagnostic._bounded_target(dict.get(storage, "target_text"))
+        digest = "unavailable"
+        if target is not None:
+            try:
+                digest = hashlib.sha256(str.encode(target, "utf-8", "surrogatepass")).hexdigest()
+            except BaseException:
+                digest = "unavailable"  # Preserve other evidence and legacy comparisons.
+        payload = "; ".join((*fields, "target-path-sha256=" + digest))
+        # Limits apply only to this occurrence's extension, never legacy/aggregate text.
+        if len(payload) > 768 or len("; " + payload) > 2048:
+            return _CopySetterDiagnostic._detail_overflow
+        return payload
 
 
 def _passive_owner_storage(owner, value):
@@ -1508,6 +1573,7 @@ class _CopyMetadataParticipant:
     current: _CopyMetadataImage | None
     restored: _CopyMetadataImage | None = None
     unknown: bool = False
+    target_text: str | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -1594,8 +1660,9 @@ class _InstallTransaction:
         self._direct_operation_depth = 0
         self._transition_order = 0
         self._copy_metadata: dict[Path, _CopyMetadataParticipant] = {
-            Path(os.path.abspath(path)): _CopyMetadataParticipant(
-                None, None, None) for path in copy_paths
+            Path(target_text): _CopyMetadataParticipant(
+                None, None, None, target_text=_CopySetterDiagnostic._bounded_target(target_text))
+            for path in copy_paths for target_text in (os.path.abspath(path),)
         }
         self._copy_current: dict[Path, _CopyMetadataImage] = {}
 
@@ -2163,25 +2230,26 @@ class _InstallTransaction:
                     actual = self._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
                 except BaseException as error:
                     _CopySetterDiagnostic.attach(error, label, restored, "metadata-acquisition", operation_ordinal,
-                        current, projected, node.python_identity, node.python_identity if identity is None else identity)
+                        current, projected, node.python_identity, node.python_identity if identity is None else identity,
+                        participant=participant)
                     raise
                 try:
                     actual_identity = self._capture_node(path, descriptor=descriptor, kind="file", data=node.data).python_identity
                 except BaseException as error:
                     _CopySetterDiagnostic.attach(error, label, restored, "identity-acquisition", operation_ordinal,
                         current, projected, node.python_identity, node.python_identity if identity is None else identity,
-                        actual=actual)
+                        actual=actual, participant=participant)
                     raise
                 valid_identity = node.python_identity if identity is None else identity
                 # Only an unchanged value or this setter's projected effect is known.
                 if actual not in (current, projected) or actual_identity not in (node.python_identity, valid_identity):
                     if primary is not None:
                         _CopySetterDiagnostic.attach(primary, label, restored, "operation", operation_ordinal,
-                            current, projected, node.python_identity, valid_identity, actual, actual_identity)
+                            current, projected, node.python_identity, valid_identity, actual, actual_identity, participant=participant)
                         raise primary
                     error = ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unknown copy setter effect")
                     _CopySetterDiagnostic.attach(error, label, restored, "comparison", operation_ordinal,
-                        current, projected, node.python_identity, valid_identity, actual, actual_identity)
+                        current, projected, node.python_identity, valid_identity, actual, actual_identity, participant=participant)
                     raise error from primary
                 diagnostic_current, diagnostic_identity = current, node.python_identity
                 current = actual
@@ -2194,12 +2262,12 @@ class _InstallTransaction:
                         participant.restored = current
                 if primary is not None:
                     _CopySetterDiagnostic.attach(primary, label, restored, "operation", operation_ordinal,
-                        diagnostic_current, projected, diagnostic_identity, valid_identity, actual, actual_identity)
+                        diagnostic_current, projected, diagnostic_identity, valid_identity, actual, actual_identity, participant=participant)
                     raise primary
                 if actual != projected or actual_identity != valid_identity:
                     error = ValueError("E_MUTABLE_PATH_POSTCONDITION: copy metadata readback")
                     _CopySetterDiagnostic.attach(error, label, restored, "comparison", operation_ordinal,
-                        diagnostic_current, projected, diagnostic_identity, valid_identity, actual, actual_identity)
+                        diagnostic_current, projected, diagnostic_identity, valid_identity, actual, actual_identity, participant=participant)
                     raise error
             if desired.xattrs is not None:
                 if current.xattrs is None:

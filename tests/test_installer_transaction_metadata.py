@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from dataclasses import replace
 import errno
+import hashlib
 import importlib.util
 import io
 import os
@@ -337,6 +338,258 @@ class CopyMetadataTests(unittest.TestCase):
             records.append((path, value, participant.unknown))
         return transaction, node, participant, records, record
 
+    def test_scalar_checkpoint_reaches_actual_cli_with_primary_target(self):
+        current = PI._CopyMetadataImage(-11644473600000000000, -100, None, None)
+        desired = replace(current, mtime_ns=0)
+        actual = replace(current, atime_ns=current.atime_ns + 100)
+        tx = self.transaction()
+        node = tx._capture_node(self.target)
+        participant = tx._copy_metadata[self.target]
+        records = []
+        def action():
+            with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, actual]):
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]),
+                                        lambda *args: records.append(args), participant)
+        result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertEqual(str(escaped[0]), "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unknown copy setter effect")
+        self.assertIn("atime_ns[unix-epoch-ns]=before:-11644473600000000000,projected:-11644473600000000000,observed:-11644473599999999900", stderr)
+        self.assertIn("mtime_ns[unix-epoch-ns]=before:-100,projected:0,observed:-100", stderr)
+        self.assertIn("flags[decimal-bitmask]=before:none,projected:none,observed:none", stderr)
+        normalized = os.path.abspath(self.target)
+        digest = hashlib.sha256(normalized.encode("utf-8", "surrogatepass")).hexdigest()
+        self.assertEqual(stderr.count("target-path-sha256=" + digest), 1)
+        self.assertNotIn(normalized, stderr)
+        self.assertEqual(PI._copy_setter_detail(escaped[0]).target_text, normalized)
+        self.assertEqual(records, [])
+        self.assertTrue(participant.unknown)
+
+    def test_scalar_created_target_without_origin_keeps_association(self):
+        created = self.root / "created"
+        tx = PI._InstallTransaction([], enabled=False, copy_paths=(created,))
+        created.write_bytes(b"created")
+        node = tx._capture_node(created)
+        participant = tx._copy_metadata[created]
+        self.assertIsNone(participant.origin)
+        current = PI._CopyMetadataImage(-11644473600000000000, 0, None, None)
+        desired = replace(current, mtime_ns=100)
+        primary = OSError(errno.EIO, "created-readback")
+        def action():
+            with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, primary]):
+                tx._apply_copy_metadata(created, node, desired, stat.S_IMODE(node.python_identity[2]),
+                                        lambda *_args: self.fail("unexpected record"), participant)
+        result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], primary)
+        self.assertIn("flags[decimal-bitmask]=before:none,projected:none,observed:unavailable", stderr)
+        self.assertIn("mtime_ns[unix-epoch-ns]=before:0,projected:100,observed:unavailable", stderr)
+        expected = os.path.abspath(created)
+        self.assertEqual(PI._copy_setter_detail(primary).target_text, expected)
+        self.assertIn("target-path-sha256=" + hashlib.sha256(expected.encode()).hexdigest(), stderr)
+        self.assertNotIn(expected, stderr)
+
+    def test_scalar_nested_inverse_targets_leaf_not_containing_member(self):
+        directory = self.root / "tree"
+        directory.mkdir()
+        self.target.rename(directory / "target")
+        self.target = directory / "target"
+        tx = self.transaction([directory])
+        primary = RuntimeError("nested-primary")
+        inverse_error = OSError(errno.EIO, "PRIVATE_nested_inverse")
+        setter = PI._WindowsBoundNode.set_copy_times
+        def inverse(bound, atime, mtime):
+            setter(bound, atime, mtime)
+            raise inverse_error
+        def action():
+            inverse_patch = patch.object(PI._WindowsBoundNode, "set_copy_times", inverse)
+            try:
+                with tx:
+                    self.owner(tx).copy_file(Path("tree/target"), self.source)
+                    inverse_patch.start()
+                    raise primary
+            finally:
+                inverse_patch.stop()
+        result, stderr, escaped = self.through_install(action)
+        aggregate = escaped[0]
+        self.assertEqual(result, 1)
+        self.assertIs(aggregate.cause, primary)
+        self.assertEqual(len(aggregate.members), 1)
+        member = aggregate.members[0]
+        self.assertEqual(member.path, str(directory))
+        normalized = os.path.abspath(self.target)
+        context = member.copy_setter_diagnostic
+        self.assertEqual(context.target_text, normalized)
+        self.assertEqual(stderr.count("target-path-sha256=" + hashlib.sha256(normalized.encode()).hexdigest()), 1)
+        self.assertNotIn("target-path-sha256=" + hashlib.sha256(os.path.abspath(directory).encode()).hexdigest(), stderr)
+        self.assertNotIn(normalized, stderr)
+        self.assertNotIn("PRIVATE_nested_inverse", stderr)
+        self.assertEqual(member.cause, str(inverse_error))
+
+    def test_scalar_aggregate_preserves_all_32_members_and_per_occurrence_bounds(self):
+        high, low = 10 ** 40 - 1, -(10 ** 39 - 1)
+        current = PI._CopyMetadataImage(high, low, high, None)
+        projected = PI._CopyMetadataImage(low, high, low, None)
+        actual = PI._CopyMetadataImage(high, high, high, None)
+        identity = (1, 2, 3, 4)
+        primary = ValueError("original-primary")
+        primary_participant = PI._CopyMetadataParticipant(None, None, None, target_text="PRIVATE_primary_target")
+        primary_current = PI._CopyMetadataImage(-11644473600000000000, 0, None, None)
+        primary_projected = replace(primary_current, flags=0)
+        primary_actual = replace(primary_projected, atime_ns=primary_current.atime_ns + 100)
+        PI._CopySetterDiagnostic.attach(primary, "timestamps", False, "comparison", 1,
+                                       primary_current, primary_projected, identity, identity, primary_actual, identity,
+                                       participant=primary_participant)
+        members = []
+        contexts = [PI._copy_setter_detail(primary)]
+        for index in range(32):
+            error = OSError(errno.EIO, f"PRIVATE_member_cause_{index}")
+            participant = PI._CopyMetadataParticipant(None, None, None, target_text=f"PRIVATE_inverse_target_{index}")
+            PI._CopySetterDiagnostic.attach(error, "timestamps", True, "comparison", index + 1,
+                                           current, projected, identity, identity, actual, identity, participant=participant)
+            _paths, received = PI._InstallTransaction._settlement_failure(error, "snapshot", index,
+                                                                         Path(f"member-{index:02}"), "E_MEMBER")
+            members.extend(received)
+            contexts.append(PI._copy_setter_detail(error))
+        aggregate = PI._InstallFailure("E_AGGREGATE", "rollback", primary, members=tuple(members),
+                                       recovery_path=Path("synthetic-recovery"))
+        original = str(aggregate)
+        legacy = []
+        additions = []
+        for index, context in enumerate(contexts):
+            rendered = context.render()
+            preceding, payload = rendered.split("; atime_ns[", 1)
+            addition = "atime_ns[" + payload
+            self.assertLessEqual(len(addition.encode("ascii")), 768)
+            self.assertLessEqual(len(("; " + addition).encode("ascii")), 2048)
+            if index:
+                self.assertEqual(addition.count(str(high)), 6)
+                self.assertEqual(addition.count(str(low)), 3)
+            self.assertIn(hashlib.sha256(context.target_text.encode()).hexdigest(), addition)
+            legacy.append(preceding)
+            additions.append(addition)
+        self.assertGreater(len(" | ".join(legacy)), 2048)
+        def action():
+            raise aggregate
+        result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], aggregate)
+        self.assertEqual(str(aggregate), original)
+        self.assertTrue(stderr.startswith("FAIL: " + original + " | copy-setter="))
+        self.assertGreater(len(stderr), 2048)
+        self.assertEqual(stderr.count("cleanup-copy-setter="), 32)
+        self.assertEqual(stderr.count("target-path-sha256="), 33)
+        self.assertNotIn("PRIVATE_", stderr)
+        self.assertNotIn("detail-budget=exceeded", stderr)
+        self.assertIn("flags[decimal-bitmask]=before:none,projected:0,observed:0", stderr)
+        self.assertIn("atime_ns[unix-epoch-ns]=before:-11644473600000000000,projected:-11644473600000000000,observed:-11644473599999999900", stderr)
+        positions = []
+        for index, member in enumerate(members):
+            self.assertIs(aggregate.members[index], member)
+            self.assertEqual(member.cause, str(OSError(errno.EIO, f"PRIVATE_member_cause_{index}")))
+            marker = f"cleanup-copy-setter=snapshot:{index}:E_MEMBER:" + contexts[index + 1].render()
+            positions.append(stderr.index(marker))
+            self.assertIn(legacy[index + 1], stderr)
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(stderr.count("target-path-sha256=" + hashlib.sha256(b"PRIVATE_primary_target").hexdigest()), 1)
+        value_free = stderr
+        for addition in additions:
+            value_free = value_free.replace("; " + addition, "")
+        expected_legacy = "FAIL: " + original + " | copy-setter=" + legacy[0]
+        for index, context in enumerate(legacy[1:]):
+            expected_legacy += f" | cleanup-copy-setter=snapshot:{index}:E_MEMBER:" + context
+        self.assertEqual(value_free, expected_legacy + "\n")
+
+    def test_scalar_limits_and_foreign_optional_fields_preserve_legacy_and_other_components(self):
+        hooks = []
+        class ForeignInteger(int):
+            def __le__(self, other):
+                hooks.append("integer-order")
+                return True
+            def __str__(self):
+                hooks.append("integer-text")
+                return "PRIVATE_integer"
+        class ForeignString(str):
+            def encode(self, *_args):
+                hooks.append("string-encode")
+                return b"PRIVATE_string"
+            def __len__(self):
+                hooks.append("string-length")
+                return 1
+        legacy = PI._CopySetterDiagnostic("timestamps", "forward", "comparison", 1,
+                                         True, False, True, True, (), ("mtime_ns",), (), ())
+        malformed = replace(legacy, scalar_values=((ForeignInteger(1), True, 10 ** 40),
+                                                  (0, -100, -(10 ** 39)), (None, 0, ())),
+                            target_text=ForeignString("PRIVATE_path"))
+        error = ValueError("optional-original")
+        PI._store_copy_setter_detail(error, malformed)
+        def action():
+            raise error
+        result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], error)
+        self.assertIn("metadata-vs-projected=mtime_ns", stderr)
+        self.assertIn("atime_ns[unix-epoch-ns]=before:unavailable,projected:unavailable,observed:unavailable", stderr)
+        self.assertIn("mtime_ns[unix-epoch-ns]=before:0,projected:-100,observed:unavailable", stderr)
+        self.assertIn("flags[decimal-bitmask]=before:none,projected:0,observed:unavailable", stderr)
+        self.assertIn("target-path-sha256=unavailable", stderr)
+        self.assertNotIn("PRIVATE_", stderr)
+        self.assertEqual(hooks, [])
+        identity = (1, 2, 3, 4)
+        current = PI._CopyMetadataImage(10 ** 40, 123, 0, (("PRIVATE_xattr", b"PRIVATE_payload"),))
+        participant = PI._CopyMetadataParticipant(None, None, None, target_text="PRIVATE_path" * 131073)
+        PI._CopySetterDiagnostic.attach(error, "timestamps", False, "comparison", 1,
+                                       current, current, identity, identity, current, identity, participant=participant)
+        context = PI._copy_setter_detail(error)
+        self.assertIsNone(context.target_text)
+        self.assertIn("mtime_ns[unix-epoch-ns]=before:123,projected:123,observed:123", context.render())
+        self.assertIn("metadata-current=true", context.render())
+        self.assertNotIn("PRIVATE_", context.render())
+        # Exact UTF-8 byte limit, including native surrogate characters.
+        for target, admitted in (("a" * 131072, True), ("a" * 131073, False),
+                                 ("\u00e9" * 65536, True), ("\u00e9" * 65537, False), ("\ud800", True)):
+            participant.target_text = target
+            PI._CopySetterDiagnostic.attach(error, "timestamps", False, "comparison", 1,
+                                           current, current, identity, identity, current, identity, participant=participant)
+            context = PI._copy_setter_detail(error)
+            self.assertEqual(context.target_text is not None, admitted)
+            expected = hashlib.sha256(target.encode("utf-8", "surrogatepass")).hexdigest() if admitted else "unavailable"
+            self.assertIn("target-path-sha256=" + expected, context.render())
+        with patch.object(PI.hashlib, "sha256", side_effect=OSError("optional-digest-unavailable")):
+            result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], error)
+        self.assertIn("metadata-current=true", stderr)
+        self.assertIn("mtime_ns[unix-epoch-ns]=before:123,projected:123,observed:123", stderr)
+        self.assertIn("target-path-sha256=unavailable", stderr)
+
+    def test_scalar_participant_namespace_and_subclass_do_not_dispatch(self):
+        hooks = []
+        class ForeignParticipant(PI._CopyMetadataParticipant):
+            def __getattribute__(self, name):
+                hooks.append("participant-getter")
+                raise AssertionError(name)
+        class ForeignKey:
+            def __hash__(self):
+                return hash("target_text")
+            def __eq__(self, other):
+                hooks.append("participant-key")
+                return False
+        malformed = PI._CopyMetadataParticipant(None, None, None, target_text="PRIVATE_path")
+        storage = PI._CopyMetadataParticipant.__dict__["__dict__"].__get__(malformed)
+        dict.__setitem__(storage, ForeignKey(), "PRIVATE_namespace")
+        hooks.clear()
+        current = PI._CopyMetadataImage(1, 2, None, None)
+        identity = (1, 2, 3, 4)
+        for participant in (malformed, ForeignParticipant(None, None, None)):
+            error = ValueError("namespace-original")
+            PI._CopySetterDiagnostic.attach(error, "timestamps", False, "comparison", 1,
+                                           current, current, identity, identity, current, identity, participant=participant)
+            context = PI._copy_setter_detail(error)
+            self.assertIsNone(context.target_text)
+            self.assertIn("metadata-current=true", context.render())
+            self.assertIn("mtime_ns[unix-epoch-ns]=before:2,projected:2,observed:2", context.render())
+        self.assertEqual(hooks, [])
+
     @contextmanager
     def no_timestamp_effect(self):
         with patch.object(PI._WindowsBoundNode, "set_copy_times", lambda *_args: None):
@@ -473,6 +726,9 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertIs(caught.exception, primary)
         self.assertEqual(events, ["metadata", "operation", "metadata", "identity", "record"])
         self.assertFalse(participant.unknown)
+        # Post-record diagnostics retain the immediate pre-setter checkpoint.
+        self.assertEqual(PI._copy_setter_detail(primary).scalar_values[1],
+                         (current.mtime_ns, desired.mtime_ns, desired.mtime_ns))
 
     def test_aggregate_inverse_cli_keeps_member_identity_order_and_private_causes(self):
         second = self.root / "second"

@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-12
+
+- **Installer failures retain the scalar checkpoint and actual target association.** Both installers add available before/projected/observed timestamps in Unix-epoch nanoseconds and decimal flags to their existing failure diagnostics. An opaque target-path digest identifies the selected copy entry, including nested and newly created targets, without adding its raw path to default output. Optional evidence has separate scalar, retention and per-occurrence display bounds; complete existing errors and rollback members remain visible. Metadata acceptance, original exceptions, exit status and recovery custody are unchanged. These diagnostics explain acquired values; they do not establish the cause of native timestamp changes or survive termination before ordinary failure output.
+
 ## 2026-10-11
 
 - **Design rules represent meaningful structures as a whole.** Related parts with whole-level relationships, invariants or lifecycle belong to a coherent object or aggregate, reusing the existing owner when it already represents the whole. The shared rule and its architecture explanation distinguish this from adding classes or empty wrappers around ordinary local containers.
