@@ -11,7 +11,7 @@ import os
 import re
 import stat as stat_module
 import sys
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
@@ -643,6 +643,398 @@ def load_jsonl(
     return events
 
 
+@dataclass(frozen=True)
+class CapturedHistoryFileV1:
+    """An original repository-relative locator and its real captured postimage.
+
+    The lifecycle owner supplies CapturedFileSnapshot; the snapshot may now live
+    at a custody destination. Original locators never become filesystem reads.
+    """
+
+    original_path: str
+    snapshot: object
+    byte_length: int
+    sha256: str
+
+
+@dataclass(frozen=True)
+class HistoricalLedgerCriteriaV1:
+    """Root-accepted original requirements, bound to acquired evidence.
+
+    This is an input contract, not a criterion inferred from source shape. The
+    lifecycle/acceptance owner establishes the meaning of the referenced bytes;
+    V authenticates their acquisition and applies the selected existing owner.
+    """
+
+    criteria_reference: str
+    acquisition_reference: str
+    ledger_required: bool
+    owner_contract: Literal["current", "archive"]
+
+
+@dataclass(frozen=True)
+class CapturedWorkItemHistoryBindingV1:
+    repository_root: Path
+    work_item: str
+    original_source_path: str
+    original_item_base: str
+    original_ledger_path: str
+    criteria: HistoricalLedgerCriteriaV1
+    files: tuple[CapturedHistoryFileV1, ...]
+    absent_paths: tuple[str, ...]
+    directory_members: Mapping[str, tuple[str, ...]]
+    acquired_input: object | None = None
+
+
+class _CapturedHistoryPath:
+    """Read-only original-path acquisition port over an exact captured selection.
+
+    It is not a disk directory, a new ledger parser, or a fallback to present
+    filesystem state. Every read and absence comes from the supplied selection.
+    """
+
+    def __init__(self, binding: CapturedWorkItemHistoryBindingV1, path: Path,
+                 acquisition_failures=None) -> None:
+        self.binding, self.path = binding, path
+        self.acquisition_failures = [] if acquisition_failures is None else acquisition_failures
+
+    def _at(self, path: Path):
+        return _CapturedHistoryPath(self.binding, path, self.acquisition_failures)
+
+    def _acquire(self, operation, path=None, *args, **kwargs):
+        try:
+            method = getattr(self.binding.acquired_input, operation)
+            return method(*args, **kwargs) if path is None else method(path, *args, **kwargs)
+        except (OSError, RuntimeError, ValueError, TypeError) as exc:
+            # A missing metadata leaf is an actual proved absence used by the
+            # owner's optional-location probes, not a failed required read.
+            if not (operation == "metadata" and isinstance(exc, FileNotFoundError)):
+                locator = self.binding.repository_root if path is None else path
+                cause = (operation, locator.relative_to(self.binding.repository_root).as_posix(),
+                         getattr(exc, "failure_id", "WI-LEGACY-COMPLETION-HISTORY"), str(exc))
+                if cause not in self.acquisition_failures:
+                    self.acquisition_failures.append(cause)
+            raise
+
+    @property
+    def repository_root(self):
+        return self.binding.repository_root
+
+    @property
+    def owner_input(self):
+        return self.binding.acquired_input
+
+    def _settled_origin(self):
+        return load_lifecycle_owner()._settled_history_input(self.owner_input)
+
+    def origin_entry(self, path):
+        return self._acquire("origin_entry", path)
+
+    def current_native_metadata(self, path):
+        return self._acquire("current_native_metadata", path)
+
+    def current_capture(self, snapshot):
+        return self._acquire("current_capture", None, snapshot)
+
+    @property
+    def files(self):
+        return self.binding.acquired_input.files
+
+    @property
+    def directories(self):
+        return self.binding.acquired_input.directories
+
+    def verify(self):
+        return self._acquire("verify")
+
+    def metadata(self, path):
+        if self._settled_origin() is not None:
+            return self.current_native_metadata(path)
+        return self._acquire("metadata", path)
+
+    def children(self, path):
+        return self._acquire("children", path)
+
+    def matching_children(self, path, pattern):
+        return self._acquire("matching_children", path, pattern)
+
+    def file_snapshot(self, path, **kwargs):
+        return self._acquire("file_snapshot", path, **kwargs)
+
+    def validator_path(self, path, validator):
+        # The consumer may load the same V source under a distinct module name.
+        # Bind its cursor to this exact selection, without reacquiring disk.
+        if self._settled_origin() is not None:
+            if self.origin_entry(path) is None:
+                raise FileNotFoundError(str(path))
+        else:
+            self.metadata(path)
+        return validator._CapturedHistoryPath(self.binding, path, self.acquisition_failures)
+
+    def _key(self) -> Path:
+        try:
+            return self.path.relative_to(self.binding.repository_root)
+        except ValueError as exc:
+            raise ValueError("WI-LEGACY-COMPLETION-CUSTODY: original locator escapes repository") from exc
+
+    def __str__(self):
+        return str(self.path)
+
+    def __fspath__(self):
+        raise TypeError("captured history paths must not be reacquired through the filesystem")
+
+    def __truediv__(self, value):
+        return self._at(self.path / value)
+
+    def joinpath(self, *values):
+        return self._at(self.path.joinpath(*values))
+
+    @property
+    def name(self):
+        return self.binding.work_item if self._key() == Path(self.binding.original_item_base) else self.path.name
+
+    @property
+    def parent(self):
+        return self._at(self.path.parent)
+
+    @property
+    def parents(self):
+        return tuple(self._at(parent) for parent in self.path.parents)
+
+    @property
+    def parts(self):
+        return self.path.parts
+
+    @property
+    def suffix(self):
+        return self.path.suffix
+
+    def with_suffix(self, suffix):
+        return self._at(self.path.with_suffix(suffix))
+
+    def absolute(self):
+        return self
+
+    def resolve(self):
+        # Logical normalization only: the original target may no longer exist.
+        return self._at(Path(os.path.abspath(self.path)))
+
+    def relative_to(self, other):
+        return self.path.relative_to(other.path if isinstance(other, _CapturedHistoryPath) else other)
+
+    def is_relative_to(self, other):
+        return self.path.is_relative_to(other.path if isinstance(other, _CapturedHistoryPath) else other)
+
+    def as_posix(self):
+        return self.path.as_posix()
+
+    def is_absolute(self):
+        return True
+
+    def exists(self, path=None):
+        return self._acquire("exists", self.path if path is None else path)
+
+    def is_file(self):
+        if self._settled_origin() is not None:
+            entry = self.origin_entry(self.path)
+            return entry is not None and entry.kind == "file"
+        return self.exists() and stat_module.S_ISREG(self.lstat().st_mode)
+
+    def is_dir(self):
+        if self._settled_origin() is not None:
+            entry = self.origin_entry(self.path)
+            return entry is not None and entry.kind == "directory"
+        return self.exists() and stat_module.S_ISDIR(self.lstat().st_mode)
+
+    def is_symlink(self):
+        if self._settled_origin() is not None and not self.is_file():
+            return False
+        return self.exists() and stat_module.S_ISLNK(self.lstat().st_mode)
+
+    def is_junction(self):
+        if self._settled_origin() is not None and not self.is_file():
+            return False
+        return self.exists() and bool(getattr(self.lstat(), "st_file_attributes", 0)
+                                      & getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+    def read_bytes(self):
+        return self.file_snapshot(self.path).data
+
+    def read_text(self, encoding=None, errors=None):
+        return self.read_bytes().decode(encoding or "utf-8", errors or "strict")
+
+    def lstat(self):
+        return self.metadata(self.path)
+
+    def iterdir(self):
+        return iter(self._at(path) for path in self.children(self.path))
+
+    def glob(self, pattern):
+        return (self._at(path) for path in self.matching_children(self.path, pattern))
+
+    def __eq__(self, other):
+        return isinstance(other, _CapturedHistoryPath) and self.binding is other.binding and self.path == other.path
+
+    def __hash__(self):
+        return hash((id(self.binding), self.path))
+
+    def __lt__(self, other):
+        return self.path < other.path
+
+
+def bind_settled_work_item_history(acquired_input):
+    """Adapt the actual lifecycle-owned settled origin, never caller topology."""
+    owner = load_lifecycle_owner()
+    port = owner._settled_history_input(acquired_input)
+    if port is None:
+        raise ValueError("WI-LEGACY-COMPLETION-CUSTODY: owner-sealed settled input is required")
+    port.verify()
+    history = port.metadata["historyBinding"]
+    criteria = history["criteria"]
+    records = tuple(CapturedHistoryFileV1(path.relative_to(port.repository_root).as_posix(), row.current,
+                        row.current.length, hashlib.sha256(row.current.data).hexdigest()) for path, row in port.files.items())
+    return CapturedWorkItemHistoryBindingV1(port.repository_root, port.metadata["workItem"], history["originalSourcePath"],
+        history["originalItemBase"], history["originalLedgerPath"],
+        HistoricalLedgerCriteriaV1(criteria["criteriaReference"], criteria["acquisitionReference"],
+                                   criteria["ledgerRequired"], criteria["ownerContract"]),
+        records, tuple(history["absentPaths"]),
+        {path.relative_to(port.repository_root).as_posix(): tuple(entry.original_path.name for entry in members)
+            for path, members in port.directories.items()}, port)
+
+
+def _acquire_captured_history_item(binding: CapturedWorkItemHistoryBindingV1):
+    """Verify native captures once before any owner consumes the logical view."""
+    failure = "WI-LEGACY-COMPLETION-HISTORY"
+    if not isinstance(binding, CapturedWorkItemHistoryBindingV1):
+        raise ValueError(f"{failure}: binding has an unsupported type")
+    owner = load_lifecycle_owner()
+    root = binding.repository_root
+    if not isinstance(root, Path) or not root.is_absolute():
+        raise ValueError(f"{failure}: repository root must be absolute")
+    owner._validate_slug(binding.work_item)
+    for value in (binding.original_source_path, binding.original_item_base, binding.original_ledger_path):
+        _legacy_projection_path_parts(value, (), failure)
+    source_path = PurePosixPath(binding.original_source_path)
+    if (source_path.stem != binding.work_item
+            and (source_path.name != "status.md" or source_path.parent.name != binding.work_item)):
+        raise ValueError(f"{failure}: original source does not bind logical identity")
+    criteria = binding.criteria
+    if (not isinstance(criteria, HistoricalLedgerCriteriaV1)
+            or type(criteria.ledger_required) is not bool
+            or criteria.owner_contract not in {"current", "archive"}):
+        raise ValueError(f"{failure}: original criteria are unavailable")
+    port = binding.acquired_input
+    if port is None or getattr(port, "repository_root", None) != root:
+        raise ValueError(f"{failure}: owner-native acquired input port is unavailable")
+    port.verify()
+    settled = owner._settled_history_input(port)
+    if settled is not None:
+        expected = bind_settled_work_item_history(port)
+        if (binding.work_item != expected.work_item or binding.original_source_path != expected.original_source_path
+                or binding.original_item_base != expected.original_item_base or binding.original_ledger_path != expected.original_ledger_path
+                or binding.criteria != expected.criteria or binding.absent_paths != expected.absent_paths
+                or dict(binding.directory_members) != expected.directory_members
+                or {row.original_path for row in binding.files} != {row.original_path for row in expected.files}):
+            raise ValueError("WI-LEGACY-COMPLETION-CUSTODY: supplied binding differs from owner-recorded origin")
+    records = {}
+    for record in binding.files:
+        if (not isinstance(record, CapturedHistoryFileV1)
+                or not is_dataclass(record.snapshot)
+                or {entry.name for entry in fields(record.snapshot)} != {entry.name for entry in fields(owner.CapturedFileSnapshot)}
+                or not is_dataclass(record.snapshot.parent_chain)
+                or {entry.name for entry in fields(record.snapshot.parent_chain)} != {entry.name for entry in fields(owner.CapturedPathParentChain)}
+                or not isinstance(record.snapshot.path, Path) or not record.snapshot.path.is_absolute()
+                or not isinstance(record.snapshot.data, bytes)
+                or type(record.snapshot.require_single_link) is not bool
+                or not isinstance(record.snapshot.identity, tuple) or len(record.snapshot.identity) != 2
+                or any(type(value) is not int for value in record.snapshot.identity)
+                or type(record.snapshot.length) is not int
+                or not isinstance(record.snapshot.parent_chain.participants, tuple)
+                or not record.snapshot.parent_chain.participants
+                or type(record.byte_length) is not int or record.byte_length < 0
+                or record.byte_length != record.snapshot.length
+                or not isinstance(record.sha256, str) or SHA256_RE.fullmatch(record.sha256) is None
+                or hashlib.sha256(record.snapshot.data).hexdigest() != record.sha256
+                or not record.snapshot.path.is_relative_to(root)):
+            raise ValueError("WI-LEGACY-COMPLETION-CUSTODY: captured file identity/bytes/locator differ")
+        for participant in record.snapshot.parent_chain.participants:
+            if (not isinstance(participant, tuple) or len(participant) != 2
+                    or not isinstance(participant[0], Path) or not participant[0].is_absolute()
+                    or not isinstance(participant[1], tuple) or len(participant[1]) != 2
+                    or any(type(value) is not int for value in participant[1])):
+                raise ValueError("WI-LEGACY-COMPLETION-CUSTODY: native parent capture shape differs")
+        _legacy_projection_path_parts(record.original_path, (), "WI-LEGACY-COMPLETION-CUSTODY")
+        key = Path(record.original_path)
+        if key in records:
+            raise ValueError("WI-LEGACY-COMPLETION-CUSTODY: duplicate original native locator")
+        # M's producer and V's loader may import the same source under different
+        # module names. Adapt the actual native capture shape, never pathname/
+        # hash-only evidence, then let its existing owner verify every field.
+        snapshot = owner.CapturedFileSnapshot(
+            record.snapshot.path, record.snapshot.identity, record.snapshot.length, record.snapshot.data,
+            owner.CapturedPathParentChain(record.snapshot.parent_chain.participants),
+            record.snapshot.require_single_link,
+        )
+        owner._verify_captured_file(snapshot, "WI-LEGACY-COMPLETION-DRIFT")
+        association = port.files.get(root / record.original_path)
+        if (association is None or association.current.path != snapshot.path
+                or association.current.identity != snapshot.identity or association.current.data != snapshot.data):
+            raise ValueError("WI-LEGACY-COMPLETION-CUSTODY: original/current native file association differs")
+        records[key] = replace(record, snapshot=snapshot)
+    for reference in (binding.original_source_path, criteria.criteria_reference, criteria.acquisition_reference):
+        _legacy_projection_path_parts(reference, (), failure)
+        if Path(reference) not in records:
+            raise ValueError(f"{failure}: required source/criteria/acquisition evidence is unavailable")
+    if any(records[Path(reference)].byte_length == 0
+           for reference in (criteria.criteria_reference, criteria.acquisition_reference)):
+        raise ValueError(f"{failure}: original criteria/acquisition evidence is empty")
+    absent = binding.absent_paths
+    if not isinstance(absent, tuple):
+        raise ValueError(f"{failure}: captured absence must be immutable")
+    for value in absent:
+        _legacy_projection_path_parts(value, (), failure)
+    if len(set(Path(value) for value in absent)) != len(absent) or any(Path(value) in records for value in absent):
+        raise ValueError(f"{failure}: captured absence conflicts or is unsafe")
+    for value in absent:
+        if port.exists(root / value):
+            raise ValueError(f"{failure}: declared absence contradicts complete native member proof")
+    directories = dict(binding.directory_members)
+    native_directories = {Path(key) for key in directories}
+    if len(native_directories) != len(directories):
+        raise ValueError(f"{failure}: original directory identity is ambiguous")
+    for key, members in directories.items():
+        if key != ".":
+            _legacy_projection_path_parts(key, (), failure)
+        if Path(key) in records or Path(key) in {Path(value) for value in absent}:
+            raise ValueError(f"{failure}: captured directory identity conflicts")
+        proof = port.directories.get(root / key)
+        actual_members = (tuple(entry.original_path.name for entry in proof) if settled is not None and proof is not None
+                          else tuple(name for name, _metadata in proof.original.members) if proof is not None else None)
+        if actual_members != tuple(members):
+            raise ValueError(f"{failure}: directory names differ from complete owner-native proof")
+        if not isinstance(members, tuple) or len(set(Path(name) for name in members)) != len(members):
+            raise ValueError(f"{failure}: captured directory inventory is ambiguous")
+        for name in members:
+            if not isinstance(name, str) or not name or Path(name).name != name or name in {".", ".."}:
+                raise ValueError(f"{failure}: captured directory member is unsafe")
+            # Native complete membership is already proved by M. An unselected
+            # member's bytes/descendant inventory remain unavailable, rather
+            # than forcing unrelated source files into the acquisition scope.
+    if Path(binding.original_item_base) not in native_directories or "." not in directories:
+        raise ValueError(f"{failure}: original bases were not acquired")
+    if Path(binding.original_ledger_path) not in records and Path(binding.original_ledger_path) not in {Path(value) for value in absent}:
+        raise ValueError(f"{failure}: selected ledger presence/absence was not acquired")
+    if criteria.owner_contract == "archive":
+        parts = PurePosixPath(binding.original_item_base).parts
+        if (len(parts) != 4 or parts[:2] != ("work-items", "archive")
+                or re.fullmatch(r"\d{4}-\d{2}", parts[2]) is None or parts[3] != binding.work_item
+                or Path(binding.original_item_base) / "closure.md" not in records):
+            raise ValueError(f"{failure}: actual historical archive/closure proof is unavailable")
+    # Freeze caller-owned collections before exposing them to any reducer.
+    frozen = replace(binding, directory_members=MappingProxyType(directories), files=tuple(records.values()))
+    return _CapturedHistoryPath(frozen, root / binding.original_item_base)
+
+
 def repo_root_for(item: Path) -> Path | None:
     """The repository root that owns this work item.
 
@@ -651,6 +1043,8 @@ def repo_root_for(item: Path) -> Path | None:
     root. Returns None when the item is not under a `work-items` tree.
     """
 
+    if isinstance(item, _CapturedHistoryPath):
+        return item._at(item.binding.repository_root)
     for parent in item.resolve().parents:
         if parent.name == "work-items":
             return parent.parent
@@ -766,7 +1160,10 @@ def resolve_scratch_pointer(
     try:
         for part in PurePosixPath(value).parts:
             current = current / part
-            info = os.lstat(current)
+            if isinstance(current, _CapturedHistoryPath) and current._settled_origin() is not None and current.is_dir():
+                current.verify()
+                continue
+            info = current.lstat()
             if stat_module.S_ISLNK(info.st_mode) or (
                 getattr(info, "st_file_attributes", 0)
                 & getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
@@ -857,8 +1254,10 @@ def retained_preimage_profiles(event: Mapping[str, object], item: Path, errors: 
 def capture_retained_preimage_payload(item: Path, entry: Mapping[str, object], profile: Mapping[str, object]):
     """Use the existing ordinary/no-follow capture, bounded by declared bytes."""
     owner = load_lifecycle_owner()
-    snapshot = owner._capture_file_snapshot(item / entry["ref"], failure_id="WI-RETAINED-PREIMAGE",
-                                            maximum_bytes=profile["byteCount"])
+    selected = item / entry["ref"]
+    snapshot = owner._capture_file_snapshot(selected.path if isinstance(selected, _CapturedHistoryPath) else selected,
+        failure_id="WI-RETAINED-PREIMAGE", maximum_bytes=profile["byteCount"],
+        **({"acquired_input": selected} if isinstance(selected, _CapturedHistoryPath) else {}))
     if snapshot.length != profile["byteCount"] or hashlib.sha256(snapshot.data).hexdigest() != profile["sha256"]:
         raise ValueError("WI-RETAINED-PREIMAGE: payload byte count/hash differs")
     return snapshot
@@ -889,6 +1288,9 @@ def _safe_repo_relative(value: str) -> bool:
 
 
 def _ordinary_custody_snapshot(item: Path, snapshot: str, digest: str) -> bool:
+    if isinstance(item, _CapturedHistoryPath):
+        leaf = item / snapshot
+        return leaf.is_file() and hashlib.sha256(leaf.read_bytes()).hexdigest() == digest
     directory = item / "review-artifact-custody"
     leaf = item / snapshot
     try:
@@ -1038,6 +1440,24 @@ def resolve_historical_pass_custody(
 _LEGACY_PROJECTION_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", re.ASCII)
 
 
+def _legacy_projection_path_parts(value: object, prefix: tuple[str, ...], failure_id: str) -> list[str]:
+    """One lexical owner for both physical and captured projection locators."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or "\x00" in value
+        or "\\" in value
+        or ":" in value
+        or value.startswith("/")
+        or value.startswith("//")
+    ):
+        raise ValueError(f"{failure_id}: unsafe projection path")
+    parts = value.split("/")
+    if any(part in {"", ".", ".."} for part in parts) or tuple(parts[:len(prefix)]) != prefix:
+        raise ValueError(f"{failure_id}: projection path escapes its structural scope")
+    return parts
+
+
 def confine_legacy_projection_path(
     root: Path,
     value: object,
@@ -1053,19 +1473,17 @@ def confine_legacy_projection_path(
     path string into a filesystem path.  It performs lexical validation and an
     lstat-only component walk before a caller may probe or read content.
     """
-    if (
-        not isinstance(value, str)
-        or not value
-        or "\x00" in value
-        or "\\" in value
-        or ":" in value
-        or value.startswith("/")
-        or value.startswith("//")
-    ):
-        raise ValueError(f"{failure_id}: unsafe projection path")
-    parts = value.split("/")
-    if any(part in {"", ".", ".."} for part in parts) or tuple(parts[:len(prefix)]) != prefix:
-        raise ValueError(f"{failure_id}: projection path escapes its structural scope")
+    parts = _legacy_projection_path_parts(value, prefix, failure_id)
+    if isinstance(root, _CapturedHistoryPath):
+        candidate = root.joinpath(*parts)
+        present = candidate.exists()
+        if not present and not allow_missing_leaf:
+            raise ValueError(f"{failure_id}: projection path component is unavailable")
+        if present and leaf_kind == "file" and not candidate.is_file():
+            raise ValueError(f"{failure_id}: projection path is not a regular file")
+        if present and leaf_kind == "directory" and not candidate.is_dir():
+            raise ValueError(f"{failure_id}: projection path is not a directory")
+        return candidate
     root = Path(root)
     if not root.is_absolute():
         raise ValueError(f"{failure_id}: projection repository root is not absolute")
@@ -1494,6 +1912,18 @@ class WorkItemObligationStateV1:
     open_revise: tuple[WorkItemObligationRowV1, ...]
     open_launches: tuple[WorkItemObligationRowV1, ...]
     unresolved_history: tuple[HistoricalLedgerHoldV1, ...] = ()
+
+
+@dataclass(frozen=True)
+class CapturedWorkItemHistoryObservationV1:
+    """History evidence only; never a terminal action or completion verdict."""
+
+    selection: Literal["present", "absent", "unavailable"]
+    ledger_sha256: str | None
+    acquisition_complete: bool
+    diagnostics: tuple[str, ...]
+    obligations: WorkItemObligationStateV1 | None
+    authority_by_raw_line: Mapping[int, LedgerAuthorityV1] | None
 
 
 @dataclass(frozen=True)
@@ -1955,7 +2385,11 @@ def _validate_event(
             try:
                 snapshot = (capture_retained_preimage_payload(item, entry, profile)
                             if retained_payloads is None else retained_payloads[entry["ref"]])
-                if (snapshot.path != item / entry["ref"] or snapshot.length != profile["byteCount"]
+                expected_path = item / entry["ref"]
+                if isinstance(expected_path, _CapturedHistoryPath):
+                    expected_path = (expected_path.owner_input.current_snapshot(expected_path.path).path
+                                     if expected_path._settled_origin() is not None else expected_path.path)
+                if (snapshot.path != expected_path or snapshot.length != profile["byteCount"]
                     or hashlib.sha256(snapshot.data).hexdigest() != profile["sha256"]):
                     raise ValueError("WI-RETAINED-PREIMAGE: captured payload binding differs")
             except (ValueError, OSError, load_lifecycle_owner().LifecycleError) as exc:
@@ -3310,7 +3744,8 @@ def _resolve_ledger_h1_artifact_set_location(root: Path):
     lifecycle = load_lifecycle_owner()
     try:
         return lifecycle.resolve_ledger_h1_artifact_set_location(
-            root, input_role="repository-root",
+            root.path if isinstance(root, _CapturedHistoryPath) else root, input_role="repository-root",
+            **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}),
         )
     except lifecycle.LifecycleError as exc:
         raise _LedgerH1AcquisitionError(
@@ -4347,10 +4782,11 @@ def _ledger_h1_candidate_group(
             lifecycle = load_lifecycle_owner()
             try:
                 fresh_location = lifecycle.resolve_work_item_ledger_location(
-                    root,
+                    root.path if isinstance(root, _CapturedHistoryPath) else root,
                     logical_work_item=work_item,
                     logical_ledger_path=path,
                     input_role="repository-root",
+                    **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}),
                 )
             except lifecycle.LifecycleError as exc:
                 reject(
@@ -4733,10 +5169,11 @@ def _load_live_ledger_h1_artifacts(
                 return None
             try:
                 location = lifecycle.resolve_work_item_ledger_location(
-                    root,
+                    root.path if isinstance(root, _CapturedHistoryPath) else root,
                     logical_work_item=logical_work_item,
                     logical_ledger_path=ledger_relative,
                     input_role="repository-root",
+                    **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}),
                 )
             except lifecycle.LifecycleError as exc:
                 raise _LedgerH1AcquisitionError(
@@ -4785,7 +5222,7 @@ def _load_effective_ledger_group(
         if compatibility_artifacts is None:
             return MappingProxyType({})
     return _ledger_h1_candidate_group(
-        Path(root), compatibility_artifacts, historical_pass_custody_blobs_by_item,
+        root if isinstance(root, _CapturedHistoryPath) else Path(root), compatibility_artifacts, historical_pass_custody_blobs_by_item,
         ledger_acquisition_complete_by_path=ledger_acquisition_complete_by_path,
     )
 
@@ -4844,6 +5281,7 @@ def _resolve_ledger_h1_selected(
     selected_ledger_bytes: bytes | None = None,
     selected_ledger_absent: bool = False,
     ledger_acquisition_complete_out: list[bool] | None = None,
+    required_ledger_acquisition_by_path: dict[str, list[bool]] | None = None,
 ) -> _LedgerH1SelectedV1:
     """One metadata-first selection composition for validator and reader."""
     target_errors: list[str] = []
@@ -4895,6 +5333,8 @@ def _resolve_ledger_h1_selected(
         failure = _LedgerH1AcquisitionError("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE", selected_ledger_path)
         return _LedgerH1SelectedV1("invalid", partition, _ledger_h1_acquisition_failure_context(failure))
     acquisition_by_path: dict[str, list[bool]] | None = (
+        {entry["ledgerPath"]: [] for entry in partition.entries}
+        if required_ledger_acquisition_by_path is not None else
         {} if ledger_acquisition_complete_out is not None else None
     )
     contexts = _load_effective_ledger_group(
@@ -4905,6 +5345,8 @@ def _resolve_ledger_h1_selected(
         ),
         ledger_acquisition_complete_by_path=acquisition_by_path,
     )
+    if required_ledger_acquisition_by_path is not None:
+        required_ledger_acquisition_by_path.update(acquisition_by_path)
     invalid = next((context for context in contexts.values() if context.observation.activation_state == "invalid"), None)
     if invalid is not None:
         return _LedgerH1SelectedV1("invalid", partition, invalid)
@@ -5362,7 +5804,7 @@ def load_effective_ledger_view(
     ledger_acquisition_complete_out: list[bool] | None = None,
 ) -> LedgerValidationContextV1:
     """Read the selected item; unrelated H1 contents are not ordinary admission."""
-    root = Path(root)
+    root = root if isinstance(root, _CapturedHistoryPath) else Path(root)
     if selected_ledger_bytes is not None and not isinstance(selected_ledger_bytes, bytes):
         return _ledger_h1_selection_failure(
             selected_ledger_path, "WI-LEDGER-CUSTODY-STALE-TARGET: captured selected ledger must be bytes",
@@ -5413,6 +5855,12 @@ def load_effective_ledger_view(
 
 
 def _is_link_or_reparse(path: Path) -> bool:
+    if isinstance(path, _CapturedHistoryPath):
+        if path._settled_origin() is not None:
+            entry = path.origin_entry(path.path)
+            if entry is None or entry.kind == "nonordinary":
+                return True
+        return not path.exists() or path.is_symlink() or path.is_junction()
     try:
         info = os.lstat(path)
     except OSError:
@@ -5431,6 +5879,27 @@ def _projection_target_identity(
     require_ledger: bool = False,
 ) -> tuple[Path, str] | None:
     """Return the one ordinary active/archive identity admissible for projection."""
+    if isinstance(item, _CapturedHistoryPath):
+        if (not isinstance(selected_ledger, _CapturedHistoryPath)
+                or selected_ledger.binding is not item.binding
+                or (require_ledger and not selected_ledger.is_file())):
+            _projection_fail(errors, "identity", "selected captured ledger identity differs")
+            return None
+        relative_item = item._key().as_posix()
+        if item._key() == Path(item.binding.original_item_base):
+            if selected_ledger._key() != Path(item.binding.original_ledger_path):
+                _projection_fail(errors, "identity", "selected captured ledger identity differs")
+                return None
+        else:
+            parts = PurePosixPath(relative_item).parts
+            ordinary = (len(parts) == 3 and parts[:2] == ("work-items", "active")) or (
+                len(parts) == 4 and parts[:2] == ("work-items", "archive")
+                and re.fullmatch(r"\d{4}-\d{2}", parts[2]) is not None)
+            if (not ordinary or item.path not in item.binding.acquired_input.directories
+                    or selected_ledger.path not in {item.path / "agent-runs.jsonl", item.path / "agent-runs.jsonl.tmp"}):
+                _projection_fail(errors, "identity", "captured group participant has no ordinary native identity")
+                return None
+        return repo_root_for(item), relative_item
     # Do not resolve `item`: resolution would erase an in-tree symlink before
     # the component lstat walk below can reject it.
     lexical_item = Path(item).absolute()
@@ -6329,7 +6798,7 @@ def _transfer_status_relation(item: Path, errors: list[str]) -> tuple[str, str] 
 
 def _transfer_receipt_candidates(root: Path, errors: list[str]) -> tuple[Path, ...]:
     archive_root = root / "work-items" / "archive"
-    if not os.path.lexists(archive_root):
+    if not (archive_root.exists() if isinstance(archive_root, _CapturedHistoryPath) else os.path.lexists(archive_root)):
         return ()
     if _is_link_or_reparse(archive_root) or not archive_root.is_dir():
         fail(
@@ -6368,7 +6837,7 @@ def _transfer_receipt_candidates(root: Path, errors: list[str]) -> tuple[Path, .
             if not item.is_dir():
                 continue
             receipt = item / "lifecycle-transition-receipt.json"
-            if os.path.lexists(receipt):
+            if receipt.exists() if isinstance(receipt, _CapturedHistoryPath) else os.path.lexists(receipt):
                 candidates.append(receipt)
     return tuple(candidates)
 
@@ -6385,7 +6854,7 @@ def _transfer_authority_metadata(root: Path, path: Path) -> os.stat_result:
         leaf_kind="file",
         failure_id="WI-OBLIGATION-TRANSFER-OWNER",
     )
-    return os.lstat(confined)
+    return confined.lstat()
 
 
 def _transfer_stat_key(metadata: os.stat_result) -> tuple[int, ...]:
@@ -6401,6 +6870,13 @@ def _transfer_stat_key(metadata: os.stat_result) -> tuple[int, ...]:
 def _read_transfer_authority_bytes(
     root: Path, path: Path, *, maximum_bytes: int | None = None
 ) -> bytes:
+    if isinstance(path, _CapturedHistoryPath):
+        metadata = _transfer_authority_metadata(root, path)
+        if maximum_bytes is not None and metadata.st_size > maximum_bytes:
+            raise ValueError(f"JSON exceeds maximum raw UTF-8 length {maximum_bytes} bytes")
+        return load_lifecycle_owner()._capture_file_snapshot(path.path,
+            failure_id="WI-OBLIGATION-TRANSFER-OWNER", maximum_bytes=maximum_bytes,
+            acquired_input=path).data
     before = _transfer_authority_metadata(root, path)
     if maximum_bytes is not None and before.st_size > maximum_bytes:
         raise ValueError(
@@ -6436,6 +6912,8 @@ def _read_transfer_authority_bytes(
 def _transfer_authority_sha256(
     root: Path, path: Path, *, maximum_bytes: int
 ) -> str:
+    if isinstance(path, _CapturedHistoryPath):
+        return hashlib.sha256(_read_transfer_authority_bytes(root, path, maximum_bytes=maximum_bytes)).hexdigest()
     before = _transfer_authority_metadata(root, path)
     if before.st_size > maximum_bytes:
         raise ValueError(
@@ -7212,7 +7690,7 @@ def authorized_historical_missing_artifacts(
             _projection_fail(errors, "manifest", "historical artifact disposition path is unsafe")
             continue
         try:
-            if os.lstat(path).st_size > _HISTORICAL_DISPOSITION_MAX_BYTES:
+            if path.lstat().st_size > _HISTORICAL_DISPOSITION_MAX_BYTES:
                 _projection_fail(errors, "manifest", "historical artifact disposition exceeds resource cap")
                 continue
             raw = path.read_bytes()
@@ -7252,7 +7730,11 @@ def authorized_historical_missing_artifacts(
 
 
 def validate_archived_ledger_obligations(
-    item: Path, telemetry: dict[str, int] | None = None
+    item: Path, telemetry: dict[str, int] | None = None, *,
+    obligation_state_out: list[WorkItemObligationStateV1] | None = None,
+    authority_state_out: list[dict[int, LedgerAuthorityV1]] | None = None,
+    ledger_acquisition_complete_out: list[bool] | None = None,
+    required_ledger_acquisition_by_path: dict[str, list[bool]] | None = None,
 ) -> tuple[list[str], list[dict], list[dict]]:
     """Validate one immutable monthly archive through the normal projection owners.
 
@@ -7260,7 +7742,8 @@ def validate_archived_ledger_obligations(
     This reader never writes the archive, registry, or any disposition.
     """
     errors: list[str] = []
-    ledger = item / "agent-runs.jsonl"
+    ledger = (item._at(item.binding.repository_root / item.binding.original_ledger_path)
+              if isinstance(item, _CapturedHistoryPath) else item / "agent-runs.jsonl")
     target = _projection_target_identity(item, ledger, errors, require_ledger=True)
     if target is None:
         return errors, [], []
@@ -7273,8 +7756,36 @@ def validate_archived_ledger_obligations(
     except OSError as exc:
         fail(errors, f"cannot read ledger: {ledger}: {exc}")
         return errors, [], []
+    if isinstance(item, _CapturedHistoryPath):
+        resolution = _resolve_ledger_h1_selected(
+            _root, item, f"{relative_item}/agent-runs.jsonl",
+            selected_ledger_bytes=ledger_bytes,
+            ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+            required_ledger_acquisition_by_path=required_ledger_acquisition_by_path,
+        )
+        if resolution.classification == "invalid":
+            # Retain the raw loader's bounded-acquisition semantics without
+            # reducing a failed applicable group as an ordinary raw archive.
+            load_jsonl(ledger, errors, source_bytes=ledger_bytes,
+                       ledger_acquisition_complete_out=ledger_acquisition_complete_out)
+            errors.extend(resolution.context.observation.diagnostics)
+            return errors, [], []
+        if resolution.classification == "member":
+            context = resolution.context
+            runtime_rows = context.rows
+            _active, validity, open_revise, open_launches = _reduce_effective_current_state(
+                runtime_rows, item, errors, telemetry, context=context
+            )
+            _capture_obligation_state(obligation_state_out, runtime_rows, open_revise,
+                                      open_launches, context.unresolved_history)
+            if authority_state_out is not None:
+                authority_state_out.append({row.raw_line_ordinal: entry.authority
+                                            for row, entry in zip(runtime_rows, validity)})
+            _history_hold_errors(context.history_custody, errors)
+            return errors, open_revise, open_launches
     raw_metadata: list[dict[str, object]] = []
-    events = load_jsonl(ledger, errors, raw_metadata, ledger_bytes)
+    events = load_jsonl(ledger, errors, raw_metadata, ledger_bytes,
+                        ledger_acquisition_complete_out=ledger_acquisition_complete_out)
     historical_pass_custody, custody_errors = resolve_historical_pass_custody(
         item, ledger_bytes, events, raw_metadata
     )
@@ -7305,6 +7816,11 @@ def validate_archived_ledger_obligations(
         _active, _validity, open_revise, open_launches = _reduce_effective_current_state(
             runtime_rows, item, errors, telemetry, context=context
         )
+        _capture_obligation_state(obligation_state_out, runtime_rows, open_revise,
+                                  open_launches, context.unresolved_history)
+        if authority_state_out is not None:
+            authority_state_out.append({row.raw_line_ordinal: validity.authority
+                                        for row, validity in zip(runtime_rows, _validity)})
         _history_hold_errors(history_holds, errors)
         return errors, open_revise, open_launches
     historical_authorizations, disposition_errors = authorized_historical_missing_artifacts(
@@ -7481,10 +7997,89 @@ def validate_archived_ledger_obligations(
         active_rows, errors, telemetry, validity=active_validity,
         _archived_preclose_v2_rows=frozenset(preclose_v2_rows),
     )
+    _capture_obligation_state(obligation_state_out, runtime_rows, open_revise, open_launches)
+    if authority_state_out is not None:
+        active_authority = {row.raw_line_ordinal: validity.authority
+                            for row, validity in zip(active_rows, active_validity)}
+        authority_state_out.append({row.raw_line_ordinal: active_authority.get(
+            row.raw_line_ordinal, _NO_LEDGER_AUTHORITY) for row in runtime_rows})
     if telemetry is not None:
         for name, value in {**migration_counters, **projection_counters}.items():
             telemetry[f"ledger-migration-{name}"] = value
     return errors, open_revise, open_launches
+
+
+def observe_captured_work_item_history(
+    binding: CapturedWorkItemHistoryBindingV1,
+    telemetry: dict[str, int] | None = None,
+) -> CapturedWorkItemHistoryObservationV1:
+    """Acquire original criteria/history and use the existing obligation owners.
+
+    The owner of accepted criteria supplies the evidenced original requirement,
+    not a new archive-time exemption. Present history is always evaluated, even
+    when its original criteria did not require a ledger. A legitimate acquired
+    absence has no invented empty obligation state or authority mask.
+    """
+    selection = "unavailable"
+    digest = None
+    complete: list[bool] = []
+    states: list[WorkItemObligationStateV1] = []
+    masks: list[dict[int, LedgerAuthorityV1]] = []
+    errors: list[str] = []
+    required_acquisition_failures = []
+    required_ledger_acquisition_by_path = {}
+    owner = load_lifecycle_owner()
+    try:
+        item = _acquire_captured_history_item(binding)
+        required_acquisition_failures = item.acquisition_failures
+        selected = item._at(binding.repository_root / binding.original_ledger_path)
+        if not selected.exists():
+            selection = "absent"
+            complete.append(True)
+            if binding.criteria.ledger_required:
+                fail(errors, f"missing ledger: {selected}")
+        else:
+            selection = "present"
+            raw = selected.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            if binding.criteria.owner_contract == "archive":
+                errors, _revises, _launches = validate_archived_ledger_obligations(
+                    item, telemetry, obligation_state_out=states,
+                    authority_state_out=masks, ledger_acquisition_complete_out=complete,
+                    required_ledger_acquisition_by_path=required_ledger_acquisition_by_path,
+                )
+            else:
+                errors = validate_work_item(
+                    item, strict_revise=True, telemetry=telemetry, validate_status_file=False,
+                    selected_ledger_bytes=raw, obligation_state_out=states,
+                    authority_state_out=masks, ledger_acquisition_complete_out=complete,
+                )
+            if complete != [True] or not states:
+                fail(errors, "WI-LEGACY-COMPLETION-HISTORY: selected owner acquisition/reduction unavailable")
+            if states and (states[-1].open_revise or states[-1].open_launches or states[-1].unresolved_history):
+                fail(errors, "WI-LEGACY-COMPLETION-HISTORY: original history has unresolved obligations")
+        # No successful observation survives a source, criteria or custody drift
+        # during reduction. Retain actual diagnostics rather than empty state.
+        for record in item.binding.files:
+            owner._verify_captured_file(record.snapshot, "WI-LEGACY-COMPLETION-DRIFT")
+        item.verify()
+    except _LedgerH1AcquisitionError as exc:
+        fail(errors, f"{exc.failure_id}: captured original compatibility acquisition unavailable: {exc.logical_ledger_path}")
+    except owner.LifecycleError as exc:
+        fail(errors, f"{exc.failure_id}: {exc}")
+    except RuntimeError as exc:
+        fail(errors, f"{getattr(exc, 'failure_id', 'WI-LEGACY-COMPLETION-HISTORY')}: {exc}")
+    except (OSError, ValueError, TypeError) as exc:
+        message = str(exc)
+        fail(errors, message if message.startswith("WI-") else f"WI-LEGACY-COMPLETION-HISTORY: {message}")
+    for operation, locator, failure_id, cause in required_acquisition_failures:
+        fail(errors, f"{failure_id}: required captured {operation} acquisition failed: {locator}: {cause}")
+    return CapturedWorkItemHistoryObservationV1(
+        selection, digest, complete == [True] and not required_acquisition_failures
+        and all(outcome == [True] for outcome in required_ledger_acquisition_by_path.values()), tuple(errors),
+        states[-1] if states else None,
+        MappingProxyType(masks[-1]) if masks else None,
+    )
 
 
 def validate_status(
@@ -8020,7 +8615,10 @@ def validate_work_item(
             "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: compatibility artifacts cannot be mixed with older candidate inputs",
         )
         return errors
-    selected_ledger = ledger_path or (item / "agent-runs.jsonl")
+    selected_ledger = ledger_path or (
+        item._at(item.binding.repository_root / item.binding.original_ledger_path)
+        if isinstance(item, _CapturedHistoryPath) else item / "agent-runs.jsonl"
+    )
     root = repo_root_for(item)
     live_compatibility_observed = bool(
         root is not None

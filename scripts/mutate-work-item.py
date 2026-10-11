@@ -1218,6 +1218,1802 @@ class CapturedFileSnapshot:
     require_single_link: bool = False
 
 
+_DIRECTORY_CAPTURE_OWNER = object()
+
+
+@dataclass(frozen=True)
+class CapturedDirectorySnapshotV1:
+    """Complete native directory observation, minted by the capture owner."""
+
+    path: Path
+    parent_chain: CapturedPathParentChain
+    metadata: os.stat_result
+    members: tuple[tuple[str, os.stat_result], ...]
+    capture_binding: tuple = field(default=(), repr=False, compare=False)
+
+
+def _directory_capture_binding(snapshot):
+    return (_DIRECTORY_CAPTURE_OWNER, snapshot.path, snapshot.parent_chain.participants,
+            _lifecycle_file_snapshot_key(snapshot.metadata),
+            tuple((name, _lifecycle_file_snapshot_key(metadata)) for name, metadata in snapshot.members))
+
+
+@dataclass(frozen=True)
+class CapturedInputAssociationV1:
+    """Original native acquisition and its exact present custody object."""
+
+    original: object
+    current: object
+
+
+LEGACY_COMPLETION_OWNER = "legacy-flat-work-item-completion"
+LEGACY_COMPLETION_KIND = "legacy-flat-completion"
+LEGACY_COMPLETION_METADATA = "legacy-work-item-completion.json"
+LEGACY_COMPLETION_RECEIPT = "lifecycle-transition-receipt.json"
+LEGACY_COMPLETION_METADATA_FIELDS = frozenset({"schemaVersion", "owner", "kind", "operationId", "workItem",
+    "terminalInstant", "source", "acceptedEvidence", "historyBinding", "custodyMap", "requiredEvidenceLinks"})
+LEGACY_COMPLETION_RECEIPT_FIELDS = frozenset({"schemaVersion", "owner", "kind", "status", "operationId", "workItem",
+    "terminalInstant", "requestSha256", "metadataSha256", "archivePath", "archiveMembershipSha256",
+    "closureInputSha256", "closureSha256", "bugDispositionReceiptSha256", "historySelectionSha256",
+    "links", "readme", "provenance"})
+_SETTLED_HISTORY_OWNER = object()
+
+
+@dataclass(frozen=True)
+class RecordedHistoryEntryV1:
+    original_path: Path
+    kind: str
+
+
+@dataclass(frozen=True)
+class RecordedHistoryCustodyV1:
+    original_path: Path
+    current: CapturedFileSnapshot
+
+
+@dataclass(frozen=True)
+class _SettledHistorySealV1:
+    owner: object
+    input: object = field(repr=False)
+
+
+def _history_input_issuer(value, name: str):
+    """Qualify the actual owner type across same-source module-loading names."""
+    module = sys.modules.get(type(value).__module__)
+    if (module is None or getattr(module, name, None) is not type(value)
+            or Path(getattr(module, "__file__", "")).absolute() != Path(__file__).absolute()):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "history input is not an actual lifecycle-owner type")
+    return module
+
+
+def _settled_history_input(value):
+    value = getattr(value, "owner_input", value)
+    if type(value).__name__ != "SettledWorkItemHistoryInputV1":
+        return None
+    issuer = _history_input_issuer(value, "SettledWorkItemHistoryInputV1")
+    seal = getattr(value, "_seal", None)
+    if not isinstance(seal, issuer._SettledHistorySealV1) or seal.owner is not issuer._SETTLED_HISTORY_OWNER or seal.input is not value:
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "settled history input was not minted for this acquisition")
+    return value
+
+
+
+
+LEGACY_COMPLETION_MARKER = "Work-item-representation: legacy-flat-completion-v2"
+LEGACY_COMPLETION_INTENT_FIELDS = frozenset({"schemaVersion", "owner", "kind", "status", "operationId",
+    "workItem", "terminalInstant", "requestBytes", "requestSha256", "sourcePath", "archivePath",
+    "preparedImages", "capturedBindings", "plannedReceiptBytes"})
+
+
+_TERMINAL_OBSERVATION_OWNER = object()
+
+
+@dataclass(frozen=True, init=False)
+class WorkItemTerminalObservation:
+    logical_reference: str
+    actual_location: Path
+    representation: str
+    physical_membership: str
+    acquisition_complete: bool
+    terminal_disposition: str | None
+    terminal_instant: str | None
+    required_artifacts: tuple[Path, ...]
+    receipt_requirements: tuple[Path, ...]
+    history_observation: object | None
+    diagnostics: tuple[str, ...]
+    acquired_input: object | None
+    _seal: tuple
+
+    def __init__(self, *args, **kwargs):
+        raise LifecycleError("WI-LEGACY-COMPLETION-ACQUISITION", "terminal observations require their owner acquisition")
+
+    def verify(self):
+        if self._seal != (_TERMINAL_OBSERVATION_OWNER, id(self)):
+            raise LifecycleError("WI-LEGACY-COMPLETION-ACQUISITION", "terminal observation owner binding differs")
+        if self.acquired_input is not None:
+            self.acquired_input.verify()
+
+
+def _terminal_observation(*args):
+    value = object.__new__(WorkItemTerminalObservation)
+    for name, data in zip((name for name in WorkItemTerminalObservation.__dataclass_fields__ if name != "_seal"), args):
+        object.__setattr__(value, name, data)
+    object.__setattr__(value, "_seal", (_TERMINAL_OBSERVATION_OWNER, id(value)))
+    return value
+
+
+def _legacy_completion_recognized(item):
+    if any(os.path.lexists(item / name) for name in (LEGACY_COMPLETION_METADATA, "legacy-source")):
+        return True
+    for name in ("closure.md", LEGACY_COMPLETION_RECEIPT):
+        path = item / name
+        if not os.path.lexists(path):
+            continue
+        raw = _capture_file_snapshot(path, failure_id="WI-LEGACY-COMPLETION-CUSTODY").data
+        if b"Work-item-representation:" in raw or LEGACY_COMPLETION_OWNER.encode() in raw:
+            return True
+    return False
+
+
+def _observe_work_item_terminal(root, item):
+    reference = f"work-item:{item.name}"
+    try:
+        port = acquire_settled_work_item_history(root, reference)
+        validator = _validator_module()
+        history = validator.observe_captured_work_item_history(validator.bind_settled_work_item_history(port))
+        port.verify()
+        if not history.acquisition_complete or history.diagnostics or (
+            history.obligations is not None and (history.obligations.open_revise or history.obligations.open_launches)):
+            raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "; ".join(history.diagnostics) or "original history remains open")
+        leaves = tuple(snapshot.path for snapshot in port._current_files)
+        return _terminal_observation(reference, item, LEGACY_COMPLETION_KIND, "archive", True,
+            "delivered", port.metadata["terminalInstant"], leaves,
+            (item / BUG_DISPOSITIONS_RECEIPT, item / LEGACY_COMPLETION_RECEIPT), history, (), port)
+    except LifecycleError as exc:
+        return _terminal_observation(reference, item, LEGACY_COMPLETION_KIND, "archive", False,
+            None, None, (), (), None, (f"{exc.failure_id}: {exc}",), None)
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        return _terminal_observation(reference, item, LEGACY_COMPLETION_KIND, "archive", False,
+            None, None, (), (), None, (f"WI-LEGACY-COMPLETION-CUSTODY: malformed acquired record: {exc}",), None)
+
+
+def _require_legacy_terminal(root, item):
+    observed = _observe_work_item_terminal(root, item)
+    if not observed.acquisition_complete:
+        raise LifecycleError("WI-LEGACY-COMPLETION-ACQUISITION", "; ".join(observed.diagnostics))
+    observed.verify()
+    return observed
+
+
+@functools.partial(_lifecycle_participant, input_role="repository-root")
+def observe_work_item_terminal(root, logical_reference):
+    category, slug = _canonical_category(logical_reference)
+    if category.name != "work-item":
+        raise LifecycleError("WI-REFERENCE-INVALID", "terminal observation requires a work-item reference")
+    rows, _dirs, _absent, _evidence = _archive_entity_rows_at(root / "work-items")
+    candidates = [path for path, _kind, reference, _leaves in rows if reference == logical_reference]
+    if len(candidates) != 1 or not _legacy_completion_recognized(candidates[0]):
+        raise LifecycleError("WI-LEGACY-COMPLETION-ACQUISITION", "selected flat-terminal envelope is unavailable or ambiguous")
+    return _observe_work_item_terminal(root, candidates[0])
+
+
+@dataclass(frozen=True, init=False)
+class PreparedWorkItemTerminal:
+    transaction: object
+    root: Path
+    source: Path
+    archive: Path
+    instant: str
+    images: Mapping
+    origin: object
+    history: object
+
+    def verify(self, root):
+        if (self.transaction is not _CURRENT_LIFECYCLE_TRANSACTION.get() or self.root != root
+                or not (isinstance(self.origin, AcquiredWorkItemInputV1) or _settled_history_input(self.origin) is not None)):
+            raise LifecycleError("WI-LEGACY-COMPLETION-PREPARED", "prepared terminal is not bound to this owner transaction")
+        self.origin.verify()
+
+
+_PENDING_LEGACY_PLAN_OWNER = object()
+
+
+@dataclass(frozen=True, init=False)
+class _PendingLegacyCompletionPlan:
+    owner: object
+    transaction: object
+    intent_path: Path
+    intent: Mapping
+
+    def verify(self, root, operation, receipt_data):
+        if (self.owner is not _PENDING_LEGACY_PLAN_OWNER or self.transaction is not _CURRENT_LIFECYCLE_TRANSACTION.get()
+                or self.intent_path != _transition_intent_path(root, operation)):
+            raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "private pending plan is not bound to this actual transaction")
+        snapshot = _capture_file_snapshot(self.intent_path, failure_id="WI-LEGACY-COMPLETION-NATIVE")
+        if snapshot.data != _migration_receipt_bytes(self.intent) or receipt_data != _unb64(self.intent["plannedReceiptBytes"]):
+            raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "private pending plan differs from its exact durable/current records")
+        _legacy_validate_intent(root, self.intent)
+        _legacy_verify_postimages(root, self.intent)
+
+
+def _legacy_terminal_entry(item, metadata, closure_data):
+    fields = _parse_fields(closure_data.decode("utf-8"))
+    sources = [item / "closure.md", item / LEGACY_COMPLETION_METADATA, item / BUG_DISPOSITIONS_MANIFEST]
+    sources += [item / cell["preservedPath"] for cell in metadata["custodyMap"]]
+    return ReadmeEntry("Recently completed", f"work-item:{item.name}", fields.get("outcome") or item.name,
+                      item / "closure.md", True, fields.get("residual risk", ""), sources, LEGACY_COMPLETION_KIND)
+
+
+def _legacy_request_bytes(evidence_data, slug, closure_data, instant, authority):
+    return _projection_json({"evidence": _b64(evidence_data), "workItem": slug, "closure": _b64(closure_data),
+                             "terminalInstant": instant, "allowProtectedUriUpdates": authority, "apply": True})
+
+
+def _legacy_evidence_input(evidence_data):
+    failure = "WI-LEGACY-COMPLETION-EVIDENCE"
+    try:
+        request = json.loads(evidence_data)
+    except (UnicodeError, ValueError) as exc:
+        raise LifecycleError(failure, "legacy evidence input is unreadable") from exc
+    if (not isinstance(request, dict) or set(request) != {"schemaVersion", "kind", "operationId", "source",
+        "acceptedEvidence", "historySelection", "bugDispositions", "expectedReadmeSha256"}
+        or type(request["schemaVersion"]) is not int or request["schemaVersion"] != 1
+        or request["kind"] != "legacy-work-item-evidence"):
+        raise LifecycleError(failure, "legacy evidence input fields differ")
+    _validate_transition_operation_id(request["operationId"])
+    return request
+
+
+def _capture_legacy_evidence(root, slug, evidence_data):
+    failure = "WI-LEGACY-COMPLETION-EVIDENCE"
+    request = _legacy_evidence_input(evidence_data)
+    selected = {}
+    def reference(cell):
+        _legacy_cell(cell)
+        path = root / cell["path"]
+        snapshot = _capture_file_snapshot(path, failure_id=failure, maximum_bytes=cell["byteLength"])
+        if snapshot.length != cell["byteLength"] or _sha256_bytes(snapshot.data) != cell["sha256"]:
+            raise LifecycleError(failure, "independently supplied evidence bytes differ")
+        selected[path] = snapshot
+        return snapshot
+    source = reference(request["source"])
+    if source.path != root / "work-items/backlog" / f"{slug}.md":
+        raise LifecycleError(failure, "legacy close requires the exact current flat source")
+    if not isinstance(request["acceptedEvidence"], dict) or set(request["acceptedEvidence"]) != {"admission", "completion", "criteria", "historyAcquisition"}:
+        raise LifecycleError(failure, "accepted original evidence roles differ")
+    for cell in request["acceptedEvidence"].values():
+        if reference(cell).length == 0:
+            raise LifecycleError(failure, "accepted evidence is empty")
+    bug_manifest = reference(request["bugDispositions"])
+    history = request["historySelection"]
+    if (not isinstance(history, dict) or set(history) != {"originalItemBase", "originalLedgerPath", "ledgerRequired",
+        "ownerContract", "artifacts", "absentPaths"} or type(history["ledgerRequired"]) is not bool
+        or history["ownerContract"] not in {"current", "archive"} or not isinstance(history["artifacts"], list)
+        or not isinstance(history["absentPaths"], list)):
+        raise LifecycleError(failure, "original history selection fields differ")
+    for cell in history["artifacts"]:
+        reference(cell)
+    for name in (history["originalItemBase"], history["originalLedgerPath"], *history["absentPaths"]):
+        _legacy_relative(name)
+    ledger = root / history["originalLedgerPath"]
+    if os.path.lexists(ledger) and ledger not in selected:
+        raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "present selected ledger lacks an exact supplied reference")
+    directories = {root}
+    for path in (*selected, root / history["originalItemBase"], ledger, *(root / p for p in history["absentPaths"])):
+        for parent in (path if path.is_dir() else path.parent, *path.parents):
+            if parent.is_relative_to(root) and parent.is_dir():
+                directories.add(parent)
+    # This bounded existing work-item namespace is traversed by the H1 and
+    # retired-consumer owners; unrelated repository directories are not walked.
+    pending = [root / "work-items"]
+    while pending:
+        path = pending.pop()
+        if not path.is_dir():
+            continue
+        proof = _capture_directory_snapshot(path, failure_id=failure)
+        directories.add(path)
+        if len(directories) > TRANSITION_INTENT_INVENTORY_MAX_ENTRIES:
+            raise LifecycleError(failure, "selected work-item topology exceeds the owner bound")
+        pending.extend(path / name for name, info in proof.members
+                       if stat.S_ISDIR(info.st_mode) and not _lifecycle_path_has_reparse(path / name))
+    proofs = [_capture_directory_snapshot(path, failure_id=failure) for path in sorted(directories)]
+    live = AcquiredWorkItemInputV1(root,
+        tuple(CapturedInputAssociationV1(snapshot, snapshot) for snapshot in selected.values()),
+        tuple(CapturedInputAssociationV1(snapshot, snapshot) for snapshot in proofs))
+    validator = _validator_module()
+    criteria = request["acceptedEvidence"]
+    binding = validator.CapturedWorkItemHistoryBindingV1(root, slug, source.path.relative_to(root).as_posix(),
+        history["originalItemBase"], history["originalLedgerPath"],
+        validator.HistoricalLedgerCriteriaV1(criteria["criteria"]["path"], criteria["historyAcquisition"]["path"],
+                                             history["ledgerRequired"], history["ownerContract"]),
+        tuple(validator.CapturedHistoryFileV1(path.relative_to(root).as_posix(), snapshot, snapshot.length,
+                                             _sha256_bytes(snapshot.data)) for path, snapshot in selected.items()),
+        tuple(history["absentPaths"]),
+        {proof.path.relative_to(root).as_posix(): tuple(name for name, _ in proof.members) for proof in proofs}, live)
+    observed = validator.observe_captured_work_item_history(binding)
+    if not observed.acquisition_complete or observed.diagnostics or (observed.obligations is not None
+            and (observed.obligations.open_revise or observed.obligations.open_launches)):
+        raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "; ".join(observed.diagnostics) or "original history is unresolved")
+    live.verify()
+    return request, source, bug_manifest, live, observed
+
+
+def _legacy_local_image(path):
+    target = LifecycleWriteTarget(path, failure_id="WI-LEGACY-COMPLETION-NATIVE")
+    primary = None
+    try:
+        target._acquire_existing_parents()
+        image = target.owned_image()
+        target.verify()
+        parents = [{"path": str(parent), "identity": list(identity)} for parent, _handle, identity in target._directories]
+        return image, parents
+    except OSError as exc:
+        primary = LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "native image existing-parent acquisition failed")
+        raise primary from exc
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        target.__exit__(type(primary) if primary is not None else None, primary,
+                        primary.__traceback__ if primary is not None else None)
+
+
+def _legacy_check_parents(parents):
+    for row in parents:
+        path = Path(row["path"])
+        _lifecycle_reject_unreduced_reparse(path, failure_id="WI-LEGACY-COMPLETION-NATIVE", message="native parent is unsafe")
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or list(_lifecycle_file_identity(info)) != row["identity"]:
+            raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "captured parent identity changed")
+
+
+def _legacy_create_directory(path):
+    # NtCreateFile returns the exclusive creator handle. A later lstat alone
+    # cannot serve as creator authority. Other hosts fail before this effect.
+    if os.name != "nt":
+        raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE-UNSUPPORTED", "exclusive directory creator/promotion is unavailable")
+    with LifecycleWriteTarget(path.parent / ".legacy-directory-owner", failure_id="WI-LEGACY-COMPLETION-NATIVE") as owner:
+        handle = owner._windows_child(owner._parent, path.name, directory=True, create=True, exclusive=True, delete=True)
+        try:
+            identity = owner._identity(handle)
+            owner.verify()
+            if _lifecycle_file_identity(path.lstat()) != identity:
+                raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "creator directory differs from its actual handle")
+            return {"path": str(path), "nodeKind": "directory", "role": "actually-created",
+                    "identity": {"kind": "native-windows-file", "value": list(identity)},
+                    "parentChain": [{"path": str(p), "identity": list(i)} for p, _h, i in owner._directories]}
+        except BaseException:
+            owner._windows_delete(handle)
+            raise
+        finally:
+            owner._release_handle(handle)
+
+
+def _legacy_move_owned(path, destination, image, *, directory_identity=None):
+    if os.name != "nt":
+        raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE-UNSUPPORTED", "native conditional relocation is unavailable")
+    capability = path if image is not None else path.parent / ".legacy-directory-move"
+    with LifecycleWriteTarget(capability, failure_id="WI-LEGACY-COMPLETION-NATIVE") as source_owner:
+        handle = source_owner._file(path.name, delete=True) if image is not None else source_owner._windows_child(
+            source_owner._parent, path.name, directory=True, delete=True)
+        try:
+            if image is None and (directory_identity is None or source_owner._identity(handle) != tuple(directory_identity["value"])):
+                raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "creator envelope native identity changed")
+            if image is not None:
+                if source_owner._identity(handle) != tuple(image["identity"]["value"]) or source_owner._read_handle(
+                        handle, len(_unb64(image["data"]))) != _unb64(image["data"]):
+                    raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "owned relocation native preimage changed")
+            with LifecycleWriteTarget(destination, failure_id="WI-LEGACY-COMPLETION-NATIVE") as target:
+                if os.path.lexists(destination):
+                    raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "create-only relocation target is occupied")
+                target._windows_rename(handle, destination.name, replace=False)
+                target.verify()
+        finally:
+            source_owner._release_handle(handle)
+
+
+def _legacy_save_intent(path, intent):
+    data = _migration_receipt_bytes(intent)
+    if len(data) > TRANSITION_INTENT_FILE_BYTE_CAP:
+        raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "bound intent exceeds the existing owner byte cap")
+    _atomic_write(path, data)
+    _transition_fsync_directory(path.parent)
+
+
+def _legacy_validate_intent(root, intent):
+    failure = "WI-LEGACY-COMPLETION-RECOVERY"
+    if (not isinstance(intent, dict) or set(intent) != LEGACY_COMPLETION_INTENT_FIELDS or intent["schemaVersion"] != 1
+        or intent["owner"] != LEGACY_COMPLETION_OWNER or intent["kind"] != LEGACY_COMPLETION_KIND or intent["status"] != "intent"):
+        raise LifecycleError(failure, "typed legacy intent fields differ")
+    _validate_slug(intent["workItem"]); _validate_transition_operation_id(intent["operationId"])
+    instant = intent["terminalInstant"]; month = archive_month(instant)
+    if (intent["sourcePath"] != f"work-items/backlog/{intent['workItem']}.md"
+            or intent["archivePath"] != f"work-items/archive/{month}/{intent['workItem']}"):
+        raise LifecycleError(failure, "typed legacy action paths differ")
+    request = _unb64(intent["requestBytes"])
+    if request is None or _sha256_bytes(request) != intent["requestSha256"]:
+        raise LifecycleError(failure, "legacy request image differs")
+    action = json.loads(_unb64(intent["plannedReceiptBytes"]))
+    if (set(action) != LEGACY_COMPLETION_RECEIPT_FIELDS or action["requestSha256"] != intent["requestSha256"]
+            or any(action[key] != intent[key] for key in ("operationId", "workItem", "terminalInstant", "archivePath"))):
+        raise LifecycleError(failure, "planned action identity differs")
+    archive = root / intent["archivePath"]
+    images = intent["preparedImages"]
+    if not isinstance(images, list) or not isinstance(intent["capturedBindings"], list):
+        raise LifecycleError(failure, "legacy image/native binding selection differs")
+    binding_keys = set()
+    for bound in intent["capturedBindings"]:
+        if (not isinstance(bound, dict) or bound.get("nodeKind") not in {"file", "directory"}
+                or bound.get("role") not in {"source", "preexisting", "actually-created"}
+                or not isinstance(bound.get("path"), str) or not isinstance(bound.get("parentChain"), list)):
+            raise LifecycleError(failure, "native binding record fields differ")
+        path = Path(bound["path"])
+        if not path.is_absolute() or not path.is_relative_to(root):
+            raise LifecycleError(failure, "native binding escapes its actual repository")
+        allowed = {"path", "nodeKind", "role", "parentChain", "identity"} if bound["nodeKind"] == "directory" else {
+            "path", "nodeKind", "role", "parentChain", "image", "imageIndex", "receipt",
+            "holdPath", "postStage", "postImage"}
+        if not set(bound).issubset(allowed):
+            raise LifecycleError(failure, "native binding contains unknown fields")
+        if bound["nodeKind"] == "directory":
+            _initial_v0_identity(bound["identity"])
+        else:
+            _initial_v0_image(bound["image"])
+            if bound.get("postImage") is not None:
+                _initial_v0_image(bound["postImage"])
+            index = bound.get("imageIndex")
+            if index is not None and (type(index) is not int or index < 0 or index >= len(images)):
+                raise LifecycleError(failure, "native image association differs")
+            key = ("receipt" if bound.get("receipt") else "image", index)
+            if key in binding_keys:
+                raise LifecycleError(failure, "native image association collides")
+            binding_keys.add(key)
+            for key in ("holdPath", "postStage"):
+                if bound.get(key) is not None and not Path(bound[key]).is_relative_to(root):
+                    raise LifecycleError(failure, "native effect locator escapes its repository")
+        ancestors = tuple(reversed(path.parents))
+        parent_paths = []
+        for parent in bound["parentChain"]:
+            if (not isinstance(parent, dict) or set(parent) != {"path", "identity"}
+                    or not isinstance(parent["path"], str) or not isinstance(parent["identity"], list)
+                    or len(parent["identity"]) != 2 or any(type(value) is not int or value < 0 for value in parent["identity"])):
+                raise LifecycleError(failure, "native parent binding fields differ")
+            parent_paths.append(Path(parent["path"]))
+        allowed_chains = (ancestors, ancestors + (path,)) if bound["nodeKind"] == "directory" else (ancestors,)
+        if tuple(parent_paths) not in allowed_chains:
+            raise LifecycleError(failure, "ordered native ancestry differs from its locator")
+        if parent_paths and parent_paths[-1] == path and bound["parentChain"][-1]["identity"] != bound["identity"]["value"]:
+            raise LifecycleError(failure, "directory identity and captured ancestry disagree")
+    destinations = set()
+    for row in images:
+        if not isinstance(row, dict) or set(row) != {"source", "destination", "disposition", "before", "after"}:
+            raise LifecycleError(failure, "typed prepared image fields differ")
+        for key in ("source", "destination"):
+            if row[key] is not None:
+                _legacy_relative(row[key])
+        if row["destination"] in destinations or row["disposition"] not in {"archive", "source", "consumer", "bug", "readme"}:
+            raise LifecycleError(failure, "typed effect selection collides")
+        destinations.add(row["destination"])
+        before, after = _unb64(row["before"]), _unb64(row["after"])
+        dest = root / row["destination"]
+        if row["disposition"] == "archive":
+            if before is not None or after is None or not dest.is_relative_to(archive):
+                raise LifecycleError(failure, "archive effect is outside its exact envelope")
+        elif row["disposition"] == "source":
+            if row["source"] != intent["sourcePath"] or row["destination"] != intent["sourcePath"] or before is None or after is not None:
+                raise LifecycleError(failure, "flat source effect differs")
+        elif row["disposition"] == "readme":
+            if row["destination"] != "work-items/README.md" or after is None:
+                raise LifecycleError(failure, "derived board effect differs")
+        elif row["disposition"] == "consumer":
+            reference = next((image for image in action["links"]["consumers"] if image["path"] == row["destination"]), None)
+            if reference is None or reference["before"] != row["before"] or reference["after"] != row["after"]:
+                raise LifecycleError(failure, "consumer effect lacks an actual bound link image")
+        elif not (dest.is_relative_to(root / "work-items/bugs/archive") and before is not None and after is not None):
+            raise LifecycleError(failure, "bug effect is outside its owner")
+    data = {row["destination"]: _unb64(row["after"]) for row in images if row["disposition"] == "archive"}
+    metadata = json.loads(data.get((archive / LEGACY_COMPLETION_METADATA).relative_to(root).as_posix(), b"null"))
+    if not isinstance(metadata, dict) or _sha256_bytes(_migration_receipt_bytes(metadata)) != action["metadataSha256"]:
+        raise LifecycleError(failure, "prepared metadata differs from the planned action")
+    expected = {cell["preservedPath"] for cell in metadata["custodyMap"]} | {
+        LEGACY_COMPLETION_METADATA, "closure.md", BUG_DISPOSITIONS_MANIFEST, BUG_DISPOSITIONS_RECEIPT}
+    if {Path(name).relative_to(archive.relative_to(root)).as_posix() for name in data} != expected:
+        raise LifecycleError(failure, "prepared archive membership differs")
+    return action
+
+
+def _legacy_verify_postimages(root, intent):
+    """Every intended after-image needs its actual current native binding."""
+    for index, row in enumerate(intent["preparedImages"]):
+        bound = next((value for value in intent["capturedBindings"] if value.get("imageIndex") == index), None)
+        if bound is None:
+            raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "final image has no required native binding")
+        after = _unb64(row["after"])
+        expected = bound["image"] if row["disposition"] == "archive" else bound.get("postImage")
+        if after is not None and (expected is None or _unb64(expected["data"]) != after):
+            raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "intended final bytes have no matching native postimage")
+        if after is None and (row["disposition"] != "source" or expected is not None):
+            raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "final absence lacks its explicit source-removal contract")
+        _legacy_check_parents(bound["parentChain"])
+        observed, _ = _legacy_local_image(root / row["destination"])
+        if observed != expected:
+            raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "final exact native postimage differs")
+
+
+def _legacy_verify_complete(root, intent_path, intent, action):
+    """The one commit proof, shared by replay, catch and compensation."""
+    _legacy_verify_postimages(root, intent)
+    archive = root / intent["archivePath"]
+    receipt = next((row for row in intent["capturedBindings"] if row.get("receipt")), None)
+    if receipt is None or Path(receipt["path"]) != archive / LEGACY_COMPLETION_RECEIPT:
+        raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "final action has no required native binding")
+    _legacy_check_parents(receipt["parentChain"])
+    observed, _ = _legacy_local_image(Path(receipt["path"]))
+    if observed != receipt["image"] or _unb64(receipt["image"]["data"]) != _unb64(intent["plannedReceiptBytes"]):
+        raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "final action native image differs")
+    pending_plan = object.__new__(_PendingLegacyCompletionPlan)
+    for key, value in {"owner": _PENDING_LEGACY_PLAN_OWNER, "transaction": _CURRENT_LIFECYCLE_TRANSACTION.get(),
+                       "intent_path": intent_path, "intent": intent}.items():
+        object.__setattr__(pending_plan, key, value)
+    port = acquire_settled_work_item_history(root, f"work-item:{intent['workItem']}", _pending_plan=pending_plan)
+    validator = _validator_module()
+    history = validator.observe_captured_work_item_history(validator.bind_settled_work_item_history(port))
+    port.verify()
+    if not history.acquisition_complete or history.diagnostics or (history.obligations is not None
+            and (history.obligations.open_revise or history.obligations.open_launches)):
+        raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "; ".join(history.diagnostics) or "history remains open")
+    actual_plan = object.__new__(PreparedWorkItemTerminal)
+    for key, value in {"transaction": _CURRENT_LIFECYCLE_TRANSACTION.get(), "root": root,
+        "source": root / intent["sourcePath"], "archive": archive, "instant": intent["terminalInstant"],
+        "images": MappingProxyType({snapshot.path: snapshot.data for snapshot in port._current_files}),
+        "origin": port, "history": history}.items():
+        object.__setattr__(actual_plan, key, value)
+    expected_board = _render_readme_bytes(root, prepared_terminal=actual_plan)
+    current_board = _capture_file_snapshot(root / "work-items/README.md", failure_id="WI-README-STALE").data
+    if current_board != expected_board or _sha256_bytes(current_board) != action["readme"]["afterSha256"]:
+        raise LifecycleError("WI-README-STALE", "actual private readback differs from the prepared board")
+
+
+def _legacy_completion_is_final(root, intent_path, intent, action):
+    try:
+        _legacy_verify_complete(root, intent_path, intent, action)
+    except (LifecycleError, OSError, ValueError, TypeError, KeyError, StopIteration) as proof_failure:
+        # Precommit may still replay/compensate only while every original native
+        # input remains recoverable. A disposed original makes this indeterminate.
+        for index, row in enumerate(intent["preparedImages"]):
+            if row["disposition"] == "archive":
+                continue
+            bound = next((value for value in intent["capturedBindings"] if value.get("imageIndex") == index), None)
+            if bound is None:
+                raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "indeterminate finalization: required original binding is missing") from proof_failure
+            source = root / row["source"]
+            hold = Path(bound["holdPath"]) if bound.get("holdPath") else source.with_name(
+                f".{source.name}.{intent['operationId']}.{index}.hold")
+            original = hold if os.path.lexists(hold) else source
+            _legacy_check_parents(bound["parentChain"])
+            if _legacy_local_image(original)[0] != bound["image"]:
+                raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY",
+                    f"indeterminate finalization: original input is unavailable or changed; complete proof: {proof_failure}") from proof_failure
+        return False
+    return True
+
+
+def _legacy_finalize_completion(root, intent_path, intent, action):
+    # The caller has verified complete final state. Missing owned cleanup objects
+    # are expired resources, including removal-before-progress-save interruptions.
+    for index, row in enumerate(intent["preparedImages"]):
+        if row["disposition"] == "archive":
+            continue
+        bound = next(value for value in intent["capturedBindings"] if value.get("imageIndex") == index)
+        source = root / row["source"]
+        hold = Path(bound["holdPath"]) if bound.get("holdPath") else source.with_name(
+            f".{source.name}.{intent['operationId']}.{index}.hold")
+        if os.path.lexists(hold):
+            _legacy_check_parents(bound["parentChain"])
+            with LifecycleWriteTarget(hold, failure_id="WI-LEGACY-COMPLETION-NATIVE") as owner:
+                owner.remove_owned(hold.name, bound["image"])
+        if bound.get("holdPath") is not None:
+            bound["holdPath"] = None
+            _legacy_save_intent(intent_path, intent)
+    for bound in reversed(intent["capturedBindings"]):
+        path = Path(bound["path"])
+        if (bound["nodeKind"] == "directory" and bound["role"] == "actually-created"
+                and path.is_relative_to(root / ".scratch") and os.path.lexists(path)):
+            _legacy_check_parents(bound["parentChain"])
+            if list(_lifecycle_file_identity(path.lstat())) != bound["identity"]["value"]:
+                raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "created empty stage parent changed")
+            path.rmdir()
+    intent_path.unlink(); _transition_fsync_directory(intent_path.parent)
+    _require_legacy_terminal(root, root / intent["archivePath"])
+    return action
+
+
+def _recover_legacy_completion(root, intent_path, intent, *, inject_failure_at=None):
+    action = _legacy_validate_intent(root, intent)
+    if _legacy_completion_is_final(root, intent_path, intent, action):
+        return _legacy_finalize_completion(root, intent_path, intent, action)
+    archive = root / intent["archivePath"]
+    stage = root / ".scratch/work-items/legacy-flat-terminal" / intent["operationId"] / "archive"
+    bindings = intent["capturedBindings"]
+    def save():
+        _legacy_save_intent(intent_path, intent)
+    def directory(path):
+        if path.exists():
+            bound = next((row for row in bindings if row["nodeKind"] == "directory" and row["path"] == str(path)), None)
+            if bound is None:
+                raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "unknown preexisting directory in prepared stage")
+            _legacy_check_parents(bound["parentChain"])
+            if list(_lifecycle_file_identity(path.lstat())) != bound["identity"]["value"]:
+                raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "creator directory was replaced")
+            return
+        if not path.parent.exists():
+            directory(path.parent)
+        bindings.append(_legacy_create_directory(path)); save()
+    def file_binding(index):
+        return next((row for row in bindings if row.get("imageIndex") == index), None)
+    # Existing parents were captured before the first effect. Missing descendants
+    # gain an actual exclusive creator observation, durably recorded before use.
+    for index, row in enumerate(intent["preparedImages"]):
+        bound = file_binding(index)
+        dest = root / row["destination"]
+        before, after = _unb64(row["before"]), _unb64(row["after"])
+        if row["disposition"] == "archive":
+            physical = dest if archive.exists() else stage / dest.relative_to(archive)
+            if bound is not None and Path(bound["path"]) == physical and not os.path.lexists(physical):
+                _legacy_check_parents(bound["parentChain"])
+                with LifecycleWriteTarget(physical, failure_id="WI-LEGACY-COMPLETION-NATIVE") as owner:
+                    created = owner.stage_create(after)
+                    bound["path"] = created["stagePath"]
+                    bound["image"] = {key: created[key] for key in ("identity", "sha256", "data")}
+                    save(); owner.promote_create(created); bound["path"] = str(physical); save()
+            if bound is None:
+                directory(physical.parent)
+                with LifecycleWriteTarget(physical, failure_id="WI-LEGACY-COMPLETION-NATIVE") as owner:
+                    if owner.owned_image() is not None:
+                        raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "unbound prepared leaf exists")
+                    created = owner.stage_create(after)
+                    bindings.append({"path": created["stagePath"], "nodeKind": "file", "role": "actually-created",
+                        "imageIndex": index, "image": {k: created[k] for k in ("identity", "sha256", "data")},
+                        "parentChain": [{"path": str(p), "identity": list(i)} for p, _h, i in owner._directories]})
+                    save()
+                    owner.promote_create(created)
+                    bound = file_binding(index); bound["path"] = str(physical); save()
+            elif Path(bound["path"]) != physical:
+                old = Path(bound["path"])
+                if old.exists():
+                    _legacy_move_owned(old, physical, bound["image"])
+                bound["path"] = str(physical); save()
+            current, _parents = _legacy_local_image(physical)
+            if current != bound["image"]:
+                raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "prepared archive leaf changed")
+    if not archive.exists():
+        directory(archive.parent)
+        stage_binding = next(row for row in bindings if row["nodeKind"] == "directory" and row["path"] == str(stage))
+        if list(_lifecycle_file_identity(stage.lstat())) != stage_binding["identity"]["value"]:
+            raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "creator envelope changed")
+        _legacy_move_owned(stage, archive, None, directory_identity=stage_binding["identity"])
+        # Native identities stay actual while their current locators move.
+        for bound in bindings:
+            old = Path(bound["path"])
+            if old.is_relative_to(stage):
+                bound["path"] = str(archive / old.relative_to(stage))
+                chain = _capture_path_parent_chain(Path(bound["path"]) / ".proof" if bound["nodeKind"] == "directory" else Path(bound["path"]),
+                                                   "WI-LEGACY-COMPLETION-NATIVE")
+                bound["parentChain"] = [{"path": str(p), "identity": list(i)} for p, i in chain.participants]
+        save()
+    if inject_failure_at == "after-promotion":
+        raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "injected interruption after promotion")
+    for index, row in enumerate(intent["preparedImages"]):
+        if row["disposition"] == "archive":
+            continue
+        bound = file_binding(index)
+        source = root / row["source"] if row["source"] else None
+        dest = root / row["destination"]
+        before, after = _unb64(row["before"]), _unb64(row["after"])
+        if bound is None:
+            raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "effect has no original native binding")
+        _legacy_check_parents(bound["parentChain"])
+        hold = source.with_name(f".{source.name}.{intent['operationId']}.{index}.hold") if source else None
+        current, _ = _legacy_local_image(source) if source else (None, ())
+        if hold is not None and not hold.exists():
+            if current != bound["image"]:
+                raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "original effect input was replaced")
+            _legacy_move_owned(source, hold, bound["image"])
+            bound["holdPath"] = str(hold); save()
+        elif hold is not None:
+            held, _ = _legacy_local_image(hold)
+            if held != bound["image"]:
+                raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "held original input was replaced")
+        if after is not None:
+            post = bound.get("postImage")
+            if post is None:
+                directory(dest.parent)
+                with LifecycleWriteTarget(dest, failure_id="WI-LEGACY-COMPLETION-NATIVE") as owner:
+                    if owner.owned_image() is not None:
+                        raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "foreign effect destination is occupied")
+                    created = owner.stage_create(after)
+                    bound["postStage"] = created["stagePath"]; bound["postImage"] = {k: created[k] for k in ("identity", "sha256", "data")}
+                    save(); owner.promote_create(created); bound["postStage"] = None; save()
+            elif not dest.exists() and bound.get("postStage"):
+                _legacy_move_owned(Path(bound["postStage"]), dest, post); bound["postStage"] = None; save()
+            observed, _ = _legacy_local_image(dest)
+            if observed != bound["postImage"]:
+                raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "created effect postimage was replaced")
+        elif os.path.lexists(dest):
+            raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "removed source reappeared")
+        if inject_failure_at == "after-source-remove" and row["disposition"] == "source":
+            raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "injected interruption after source removal")
+        if inject_failure_at == "after-board" and row["disposition"] == "readme":
+            raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "injected interruption after derived board")
+    receipt_path = archive / LEGACY_COMPLETION_RECEIPT
+    receipt_data = _unb64(intent["plannedReceiptBytes"])
+    bound_receipt = next((row for row in bindings if row.get("receipt")), None)
+    if bound_receipt is None:
+        with LifecycleWriteTarget(receipt_path, failure_id="WI-LEGACY-COMPLETION-NATIVE") as owner:
+            if owner.owned_image() is not None:
+                raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "unknown action receipt exists")
+            created = owner.stage_create(receipt_data)
+            bound_receipt = {"path": created["stagePath"], "nodeKind": "file", "role": "actually-created", "receipt": True,
+                "image": {k: created[k] for k in ("identity", "sha256", "data")},
+                "parentChain": [{"path": str(p), "identity": list(i)} for p, _h, i in owner._directories]}
+            bindings.append(bound_receipt); save(); owner.promote_create(created); bound_receipt["path"] = str(receipt_path); save()
+    elif Path(bound_receipt["path"]) != receipt_path:
+        _legacy_move_owned(Path(bound_receipt["path"]), receipt_path, bound_receipt["image"]); bound_receipt["path"] = str(receipt_path); save()
+    observed, _ = _legacy_local_image(receipt_path)
+    if observed != bound_receipt["image"]:
+        raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "created action receipt changed")
+    _legacy_verify_complete(root, intent_path, intent, action)
+    return _legacy_finalize_completion(root, intent_path, intent, action)
+
+
+
+def _compensate_legacy_completion(root, intent_path, intent):
+    """Restore only actual held originals and remove actual creator postimages."""
+    action = _legacy_validate_intent(root, intent)
+    if _legacy_completion_is_final(root, intent_path, intent, action):
+        _legacy_finalize_completion(root, intent_path, intent, action)
+        return True
+    bindings = intent["capturedBindings"]
+    # Diagnose every foreign postimage before the first compensating effect.
+    # A partial compensation must not destroy the evidence needed to resume.
+    for index, row in enumerate(intent["preparedImages"]):
+        bound = next((value for value in bindings if value.get("imageIndex") == index), None)
+        if bound is None:
+            continue
+        _legacy_check_parents(bound["parentChain"])
+        if row["disposition"] == "archive":
+            path = Path(bound["path"])
+            if path.exists() and _legacy_local_image(path)[0] != bound["image"]:
+                raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "foreign archive replacement preserved")
+        else:
+            source = root / row["source"]
+            hold = Path(bound["holdPath"]) if bound.get("holdPath") else source.with_name(
+                f".{source.name}.{intent['operationId']}.{index}.hold")
+            if hold.exists():
+                if _legacy_local_image(hold)[0] != bound["image"]:
+                    raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "original native hold differs")
+                current = _legacy_local_image(root / row["destination"])[0]
+                if current is not None and current != bound.get("postImage"):
+                    raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "foreign effect replacement preserved")
+            elif _legacy_local_image(source)[0] != bound["image"]:
+                raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "foreign source replacement preserved")
+    receipt = next((row for row in bindings if row.get("receipt")), None)
+    if receipt is not None:
+        path = Path(receipt["path"])
+        if path.exists():
+            _legacy_check_parents(receipt["parentChain"])
+            with LifecycleWriteTarget(path, failure_id="WI-LEGACY-COMPLETION-RECOVERY") as owner:
+                owner.remove_owned(path.name, receipt["image"])
+    for index in reversed(range(len(intent["preparedImages"]))):
+        row = intent["preparedImages"][index]
+        bound = next((value for value in bindings if value.get("imageIndex") == index), None)
+        if bound is None:
+            continue
+        if row["disposition"] == "archive":
+            path = Path(bound["path"])
+            if path.exists():
+                _legacy_check_parents(bound["parentChain"])
+                with LifecycleWriteTarget(path, failure_id="WI-LEGACY-COMPLETION-RECOVERY") as owner:
+                    owner.remove_owned(path.name, bound["image"])
+            continue
+        source = root / row["source"]
+        _legacy_check_parents(bound["parentChain"])
+        hold = Path(bound["holdPath"]) if bound.get("holdPath") else source.with_name(
+            f".{source.name}.{intent['operationId']}.{index}.hold")
+        if bound.get("postImage"):
+            path = Path(bound["postStage"]) if bound.get("postStage") else root / row["destination"]
+            if path.exists():
+                with LifecycleWriteTarget(path, failure_id="WI-LEGACY-COMPLETION-RECOVERY") as owner:
+                    owner.remove_owned(path.name, bound["postImage"])
+        if hold.exists():
+            if source.exists():
+                raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "foreign source replacement preserved; original hold retained")
+            _legacy_move_owned(hold, source, bound["image"])
+        else:
+            current, _ = _legacy_local_image(source)
+            if current != bound["image"]:
+                raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "original source state is not recoverable")
+    for bound in reversed(bindings):
+        if bound["nodeKind"] != "directory" or bound["role"] != "actually-created":
+            continue
+        path = Path(bound["path"])
+        if path.exists():
+            _legacy_check_parents(bound["parentChain"])
+            if list(_lifecycle_file_identity(path.lstat())) != bound["identity"]["value"]:
+                raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "foreign directory replacement preserved")
+            path.rmdir()
+    intent_path.unlink(); _transition_fsync_directory(intent_path.parent)
+
+
+def _apply_legacy_completion(root, path, intent, *, inject_failure_at=None):
+    try:
+        return _recover_legacy_completion(root, path, intent, inject_failure_at=inject_failure_at)
+    except BaseException as primary:
+        if inject_failure_at is not None or not path.exists():
+            raise
+        try:
+            finalized = _compensate_legacy_completion(root, path, intent)
+        except BaseException as cleanup:
+            composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+            if composer is not None:
+                composer.set_rollback("incomplete")
+                composer.record_cleanup(phase="rollback-postcheck", failure_id="WI-LEGACY-COMPLETION-RECOVERY",
+                    resource=intent["operationId"], diagnostic="original native recovery evidence retained", cause=cleanup)
+            raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", f"primary: {primary}; compensation: {cleanup}") from primary
+        else:
+            composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+            if composer is not None:
+                composer.set_rollback("incomplete" if finalized else "completed")
+            raise
+
+
+def _close_legacy_flat(root, slug, closure_data, instant, evidence_data, *, apply, authority, inject_failure_at=None):
+    if type(apply) is not bool:
+        raise LifecycleError("WI-LEGACY-COMPLETION-EVIDENCE", "explicit apply authority must be Boolean")
+    root = _lifecycle_unresolved_absolute(root)
+    _validate_closure(closure_data, instant)
+    request_bytes = _legacy_request_bytes(evidence_data, slug, closure_data, instant, authority)
+    request_digest = _sha256_bytes(request_bytes)
+    raw_request = _legacy_evidence_input(evidence_data)
+    operation = raw_request["operationId"]
+    _validate_transition_operation_id(operation)
+    archive = root / "work-items/archive" / archive_month(instant) / slug
+    intent_path = _transition_intent_path(root, operation)
+    if intent_path.exists():
+        intent = _load_transition_intent(root, intent_path)
+        if intent["kind"] != LEGACY_COMPLETION_KIND or intent["requestSha256"] != request_digest:
+            raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "pending replay request differs")
+        if apply:
+            _apply_legacy_completion(root, intent_path, intent, inject_failure_at=inject_failure_at)
+        return archive
+    if archive.exists():
+        port = acquire_settled_work_item_history(root, f"work-item:{slug}")
+        action = json.loads((archive / LEGACY_COMPLETION_RECEIPT).read_bytes())
+        if action["operationId"] != operation or action["requestSha256"] != request_digest:
+            raise LifecycleError("WI-IMMUTABLE-ARCHIVE", "legacy replay request differs")
+        port.verify(); _require_legacy_terminal(root, archive)
+        return archive
+    request, source, manifest, live, history = _capture_legacy_evidence(root, slug, evidence_data)
+    if _category_locations(root, CATEGORIES["work-item"], slug) != [source.path]:
+        raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", "flat close source is not uniquely current")
+    board = _capture_file_snapshot(root / "work-items/README.md", failure_id="WI-README-STALE")
+    if _sha256_bytes(board.data) != request["expectedReadmeSha256"]:
+        raise LifecycleError("WI-README-STALE", "supplied prior README digest differs")
+    _manifest, manifest_data, bugs = _prepare_bug_dispositions(root, source.path, slug, instant,
+                                                             allow_placeholder_context=True, manifest_snapshot=manifest)
+    archive_files, cells = {}, []
+    for index, (original, association) in enumerate(sorted(live.files.items())):
+        preserved = f"legacy-source/{source.path.name}" if original == source.path else f"history/{index}/{original.name}"
+        snapshot = association.original
+        cell = {"originalPath": original.relative_to(root).as_posix(), "preservedPath": preserved,
+                "byteLength": snapshot.length, "sha256": _sha256_bytes(snapshot.data)}
+        cells.append(cell); archive_files[preserved] = snapshot.data
+    by_original = {cell["originalPath"]: cell for cell in cells}
+    accepted = {role: {"originalPath": cell["path"], "path": by_original[cell["path"]]["preservedPath"],
+        "byteLength": cell["byteLength"], "sha256": cell["sha256"]} for role, cell in request["acceptedEvidence"].items()}
+    selection = request["historySelection"]
+    history_binding = {"originalSourcePath": source.path.relative_to(root).as_posix(),
+        "originalItemBase": selection["originalItemBase"], "originalLedgerPath": selection["originalLedgerPath"],
+        "criteria": {"criteriaReference": accepted["criteria"]["originalPath"],
+            "acquisitionReference": accepted["historyAcquisition"]["originalPath"],
+            "ledgerRequired": selection["ledgerRequired"], "ownerContract": selection["ownerContract"]},
+        "absentPaths": selection["absentPaths"]}
+    source_cell = by_original[source.path.relative_to(root).as_posix()]
+    required = []
+    for link in _markdown_local_links(source.data.decode("utf-8")):
+        parts = _local_markdown_href_parts(link.href)
+        if parts is None:
+            continue
+        target = Path(os.path.abspath(source.path.parent / parts[0]))
+        if not target.is_relative_to(root):
+            continue  # Unselected external historical navigation is evidence-only.
+        cell = by_original.get(target.relative_to(root).as_posix())
+        if cell is None:
+            continue  # Unselected historical navigation is raw evidence only.
+        required.append({"sourcePath": source_cell["preservedPath"], "sourceSha256": source_cell["sha256"],
+            "originalHref": link.href, "originalTarget": cell["originalPath"], "retainedTarget": cell["preservedPath"],
+            "targetByteLength": cell["byteLength"], "targetSha256": cell["sha256"], "suffix": parts[1],
+            "acceptanceEvidence": {k: accepted["completion"][k] for k in ("path", "byteLength", "sha256")}})
+    navigation = "\n## Required evidence\n\n" + "".join(f"- [{row['originalTarget']}]({row['retainedTarget']}{row['suffix']})\n" for row in required)
+    closure = closure_data.rstrip(b"\n") + b"\n" + LEGACY_COMPLETION_MARKER.encode() + b"\n" + navigation.encode()
+    metadata_data = _legacy_work_item_metadata_bytes(live, operation_id=operation, work_item=slug, terminal_instant=instant,
+        source=source_cell, accepted_evidence=accepted, history_binding=history_binding, custody_map=cells, required_evidence_links=required)
+    metadata = json.loads(metadata_data)
+    archive_files.update({LEGACY_COMPLETION_METADATA: metadata_data, "closure.md": closure, BUG_DISPOSITIONS_MANIFEST: manifest_data})
+    incoming = _incoming_link_result(root, {source.path}, f"work-item:{slug}", strict_consumer_reads=True,
+        literal_path_references=(source.path.relative_to(root).as_posix(), source.path.relative_to(root / "work-items").as_posix()))
+    links = _physical_archive_link_plans(root, source.path, archive / source_cell["preservedPath"], incoming["references"],
+                                        failure_id="WI-CLOSE-LINK-INVENTORY", consumer_images={bug.source: bug for bug in bugs})
+    by_bug = {bug.source: bug for bug in bugs}
+    bug_uri_rows = []
+    for link in links:
+        relative = link["path"].relative_to(root / "work-items").as_posix()
+        image = by_bug.get(link["path"])
+        descriptor = _close_link_consumer_descriptor(relative)
+        if descriptor is not None or image is not None:
+            permission = _close_link_authority(root, link["path"], link["before"], image, authority,
+                                               json.loads(manifest_data)["schemaVersion"])
+            if image is not None:
+                by_bug[image.source] = replace(image, after=link["after"])
+                final = image.target or image.source
+                bug_uri_rows.append({"source": relative, "target": final.relative_to(root / "work-items").as_posix(),
+                    "beforeSha256": _sha256_bytes(link["before"]), "afterSha256": _sha256_bytes(link["after"]),
+                    "authority": permission, "uriChanges": _close_link_uri_changes(image.after, link["after"])})
+    bugs = tuple(by_bug[bug.source] for bug in bugs)
+    images = {archive / path: data for path, data in archive_files.items()}
+    planned = object.__new__(PreparedWorkItemTerminal)
+    for key, value in {"transaction": _CURRENT_LIFECYCLE_TRANSACTION.get(), "root": root, "source": source.path,
+        "archive": archive, "instant": instant, "images": MappingProxyType(images), "origin": live, "history": history}.items():
+        object.__setattr__(planned, key, value)
+    rendered = _render_readme_bytes(root, prepared_terminal=planned)
+    board_hash = _sha256_bytes(rendered)
+    maintenance = {"version": 1, "source": source.path.relative_to(root / "work-items").as_posix(),
+        "target": (archive / source_cell["preservedPath"]).relative_to(root / "work-items").as_posix(),
+        "allowProtectedUriUpdates": authority, "consumers": sorted(bug_uri_rows, key=lambda row: row["source"])} if bug_uri_rows else None
+    receipt_bug = _bug_disposition_receipt_bytes(root, slug, instant, manifest_data, closure, bugs, board_hash,
+                                               link_maintenance=maintenance)
+    archive_files[BUG_DISPOSITIONS_RECEIPT] = receipt_bug
+    for link in links:
+        if link["path"] == board.path:
+            link["after"] = rendered; link["afterSha256"] = board_hash
+    action = {"schemaVersion": 1, "owner": LEGACY_COMPLETION_OWNER, "kind": LEGACY_COMPLETION_KIND, "status": "settled",
+        "operationId": operation, "workItem": slug, "terminalInstant": instant, "requestSha256": request_digest,
+        "metadataSha256": _sha256_bytes(metadata_data), "archivePath": archive.relative_to(root).as_posix(),
+        "archiveMembershipSha256": _sha256_bytes(_projection_json(sorted(
+            ({"path": path, "byteLength": len(data), "sha256": _sha256_bytes(data)} for path, data in archive_files.items()),
+            key=lambda row: row["path"].encode("utf-8")))),
+        "closureInputSha256": _sha256_bytes(closure_data), "closureSha256": _sha256_bytes(closure),
+        "bugDispositionReceiptSha256": _sha256_bytes(receipt_bug),
+        "historySelectionSha256": _sha256_bytes(_projection_json(metadata["historyBinding"])),
+        "links": {"inventory": incoming, "consumers": [{"path": row["path"].relative_to(root).as_posix(),
+            "before": _b64(row["before"]), "after": _b64(row["after"]), "beforeSha256": _sha256_bytes(row["before"]),
+            "afterSha256": _sha256_bytes(row["after"])} for row in links]},
+        "readme": {"beforeSha256": _sha256_bytes(board.data), "afterSha256": board_hash},
+        "provenance": {"actor": "lifecycle owner", "actualExecutionPath": "public-helper",
+            "targetImplementationSha256": _sha256_bytes(_capture_file_snapshot(Path(__file__), failure_id="WI-LEGACY-COMPLETION-NATIVE").data),
+            "runtimeMetadata": "unspecified by runtime"}}
+    rows = [{"source": None, "destination": (archive / path).relative_to(root).as_posix(), "disposition": "archive",
+             "before": None, "after": _b64(data)} for path, data in sorted(archive_files.items())]
+    rows.append({"source": source.path.relative_to(root).as_posix(), "destination": source.path.relative_to(root).as_posix(),
+                 "disposition": "source", "before": _b64(source.data), "after": None})
+    for bug in bugs:
+        if bug.action == "terminalize":
+            rows.append({"source": bug.source.relative_to(root).as_posix(), "destination": bug.target.relative_to(root).as_posix(),
+                         "disposition": "bug", "before": _b64(bug.before), "after": _b64(bug.after)})
+    bug_sources = {bug.source for bug in bugs if bug.action == "terminalize"}
+    for row in links:
+        if row["path"] not in bug_sources and row["path"] != board.path:
+            name = row["path"].relative_to(root).as_posix()
+            rows.append({"source": name, "destination": name, "disposition": "consumer", "before": _b64(row["before"]), "after": _b64(row["after"])})
+    rows.append({"source": board.path.relative_to(root).as_posix(), "destination": board.path.relative_to(root).as_posix(),
+                 "disposition": "readme", "before": _b64(board.data), "after": _b64(rendered)})
+    bindings = []
+    for index, row in enumerate(rows):
+        if row["source"]:
+            image, parents = _legacy_local_image(root / row["source"])
+            if image is None or _unb64(image["data"]) != _unb64(row["before"]):
+                raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "effect preimage drifted")
+            bindings.append({"path": str(root / row["source"]), "nodeKind": "file", "role": "source" if row["disposition"] == "source" else "preexisting",
+                             "imageIndex": index, "image": image, "parentChain": parents})
+    anchors = set(live.directories) | {root / ".scratch", root / "work-items"}
+    for leaf in (root / ".scratch/work-items/legacy-flat-terminal" / operation,
+                 archive.parent, *(bug.target.parent for bug in bugs if bug.target is not None)):
+        anchors.update(path for path in leaf.parents if path.is_relative_to(root) and path.is_dir())
+    for path in sorted(anchors):
+        snapshot = _capture_directory_snapshot(path, failure_id="WI-LEGACY-COMPLETION-NATIVE")
+        bindings.append({"path": str(path), "nodeKind": "directory", "role": "preexisting",
+            "identity": {"kind": "native-windows-file" if os.name == "nt" else "stat", "value": list(_lifecycle_file_identity(snapshot.metadata))},
+            "parentChain": [{"path": str(p), "identity": list(i)} for p, i in snapshot.parent_chain.participants]})
+    intent = {"schemaVersion": 1, "owner": LEGACY_COMPLETION_OWNER, "kind": LEGACY_COMPLETION_KIND, "status": "intent",
+        "operationId": operation, "workItem": slug, "terminalInstant": instant, "requestBytes": _b64(request_bytes),
+        "requestSha256": request_digest, "sourcePath": source.path.relative_to(root).as_posix(),
+        "archivePath": archive.relative_to(root).as_posix(), "preparedImages": rows, "capturedBindings": bindings,
+        "plannedReceiptBytes": _b64(_legacy_work_item_action_receipt_bytes(action))}
+    _legacy_validate_intent(root, intent)
+    live.verify(); planned.verify(root)
+    if apply:
+        if os.name != "nt":
+            raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE-UNSUPPORTED", "native creator-bound flat close is unavailable on this host")
+        _legacy_save_intent(intent_path, intent)
+        _apply_legacy_completion(root, intent_path, intent, inject_failure_at=inject_failure_at)
+    return archive
+
+
+def _legacy_relative(value, *, root_directory=False):
+    if root_directory and value == ".":
+        return "."
+    try:
+        _validator_module()._legacy_projection_path_parts(value, (), "WI-LEGACY-COMPLETION-CUSTODY")
+    except (ValueError, TypeError) as exc:
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", str(exc)) from exc
+    return value
+
+
+def _legacy_cell(cell, *, original=False):
+    keys = {"originalPath", "preservedPath", "byteLength", "sha256"} if original else {"path", "byteLength", "sha256"}
+    if (not isinstance(cell, dict) or set(cell) != keys or type(cell.get("byteLength")) is not int
+            or cell["byteLength"] < 0 or not isinstance(cell.get("sha256"), str)
+            or SHA256_RE.fullmatch(cell["sha256"]) is None):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "custody reference fields differ")
+    for key in (("originalPath", "preservedPath") if original else ("path",)):
+        _legacy_relative(cell[key])
+    return cell
+
+
+def _record_work_item_logical_origin(acquired_input):
+    _history_input_issuer(acquired_input, "AcquiredWorkItemInputV1")
+    acquired_input.verify()
+    rows = []
+    for path, association in sorted(acquired_input.directories.items(), key=lambda row: row[0].as_posix().encode("utf-8")):
+        snapshot = association.original
+        members = []
+        for name, metadata in snapshot.members:
+            nonordinary = stat.S_ISLNK(metadata.st_mode) or bool(getattr(metadata, "st_file_attributes", 0)
+                         & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+            kind = "nonordinary" if nonordinary else "file" if stat.S_ISREG(metadata.st_mode) else "directory" if stat.S_ISDIR(metadata.st_mode) else "nonordinary"
+            members.append({"name": name, "kind": kind})
+        rows.append({"originalPath": path.relative_to(acquired_input.repository_root).as_posix(), "members": members})
+    return {"schemaVersion": 1, "kind": "recorded-logical-origin", "directories": rows,
+            "capturedFilePaths": sorted(path.relative_to(acquired_input.repository_root).as_posix()
+                                       for path in acquired_input.files)}
+
+
+def _legacy_work_item_metadata_bytes(acquired_input, *, operation_id, work_item, terminal_instant,
+                                     source, accepted_evidence, history_binding, custody_map, required_evidence_links):
+    """Owner serialization from genuine live origin; no caller-supplied topology."""
+    _validate_slug(work_item)
+    _validate_transition_operation_id(operation_id)
+    _strict_utc(terminal_instant)
+    origin = _record_work_item_logical_origin(acquired_input)
+    _legacy_cell(source, original=True)
+    custody = {}
+    destinations = set()
+    for cell in custody_map:
+        _legacy_cell(cell, original=True)
+        key = acquired_input.repository_root / cell["originalPath"]
+        snapshot = acquired_input.files.get(key)
+        if (snapshot is None or snapshot.original.length != cell["byteLength"]
+                or _sha256_bytes(snapshot.original.data) != cell["sha256"] or key in custody
+                or Path(cell["preservedPath"]) in destinations):
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "selected original/custody bytes or identity differs")
+        custody[key] = cell
+        destinations.add(Path(cell["preservedPath"]))
+    if set(custody) != set(acquired_input.files):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "custody does not cover the exact selected native file set")
+    if source != custody.get(acquired_input.repository_root / source.get("originalPath", "")):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "source differs from selected native custody")
+    history = dict(history_binding)
+    if "origin" in history:
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "origin descriptor is lifecycle-owner-produced")
+    history["origin"] = origin
+    payload = {"schemaVersion": 2, "owner": LEGACY_COMPLETION_OWNER, "kind": LEGACY_COMPLETION_KIND,
+        "operationId": operation_id, "workItem": work_item, "terminalInstant": terminal_instant,
+        "source": source, "acceptedEvidence": accepted_evidence, "historyBinding": history,
+        "custodyMap": list(custody_map), "requiredEvidenceLinks": required_evidence_links}
+    return _migration_receipt_bytes(payload)
+
+
+def _legacy_work_item_action_receipt_bytes(payload):
+    if not isinstance(payload, dict) or set(payload) != LEGACY_COMPLETION_RECEIPT_FIELDS:
+        raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "action receipt fields differ")
+    return _migration_receipt_bytes(payload)
+
+
+@dataclass(frozen=True, init=False)
+class SettledWorkItemHistoryInputV1:
+    """Recorded logical origin bound to freshly captured current native custody.
+
+    The constructor owns the seal. No original native statistic or directory
+    capture is reconstructed, and this read binding is not a terminal verdict.
+    """
+    repository_root: Path
+    archive: Path
+    logical_reference: str
+    metadata: Mapping[str, object]
+    files: Mapping[Path, RecordedHistoryCustodyV1]
+    directories: Mapping[Path, tuple[RecordedHistoryEntryV1, ...]]
+    _current_files: tuple[CapturedFileSnapshot, ...] = field(repr=False)
+    _current_directories: tuple[CapturedDirectorySnapshotV1, ...] = field(repr=False)
+    _seal: _SettledHistorySealV1 = field(repr=False)
+
+    def __init__(self, *args, **kwargs):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "settled history input requires its lifecycle owner constructor")
+
+    def _path(self, path):
+        path = _lifecycle_unresolved_absolute(path)
+        if not path.is_relative_to(self.repository_root):
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "recorded locator escapes repository")
+        return path
+
+    def origin_entry(self, path):
+        path = self._path(path)
+        if path in self.directories:
+            return RecordedHistoryEntryV1(path, "directory")
+        cursor = path
+        while cursor != self.repository_root:
+            members = self.directories.get(cursor.parent)
+            if members is not None:
+                entry = next((row for row in members if row.original_path == cursor), None)
+                if entry is None:
+                    return None
+                if cursor == path:
+                    return entry
+                raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", f"original descendant topology was not acquired: {path}")
+            cursor = cursor.parent
+        raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", f"original topology was not acquired: {path}")
+
+    def origin_members(self, path):
+        path = self._path(path)
+        if path not in self.directories:
+            raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", f"complete recorded directory membership unavailable: {path}")
+        return self.directories[path]
+
+    def exists(self, path):
+        return self.origin_entry(path) is not None
+
+    def children(self, path):
+        return tuple(row.original_path for row in self.origin_members(path))
+
+    def matching_children(self, path, pattern):
+        if not self.exists(path):
+            return ()
+        parents = (self._path(path),)
+        for part in PurePosixPath(pattern).parts:
+            parents = tuple(child for parent in parents for child in self.children(parent) if Path(child.name).match(part))
+        return parents
+
+    def custody_association(self, path):
+        path = self._path(path)
+        row = self.files.get(path)
+        if row is None:
+            raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", f"exact current custody for original bytes was not acquired: {path}")
+        return row
+
+    def current_snapshot(self, path):
+        return self.custody_association(path).current
+
+    def file_snapshot(self, path, *, maximum_bytes=None, require_single_link=False, failure_id="WI-LEGACY-COMPLETION-HISTORY"):
+        snapshot = self.current_snapshot(path)
+        if maximum_bytes is not None and snapshot.length > maximum_bytes:
+            raise LifecycleError(failure_id, "current custody exceeds owner byte limit")
+        _verify_captured_file(replace(snapshot, require_single_link=require_single_link or snapshot.require_single_link),
+                              "WI-LEGACY-COMPLETION-DRIFT")
+        return snapshot
+
+    def current_native_metadata(self, path):
+        snapshot = self.file_snapshot(path)
+        metadata = snapshot.path.lstat()
+        _verify_captured_file(snapshot, "WI-LEGACY-COMPLETION-DRIFT")
+        return metadata
+
+    def current_capture(self, snapshot):
+        expected = next((row for row in self._current_files if row.path == snapshot.path), None)
+        if (expected is None or expected.identity != snapshot.identity or expected.length != snapshot.length
+                or expected.data != snapshot.data or expected.parent_chain.participants != snapshot.parent_chain.participants):
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "current capture is outside the owner-bound selection")
+        _verify_captured_file(expected, "WI-LEGACY-COMPLETION-DRIFT")
+        return expected
+
+    def verify(self):
+        _settled_history_input(self)
+        for snapshot in self._current_files:
+            _verify_captured_file(snapshot, "WI-LEGACY-COMPLETION-DRIFT")
+        for snapshot in self._current_directories:
+            _verify_captured_directory(snapshot, "WI-LEGACY-COMPLETION-DRIFT")
+
+
+def _legacy_freeze(value):
+    if isinstance(value, dict):
+        return MappingProxyType({key: _legacy_freeze(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_legacy_freeze(item) for item in value)
+    return value
+
+
+def _legacy_record_object(snapshot):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "record repeats a JSON key")
+            result[key] = value
+        return result
+    try:
+        value = json.loads(snapshot.data.decode("utf-8"), object_pairs_hook=unique)
+    except (UnicodeError, ValueError) as exc:
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "canonical completion record is unreadable") from exc
+    if not isinstance(value, dict) or snapshot.data != _migration_receipt_bytes(value):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "completion record is not canonical owner serialization")
+    return value
+
+
+def _legacy_origin_directories(root, origin):
+    if (not isinstance(origin, dict) or set(origin) != {"schemaVersion", "kind", "directories", "capturedFilePaths"}
+            or type(origin.get("schemaVersion")) is not int or origin.get("schemaVersion") != 1 or origin.get("kind") != "recorded-logical-origin"
+            or not isinstance(origin.get("directories"), list) or not isinstance(origin.get("capturedFilePaths"), list)):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "recorded logical origin fields differ")
+    directories = {}
+    for row in origin["directories"]:
+        if not isinstance(row, dict) or set(row) != {"originalPath", "members"} or not isinstance(row["members"], list):
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "recorded directory fields differ")
+        path = root / _legacy_relative(row["originalPath"], root_directory=True)
+        if path in directories:
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "recorded directory identity collides")
+        members = []
+        for member in row["members"]:
+            if (not isinstance(member, dict) or set(member) != {"name", "kind"}
+                    or not isinstance(member["name"], str) or Path(member["name"]).name != member["name"]
+                    or member["name"] in {"", ".", ".."} or member["kind"] not in {"file", "directory", "nonordinary"}):
+                raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "recorded member fields differ")
+            _legacy_relative(member["name"])
+            members.append(RecordedHistoryEntryV1(path / member["name"], member["kind"]))
+        if (len({entry.original_path for entry in members}) != len(members)
+                or [entry.original_path.name for entry in members] != sorted(
+                    (entry.original_path.name for entry in members), key=lambda name: name.encode("utf-8"))):
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "recorded member identity collides")
+        directories[path] = tuple(members)
+    if root not in directories:
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "recorded repository topology is missing")
+    for path in directories:
+        if path != root and not any(entry.original_path == path and entry.kind == "directory" for entry in directories.get(path.parent, ())):
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "recorded directory parent/kind association differs")
+    selected = [root / _legacy_relative(path) for path in origin["capturedFilePaths"]]
+    if len(set(selected)) != len(selected) or any(not any(entry.original_path == path and entry.kind == "file"
+            for entry in directories.get(path.parent, ())) for path in selected):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "recorded selected file/parent association differs")
+    return directories, frozenset(selected)
+
+
+def _legacy_archive_membership(files, archive):
+    rows = [{"path": snapshot.path.relative_to(archive).as_posix(), "byteLength": snapshot.length,
+             "sha256": _sha256_bytes(snapshot.data)} for snapshot in files if snapshot.path != archive / LEGACY_COMPLETION_RECEIPT]
+    rows.sort(key=lambda row: row["path"].encode("utf-8"))
+    return _sha256_bytes(_projection_json(rows))
+
+
+def _validate_legacy_historical_links(root, archive, reference, links, custody, *, bug_results=()):
+    """Immutable inventory/images, without eternal live consumer hash checks."""
+    failure = "WI-LEGACY-COMPLETION-CUSTODY"
+    def reject():
+        raise LifecycleError(failure, "historical incoming inventory/consumer images differ")
+    if (not isinstance(links, dict) or set(links) != {"inventory", "consumers"}
+            or not isinstance(links["consumers"], list)):
+        reject()
+    inventory = links["inventory"]
+    if not isinstance(inventory, dict) or set(inventory) != {"result", "references"} or not isinstance(inventory["references"], list):
+        reject()
+    references, identities, physical = inventory["references"], set(), set()
+    for row in references:
+        if (not isinstance(row, dict) or set(row) != {"consumer", "kind", "value"}
+                or row["kind"] not in {"logical", "physical"} or not isinstance(row["value"], str)):
+            reject()
+        _legacy_relative(row["consumer"])
+        identity = (row["consumer"], row["kind"], row["value"])
+        if identity in identities or (row["kind"] == "logical" and row["value"] != reference):
+            reject()
+        identities.add(identity)
+        if row["kind"] == "physical":
+            physical.add("work-items/" + row["consumer"])
+    if inventory["result"] != ("unmapped" if physical else "logical-only" if references else "clear"):
+        reject()
+    images = {}
+    for row in links["consumers"]:
+        if not isinstance(row, dict) or set(row) != {"path", "before", "after", "beforeSha256", "afterSha256"}:
+            reject()
+        _legacy_relative(row["path"])
+        before, after = _unb64(row["before"]), _unb64(row["after"])
+        if (before is None or after is None or row["path"] in images
+                or _sha256_bytes(before) != row["beforeSha256"] or _sha256_bytes(after) != row["afterSha256"]):
+            reject()
+        try:
+            images[row["path"]] = (before.decode("utf-8"), after.decode("utf-8"))
+        except UnicodeError:
+            reject()
+    if set(images) != physical:
+        reject()
+    by_original = {root / cell["originalPath"]: cell for cell in custody}
+    consumer_targets = {root / "work-items" / row["source"]: root / "work-items" / row["target"]
+                        for row in bug_results if row.get("target") is not None}
+    for row in references:
+        consumer = root / "work-items" / row["consumer"]
+        if row["kind"] == "logical":
+            if consumer.relative_to(root).as_posix() in images:
+                before, after = images[consumer.relative_to(root).as_posix()]
+                if reference not in before or reference not in after:
+                    reject()
+            continue
+        before, after = images[consumer.relative_to(root).as_posix()]
+        current_consumer = consumer_targets.get(consumer, consumer)
+        parts = _local_markdown_href_parts(row["value"])
+        if parts is not None and any(link.href == row["value"] for link in _markdown_local_links(before)):
+            original = Path(os.path.abspath(consumer.parent / parts[0]))
+            cell = by_original.get(original)
+            if cell is None:
+                reject()
+            expected = os.path.relpath(archive / cell["preservedPath"], current_consumer.parent).replace(os.sep, "/") + parts[1]
+            if not any(link.href == expected for link in _markdown_local_links(after)):
+                reject()
+        else:
+            # The existing inventory also admits exact literal locators. Bind
+            # their original/custody association without an old OS-path lookup.
+            locator = row["value"].replace("\\", "/")
+            _legacy_relative(locator)
+            candidates = [cell for path, cell in by_original.items()
+                          if locator in {path.relative_to(root).as_posix(),
+                              path.relative_to(root / "work-items").as_posix() if path.is_relative_to(root / "work-items") else None}]
+            if len(candidates) != 1 or _incoming_literal_pattern(locator).search(before) is None:
+                reject()
+            expected = (archive / candidates[0]["preservedPath"]).relative_to(root).as_posix()
+            if _incoming_literal_pattern(expected).search(after) is None:
+                reject()
+
+
+@functools.partial(_lifecycle_participant, input_role="repository-root")
+def acquire_settled_work_item_history(root: Path, logical_reference: str, *, expected_references=(), _pending_plan=None):
+    """Structural records/current-native custody -> read binding, never history verdict."""
+    category, slug = _canonical_category(logical_reference)
+    if category.name != "work-item":
+        raise LifecycleError("WI-REFERENCE-INVALID", "settled history requires a work-item reference")
+    root = _lifecycle_unresolved_absolute(root)
+    work_items = root / "work-items"
+    rows, _directories, _absent, _evidence = _archive_entity_rows_at(work_items)
+    candidates = [path for path, _kind, reference, _leaves in rows if reference == logical_reference]
+    if len(candidates) != 1 or (work_items / "backlog" / f"{slug}.md").exists() or (work_items / "active" / slug).exists():
+        raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", "settled history requires one unique canonical archive")
+    archive = candidates[0]
+    captures = []
+    def capture(relative, maximum=LEDGER_LOCATION_PROOF_BYTE_CAP):
+        _legacy_relative(relative)
+        snapshot = _capture_file_snapshot(archive / relative, failure_id="WI-LEGACY-COMPLETION-CUSTODY", maximum_bytes=maximum)
+        captures.append(snapshot)
+        return snapshot
+    metadata_capture = capture(LEGACY_COMPLETION_METADATA)
+    if not (archive / LEGACY_COMPLETION_RECEIPT).exists():
+        raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "settlement receipt is missing")
+    receipt_capture = capture(LEGACY_COMPLETION_RECEIPT)
+    metadata, receipt = _legacy_record_object(metadata_capture), _legacy_record_object(receipt_capture)
+    if (set(metadata) != LEGACY_COMPLETION_METADATA_FIELDS or type(metadata.get("schemaVersion")) is not int or metadata.get("schemaVersion") != 2
+            or metadata.get("owner") != LEGACY_COMPLETION_OWNER or metadata.get("kind") != LEGACY_COMPLETION_KIND
+            or metadata.get("workItem") != slug or set(receipt) != LEGACY_COMPLETION_RECEIPT_FIELDS
+            or type(receipt.get("schemaVersion")) is not int or receipt.get("schemaVersion") != 1 or receipt.get("owner") != LEGACY_COMPLETION_OWNER
+            or receipt.get("kind") != LEGACY_COMPLETION_KIND or receipt.get("status") != "settled"):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "settled origin owner/version/record fields differ")
+    for key in ("operationId", "workItem", "terminalInstant"):
+        if receipt.get(key) != metadata.get(key):
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "action and origin identities differ")
+    _validate_transition_operation_id(metadata["operationId"])
+    instant = metadata["terminalInstant"]
+    _strict_utc(instant)
+    if archive.parent.name != archive_month(instant) or receipt["archivePath"] != archive.relative_to(root).as_posix():
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "terminal archive month/location differs")
+    if _transition_intent_path(root, metadata["operationId"]).exists():
+        if _pending_plan is None:
+            raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "pending action cannot mint a settled origin")
+        _history_input_issuer(_pending_plan, "_PendingLegacyCompletionPlan")
+        _pending_plan.verify(root, metadata["operationId"], receipt_capture.data)
+    for field in ("requestSha256", "metadataSha256", "archiveMembershipSha256", "closureInputSha256", "closureSha256",
+                  "bugDispositionReceiptSha256", "historySelectionSha256"):
+        if not isinstance(receipt[field], str) or SHA256_RE.fullmatch(receipt[field]) is None:
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "action digest fields differ")
+    if receipt["metadataSha256"] != _sha256_bytes(metadata_capture.data):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "immutable metadata differs from its action")
+    history = metadata["historyBinding"]
+    history_keys = {"originalSourcePath", "originalItemBase", "originalLedgerPath", "criteria", "absentPaths", "origin"}
+    if not isinstance(history, dict) or set(history) != history_keys or not isinstance(history.get("absentPaths"), list):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "history binding fields differ")
+    directories, selected = _legacy_origin_directories(root, history["origin"])
+    if receipt["historySelectionSha256"] != _sha256_bytes(_projection_json(history)):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "history selection differs from its action")
+    custody = metadata["custodyMap"]
+    if not isinstance(custody, list):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "custody selection is missing")
+    associations, destinations = {}, set()
+    for cell in custody:
+        _legacy_cell(cell, original=True)
+        original = root / cell["originalPath"]
+        destination = archive / cell["preservedPath"]
+        if original in associations or destination in destinations or original not in selected:
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "custody original/current identity collides")
+        snapshot = capture(cell["preservedPath"], cell["byteLength"])
+        if snapshot.length != cell["byteLength"] or _sha256_bytes(snapshot.data) != cell["sha256"]:
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "current custody does not preserve selected original bytes")
+        associations[original] = RecordedHistoryCustodyV1(original, snapshot)
+        destinations.add(destination)
+    if set(associations) != selected:
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "custody does not cover the exact recorded selection")
+    source = _legacy_cell(metadata["source"], original=True)
+    if (source not in custody or source["originalPath"] != history["originalSourcePath"]
+            or Path(source["originalPath"]).stem != slug or source["preservedPath"] != f"legacy-source/{Path(source['originalPath']).name}"):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "preserved source/logical identity differs")
+    criteria = history["criteria"]
+    if (not isinstance(criteria, dict) or set(criteria) != {"criteriaReference", "acquisitionReference", "ledgerRequired", "ownerContract"}
+            or type(criteria["ledgerRequired"]) is not bool or criteria["ownerContract"] not in {"current", "archive"}):
+        raise LifecycleError("WI-LEGACY-COMPLETION-EVIDENCE", "original criteria are unavailable")
+    accepted = metadata["acceptedEvidence"]
+    if not isinstance(accepted, dict) or set(accepted) != {"admission", "completion", "criteria", "historyAcquisition"}:
+        raise LifecycleError("WI-LEGACY-COMPLETION-EVIDENCE", "accepted evidence roles differ")
+    for role, cell in accepted.items():
+        if not isinstance(cell, dict) or set(cell) != {"originalPath", "path", "byteLength", "sha256"}:
+            raise LifecycleError("WI-LEGACY-COMPLETION-EVIDENCE", "accepted evidence reference differs")
+        candidate = {"originalPath": cell["originalPath"], "preservedPath": cell["path"], "byteLength": cell["byteLength"], "sha256": cell["sha256"]}
+        if candidate not in custody or cell["byteLength"] == 0:
+            raise LifecycleError("WI-LEGACY-COMPLETION-EVIDENCE", "accepted evidence does not bind nonempty selected custody")
+    if (accepted["criteria"]["originalPath"] != criteria["criteriaReference"]
+            or accepted["historyAcquisition"]["originalPath"] != criteria["acquisitionReference"]):
+        raise LifecycleError("WI-LEGACY-COMPLETION-EVIDENCE", "criteria roles and original references differ")
+    required_links = metadata["requiredEvidenceLinks"]
+    if not isinstance(required_links, list):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "required evidence navigation is missing")
+    seen_links = set()
+    by_original = {row["originalPath"]: row for row in custody}
+    by_preserved = {row["preservedPath"]: row for row in custody}
+    for row in required_links:
+        if not isinstance(row, dict) or set(row) != {"sourcePath", "sourceSha256", "originalHref", "originalTarget",
+                "retainedTarget", "targetByteLength", "targetSha256", "suffix", "acceptanceEvidence"}:
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "required evidence mapping fields differ")
+        source_cell, target_cell = by_preserved.get(row["sourcePath"]), by_original.get(row["originalTarget"])
+        if source_cell is None or target_cell is None or row["sourceSha256"] != source_cell["sha256"]:
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "required source/target is outside exact selected custody")
+        source_bytes = associations[root / source_cell["originalPath"]].current.data
+        try:
+            links_in_source = _markdown_local_links(source_bytes.decode("utf-8"))
+        except UnicodeError as exc:
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "required source navigation is not UTF-8") from exc
+        parts = _local_markdown_href_parts(row["originalHref"])
+        if parts is None or not any(link.href == row["originalHref"] for link in links_in_source):
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "required href was not parsed from the bound original source")
+        original_target = Path(os.path.abspath((root / source_cell["originalPath"]).parent / parts[0]))
+        if (not original_target.is_relative_to(root) or original_target.relative_to(root).as_posix() != row["originalTarget"]
+                or row["retainedTarget"] != target_cell["preservedPath"] or row["targetByteLength"] != target_cell["byteLength"]
+                or row["targetSha256"] != target_cell["sha256"] or row["suffix"] != parts[1]):
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "required original-base/custody/suffix association differs")
+        proof = _legacy_cell(row["acceptanceEvidence"])
+        if not any(proof == {key: cell[key] for key in ("path", "byteLength", "sha256")} for cell in accepted.values()):
+            raise LifecycleError("WI-LEGACY-COMPLETION-EVIDENCE", "required mapping acceptance reference differs")
+        identity = (row["sourcePath"], row["sourceSha256"], row["originalHref"])
+        if identity in seen_links:
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "required mapping source/href repeats")
+        seen_links.add(identity)
+    closure, manifest, bug_receipt = capture("closure.md"), capture(BUG_DISPOSITIONS_MANIFEST), capture(BUG_DISPOSITIONS_RECEIPT)
+    _validate_closure(closure.data, instant)
+    _verify_archived_bug_dispositions(root, archive, closure.data, instant)
+    if receipt["closureSha256"] != _sha256_bytes(closure.data) or receipt["bugDispositionReceiptSha256"] != _sha256_bytes(bug_receipt.data):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "distinct required receipt/closure bytes differ")
+    provenance = receipt["provenance"]
+    if (not isinstance(provenance, dict) or set(provenance) != {"actor", "actualExecutionPath", "targetImplementationSha256", "runtimeMetadata"}
+            or not isinstance(provenance["actor"], str) or not provenance["actor"].strip()
+            or provenance["actualExecutionPath"] not in {"public-helper", "manual-equivalent"}
+            or provenance["runtimeMetadata"] is None
+            or (provenance["targetImplementationSha256"] is None and provenance["actualExecutionPath"] == "public-helper")
+            or (provenance["targetImplementationSha256"] is not None and (not isinstance(provenance["targetImplementationSha256"], str)
+                or SHA256_RE.fullmatch(provenance["targetImplementationSha256"]) is None))):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "actual execution provenance differs")
+    readme = receipt["readme"]
+    if (not isinstance(readme, dict) or set(readme) != {"beforeSha256", "afterSha256"}
+            or (readme["beforeSha256"] is not None and (not isinstance(readme["beforeSha256"], str) or SHA256_RE.fullmatch(readme["beforeSha256"]) is None))
+            or not isinstance(readme["afterSha256"], str) or SHA256_RE.fullmatch(readme["afterSha256"]) is None):
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "historical board binding differs")
+    if json.loads(bug_receipt.data)["readmeSha256"] != readme["afterSha256"]:
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "distinct receipt historical board bindings disagree")
+    _validate_legacy_historical_links(root, archive, logical_reference, receipt["links"], custody,
+                                    bug_results=json.loads(bug_receipt.data)["bugs"])
+    current_directories, all_files, expected_files = [], {}, set(destinations) | {snapshot.path for snapshot in captures}
+    expected_dirs = {archive} | {parent for path in expected_files for parent in path.parents if parent.is_relative_to(archive)}
+    for path in sorted(expected_dirs, key=lambda path: path.as_posix().encode("utf-8")):
+        snapshot = _capture_directory_snapshot(path, failure_id="WI-LEGACY-COMPLETION-CUSTODY")
+        current_directories.append(snapshot)
+        for name, info in snapshot.members:
+            child = path / name
+            if stat.S_ISREG(info.st_mode) and not _lifecycle_path_has_reparse(child) and child in expected_files:
+                all_files[child] = next((row for row in captures if row.path == child), None) or capture(child.relative_to(archive).as_posix())
+            elif stat.S_ISDIR(info.st_mode) and not _lifecycle_path_has_reparse(child) and child in expected_dirs:
+                continue
+            else:
+                raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "archive contains unbound, duplicate or nonordinary preserved membership")
+    if set(all_files) != expected_files or _legacy_archive_membership(all_files.values(), archive) != receipt["archiveMembershipSha256"]:
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "complete current archive membership differs")
+    for cell in expected_references:
+        _legacy_cell(cell)
+        candidate = all_files.get(archive / cell["path"])
+        if candidate is None or candidate.length != cell["byteLength"] or _sha256_bytes(candidate.data) != cell["sha256"]:
+            raise LifecycleError("WI-LEGACY-COMPLETION-EVIDENCE", "independently bound accepted reference differs")
+    value = object.__new__(SettledWorkItemHistoryInputV1)
+    for key, data in {"repository_root": root, "archive": archive, "logical_reference": logical_reference,
+        "metadata": _legacy_freeze(metadata), "files": MappingProxyType(associations), "directories": MappingProxyType(directories),
+        "_current_files": tuple(all_files.values()), "_current_directories": tuple(current_directories)}.items():
+        object.__setattr__(value, key, data)
+    object.__setattr__(value, "_seal", _SettledHistorySealV1(_SETTLED_HISTORY_OWNER, value))
+    for relative in (history["originalSourcePath"], history["originalItemBase"], history["originalLedgerPath"],
+                     criteria["criteriaReference"], criteria["acquisitionReference"], *history["absentPaths"]):
+        _legacy_relative(relative)
+    if root / history["originalItemBase"] not in value.directories:
+        raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "original item base is not a recorded directory")
+    for relative in history["absentPaths"]:
+        if value.origin_entry(root / relative) is not None:
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "declared original absence contradicts complete recorded members")
+    value.verify()
+    return value
+
+
+class AcquiredWorkItemInputV1:
+    """One finite original selection; no filesystem fallback or writer API.
+
+    Directory observations and file captures are native owner products. This
+    port holds an old observation plus current custody, not virtual directories
+    or a new interpretation of lifecycle/ledger authority.
+    """
+
+    def __init__(self, repository_root: Path, files: Iterable[CapturedInputAssociationV1],
+                 directories: Iterable[CapturedInputAssociationV1]):
+        self.repository_root = _lifecycle_unresolved_absolute(repository_root)
+        files, directories = tuple(files), tuple(directories)
+        self.files = MappingProxyType({row.original.path: row for row in files})
+        self.directories = MappingProxyType({row.original.path: row for row in directories})
+        if len(self.files) != len(files) or len(self.directories) != len(directories):
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "duplicate native original association")
+        if self.repository_root not in self.directories:
+            raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "original repository directory proof is missing")
+        self.verify()
+
+    def _path(self, path: Path) -> Path:
+        path = _lifecycle_unresolved_absolute(path)
+        if not path.is_relative_to(self.repository_root):
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "acquired original locator escapes repository")
+        return path
+
+    def metadata(self, path: Path) -> os.stat_result:
+        path = self._path(path)
+        if path in self.directories:
+            return self.directories[path].original.metadata
+        if path in self.files:
+            parent = self.directories.get(path.parent)
+            if parent is None:
+                raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "original file parent proof is missing")
+            for name, metadata in parent.original.members:
+                if Path(name) == Path(path.name):
+                    return metadata
+        cursor = path
+        while cursor != self.repository_root:
+            parent = self.directories.get(cursor.parent)
+            if parent is not None:
+                member = next((metadata for name, metadata in parent.original.members
+                               if Path(name) == Path(cursor.name)), None)
+                if member is None:
+                    raise FileNotFoundError(str(path))
+                if cursor == path:
+                    return member
+                raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "original descendant directory was not acquired")
+            cursor = cursor.parent
+        raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "original path was not acquired")
+
+    def exists(self, path: Path) -> bool:
+        try:
+            self.metadata(path)
+        except FileNotFoundError:
+            return False
+        return True
+
+    def children(self, path: Path) -> tuple[Path, ...]:
+        path = self._path(path)
+        row = self.directories.get(path)
+        if row is None:
+            if not self.exists(path):
+                raise FileNotFoundError(str(path))
+            raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "complete original directory proof is missing")
+        return tuple(path / name for name, _metadata in row.original.members)
+
+    def matching_children(self, path: Path, pattern: str) -> tuple[Path, ...]:
+        # Resolve the existing owners' finite relative patterns through complete
+        # captured member proofs. Missing descendant proof is never empty.
+        path = self._path(path)
+        if not self.exists(path):
+            return ()
+        parents = (path,)
+        for part in PurePosixPath(pattern).parts:
+            matches = []
+            for parent in parents:
+                matches.extend(child for child in self.children(parent) if Path(child.name).match(part))
+            parents = tuple(matches)
+        return parents
+
+    def file_snapshot(self, path: Path, *, maximum_bytes: int | None = None,
+                      require_single_link: bool = False, failure_id="WI-LEGACY-COMPLETION-HISTORY") -> CapturedFileSnapshot:
+        path = self._path(path)
+        row = self.files.get(path)
+        if row is None:
+            if not self.exists(path):
+                raise FileNotFoundError(str(path))
+            raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "exact original file bytes were not acquired")
+        if maximum_bytes is not None and row.original.length > maximum_bytes:
+            raise LifecycleError(failure_id, "acquired file exceeds owner byte limit")
+        metadata = self.metadata(path)
+        if require_single_link and metadata.st_nlink != 1:
+            raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "original file is not singly owned")
+        _verify_captured_file(replace(row.current, require_single_link=
+                                     require_single_link or row.current.require_single_link), "WI-LEGACY-COMPLETION-DRIFT")
+        # Existing consumers compare the selected original locator. Keep that
+        # association without reopening it; current ownership stays in the port.
+        return CapturedFileSnapshot(path, row.original.identity, row.original.length,
+                                    row.original.data, row.original.parent_chain, require_single_link)
+
+    def verify(self) -> None:
+        current_directories = {}
+        for path, row in self.directories.items():
+            if (not path.is_relative_to(self.repository_root)
+                    or not isinstance(row.original, CapturedDirectorySnapshotV1)
+                    or not isinstance(row.current, CapturedDirectorySnapshotV1)
+                    or not row.current.path.is_relative_to(self.repository_root)
+                    or row.original.capture_binding != _directory_capture_binding(row.original)):
+                raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "directory association is not owner-native")
+            previous = current_directories.get(row.current.path)
+            if previous is not None and previous.capture_binding != row.current.capture_binding:
+                raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "conflicting current native directory proof")
+            current_directories[row.current.path] = row.current
+            if path != self.repository_root:
+                parent = self.directories.get(path.parent)
+                if parent is None or not any(Path(name) == Path(path.name)
+                        and _lifecycle_file_identity(metadata) == _lifecycle_file_identity(row.original.metadata)
+                        for name, metadata in parent.original.members):
+                    raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "original directory/native parent association differs")
+        for path, row in self.files.items():
+            if (not path.is_relative_to(self.repository_root)
+                    or not isinstance(row.original, CapturedFileSnapshot)
+                    or not isinstance(row.current, CapturedFileSnapshot)
+                    or not row.current.path.is_relative_to(self.repository_root)
+                    or row.original.data != row.current.data or row.original.length != row.current.length):
+                raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "file association does not preserve original exact bytes")
+            metadata = self.metadata(path)
+            if not stat.S_ISREG(metadata.st_mode) or _lifecycle_file_identity(metadata) != row.original.identity:
+                raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "original file/native directory association differs")
+            _verify_captured_file(row.current, "WI-LEGACY-COMPLETION-DRIFT")
+        for snapshot in current_directories.values():
+            _verify_captured_directory(snapshot, "WI-LEGACY-COMPLETION-DRIFT")
+
+
+def _call_acquired_input(acquired_input, method: str, *args, **kwargs):
+    try:
+        return getattr(acquired_input, method)(*args, **kwargs)
+    except AttributeError as exc:
+        raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", f"acquired input lacks owner operation: {method}") from exc
+    except RuntimeError as exc:
+        # Actual M may be imported by producer/consumer under distinct names.
+        # Preserve the real owner failure, including its cause, across that port.
+        failure_id = getattr(exc, "failure_id", None)
+        if isinstance(exc, LifecycleError) or not isinstance(failure_id, str):
+            raise
+        raise LifecycleError(failure_id, str(exc)) from exc
+
+
+def _input_metadata(path: Path, acquired_input=None):
+    if acquired_input is not None and _settled_history_input(acquired_input) is not None:
+        return _call_acquired_input(acquired_input, "current_native_metadata", path)
+    return path.lstat() if acquired_input is None else _call_acquired_input(acquired_input, "metadata", path)
+
+
+def _input_exists(path: Path, acquired_input=None):
+    if acquired_input is not None:
+        return _call_acquired_input(acquired_input, "exists", path)
+    return _ledger_h1_lexically_exists(path)
+
+
+def _input_is_file(path: Path, acquired_input=None):
+    if acquired_input is None:
+        return path.is_file()
+    if _settled_history_input(acquired_input) is not None:
+        entry = _call_acquired_input(acquired_input, "origin_entry", path)
+        return entry is not None and entry.kind == "file"
+    return _input_exists(path, acquired_input) and stat.S_ISREG(_input_metadata(path, acquired_input).st_mode)
+
+
+def _input_is_dir(path: Path, acquired_input=None):
+    if acquired_input is None:
+        return path.is_dir()
+    if _settled_history_input(acquired_input) is not None:
+        entry = _call_acquired_input(acquired_input, "origin_entry", path)
+        return entry is not None and entry.kind == "directory"
+    return _input_exists(path, acquired_input) and stat.S_ISDIR(_input_metadata(path, acquired_input).st_mode)
+
+
+def _input_children(path: Path, acquired_input=None):
+    return tuple(path.iterdir()) if acquired_input is None else _call_acquired_input(acquired_input, "children", path)
+
+
+def _input_descendants(path: Path, acquired_input=None):
+    if acquired_input is None:
+        yield from path.rglob("*")
+        return
+    for child in _input_children(path, acquired_input):
+        yield child
+        if _input_is_dir(child, acquired_input):
+            yield from _input_descendants(child, acquired_input)
+
+
+def _input_bytes(path: Path, acquired_input=None):
+    return path.read_bytes() if acquired_input is None else _call_acquired_input(acquired_input, "file_snapshot", path).data
+
+
+def _input_text(path: Path, acquired_input=None, *args, **kwargs):
+    if acquired_input is None:
+        return path.read_text(*args, **kwargs)
+    return _input_bytes(path, acquired_input).decode(kwargs.get("encoding") or "utf-8", kwargs.get("errors") or "strict")
+
+
+def _input_glob(path: Path, pattern: str, acquired_input=None):
+    return path.glob(pattern) if acquired_input is None else _call_acquired_input(acquired_input, "matching_children", path, pattern)
+
+
+def _input_resolve(path: Path, acquired_input=None, *args, **kwargs):
+    if acquired_input is None:
+        return path.resolve(*args, **kwargs)
+    if kwargs.get("strict") and not _input_exists(path, acquired_input):
+        raise FileNotFoundError(str(path))
+    return _lifecycle_unresolved_absolute(path)
+
+
+@contextlib.contextmanager
+def _input_directory_inventory(path: Path, acquired_input=None):
+    if acquired_input is not None:
+        yield iter(_input_children(path, acquired_input))
+    else:
+        with os.scandir(path) as entries:
+            yield (Path(entry.path) for entry in entries)
+
+
+def _input_has_reparse(path: Path, acquired_input=None):
+    if acquired_input is None:
+        return _lifecycle_path_has_reparse(path)
+    cursor = _lifecycle_unresolved_absolute(path)
+    while cursor.is_relative_to(acquired_input.repository_root):
+        if not acquired_input.exists(cursor):
+            return False
+        if _settled_history_input(acquired_input) is not None:
+            entry = _call_acquired_input(acquired_input, "origin_entry", cursor)
+            if entry.kind == "nonordinary":
+                return True
+            if entry.kind == "directory":
+                # Logical kinds are immutable owner-recorded topology. Current
+                # native custody is checked by capture/outer consumption guards.
+                if cursor == acquired_input.repository_root:
+                    break
+                cursor = cursor.parent
+                continue
+        metadata = _input_metadata(cursor, acquired_input)
+        if stat.S_ISLNK(metadata.st_mode) or bool(getattr(metadata, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)):
+            return True
+        if cursor == acquired_input.repository_root:
+            break
+        cursor = cursor.parent
+    return False
+
+
+def _input_reject_reparse(path: Path, *, failure_id: str, message: str, acquired_input=None):
+    if acquired_input is None:
+        return _lifecycle_reject_unreduced_reparse(path, failure_id=failure_id, message=message)
+    if _input_has_reparse(path, acquired_input):
+        raise LifecycleError(failure_id, message)
+
+
 PARTIAL_MIGRATION_RECOVERY_INVENTORY_SHA256 = (
     "909A56FDBE1EC62A7D28B76D7FC682F1618B5956CCA501E525E89C3BC19E622C"
 )
@@ -1613,6 +3409,7 @@ def _resolve_project_root_identity(
     selected_reference: tuple[str, str] | None = None, selected_transition: str | None = None,
     binding_evidence_out: list | None = None,
     acquisition_purpose: str = "bound-acquisition",
+    acquired_input=None,
 ) -> tuple[Path, Path]:
     """Acquire raw semantic identity once; normalize proved roles without guessing."""
     if acquisition_purpose not in ("bound-acquisition", "topology-observation"):
@@ -1631,7 +3428,21 @@ def _resolve_project_root_identity(
     if acquisition_purpose == "topology-observation":
         if current is not None or input_role != "caller-root" or selected or binding_evidence_out is not None:
             raise LifecycleError(failure_id, "incompatible project topology observation context")
-    else:
+
+    if acquired_input is not None:
+        _call_acquired_input(acquired_input, "verify")
+        repository = acquired_input.repository_root
+        work_items = repository / "work-items"
+        selected_root = _lifecycle_unresolved_absolute(root)
+        expected = work_items if input_role == "work-items-root" else repository
+        if (selected_root != expected or current is not None and
+                (repository, work_items) != (current.repository_root, current.work_items_root)):
+            raise LifecycleError(failure_id, "captured project protocol role differs from native original root")
+        if current is not None:
+            current.verify()
+        return repository, work_items
+
+    if acquisition_purpose != "topology-observation":
         _lifecycle_reject_unreduced_reparse(Path(root), failure_id=failure_id,
             message="project root or parent contains a link or reparse point")
     resolved = Path(root).resolve()
@@ -1731,16 +3542,18 @@ def project_root_identity(root: Path, *, input_role: str = "caller-root",
 
 
 def _read_project_topology_at(work_items: Path, *, root_failure_id: str = ROOT_CONTRACT_FAILURE,
-    acquisition_purpose: str = "bound-acquisition", original_root: Path | None = None) -> ProjectTopology:
+    acquisition_purpose: str = "bound-acquisition", original_root: Path | None = None,
+    acquired_input=None,
+) -> ProjectTopology:
     unresolved = work_items.parent
     if unresolved / "work-items" != work_items:
         raise LifecycleError(root_failure_id, "invalid canonical work-items role")
     if acquisition_purpose != "topology-observation":
-        _lifecycle_reject_unreduced_reparse(work_items, failure_id=root_failure_id,
-            message="canonical work-items root contains a link or reparse point")
+        _input_reject_reparse(work_items, failure_id=root_failure_id,
+            message="canonical work-items root contains a link or reparse point", acquired_input=acquired_input)
     contract_path = work_items / ROOT_CONTRACT_FILE
     try:
-        contract_path.lstat()
+        _input_metadata(contract_path, acquired_input)
     except FileNotFoundError:
         return ProjectTopology(work_items=work_items, auxiliary_roots=frozenset())
     except OSError as exc:
@@ -1748,28 +3561,28 @@ def _read_project_topology_at(work_items: Path, *, root_failure_id: str = ROOT_C
             ROOT_CONTRACT_FAILURE, "root contract entry cannot be inspected"
         ) from exc
     if acquisition_purpose == "topology-observation" and original_root is not None:
-        _lifecycle_reject_unreduced_reparse(original_root, failure_id=root_failure_id,
-            message="project root or parent contains a link or reparse point")
-    _lifecycle_reject_unreduced_reparse(
+        _input_reject_reparse(original_root, failure_id=root_failure_id,
+            message="project root or parent contains a link or reparse point", acquired_input=acquired_input)
+    _input_reject_reparse(
         unresolved,
         failure_id=root_failure_id,
         message="repository root or parent contains a link or reparse point",
-    )
-    _lifecycle_reject_unreduced_reparse(
+     acquired_input=acquired_input)
+    _input_reject_reparse(
         work_items,
         failure_id=root_failure_id,
         message="work-items root contains a link or reparse point",
-    )
-    _lifecycle_reject_unreduced_reparse(
+     acquired_input=acquired_input)
+    _input_reject_reparse(
         contract_path,
         failure_id=ROOT_CONTRACT_FAILURE,
         message="root contract contains a link or reparse point",
-    )
-    if not contract_path.is_file():
+     acquired_input=acquired_input)
+    if not _input_is_file(contract_path, acquired_input):
         raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract must be a regular file")
     try:
         contract = json.loads(
-            contract_path.read_text(encoding="utf-8"),
+            _input_text(contract_path, acquired_input, encoding="utf-8"),
             object_pairs_hook=_root_contract_json_object,
         )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -1814,12 +3627,12 @@ def _read_project_topology_at(work_items: Path, *, root_failure_id: str = ROOT_C
         if not isinstance(definition, dict) or definition != {"kind": "flat-json"}:
             raise LifecycleError(ROOT_CONTRACT_FAILURE, f"auxiliary root definition is invalid: {name}")
         auxiliary_path = work_items / name
-        _lifecycle_reject_unreduced_reparse(
+        _input_reject_reparse(
             auxiliary_path,
             failure_id=ROOT_CONTRACT_FAILURE,
             message=f"auxiliary root contains a link or reparse point: {name}",
-        )
-        if auxiliary_path.exists() and not auxiliary_path.is_dir():
+         acquired_input=acquired_input)
+        if (_input_exists(auxiliary_path, acquired_input) if acquired_input is not None else auxiliary_path.exists()) and not _input_is_dir(auxiliary_path, acquired_input):
             raise LifecycleError(ROOT_CONTRACT_FAILURE, f"auxiliary root is not a directory: {name}")
         auxiliary_roots.add(name)
     topology = ProjectTopology(
@@ -1833,13 +3646,15 @@ def _read_project_topology_at(work_items: Path, *, root_failure_id: str = ROOT_C
 
 
 def _resolve_project_topology(root: Path, *, root_failure_id: str = ROOT_CONTRACT_FAILURE,
-    input_role: str = "caller-root") -> ProjectTopology:
+    input_role: str = "caller-root",
+    acquired_input=None,
+) -> ProjectTopology:
     purpose = ("topology-observation" if input_role == "caller-root"
         and _CURRENT_LIFECYCLE_TRANSACTION.get() is None else "bound-acquisition")
     _repository, work_items = _resolve_project_root_identity(root, input_role=input_role,
-        failure_id=root_failure_id, acquisition_purpose=purpose)
+        failure_id=root_failure_id, acquisition_purpose=purpose, acquired_input=acquired_input)
     return _read_project_topology_at(work_items, root_failure_id=root_failure_id,
-        acquisition_purpose=purpose, original_root=Path(root))
+        acquisition_purpose=purpose, original_root=Path(root), acquired_input=acquired_input)
 
 
 def _work_items_root(
@@ -1847,8 +3662,9 @@ def _work_items_root(
     *,
     root_failure_id: str = ROOT_CONTRACT_FAILURE,
     input_role: str = "caller-root",
+    acquired_input=None,
 ) -> Path:
-    return _resolve_project_topology(root, root_failure_id=root_failure_id, input_role=input_role).work_items
+    return _resolve_project_topology(root, root_failure_id=root_failure_id, input_role=input_role, acquired_input=acquired_input).work_items
 
 
 def is_valid_slug(slug: str) -> bool:
@@ -1958,9 +3774,12 @@ class DecisionCompatibilityProfile:
     validate_record: Callable[[Path, str, str], CurrentDecisionRecord]
 
 
-def _read_current_decision_text(path: Path, slug: str) -> str:
+def _read_current_decision_text(path: Path, slug: str,
+    *,
+    acquired_input=None,
+) -> str:
     try:
-        return path.read_text(encoding="utf-8")
+        return _input_text(path, acquired_input, encoding="utf-8")
     except UnicodeDecodeError as exc:
         raise LifecycleError(
             "WI-DECISION-SCHEMA-INVALID",
@@ -2481,8 +4300,9 @@ def _validate_current_decision_record(
     *,
     v0_cutover_date: str | None = None,
     h1_cutover_date: str | None = None,
+    acquired_input=None,
 ) -> CurrentDecisionRecord:
-    text = _read_current_decision_text(path, slug)
+    text = _read_current_decision_text(path, slug, acquired_input=acquired_input)
     selected = _current_decision_format(text, slug)
     if selected == DECISION_FORMAT_V1:
         return _validate_current_decision_v1(text, slug)
@@ -2527,24 +4347,28 @@ def _validate_current_decision_v0_manifest_record(
     path: Path,
     slug: str,
     cutover_date: str,
+    *,
+    acquired_input=None,
 ) -> CurrentDecisionRecord:
     return _validate_current_decision_record(
         path,
         slug,
         v0_cutover_date=cutover_date,
-    )
+     acquired_input=acquired_input)
 
 
 def _validate_current_decision_h1_manifest_record(
     path: Path,
     slug: str,
     cutover_date: str,
+    *,
+    acquired_input=None,
 ) -> CurrentDecisionRecord:
     return _validate_current_decision_record(
         path,
         slug,
         h1_cutover_date=cutover_date,
-    )
+     acquired_input=acquired_input)
 
 
 def _verify_current_decision_compatibility_manifest(
@@ -2552,16 +4376,17 @@ def _verify_current_decision_compatibility_manifest(
     profile: DecisionCompatibilityProfile,
     *,
     manifest_bytes: bytes | None = None,
+    acquired_input=None,
 ) -> dict[str, CurrentDecisionRecord]:
     def manifest_invalid(message: str) -> LifecycleError:
         return LifecycleError(profile.manifest_invalid_failure_id, message)
 
-    work_items = _work_items_root(root)
+    work_items = _work_items_root(root, acquired_input=acquired_input)
     decisions = work_items / CATEGORIES["decision"].current_root
-    current_paths = sorted(decisions.glob("*.md"), key=lambda path: path.name)
+    current_paths = sorted(_input_glob(decisions, "*.md", acquired_input), key=lambda path: path.name)
     formats: dict[str, str] = {}
     for path in current_paths:
-        text = _read_current_decision_text(path, path.stem)
+        text = _read_current_decision_text(path, path.stem, acquired_input=acquired_input)
         try:
             formats[path.name] = _current_decision_format(text, path.stem)
         except LifecycleError as exc:
@@ -2572,7 +4397,7 @@ def _verify_current_decision_compatibility_manifest(
         name for name, selected in formats.items() if selected == profile.format
     )
     manifest_path = work_items / profile.manifest_name
-    if manifest_bytes is None and not manifest_path.is_file():
+    if manifest_bytes is None and not _input_is_file(manifest_path, acquired_input):
         if discovered:
             raise LifecycleError(
                 profile.manifest_missing_failure_id,
@@ -2581,7 +4406,7 @@ def _verify_current_decision_compatibility_manifest(
         return {}
     try:
         encoded = (
-            manifest_path.read_bytes()
+            _input_bytes(manifest_path, acquired_input)
             if manifest_bytes is None
             else manifest_bytes
         )
@@ -2711,12 +4536,12 @@ def _verify_current_decision_compatibility_manifest(
         )
 
     anchor_path = decisions / f"{policy_slug}.md"
-    if not anchor_path.is_file() or formats.get(anchor_path.name) != DECISION_FORMAT_V1:
+    if not _input_is_file(anchor_path, acquired_input) or formats.get(anchor_path.name) != DECISION_FORMAT_V1:
         raise manifest_invalid(
             f"decision {profile.label} manifest policy anchor is not a current V1 record"
         )
     try:
-        anchor = _validate_current_decision_record(anchor_path, policy_slug)
+        anchor = _validate_current_decision_record(anchor_path, policy_slug, acquired_input=acquired_input)
     except LifecycleError as exc:
         raise manifest_invalid(
             f"decision {profile.label} manifest policy anchor is invalid"
@@ -2763,7 +4588,7 @@ def _verify_current_decision_compatibility_manifest(
                 try:
                     archived = _capture_file_snapshot(
                         archive, failure_id=profile.manifest_stale_failure_id
-                    ).data
+                    , acquired_input=acquired_input).data
                 except LifecycleError as exc:
                     raise LifecycleError(
                         profile.manifest_stale_failure_id,
@@ -2786,13 +4611,14 @@ def _verify_current_decision_compatibility_manifest(
                 profile.manifest_stale_failure_id,
                 f"admitted decisions/{name} is missing or no longer {profile.label}",
             )
-        actual_digest = hashlib.sha256(path.read_bytes()).hexdigest().upper()
+        actual_digest = hashlib.sha256(_input_bytes(path, acquired_input)).hexdigest().upper()
         if actual_digest != entry["sha256"]:
             raise LifecycleError(
                 profile.hash_mismatch_failure_id,
                 f"admitted decisions/{name} differs from its frozen SHA-256",
             )
-        admitted[name] = profile.validate_record(path, path.stem, cutover_date)
+        admitted[name] = (profile.validate_record(path, path.stem, cutover_date) if acquired_input is None
+                          else profile.validate_record(path, path.stem, cutover_date, acquired_input=acquired_input))
     return admitted
 
 
@@ -3333,6 +5159,7 @@ def _preflight_current_decision_h1(
     root: Path,
     *,
     manifest_bytes: bytes | None = None,
+    acquired_input=None,
 ) -> dict[str, CurrentDecisionRecord]:
     return _verify_current_decision_compatibility_manifest(
         root,
@@ -3353,7 +5180,7 @@ def _preflight_current_decision_h1(
             validate_record=_validate_current_decision_h1_manifest_record,
         ),
         manifest_bytes=manifest_bytes,
-    )
+     acquired_input=acquired_input)
 
 
 def _validate_canonical_candidate_header(data: bytes) -> None:
@@ -3529,6 +5356,32 @@ class LifecycleWriteTarget:
 
     def _failure(self, stage: str, cause: BaseException) -> LifecycleError:
         return LifecycleError("WI-LIFECYCLE-WRITE-BOUNDARY", f"{stage}: {cause}")
+
+    def _acquire_existing_parents(self):
+        """Acquire the directory reader's native chain without namespace effects.
+
+        The read consumer owns finally-close, including partial acquisition.
+        Ordinary constructive __enter__ remains the separate write operation.
+        """
+        if self._open or self._directories:
+            raise self._failure("existing-parent acquisition", OSError("native owner is already active"))
+        if os.name == "nt":
+            self._initialize_windows()
+            handle = self._windows_root(self.path.anchor)
+        else:
+            handle = os.open(self.path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        cursor = Path(self.path.anchor)
+        self._retain_directory(cursor, handle)
+        for part in self.path.parent.parts[1:]:
+            cursor /= part
+            if os.name == "nt":
+                child = self._windows_child(handle, part, directory=True, create=False)
+            else:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=handle)
+            self._retain_directory(cursor, child)
+            handle = child
+        self._parent, self._open = handle, True
+        self.verify()
 
     def __enter__(self):
         try:
@@ -3970,7 +5823,7 @@ class LifecycleWriteTarget:
         name = Unicode(length, length + 2, c.cast(text, c.c_void_p))
         attributes = Attributes(c.sizeof(Attributes), parent, c.pointer(name), 0x40, None, None)
         output = w.HANDLE(); status = Status()
-        access = 0x1000a0 if directory else 0x100081 | (2 if write else 0) | (0x10000 if delete else 0)
+        access = (0x1000a0 | (0x10000 if delete else 0)) if directory else 0x100081 | (2 if write else 0) | (0x10000 if delete else 0)
         disposition = 2 if exclusive else 3 if create else 1
         options = 0x200020 | (1 if directory else 0x40)
         result = nt.NtCreateFile(c.byref(output), access, c.byref(attributes), c.byref(status), None, 0x80,
@@ -4086,6 +5939,7 @@ def _archive_entity_rows_at(work_items: Path) -> tuple:
     owned_inputs = {
         "status.md", "closure.md", LEGACY_RETIREMENT_FILE,
         BUG_DISPOSITIONS_MANIFEST, BUG_DISPOSITIONS_RECEIPT,
+        LEGACY_COMPLETION_METADATA, "legacy-source",
     }
     directories = []
     rows = []
@@ -4126,6 +5980,8 @@ def _archive_entity_rows_at(work_items: Path) -> tuple:
                 continue
             leaves = children(item, lexical_only=not canonical_month)
             owned = owned_inputs.intersection(path.name for path in leaves)
+            if _legacy_completion_recognized(item):
+                owned.add(LEGACY_COMPLETION_METADATA)
             if not canonical_month and not owned:
                 continue
             if owned or not leaves and canonical_month:
@@ -4215,6 +6071,8 @@ def _category_locations_at(work_items: Path, category: Category, slug: str, *,
         for path, _kind, reference, _leaves in archive_rows:
             if reference == f"work-item:{slug}":
                 _observe_project_path_at(path, "directory", evidence, failure_id)
+                if _legacy_completion_recognized(path):
+                    _require_legacy_terminal(work_items.parent, path)
                 locations.append(path)
     else:
         current = work_items / category.current_root / f"{slug}.md"
@@ -4272,15 +6130,38 @@ def resolve_legacy_path(root: Path, legacy_path: str) -> Path:
     if candidate.is_absolute():
         raise LifecycleError("WI-REFERENCE-INVALID", "legacy path must be relative")
     repo_root = _work_items_root(root).parent.resolve()
-    resolved = (repo_root / candidate).resolve()
+    resolved = _lifecycle_unresolved_absolute(repo_root / candidate)
     if resolved != repo_root and repo_root not in resolved.parents:
         raise LifecycleError("WI-REFERENCE-INVALID", "legacy path escapes repository")
+    inventory = _archive_entity_inventory(root)
+    for item in inventory.logical_work_item_paths:
+        if resolved.is_relative_to(item) and _legacy_completion_recognized(item):
+            _require_legacy_terminal(repo_root, item)
     if not resolved.exists():
+        selected = []
+        for item in inventory.logical_work_item_paths:
+            if not _legacy_completion_recognized(item):
+                continue
+            if candidate.parts[:2] == ("work-items", "backlog") and candidate.stem == item.name:
+                observation = _require_legacy_terminal(repo_root, item)
+            else:
+                metadata = _capture_file_snapshot(item / LEGACY_COMPLETION_METADATA, failure_id="WI-LEGACY-COMPLETION-CUSTODY")
+                payload = json.loads(metadata.data)
+                if not any(row.get("originalPath") == candidate.as_posix() for row in payload["custodyMap"]):
+                    continue
+                observation = _require_legacy_terminal(repo_root, item)
+            port = observation.acquired_input
+            if resolved in port.files:
+                selected.append(port.current_snapshot(resolved).path)
+        if len(selected) == 1:
+            return selected[0]
+        if len(selected) > 1:
+            raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", "original reference has multiple exact retained owners")
         raise LifecycleError(
             "WI-LEGACY-LINK-UNMAPPED",
             f"legacy path is absent and has no incoming-link inventory: {legacy_path}",
         )
-    _reject_unbound_archive_selection(_archive_entity_inventory(root), path=resolved)
+    _reject_unbound_archive_selection(inventory, path=resolved)
     return resolved
 
 
@@ -4374,9 +6255,12 @@ def _status_entry(root: Path, item: Path, *, diagnostic_status: bool = False) ->
     return entry
 
 
-def _legacy_retirement_entry(item: Path, metadata: Path) -> ReadmeEntry:
+def _legacy_retirement_entry(item: Path, metadata: Path,
+    *,
+    acquired_input=None,
+) -> ReadmeEntry:
     try:
-        payload = json.loads(metadata.read_text(encoding="utf-8"))
+        payload = json.loads(_input_text(metadata, acquired_input, encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise LifecycleError(
             "WI-LEGACY-RETIREMENT-INVALID",
@@ -4450,11 +6334,12 @@ def _legacy_retirement_entry(item: Path, metadata: Path) -> ReadmeEntry:
                 "WI-LEGACY-RETIREMENT-INVALID", f"unsafe source path: {relative!r}"
             )
         source = item / candidate
-        if source.is_symlink() or not source.is_file():
+        if (source.is_symlink() if acquired_input is None else _input_exists(source, acquired_input)
+                and stat.S_ISLNK(_input_metadata(source, acquired_input).st_mode)) or not _input_is_file(source, acquired_input):
             raise LifecycleError(
                 "WI-LEGACY-RETIREMENT-INVALID", f"missing source payload: {relative}"
             )
-        data = source.read_bytes()
+        data = _input_bytes(source, acquired_input)
         if (
             row.get("byteLength") != len(data)
             or row.get("sha256") != hashlib.sha256(data).hexdigest()
@@ -4466,8 +6351,8 @@ def _legacy_retirement_entry(item: Path, metadata: Path) -> ReadmeEntry:
         sources.append(source)
     actual = {
         path.relative_to(item).as_posix()
-        for path in item.rglob("*")
-        if path.is_file() and path != metadata
+        for path in _input_descendants(item, acquired_input)
+        if _input_is_file(path, acquired_input) and path != metadata
     }
     if actual != seen:
         raise LifecycleError(
@@ -4490,6 +6375,7 @@ def _legacy_retirement_entry(item: Path, metadata: Path) -> ReadmeEntry:
         ),
         mutable_consumers_only=True,
         scan_markdown_links=False,
+        acquired_input=acquired_input,
     )
     try:
         _validate_incoming_link_snapshot(
@@ -4512,17 +6398,25 @@ def _legacy_retirement_entry(item: Path, metadata: Path) -> ReadmeEntry:
     )
 
 
-def _archived_work_item_entry(item: Path) -> ReadmeEntry:
+def _archived_work_item_entry(item: Path,
+    *,
+    acquired_input=None,
+) -> ReadmeEntry:
+    if acquired_input is None and _legacy_completion_recognized(item):
+        observation = _require_legacy_terminal(item.parent.parent.parent.parent, item)
+        port = observation.acquired_input
+        closure_data = next(snapshot.data for snapshot in port._current_files if snapshot.path == item / "closure.md")
+        return _legacy_terminal_entry(item, port.metadata, closure_data)
     retirement = item / LEGACY_RETIREMENT_FILE
-    if retirement.is_file():
-        if (item / "status.md").exists() or (item / "closure.md").exists():
+    if _input_is_file(retirement, acquired_input):
+        if (_input_exists(item / "status.md", acquired_input) if acquired_input is not None else (item / "status.md").exists()) or (_input_exists(item / "closure.md", acquired_input) if acquired_input is not None else (item / "closure.md").exists()):
             raise LifecycleError(
                 "WI-LEGACY-RETIREMENT-INVALID",
                 f"direct legacy retirement must not carry active/closure history: {item}",
             )
-        return _legacy_retirement_entry(item, retirement)
+        return _legacy_retirement_entry(item, retirement, acquired_input=acquired_input)
     closure = item / "closure.md"
-    if not closure.is_file():
+    if not _input_is_file(closure, acquired_input):
         raise LifecycleError(
             "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING",
             f"archived work-item lacks closure.md: {item}",
@@ -4532,17 +6426,17 @@ def _archived_work_item_entry(item: Path) -> ReadmeEntry:
         closure,
         failure_id="WI-README-STALE",
         maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
-    ).data
+     acquired_input=acquired_input).data
     status_data = _capture_file_snapshot(
         status,
         failure_id="WI-README-STALE",
         maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
-    ).data if status.is_file() else b""
+     acquired_input=acquired_input).data if _input_is_file(status, acquired_input) else b""
     closure_markers = _schema_marker_occurrences(closure_data, "closure.md")
     status_markers = _schema_marker_occurrences(status_data, "status.md")
     fields = _parse_fields(closure_data.decode("utf-8"))
     sources = [closure]
-    if status.is_file():
+    if _input_is_file(status, acquired_input):
         sources.append(status)
 
     if not closure_markers and not status_markers:
@@ -4594,7 +6488,8 @@ def collect_readme_entries(root: Path) -> list[ReadmeEntry]:
     return _collect_readme_entries(root)
 
 
-def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInventory | None = None) -> list[ReadmeEntry]:
+def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInventory | None = None,
+                            prepared_terminal=None) -> list[ReadmeEntry]:
     work_items = _work_items_root(root)
     inventory = archive_inventory if archive_inventory is not None else _archive_entity_inventory(root)
     entries: list[ReadmeEntry] = []
@@ -4602,6 +6497,8 @@ def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInven
     backlog = work_items / "backlog"
     if backlog.is_dir():
         for path in sorted(backlog.glob("*.md")):
+            if prepared_terminal is not None and path == prepared_terminal.source:
+                continue
             data = _capture_file_snapshot(
                 path,
                 failure_id="WI-README-STALE",
@@ -4649,6 +6546,8 @@ def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInven
             )
 
     for entity in inventory.entities:
+        if prepared_terminal is not None and entity.path == prepared_terminal.archive:
+            continue
         if entity.kind in {"work-item", "invalid-work-item"}:
             entries.append(_archived_work_item_entry(entity.path))
         elif entity.kind == "archive-metadata":
@@ -4663,6 +6562,10 @@ def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInven
                     path, False, "Identify the creator and format, then use its existing owner.",
                     [] if path == entity.path else [path], "WI-ARCHIVE-ENTITY-UNBOUND"))
     inventory.verify()
+    if prepared_terminal is not None:
+        metadata = json.loads(prepared_terminal.images[prepared_terminal.archive / LEGACY_COMPLETION_METADATA])
+        entries.append(_legacy_terminal_entry(prepared_terminal.archive, metadata,
+                                             prepared_terminal.images[prepared_terminal.archive / "closure.md"]))
 
     seen: set[str] = set()
     for entry in entries:
@@ -4677,7 +6580,7 @@ def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInven
     return sorted(entries, key=lambda entry: (order[entry.section], entry.logical_reference))
 
 
-def _input_digest(entries: Iterable[ReadmeEntry], work_items: Path) -> str:
+def _input_digest(entries: Iterable[ReadmeEntry], work_items: Path, *, prepared_terminal=None) -> str:
     inputs: dict[str, Path] = {}
     for entry in entries:
         for path in entry.source_paths:
@@ -4685,11 +6588,11 @@ def _input_digest(entries: Iterable[ReadmeEntry], work_items: Path) -> str:
             inputs[logical_path] = path
     digest = hashlib.sha256()
     for logical_path, path in sorted(inputs.items()):
-        data = _capture_file_snapshot(
+        data = (prepared_terminal.images[path] if prepared_terminal is not None and path in prepared_terminal.images else _capture_file_snapshot(
             path,
             failure_id="WI-README-STALE",
             maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
-        ).data
+        ).data)
         encoded = logical_path.encode("utf-8")
         digest.update(len(encoded).to_bytes(8, "big"))
         digest.update(encoded)
@@ -4698,9 +6601,16 @@ def _input_digest(entries: Iterable[ReadmeEntry], work_items: Path) -> str:
     return digest.hexdigest()
 
 
-def _canonical_timestamp(entries: Iterable[ReadmeEntry]) -> str:
+def _canonical_timestamp(entries: Iterable[ReadmeEntry], *, prepared_terminal=None) -> str:
     instants: list[str] = []
     for entry in entries:
+        if entry.classification == LEGACY_COMPLETION_KIND:
+            path = entry.link.parent / LEGACY_COMPLETION_METADATA
+            raw = prepared_terminal.images[path] if prepared_terminal is not None and path in prepared_terminal.images else _capture_file_snapshot(
+                path, failure_id="WI-README-STALE").data
+            instant = json.loads(raw)["terminalInstant"]
+            _strict_utc(instant); instants.append(instant)
+            continue
         if entry.classification in {"WI-ARCHIVE-ENTITY-UNBOUND", "WI-ARCHIVE-METADATA"}:
             continue
         for path in entry.source_paths:
@@ -4776,12 +6686,17 @@ def _render_readme_bytes(
     static_guide_override: str | None = None, input_digest_out: list[str] | None = None,
     archive_inventory_out: list[dict] | None = None,
     archive_inventory_witness_out: list[ArchiveEntityInventory] | None = None,
+    prepared_terminal=None,
 ) -> bytes:
+    if prepared_terminal is not None:
+        if type(prepared_terminal) is not PreparedWorkItemTerminal:
+            raise LifecycleError("WI-LEGACY-COMPLETION-PREPARED", "unsupported prepared terminal type")
+        prepared_terminal.verify(root)
     work_items = _work_items_root(root)
     inventory = _archive_entity_inventory(root)
-    entries = _collect_readme_entries(root, archive_inventory=inventory)
-    canonical_timestamp = _canonical_timestamp(entries)
-    input_digest = _input_digest(entries, work_items)
+    entries = _collect_readme_entries(root, archive_inventory=inventory, prepared_terminal=prepared_terminal)
+    canonical_timestamp = _canonical_timestamp(entries, prepared_terminal=prepared_terminal)
+    input_digest = _input_digest(entries, work_items, prepared_terminal=prepared_terminal)
     if input_digest_out is not None:
         input_digest_out.append(input_digest)
     lines = [
@@ -7038,15 +8953,18 @@ def _load_bug_disposition_manifest(
     item: Path,
     slug: str,
     terminal_instant: str,
+    *, manifest_snapshot=None,
 ) -> tuple[Path, bytes, dict]:
-    manifest = item / BUG_DISPOSITIONS_MANIFEST
+    manifest = manifest_snapshot.path if manifest_snapshot is not None else item / BUG_DISPOSITIONS_MANIFEST
     if manifest.is_symlink() or not manifest.is_file():
         raise _bug_disposition_fail(
             "WI-BUG-DISPOSITIONS-MISSING",
             f"active work-item requires {BUG_DISPOSITIONS_MANIFEST}: {slug}",
         )
     try:
-        data = manifest.read_bytes()
+        if manifest_snapshot is not None:
+            _verify_captured_file(manifest_snapshot, "WI-BUG-DISPOSITIONS-DRIFT")
+        data = manifest_snapshot.data if manifest_snapshot is not None else manifest.read_bytes()
         payload = json.loads(data.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise _bug_disposition_fail(
@@ -7311,9 +9229,10 @@ def _prepare_bug_dispositions(
     terminal_instant: str,
     *,
     allow_placeholder_context: bool = False,
+    manifest_snapshot=None,
 ) -> tuple[Path, bytes, tuple[BugDispositionPlan, ...]]:
     manifest, manifest_data, payload = _load_bug_disposition_manifest(
-        item, slug, terminal_instant
+        item, slug, terminal_instant, manifest_snapshot=manifest_snapshot
     )
     schema_version = payload["schemaVersion"]
     if schema_version == 2 and not allow_placeholder_context:
@@ -7632,11 +9551,19 @@ def _verify_close_link_maintenance(work_items: Path, slug: str, instant: str,
     failure = "WI-IMMUTABLE-ARCHIVE"
     def reject() -> None:
         raise LifecycleError(failure, "ordinary-close link receipt binding differs")
+    expected_source = f"active/{slug}"
+    expected_target = f"archive/{archive_month(instant)}/{slug}"
+    legacy_metadata = work_items / expected_target / LEGACY_COMPLETION_METADATA
+    legacy = os.path.lexists(legacy_metadata)
+    if legacy:
+        metadata = json.loads(_capture_file_snapshot(legacy_metadata, failure_id=failure).data)
+        expected_source = metadata["source"]["originalPath"].removeprefix("work-items/")
+        expected_target += "/" + metadata["source"]["preservedPath"]
     if (not isinstance(value, dict) or set(value) != {
         "version", "source", "target", "allowProtectedUriUpdates", "consumers"
     } or type(value["version"]) is not int or value["version"] != 1
-        or value["source"] != f"active/{slug}"
-        or value["target"] != f"archive/{archive_month(instant)}/{slug}"
+        or value["source"] != expected_source
+        or value["target"] != expected_target
         or type(value["allowProtectedUriUpdates"]) is not bool
         or not isinstance(value["consumers"], list) or not value["consumers"]):
         reject()
@@ -7654,7 +9581,10 @@ def _verify_close_link_maintenance(work_items: Path, slug: str, instant: str,
             if (not isinstance(path, str) or not path or "\\" in path
                 or PurePosixPath(path).is_absolute() or any(part in {"", ".", ".."} for part in path.split("/"))):
                 reject()
-            _terminalization_bound_path(work_items, path, label="close link receipt")
+            if legacy:
+                _legacy_relative("work-items/" + path)
+            else:
+                _terminalization_bound_path(work_items, path, label="close link receipt")
         if row["source"] in by_source or "archive" in PurePosixPath(row["source"]).parts:
             reject()
         authority = row["authority"]
@@ -8091,8 +10021,26 @@ def _verify_parent_archive_link_targets(plan: dict, *, archived: bool,
             raise LifecycleError(failure_id, "declared absent URI target appeared")
 
 
+def close_item(root, slug, closure_data, terminal_instant, *, inject_readme_failure=False,
+               inject_bug_failure_after=None, allow_protected_uri_updates=False,
+               legacy_evidence_data=None, apply=False, inject_failure_at=None):
+    if legacy_evidence_data is not None:
+        return _close_legacy_flat_entry(root, slug, closure_data, terminal_instant, legacy_evidence_data,
+            apply=apply, authority=allow_protected_uri_updates,
+            inject_failure_at=inject_failure_at or ("after-board" if inject_readme_failure else None))
+    return _close_item_directory(root, slug, closure_data, terminal_instant,
+        inject_readme_failure=inject_readme_failure, inject_bug_failure_after=inject_bug_failure_after,
+        allow_protected_uri_updates=allow_protected_uri_updates, apply=apply, inject_failure_at=inject_failure_at)
+
+
+@_lifecycle_participant
+def _close_legacy_flat_entry(root, slug, closure_data, instant, evidence_data, *, apply, authority, inject_failure_at=None):
+    return _close_legacy_flat(root, slug, closure_data, instant, evidence_data,
+                             apply=apply, authority=authority, inject_failure_at=inject_failure_at)
+
+
 @functools.partial(_lifecycle_participant, subject_parameters=('category-slug', 'work-item', 'slug'))
-def close_item(
+def _close_item_directory(
     root: Path,
     slug: str,
     closure_data: bytes,
@@ -8101,7 +10049,15 @@ def close_item(
     inject_readme_failure: bool = False,
     inject_bug_failure_after: int | None = None,
     allow_protected_uri_updates: bool = False,
+    legacy_evidence_data: bytes | None = None,
+    apply: bool = False,
+    inject_failure_at: str | None = None,
 ) -> Path:
+    if legacy_evidence_data is not None:
+        return _close_legacy_flat(root, slug, closure_data, terminal_instant, legacy_evidence_data,
+            apply=apply, authority=allow_protected_uri_updates, inject_failure_at=inject_failure_at)
+    if apply or inject_failure_at is not None:
+        raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", "legacy apply/fault arguments require explicit legacy evidence")
     if type(allow_protected_uri_updates) is not bool:
         raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", "URI-upkeep authority must be boolean")
     _validate_slug(slug)
@@ -8811,17 +10767,19 @@ def _repository_root_for_item(item: Path) -> Path:
     raise LifecycleError("WI-INVALID-TARGET", "path is not owned by a work-items root")
 
 
-def _require_lifecycle_mutation_path(root: Path, path: Path, *, failure_id: str) -> Path:
+def _require_lifecycle_mutation_path(root: Path, path: Path, *, failure_id: str,
+    acquired_input=None,
+) -> Path:
     path = _lifecycle_unresolved_absolute(path)
-    _lifecycle_reject_unreduced_reparse(
+    _input_reject_reparse(
         path, failure_id=failure_id, message="lifecycle mutation path contains a link or reparse point"
-    )
+    , acquired_input=acquired_input)
     repository = _lifecycle_unresolved_absolute(Path(root))
-    _lifecycle_reject_unreduced_reparse(
+    _input_reject_reparse(
         repository, failure_id=failure_id, message="repository root contains a link or reparse point"
-    )
-    repository = repository.resolve()
-    candidate = path.resolve(strict=False)
+    , acquired_input=acquired_input)
+    repository = _input_resolve(repository, acquired_input)
+    candidate = _input_resolve(path, acquired_input, strict=False)
     try:
         candidate.relative_to(repository)
     except ValueError as exc:
@@ -9292,23 +11250,23 @@ BUG_SUPERSESSION_INVENTORY_LINK_FIELDS = {
 
 
 def _bounded_transition_intent_inventory(
-    directory: Path, *, failure_id: str, unreadable: str
+    directory: Path, *, failure_id: str, unreadable: str,
+    acquired_input=None,
 ) -> list[Path]:
     """Inventory transition intents within finite count and byte budgets."""
     candidates: list[Path] = []
     total_bytes = 0
     json_suffix = os.path.normcase(".json")
     try:
-        with os.scandir(directory) as entries:
-            for entry_count, entry in enumerate(entries, start=1):
+        with _input_directory_inventory(directory, acquired_input) as entries:
+            for entry_count, path in enumerate(entries, start=1):
                 if entry_count > TRANSITION_INTENT_INVENTORY_MAX_ENTRIES:
                     raise LifecycleError(
                         failure_id, "transition intent inventory limit exceeded"
                     )
-                if not os.path.normcase(entry.name).endswith(json_suffix):
+                if not os.path.normcase(path.name).endswith(json_suffix):
                     continue
-                path = Path(entry.path)
-                metadata = path.lstat()
+                metadata = _input_metadata(path, acquired_input)
                 if (
                     not stat.S_ISREG(metadata.st_mode)
                     or stat.S_ISLNK(metadata.st_mode)
@@ -9344,6 +11302,7 @@ def _validate_transfer_migration_receipt_bindings(
     value: object,
     *,
     failure_id: str,
+    acquired_input=None,
 ) -> tuple[dict[str, str], ...]:
     if not isinstance(archive_path, str) or not isinstance(value, list):
         raise LifecycleError(failure_id, "migration receipt binding list differs")
@@ -9360,7 +11319,7 @@ def _validate_transfer_migration_receipt_bindings(
         ):
             raise LifecycleError(failure_id, "migration receipt binding row differs")
         path = row["path"]
-        _intent_path(root, path)
+        _intent_path(root, path, acquired_input=acquired_input)
         pure = PurePosixPath(path)
         if pure.parent != expected_parent or pure.suffix != ".json":
             raise LifecycleError(failure_id, "migration receipt binding path differs")
@@ -10423,12 +12382,25 @@ def _physical_archive_link_plans(
                 destination = archive / candidate.relative_to(source_resolved)
                 href = os.path.relpath(destination, final_consumer.parent).replace(os.sep, "/") + parts[1]
                 replacements.append((link.href_start, link.href_end, href))
-        if not replacements:
+        literal_changes = []
+        for reference in references:
+            if reference["consumer"] != relative or reference["kind"] != "physical":
+                continue
+            value = reference["value"].replace("\\", "/")
+            if value in {source.relative_to(repository).as_posix(), source.relative_to(_work_items_root(root)).as_posix()}:
+                if not any(link.href == reference["value"] and (consumer.parent / (_local_markdown_href_parts(link.href) or ("",))[0]).resolve() == source_resolved
+                           for link in _markdown_local_links(text)):
+                    pattern = _incoming_literal_pattern(value)
+                    if pattern.search(text):
+                        literal_changes.append((pattern, archive.relative_to(repository).as_posix()))
+        if not replacements and not literal_changes:
             if image is not None and relative not in referenced_paths:
                 continue
             raise LifecycleError(failure_id, f"physical link has no safe rewrite: {relative}")
         for start, end, href in reversed(replacements):
             text = text[:start] + href + text[end:]
+        for pattern, replacement in literal_changes:
+            text = pattern.sub(lambda _match: replacement, text)
         after = text.encode("utf-8")
         plans.append({
             "path": consumer,
@@ -10534,11 +12506,14 @@ def _validate_transition_operation_id(operation_id: str) -> None:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "invalid transition operation id")
 
 
-def _transition_intent_path(root: Path, operation_id: str) -> Path:
+def _transition_intent_path(root: Path, operation_id: str,
+    *,
+    acquired_input=None,
+) -> Path:
     _validate_transition_operation_id(operation_id)
     repository, _work_items = _resolve_project_root_identity(
         root, input_role="repository-root",
-    )
+     acquired_input=acquired_input)
     return repository / ".scratch" / "work-items-lifecycle-transitions" / f"{operation_id}.json"
 
 
@@ -10583,17 +12558,20 @@ def _transition_fsync_directory(path: Path) -> None:
             ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(native_handle)
 
 
-def _intent_path(root: Path, relative: str) -> Path:
+def _intent_path(root: Path, relative: str,
+    *,
+    acquired_input=None,
+) -> Path:
     pure = Path(relative)
     if pure.is_absolute() or ".." in pure.parts:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "intent path is not repository-relative")
     repository, _work_items = _resolve_project_root_identity(
         root, input_role="repository-root",
-    )
+     acquired_input=acquired_input)
     path = repository.joinpath(*pure.parts)
     return _require_lifecycle_mutation_path(
         repository, path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
-    )
+    , acquired_input=acquired_input)
 
 
 
@@ -11223,6 +13201,9 @@ def _read_transition_intent_envelope(root: Path, path: Path) -> tuple:
         and payload.get("owner") == SUCCESSOR_IMPORT_OWNER
         and payload.get("kind") == SUCCESSOR_IMPORT_KIND
     )
+    is_legacy_completion = (isinstance(payload, dict) and set(payload) == LEGACY_COMPLETION_INTENT_FIELDS
+        and payload.get("schemaVersion") == 1 and payload.get("owner") == LEGACY_COMPLETION_OWNER
+        and payload.get("kind") == LEGACY_COMPLETION_KIND)
     if (
         not (
             is_v1
@@ -11232,16 +13213,17 @@ def _read_transition_intent_envelope(root: Path, path: Path) -> tuple:
             or is_fixed_bug_archive
             or is_ledger_h1_relocation
             or is_successor_import
+            or is_legacy_completion
         )
         or payload.get("status") != "intent"
         or (
-            not (is_bug_supersession or is_fixed_bug_archive or is_ledger_h1_relocation or is_successor_import)
+            not (is_bug_supersession or is_fixed_bug_archive or is_ledger_h1_relocation or is_successor_import or is_legacy_completion)
             and not isinstance(payload.get("bugs"), list)
         )
     ):
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition intent shape differs")
     _transition_intent_operation_id(root, path, intent=payload)
-    return payload, snapshot, (is_v1, is_v2, is_legacy_v2, is_bug_supersession, is_fixed_bug_archive, is_ledger_h1_relocation, is_successor_import)
+    return payload, snapshot, (is_v1, is_v2, is_legacy_v2, is_bug_supersession, is_fixed_bug_archive, is_ledger_h1_relocation, is_successor_import, is_legacy_completion)
 
 
 def _read_selected_transition_at(repository: Path, operation_id: str) -> tuple[bool, tuple]:
@@ -11264,7 +13246,10 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
         captured = _read_transition_intent_envelope(root, path)
     payload, snapshot, families = captured
     _verify_captured_file(snapshot, "WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
-    is_v1, is_v2, is_legacy_v2, is_bug_supersession, is_fixed_bug_archive, is_ledger_h1_relocation, is_successor_import = families
+    is_v1, is_v2, is_legacy_v2, is_bug_supersession, is_fixed_bug_archive, is_ledger_h1_relocation, is_successor_import, is_legacy_completion = families
+    if is_legacy_completion:
+        _legacy_validate_intent(root, payload)
+        return payload
     if is_successor_import:
         _validate_successor_import_intent(root, path, payload, snapshot.data)
         return payload
@@ -11353,6 +13338,7 @@ def _ledger_location_proof_object(
     failure_id: str,
     unreadable: str,
     maximum_bytes: int = LEDGER_LOCATION_PROOF_BYTE_CAP,
+    acquired_input=None,
 ) -> tuple[dict, bytes]:
     def reject_duplicate_pairs(pairs: list[tuple[str, object]]) -> dict:
         value: dict[str, object] = {}
@@ -11370,7 +13356,7 @@ def _ledger_location_proof_object(
             failure_id=failure_id,
             maximum_bytes=maximum_bytes,
             require_single_link=True,
-        ).data
+         acquired_input=acquired_input).data
         payload = json.loads(
             raw.decode("utf-8", errors="strict"),
             object_pairs_hook=reject_duplicate_pairs,
@@ -11386,9 +13372,14 @@ def _ledger_location_proof_object(
     return payload, raw
 
 
-def _ledger_location_lexically_exists(path: Path) -> bool:
+def _ledger_location_lexically_exists(path: Path,
+    *,
+    acquired_input=None,
+) -> bool:
+    if acquired_input is not None and _settled_history_input(acquired_input) is not None:
+        return _input_exists(path, acquired_input)
     try:
-        path.lstat()
+        _input_metadata(path, acquired_input)
     except FileNotFoundError:
         return False
     except OSError as exc:
@@ -11400,26 +13391,33 @@ def _ledger_location_lexically_exists(path: Path) -> bool:
 
 
 def _ledger_location_regular_sha256(
-    path: Path, *, failure_id: str, maximum_bytes: int | None = None
+    path: Path, *, failure_id: str, maximum_bytes: int | None = None,
+    acquired_input=None,
 ) -> str:
     maximum_bytes = (
         LEDGER_LOCATION_PROOF_BYTE_CAP if maximum_bytes is None else maximum_bytes
     )
     if type(maximum_bytes) is not int or maximum_bytes < 0:
         raise LifecycleError(failure_id, "ledger location byte limit is invalid")
-    _lifecycle_reject_unreduced_reparse(
+    if acquired_input is not None:
+        _input_reject_reparse(path, failure_id=failure_id,
+                             message="ledger location path crosses a link or reparse point", acquired_input=acquired_input)
+        captured = _capture_file_snapshot(path, failure_id=failure_id,
+                                          maximum_bytes=maximum_bytes, acquired_input=acquired_input)
+        return _sha256_bytes(captured.data)
+    _input_reject_reparse(
         path,
         failure_id=failure_id,
         message="ledger location path crosses a link or reparse point",
-    )
+     acquired_input=acquired_input)
     parent_chain = _capture_path_parent_chain(path, failure_id)
     descriptor = -1
     try:
-        observed = path.lstat()
+        observed = _input_metadata(path, acquired_input)
         if (
             not stat.S_ISREG(observed.st_mode)
             or observed.st_size > maximum_bytes
-            or _lifecycle_path_has_reparse(path)
+            or _input_has_reparse(path, acquired_input)
         ):
             raise OSError("ledger location is not a bounded regular file")
         descriptor = _open_readonly_nofollow(path)
@@ -11451,12 +13449,12 @@ def _ledger_location_regular_sha256(
                 ):
                     raise OSError("ledger location changed while hashing")
                 digests.append(digest.hexdigest())
-        current = path.lstat()
+        current = _input_metadata(path, acquired_input)
         if (
             digests[0] != digests[1]
             or _lifecycle_file_snapshot_key(observed)
             != _lifecycle_file_snapshot_key(current)
-            or _lifecycle_path_has_reparse(path)
+            or _input_has_reparse(path, acquired_input)
         ):
             raise OSError("ledger location identity or content changed")
     except OSError as exc:
@@ -11473,22 +13471,23 @@ def _migration_receipt_bindings_at(
     archive: Path,
     *,
     failure_id: str,
+    acquired_input=None,
 ) -> tuple[dict[str, str], ...]:
     repository, _work_items = _resolve_project_root_identity(
         root, input_role="repository-root",
-    )
+     acquired_input=acquired_input)
     receipt_root = archive / "ledger-migration-receipts"
-    if not _ledger_location_lexically_exists(receipt_root):
+    if not _ledger_location_lexically_exists(receipt_root, acquired_input=acquired_input):
         return ()
-    _lifecycle_reject_unreduced_reparse(
+    _input_reject_reparse(
         receipt_root,
         failure_id=failure_id,
         message="migration receipt root crosses a link or reparse point",
-    )
-    if not receipt_root.is_dir():
+     acquired_input=acquired_input)
+    if not _input_is_dir(receipt_root, acquired_input):
         raise LifecycleError(failure_id, "migration receipt root is not a directory")
     receipts = sorted(
-        receipt_root.glob("*.json"),
+        _input_glob(receipt_root, "*.json", acquired_input),
         key=lambda path: path.relative_to(repository).as_posix().encode("utf-8"),
     )
     rows = tuple(
@@ -11497,7 +13496,7 @@ def _migration_receipt_bindings_at(
             "sha256": _ledger_location_regular_sha256(
                 receipt,
                 failure_id=failure_id,
-            ),
+             acquired_input=acquired_input),
         }
         for receipt in receipts
     )
@@ -11506,7 +13505,7 @@ def _migration_receipt_bindings_at(
         archive.relative_to(repository).as_posix(),
         list(rows),
         failure_id=failure_id,
-    )
+     acquired_input=acquired_input)
     return rows
 
 
@@ -11533,6 +13532,7 @@ def _validate_ledger_location_intent(
     *,
     slug: str,
     logical_work_item: str,
+    acquired_input=None,
 ) -> None:
     try:
         loaded = _load_transition_intent(root, path)
@@ -11586,7 +13586,7 @@ def _validate_ledger_location_intent(
             "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
             "ledger location intent binding differs",
         )
-    expected_path = _transition_intent_path(root, operation_id)
+    expected_path = _transition_intent_path(root, operation_id, acquired_input=acquired_input)
     if expected_path.absolute() != path.absolute():
         raise LifecycleError(
             "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
@@ -11600,16 +13600,17 @@ def _matching_ledger_location_intents(
     *,
     slug: str,
     logical_work_item: str,
+    acquired_input=None,
 ) -> list[tuple[dict, Path, bytes]]:
     transition_root = repository / ".scratch" / "work-items-lifecycle-transitions"
-    if not _ledger_location_lexically_exists(transition_root):
+    if not _ledger_location_lexically_exists(transition_root, acquired_input=acquired_input):
         return []
-    _lifecycle_reject_unreduced_reparse(
+    _input_reject_reparse(
         transition_root,
         failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
         message="transition staging root is a link or reparse point",
-    )
-    if not transition_root.is_dir():
+     acquired_input=acquired_input)
+    if not _input_is_dir(transition_root, acquired_input):
         raise LifecycleError(
             "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
             "transition staging root is not a directory",
@@ -11619,7 +13620,7 @@ def _matching_ledger_location_intents(
         transition_root,
         failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
         unreadable="transition staging root is unreadable",
-    )
+     acquired_input=acquired_input)
     loaded_bytes = 0
     for path in candidates:
         payload, raw = _ledger_location_proof_object(
@@ -11627,7 +13628,7 @@ def _matching_ledger_location_intents(
             failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
             unreadable="transition intent is unreadable",
             maximum_bytes=TRANSITION_INTENT_FILE_BYTE_CAP,
-        )
+         acquired_input=acquired_input)
         loaded_bytes += len(raw)
         if loaded_bytes > TRANSITION_INTENT_INVENTORY_BYTE_CAP:
             raise LifecycleError(
@@ -11642,7 +13643,7 @@ def _matching_ledger_location_intents(
             payload,
             slug=slug,
             logical_work_item=logical_work_item,
-        )
+         acquired_input=acquired_input)
         matches.append((payload, path, raw))
     if len(matches) > 1:
         raise LifecycleError(
@@ -11659,12 +13660,13 @@ def _validate_stable_ledger_settlement(
     receipt_path: Path,
     *,
     slug: str,
+    acquired_input=None,
 ) -> tuple[dict, bytes, str]:
     payload, raw = _ledger_location_proof_object(
         receipt_path,
         failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
         unreadable="settled receipt is unreadable",
-    )
+     acquired_input=acquired_input)
     schema_version = payload.get("schemaVersion")
     is_v1 = (
         schema_version == 1
@@ -11730,7 +13732,7 @@ def _validate_stable_ledger_settlement(
             "settled receipt binding or shape differs",
         )
     try:
-        _transition_intent_path(root, operation_id)
+        _transition_intent_path(root, operation_id, acquired_input=acquired_input)
     except LifecycleError as exc:
         raise LifecycleError(
             "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
@@ -11781,32 +13783,32 @@ def _validate_stable_ledger_settlement(
             archive / "agent-runs.jsonl",
             failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
             maximum_bytes=_validator_module().MAX_TRANSFER_LEDGER_BYTES,
-        ),
+         acquired_input=acquired_input),
         "statusSha256": _ledger_location_regular_sha256(
             archive / "status.md",
             failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-        ),
+         acquired_input=acquired_input),
         "closureSha256": _ledger_location_regular_sha256(
             archive / "closure.md",
             failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-        ),
+         acquired_input=acquired_input),
         "bugDispositionReceiptSha256": _ledger_location_regular_sha256(
             archive / BUG_DISPOSITIONS_RECEIPT,
             failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-        ),
+         acquired_input=acquired_input),
     }
     physical_migration_receipts = _migration_receipt_bindings_at(
         root,
         archive,
         failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-    )
+     acquired_input=acquired_input)
     if is_v2:
         expected_migration_receipts = _validate_transfer_migration_receipt_bindings(
             root,
             payload.get("archivePath"),
             payload.get("migrationReceipts"),
             failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-        )
+         acquired_input=acquired_input)
         if physical_migration_receipts != expected_migration_receipts:
             raise LifecycleError(
                 "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
@@ -11892,6 +13894,7 @@ def _ledger_settlement_agrees_with_intent(receipt: dict, intent: dict) -> bool:
 def resolve_work_item_ledger_location(
     root: Path, *, logical_work_item: str, logical_ledger_path: str,
     input_role: str = "caller-root",
+    acquired_input=None,
 ) -> WorkItemLedgerLocationV1:
     logical_parts = PurePosixPath(logical_work_item).parts
     if (
@@ -11906,27 +13909,27 @@ def resolve_work_item_ledger_location(
     slug = logical_parts[2]
     _validate_slug(slug)
     repository, work_items = _resolve_project_root_identity(root, input_role=input_role,
-        selected_reference=("work-item", slug))
+        selected_reference=("work-item", slug), acquired_input=acquired_input)
     root = repository
     active = work_items / "active" / slug
     backlog = work_items / "backlog" / f"{slug}.md"
     archive_root = work_items / "archive"
-    active_exists = _ledger_location_lexically_exists(active)
-    backlog_exists = _ledger_location_lexically_exists(backlog)
+    active_exists = _ledger_location_lexically_exists(active, acquired_input=acquired_input)
+    backlog_exists = _ledger_location_lexically_exists(backlog, acquired_input=acquired_input)
     archives: list[Path] = []
-    if _ledger_location_lexically_exists(archive_root):
-        _lifecycle_reject_unreduced_reparse(
+    if _ledger_location_lexically_exists(archive_root, acquired_input=acquired_input):
+        _input_reject_reparse(
             archive_root,
             failure_id="WI-CATEGORY-DUAL-LOCATION",
             message="archive root crosses a link or reparse point",
-        )
-        if not archive_root.is_dir():
+         acquired_input=acquired_input)
+        if not _input_is_dir(archive_root, acquired_input):
             raise LifecycleError(
                 "WI-CATEGORY-DUAL-LOCATION", "archive root is not a directory"
             )
-        for month in sorted(archive_root.iterdir()):
+        for month in sorted(_input_children(archive_root, acquired_input)):
             candidate = month / slug
-            if _ledger_location_lexically_exists(candidate):
+            if _ledger_location_lexically_exists(candidate, acquired_input=acquired_input):
                 archives.append(candidate)
     if backlog_exists or len(archives) > 1 or (active_exists and archives):
         raise LifecycleError(
@@ -11938,15 +13941,15 @@ def resolve_work_item_ledger_location(
         repository,
         slug=slug,
         logical_work_item=logical_work_item,
-    )
+     acquired_input=acquired_input)
     intent, intent_path, intent_raw = intents[0] if intents else (None, None, None)
     if active_exists:
-        _lifecycle_reject_unreduced_reparse(
+        _input_reject_reparse(
             active,
             failure_id="WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE",
             message="active H1 work item crosses a link or reparse point",
-        )
-        if not active.is_dir():
+         acquired_input=acquired_input)
+        if not _input_is_dir(active, acquired_input):
             raise LifecycleError(
                 "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE",
                 "active H1 work item is not a directory",
@@ -11955,7 +13958,7 @@ def resolve_work_item_ledger_location(
             active / "agent-runs.jsonl",
             failure_id="WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE",
             maximum_bytes=_validator_module().MAX_TRANSFER_LEDGER_BYTES,
-        )
+         acquired_input=acquired_input)
         if intent is not None and intent.get("expectedLedgerSha256") != ledger_sha256:
             raise LifecycleError(
                 "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
@@ -11978,12 +13981,12 @@ def resolve_work_item_ledger_location(
             "H1 work item has no owner-proven physical ledger location",
         )
     archive = archives[0]
-    _lifecycle_reject_unreduced_reparse(
+    _input_reject_reparse(
         archive,
         failure_id="WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE",
         message="archived H1 work item crosses a link or reparse point",
-    )
-    if not archive.is_dir():
+     acquired_input=acquired_input)
+    if not _input_is_dir(archive, acquired_input):
         raise LifecycleError(
             "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE",
             "archived H1 work item is not a directory",
@@ -11991,14 +13994,14 @@ def resolve_work_item_ledger_location(
     physical_work_item = archive.relative_to(repository).as_posix()
     physical_ledger_path = f"{physical_work_item}/agent-runs.jsonl"
     receipt_path = archive / "lifecycle-transition-receipt.json"
-    if _ledger_location_lexically_exists(receipt_path):
+    if _ledger_location_lexically_exists(receipt_path, acquired_input=acquired_input):
         receipt, receipt_raw, ledger_sha256 = _validate_stable_ledger_settlement(
             root,
             repository,
             archive,
             receipt_path,
             slug=slug,
-        )
+         acquired_input=acquired_input)
         if intent is not None and not _ledger_settlement_agrees_with_intent(
             receipt, intent
         ):
@@ -12031,7 +14034,7 @@ def resolve_work_item_ledger_location(
         archive / "agent-runs.jsonl",
         failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
         maximum_bytes=_validator_module().MAX_TRANSFER_LEDGER_BYTES,
-    )
+     acquired_input=acquired_input)
     status_after = _unb64(intent.get("statusAfter"))
     closure_after = _unb64(intent.get("closureAfter"))
     if (
@@ -12041,12 +14044,12 @@ def resolve_work_item_ledger_location(
         or _ledger_location_regular_sha256(
             archive / "status.md",
             failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
-        )
+         acquired_input=acquired_input)
         != _sha256_bytes(status_after)
         or _ledger_location_regular_sha256(
             archive / "closure.md",
             failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
-        )
+         acquired_input=acquired_input)
         != _sha256_bytes(closure_after)
     ):
         raise LifecycleError(
@@ -12345,6 +14348,8 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) 
 def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str | None = None,
                         expected_request: dict | None = None) -> dict | None:
     intent = _load_transition_intent(root, intent_path)
+    if intent.get("kind") == LEGACY_COMPLETION_KIND:
+        return _recover_legacy_completion(root, intent_path, intent, inject_failure_at=inject_failure_at)
     if expected_request is not None:
         path_fields = {"activePath", "archivePath", "successorPath"}
         if any(
@@ -14218,8 +16223,9 @@ def _incoming_attachment_kind(data: bytes) -> str | None:
 
 class _RetainedConsumerScanPreparation:
     """Invocation-owned validator and captured/decoded inputs, never admission."""
-    def __init__(self) -> None:
+    def __init__(self, acquired_input=None) -> None:
         self._validator: object | None = None
+        self.acquired_input = acquired_input
         self._items: dict[Path, tuple[CapturedFileSnapshot, list[dict], list[dict[str, object]], tuple[str, ...]] | None] = {}
 
     def validator(self):
@@ -14232,10 +16238,11 @@ class _RetainedConsumerScanPreparation:
             # Missing/failed preparation remains nonauthorizing for this scan.
             self._items[item] = None
             ledger_path = item / "agent-runs.jsonl"
-            if ledger_path.exists():
+            if (ledger_path.exists() if self.acquired_input is None else _input_exists(ledger_path, self.acquired_input)):
                 validator = self.validator()
                 carrier = _capture_file_snapshot(ledger_path, failure_id="WI-CATEGORY-MIGRATION-INVENTORY",
-                                                 maximum_bytes=validator.MAX_LEDGER_EVENTS * validator.MAX_LEDGER_LINE_BYTES)
+                                                 maximum_bytes=validator.MAX_LEDGER_EVENTS * validator.MAX_LEDGER_LINE_BYTES,
+                                                 acquired_input=self.acquired_input)
                 diagnostics: list[str] = []
                 metadata: list[dict[str, object]] = []
                 events = validator.load_jsonl(ledger_path, diagnostics, metadata, carrier.data)
@@ -14256,6 +16263,8 @@ def _retained_preimage_consumer(
     relative = consumer.relative_to(item).as_posix()
     preparation = _RetainedConsumerScanPreparation() if scan_preparation is None else scan_preparation
     validator = preparation.validator()
+    acquired_input = preparation.acquired_input
+    selected_item = item if acquired_input is None else _call_acquired_input(acquired_input, "validator_path", item, validator)
     try:
         prepared = preparation.item(item)
         if prepared is None:
@@ -14263,7 +16272,7 @@ def _retained_preimage_consumer(
         carrier, events, metadata, _diagnostics = prepared
         for event, identity in zip(events, metadata):
             profile_errors: list[str] = []
-            profiles = validator.retained_preimage_profiles(event, item, profile_errors)
+            profiles = validator.retained_preimage_profiles(event, selected_item, profile_errors)
             if profile_errors:
                 continue
             for entry, profile in profiles:
@@ -14275,14 +16284,14 @@ def _retained_preimage_consumer(
                     continue
                 association_key = f"review-artifact-custody/historical-pass/{identity['sha256']}.json"
                 association = _capture_file_snapshot(item / association_key, failure_id="WI-CATEGORY-MIGRATION-INVENTORY",
-                                                     maximum_bytes=validator.MAX_LEDGER_LINE_BYTES)
+                                                     maximum_bytes=validator.MAX_LEDGER_LINE_BYTES, acquired_input=acquired_input)
                 provenance = _capture_file_snapshot(item / profile["provenance"]["snapshot"],
-                                                     failure_id="WI-CATEGORY-MIGRATION-INVENTORY")
-                payload = validator.capture_retained_preimage_payload(item, entry, profile)
+                                                     failure_id="WI-CATEGORY-MIGRATION-INVENTORY", acquired_input=acquired_input)
+                payload = validator.capture_retained_preimage_payload(selected_item, entry, profile)
                 # Resolve exactly the captured association/snapshot; unrelated
                 # declarations and legacy rows cannot become a new veto.
                 custody, custody_errors = validator.resolve_historical_pass_custody(
-                    item, carrier.data, events, metadata, selected_association=association_key,
+                    selected_item, carrier.data, events, metadata, selected_association=association_key,
                     candidate_blobs={association_key: association.data,
                                      profile["provenance"]["snapshot"]: provenance.data},
                 )
@@ -14290,21 +16299,29 @@ def _retained_preimage_consumer(
                 if custody_errors or locator != profile["provenance"]["snapshot"]:
                     continue
                 record_errors: list[str] = []
-                if not validator._validate_event(event, item, set(), record_errors,
+                if not validator._validate_event(event, selected_item, set(), record_errors,
                     historical_pass_snapshot=locator, retained_payloads={entry["ref"]: payload}) or record_errors:
                     continue
                 captures = (carrier, association, provenance, payload)
                 for snapshot in captures:
-                    _verify_captured_file(snapshot, "WI-CATEGORY-MIGRATION-INVENTORY")
+                    _verify_captured_file(snapshot, "WI-CATEGORY-MIGRATION-INVENTORY", acquired_input=acquired_input)
                 transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
                 if transaction is not None:
-                    transaction.observe_retained_inputs(captures)
+                    transaction.observe_retained_inputs(captures if acquired_input is None else
+                        tuple(_call_acquired_input(acquired_input, "current_capture", snapshot)
+                              if _settled_history_input(acquired_input) is not None else acquired_input.files[snapshot.path].current
+                              for snapshot in captures))
                 return True
     except (OSError, ValueError, LifecycleError, validator.load_lifecycle_owner().LifecycleError):
         # Failed admission is not an exemption. The caller retains its existing
         # native/UTF-8/reference checks and strict refusal for unreadable input.
         return False
     return False
+
+
+def _incoming_literal_pattern(literal_path):
+    return re.compile(r"(?<![A-Za-z0-9_.\\/-]){}(?![A-Za-z0-9_.\\/-])".format(
+        re.escape(literal_path).replace("/", r"[\\/]")))
 
 
 def _incoming_link_result(
@@ -14316,11 +16333,12 @@ def _incoming_link_result(
     mutable_consumers_only: bool = False,
     scan_markdown_links: bool = True,
     strict_consumer_reads: bool = False,
+    acquired_input=None,
 ) -> dict:
-    work_items = _work_items_root(root)
+    work_items = _work_items_root(root, acquired_input=acquired_input)
     physical: list[dict[str, str]] = []
     logical: list[dict[str, str]] = []
-    owned_resolved = frozenset(path.resolve() for path in owned_paths)
+    owned_resolved = frozenset(_input_resolve(path, acquired_input) for path in owned_paths)
     if not owned_resolved:
         raise LifecycleError(
             "WI-CATEGORY-MIGRATION-INVENTORY",
@@ -14335,11 +16353,7 @@ def _incoming_link_result(
     literal_patterns = tuple(
         (
             literal_path,
-            re.compile(
-                r"(?<![A-Za-z0-9_.\\/-]){}(?![A-Za-z0-9_.\\/-])".format(
-                    re.escape(literal_path).replace("/", r"[\\/]"),
-                )
-            ),
+            _incoming_literal_pattern(literal_path),
         )
         for literal_path in literal_paths
     )
@@ -14350,12 +16364,12 @@ def _incoming_link_result(
             for owned in owned_resolved
         )
 
-    preparation = _RetainedConsumerScanPreparation()
+    preparation = _RetainedConsumerScanPreparation(acquired_input)
 
-    for consumer in sorted(path for path in work_items.rglob("*") if path.is_file()):
+    for consumer in sorted(path for path in _input_descendants(work_items, acquired_input) if _input_is_file(path, acquired_input)):
         if consumer.name in {"README.md", "index.md"}:
             continue
-        consumer_resolved = consumer.resolve()
+        consumer_resolved = _input_resolve(consumer, acquired_input)
         if belongs_to_owned(consumer_resolved):
             continue
         consumer_rel = consumer.relative_to(work_items).as_posix()
@@ -14364,7 +16378,7 @@ def _incoming_link_result(
         if _retained_preimage_consumer(consumer, work_items, scan_preparation=preparation):
             continue
         try:
-            consumer_bytes = consumer.read_bytes()
+            consumer_bytes = _input_bytes(consumer, acquired_input)
             if consumer.suffix.lower() not in {".md", ".json", ".jsonl"} and _incoming_attachment_kind(consumer_bytes) is not None:
                 continue
             text = consumer_bytes.decode("utf-8")
@@ -14385,7 +16399,7 @@ def _incoming_link_result(
                 href_parts = _local_markdown_href_parts(raw)
                 if href_parts is None:
                     continue
-                candidate = (consumer.parent / href_parts[0]).resolve()
+                candidate = _input_resolve(consumer.parent / href_parts[0], acquired_input)
                 if belongs_to_owned(candidate):
                     physical.append(
                         {
@@ -14404,7 +16418,7 @@ def _incoming_link_result(
                     }
                 )
     references = sorted(
-        physical + logical,
+        {tuple(sorted(row.items())): row for row in physical + logical}.values(),
         key=lambda item: (item["consumer"], item["kind"], item["value"]),
     )
     if physical:
@@ -14729,7 +16743,11 @@ def _capture_file_snapshot(
     failure_id: str,
     maximum_bytes: int = 4 * 1024 * 1024,
     require_single_link: bool = False,
+    acquired_input=None,
 ) -> CapturedFileSnapshot:
+    if acquired_input is not None:
+        return _call_acquired_input(acquired_input, "file_snapshot", path, maximum_bytes=maximum_bytes,
+                                    require_single_link=require_single_link, failure_id=failure_id)
     parent_chain, observed, descriptor, before = _capture_file_identity_prefix(
         path, failure_id=failure_id, maximum_bytes=maximum_bytes, require_single_link=require_single_link)
     try:
@@ -14774,7 +16792,19 @@ def _capture_file_snapshot(
     )
 
 
-def _verify_captured_file(snapshot: CapturedFileSnapshot, failure_id: str) -> None:
+def _verify_captured_file(snapshot: CapturedFileSnapshot, failure_id: str, *, acquired_input=None) -> None:
+    if acquired_input is not None:
+        if _settled_history_input(acquired_input) is not None:
+            _call_acquired_input(acquired_input, "current_capture", snapshot)
+            return
+        actual = _capture_file_snapshot(snapshot.path, failure_id=failure_id,
+            maximum_bytes=snapshot.length, require_single_link=snapshot.require_single_link,
+            acquired_input=acquired_input)
+        if (actual.identity != snapshot.identity or actual.length != snapshot.length
+                or actual.data != snapshot.data
+                or actual.parent_chain.participants != snapshot.parent_chain.participants):
+            raise LifecycleError(failure_id, "captured original acquisition identity or bytes changed")
+        return
     _verify_captured_parent_chain(snapshot.parent_chain, failure_id)
     descriptor = -1
     try:
@@ -14839,6 +16869,81 @@ def _verify_captured_file(snapshot: CapturedFileSnapshot, failure_id: str) -> No
         raise LifecycleError(
             failure_id, "captured file path identity or content changed"
         )
+
+
+def _capture_directory_snapshot(path: Path, *, failure_id: str) -> CapturedDirectorySnapshotV1:
+    """Capture complete member/native identities using existing parent handles.
+
+    This deliberately bypasses the write target's creating __enter__: every
+    directory is opened existing/read-only and every retained handle is closed.
+    """
+    path = _lifecycle_unresolved_absolute(path)
+    target = LifecycleWriteTarget(path / ".directory-acquisition", failure_id=failure_id)
+    primary = None
+    try:
+        target._acquire_existing_parents()
+        handle = target._parent
+        before = path.lstat()
+
+        def inventory():
+            with os.scandir(path) as stream:
+                entries = sorted(stream, key=lambda entry: entry.name.encode("utf-8"))
+            rows = []
+            for entry in entries:
+                # Windows DirEntry's cached stat has zero native file identity;
+                # bind the path lstat to the actual parent-relative handle.
+                metadata = (path / entry.name).lstat()
+                reparse = stat.S_ISLNK(metadata.st_mode) or bool(getattr(metadata, "st_file_attributes", 0)
+                          & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+                # A reparse member is an observed fact, never a traversable
+                # input. Selected owners retain their normal rejection rules.
+                if not reparse and (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
+                    if os.name == "nt":
+                        member = target._windows_child(handle, entry.name,
+                            directory=stat.S_ISDIR(metadata.st_mode), create=False)
+                    else:
+                        flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+                        if stat.S_ISDIR(metadata.st_mode):
+                            flags |= os.O_DIRECTORY
+                        member = os.open(entry.name, flags, dir_fd=handle)
+                    try:
+                        if target._identity(member) != _lifecycle_file_identity(metadata):
+                            raise LifecycleError(failure_id, "directory member differs from its captured parent handle")
+                    finally:
+                        target._release_handle(member)
+                rows.append((entry.name, metadata))
+            target.verify()
+            return tuple(rows)
+
+        members, repeated = inventory(), inventory()
+        after = path.lstat()
+        if (_lifecycle_file_snapshot_key(before) != _lifecycle_file_snapshot_key(after)
+                or tuple((name, _lifecycle_file_snapshot_key(meta)) for name, meta in members)
+                != tuple((name, _lifecycle_file_snapshot_key(meta)) for name, meta in repeated)):
+            raise LifecycleError(failure_id, "complete directory membership changed during capture")
+        chain = CapturedPathParentChain(tuple((parent, identity) for parent, _handle, identity in target._directories))
+        snapshot = CapturedDirectorySnapshotV1(path, chain, before, members)
+        return replace(snapshot, capture_binding=_directory_capture_binding(snapshot))
+    except OSError as exc:
+        primary = LifecycleError(failure_id, "native directory acquisition failed")
+        raise primary from exc
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        target.__exit__(type(primary) if primary is not None else None, primary,
+                        primary.__traceback__ if primary is not None else None)
+
+
+def _verify_captured_directory(snapshot: CapturedDirectorySnapshotV1, failure_id: str):
+    if snapshot.capture_binding != _directory_capture_binding(snapshot):
+        raise LifecycleError(failure_id, "directory observation was not minted intact by the native owner")
+    _verify_captured_parent_chain(snapshot.parent_chain, failure_id)
+    current = _capture_directory_snapshot(snapshot.path, failure_id=failure_id)
+    if (_lifecycle_file_snapshot_key(current.metadata) != _lifecycle_file_snapshot_key(snapshot.metadata)
+            or tuple((name, _lifecycle_file_snapshot_key(meta)) for name, meta in current.members)
+            != tuple((name, _lifecycle_file_snapshot_key(meta)) for name, meta in snapshot.members)):
+        raise LifecycleError(failure_id, "captured native directory identity/membership changed")
 
 
 def _parse_migration_inventory_bytes(
@@ -20826,22 +22931,25 @@ def _ledger_h1_archive_owner(
     return archive_owner
 
 
-def _ledger_h1_directory_snapshot(path: Path) -> tuple[int, str]:
+def _ledger_h1_directory_snapshot(path: Path,
+    *,
+    acquired_input=None,
+) -> tuple[int, str]:
     rows: list[dict[str, object]] = []
     try:
-        children = sorted(path.iterdir(), key=lambda child: child.name.encode("utf-8"))
+        children = sorted(_input_children(path, acquired_input), key=lambda child: child.name.encode("utf-8"))
     except OSError as exc:
         raise LifecycleError(
             "WI-LEDGER-COMPAT-SET-TOPOLOGY",
             "H1 artifact directory is unreadable",
         ) from exc
     for child in children:
-        if _lifecycle_path_has_reparse(child) or not child.is_file():
+        if _input_has_reparse(child, acquired_input) or not _input_is_file(child, acquired_input):
             _ledger_h1_relocation_fail(
                 "H1 artifact directories must contain only ordinary flat files"
             )
         try:
-            raw = child.read_bytes()
+            raw = _input_bytes(child, acquired_input)
         except OSError as exc:
             raise LifecycleError(
                 "WI-LEDGER-COMPAT-SET-TOPOLOGY",
@@ -20865,23 +22973,24 @@ def _ledger_h1_member_snapshot(
     path: Path,
     *,
     kind: str,
+    acquired_input=None,
 ) -> tuple[int, str]:
-    if _lifecycle_path_has_reparse(path):
+    if _input_has_reparse(path, acquired_input):
         _ledger_h1_relocation_fail("H1 artifact-set member is a link or reparse point")
     if kind == "file":
-        if not path.is_file():
+        if not _input_is_file(path, acquired_input):
             _ledger_h1_relocation_fail("H1 artifact-set file member is missing")
         try:
-            raw = path.read_bytes()
+            raw = _input_bytes(path, acquired_input)
         except OSError as exc:
             raise LifecycleError(
                 "WI-LEDGER-COMPAT-SET-TOPOLOGY",
                 "H1 artifact-set file member is unreadable",
             ) from exc
         return len(raw), _sha256_bytes(raw)
-    if kind != "directory" or not path.is_dir():
+    if kind != "directory" or not _input_is_dir(path, acquired_input):
         _ledger_h1_relocation_fail("H1 artifact-set directory member is missing")
-    return _ledger_h1_directory_snapshot(path)
+    return _ledger_h1_directory_snapshot(path, acquired_input=acquired_input)
 
 
 def _ledger_h1_artifact_set_digest_version(
@@ -20924,9 +23033,14 @@ def _ledger_h1_artifact_set_digest(
     return _ledger_h1_artifact_set_digest_version(members, version=2)
 
 
-def _ledger_h1_lexically_exists(path: Path) -> bool:
+def _ledger_h1_lexically_exists(path: Path,
+    *,
+    acquired_input=None,
+) -> bool:
+    if acquired_input is not None and _settled_history_input(acquired_input) is not None:
+        return _input_exists(path, acquired_input)
     try:
-        path.lstat()
+        _input_metadata(path, acquired_input)
     except FileNotFoundError:
         return False
     except OSError as exc:
@@ -20940,11 +23054,13 @@ def _ledger_h1_lexically_exists(path: Path) -> bool:
 def _ledger_h1_members_at_base(
     repository: Path,
     base: Path,
+    *,
+    acquired_input=None,
 ) -> tuple[dict[str, object], ...]:
     members: list[dict[str, object]] = []
     for name, kind in LEDGER_H1_RELOCATION_MEMBERS:
         path = base / name
-        byte_length, sha256 = _ledger_h1_member_snapshot(path, kind=kind)
+        byte_length, sha256 = _ledger_h1_member_snapshot(path, kind=kind, acquired_input=acquired_input)
         members.append(
             {
                 "logicalPath": f"work-items/{name}",
@@ -20959,40 +23075,43 @@ def _ledger_h1_members_at_base(
     return tuple(members)
 
 
-def _ledger_h1_archive_bases(repository: Path, work_items: Path) -> tuple[Path, ...]:
+def _ledger_h1_archive_bases(repository: Path, work_items: Path,
+    *,
+    acquired_input=None,
+) -> tuple[Path, ...]:
     archive = work_items / "archive"
-    if not _ledger_h1_lexically_exists(archive):
+    if not _ledger_h1_lexically_exists(archive, acquired_input=acquired_input):
         return ()
-    _lifecycle_reject_unreduced_reparse(
+    _input_reject_reparse(
         archive,
         failure_id="WI-LEDGER-COMPAT-SET-TOPOLOGY",
         message="H1 archive root contains a link or reparse point",
-    )
-    if not archive.is_dir():
+     acquired_input=acquired_input)
+    if not _input_is_dir(archive, acquired_input):
         _ledger_h1_relocation_fail("H1 archive root is not a directory")
     bases: list[Path] = []
     try:
-        months = sorted(archive.iterdir(), key=lambda path: path.name.encode("utf-8"))
+        months = sorted(_input_children(archive, acquired_input), key=lambda path: path.name.encode("utf-8"))
         for month in months:
-            if not month.is_dir():
+            if not _input_is_dir(month, acquired_input):
                 continue
-            _lifecycle_reject_unreduced_reparse(
+            _input_reject_reparse(
                 month,
                 failure_id="WI-LEDGER-COMPAT-SET-TOPOLOGY",
                 message="H1 archive month contains a link or reparse point",
-            )
+             acquired_input=acquired_input)
             for owner in sorted(
-                month.iterdir(), key=lambda path: path.name.encode("utf-8")
+                _input_children(month, acquired_input), key=lambda path: path.name.encode("utf-8")
             ):
-                if not owner.is_dir():
+                if not _input_is_dir(owner, acquired_input):
                     continue
                 base = owner / LEDGER_H1_ARTIFACT_BASE
-                if _ledger_h1_lexically_exists(base):
-                    _lifecycle_reject_unreduced_reparse(
+                if _ledger_h1_lexically_exists(base, acquired_input=acquired_input):
+                    _input_reject_reparse(
                         base,
                         failure_id="WI-LEDGER-COMPAT-SET-TOPOLOGY",
                         message="H1 archived artifact base contains a link or reparse point",
-                    )
+                     acquired_input=acquired_input)
                     bases.append(base)
     except OSError as exc:
         raise LifecycleError(
@@ -21002,16 +23121,19 @@ def _ledger_h1_archive_bases(repository: Path, work_items: Path) -> tuple[Path, 
     return tuple(bases)
 
 
-def _ledger_h1_root_profile_observed(work_items: Path) -> bool:
+def _ledger_h1_root_profile_observed(work_items: Path,
+    *,
+    acquired_input=None,
+) -> bool:
     h1 = work_items / DECISION_H1_MANIFEST
-    if _ledger_h1_lexically_exists(h1):
+    if _ledger_h1_lexically_exists(h1, acquired_input=acquired_input):
         try:
             manifest_bytes = _capture_file_snapshot(
                 h1, failure_id="WI-DECISION-H1-MANIFEST-INVALID"
-            ).data
+            , acquired_input=acquired_input).data
             _preflight_current_decision_h1(
                 work_items.parent, manifest_bytes=manifest_bytes
-            )
+            , acquired_input=acquired_input)
         except (OSError, LifecycleError):
             return True
         payload = json.loads(
@@ -21026,21 +23148,21 @@ def _ledger_h1_root_profile_observed(work_items: Path) -> bool:
     registry = work_items / LEGACY_PROJECTION_REGISTRY
     receipts = work_items / LEGACY_PROJECTION_RECEIPTS
     try:
-        if manifests.is_dir() and any(
-            profile_marker in (raw := path.read_bytes()) or policy_marker in raw
-            for path in manifests.iterdir()
-            if path.is_file() and path.suffix == ".json"
+        if _input_is_dir(manifests, acquired_input) and any(
+            profile_marker in (raw := _input_bytes(path, acquired_input)) or policy_marker in raw
+            for path in _input_children(manifests, acquired_input)
+            if _input_is_file(path, acquired_input) and path.suffix == ".json"
         ):
             return True
-        if registry.is_file():
-            registry_bytes = registry.read_bytes()
+        if _input_is_file(registry, acquired_input):
+            registry_bytes = _input_bytes(registry, acquired_input)
             if profile_marker in registry_bytes or policy_marker in registry_bytes:
                 return True
-        if receipts.is_dir():
-            for path in receipts.iterdir():
-                if not path.is_file() or path.suffix != ".json":
+        if _input_is_dir(receipts, acquired_input):
+            for path in _input_children(receipts, acquired_input):
+                if not _input_is_file(path, acquired_input) or path.suffix != ".json":
                     continue
-                raw = path.read_bytes()
+                raw = _input_bytes(path, acquired_input)
                 if (
                     profile_marker in raw
                     or policy_marker in raw
@@ -21064,11 +23186,14 @@ def _ledger_h1_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]
     return value
 
 
-def _ledger_h1_receipt_object(path: Path) -> tuple[dict[str, object], bytes]:
-    if _lifecycle_path_has_reparse(path) or not path.is_file():
+def _ledger_h1_receipt_object(path: Path,
+    *,
+    acquired_input=None,
+) -> tuple[dict[str, object], bytes]:
+    if _input_has_reparse(path, acquired_input) or not _input_is_file(path, acquired_input):
         _ledger_h1_relocation_fail("settled H1 archive lacks one ordinary receipt")
     try:
-        raw = path.read_bytes()
+        raw = _input_bytes(path, acquired_input)
         receipt = json.loads(
             raw.decode("utf-8"),
             object_pairs_hook=_ledger_h1_json_object,
@@ -21128,26 +23253,27 @@ def resolve_ledger_h1_artifact_set_location(
     root: Path,
     *,
     input_role: str = "caller-root",
+    acquired_input=None,
 ) -> LedgerH1ArtifactSetLocationV1 | None:
     """Resolve one complete root set or one exact settled archived set."""
 
     unresolved = _lifecycle_unresolved_absolute(Path(root))
-    _lifecycle_reject_unreduced_reparse(
+    _input_reject_reparse(
         unresolved,
         failure_id="WI-LEDGER-COMPAT-SET-TOPOLOGY",
         message="H1 repository root contains a link or reparse point",
-    )
+     acquired_input=acquired_input)
     repository, work_items = _resolve_project_root_identity(
         unresolved, input_role=input_role, failure_id="WI-LEDGER-COMPAT-SET-TOPOLOGY",
-    )
-    if not work_items.is_dir() or _lifecycle_path_has_reparse(work_items):
+     acquired_input=acquired_input)
+    if not _input_is_dir(work_items, acquired_input) or _input_has_reparse(work_items, acquired_input):
         return None
     root_presence = tuple(
-        _ledger_h1_lexically_exists(work_items / name)
+        _ledger_h1_lexically_exists(work_items / name, acquired_input=acquired_input)
         for name, _kind in LEDGER_H1_RELOCATION_MEMBERS
     )
-    root_observed = _ledger_h1_root_profile_observed(work_items)
-    archive_bases = _ledger_h1_archive_bases(repository, work_items)
+    root_observed = _ledger_h1_root_profile_observed(work_items, acquired_input=acquired_input)
+    archive_bases = _ledger_h1_archive_bases(repository, work_items, acquired_input=acquired_input)
     if root_observed and not all(root_presence):
         _ledger_h1_relocation_fail("root H1 artifact set is partial")
     if root_observed and all(root_presence) and archive_bases:
@@ -21155,7 +23281,7 @@ def resolve_ledger_h1_artifact_set_location(
     if len(archive_bases) > 1:
         _ledger_h1_relocation_fail("more than one archived H1 artifact set exists")
     if root_observed and all(root_presence):
-        members = _ledger_h1_members_at_base(repository, work_items)
+        members = _ledger_h1_members_at_base(repository, work_items, acquired_input=acquired_input)
         return LedgerH1ArtifactSetLocationV1(
             "work-items",
             "root",
@@ -21166,20 +23292,20 @@ def resolve_ledger_h1_artifact_set_location(
     if not archive_bases:
         return None
     base = archive_bases[0]
-    if not base.is_dir():
+    if not _input_is_dir(base, acquired_input):
         _ledger_h1_relocation_fail("archived H1 artifact base is not a directory")
     try:
-        _archived_work_item_entry(base.parent)
+        _archived_work_item_entry(base.parent, acquired_input=acquired_input)
     except LifecycleError as exc:
         raise LifecycleError(
             "WI-LEDGER-COMPAT-SET-TOPOLOGY",
             "archived H1 artifact base has no valid work-item owner",
         ) from exc
-    members = _ledger_h1_members_at_base(repository, base)
+    members = _ledger_h1_members_at_base(repository, base, acquired_input=acquired_input)
     artifact_set_sha256_v2 = _ledger_h1_artifact_set_digest(members)
     artifact_set_sha256_v1 = _ledger_h1_artifact_set_digest_v1(members)
     receipt_path = base / "relocation-receipt.json"
-    receipt, _raw = _ledger_h1_receipt_object(receipt_path)
+    receipt, _raw = _ledger_h1_receipt_object(receipt_path, acquired_input=acquired_input)
     _ledger_h1_validate_receipt(
         repository,
         base,
@@ -23190,6 +25316,9 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--closure-file", required=True)
             command.add_argument("--terminal-instant", required=True)
             command.add_argument("--allow-protected-uri-updates", action="store_true")
+            command.add_argument("--legacy-evidence-file")
+            command.add_argument("--apply", action="store_true")
+            command.add_argument("--inject-failure-at", choices=("after-promotion", "after-source-remove", "after-board"))
         else:
             command.add_argument("--successor-slug", required=True)
             command.add_argument("--status-file", required=True)
@@ -23530,6 +25659,9 @@ def main(argv: list[str]) -> int:
                 args.terminal_instant,
                 inject_readme_failure=bool(args.inject_readme_failure),
                 allow_protected_uri_updates=bool(args.allow_protected_uri_updates),
+                legacy_evidence_data=_read_arg_file(args.legacy_evidence_file) if args.legacy_evidence_file else None,
+                apply=bool(args.apply),
+                inject_failure_at=args.inject_failure_at,
             )
             print(result)
         elif args.command == "reopen":

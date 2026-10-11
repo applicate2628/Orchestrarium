@@ -819,6 +819,52 @@ same operator-authorized missing-evidence repair to every supported flat
 category, including roadmaps, using that category's own UTC/detail/evidence
 fields.
 
+## Complete an accepted legacy flat work-item
+
+Use the existing lifecycle owner for an **accepted completed flat work-item** that remains current. This is distinct from ordinary tracked close, conversion, never-admitted retirement and archive-with-successor. Preserve the original slug and source bytes; do not invent an active interval, status, admission, ledger events or a successor merely to make validation pass. An archive location or a completion heading alone is not delivery evidence.
+
+### Prepare the selected evidence and preview
+
+The owning Root supplies accepted original admission, useful completion, applicable criteria and the bounded history/evidence selection. Those roles may reference different sections of the same real artifact; they do not require invented historical documents. The legacy evidence input has exact keys `schemaVersion`, `kind`, `operationId`, `source`, `acceptedEvidence`, `historySelection`, `bugDispositions` and `expectedReadmeSha256`; use version 1 and kind `legacy-work-item-evidence`. Bind actual selected paths, lengths and digests, original logical bases and required supporting artifacts. Prepare the existing bug-disposition manifest under its unchanged admission/status rules.
+
+History applicability follows the original accepted criteria, not the flat filename. Present history is acquired and evaluated through the existing validator, preserving raw rows, epochs, original `Closed`, authority and obligations. Evidenced nonrequired absence is permitted without inventing an empty ledger or obligation result. Missing required input, unknown criteria, corrupt or incomplete acquisition and open obligations refuse dependent effects. Supporting history may be copied into custody while its original shared location remains; do not report all originals absent unless the actual selected evidence proves it.
+
+Supply the existing closure fields and strict UTC `Closed` matching `--terminal-instant`. The new terminal instant dates this actual action and archive month; it does not rewrite the historical completion or validate a previously invalid closer. Without `--apply`, the explicit legacy branch validates and previews without canonical writes:
+
+```powershell
+python -B scripts/mutate-work-item.py --root <repo> close --slug <legacy-slug> --closure-file <closure.md-input> --terminal-instant <YYYY-MM-DDTHH:MM:SSZ> --legacy-evidence-file <legacy-evidence.json>
+```
+
+After the original outcome/evidence and preview are accepted, use the same request with positive apply:
+
+```powershell
+python -B scripts/mutate-work-item.py --root <repo> close --slug <legacy-slug> --closure-file <closure.md-input> --terminal-instant <YYYY-MM-DDTHH:MM:SSZ> --legacy-evidence-file <legacy-evidence.json> --apply
+```
+
+`operationId` belongs to the bound evidence request. Matching reentry/replay retains that exact request, closure and selected bindings; a different request or conflicting identity refuses. Preview success is not apply, settlement or Goal acceptance. Observed physical support is Windows NT; unsupported hosts refuse before physical effects. Portable metadata and preview do not establish all-platform physical support or authorize a weaker rename/ownership route.
+
+### Receive the archive and distinct receipts
+
+The applied representation preserves the raw source and selected original history/evidence in one archive envelope. Permanent metadata version 2 records logical origin and custody; the separate lifecycle action receipt version 1 binds the request, metadata, archive membership, history selection, links, README and execution provenance. The existing bug-disposition receipt remains a distinct required receipt with its own schema and purpose. Neither receipt substitutes for the other or proves semantic acceptance by its filename.
+
+Verify actual source/location membership, retained bytes, closure/instant, required evidence navigation and both receipt relationships through the lifecycle owner's fresh readers. Original-relative targets, query/fragment suffixes and distinct same-basename evidence must resolve to the exact retained bytes. Preserved historical incoming-link/README snapshots do not freeze lawful later consumer edits. Current category, dependency, original-path, descendant, README and audit receiving must agree on settlement; an incomplete observation has no terminal disposition or instant.
+
+The original historical selection stays with its existing history owner. A fresh process binds recorded logical topology to real current native custody; it does not deserialize old native identities or module seals. Successful structural acquisition alone cannot satisfy an open historical obligation. Hold and reverify the actual captured objects during receiving; a same-byte replacement during that held read remains drift.
+
+The accepted public physical receiving covers bounded Windows absence and one genuine required-current-history cohort, plus distinct pending/read/replay/ordinary regression controls. It does not establish every raw/H1/transfer physical variant, crash cut, filesystem or installed runtime. The Goal consumer adapter has an accepted contract but no runtime convergence credit from these physical results. Use the [full-goal receiving workflow](#full-goal-completion-receiving) only with its actual implemented producer/consumer gates and original admitted scope; this section grants no Goal eligibility.
+
+### Preserve pending recovery and actual provenance
+
+A pending intent, missing or altered action/metadata, unknown settlement or unresolved original history stays nonauthorizing across owner readers. Preserve the exact request, retained original native holds, creator/postimage/parent bindings and failure evidence. Do not clear the intent, recreate a disposed original, edit a receipt or change a hash to make the record look settled. Inspect the actual bounded cause, then use the existing explicit recovery command for that operation:
+
+```powershell
+python -B scripts/mutate-work-item.py recover-transition --root <repo> --operation-id <bounded-operation-id> --apply
+```
+
+The accepted finalization contract requires complete actual request/action/postimage/history/board proof before cleanup-only recovery can dispense with an already-disposed original hold. Remaining live holds and created parents still require their native ownership checks; foreign substitutions or children must be preserved. Public readers remain pending until cleanup and intent settlement are verified. The independently observed post-hold-disposal recovery correction is not certified by this runbook; do not assume every interrupted finalization state is recoverable from the earlier precommit or board-before-receipt tests. Retain an explicitly indeterminate state when current proof cannot establish safe replay, compensation or finalization, keeping the original failure and secondary recovery cause visible.
+
+Helpers assist the already authorized operation. An unavailable or defective helper alone does not remove the owning guarantees or create a workflow-wide blocker. A lawful manual equivalent must preserve the same evidence, identity, history/obligation, rollback/replay, receipt/link/README and independent readback requirements, with actual `manual-equivalent` provenance; it must not impersonate `public-helper`, forge a native seal or bypass host denial. Live resources and retained evidence are separate: release newly owned handles/processes, while preserving user, foreign, ambiguous and genuinely load-bearing recovery state under its owner.
+
 ## Release one archived retained scratch entry
 
 This section describes Version 1 live-inventory release. Recording an accepted
