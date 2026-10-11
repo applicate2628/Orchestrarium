@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tomllib
 import tracemalloc
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -28,7 +28,7 @@ EXPECTED_KIMI_TERMINAL_INSTRUCTION = (
     b"Your final nonblank line must be exactly one of: GATE: PASS, "
     b"GATE: REVISE, GATE: BLOCKED. Do not emit any other gate-like line.\n"
 )
-_SYNTHETIC_AUTH_SCHEME = "Bear" + "er"
+_SYNTHETIC_AUTH_SCHEME = "Bearer"
 _SYNTHETIC_AUTH_PAYLOAD = "bearer-" + "payload"
 _SYNTHETIC_AUTH_VALUE = f"{_SYNTHETIC_AUTH_SCHEME} {_SYNTHETIC_AUTH_PAYLOAD}"
 
@@ -813,6 +813,10 @@ def _finalize_kimi(
     credential_needles: tuple[bytes, ...] = (),
 ) -> tuple[int, dict[str, object], list[str], object]:
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    output_context = owner.resolve_provider_output_context(
+        owner.resolve_provider_auth_configuration("kimi", environment={}),
+        credential_needles,
+    )
     lifecycle = owner.RunCaptureLifecycle.create("kimi", "safe-public-capture")
     lifecycle.initialize(b"fixture prompt")
     process = process_result or _kimi_process_result(stdout, stderr)
@@ -855,7 +859,9 @@ def _finalize_kimi(
             "raw_stderr": stderr,
             "process_result": process_result or process,
             "runner": object() if with_ledger else None,
-            "credential_needles": credential_needles,
+            "credential_needles": output_context.needles,
+            "output_context": output_context,
+            "attempted": True,  # The supplied process observation is a simulated attempt.
         }
         if observed is not None:
             arguments["kimi_observed"] = observed
@@ -1687,13 +1693,13 @@ def test_kimi_empty_credential_needles_fail_closed_when_raw_streams_are_unsettle
         b"C:" + br"\Users\synthetic-stderr-two\private.txt\n",
     ),
 )
-def test_kimi_benign_stderr_machine_path_has_stdout_only_public_capture(
+def test_kimi_stderr_machine_path_is_rejected_before_either_sink(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     stderr: bytes,
 ) -> None:
-    """Catches public Kimi metadata that commits to a benign stderr-only path."""
+    """Both settled channels enter the same admitted output-safety boundary."""
 
     owner = _load_owner()
     stdout = b"\xe2\x80\xa2 KIMI_WRAPPER_SMOKE=PASS\n  GATE: PASS\n"
@@ -1701,9 +1707,9 @@ def test_kimi_benign_stderr_machine_path_has_stdout_only_public_capture(
         owner, tmp_path, monkeypatch, capsys, stdout=stdout, stderr=stderr, with_ledger=True
     )
 
-    assert code == 0
-    assert payload["gate"] == "PASS"
-    assert {key: payload[key] for key in _public_stdout_metadata(stdout)} == _public_stdout_metadata(stdout)
+    assert code != 0
+    assert payload["gate"] == "none"
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"
     visible_terminal = json.dumps({"payload": payload, "notes": notes})
     assert stderr.decode("utf-8").strip() not in visible_terminal
     assert not lifecycle.run_dir.exists()
@@ -5089,6 +5095,227 @@ def test_kimi_private_home_setup_failure_keeps_safe_primary_cause_without_child(
     assert str(tmp_path) not in visible
     assert "setup" not in receipt_path.read_text(encoding="utf-8")
     assert not any(capture_root.iterdir())
+
+
+@pytest.mark.parametrize("result_text,reason", (
+    ('{"api_key":"SYNTHETIC-NONAUTH-ROW24-CREDENTIAL"}', "CREDENTIAL"),
+    (f"Authorization: {_SYNTHETIC_AUTH_SCHEME} SYNTHETIC-NONAUTH-ROW24-CREDENTIAL", "CREDENTIAL"),
+    ("Z:" + chr(92) + "private" + chr(92) + "artifact.txt", "MACHINE_PATH"),
+    (str(PurePosixPath("/home") / "synthetic-owner" / "private.txt"), "MACHINE_PATH"),
+))
+def test_external_original_output_classes_never_reach_either_sink(
+    tmp_path, monkeypatch, capsys, result_text, reason
+):
+    owner = _load_owner()
+    code, payload, _, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys,
+        stdout=(result_text + "\nGATE: PASS\n").encode(), stderr=b"",
+    )
+    durable = (tmp_path / "kimi-terminal.receipt").read_text(encoding="utf-8")
+    assert owner.parse_provider_result(durable) == payload
+    assert code != 0
+    assert payload["status"] == "blocked" and payload["gate"] == "none"
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_" + reason + "_ECHO"
+    assert result_text not in durable and result_text not in json.dumps(payload)
+    assert not lifecycle.run_dir.exists()
+
+
+@pytest.mark.parametrize("text", (
+    '{"password":"unconfigured-value"}',
+    "sEcReT=unconfigured-value",
+    '{"api\\u005fkey":"unconfigured-value"}',
+    '{"token":0}',
+    json.dumps({"Authorization": f"{_SYNTHETIC_AUTH_SCHEME} unconfigured-value"}, separators=(",", ":")),
+    "Q:/different-root/entry.txt",
+    json.dumps({"detail": "R:" + chr(92) + "another" + chr(92) + "entry.txt"}),
+))
+def test_external_safety_general_classes_use_settled_receipt(
+    tmp_path, monkeypatch, capsys, text
+):
+    owner = _load_owner()
+    code, payload, _, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys,
+        stdout=b"safe\nGATE: PASS\n", stderr=text.encode(),
+    )
+    durable = (tmp_path / "kimi-terminal.receipt").read_text(encoding="utf-8")
+    assert owner.parse_provider_result(durable) == payload
+    assert code != 0 and payload["gate"] == "none"
+    assert "unconfigured-value" not in durable
+    assert not lifecycle.run_dir.exists()
+
+
+def test_external_safety_benign_values_and_known_template_priority(
+    tmp_path, monkeypatch, capsys
+):
+    owner = _load_owner()
+    text = (
+        '{"api_key":"","token":null,"password":"  ","token_count":0,'
+        '"secret":"<secret>","status":"token"}\n'
+        'token password secret Authorization\n'
+        'Q:relative/file.txt https://example.test/?path=R:/outside/file.txt '
+        'relative/file.txt <drive>:/template/file.txt\nGATE: PASS\n'
+    )
+    code, payload, _, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys, stdout=text.encode(), stderr=b"",
+    )
+    assert code == 0 and payload["resultText"] == text
+    assert owner.provider_output_safety_scan_terminal(
+        "kimi", (b"<secret>",), stdout=text.encode(), stderr=b"",
+    ) == "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_finalizer_missing_captured_context_refuses_settled_output(
+    tmp_path, monkeypatch, capsys
+):
+    owner = _load_owner()
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    lifecycle = owner.RunCaptureLifecycle.create("kimi", "missing-context")
+    lifecycle.initialize(b"fixture prompt")
+    raw = b"safe\nGATE: PASS\n"
+    process = _kimi_process_result(raw, b"")
+    receipt_path = (tmp_path / "missing-context.receipt").resolve()
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = owner.finalize_reserved_run_once(
+            owner.Control(terminal_receipt=receipt_path),
+            "kimi", "kimi-code/k3", "unsupported", "fixture", "",
+            owner.ReservedExternalRunV1(receipt, lifecycle=lifecycle, state="initialized"),
+            0, owner.provider_stream_result(process),
+            raw_stdout=raw, raw_stderr=b"", process_result=process, attempted=True,
+            role_provenance=owner.ExternalRoleProvenance("none", "external-reviewer"),
+        )
+        assert code != 0 and receipt.committed
+    payload = owner.parse_provider_result(capsys.readouterr().out)
+    assert payload["authorizing"] is False
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+    assert payload["resultText"] == ""
+    assert owner.parse_provider_result(receipt_path.read_text(encoding="utf-8")) == payload
+    assert not lifecycle.run_dir.exists()
+
+
+@pytest.mark.parametrize("branch", ("full", "decoded-path", "build-exception", "replacement", "minimal"))
+def test_external_safety_every_builder_exit_checks_actual_line(
+    tmp_path, monkeypatch, capsys, branch
+):
+    owner = _load_owner()
+    unsafe = '{"api_key":"fixture-caller-value"}'
+    if branch == "decoded-path":
+        unsafe = '"' + chr(92) + 'u0052:' + chr(92) * 2 + 'root' + chr(92) * 2 + 'entry.txt"'
+    original_full = owner.build_provider_result_line
+    original_minimal = owner.build_minimal_provider_failure_line
+    def poison(line):
+        payload = owner.parse_provider_result(line)
+        payload["resultText"] = unsafe
+        return owner.RESULT_PREFIX + json.dumps(payload) + "\n"
+    if branch in {"full", "decoded-path", "replacement"}:
+        monkeypatch.setattr(owner, "build_provider_result_line",
+                            lambda *a, **kw: poison(original_full(*a, **kw)))
+    if branch in {"build-exception", "replacement", "minimal"}:
+        monkeypatch.setattr(owner, "build_minimal_provider_failure_line",
+                            lambda *a, **kw: poison(original_minimal(*a, **kw)))
+    if branch == "build-exception":
+        def broken(*a, **kw):
+            raise ValueError("synthetic builder refusal")
+        monkeypatch.setattr(owner, "build_provider_result_line", broken)
+    if branch in {"full", "decoded-path"}:
+        code, payload, _, lifecycle = _finalize_kimi(
+            owner, tmp_path, monkeypatch, capsys, stdout=b"safe\nGATE: PASS\n",
+            stderr=b"", cancelled=True, exit_code=130,
+        )
+        assert code == 130 and payload["exitCode"] == 130 and payload["gate"] == "none"
+    else:
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+        receipt_path = (tmp_path / "rejected.receipt").resolve()
+        lifecycle = None if branch == "minimal" else owner.RunCaptureLifecycle.create("kimi", "fixture")
+        if lifecycle is not None:
+            lifecycle.initialize(b"safe")
+        process = _kimi_process_result(b"safe\nGATE: PASS\n", b"")
+        with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+            code = owner.finalize_reserved_run_once(
+                owner.Control(), "kimi", "kimi-code/k3", "unsupported", "fixture", "",
+                owner.ReservedExternalRunV1(receipt, lifecycle=lifecycle, state="initialized"),
+                0, owner.provider_stream_result(process), raw_stdout=b"safe\nGATE: PASS\n",
+                raw_stderr=b"", process_result=process,
+                role_provenance=owner.ExternalRoleProvenance("none", "external-reviewer"),
+            )
+            assert not receipt.committed
+        assert code != 0
+        assert not receipt_path.exists() or receipt_path.read_bytes() == b""
+        assert capsys.readouterr().out == ""
+    if lifecycle is not None:
+        assert not lifecycle.run_dir.exists()
+
+
+@pytest.mark.parametrize("mode", ("commit", "stdout", "ledger", "materialization", "timeout", "nonzero"))
+def test_external_safety_failure_returns_keep_single_safe_commit(
+    tmp_path, monkeypatch, capsys, mode
+):
+    owner = _load_owner()
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    lifecycle = owner.RunCaptureLifecycle.create("kimi", "fixture")
+    lifecycle.initialize(b"safe")
+    raw = b"safe\nGATE: PASS\n"
+    process = _kimi_process_result(raw, b"")
+    commit_calls = []
+    original_commit = owner.TerminalReceiptV1.commit
+    def commit(receipt, data):
+        commit_calls.append(data)
+        if mode == "commit":
+            raise OSError("synthetic commit refusal")
+        return original_commit(receipt, data)
+    monkeypatch.setattr(owner.TerminalReceiptV1, "commit", commit)
+    if mode == "ledger":
+        monkeypatch.setattr(owner, "record_terminal", lambda *a, **kw: False)
+    if mode == "materialization":
+        def refuse(*a, **kw):
+            raise ValueError("synthetic materializer refusal")
+        monkeypatch.setattr(owner, "materialize_terminal", refuse)
+    class RefusedStdout:
+        def write(self, value):
+            raise OSError("synthetic stdout refusal")
+        def flush(self):
+            pass
+    path = (tmp_path / "sink.receipt").resolve()
+    with owner.TerminalReceiptV1.reserve(path) as receipt:
+        with monkeypatch.context() as emission:
+            if mode == "stdout":
+                emission.setattr(owner.sys, "stdout", RefusedStdout())
+            code = owner.finalize_reserved_run_once(
+                owner.Control(ledger="fixture" if mode == "ledger" else None),
+                "kimi", "kimi-code/k3", "unsupported", "fixture", "",
+                owner.ReservedExternalRunV1(receipt, lifecycle=lifecycle, state="initialized"),
+                124 if mode == "timeout" else 7 if mode == "nonzero" else 0,
+                owner.provider_stream_result(process), raw_stdout=raw, raw_stderr=b"",
+                process_result=process, timed_out=mode == "timeout",
+                role_provenance=owner.ExternalRoleProvenance("none", "external-reviewer"),
+            )
+    assert code != 0 and len(commit_calls) == 1
+    if mode != "commit":
+        payload = owner.parse_provider_result(path.read_text(encoding="utf-8"))
+        assert payload["authorizing"] is False
+        assert owner._provider_terminal_line_safety("kimi", (), path.read_text(encoding="utf-8")) is None
+        if mode in {"timeout", "nonzero"}:
+            assert code == payload["exitCode"] == (124 if mode == "timeout" else 7)
+    assert not lifecycle.run_dir.exists()
+
+
+def test_external_safety_cleanup_failure_keeps_causal_count(
+    tmp_path, monkeypatch, capsys
+):
+    owner = _load_owner()
+    original = owner.ReservedExternalRunV1.cleanup_once
+    def failed(reserved):
+        original(reserved)
+        return owner._bounded_cleanup_result(("synthetic-cleanup-refusal",), recovery_retained=True)
+    monkeypatch.setattr(owner.ReservedExternalRunV1, "cleanup_once", failed)
+    code, payload, _, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys,
+        stdout=b'{"api_key":"fixture-private-value"}\nGATE: PASS\n', stderr=b"",
+    )
+    assert code != 0 and payload["cleanupStatus"] == "incomplete"
+    assert payload["cleanupIssueCount"] == 1 and payload["captureRecoveryRetained"] is True
+    assert "fixture-private-value" not in (tmp_path / "kimi-terminal.receipt").read_text(encoding="utf-8")
+    assert not lifecycle.run_dir.exists()
 
 
 def test_kimi_unchanged_snapshot_allows_distinct_handle_and_path_ctime(
