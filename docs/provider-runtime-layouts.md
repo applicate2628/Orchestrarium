@@ -10,13 +10,15 @@ Repository policy tests use inline requests and consume no tracked provider-resu
 
 Production auto-routing in the root integration contract is limited to Codex plus Claude Code. Kimi Code is explicit-only through the canonical fixed `kimi-code/k3` wrapper for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Omitting the capability file keeps tools, Model Context Protocol servers, and subagents empty with permission `reject`; a validated file may select admitted read tools/servers or scoped worker tools. Every result remains independently verified and nonauthorizing. Capability-file reads compare descriptor and pathname metadata before and after acquisition and reject drift. Selected Model Context Protocol (MCP) environment and header values are private by default; the existing public environment controls `PATH`, `LANG`, `TIMEOUT` and headers `Accept-Language`, `X-Region`, `X-Timeout` retain their behavior. Structured authorization/cookie payloads, values carried by credential-named Model Context Protocol command options, and URL user-info, non-service path segments, fragments, and query values, including URLs in environment values and arguments, are also checked. Raw and JSON-escaped echoes cannot enter public results or receipts; public endpoint text and ordinary non-credential command arguments remain public controls. This does not read provider authentication storage or change tool permissions. Grok remains unavailable in 1.x. `resolve_external_dispatch` must not use either in `auto`.
 
-Selected private values are checked unchanged in raw provider streams. For the final terminal envelope, the builder owns field provenance: caller/provider-derived data is checked recursively, while fixed wrapper metadata and computed capture hashes are not treated as provider echoes. The generic detector still examines the complete serialized result; malformed or unclassified terminal fields fail visibly. This distinction is not a minimum-secret-length exemption.
+Supported authentication transports may attempt a task without known exact credential values; selecting a mode proves neither login success nor detector availability. The provider-prompt owner resolves one ordinary-local output context and checks both complete settled streams with all known injected and selected private values, credential classes and machine paths. Bare credential assignments under the existing label family use colon or equals delimiters with line-local empty/null/template semantics. Quoted JSON labels retain JSON whitespace, multiline values and visible required-parse failures, including actual nested JSON strings. Unknown context, unavailable detectors, invalid decoding and incomplete acquisition withhold child text and remain visible failures. These checks provide limited coverage even when exact values are known: arbitrary opaque, refreshed or transformed secrets are not proved absent, and local output supplies no retention/export/publication credit.
 
-If Kimi private-home setup fails before any child or capture exists, finalization scans explicit empty streams and preserves the stable setup-failure identifier. This does not waive scanner availability or permit unverified post-launch output; all actual child/capture failures keep their original safety checks.
+Selected private values are checked unchanged in raw provider streams. For the final terminal envelope, the builder owns validated field provenance: caller/provider-derived data is checked recursively for exact known echoes, while proved fixed protocol values and capture metadata computed from actual runner observations receive contextual treatment only for that exact check. Generic credential checks visit the complete actual serialized result and all parsed/nested strings; only validated control slots interpret closed protocol tokens as control metadata. Machine-path checks inspect the entire actual line, parsed/nested strings and stderr with no provenance exemption. Unknown fields or invalid source claims fail visibly. The actual checked line is committed/read back before identical stdout, and replacement lines receive the same checks. This distinction is not a minimum-secret-length exemption.
+
+For a positively established pre-child setup failure, finalization scans explicit empty streams and preserves the stable setup-failure identifier. An attempted process with missing observations is an acquisition failure, never a pre-child failure. This does not waive scanner availability or permit unverified post-launch output; actual child/capture failures and cleanup uncertainty remain visible. Default and configured prompt captures share one creator-owned namespace: safe automatic roots and protected workspaces remain useful; unsafe or unestablished bindings fail before disk capture. Pending acquisition and interrupted promotion retain one cleanup owner, and native prompt/child handles close before capture removal. Windows prompt creation records its original native opening and file identity before verification or descriptor conversion. A positively stored descriptor becomes the sole close owner; its transferred raw alias is retired before descriptor closure. An unobserved conversion outcome retains its original association and nonclean settlement without guessing whether to close a native handle or descriptor. An interrupted close with unknown effect retains its original association and a nonclean cached result; its numeric handle is never retried as proved ownership. A bookkeeping interruption after positively observed closure retains the closed effect separately and never repeats the native close. Independently safe resources still close, the first interruption remains primary, and reserved-context exit always attempts receipt closure after capture settlement without replacing an earlier body failure.
 
 Do not confuse these runtime surfaces with the monorepo authoring trees `src.codex/` and `src.claude/`.
 
-Architecture note: on the Codex line, the installed `AGENTS.md` is intentionally the compact universal minimum. Detailed installed role contracts and runtime guidance belong in the installed `skills/<role>/SKILL.md` files; the Native role manifest is source-only current-payload validation, while role TOMLs are create-only targets with no installed receipt or general adoption/update/reclaim authority in 1.x. The installer appends missing manifest mappings without reserializing `.codex/config.toml`, preserves unrelated bytes and the thread limit, rejects same-name mapping collisions, and gives an absent config `multi_agent_v2 = true` plus all mappings. It accepts exactly five hash-pinned stock-role upgrades, while the frozen legacy `luna_mechanical` config/file pair is a separate bounded mapping migration; legacy fixture bytes remain historical migration inputs. Codex and Claude compose one identical complete canonical `.agents/skills/lead` tree before its single create-only publication, in either installation order, and Claude receives only create-only discovery projections. Codex hook inventory is mutable evidence outside that tree and is authoritative only beside the final resolved ordinary `hooks.json`. Shared/provider reference trees are source-maintainer canon, not target-project install payload. Claude uses a short `CLAUDE.md` entrypoint plus `.claude/agents/*.md` role files. Its four Claude-owned curated role bodies are `lead`, `product-manager`, `analyst`, and `planner`; Architect instead uses the universal `.agents/skills/architect/SKILL.md` body through the existing `.claude/skills/architect` projection. Claude main-agent `lead` activation uses the documented `initialPrompt: /lead`; the same definition retains a fail-closed stale-dispatch branch, while the other three Claude-owned roles and Architect keep thin `.claude/agents/<role>.md` wrappers that load their respective body.
+Architecture note: on the Codex line, the installed `AGENTS.md` is intentionally the compact universal minimum. Detailed installed role contracts and runtime guidance belong in the installed `skills/<role>/SKILL.md` files; the Native role manifest is source-only current-payload validation, while role TOMLs are create-only targets with no installed receipt or general adoption/update/reclaim authority in 1.x. The installer appends missing manifest mappings without reserializing `.codex/config.toml`, preserves unrelated bytes and the thread limit, rejects same-name mapping collisions, and gives an absent config `multi_agent_v2 = true` plus all mappings. It accepts exactly five hash-pinned stock-role upgrades, while the frozen legacy `luna_mechanical` config/file pair is a separate bounded mapping migration; legacy fixture bytes remain historical migration inputs. Codex and Claude compose one identical complete canonical `.agents/skills/lead` tree before its single create-only publication or receipt-bound replacement, in either installation order, and Claude receives only create-only discovery projections. Codex hook inventory is mutable evidence outside that tree and is authoritative only beside the final resolved ordinary `hooks.json`. Shared/provider reference trees are source-maintainer canon, not target-project install payload. Claude uses a short `CLAUDE.md` entrypoint plus `.claude/agents/*.md` role files. Its four Claude-owned curated role bodies are `lead`, `product-manager`, `analyst`, and `planner`; Architect instead uses the universal `.agents/skills/architect/SKILL.md` body through the existing `.claude/skills/architect` projection. Claude main-agent `lead` activation uses the documented `initialPrompt: /lead`; the same definition retains a fail-closed stale-dispatch branch, while the other three Claude-owned roles and Architect keep thin `.claude/agents/<role>.md` wrappers that load their respective body.
 
 Read the tables with three layers in mind:
 
@@ -34,6 +36,53 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | `Local` | Project-level installed runtime surface inside the current repository or target project |
 
 ## Codex
+
+Both installer entrypoints use one canonical Lead receipt lifecycle for repository,
+explicit-target and global materialization. The existing compact receipt binds the
+actual final authored tree after verification and declared reclamation; it grants
+no historical producer, signer, native hook trust or publication claim.
+
+A supported predecessor transport generation is admitted through its scoped
+receipt, complete authored canonical tree, ordered manifest codec and matching
+ordinary peer members. Its captured old digests drive the existing exact migration
+owner. Both provider entrypoints converge an already owned scoped Claude transport
+peer in the same transaction. An absent unselected peer is not created; an unknown,
+customized or unsupported unselected peer remains preserved and unclaimed, while
+explicit unknown overwrite still refuses. Historical example hashes are not the
+general ownership rule, and independently valid safe and frozen legacy routes keep
+their controls.
+
+File and tree replacements retain their actual beforeimages and register performed
+effects with the existing transaction owner. Directory recovery stays in the same
+actual parent and uses one atomic no-overwrite move capability. An unsupported
+required move refuses that operation before live effects. Owned staging records
+actual created identities and partial bytes separately from the desired source.
+Enclosing moves relocate current child and recovery addresses while preserving
+their original proof and logical restoration destinations.
+
+Rollback checks physical membership, identities, bytes, untouched snapshot
+witnesses and retained recovery before restoration. It reverses actual destructive
+dependencies and consumes each owned image once. Commit settles an admitted child
+migration before disposing its containing image; failed children protect both the
+current file and prior recovery. A direct writer preserves an image needed by an
+explicitly deferred migration until that migration's owner commits or rolls back.
+Foreign drift blocks affected parent snapshots, preserves current state and reports
+the original failure plus settlement evidence. Installer Python children retain
+their verification and trust checks with bytecode writes disabled.
+
+Snapshot backups bind their empty creator root before copying and record each
+created member and partial write. Final observation verifies that composition;
+unclaimed siblings remain preserved with visible recovery. Moving a prepared
+object consumes its staging role and grants no cleanup authority over a later
+occupant of the vacated name.
+
+On the tested Windows NTFS target, cleanup verifies native identity, content and
+complete link metadata through one object handle before disposition. Observation
+can coexist with the declared creator; mutation and disposal retain restrictive
+sharing. Tested Linux cleanup uses declared member checks, parent-relative native
+operations and result verification. It does not provide atomic inode-conditioned
+removal against an intentional same-user replacement in the final syscall
+interval. Remote and long-path Windows variants have no new verification claim.
 
 ### Global
 
