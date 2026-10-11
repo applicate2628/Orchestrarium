@@ -199,15 +199,17 @@ def write_staged_item(
     return item
 
 
-def _goal_fixture(tmp_path: Path, *, criterion_ids=("alpha", "omega", "useful"), legacy=False, preservation=False):
+def _goal_fixture(tmp_path: Path, *, criterion_ids=("alpha", "omega", "useful"), legacy=False, preservation=False, flat=None):
     """Accepted synthetic admission; actual lifecycle calls are runtime-only."""
     checker = load_checker_module()
     owner = checker.load_lifecycle_owner()
     roots = {key: tmp_path / key for key in ("A", "B")}
+    if flat is not None:
+        roots["B"] = flat.root
     for rid, root in roots.items():
-        root.mkdir()
+        root.mkdir(exist_ok=flat is not None and rid == "B")
         if not preservation or rid != "B":
-            (root / "work-items" / "epics").mkdir(parents=True)
+            (root / "work-items" / "epics").mkdir(parents=True, exist_ok=flat is not None and rid == "B")
         (root / "inputs").mkdir()
     record = roots["A"] / "work-items" / "epics" / "goal-epic.md"
     record.write_text("status: active\nlabel: Synthetic goal.\n", encoding="utf-8")
@@ -231,6 +233,9 @@ def _goal_fixture(tmp_path: Path, *, criterion_ids=("alpha", "omega", "useful"),
     rules = {"emptyActiveCriterion": criterion_ids[0], "settlementCriterion": criterion_ids[1]}
     members = [{"rootId": rid, "slug": slug, "outcome": "delivered", "acceptance": ref(rid, "outcome.md", slug), "receipt": None}
                for rid, slug in (("A", "a"), ("B", "b"), ("A", "g")) if not preservation or rid != "B"]
+    if flat is not None:
+        members.append({"rootId": "B", "slug": flat.slug, "outcome": "delivered",
+                        "acceptance": ref("B", "evidence/acceptance.md"), "receipt": None})
     if legacy:
         historical = roots["A"] / "work-items" / "archive" / "2026-06" / "historical-member"
         historical.mkdir(parents=True)
@@ -256,7 +261,7 @@ def _goal_fixture(tmp_path: Path, *, criterion_ids=("alpha", "omega", "useful"),
                       "checks": [ref("A", "inputs/checks.md")], "sourcePins": [ref("A", "inputs/source.md")], "actions": []}
                      for cid in criterion_ids], "rules": rules,
         "coverage": {"inventory": ref("A", "inputs/inventory.md"), "audit": ref("A", "inputs/audit.md"), "pending": []}}
-    def write_goal(terminal=False):
+    def write_goal(terminal=False, *, omit_refresh=()):
         nonlocal record
         prefix = b"status: active\nlabel: Synthetic goal.\n"
         if terminal:
@@ -268,7 +273,9 @@ def _goal_fixture(tmp_path: Path, *, criterion_ids=("alpha", "omega", "useful"),
             prefix = b"status: closed\nclosed: 2026-10-08T00:05:00Z\noutcome: Delivered.\nevidence: Accepted fixture.\n"
         record.write_bytes(prefix + b"<!-- orchestrarium-goal-contract:v1 -->\n" + json.dumps(goal).encode()
                            + b"\n<!-- /orchestrarium-goal-contract:v1 -->\n")
-        for root in roots.values():
+        for rid, root in roots.items():
+            if rid in omit_refresh:
+                continue
             if (root / "work-items").is_dir():
                 owner.refresh_readme(root)
         return record
@@ -282,6 +289,192 @@ def _goal_fixture(tmp_path: Path, *, criterion_ids=("alpha", "omega", "useful"),
         return archived
     write_goal()
     return checker, owner, roots, goal, write_goal, close_member
+
+
+class TestLegacyFlatGoalConsumer(unittest.TestCase):
+    def setUp(self):
+        # Ordinary import reuses the one real producer module/class already
+        # loaded by its own tests. A second fixed-name owner alias invalidates
+        # genuine issuer registrations and is not a fixture isolation mechanism.
+        from tests.test_legacy_flat_terminal_close import LegacyFlatTerminalTests
+        self.flat = LegacyFlatTerminalTests()
+        self.flat.setUp()
+        self.addCleanup(self.flat.doCleanups)
+        temporary = tempfile.TemporaryDirectory(prefix="flat-goal-consumer-", dir=ROOT / ".scratch")
+        self.addCleanup(temporary.cleanup)
+        self.goal_temporary = Path(temporary.name)
+
+    def complete_flat(self, *, history=False, pending=False):
+        if history:
+            # Reuse the actual admitted serializer fixture and its original
+            # required-history criterion; no synthetic terminal or empty ledger.
+            self.flat.test_actual_flat_native_history_accepts_evidenced_absence_and_real_settled_rows()
+        # Bind the Goal reference only after its original criteria/history bytes
+        # are ready. The earlier fixture's stale acceptance SHA correctly refused.
+        self.checker, self.owner, self.roots, self.goal, self.write_goal, self.close_member = _goal_fixture(
+            self.goal_temporary, legacy=True, flat=self.flat)
+        for rid, slug in (("A", "a"), ("B", "b"), ("A", "g")):
+            self.close_member(rid, slug)
+        self.flat_row = next(row for row in self.goal["members"] if row["slug"] == self.flat.slug)
+        _raw, arguments = self.flat.legacy_request()
+        if history:
+            request_path = self.flat.root / "legacy-evidence.json"
+            request = json.loads(request_path.read_bytes())
+            request["historySelection"]["ledgerRequired"] = True
+            request["historySelection"]["absentPaths"] = []
+            request["historySelection"]["artifacts"] += [self.flat.reference(self.flat.source.parent / name)
+                                                         for name in ("agent-runs.jsonl", "proof.md")]
+            request_path.write_text(json.dumps(request, sort_keys=True) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, "-B", str(MUTATOR), *arguments, "--apply",
+            *( ["--inject-failure-at", "after-board"] if pending else [])],
+            text=True, capture_output=True, timeout=240, check=False)
+        assert result.returncode == (1 if pending else 0), result.stdout + result.stderr
+        self.archive = self.flat.root / "work-items/archive/2026-10" / self.flat.slug
+        if not pending:
+            action = self.archive / self.owner.LEGACY_COMPLETION_RECEIPT
+            self.flat_row["receipt"] = {"rootId": "B", "workItem": self.flat.slug,
+                "path": action.name, "sha256": hashlib.sha256(action.read_bytes()).hexdigest()}
+        assert not self.flat.source.exists()
+        self.record = self.write_goal(terminal=True, omit_refresh=("B",) if pending else ())
+
+    def public_observation(self):
+        result = subprocess.run([sys.executable, "-B", str(CHECKER), "--root", str(self.roots["A"]),
+            "--goal", str(self.record), "--goal-phase", "final", "--json"],
+            text=True, capture_output=True, timeout=240, check=False)
+        assert result.stdout.strip(), result.stderr
+        return result, json.loads(result.stdout)
+
+    def assert_flat_credit(self, observation):
+        assert observation["decision"] == "eligible", observation
+        row = next(row for row in observation["members"] if row["slug"] == self.flat.slug)
+        assert row == {"rootId": "B", "slug": self.flat.slug, "state": "delivered-closed",
+                       "proofProfile": "legacy-flat-completion-v1"}, row
+        quoted = {ref["path"] for ref in observation["quote"]["references"]
+                  if ref["rootId"] == "B" and ref["workItem"] == self.flat.slug}
+        assert {"closure.md", self.owner.LEGACY_COMPLETION_RECEIPT, self.owner.BUG_DISPOSITIONS_RECEIPT} <= quoted
+        port = self.owner.observe_work_item_terminal(self.roots["B"], f"work-item:{self.flat.slug}")
+        assert {path.relative_to(self.archive).as_posix() for path in port.required_artifacts} <= quoted
+        assert observation["admissionId"] == self.goal["admissionId"]
+        assert [row["id"] for row in observation["criteria"]] == self.goal["criterionIds"]
+        assert [row["slug"] for row in observation["members"]] == [row["slug"] for row in self.goal["members"]]
+        historical = next(row for row in observation["members"] if row["slug"] == "historical-member")
+        assert historical["proofProfile"] == "legacy-read-compatible"
+
+    def test_public_original_history_absence_uses_real_owner_and_both_receipts(self):
+        self.complete_flat()
+        result, observation = self.public_observation()
+        self.assertEqual(result.returncode, 0, observation)
+        self.assert_flat_credit(observation)
+
+    def test_public_present_original_settled_history_keeps_raw_bytes_and_authority(self):
+        self.complete_flat(history=True)
+        before = self.owner.observe_work_item_terminal(self.roots["B"], f"work-item:{self.flat.slug}")
+        raw = {path: path.read_bytes() for path in before.required_artifacts}
+        result, observation = self.public_observation()
+        self.assertEqual(result.returncode, 0, observation)
+        self.assert_flat_credit(observation)
+        self.assertEqual(raw, {path: path.read_bytes() for path in before.required_artifacts})
+        after = self.owner.observe_work_item_terminal(self.roots["B"], f"work-item:{self.flat.slug}")
+        before.verify(); after.verify()
+        self.assertEqual(before.logical_reference, after.logical_reference)
+        self.assertEqual(before.actual_location, after.actual_location)
+        self.assertEqual(before.history_observation.selection, after.history_observation.selection)
+        self.assertEqual(before.history_observation.ledger_sha256, after.history_observation.ledger_sha256)
+        first, second = before.history_observation.authority_by_raw_line, after.history_observation.authority_by_raw_line
+        self.assertEqual(set(first), set(second))
+        for ordinal in first:
+            self.assertEqual(first[ordinal].__dataclass_fields__.keys(), second[ordinal].__dataclass_fields__.keys())
+            for field in first[ordinal].__dataclass_fields__:
+                self.assertEqual(getattr(first[ordinal], field), getattr(second[ordinal], field), (ordinal, field))
+
+    def test_pending_owner_is_not_goal_credit(self):
+        self.complete_flat(pending=True)
+        result, observation = self.public_observation()
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(observation["decision"], "unverified")
+        self.assertTrue(any("PENDING" in cause["detail"] for cause in observation["causes"]), observation)
+        self.assertFalse(any(row["slug"] == self.flat.slug for row in observation["members"]))
+
+    def test_pending_receipts_and_useful_outcome_refuse(self):
+        self.complete_flat()
+        original_receipt, original_acceptance = copy.deepcopy(self.flat_row["receipt"]), copy.deepcopy(self.flat_row["acceptance"])
+        bug = self.archive / self.owner.BUG_DISPOSITIONS_RECEIPT
+        self.flat_row["receipt"] = {"rootId": "B", "workItem": self.flat.slug, "path": bug.name,
+                                    "sha256": hashlib.sha256(bug.read_bytes()).hexdigest()}
+        self.record = self.write_goal(terminal=True)
+        _process, result = self.public_observation()
+        self.assertTrue(any(cause["code"] == "GC-RECEIPT" and cause["item"] == self.flat.slug
+                            for cause in result["causes"]), result)
+        self.assertFalse(any(row["slug"] == self.flat.slug for row in result["members"]))
+        self.flat_row["receipt"] = original_receipt
+        self.flat_row["acceptance"] = None
+        self.record = self.write_goal(terminal=True)
+        _process, result = self.public_observation()
+        self.assertTrue(any(cause["code"] == "GC-OUTCOME" for cause in result["causes"]), result)
+        self.assertNotEqual(result["decision"], "eligible")
+        self.flat_row["acceptance"] = original_acceptance
+        self.record = self.write_goal(terminal=True)
+        for name in (self.owner.LEGACY_COMPLETION_RECEIPT, self.owner.BUG_DISPOSITIONS_RECEIPT):
+            path = self.archive / name
+            saved = self.flat.root / f"fixture-held-{name}"
+            raw = path.read_bytes(); path.rename(saved)
+            try:
+                process, result = self.public_observation()
+                self.assertEqual(process.returncode, 1)
+                self.assertEqual(result["decision"], "unverified")
+                self.assertTrue(result["causes"])
+                self.assertFalse(any(row["slug"] == self.flat.slug for row in result["members"]))
+                self.assertEqual(saved.read_bytes(), raw)
+            finally:
+                saved.rename(path)
+
+    def test_held_native_drift_and_new_ambiguity_refuse(self):
+        self.complete_flat()
+        self.checker.load_lifecycle_owner = lambda: self.owner
+        original_observe = self.owner.observe_work_item_terminal
+        original_verify = self.owner.WorkItemTerminalObservation.verify
+        held = []
+        def observe(root, reference):
+            value = original_observe(root, reference)
+            if reference == f"work-item:{self.flat.slug}": held.append(value)
+            return value
+        calls = []
+        moved = self.flat.root / "fixture-held-required-proof.bin"
+        replacement = []
+        def verify(value):
+            if held and value is held[-1]:
+                calls.append(value)
+                if len(calls) == 2:
+                    path = next(path for path in value.required_artifacts if path.name == "proof.md")
+                    raw = path.read_bytes(); path.rename(moved); path.write_bytes(raw)
+                    replacement.append(path)
+                    self.assertNotEqual(self.owner._lifecycle_file_identity(path.lstat()),
+                                        self.owner._lifecycle_file_identity(moved.lstat()))
+            return original_verify(value)
+        self.owner.observe_work_item_terminal = observe
+        self.owner.WorkItemTerminalObservation.verify = verify
+        try:
+            result = self.checker.evaluate_goal_completion(self.roots["A"], self.record, phase="final")
+        finally:
+            self.owner.observe_work_item_terminal = original_observe
+            self.owner.WorkItemTerminalObservation.verify = original_verify
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result["decision"], "unverified")
+        self.assertTrue(any(cause["code"] == "GC-DRIFT" and cause["item"] == self.flat.slug for cause in result["causes"]), result)
+        self.assertFalse(any(row["slug"] == self.flat.slug for row in result["members"]))
+        # Reconcile only fixture-owned replacement; product never removed it.
+        replacement[0].rename(self.flat.root / "fixture-preserved-replacement.bin")
+        moved.rename(replacement[0])
+        duplicate = self.flat.root / "work-items/backlog" / f"{self.flat.slug}.md"
+        duplicate.write_bytes((self.archive / "legacy-source" / duplicate.name).read_bytes())
+        try:
+            process, ambiguous = self.public_observation()
+            self.assertEqual(process.returncode, 1)
+            self.assertEqual(ambiguous["decision"], "unverified")
+            self.assertTrue(any("LOCATION" in cause["detail"] or "ambiguous" in cause["detail"]
+                                for cause in ambiguous["causes"]), ambiguous)
+        finally:
+            duplicate.rename(self.flat.root / "fixture-preserved-duplicate.md")
 
 
 def test_goal_progress_preclose_and_owner_closed_final_are_distinct(tmp_path: Path):

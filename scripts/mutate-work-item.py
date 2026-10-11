@@ -541,6 +541,7 @@ class LifecycleTransaction:
         self._identity: tuple[int, int] | None = None
         self._locked = False
         self._retained_observations: dict[Path, CapturedFileSnapshot] = {}
+        self._validator_reuse = None
         self._unsettled_relocations: tuple[UnsettledLifecycleRelocation, ...] = ()
 
     def _ensure_lock_file(self) -> None:
@@ -773,6 +774,7 @@ class LifecycleTransaction:
                 )
             return self
         except BaseException:
+            self._validator_reuse = None
             if self._file is not None:
                 if self._locked:
                     try:
@@ -791,6 +793,7 @@ class LifecycleTransaction:
         except BaseException as candidate:
             release_error = candidate
         finally:
+            self._validator_reuse = None
             if self._file is not None:
                 self._file.close()
                 self._file = None
@@ -6877,11 +6880,30 @@ def _preflight_readme_markers(root: Path) -> None:
 
 def _validator_module():
     path = Path(__file__).with_name("validate-work-item-state.py")
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is not None:
+        transaction.verify()
+        if transaction._validator_reuse is not None:
+            return transaction._validator_reuse
     spec = importlib.util.spec_from_file_location("work_item_state_validator", path)
     if spec is None or spec.loader is None:
         raise LifecycleError("WI-VALIDATOR-LOAD", f"cannot load validator: {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    if transaction is None:
+        spec.loader.exec_module(module)
+        return module
+    source = _capture_file_snapshot(path, failure_id="WI-VALIDATOR-LOAD")
+    # Execute the native-acquired source, preserving the existing spec/name/file
+    # context. V continues to own its schema path and dependency loaders.
+    exec(compile(source.data, str(path), "exec", dont_inherit=True), module.__dict__)
+    schema = _capture_file_snapshot(module.AGENT_RUN_SCHEMA_PATH, failure_id="WI-VALIDATOR-LOAD")
+    if json.loads(schema.data.decode("utf-8")) != module.AGENT_RUN_SCHEMA:
+        raise LifecycleError("WI-VALIDATOR-LOAD", "loaded validator schema differs from the acquired configuration")
+    _verify_captured_file(source, "WI-VALIDATOR-LOAD")
+    _verify_captured_file(schema, "WI-VALIDATOR-LOAD")
+    transaction.observe_retained_inputs((source, schema))
+    transaction.verify()
+    transaction._validator_reuse = module
     return module
 
 

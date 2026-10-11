@@ -24,6 +24,126 @@ def digest(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+class TestLifecycleValidatorReuse(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="validator-reuse-test-", dir=ROOT / ".scratch")
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name)
+        self.scripts = self.base / "source/scripts"; self.scripts.mkdir(parents=True)
+        for name in ("mutate-work-item.py", "validate-work-item-state.py"):
+            shutil.copy2(ROOT / "scripts" / name, self.scripts / name)
+        self.schema = self.base / "source/shared/schemas/agent-runs.schema.json"
+        self.schema.parent.mkdir(parents=True)
+        shutil.copy2(ROOT / "shared/schemas/agent-runs.schema.json", self.schema)
+        spec = importlib.util.spec_from_file_location("actual_validator_reuse_owner", self.scripts / "mutate-work-item.py")
+        self.owner = importlib.util.module_from_spec(spec); sys.modules[spec.name] = self.owner; spec.loader.exec_module(self.owner)
+        self.repo = self.base / "repo"; self.repo.mkdir()
+        (self.repo / "work-items").mkdir()
+
+    def transaction(self):
+        return self.owner.LifecycleTransaction(self.repo, input_role="repository-root")
+
+    def validate_independently(self, validator):
+        good = "---\ntemplate: quick-fix\nstatus: active\nstarted: 2026-10-11T00:00:00Z\nupdated: 2026-10-11T00:00:00Z\n---\n- **Task**: Actual useful result.\n- **Current step**: Implement.\n- **Last result**: Accepted.\n- **Next action**: Verify.\n"
+        accepted, refused = [], []
+        validator.validate_quick_fix_status(good, accepted)
+        validator.validate_quick_fix_status("template: quick-fix\nstatus: active\n", refused)
+        self.assertEqual(accepted, [])
+        self.assertTrue(refused)
+
+    def test_actual_transaction_results_nested_standalone_and_failure(self):
+        owner = self.owner
+        fresh_a, fresh_b = owner._validator_module(), owner._validator_module()
+        self.assertIsNot(fresh_a, fresh_b)
+        self.validate_independently(fresh_a)
+        observed = []
+        @owner._lifecycle_participant
+        def nested(root):
+            value = owner._validator_module(); observed.append(value)
+            self.validate_independently(value)
+            return value
+        @owner._lifecycle_participant
+        def operation(root, fail=False):
+            transaction = owner._CURRENT_LIFECYCLE_TRANSACTION.get()
+            observed.append(transaction)
+            first = owner._validator_module()
+            self.assertIs(first, nested(root))
+            self.assertIs(first, owner._validator_module())
+            child_owner = first.load_lifecycle_owner()
+            self.assertIsNot(child_owner, owner)
+            self.assertIsNone(child_owner._CURRENT_LIFECYCLE_TRANSACTION.get())
+            self.assertIs(owner._CURRENT_LIFECYCLE_TRANSACTION.get(), transaction)
+            self.assertEqual(first.AGENT_RUN_SCHEMA, json.loads(self.schema.read_bytes()))
+            if fail:
+                raise owner.LifecycleError("WI-TEST-VALIDATOR-PRIMARY", "real operation primary")
+            return first
+        first = operation(self.repo)
+        transaction = observed[0]
+        self.assertIsNone(transaction._validator_reuse)
+        self.assertIsNone(owner._CURRENT_LIFECYCLE_TRANSACTION.get())
+        second = operation(self.repo)
+        self.assertIsNot(first, second)
+        with self.assertRaisesRegex(owner.LifecycleError, "real operation primary"):
+            operation(self.repo, True)
+        for value in observed:
+            if isinstance(value, owner.LifecycleTransaction):
+                self.assertIsNone(value._validator_reuse)
+                self.assertIsNone(value._file)
+        self.assertIsNot(second, owner._validator_module())
+
+    def test_source_schema_and_initialization_failure_epochs(self):
+        owner = self.owner
+        source = self.scripts / "validate-work-item-state.py"
+        original_source, original_schema = source.read_bytes(), self.schema.read_bytes()
+        # These are independent initial-acquisition failures, not fake validators.
+        for path, replacement in ((source, None), (self.schema, None), (self.schema, b"{bad schema"),
+                                  (source, original_source + b"\nraise RuntimeError('actual initialization failure')\n")):
+            saved = self.base / "held-initial-input"
+            path.rename(saved)
+            if replacement is not None:
+                path.write_bytes(replacement)
+            transaction = self.transaction()
+            with transaction:
+                token = owner._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+                try:
+                    with self.assertRaises((owner.LifecycleError, OSError, ValueError, RuntimeError)):
+                        owner._validator_module()
+                    self.assertIsNone(transaction._validator_reuse)
+                finally:
+                    owner._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+            if path.exists(): path.unlink()
+            saved.rename(path)
+        for path in (source, self.schema):
+            transaction = self.transaction(); transaction.__enter__()
+            token = owner._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            replaced = False
+            try:
+                value = owner._validator_module(); self.validate_independently(value)
+                held = self.base / "held-original-input"
+                image, _parents = owner._legacy_local_image(path)
+                # The fixture actor owns this copied input; production mutation
+                # rightly refuses to move a retained transaction participant.
+                path.rename(held)
+                path.write_bytes(held.read_bytes())
+                replaced = True
+                self.assertNotEqual(owner._lifecycle_file_identity(path.lstat()), tuple(image["identity"]["value"]))
+                with self.assertRaisesRegex(owner.LifecycleError, "changed"):
+                    owner._validator_module()
+                self.assertIs(transaction._validator_reuse, value)
+            finally:
+                owner._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+                if replaced:
+                    with self.assertRaises(owner.LifecycleError):
+                        transaction.__exit__(None, None, None)
+                else:
+                    transaction.__exit__(None, None, None)
+                self.assertIsNone(transaction._validator_reuse)
+                self.assertIsNone(transaction._file)
+            path.unlink(); held.rename(path)
+        self.assertEqual(source.read_bytes(), original_source)
+        self.assertEqual(self.schema.read_bytes(), original_schema)
+
+
 class LegacyFlatTerminalTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="flat-terminal-test-", dir=ROOT / ".scratch")

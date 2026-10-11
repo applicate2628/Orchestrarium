@@ -719,6 +719,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
                   "evaluatorSha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), "references": []},
     }
     captures = []
+    held_legacy_members = []
     roots: dict[str, Path] = {}
     referenced: set[tuple] = set()
     profile_observations = {}
@@ -771,6 +772,68 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
             referenced.add(identity)
             result["quote"]["references"].append(dict(ref))
         return path, data
+
+    def legacy_terminal_member(root_id: str, slug: str, item: Path, row: dict,
+                               closure_fields: dict):
+        context = {"root_id": root_id, "item": slug}
+        try:
+            observed = owner.observe_work_item_terminal(roots[root_id], f"work-item:{slug}")
+            if not isinstance(observed, owner.WorkItemTerminalObservation):
+                raise GoalInputError("GC-REFERENCE", "terminal observation is not issued by the loaded owner", **context)
+            observed.verify()
+        except (owner.LifecycleError, OSError, ValueError, RuntimeError) as exc:
+            if isinstance(exc, GoalInputError):
+                raise
+            raise GoalInputError("GC-REFERENCE", f"terminal acquisition failed: {getattr(exc, 'failure_id', type(exc).__name__)}: {exc}", **context) from exc
+        if (observed.logical_reference != f"work-item:{slug}" or observed.actual_location.resolve() != item
+            or observed.representation != owner.LEGACY_COMPLETION_KIND or observed.physical_membership != "archive"
+            or observed.acquisition_complete is not True or observed.acquired_input is None or observed.diagnostics):
+            raise GoalInputError("GC-REFERENCE", f"terminal member binding/acquisition unavailable: {observed.diagnostics}", **context)
+        if (observed.terminal_disposition != "delivered" or not isinstance(observed.terminal_instant, str)
+            or row["outcome"] != "delivered" or row["acceptance"] is None or not closure_fields.get("outcome")
+            or closure_fields.get("closed") != observed.terminal_instant):
+            raise GoalInputError("GC-OUTCOME", "terminal owner/closure and accepted useful outcome differ", **context)
+        try:
+            owner._strict_utc(observed.terminal_instant)
+        except owner.LifecycleError as exc:
+            raise GoalInputError("GC-OUTCOME", f"{exc.failure_id}: {exc}", **context) from exc
+        history = observed.history_observation
+        if history is None or history.acquisition_complete is not True or history.diagnostics:
+            raise GoalInputError("GC-OBLIGATION", f"original history acquisition unavailable: {getattr(history, 'diagnostics', None)}", **context)
+        if history.selection == "present":
+            obligations = history.obligations
+            if (obligations is None or obligations.open_revise or obligations.open_launches
+                or obligations.unresolved_history):
+                raise GoalInputError("GC-OBLIGATION", "original effective obligations unavailable or open", **context)
+        elif history.selection != "absent" or history.obligations is not None:
+            raise GoalInputError("GC-OBLIGATION", "original history selection is unavailable or inconsistent", **context)
+        action_path = item / owner.LEGACY_COMPLETION_RECEIPT
+        bug_path = item / owner.BUG_DISPOSITIONS_RECEIPT
+        receipts = tuple(observed.receipt_requirements)
+        if len(receipts) != 2 or set(receipts) != {action_path, bug_path}:
+            raise GoalInputError("GC-RECEIPT", "both distinct owner receipt roles are required", **context)
+        if row["receipt"] is None:
+            raise GoalInputError("GC-RECEIPT", "legacy terminal member lacks accepted action receipt", **context)
+        receipt_path, _receipt_data = resolve_ref(row["receipt"])
+        if receipt_path != action_path:
+            raise GoalInputError("GC-RECEIPT", "member receipt is not the actual legacy terminal action receipt", row["receipt"], **context)
+        if not observed.required_artifacts:
+            raise GoalInputError("GC-REFERENCE", "terminal required artifact acquisition is empty", **context)
+        for actual in (*observed.required_artifacts, *receipts):
+            if item in actual.parents:
+                relative, subject = actual.relative_to(item), slug
+            elif roots[root_id] in actual.parents:
+                relative, subject = actual.relative_to(roots[root_id]), None
+            else:
+                raise GoalInputError("GC-REFERENCE", "owner artifact escapes the admitted member/root bases", **context)
+            try:
+                data = capture(actual)
+                resolve_ref({"rootId": root_id, "workItem": subject, "path": relative.as_posix(),
+                             "sha256": hashlib.sha256(data).hexdigest()})
+            except GoalInputError as exc:
+                exc.root_id, exc.item = root_id, slug
+                raise
+        return observed
 
     def admission(value: Any, seen: set[tuple]) -> dict:
         ref = _goal_ref(value)
@@ -1037,7 +1100,10 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
                 profile = "legacy-read-compatible" if entry.classification == owner.LEGACY_READ_CLASSIFICATION else "modern"
                 if row["outcome"] != "delivered" or not closure_fields.get("outcome"):
                     raise GoalInputError("GC-OUTCOME", "archival alone is not delivered outcome")
-                if profile == "modern":
+                if entry.classification == owner.LEGACY_COMPLETION_KIND:
+                    observation = legacy_terminal_member(root_id, slug, path, row, closure_fields)
+                    profile = "legacy-flat-completion-v1"
+                elif profile == "modern":
                     status_text = capture(path / "status.md").decode("utf-8")
                     status_fields = owner._parse_fields(status_text)
                     if status_fields.get("status") not in {"closed", "completed"}:
@@ -1054,7 +1120,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
                 elif row["receipt"] is not None:
                     resolve_ref(row["receipt"])
                 resolve_ref({"rootId": root_id, "workItem": slug, "path": "closure.md", "sha256": hashlib.sha256(closure_bytes).hexdigest()})
-                if (path / "agent-runs.jsonl").exists():
+                if profile != "legacy-flat-completion-v1" and (path / "agent-runs.jsonl").exists():
                     errors, reviews, launches = validator.validate_archived_ledger_obligations(path)
                     for error in errors:
                         cause("GC-OBLIGATION", error, root_id, slug)
@@ -1062,8 +1128,12 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
                         cause("GC-OBLIGATION", "archived effective obligations remain open", root_id, slug)
                 elif profile == "modern" and not validator.is_quick_fix_status(status_text):
                     cause("GC-OBLIGATION", "required archived ledger acquisition unavailable", root_id, slug)
-            result["members"].append({"rootId": root_id, "slug": slug,
-                "state": "active" if active else "delivered-closed", "proofProfile": profile})
+            member_result = {"rootId": root_id, "slug": slug,
+                "state": "active" if active else "delivered-closed", "proofProfile": profile}
+            if profile == "legacy-flat-completion-v1":
+                held_legacy_members.append((len(result["members"]) + len(held_legacy_members), observation, member_result))
+            else:
+                result["members"].append(member_result)
         for root_row in result["roots"]:
             root_id = root_row["id"]
             chain, kind, identity, contract_present = profile_observations[root_id]
@@ -1077,11 +1147,19 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
             except (owner.LifecycleError, OSError, GoalInputError) as exc:
                 root_row["taskDomain"] = "unverified"
                 raise GoalInputError("GC-DRIFT", f"task-domain recheck failed: {exc}", root_id=root_id) from exc
+        for _index, observation, member_result in held_legacy_members:
+            try:
+                observation.verify()
+            except (owner.LifecycleError, OSError, ValueError, RuntimeError) as exc:
+                raise GoalInputError("GC-DRIFT", f"held terminal acquisition changed: {getattr(exc, 'failure_id', type(exc).__name__)}: {exc}",
+                                    root_id=member_result["rootId"], item=member_result["slug"]) from exc
         for snapshot in captures:
             try:
                 owner._verify_captured_file(snapshot, "WI-GOAL-DRIFT")
             except owner.LifecycleError as exc:
                 raise GoalInputError("GC-DRIFT", str(exc)) from exc
+        for index, _observation, member_result in held_legacy_members:
+            result["members"].insert(index, member_result)
         if any(row["code"] == "GC-OBLIGATION" for row in result["causes"]):
             result["decision"] = "unverified"
         elif phase == "preclose":
