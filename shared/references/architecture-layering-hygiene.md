@@ -52,6 +52,34 @@ opposite, equally-flagged failure. OWNER: the author of each owner (its abstract
 scenario-specific general-owner edit; right-level and over-abstraction remain a review verdict, not a
 grep. [spine: General-case over local symptoms, SOLID reminder]
 
+### Represent a meaningful structure as a whole
+
+An incidental data structure is defined as follows:
+
+> incidental data structure is a data structure that occurs within a system when there is no object representing the structure as a whole
+
+When related parts form a meaningful domain whole, represent that whole with a
+coherent object, value or aggregate that owns the parts and their relationships,
+shared invariants and lifecycle where those belong to the whole. Reuse an existing
+owner if it already represents that whole; otherwise place the smallest meaningful
+whole abstraction at the owning boundary. Its identity, operations and constraints
+come from the domain or accepted contract, not a fixture name or current layout.
+Whole representation needs no hypothetical future variant or second consumer.
+
+This is an abstraction and ownership judgment, not a requirement to turn every
+local array, tuple or dictionary into a class. A container or existing object can
+already be the complete representation needed by its caller. An empty wrapper
+that owns no relationship, invariant, operation or lifetime adds no useful whole.
+Do not introduce a reflection framework, mandatory helper, schema, hook or universal
+review veto merely to satisfy this guideline.
+
+OWNER: the existing domain/structure owner. PROBE (review-bound): identify the
+whole, its related parts and whole-level contract; verify that one representation
+owns the relationships and applicable invariants/lifecycle. If an existing owner
+already does so, keep it. If no whole-level responsibility exists, preserve the
+simple local representation. This sharpens M and the shared General-case rule;
+it does not create another workflow stage. [spine: General-case over local symptoms]
+
 ## A. Generalization & scaling
 
 **A1 — Ownership follows the dependency graph, not a name or level label.** A capability is owned by
@@ -490,6 +518,9 @@ check that catches a violation):
 
 ## Terms and Abbreviations
 
+- **incidental data structure** — related system data without an object representing its whole.
+- **whole object / aggregate** — a coherent domain representation owning related parts and their
+  applicable relationships, invariants and lifecycle; not a mandated programming-language class.
 - **layer / module** — a single-abstraction-level unit with a narrow interface and one owner.
 - **silo** — a feature implemented as a big independent program with private copies of shared layers
   (the anti-pattern).

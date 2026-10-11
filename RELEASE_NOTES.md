@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-11
 
+- **Design rules represent meaningful structures as a whole.** Related parts with whole-level relationships, invariants or lifecycle belong to a coherent object or aggregate, reusing the existing owner when it already represents the whole. The shared rule and its architecture explanation distinguish this from adding classes or empty wrappers around ordinary local containers.
+
 - **Shared rules fit the existing loading budget while preserving their protections.** Consolidated wording restores the always-loaded spine within its unchanged limit, retaining the operational rules and safety gates. Installed pack preparation can consume the complete shared contract without raising the budget or hiding requirements.
 
 - **Hook updates and installer rollback share one transaction owner.** Pure hook configuration and inventory plans feed the installer's recorded native state instead of untracked child afterimages. Ordinary and atomic writes, copied metadata, pointer bindings and borrowed openings preserve their distinct contracts; failures retain the original cause, safe sibling restoration and truthful usable or unresolved recovery.
