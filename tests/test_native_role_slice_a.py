@@ -8,6 +8,7 @@ import json
 import hashlib
 import os
 import stat
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -37,6 +38,1012 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import production_installer as installer  # noqa: E402
 from linked_runtime_subroots import LinkedRuntimeSubrootAuthority  # noqa: E402
 import linked_runtime_subroots as runtime_subroots  # noqa: E402
+
+
+@pytest.mark.parametrize("drift", ("none", "tree", "receipt", "member", "equal-tree", "sibling"))
+def test_replacement_rollback_preserves_foreign_snapshot_members(tmp_path: Path, drift: str) -> None:
+    """Actual replacements cannot grant parent snapshots foreign-byte removal."""
+    skills = tmp_path / "skills"
+    lead = skills / "participant"
+    lead.mkdir(parents=True)
+    (lead / "body").write_bytes(b"old\n")
+    sibling = skills / "sibling"
+    sibling.write_bytes(b"untouched\n")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "body").write_bytes(b"new\n")
+    receipt = skills / "metadata"
+    receipt.write_bytes(b"old receipt\n")
+    receipt_identity = None
+    with pytest.raises((RuntimeError, installer._InstallFailure)) as caught:
+        with installer._InstallTransaction([skills], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            owner.replace_exact_tree(Path("skills/participant"), installer._tree_sha256(lead), source)
+            owner.replace_exact_file(Path("skills/metadata"), installer._file_sha256(receipt), b"new receipt\n")
+            receipt_identity = owner._identity(receipt)
+            if drift in {"tree", "equal-tree"}:
+                os.rename(lead, tmp_path / "managed")
+                if drift == "equal-tree":
+                    shutil.copytree(source, lead)
+                else:
+                    lead.mkdir()
+                    (lead / "foreign").write_bytes(b"foreign\n")
+            elif drift == "receipt":
+                receipt.write_bytes(b"foreign receipt\n")
+            elif drift == "member":
+                (lead / "foreign").write_bytes(b"foreign\n")
+            elif drift == "sibling":
+                sibling.write_bytes(b"foreign sibling\n")
+            raise RuntimeError("replacement failure")
+    error = caught.value
+    if drift == "none":
+        assert type(error) is RuntimeError
+        assert (lead / "body").read_bytes() == b"old\n"
+        assert receipt.read_bytes() == b"old receipt\n"
+    else:
+        assert isinstance(error, installer._InstallFailure)
+        assert str(error.cause) == "replacement failure"
+        assert error.members and error.recovery_path.is_dir()
+        if drift in {"tree", "member"}:
+            assert (lead / "foreign").read_bytes() == b"foreign\n"
+        elif drift == "receipt":
+            assert receipt.read_bytes() == b"foreign receipt\n"
+            assert installer._CreateOnlyMutablePath._identity(receipt) == receipt_identity
+        elif drift == "equal-tree":
+            assert (lead / "body").read_bytes() == b"new\n"
+        else:
+            assert sibling.read_bytes() == b"foreign sibling\n"
+
+
+@pytest.mark.parametrize("boundary", ("detach", "publish", "inside-writer"))
+def test_replacement_restore_boundary_retains_unknown_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    tree = tmp_path / "parent/child"
+    tree.mkdir(parents=True)
+    (tree / "body").write_bytes(b"old\n")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "body").write_bytes(b"new\n")
+    native_move = installer._InstallTransaction._native_publish_no_replace
+    publish = installer._InstallTransaction._publish_retained
+    armed = False
+    injected = False
+    def injected_native_move(old, new):
+        if armed and boundary == "detach" and Path(old) == tree:
+            (tree / "foreign").write_bytes(b"foreign at detach\n")
+        return native_move(old, new)
+    def injected_publish(transaction, old, new, **keywords):
+        nonlocal injected
+        if Path(new) == tree:
+            if boundary == "inside-writer" and not armed and not injected:
+                injected = True
+                raise RuntimeError("inside writer failure")
+            if boundary == "publish" and armed:
+                tree.mkdir()
+                (tree / "foreign").write_bytes(b"foreign at publication\n")
+        return publish(transaction, old, new, **keywords)
+    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(injected_native_move))
+    monkeypatch.setattr(installer._InstallTransaction, "_publish_retained", injected_publish)
+    with pytest.raises((RuntimeError, installer._InstallFailure)) as caught:
+        with installer._InstallTransaction([tree.parent], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            owner.replace_exact_tree(tree.relative_to(tmp_path), installer._tree_sha256(tree), source)
+            armed = True
+            raise RuntimeError("post writer failure")
+    if boundary == "inside-writer":
+        assert type(caught.value) is RuntimeError
+        assert str(caught.value) == "inside writer failure"
+        assert (tree / "body").read_bytes() == b"old\n"
+    else:
+        assert isinstance(caught.value, installer._InstallFailure)
+        assert str(caught.value.cause) == "post writer failure"
+        assert (tree / "foreign").is_file()
+        assert caught.value.recovery_path.is_dir()
+
+
+@pytest.mark.parametrize("foreign_kind", ("file", "empty-directory", "nonempty-directory"))
+def test_native_publication_refuses_foreign_appearance_at_call_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign_kind: str,
+) -> None:
+    source = tmp_path / "исходное дерево"
+    source.mkdir()
+    (source / "текст").write_bytes(b"managed bytes\n")
+    target = tmp_path / "новое дерево"
+    transaction = installer._InstallTransaction([], enabled=False)
+    before = transaction._observe(source)
+    native = transaction._native_publish_no_replace
+    foreign = None
+    def inject(old, new):
+        nonlocal foreign
+        if foreign_kind == "file":
+            target.write_bytes(b"foreign file\n")
+        else:
+            target.mkdir()
+            if foreign_kind == "nonempty-directory":
+                (target / "foreign").write_bytes(b"foreign member\n")
+        foreign = transaction._observe(target)
+        return native(old, new)
+    monkeypatch.setattr(transaction, "_native_publish_no_replace", inject)
+    with pytest.raises(OSError):
+        transaction._publish_retained(source, target)
+    assert transaction._observe(source) == before
+    assert transaction._observe(target) == foreign
+
+
+@pytest.mark.skipif(os.name != "posix", reason="descriptor-relative reconstruction needs POSIX capabilities")
+def test_exclusive_directory_publication_and_rollback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the private constructor seam; native support is a separate observation."""
+    target = tmp_path / "parent/participant"
+    target.mkdir(parents=True)
+    (target / "old").write_bytes(b"old bytes\n")
+    source = tmp_path / "source"
+    (source / "nested").mkdir(parents=True)
+    (source / "nested/new").write_bytes(b"new bytes\n")
+    native = installer._InstallTransaction._native_publish_no_replace
+    restoring = False
+    def publication_without_native(old, new):
+        # Live-object retention/detach still require actual native capability.
+        return native(old, new) if not restoring or old == target else False
+    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(publication_without_native))
+    with pytest.raises(RuntimeError, match="^constructor rollback$"):
+        with installer._InstallTransaction([target.parent], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            owner.replace_exact_tree(target.relative_to(tmp_path), installer._tree_sha256(target), source)
+            assert (target / "nested/new").read_bytes() == b"new bytes\n"
+            restoring = True
+            raise RuntimeError("constructor rollback")
+    assert (target / "old").read_bytes() == b"old bytes\n"
+    assert not (target / "nested").exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="native directory descriptor acquisition requires POSIX support")
+def test_exclusive_tree_second_parent_open_failure_closes_first_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import errno
+
+    required = {os.open, os.mkdir, os.stat}
+    if not (required <= os.supports_dir_fd and hasattr(os, "O_DIRECTORY")
+            and hasattr(os, "O_NOFOLLOW") and hasattr(os, "fchmod")):
+        pytest.skip("native relative-directory acquisition capability is absent")
+    source = tmp_path / "from/source"
+    target = tmp_path / "to/target"
+    source.mkdir(parents=True)
+    target.parent.mkdir()
+    (source / "body").write_bytes(b"source remains\n")
+    transaction = installer._InstallTransaction([], enabled=False)
+    owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+    before = transaction._observe(source)
+    effect = transaction.arm_replacement(target, source, owner)
+    native_open = os.open
+    primary = OSError(errno.EIO, "second parent acquisition failed")
+    acquired = None
+    calls = []
+    def fail_second_parent(path, flags, *args, **kwargs):
+        nonlocal acquired
+        if not kwargs.get("dir_fd") and Path(path) in (source.parent, target.parent):
+            calls.append(Path(path))
+            if Path(path) == target.parent:
+                raise primary
+            acquired = native_open(path, flags, *args, **kwargs)
+            metadata = os.fstat(acquired)
+            assert (metadata.st_dev, metadata.st_ino) == (source.parent.stat().st_dev, source.parent.stat().st_ino)
+            return acquired
+        return native_open(path, flags, *args, **kwargs)
+    monkeypatch.setattr(os, "open", fail_second_parent)
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {fail_second_parent})
+    try:
+        with pytest.raises(OSError) as caught:
+            transaction._construct_exclusive_tree(source, target, before, effect)
+        assert caught.value is primary and calls == [source.parent, target.parent]
+        assert acquired is not None
+        assert transaction._observe(source) == before and not target.exists()
+        with pytest.raises(OSError) as closed:
+            os.fstat(acquired)
+        assert closed.value.errno == errno.EBADF
+    finally:
+        if acquired is not None:
+            try:
+                os.fstat(acquired)
+            except OSError as closed:
+                assert closed.errno == errno.EBADF
+            else:
+                os.close(acquired)  # The failing pre-fix oracle leaves no test-owned descriptor.
+
+
+@pytest.mark.parametrize("boundary", ("reservation", "retain", "quarantine"))
+def test_directory_sibling_retention_preserves_foreign_slot_and_parent_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    target = tmp_path / "parent/participant"
+    target.mkdir(parents=True)
+    (target / "body").write_bytes(b"old\n")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "body").write_bytes(b"new\n")
+    original = installer._InstallTransaction._observe(target)
+    native = installer._InstallTransaction._native_publish_no_replace
+    dispose = installer._InstallTransaction._dispose_image
+    armed = False
+    injected = False
+    foreign = None
+    foreign_state = None
+    retained = None
+    retained_state = None
+
+    def inject(path):
+        nonlocal injected, foreign, foreign_state
+        assert path.parent == target.parent
+        path.write_bytes(b"foreign slot\n")
+        foreign = path
+        foreign_state = installer._InstallTransaction._observe(path)
+        injected = True
+
+    def inject_move(old, new):
+        if Path(old) == target and not injected and (
+            (boundary == "retain" and not armed) or (boundary == "quarantine" and armed)
+        ):
+            inject(Path(new))
+        return native(old, new)
+
+    def inject_reservation(transaction, path, expected):
+        reservation = next((effect for effect in transaction._effects
+                            if effect.retained == path and effect.reservation_state is not None), None)
+        result = dispose(transaction, path, expected)
+        if boundary == "reservation" and reservation is not None and not injected:
+            inject(path)
+        return result
+
+    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(inject_move))
+    monkeypatch.setattr(installer._InstallTransaction, "_dispose_image", inject_reservation)
+    with pytest.raises(installer._InstallFailure) as caught:
+        with installer._InstallTransaction([target.parent], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            owner.replace_exact_tree(target.relative_to(tmp_path), installer._tree_sha256(target), source)
+            effect = transaction._effects[-1]
+            retained, retained_state = effect.retained, dict(effect.retained_state)
+            armed = True
+            raise RuntimeError("rollback after sibling retain")
+    assert injected
+    assert installer._InstallTransaction._observe(foreign) == foreign_state
+    assert caught.value.members and caught.value.recovery_path.is_dir()
+    if boundary == "quarantine":
+        assert str(caught.value.cause) == "rollback after sibling retain"
+        assert (target / "body").read_bytes() == b"new\n"
+        assert installer._InstallTransaction._observe(retained) == retained_state
+    else:
+        if boundary == "reservation":
+            assert isinstance(caught.value.cause, ValueError)
+            assert str(caught.value.cause) == "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained slot drift"
+        else:
+            assert isinstance(caught.value.cause, FileExistsError)
+        assert installer._InstallTransaction._observe(target) == original
+
+
+def test_readonly_created_directory_rollback_uses_same_parent_detach(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "body").write_bytes(b"created\n")
+    source.chmod(0o555)
+    target = tmp_path / "parent/participant"
+    target.parent.mkdir()
+    before = installer._InstallTransaction._observe(target.parent)
+    with pytest.raises(RuntimeError, match="^created directory rollback$"):
+        with installer._InstallTransaction([target.parent], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            owner.create_tree(target.relative_to(tmp_path), source)
+            assert transaction._effects[-1].retained.parent == target.parent
+            raise RuntimeError("created directory rollback")
+    assert installer._InstallTransaction._observe(target.parent) == before
+    source.chmod(0o755)
+
+
+def test_partial_quarantine_disposal_protects_recovery_from_ancestor_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "parent/participant"
+    target.mkdir(parents=True)
+    (target / "body").write_bytes(b"old\n")
+    original = installer._InstallTransaction._observe(target)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "body").write_bytes(b"new\n")
+    foreign = None
+    foreign_state = None
+    two_images = False
+    transaction = installer._InstallTransaction([target.parent], enabled=True)
+    dispose_node = transaction._dispose_node
+    primary = RuntimeError("primary rollback failure")
+    hits = 0
+
+    def inject_after_owned_disposal(path, expected):
+        nonlocal foreign, foreign_state, two_images, hits
+        effect = transaction._effects[-1] if transaction._effects else None
+        result = dispose_node(path, expected)
+        if effect is not None and effect.quarantine == path.parent and foreign is None:
+            hits += 1
+            assert not path.exists() and not path.is_symlink()
+            assert effect.quarantine.parent == target.parent
+            assert effect.restored_state == original
+            assert transaction._observe(target) == original
+            two_images = True
+            foreign = path
+            foreign.write_bytes(b"foreign during disposal\n")
+            foreign_state = transaction._observe(effect.quarantine)
+            assert foreign_state[foreign].python_identity[:2] != expected.python_identity[:2]
+            if os.name == "nt":
+                assert foreign_state[foreign].native_proof != expected.native_proof
+        return result
+
+    monkeypatch.setattr(transaction, "_dispose_node", inject_after_owned_disposal)
+    with pytest.raises(installer._InstallFailure) as caught:
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            owner.replace_exact_tree(target.relative_to(tmp_path), installer._tree_sha256(target), source)
+            raise primary
+    assert hits == 1 and two_images and foreign is not None
+    assert caught.value.cause is primary
+    assert caught.value.members and caught.value.recovery_path.is_dir()
+    assert transaction._observe(target) == original
+    assert transaction._observe(foreign.parent) == foreign_state
+    assert foreign.read_bytes() == b"foreign during disposal\n"
+    effect = transaction._effects[-1]
+    assert not effect.settled and effect.quarantine_state is not None
+
+
+def test_disabled_direct_writers_settle_only_their_validated_resources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transaction = installer._InstallTransaction([], enabled=False)
+    owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.write_bytes(b"old first")
+    second.write_bytes(b"old second")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "body").write_bytes(b"current")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "body").write_bytes(b"historical")
+    copy_tree = installer._copy_tree
+    nested = False
+
+    def nested_writer(old, new, **kwargs):
+        nonlocal nested
+        if not nested:
+            nested = True
+            owner.replace_exact_file(Path("first"), installer._file_sha256(first), b"new first")
+            assert transaction._effects[-1].retained.exists()  # Outer writer owns completion.
+        return copy_tree(old, new, **kwargs)
+
+    monkeypatch.setattr(installer, "_copy_tree", nested_writer)
+    owner.replace_exact_tree(Path("tree"), installer._tree_sha256(tree), source)
+    assert nested and first.read_bytes() == b"new first"
+    owner.replace_exact_file(Path("second"), installer._file_sha256(second), b"new second")
+    owner.replace_exact_tree_with_projection(Path("tree"), installer._tree_sha256(tree), source)
+    owner.create_tree(Path("created"), source)
+    owner.remove_exact_file(Path("second"), installer._file_sha256(second))
+    assert not second.exists()
+    assert all(not effect.retained.exists() for effect in transaction._effects)
+    assert not transaction._migration_retention
+    before = transaction._observe(tmp_path)
+    count = len(transaction._effects)
+    owner.create_tree(Path("created"), source)
+    dry = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=True)
+    dry.replace_exact_file(Path("first"), installer._file_sha256(first), b"unused")
+    assert transaction._observe(tmp_path) == before and len(transaction._effects) == count
+
+
+def test_disabled_postpublication_failure_keeps_primary_foreign_and_prior_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target, source = tmp_path / "target", tmp_path / "source"
+    target.mkdir()
+    source.mkdir()
+    (target / "body").write_bytes(b"old")
+    (source / "body").write_bytes(b"new")
+    original = installer._InstallTransaction._observe(target)
+    transaction = installer._InstallTransaction([], enabled=False)
+    owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+    validation = installer._projection_resolves_to
+    foreign_state = None
+    def fail_validation(path, expected_source):
+        nonlocal foreign_state
+        if path == target:
+            path.unlink()
+            path.mkdir()
+            (path / "foreign").write_bytes(b"foreign")
+            foreign_state = transaction._observe(path)
+            raise ValueError("actual final validation failure")
+        return validation(path, expected_source)
+    monkeypatch.setattr(installer, "_projection_resolves_to", fail_validation)
+    with pytest.raises(installer._InstallFailure) as caught:
+        owner.replace_exact_tree_with_projection(Path("target"), installer._tree_sha256(target), source)
+    assert str(caught.value.cause) == "actual final validation failure"
+    assert transaction._observe(target) == foreign_state
+    retained = transaction._effects[0].retained
+    assert transaction._observe(retained) == transaction._relocate(original, target, retained)
+    assert caught.value.recovery_path == retained and caught.value.members
+    other = tmp_path / "other"
+    other.write_bytes(b"old other")
+    owner.replace_exact_file(Path("other"), installer._file_sha256(other), b"new other")
+    assert transaction._observe(retained) == transaction._relocate(original, target, retained)
+    assert transaction._observe(target) == foreign_state
+
+
+def test_disabled_projection_publication_failure_preserves_absent_target_compensation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target, source = tmp_path / "target", tmp_path / "source"
+    target.mkdir()
+    source.mkdir()
+    (target / "body").write_bytes(b"old")
+    (source / "body").write_bytes(b"new")
+    transaction = installer._InstallTransaction([], enabled=False)
+    original = transaction._observe(target)
+    native = installer._InstallTransaction._native_publish_no_replace
+    injected = False
+    def fail_publication(old, new):
+        nonlocal injected
+        if Path(new) == target and Path(old).is_symlink() and not injected:
+            injected = True
+            raise RuntimeError("actual publication failure")
+        return native(old, new)
+    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(fail_publication))
+    owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+    with pytest.raises(RuntimeError, match="^actual publication failure$"):
+        owner.replace_exact_tree_with_projection(Path("target"), installer._tree_sha256(target), source)
+    assert injected and transaction._observe(target) == original
+    assert all(not effect.retained.exists() for effect in transaction._effects)
+
+
+def test_disabled_direct_disposal_failure_keeps_validated_current_and_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target, source = tmp_path / "target", tmp_path / "source"
+    target.mkdir()
+    source.mkdir()
+    (target / "body").write_bytes(b"old")
+    (source / "body").write_bytes(b"new")
+    transaction = installer._InstallTransaction([], enabled=False)
+    dispose = installer._InstallTransaction._dispose_image
+    injected = False
+    def fail_disposal(current, path, expected):
+        nonlocal injected
+        if any(effect.retained == path and effect.retained_state is not None for effect in current._effects):
+            injected = True
+            raise OSError("actual direct disposal failure")
+        return dispose(current, path, expected)
+    monkeypatch.setattr(installer._InstallTransaction, "_dispose_image", fail_disposal)
+    owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+    with pytest.raises(installer._InstallFailure) as caught:
+        owner.replace_exact_tree_with_projection(Path("target"), installer._tree_sha256(target), source)
+    assert injected and str(caught.value.cause) == "actual direct disposal failure"
+    assert installer._projection_resolves_to(target, source)
+    assert (caught.value.recovery_path / "body").read_bytes() == b"old"
+    assert caught.value.members
+
+
+@pytest.mark.parametrize("outcome", ("direct-success", "enabled-rollback", "direct-validation-failure"))
+def test_nested_owned_file_effect_follows_enclosing_actual_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    target, source = tmp_path / "parent/target", tmp_path / "source"
+    target.mkdir(parents=True)
+    source.mkdir()
+    (target / "body").write_bytes(b"old")
+    (source / "body").write_bytes(b"desired")
+    transaction = installer._InstallTransaction([target.parent], enabled=outcome == "enabled-rollback")
+    owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+    original = transaction._observe(target)
+    copy_tree = installer._copy_tree
+    nested = False
+    def nested_copy(old, new, **kwargs):
+        nonlocal nested
+        if not nested:
+            nested = True
+            owner.replace_exact_file(target.relative_to(tmp_path) / "body", installer._file_sha256(target / "body"), b"own nested write")
+        return copy_tree(old, new, **kwargs)
+    monkeypatch.setattr(installer, "_copy_tree", nested_copy)
+    digest = installer._tree_sha256
+    foreign = None
+    foreign_state = None
+    def fail_final(path, **kwargs):
+        nonlocal foreign, foreign_state
+        result = digest(path, **kwargs)
+        if outcome == "direct-validation-failure" and nested and path == target and (target / "body").read_bytes() == b"desired":
+            foreign = target / "foreign"
+            foreign.write_bytes(b"foreign remains")
+            foreign_state = transaction._observe(target)
+            raise ValueError("nested final validation failure")
+        return result
+    monkeypatch.setattr(installer, "_tree_sha256", fail_final)
+    if outcome == "direct-success":
+        owner.replace_exact_tree(target.relative_to(tmp_path), digest(target), source)
+        assert (target / "body").read_bytes() == b"desired"
+        assert not transaction._migration_retention
+        assert all(not effect.retained.exists() for effect in transaction._effects)
+    elif outcome == "enabled-rollback":
+        with pytest.raises(RuntimeError, match="^after enclosing publication$"):
+            with transaction:
+                owner.replace_exact_tree(target.relative_to(tmp_path), digest(target), source)
+                assert transaction._effects[0].transition_order > transaction._effects[1].transition_order
+                raise RuntimeError("after enclosing publication")
+        assert transaction._observe(target) == original
+        assert not transaction._migration_retention
+    else:
+        with pytest.raises(installer._InstallFailure) as caught:
+            owner.replace_exact_tree(target.relative_to(tmp_path), digest(target), source)
+        assert str(caught.value.cause) == "nested final validation failure"
+        assert transaction._observe(target) == foreign_state
+        child = transaction._effects[1]
+        assert child.location != child.path and (child.location).read_bytes() == b"own nested write"
+        assert child.retained.read_bytes() == b"old"
+        assert caught.value.members and caught.value.recovery_path.exists()
+    assert nested
+
+
+@pytest.mark.parametrize("outcome", ("commit", "rollback", "direct-commit", "direct-rollback", "failed-child"))
+def test_nested_migration_lifetime_precedes_containing_image_disposal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    target, source = tmp_path / "participant", tmp_path / "source"
+    target.mkdir()
+    source.mkdir()
+    (target / "role").write_bytes(b"old\n")
+    (source / "role").write_bytes(b"desired\n")
+    transaction = installer._InstallTransaction([target], enabled=not outcome.startswith("direct"))
+    owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+    original = transaction._observe(target)
+    copy_tree = installer._copy_tree
+    local_record = None
+    def nested_copy(old, new, **kwargs):
+        nonlocal local_record
+        if local_record is None:
+            owner.migrate_exact_file(Path("participant/role"), hashlib.sha256(b"old\n").hexdigest(), b"migrated\n")
+            local_record = transaction._slice_a_migrated[-1]
+        return copy_tree(old, new, **kwargs)
+    monkeypatch.setattr(installer, "_copy_tree", nested_copy)
+    if outcome.startswith("direct"):
+        owner.replace_exact_tree(Path("participant"), installer._tree_sha256(target), source)
+        current = transaction._slice_a_migrated[-1]
+        assert not current.settled and current.tombstone_path.read_bytes() == b"old\n"
+        assert current.tombstone_path != local_record.tombstone_path
+        assert transaction._effects[0].deferred_migrations == (local_record.proof_key,)
+        if outcome == "direct-commit":
+            owner.commit_migrated(local_record)
+        else:
+            owner.rollback_migrated(local_record)
+        assert transaction._slice_a_migrated[-1].settled
+        assert (target / "role").read_bytes() == b"desired\n"
+        assert all(effect.settled and not effect.retained.exists() for effect in transaction._effects)
+        assert not transaction._migration_retention
+    elif outcome == "rollback":
+        with pytest.raises(RuntimeError, match="^after enclosing publication$"):
+            with transaction:
+                owner.replace_exact_tree(Path("participant"), installer._tree_sha256(target), source)
+                raise RuntimeError("after enclosing publication")
+        assert transaction._observe(target) == original
+        assert not transaction._migration_retention
+    elif outcome == "failed-child":
+        failure_hit = False
+        prior_foreign = None
+        def fail_child(record):
+            nonlocal failure_hit, prior_foreign
+            failure_hit = True
+            record.tombstone_path.write_bytes(b"foreign prior\n")
+            prior_foreign = transaction._observe(record.tombstone_path)
+            raise OSError("child migration disposal failure")
+        monkeypatch.setattr(owner, "commit_migrated", fail_child)
+        with pytest.raises(installer._InstallFailure) as caught:
+            with transaction:
+                owner.replace_exact_tree(Path("participant"), installer._tree_sha256(target), source)
+                unrelated = tmp_path / "unrelated"
+                unrelated.write_bytes(b"separate old\n")
+                owner.replace_exact_file(Path("unrelated"), installer._file_sha256(unrelated), b"separate desired\n")
+                transaction.commit()
+                raise RuntimeError("committed body primary")
+        assert failure_hit and str(caught.value.cause) == "committed body primary"
+        current = transaction._slice_a_migrated[-1]
+        assert current.leaf_path.read_bytes() == b"migrated\n"
+        assert transaction._observe(current.tombstone_path) == prior_foreign
+        assert (target / "role").read_bytes() == b"desired\n"
+        assert unrelated.read_bytes() == b"separate desired\n"
+        assert transaction._effects[-1].settled and transaction._effects[-1].retained_state is None
+        assert caught.value.members and caught.value.recovery_path.exists()
+    else:
+        with transaction:
+            owner.replace_exact_tree(Path("participant"), installer._tree_sha256(target), source)
+            transaction.commit()
+        assert (target / "role").read_bytes() == b"desired\n"
+        assert all(not effect.retained.exists() for effect in transaction._effects)
+        assert not transaction._migration_retention
+    assert local_record is not None
+
+
+def test_owned_tree_stage_partial_write_keeps_original_and_closes_creator_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target, source = tmp_path / "target", tmp_path / "source"
+    target.mkdir()
+    source.mkdir()
+    (target / "body").write_bytes(b"old\n")
+    (source / "body").write_bytes(b"x" * (2 * 1024 * 1024))
+    transaction = installer._InstallTransaction([], enabled=False)
+    owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+    original = transaction._observe(target)
+    write = os.write
+    writes = 0
+    stage_descriptor = None
+    partial = None
+    def fail_second_write(descriptor, payload):
+        nonlocal writes, stage_descriptor, partial
+        writes += 1
+        stage_descriptor = descriptor
+        if writes == 2:
+            effect = transaction._effects[-1]
+            partial = dict(effect.prepared_state)
+            assert transaction._observe(effect.prepared_path) == partial
+            assert partial[effect.prepared_path / "body"].data == hashlib.sha256(b"x" * (1024 * 1024)).hexdigest()
+            raise OSError("partial owned stage failure")
+        return write(descriptor, payload)
+    monkeypatch.setattr(os, "write", fail_second_write)
+    with pytest.raises(OSError, match="^partial owned stage failure$"):
+        owner.replace_exact_tree(Path("target"), installer._tree_sha256(target), source)
+    assert writes == 2 and partial is not None
+    assert transaction._observe(target) == original
+    assert all(not effect.prepared_path.exists() and not effect.retained.exists() for effect in transaction._effects)
+    with pytest.raises(OSError):
+        os.fstat(stage_descriptor)
+
+
+def test_nested_directory_sibling_recovery_moves_with_its_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target, source, child_source = tmp_path / "parent/target", tmp_path / "source", tmp_path / "child-source"
+    (target / "child").mkdir(parents=True)
+    source.mkdir()
+    child_source.mkdir()
+    (target / "child/body").write_bytes(b"old child")
+    (source / "body").write_bytes(b"desired")
+    (child_source / "body").write_bytes(b"new child")
+    transaction = installer._InstallTransaction([target.parent], enabled=True)
+    owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+    original = transaction._observe(target)
+    copy_tree = installer._copy_tree
+    nested = False
+    def nested_copy(old, new, **kwargs):
+        nonlocal nested
+        if not nested:
+            nested = True
+            child = target / "child"
+            owner.replace_exact_tree(child.relative_to(tmp_path), installer._tree_sha256(child), child_source)
+        return copy_tree(old, new, **kwargs)
+    monkeypatch.setattr(installer, "_copy_tree", nested_copy)
+    with pytest.raises(RuntimeError, match="^nested directory rollback$"):
+        with transaction:
+            owner.replace_exact_tree(target.relative_to(tmp_path), installer._tree_sha256(target), source)
+            parent, child = transaction._effects[:2]
+            assert child.retained.parent == parent.retained
+            assert child.retention_parent == parent.retained
+            raise RuntimeError("nested directory rollback")
+    assert transaction._observe(target) == original
+    assert all(not effect.retained.exists() for effect in transaction._effects)
+
+
+@pytest.mark.parametrize("kind", ("file", "directory"))
+def test_snapshot_completed_copy_does_not_adopt_foreign_sibling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    source = tmp_path / "source"
+    if kind == "directory":
+        source.mkdir()
+        (source / "body").write_bytes(b"declared snapshot bytes\n")
+    else:
+        source.write_bytes(b"declared snapshot bytes\n")
+    transaction = installer._InstallTransaction([source], enabled=True)
+    original = transaction._observe(source)
+    real_copy = transaction._copy_snapshot
+    copies = []
+    foreign = None
+    foreign_state = None
+    def copy_then_foreign(path, backup, before):
+        nonlocal foreign, foreign_state
+        completed = real_copy(path, backup, before)
+        member = backup / "body" if kind == "directory" else backup
+        assert member.read_bytes() == b"declared snapshot bytes\n"
+        assert completed[member].data == hashlib.sha256(member.read_bytes()).hexdigest()
+        if os.name == "nt":
+            assert completed[member].native_proof is not None
+        copies.append(completed)
+        foreign = backup.parent / "foreign"
+        foreign.write_bytes(b"unclaimed sibling\n")
+        foreign_state = transaction._observe(foreign)
+        return completed
+    monkeypatch.setattr(transaction, "_copy_snapshot", copy_then_foreign)
+    with pytest.raises(installer._InstallFailure) as failure:
+        transaction.__enter__()
+    assert len(copies) == 1
+    assert "snapshot membership drift" in str(failure.value.cause)
+    assert failure.value.recovery_path == foreign.parent
+    assert foreign not in transaction._backup_root_state
+    assert transaction._observe(foreign) == foreign_state
+    assert transaction._observe(source) == original
+    # Test fixture owns this synthetic foreign node; installer did not claim it.
+    transaction._dispose_image(foreign, foreign_state)
+    assert transaction._discard_backup() is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows creator-handle abandonment contract")
+def test_snapshot_partial_writer_failure_retains_primary_and_disposes_declared_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    source.write_bytes(b"x" * (2 * 1024 * 1024))
+    transaction = installer._InstallTransaction([source], enabled=True)
+    original = transaction._observe(source)
+    write = os.write
+    primary = OSError("snapshot second write failed")
+    writes = 0
+    descriptor = None
+    partial = None
+    def fail_second(fd, data):
+        nonlocal writes, descriptor, partial
+        writes += 1
+        descriptor = fd
+        if writes == 2:
+            backup = transaction._temporary / "0"
+            partial = transaction._backup_states[backup][backup]
+            assert partial.data == hashlib.sha256(b"x" * (1024 * 1024)).hexdigest()
+            assert partial.native_proof is not None
+            assert transaction._observe(backup) == {backup: partial}
+            raise primary
+        return write(fd, data)
+    monkeypatch.setattr(os, "write", fail_second)
+    with pytest.raises(OSError) as failure:
+        transaction.__enter__()
+    assert failure.value is primary
+    assert writes == 2 and partial is not None
+    assert transaction._observe(source) == original
+    assert not transaction._temporary.exists()
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows creator-handle abandonment contract")
+@pytest.mark.parametrize("foreign_child,mode", ((False, 0o777), (True, 0o777), (False, 0o700), (True, 0o700)))
+def test_native_creator_first_proof_failure_preserves_primary_and_settles_only_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign_child: bool, mode: int,
+) -> None:
+    path = tmp_path / "born"
+    primary = OSError("first creator native proof failed")
+    proof = installer._WindowsBoundNode.proof_from_handle
+    original_token = None
+    def fail_after_real_proof(cls, handle):
+        nonlocal original_token
+        original_token = proof(handle)
+        if foreign_child:
+            (path / "foreign").write_bytes(b"preserved foreign child\n")
+        raise primary
+    monkeypatch.setattr(installer._WindowsBoundNode, "proof_from_handle", classmethod(fail_after_real_proof))
+    if foreign_child:
+        with pytest.raises(installer._InstallFailure) as failure:
+            with installer._WindowsBoundNode.create(path, directory=True, mode=mode):
+                pytest.fail("failed acquisition yielded a creator")
+        assert failure.value.cause is primary
+        assert failure.value.recovery_path == path
+        assert "145" in failure.value.members[0].cause
+        assert (path / "foreign").read_bytes() == b"preserved foreign child\n"
+    else:
+        with pytest.raises(OSError) as failure:
+            with installer._WindowsBoundNode.create(path, directory=True, mode=mode):
+                pytest.fail("failed acquisition yielded a creator")
+        assert failure.value is primary
+        assert not path.exists()
+    assert original_token is not None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows bound-node identity/disposition contract")
+def test_native_disposal_rejects_missing_proof_and_blocks_real_foreign_replacement(
+    tmp_path: Path,
+) -> None:
+    target, foreign = tmp_path / "owned", tmp_path / "foreign"
+    target.write_bytes(b"original owned bytes\n")
+    foreign.write_bytes(b"preserved foreign bytes\n")
+    transaction = installer._InstallTransaction([], enabled=False)
+    original = transaction._observe(target)
+    foreign_before = transaction._observe(foreign)
+    from dataclasses import replace
+    with pytest.raises(ValueError, match="missing native creator proof"):
+        transaction._dispose_node(target, replace(original[target], native_proof=None))
+    with installer._WindowsBoundNode(target, purpose="dispose") as bound:
+        assert bound.proof == original[target].native_proof
+        with pytest.raises(OSError):
+            os.replace(foreign, target)
+        assert bound.proof == original[target].native_proof
+    assert transaction._observe(target) == original
+    assert transaction._observe(foreign) == foreign_before
+    transaction._dispose_image(target, original)
+    assert not target.exists()
+    assert transaction._observe(foreign) == foreign_before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows original raw-reparse witness")
+def test_native_readonly_disposal_protects_live_boundary_and_refuses_prior_content_drift(tmp_path: Path) -> None:
+    target, foreign = tmp_path / "readonly", tmp_path / "foreign"
+    target.write_bytes(b"owned readonly\n")
+    target.chmod(stat.S_IREAD)
+    foreign.write_bytes(b"foreign replacement\n")
+    transaction = installer._InstallTransaction([], enabled=False)
+    original = transaction._observe(target)
+    foreign_before = transaction._observe(foreign)
+    with installer._WindowsBoundNode(target, purpose="dispose") as bound:
+        assert bound.proof == original[target].native_proof
+        with pytest.raises(OSError):
+            with target.open("wb") as writer:
+                writer.write(b"forbidden write\n")
+        with pytest.raises(OSError):
+            os.replace(foreign, target)
+        assert bound.proof == original[target].native_proof
+    assert transaction._observe(target) == original
+    assert transaction._observe(foreign) == foreign_before
+    transaction._dispose_image(target, original)
+    assert not target.exists()
+    target.write_bytes(b"before drift\n")
+    expected = transaction._observe(target)
+    target.write_bytes(b"changed before acquire\n")
+    target.chmod(stat.S_IREAD)
+    changed = transaction._observe(target)
+    with pytest.raises(ValueError, match="disposal drift"):
+        transaction._dispose_image(target, expected)
+    assert transaction._observe(target) == changed
+    assert transaction._observe(foreign) == foreign_before
+    transaction._dispose_image(target, changed)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows original raw-reparse witness")
+def test_native_disposal_rejects_same_id_same_target_changed_reparse_metadata(tmp_path: Path) -> None:
+    import struct
+    source, link = tmp_path / "source", tmp_path / "link"
+    source.mkdir()
+    (source / "sentinel").write_bytes(b"preserved target\n")
+    transaction = installer._InstallTransaction([], enabled=False)
+    target_before = transaction._observe(source)
+    actual = {}
+    transaction._create_owned_projection(source, link, lambda member, row: actual.update({member: row}))
+    original = actual[link]
+    raw = bytearray(original.reparse_data)
+    print_offset, print_size = struct.unpack_from("<HH", raw, 12)
+    assert print_size >= 2
+    raw[20 + print_offset] ^= 1  # PrintName changes; SubstituteName/target does not.
+    C, _W, K, *_rest = installer._WindowsBoundNode._api()
+    handle = K.CreateFileW(str(link), 0x13019F, 7, None, 3, 0x2200000, None)
+    assert handle != C.c_void_p(-1).value, C.get_last_error()
+    actor = installer._WindowsBoundNode(link)
+    actor.handle = handle
+    with actor:
+        assert actor.proof == original.native_proof
+        actor.set_reparse_data(bytes(raw))
+        assert actor.proof == original.native_proof
+        assert actor.logical_target() == original.data
+    changed = transaction._observe(link)
+    assert changed[link].native_proof == original.native_proof
+    assert changed[link].data == original.data
+    assert changed[link].reparse_data != original.reparse_data
+    with pytest.raises(ValueError, match="native disposal reparse metadata"):
+        transaction._dispose_node(link, original)
+    assert transaction._observe(link) == changed
+    assert transaction._observe(source) == target_before
+    # This explicit test actor owns its changed metadata; original installer proof refused it.
+    transaction._dispose_image(link, changed)
+    assert transaction._observe(source) == target_before
+
+
+@pytest.mark.parametrize("position", ("published", "refused"))
+def test_migration_stage_settlement_preserves_a_later_occupant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, position: str,
+) -> None:
+    path = tmp_path / "role"
+    path.write_bytes(b"old stock bytes\n")
+    transaction = installer._InstallTransaction([], enabled=False)
+    owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+    before = transaction._observe(path)
+    publish = transaction._publish_retained
+    foreign = None
+    foreign_state = None
+    relocated = None
+    primary = None
+    hits = 0
+    def inject(source, target, **kwargs):
+        nonlocal foreign, foreign_state, relocated, primary, hits
+        migration = kwargs.get("migration")
+        if migration is not None and source == migration.prepared_path:
+            hits += 1
+            if position == "published":
+                result = publish(source, target, **kwargs)
+            else:
+                relocated = tmp_path / "retained-creator-stage"
+                os.rename(source, relocated)
+            foreign = source
+            foreign.write_bytes(b"foreign ordinary occupant\n")
+            foreign_state = transaction._observe(foreign)
+            if position == "published":
+                return result
+            try:
+                return publish(source, target, **kwargs)
+            except BaseException as error:
+                primary = error
+                raise
+        return publish(source, target, **kwargs)
+    monkeypatch.setattr(transaction, "_publish_retained", inject)
+    if position == "published":
+        owner.migrate_exact_file(Path("role"), hashlib.sha256(b"old stock bytes\n").hexdigest(), b"desired\n")
+        assert path.read_bytes() == b"desired\n"
+    else:
+        with pytest.raises(installer._InstallFailure) as failure:
+            owner.migrate_exact_file(Path("role"), hashlib.sha256(b"old stock bytes\n").hexdigest(), b"desired\n")
+        assert failure.value.cause is primary
+        assert "migration beforeimage drift" in str(primary)
+        assert relocated.read_bytes() == b"desired\n"
+    assert hits == 1
+    assert transaction._observe(foreign) == foreign_state
+    record = transaction._slice_a_migrated[-1]
+    assert transaction._observe(record.tombstone_path) == transaction._relocate(before, path, record.tombstone_path)
+
+
+@pytest.mark.parametrize("kind", ("file", "directory"))
+def test_disposal_accepts_only_legal_platform_readonly_effect(tmp_path: Path, kind: str) -> None:
+    target = tmp_path / "owned"
+    if kind == "directory":
+        target.mkdir()
+        (target / "body").write_bytes(b"owned bytes\n")
+    else:
+        target.write_bytes(b"owned bytes\n")
+    target.chmod(stat.S_IREAD | (stat.S_IEXEC if kind == "directory" else 0))
+    transaction = installer._InstallTransaction([], enabled=False)
+    transaction._dispose_image(target, transaction._observe(target))
+    assert not target.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX write permissions are independent fields")
+def test_disposal_rejects_undeclared_posix_group_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "owned"
+    target.mkdir()
+    (target / "body").write_bytes(b"owned bytes\n")
+    target.chmod(0o555)
+    transaction = installer._InstallTransaction([], enabled=False)
+    expected = transaction._observe(target)
+    chmod = Path.chmod
+    def add_group_write(path, mode, *args, **kwargs):
+        chmod(path, mode, *args, **kwargs)
+        if path == target:
+            chmod(path, stat.S_IMODE(path.stat().st_mode) | stat.S_IWGRP)
+    monkeypatch.setattr(Path, "chmod", add_group_write)
+    with pytest.raises(ValueError, match="disposal permission transition"):
+        transaction._dispose_image(target, expected)
+    assert target.exists() and (target / "body").read_bytes() == b"owned bytes\n"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Windows readonly disposition does not call chmod")
+def test_disposal_retains_readonly_file_modified_during_chmod(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "owned"
+    target.write_bytes(b"owned bytes\n")
+    target.chmod(stat.S_IREAD)
+    transaction = installer._InstallTransaction([], enabled=False)
+    expected = transaction._observe(target)
+    chmod = Path.chmod
+    hits = 0
+    def modify_bytes(path, mode, *args, **kwargs):
+        nonlocal hits
+        chmod(path, mode, *args, **kwargs)
+        if path == target:
+            hits += 1
+            target.write_bytes(b"foreign bytes\n")
+    monkeypatch.setattr(Path, "chmod", modify_bytes)
+    with pytest.raises(ValueError, match="disposal permission content drift"):
+        transaction._dispose_image(target, expected)
+    assert target.read_bytes() == b"foreign bytes\n"
+    assert hits == 1
+    assert installer._CreateOnlyMutablePath._identity(target)[:2] == expected[target].python_identity[:2]
 
 
 POST_MATERIALIZATION_WRITER_IDS = {
@@ -2133,6 +3140,60 @@ def test_canonical_lead_provider_order_matrix(
         shutil.rmtree(stage.path, ignore_errors=True)
 
 
+@pytest.mark.parametrize("mode", ("repo", "target", "global"))
+@pytest.mark.parametrize("provider_order", (("codex", "claude"), ("claude", "codex")))
+def test_receipted_transport_upgrade_converges_from_either_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, provider_order: tuple[str, str],
+) -> None:
+    install_root = tmp_path / "installation"
+    install_root.mkdir()
+    assert _same_root_install("claude", mode, install_root, monkeypatch) == 0
+    skills = install_root / ".agents" / "skills"
+    lead = skills / "lead"
+    peer = install_root / ".claude" / "agents"
+    payload = (lead / "scripts" / "provider_prompt.py").read_bytes() + b"\n# supported predecessor example\n"
+    manifest_path = Path("shared") / installer.TRANSPORT_PROJECTION_MANIFEST
+    manifest = json.loads((lead / manifest_path).read_bytes())
+    manifest["packRevision"] = "supported-predecessor-example"
+    manifest["files"]["provider_prompt.py"]["sha256"] = hashlib.sha256(payload).hexdigest()
+    encoded = (json.dumps(manifest, indent=2) + "\n").encode()
+    for participant in (lead, peer):
+        (participant / "scripts" / "provider_prompt.py").write_bytes(payload)
+        (participant / manifest_path).write_bytes(encoded)
+    (skills / installer._LEAD_RECEIPT_NAME).write_bytes(
+        installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True))
+    )
+    for provider in provider_order:
+        assert _same_root_install(provider, mode, install_root, monkeypatch) == 0
+        assert (lead / "scripts" / "provider_prompt.py").read_bytes() == (ROOT / "scripts" / "provider_prompt.py").read_bytes()
+        assert (peer / "scripts" / "provider_prompt.py").read_bytes() == (ROOT / "scripts" / "provider_prompt.py").read_bytes()
+        receipt = installer._read_lead_receipt(skills / installer._LEAD_RECEIPT_NAME)
+        assert receipt is not None and receipt[2] == installer._tree_sha256(lead, ignore_runtime_cache=True)
+
+
+@pytest.mark.parametrize("peer_state", ("absent", "unknown"))
+def test_unselected_unproved_peer_does_not_veto_canonical_upgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, peer_state: str,
+) -> None:
+    root = tmp_path / "installation"
+    root.mkdir()
+    assert _same_root_install("codex", "target", root, monkeypatch) == 0
+    skills = root / ".agents/skills"
+    lead = skills / "lead"
+    (lead / "SKILL.md").write_bytes((lead / "SKILL.md").read_bytes() + b"\nold generation example\n")
+    (skills / installer._LEAD_RECEIPT_NAME).write_bytes(
+        installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
+    peer = root / ".claude"
+    if peer_state == "unknown":
+        path = peer / "agents/scripts/provider_prompt.py"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"unknown peer bytes\n")
+    before = installer._InstallTransaction._observe(peer)
+    assert _same_root_install("codex", "target", root, monkeypatch) == 0
+    assert installer._InstallTransaction._observe(peer) == before
+    assert (lead / "SKILL.md").read_bytes() == (ROOT / "src.codex/skills/lead/SKILL.md").read_bytes()
+
+
 def test_codex_health_requires_target_derived_inventory_sidecar(tmp_path: Path) -> None:
     """Trust health reads the sidecar beside hooks.json, never lead/scripts."""
 
@@ -2948,14 +4009,25 @@ def test_exact_tree_post_upgrade_failure_restores_nested_readonly_snapshot(
     assert readonly_flag
 
     temporary_paths: list[Path] = []
-    real_mkdtemp = installer.tempfile.mkdtemp
+    real_allocate = installer._InstallTransaction._allocate_owned_directory
+    born_rows = []
 
-    def record_mkdtemp(suffix=None, prefix=None, dir=None):
-        path = Path(real_mkdtemp(suffix=suffix, prefix=prefix, dir=dir))
-        temporary_paths.append(path)
-        return str(path)
+    def record_allocate(transaction, parent, prefix, record):
+        def record_real_born(path, row):
+            record(path, row)
+            if path == transaction._temporary:
+                assert row.kind == "directory" and row.native_proof is not None
+                assert transaction._backup_root_state[path] == row
+                assert installer._CreateOnlyMutablePath._identity(path) == row.python_identity
+                assert path != target and path != source and target not in path.parents and source not in path.parents
+                born_rows.append((path, row))
+        path = real_allocate(transaction, parent, prefix, record_real_born)
+        if path == transaction._temporary:
+            assert any(member == path for member, _row in born_rows)
+            temporary_paths.append(path)
+        return path
 
-    monkeypatch.setattr(installer.tempfile, "mkdtemp", record_mkdtemp)
+    monkeypatch.setattr(installer._InstallTransaction, "_allocate_owned_directory", record_allocate)
     try:
         with pytest.raises(RuntimeError, match="^forced post-upgrade failure$"):
             transaction = installer._InstallTransaction([target], enabled=True)
@@ -2970,7 +4042,8 @@ def test_exact_tree_post_upgrade_failure_restores_nested_readonly_snapshot(
         assert (cache / "runtime.pyc").read_bytes() == historical_cache
         assert cache.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
         assert not tuple(target.parent.glob(".analyst.upgrade.*"))
-        assert temporary_paths and all(not path.exists() for path in temporary_paths)
+        assert temporary_paths and born_rows and len(temporary_paths) == len(born_rows) == 1
+        assert all(not path.exists() for path in temporary_paths)
     finally:
         for path in (anchor, source.parent.parent):
             if path.exists():
@@ -3018,6 +4091,7 @@ def test_projection_migration_rollback_restores_readonly_historical_tree(
     assert expected is not None
     target.chmod(0o555)
     original_mode = stat.S_IMODE(target.lstat().st_mode)
+    original_identity = installer._CreateOnlyMutablePath._identity(target)
 
     with pytest.raises(RuntimeError, match="^forced post-migration failure$"):
         tombstone = target.parent / ".analyst.projection.tombstone"
@@ -3027,11 +4101,13 @@ def test_projection_migration_rollback_restores_readonly_historical_tree(
             owner.replace_exact_tree_with_projection(
                 Path("skills") / "analyst", expected, source
             )
+            assert transaction._effects[-1].retained.parent == target.parent
             raise RuntimeError("forced post-migration failure")
 
     assert not target.is_symlink()
     assert (target / "SKILL.md").read_bytes() == historical
     assert stat.S_IMODE(target.lstat().st_mode) == original_mode
+    assert installer._CreateOnlyMutablePath._identity(target) == original_identity
     assert not (target.parent / ".analyst.projection.tmp").exists()
     assert not (target.parent / ".analyst.projection.tombstone").exists()
     target.chmod(0o755)
@@ -3092,17 +4168,18 @@ def test_projection_migration_cleanup_failure_restores_snapshot_members(
     expected = installer._tree_sha256(target)
     assert expected is not None
 
-    original_cleanup = installer._remove_readonly_tree
+    original_validation = installer._projection_resolves_to
     cleanup_failed = False
 
-    def fail_cleanup(path: Path) -> None:
+    def fail_cleanup(path: Path, expected_source: Path) -> bool:
         nonlocal cleanup_failed
-        if path == tombstone and not cleanup_failed:
+        result = original_validation(path, expected_source)
+        if path == target and result and not cleanup_failed:
             cleanup_failed = True
             raise OSError("forced cleanup failure")
-        original_cleanup(path)
+        return result
 
-    monkeypatch.setattr(installer, "_remove_readonly_tree", fail_cleanup)
+    monkeypatch.setattr(installer, "_projection_resolves_to", fail_cleanup)
     with pytest.raises(OSError, match="^forced cleanup failure$"):
         transaction = installer._InstallTransaction([target, tombstone], enabled=True)
         with transaction:
@@ -3111,11 +4188,52 @@ def test_projection_migration_cleanup_failure_restores_snapshot_members(
                 Path("skills") / "analyst", expected, source
             )
 
+    assert cleanup_failed
     assert not target.is_symlink()
     assert (target / "SKILL.md").read_bytes() == historical
     assert not (target.parent / ".analyst.projection.tmp").exists()
     assert not tombstone.exists()
     assert not tombstone.is_symlink()
+
+
+@pytest.mark.parametrize("body_failure", (False, True))
+def test_committed_projection_disposal_failure_preserves_current_and_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body_failure: bool,
+) -> None:
+    target = tmp_path / "parent/participant"
+    target.mkdir(parents=True)
+    (target / "body").write_bytes(b"old\n")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "body").write_bytes(b"current\n")
+    foreign = target.parent / "foreign"
+    foreign.write_bytes(b"foreign remains\n")
+    foreign_state = installer._InstallTransaction._observe(foreign)
+    dispose = installer._InstallTransaction._dispose_image
+    injected = False
+    retained = None
+    def fail_disposal(transaction, path, expected):
+        nonlocal injected, retained
+        if transaction.committed and path in {effect.retained for effect in transaction._effects} and not injected:
+            injected = True
+            retained = path
+            raise OSError("forced committed disposal failure")
+        return dispose(transaction, path, expected)
+    monkeypatch.setattr(installer._InstallTransaction, "_dispose_image", fail_disposal)
+    with pytest.raises(installer._InstallFailure) as caught:
+        with installer._InstallTransaction([target], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            owner.replace_exact_tree_with_projection(target.relative_to(tmp_path), installer._tree_sha256(target), source)
+            transaction.commit()
+            if body_failure:
+                raise RuntimeError("primary after commit")
+    assert injected
+    assert target.is_symlink() and (target / "body").read_bytes() == b"current\n"
+    assert str(caught.value.cause) == ("primary after commit" if body_failure else "forced committed disposal failure")
+    assert any(member.cause == "forced committed disposal failure" for member in caught.value.members)
+    assert retained.is_dir() and (retained / "body").read_bytes() == b"old\n"
+    assert caught.value.recovery_path.is_dir()
+    assert installer._InstallTransaction._observe(foreign) == foreign_state
 
 
 def test_tree_sha256_ignores_only_regular_pyc_under_ordinary_runtime_cache(
@@ -3806,3 +4924,720 @@ def test_live_codex_docs_use_shared_agents_global_root() -> None:
                 assert markers is not None and all(marker in line for marker in markers), (
                     f"{path.relative_to(ROOT)}: {stale_root}"
                 )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory birth permissions")
+def test_private_allocation_preserves_source_and_ordinary_directory_modes(tmp_path: Path) -> None:
+    previous_umask = os.umask(0o022)
+    transaction = installer._InstallTransaction([], enabled=False)
+    acquired = {}
+    source = tmp_path / "source"
+    ordinary = tmp_path / "ordinary"
+    projection = tmp_path / "projection"
+    try:
+        source.mkdir(mode=0o700)
+        payload = source / "payload"
+        payload.write_bytes(b"private snapshot payload")
+        payload.chmod(0o644)
+        before = transaction._observe(source)
+        private = transaction._allocate_owned_directory(tmp_path, "private-", acquired.__setitem__)
+        assert acquired[private].python_identity[2] & 0o777 == 0o700
+        assert stat.S_IMODE(private.stat().st_mode) == 0o700
+        transaction._create_owned_directory(ordinary, acquired.__setitem__)
+        assert stat.S_IMODE(ordinary.stat().st_mode) == 0o755
+        parent_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            relative = tmp_path / "relative-private"
+            transaction._create_owned_directory(relative, acquired.__setitem__, parent_descriptor=parent_fd, mode=0o700)
+        finally:
+            os.close(parent_fd)
+        assert stat.S_IMODE(relative.stat().st_mode) == 0o700
+        transaction._copy_snapshot(source, private / "copy", before)
+        assert (private / "copy" / "payload").read_bytes() == b"private snapshot payload"
+        assert stat.S_IMODE((private / "copy" / "payload").stat().st_mode) == 0o644
+        source.chmod(0o755)
+        projected_source = transaction._observe(source)
+        projected = {}
+        transaction._construct_exclusive_tree(source, projection, projected_source, None, sink=projected.__setitem__)
+        assert stat.S_IMODE(projection.stat().st_mode) == 0o755
+        assert transaction._observe(source) == projected_source
+        assert before[payload] == projected_source[payload]
+        transaction._dispose_image(projection, projected)
+        snapshot = transaction._backup_states[private / "copy"]
+        transaction._dispose_image(private / "copy", snapshot)
+        for path in (private, ordinary, relative):
+            transaction._dispose_image(path, {path: acquired[path]})
+        assert all(not path.exists() for path in (private, ordinary, relative, projection))
+    finally:
+        os.umask(previous_umask)
+
+
+def test_existing_scalar_writer_records_truncation_before_a_fallible_getter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "scalar"
+    path.write_bytes(b"original scalar bytes")
+    transaction = installer._InstallTransaction([], enabled=False)
+    original = transaction._observe(path)[path]
+    descriptor = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0))
+    current = {}
+    primary = OSError("forced scalar partial write")
+    real_write = os.write
+    calls = []
+    def write(fd, data):
+        if fd == descriptor:
+            calls.append(bytes(data))
+            if len(calls) == 2:
+                raise primary
+        return real_write(fd, data)
+    real_capture = installer._InstallTransaction._capture_node
+    def capture(member, **kwargs):
+        if kwargs.get("descriptor") == descriptor:
+            raise OSError("a repeated proof getter lost the performed truncation")
+        return real_capture(member, **kwargs)
+    monkeypatch.setattr(installer.os, "write", write)
+    monkeypatch.setattr(installer._InstallTransaction, "_capture_node", staticmethod(capture))
+    try:
+        with pytest.raises(OSError) as failure:
+            transaction._write_owned_file(path, descriptor, (b"partial", b"unwritten"),
+                current.__setitem__, hashlib.sha256(b"partialunwritten").hexdigest(), initial_state=original)
+        assert failure.value is primary and len(calls) == 2
+        assert path.read_bytes() == b"partial"
+        assert current[path].data == hashlib.sha256(b"partial").hexdigest()
+        assert current[path].python_identity == original.python_identity
+        assert current[path].native_proof == original.native_proof
+        assert original.data == hashlib.sha256(b"original scalar bytes").hexdigest()
+    finally:
+        os.close(descriptor)
+
+
+@pytest.mark.parametrize("scenario", ("absent", "existing", "legacy", "alias"))
+def test_normalization_records_real_scalar_actions_and_restores_original(
+    tmp_path: Path, scenario: str
+) -> None:
+    anchor = tmp_path / "project"
+    anchor.mkdir()
+    target = anchor / "settings.yaml"
+    legacy = target.with_suffix("")
+    original = b"delegationMode: manual\ncustomSetting: preserved\n"
+    external = tmp_path / "external"
+    if scenario == "existing":
+        target.write_bytes(original)
+        if os.name != "nt":
+            target.chmod(0o640)
+    elif scenario == "legacy":
+        legacy.write_bytes(original)
+    elif scenario == "alias":
+        external.write_bytes(original)
+        target.symlink_to(external)
+    transaction = installer._InstallTransaction([target, legacy], enabled=True)
+    primary = RuntimeError("forced after declared normalization")
+    pointer = installer._InstallTransaction._observe(target) if scenario == "alias" else None
+    input_path = legacy if scenario == "legacy" else target
+    module = installer._load_module_from_path("normalizer_scalar_test", ROOT / "scripts/normalize-agents-mode.py")
+    planned = module.normalize_file(str(ROOT / "shared/agents-mode.defaults.yaml"), str(input_path), "codex").encode()
+    before_identity = installer._CreateOnlyMutablePath._identity(input_path) if input_path.exists() and scenario != "alias" else None
+    with pytest.raises(RuntimeError) as failure:
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+            installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+                "codex", False, transaction=transaction, mutable_owner=owner)
+            assert target.read_bytes() == planned
+            entries = [entry for entry in transaction._entries if entry["kind"] == "scalar"]
+            assert entries and entries[-1]["origin"].native_proof is not None if os.name == "nt" else entries
+            if scenario == "existing":
+                assert installer._CreateOnlyMutablePath._identity(target) == before_identity
+            if scenario == "alias":
+                assert transaction._observe(target) == pointer
+            raise primary
+    assert failure.value is primary
+    if scenario == "absent":
+        assert not target.exists()
+    elif scenario == "legacy":
+        assert not target.exists() and legacy.read_bytes() == original
+    elif scenario == "alias":
+        assert transaction._observe(target) == pointer and external.read_bytes() == original
+    else:
+        assert target.read_bytes() == original
+        assert installer._CreateOnlyMutablePath._identity(target) == before_identity
+    assert not any(entry["kind"] == "scalar" and not entry["consumed"] for entry in transaction._entries)
+
+
+@pytest.mark.parametrize("foreign", ("data", "replacement"))
+def test_normalization_preserves_foreign_current_and_actual_beforeimage(tmp_path: Path, foreign: str) -> None:
+    target = tmp_path / "settings.yaml"
+    target.write_bytes(b"delegationMode: manual\n")
+    transaction = installer._InstallTransaction([target, target.with_suffix("")], enabled=True)
+    primary = RuntimeError("forced after foreign normalization mutation")
+    with pytest.raises(installer._InstallFailure) as failure:
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+                "codex", False, transaction=transaction, mutable_owner=owner)
+            if foreign == "data":
+                target.write_bytes(b"foreign same object")
+            else:
+                replacement = tmp_path / "replacement"
+                replacement.write_bytes(b"foreign replacement")
+                os.replace(replacement, target)
+            witness = transaction._observe(target)
+            raise primary
+    assert failure.value.cause is primary
+    assert transaction._observe(target) == witness
+    assert failure.value.recovery_path is not None and failure.value.recovery_path.exists()
+
+
+@pytest.mark.parametrize("sequence", ("create-scalar", "migrate-scalar-commit", "migrate-scalar-rollback", "scalar-migrate"))
+def test_normalization_uses_current_role_and_surviving_native_inverse(tmp_path: Path, sequence: str) -> None:
+    target = tmp_path / "settings.yaml"
+    old = b"delegationMode: manual\ncustomSetting: old\n"
+    migrated = b"delegationMode: auto\ncustomSetting: migrated\n"
+    if sequence != "create-scalar":
+        target.write_bytes(old)
+    before = installer._InstallTransaction._observe(target)
+    transaction = installer._InstallTransaction([target, target.with_suffix("")], enabled=True)
+    primary = RuntimeError("forced normalization role inverse")
+    def actions():
+        owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+        if sequence == "create-scalar":
+            owner.create_file(Path("settings.yaml"), old)
+        elif sequence.startswith("migrate-scalar"):
+            owner.migrate_exact_file(Path("settings.yaml"), hashlib.sha256(old).hexdigest(), migrated)
+        installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+            "codex", False, transaction=transaction, mutable_owner=owner)
+        if sequence == "scalar-migrate":
+            scalar = target.read_bytes()
+            owner.migrate_exact_file(Path("settings.yaml"), hashlib.sha256(scalar).hexdigest(), migrated)
+        if sequence.endswith("commit"):
+            expected = target.read_bytes()
+            transaction.commit()
+            return expected
+        raise primary
+    if sequence.endswith("commit"):
+        with transaction:
+            expected = actions()
+        assert target.read_bytes() == expected
+        assert all(record.settled for record in transaction._slice_a_migrated)
+    else:
+        with pytest.raises(RuntimeError) as failure:
+            with transaction:
+                actions()
+        assert failure.value is primary
+        assert transaction._observe(target) == before
+
+
+def test_normalization_refuses_pointer_retarget_after_real_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target, first, other = (tmp_path / name for name in ("settings.yaml", "first", "other"))
+    first.write_bytes(b"delegationMode: manual\n")
+    other.write_bytes(b"other destination must remain unchanged")
+    target.symlink_to(first)
+    transaction = installer._InstallTransaction([target], enabled=True)
+    real_load = installer._load_module_from_path
+    hits = []
+    def load(name, path):
+        module = real_load(name, path)
+        if path != ROOT / "scripts/normalize-agents-mode.py":
+            return module
+        render = module.normalize_file
+        def retarget(*args):
+            result = render(*args)
+            target.unlink()
+            target.symlink_to(other)
+            hits.append(True)
+            return result
+        module.normalize_file = retarget
+        return module
+    monkeypatch.setattr(installer, "_load_module_from_path", load)
+    before_first, before_other = first.read_bytes(), other.read_bytes()
+    with pytest.raises(installer._InstallFailure) as failure:
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+                "codex", False, transaction=transaction, mutable_owner=owner)
+    assert hits == [True]
+    assert "scalar rendering drift" in str(failure.value.cause)
+    assert first.read_bytes() == before_first and other.read_bytes() == before_other
+    assert target.is_symlink() and target.resolve() == other.resolve()
+
+
+def test_normalization_parent_creation_and_disabled_direct_lifetime(tmp_path: Path) -> None:
+    target = tmp_path / "missing" / "nested" / "settings.yaml"
+    transaction = installer._InstallTransaction([target], enabled=True)
+    primary = RuntimeError("forced normalized parent rollback")
+    with pytest.raises(RuntimeError) as failure:
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+                "codex", False, transaction=transaction, mutable_owner=owner)
+            assert target.is_file()
+            raise primary
+    assert failure.value is primary and not (tmp_path / "missing").exists()
+    direct = installer._InstallTransaction([], enabled=False)
+    owner = installer._CreateOnlyMutablePath(tmp_path, direct, dry_run=False)
+    installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+        "codex", False, transaction=direct, mutable_owner=owner)
+    first_identity, first_bytes = owner._identity(target), target.read_bytes()
+    installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+        "codex", False, transaction=direct, mutable_owner=owner)
+    assert owner._identity(target) == first_identity and target.read_bytes() == first_bytes
+    preview = tmp_path / "preview" / "settings.yaml"
+    installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", preview, "codex", True)
+    assert not preview.parent.exists()
+
+
+def test_normalization_keeps_ordinary_readonly_failure_and_original_state(tmp_path: Path) -> None:
+    target = tmp_path / "settings.yaml"
+    target.write_bytes(b"delegationMode: manual\n")
+    target.chmod(stat.S_IREAD)
+    transaction = installer._InstallTransaction([target], enabled=True)
+    before = transaction._observe(target)
+    try:
+        with pytest.raises(PermissionError):
+            with transaction:
+                owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+                installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+                    "codex", False, transaction=transaction, mutable_owner=owner)
+        assert transaction._observe(target) == before
+    finally:
+        target.chmod(stat.S_IWRITE | stat.S_IREAD)
+
+
+@pytest.mark.parametrize("fault", ("capture", "ambiguous-write", "close"))
+def test_normalization_failure_keeps_primary_and_reports_real_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    target = tmp_path / "settings.yaml"
+    if fault == "close":
+        target.write_bytes(b"delegationMode: manual\n")
+    close_origin = (target.stat().st_dev, target.stat().st_ino) if fault == "close" else None
+    transaction = installer._InstallTransaction([target], enabled=True)
+    primary = OSError(f"forced scalar {fault}")
+    capture, write, close, opened = (installer._InstallTransaction._capture_node, os.write, os.close, os.open)
+    hits, descriptors = [], []
+    def capture_fault(path, **kwargs):
+        result = capture(path, **kwargs)
+        if fault == "capture" and path == target and (kwargs.get("descriptor") is not None or kwargs.get("bound_node") is not None) and not hits:
+            hits.append(True)
+            raise primary
+        return result
+    def open_file(path, *args, **kwargs):
+        descriptor = opened(path, *args, **kwargs)
+        if args[0] & os.O_RDWR and close_origin is not None:
+            metadata = os.fstat(descriptor)
+            if (metadata.st_dev, metadata.st_ino) == close_origin:
+                descriptors.append(descriptor)
+        return descriptor
+    def write_fault(descriptor, data):
+        count = write(descriptor, data)
+        if fault == "ambiguous-write" and not hits and target.exists():
+            try:
+                actual = os.fstat(descriptor)
+                selected = target.stat()
+                same = (actual.st_dev, actual.st_ino) == (selected.st_dev, selected.st_ino)
+            except OSError:
+                same = False
+            if same:
+                hits.append(True)
+                raise primary
+        return count
+    def close_fault(descriptor):
+        metadata = os.fstat(descriptor)
+        selected = (descriptor in descriptors and
+                    (metadata.st_dev, metadata.st_ino) == close_origin)
+        close(descriptor)
+        if fault == "close" and selected and not hits:
+            hits.append(True)
+            raise primary
+    monkeypatch.setattr(installer._InstallTransaction, "_capture_node", staticmethod(capture_fault))
+    monkeypatch.setattr(installer.os, "open", open_file)
+    monkeypatch.setattr(installer.os, "write", write_fault)
+    monkeypatch.setattr(installer.os, "close", close_fault)
+    with pytest.raises(BaseException) as failure:
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+                "codex", False, transaction=transaction, mutable_owner=owner)
+    assert hits == [True]
+    cause = failure.value
+    while isinstance(cause, installer._InstallFailure):
+        cause = cause.cause
+    assert cause is primary
+    if fault == "close":
+        assert target.read_bytes() == b"delegationMode: manual\n"
+        assert not isinstance(failure.value, installer._InstallFailure) or failure.value.recovery_path is None or failure.value.recovery_path.exists()
+    else:
+        assert isinstance(failure.value, installer._InstallFailure)
+        assert target.exists() and failure.value.recovery_path is None
+
+
+@pytest.mark.parametrize("scenario", ("absent", "existing", "missing", "retarget"))
+def test_normalization_binds_selected_directory_alias_before_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str,
+) -> None:
+    anchor = tmp_path / "project"
+    anchor.mkdir()
+    original_parent, foreign_parent = tmp_path / "original", tmp_path / "foreign"
+    original_parent.mkdir()
+    foreign_parent.mkdir()
+    alias = anchor / "selected"
+    alias.symlink_to(original_parent, target_is_directory=True)
+    target = alias / ("nested/settings.yaml" if scenario == "missing" else "settings.yaml")
+    physical = original_parent / target.relative_to(alias)
+    if scenario == "existing":
+        physical.write_bytes(b"delegationMode: manual\ncustomSetting: retained\n")
+        if os.name != "nt":
+            physical.chmod(0o640)
+    before = installer._InstallTransaction._observe(physical)
+    pointer = installer._InstallTransaction._observe(alias)
+    real_load = installer._load_module_from_path
+    module = real_load("normalizer_parent_alias_plan", ROOT / "scripts/normalize-agents-mode.py")
+    planned = module.normalize_file(str(ROOT / "shared/agents-mode.defaults.yaml"), str(target), "codex").encode()
+    hits = []
+    foreign_pointer = []
+    def load(name, path):
+        loaded = real_load(name, path)
+        if path != ROOT / "scripts/normalize-agents-mode.py":
+            return loaded
+        real_render = loaded.normalize_file
+        def retarget(*args):
+            result = real_render(*args)
+            alias.unlink()
+            alias.symlink_to(foreign_parent, target_is_directory=True)
+            foreign_pointer.append(installer._InstallTransaction._observe(alias))
+            hits.append(True)
+            return result
+        loaded.normalize_file = retarget
+        return loaded
+    if scenario == "retarget":
+        monkeypatch.setattr(installer, "_load_module_from_path", load)
+    transaction = installer._InstallTransaction([target], enabled=True)
+    primary = RuntimeError("forced directory-alias scalar inverse")
+    with pytest.raises(BaseException) as caught:
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+            installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+                "codex", False, transaction=transaction, mutable_owner=owner)
+            assert physical.read_bytes() == planned
+            assert transaction._expected[target] == transaction._observe(target)
+            if scenario == "existing":
+                actual = transaction._observe(physical)[physical]
+                assert actual.python_identity == before[physical].python_identity
+                assert actual.native_proof == before[physical].native_proof
+            raise primary
+    if scenario == "retarget":
+        assert hits == [True], str(caught.value)
+        assert "scalar rendering drift" in str(caught.value)
+        assert not physical.exists() and not (foreign_parent / "settings.yaml").exists()
+        assert transaction._observe(alias) == foreign_pointer[0]
+    else:
+        assert caught.value is primary
+        assert transaction._observe(physical) == before
+        assert transaction._observe(alias) == pointer
+        if scenario == "missing":
+            assert not (original_parent / "nested").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX retained parent descriptor")
+def test_scalar_parent_close_failure_preserves_actual_write_primary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "settings.yaml"
+    target.write_bytes(b"delegationMode: manual\n")
+    origin = target.stat()
+    primary, secondary = OSError("actual scalar write failure"), OSError("parent close failure")
+    real_bind, real_write, real_close = installer._InstallTransaction._bind_scalar_parent, os.write, os.close
+    parents, hits = [], []
+    def bind(transaction, path, node, resources):
+        reference = real_bind(transaction, path, node, resources)
+        if path == tmp_path:
+            parents.append(reference)
+        return reference
+    def write(descriptor, data):
+        metadata = os.fstat(descriptor)
+        result = real_write(descriptor, data)
+        if (metadata.st_dev, metadata.st_ino) == (origin.st_dev, origin.st_ino) and "write" not in hits:
+            hits.append("write")
+            raise primary
+        return result
+    def close(descriptor):
+        selected = descriptor in parents and stat.S_ISDIR(os.fstat(descriptor).st_mode)
+        real_close(descriptor)
+        if selected and "close" not in hits:
+            hits.append("close")
+            raise secondary
+    monkeypatch.setattr(installer._InstallTransaction, "_bind_scalar_parent", bind)
+    monkeypatch.setattr(installer.os, "write", write)
+    monkeypatch.setattr(installer.os, "close", close)
+    with pytest.raises(installer._InstallFailure) as caught:
+        with installer._InstallTransaction([target], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+                "codex", False, transaction=transaction, mutable_owner=owner)
+    assert hits == ["write", "close"]
+    cause = caught.value
+    while isinstance(cause, installer._InstallFailure):
+        cause = cause.cause
+    assert cause is primary
+    with pytest.raises(OSError):
+        os.fstat(parents[0])
+
+
+@pytest.mark.parametrize("phase", ("forward", "inverse"))
+def test_scalar_opened_foreign_origin_is_closed_before_read_or_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    target, other = tmp_path / "settings.yaml", tmp_path / "other"
+    target.write_bytes(b"delegationMode: manual\n")
+    other.write_bytes(b"synthetic unrelated bytes")
+    original = installer._InstallTransaction._observe(target)
+    foreign = installer._InstallTransaction._observe(other)
+    real_open, real_read = os.open, installer._InstallTransaction._descriptor_bytes
+    redirected, foreign_reads = [], []
+    armed = phase == "forward"
+    def open_file(path, flags, *args, **kwargs):
+        if armed and not redirected and flags & os.O_RDWR and (path == target or path == target.name):
+            descriptor = real_open(other, flags)
+            redirected.append(descriptor)
+            return descriptor
+        return real_open(path, flags, *args, **kwargs)
+    def read(descriptor):
+        metadata = os.fstat(descriptor)
+        if (metadata.st_dev, metadata.st_ino) == foreign[other].python_identity[:2]:
+            foreign_reads.append(True)
+        return real_read(descriptor)
+    monkeypatch.setattr(installer.os, "open", open_file)
+    monkeypatch.setattr(installer._InstallTransaction, "_descriptor_bytes", staticmethod(read))
+    primary = RuntimeError("forced scalar inverse foreign descriptor")
+    expected_error = ValueError if phase == "forward" else installer._InstallFailure
+    with pytest.raises(expected_error, match="scalar opened origin" if phase == "forward" else None) as caught:
+        with installer._InstallTransaction([target], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+                "codex", False, transaction=transaction, mutable_owner=owner)
+            current = transaction._observe(target)
+            armed = True
+            raise primary
+    assert len(redirected) == 1 and not foreign_reads
+    assert transaction._observe(other) == foreign
+    if phase == "forward":
+        assert transaction._observe(target) == original
+    else:
+        assert caught.value.cause is primary
+        assert any("scalar opened origin" in member.cause for member in caught.value.members)
+        assert transaction._observe(target) == current
+        assert current[target].python_identity[:2] == original[target].python_identity[:2]
+        assert current[target].native_proof == original[target].native_proof
+        assert caught.value.recovery_path.is_dir()
+    with pytest.raises(OSError):
+        os.fstat(redirected[0])
+
+
+def test_committed_scalar_body_error_preserves_primary_and_clears_disposed_recovery(tmp_path: Path) -> None:
+    target = tmp_path / "settings.yaml"
+    target.write_bytes(b"delegationMode: manual\n")
+    primary = OSError("forced committed scalar body error")
+    member = installer._RollbackFailureMember("snapshot", 0, str(target),
+        "E_ROLLBACK_RESTORE_FAILED", "original member")
+    with pytest.raises(installer._InstallFailure) as caught:
+        with installer._InstallTransaction([target], enabled=True) as transaction:
+            backup = transaction._temporary
+            assert backup.is_dir()
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._normalize_agents_mode(ROOT, ROOT / "shared/agents-mode.defaults.yaml", target,
+                "codex", False, transaction=transaction, mutable_owner=owner)
+            desired = transaction._observe(target)
+            transaction.commit()
+            raise installer._InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-body", primary,
+                members=(member,), recovery_path=backup)
+    assert caught.value.stable_id == "E_ROLLBACK_SETTLEMENT_FAILED"
+    assert caught.value.context == "scalar-body" and caught.value.cause is primary
+    assert caught.value.members == (member,)
+    assert caught.value.recovery_path is None and not backup.exists()
+    assert installer._InstallTransaction._observe(target) == desired
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native parent anchor")
+def test_native_parent_anchor_creates_and_refuses_collisions_at_process_cwd(tmp_path: Path) -> None:
+    transaction = installer._InstallTransaction([], enabled=False)
+    parent = transaction._capture_node(tmp_path)
+    acquired = {}
+    original_cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        for name, directory in (("file", False), ("directory", True)):
+            path = tmp_path / name
+            with installer._WindowsBoundNode.create(path, directory=directory) as created:
+                row = transaction._capture_node(path, bound_node=created,
+                    kind="directory" if directory else "file",
+                    data=None if directory else hashlib.sha256(b"").hexdigest())
+                acquired[path] = row
+                if not directory:
+                    acquired[path] = transaction._write_owned_file(path, created.descriptor,
+                        (b"collision witness",), acquired.__setitem__, hashlib.sha256(b"collision witness").hexdigest())
+            assert created.handle is None and created.descriptor is None
+            with pytest.raises(FileExistsError, match="native creation conflict"):
+                with installer._WindowsBoundNode.create(path, directory=directory):
+                    pytest.fail("existing leaf was granted creator ownership")
+            assert transaction._observe(path) == {path: acquired[path]}
+        assert transaction._capture_node(tmp_path) == parent
+    finally:
+        os.chdir(original_cwd)
+        for path, row in acquired.items():
+            transaction._dispose_image(path, {path: row})
+    assert not (tmp_path / "file").exists() and not (tmp_path / "directory").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows private security descriptor birth")
+def test_native_private_allocator_matches_builtin_birth_under_broad_parent(tmp_path: Path) -> None:
+    import ctypes as C
+    from ctypes import wintypes as W
+    advapi = C.WinDLL("advapi32", use_last_error=True)
+    kernel = installer._WindowsBoundNode._api()[2]
+    free = kernel.LocalFree
+    free.argtypes, free.restype = (W.LPVOID,), W.LPVOID
+    convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
+    convert.argtypes = (W.LPCWSTR, W.DWORD, C.POINTER(W.LPVOID), C.POINTER(W.DWORD))
+    convert.restype = W.BOOL
+    get_dacl = advapi.GetSecurityDescriptorDacl
+    get_dacl.argtypes = (W.LPVOID, C.POINTER(W.BOOL), C.POINTER(W.LPVOID), C.POINTER(W.BOOL))
+    get_dacl.restype = W.BOOL
+    set_info = advapi.SetNamedSecurityInfoW
+    set_info.argtypes = (W.LPWSTR, W.DWORD, W.DWORD, W.LPVOID, W.LPVOID, W.LPVOID, W.LPVOID)
+    set_info.restype = W.DWORD
+    get_info = advapi.GetSecurityInfo
+    get_info.argtypes = (W.HANDLE, W.DWORD, W.DWORD, W.LPVOID, W.LPVOID, W.LPVOID, W.LPVOID, C.POINTER(W.LPVOID))
+    get_info.restype = W.DWORD
+    render = advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW
+    render.argtypes = (W.LPVOID, W.DWORD, W.DWORD, C.POINTER(W.LPWSTR), C.POINTER(W.DWORD))
+    render.restype = W.BOOL
+    def security(path, row):
+        descriptor, text = W.LPVOID(), W.LPWSTR()
+        handle = kernel.CreateFileW(str(path), 0x20081, 7, None, 3, 0x2200000, None)
+        if handle == C.c_void_p(-1).value:
+            raise C.WinError(C.get_last_error())
+        try:
+            assert installer._WindowsBoundNode.proof_from_handle(handle) == row.native_proof
+            assert get_info(handle, 1, 4, None, None, None, None, C.byref(descriptor)) == 0
+            assert render(descriptor, 1, 4, C.byref(text), None)
+            return text.value
+        finally:
+            assert kernel.CloseHandle(handle)
+            if text:
+                assert not free(C.cast(text, W.LPVOID))
+            if descriptor.value:
+                assert not free(descriptor)
+    transaction = installer._InstallTransaction([], enabled=False)
+    broad = tmp_path / "broad-parent"
+    acquired = {}
+    transaction._create_owned_directory(broad, acquired.__setitem__)
+    descriptor, acl = W.LPVOID(), W.LPVOID()
+    present, defaulted = W.BOOL(), W.BOOL()
+    try:
+        assert convert("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)(A;OICI;GRGX;;;WD)", 1, C.byref(descriptor), None)
+        assert get_dacl(descriptor, C.byref(present), C.byref(acl), C.byref(defaulted)) and present.value
+        assert set_info(str(broad), 1, 0x80000004, None, None, acl, None) == 0
+    finally:
+        if descriptor.value:
+            assert not free(descriptor)
+    builtin = broad / "builtin-private"
+    builtin.mkdir(mode=0o700)
+    builtin_row = transaction._capture_node(builtin)
+    private = transaction._allocate_owned_directory(broad, "private-", acquired.__setitem__)
+    private_security = security(private, acquired[private])
+    assert private_security == security(builtin, builtin_row)
+    assert private_security.startswith("D:P") and ";;;WD)" not in private_security
+    payload = private / "payload"
+    with installer._WindowsBoundNode.create(payload, directory=False) as created:
+        transaction._capture_node(payload, bound_node=created, kind="file", data=hashlib.sha256(b"").hexdigest())
+        transaction._write_owned_file(payload, created.descriptor, (b"private bytes",), acquired.__setitem__, hashlib.sha256(b"private bytes").hexdigest())
+    assert ";;;WD)" not in security(payload, acquired[payload])
+    ordinary = broad / "ordinary"
+    transaction._create_owned_directory(ordinary, acquired.__setitem__)
+    assert ";;;WD)" in security(ordinary, acquired[ordinary])
+    with pytest.raises(FileExistsError):
+        with installer._WindowsBoundNode.create(private, directory=True, mode=0o700):
+            pytest.fail("private collision changed ownership")
+    assert transaction._capture_node(private) == acquired[private]
+    assert security(private, acquired[private]) == private_security
+    transaction._dispose_image(payload, {payload: acquired[payload]})
+    for path, row in ((private, acquired[private]), (ordinary, acquired[ordinary]), (builtin, builtin_row), (broad, acquired[broad])):
+        transaction._dispose_image(path, {path: row})
+    assert not broad.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows private descriptor lifecycle")
+@pytest.mark.parametrize("failure", ("conversion", "parent", "body-and-release", "body-and-close"))
+def test_native_private_descriptor_failure_preserves_primary_and_creator_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    import ctypes as C
+    transaction = installer._InstallTransaction([], enabled=False)
+    warm_rows = {}
+    warm = tmp_path / "warm"
+    transaction._create_owned_directory(warm, warm_rows.__setitem__, mode=0o700)
+    transaction._dispose_image(warm, warm_rows)
+    convert, release = installer._WindowsBoundNode._security_bindings
+    released = []
+    created = {}
+    primary = RuntimeError("forced private creator body")
+    target = tmp_path / "subject"
+    def conversion(*args):
+        result = convert(*args)
+        assert result
+        if failure == "conversion":
+            C.set_last_error(13)
+            return 0
+        return result
+    def checked_release(pointer):
+        assert not release(pointer)
+        released.append(True)
+        if failure == "body-and-release":
+            C.set_last_error(5)
+            return 1
+        return None
+    monkeypatch.setattr(installer._WindowsBoundNode, "_security_bindings", (conversion, checked_release))
+    real_enter = installer._WindowsBoundNode.__enter__
+    def enter(bound):
+        if failure == "parent" and bound.purpose == "parent" and bound.path == tmp_path:
+            raise primary
+        return real_enter(bound)
+    monkeypatch.setattr(installer._WindowsBoundNode, "__enter__", enter)
+    real_metadata = installer._WindowsBoundNode.python_metadata
+    creator_descriptors = []
+    def metadata(bound, *args, **kwargs):
+        value = real_metadata(bound, *args, **kwargs)
+        if bound.path == target:
+            creator_descriptors.append(bound.descriptor)
+        return value
+    monkeypatch.setattr(installer._WindowsBoundNode, "python_metadata", metadata)
+    real_close = os.close
+    failed_close = []
+    def close(descriptor):
+        real_close(descriptor)
+        if failure == "body-and-close" and descriptor in creator_descriptors and not failed_close:
+            failed_close.append(True)
+            raise OSError("forced creator close reported failure")
+    monkeypatch.setattr(installer.os, "close", close)
+    def record(path, row):
+        created[path] = row
+        raise primary
+    with pytest.raises(BaseException) as caught:
+        transaction._create_owned_directory(target, record, mode=0o700)
+    assert len(released) == 1
+    if failure == "conversion":
+        assert isinstance(caught.value, OSError) and caught.value.winerror == 13
+        assert not target.exists() and not created
+    elif failure == "parent":
+        assert caught.value is primary and not target.exists() and not created
+    else:
+        assert isinstance(caught.value, installer._InstallFailure) and caught.value.cause is primary
+        assert caught.value.members and caught.value.recovery_path == target
+        assert transaction._observe(target) == created
+        if failure == "body-and-close":
+            assert failed_close and creator_descriptors
+            with pytest.raises(OSError):
+                os.fstat(creator_descriptors[0])
+        transaction._dispose_image(target, created)
+        assert not target.exists()

@@ -324,6 +324,162 @@ def _load_installer():
     return module
 
 
+def _receipted_predecessor(tmp_path: Path):
+    installer = _load_installer()
+    canonical = tmp_path / ".agents" / "skills"
+    peer = tmp_path / ".claude" / "agents" / "scripts"
+    peer.mkdir(parents=True)
+    stage = installer._stage_canonical_lead_tree(
+        ROOT, ROOT / "src.codex" / "skills" / "lead", canonical / "lead" / "scripts",
+    )
+    try:
+        canonical.mkdir(parents=True)
+        shutil.copytree(stage.path, canonical / "lead")
+        for name in TRANSPORT_FILES:
+            target = peer / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((stage.path / "scripts" / name).read_bytes())
+        manifest_relative = Path("shared") / installer.TRANSPORT_PROJECTION_MANIFEST
+        peer_manifest = peer.parent / manifest_relative
+        peer_manifest.parent.mkdir(parents=True)
+        old_payload = (canonical / "lead/scripts/provider_prompt.py").read_bytes() + b"\n# alternate supported generation\n"
+        manifest = json.loads((stage.path / manifest_relative).read_bytes())
+        manifest["packRevision"] = "alternate-supported-generation"
+        manifest["files"]["provider_prompt.py"]["sha256"] = _sha(old_payload)
+        encoded = (json.dumps(manifest, indent=2) + "\n").encode()
+        for base in (canonical / "lead", peer.parent):
+            (base / "scripts/provider_prompt.py").write_bytes(old_payload)
+            (base / manifest_relative).write_bytes(encoded)
+        receipt = canonical / installer._LEAD_RECEIPT_NAME
+        receipt.write_bytes(installer._lead_receipt_bytes(
+            installer._tree_sha256(canonical / "lead", ignore_runtime_cache=True)))
+        return installer, canonical, peer, stage
+    except BaseException:
+        shutil.rmtree(stage.path)
+        raise
+
+
+@pytest.mark.parametrize("change", ("self-consistent-peer", "missing-receipt", "partial", "mixed"))
+def test_general_predecessor_requires_complete_owner_binding(tmp_path: Path, change: str) -> None:
+    installer, canonical, peer, desired = _receipted_predecessor(tmp_path)
+    try:
+        if change == "missing-receipt":
+            (canonical / installer._LEAD_RECEIPT_NAME).unlink()
+        elif change == "partial":
+            (peer / "provider_prompt.py").unlink()
+        elif change == "mixed":
+            (peer / "invoke-codex-prompt.py").write_bytes(b"mixed generation\n")
+        else:
+            changed = (peer / "provider_prompt.py").read_bytes() + b"# foreign change\n"
+            (peer / "provider_prompt.py").write_bytes(changed)
+            path = peer.parent / "shared" / installer.TRANSPORT_PROJECTION_MANIFEST
+            manifest = json.loads(path.read_bytes())
+            manifest["files"]["provider_prompt.py"]["sha256"] = _sha(changed)
+            path.write_bytes((json.dumps(manifest) + "\n").encode())
+        before = installer._InstallTransaction._observe(peer.parent)
+        proof = installer._transport_predecessor(ROOT, canonical, peer)
+        assert proof is None
+        with pytest.raises(ValueError, match="E_TRANSPORT_PROJECTION_PARITY"):
+            installer._stage_claude_transport_projection(ROOT, desired.path / "scripts", peer, predecessor=proof)
+        assert installer._InstallTransaction._observe(peer.parent) == before
+    finally:
+        shutil.rmtree(desired.path)
+
+
+def test_captured_predecessor_survives_only_same_owner_effect(tmp_path: Path) -> None:
+    installer, canonical, peer, desired = _receipted_predecessor(tmp_path)
+    source = tmp_path / "source-skills"
+    source.mkdir()
+    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
+    try:
+        plan = installer._preflight_canonical_skills(source, canonical, root=ROOT, claude_transport_root=peer)
+        try:
+            with installer._InstallTransaction([canonical], enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+                lead = next(skill for skill in plan.skills if skill.name == "lead")
+                owner.replace_exact_tree((canonical / "lead").relative_to(tmp_path), lead.installed_digest, lead.source,
+                                         ignore_runtime_cache=True)
+                installer._apply_canonical_skills_plan(plan, canonical, owner, root=ROOT, claude_transport_root=peer)
+                installer._finalize_canonical_lead_receipt(plan, canonical, owner)
+                transaction.commit()
+            assert (peer / "provider_prompt.py").read_bytes() == (ROOT / "scripts/provider_prompt.py").read_bytes()
+        finally:
+            installer._discard_canonical_skills_plan(plan)
+    finally:
+        shutil.rmtree(desired.path)
+
+
+@pytest.mark.parametrize("changed", ("peer", "receipt", "stage"))
+def test_predecessor_plan_rejects_deterministic_pre_effect_drift(tmp_path: Path, changed: str) -> None:
+    installer, canonical, peer, desired = _receipted_predecessor(tmp_path)
+    source = tmp_path / "source-skills"
+    source.mkdir()
+    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
+    try:
+        plan = installer._preflight_canonical_skills(source, canonical, root=ROOT, claude_transport_root=peer)
+        try:
+            path = {"peer": peer / "provider_prompt.py",
+                    "receipt": canonical / installer._LEAD_RECEIPT_NAME,
+                    "stage": plan.stage.path / "scripts/provider_prompt.py"}[changed]
+            path.write_bytes(path.read_bytes() + b"\nforeign drift\n")
+            before = installer._InstallTransaction._observe(canonical)
+            owner = installer._CreateOnlyMutablePath(tmp_path, installer._InstallTransaction([], enabled=False), dry_run=False)
+            with pytest.raises(ValueError):
+                installer._apply_canonical_skills_plan(plan, canonical, owner, root=ROOT, claude_transport_root=peer)
+            assert installer._InstallTransaction._observe(canonical) == before
+            assert owner.transaction._effects == []
+        finally:
+            installer._discard_canonical_skills_plan(plan)
+    finally:
+        shutil.rmtree(desired.path)
+
+
+def test_unsupported_required_directory_move_refuses_before_coupled_effects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    installer, canonical, peer, desired = _receipted_predecessor(tmp_path)
+    source = tmp_path / "source-skills"
+    source.mkdir()
+    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
+    before = installer._InstallTransaction._observe(canonical)
+    peer_before = installer._InstallTransaction._observe(peer.parent)
+    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(lambda *_args: False))
+    try:
+        with pytest.raises(ValueError, match="required directory no-replace capability unavailable"):
+            installer._preflight_canonical_skills(source, canonical, root=ROOT, claude_transport_root=peer)
+        assert installer._InstallTransaction._observe(canonical) == before
+        assert installer._InstallTransaction._observe(peer.parent) == peer_before
+    finally:
+        shutil.rmtree(desired.path)
+
+
+def test_same_owner_reclaim_and_receipt_effects_preserve_predecessor_currency(tmp_path: Path) -> None:
+    installer, canonical, peer, desired = _receipted_predecessor(tmp_path)
+    source = tmp_path / "source-skills"
+    source.mkdir()
+    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
+    obsolete = source / "lead" / "obsolete-example.txt"
+    obsolete.write_bytes(b"declared obsolete example\n")
+    try:
+        plan = installer._preflight_canonical_skills(source, canonical, root=ROOT, claude_transport_root=peer)
+        try:
+            with installer._InstallTransaction([canonical], enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+                lead = next(skill for skill in plan.skills if skill.name == "lead")
+                owner.replace_exact_tree((canonical / "lead").relative_to(tmp_path), lead.installed_digest, lead.source,
+                                         ignore_runtime_cache=True)
+                reclaimed = installer._reclaim_retired(canonical, {"lead/obsolete-example.txt": _sha(obsolete.read_bytes())},
+                                                      False, transaction=transaction, mutable_owner=owner)
+                installer._finalize_canonical_lead_receipt(plan, canonical, owner, reclaimed)
+                installer._apply_canonical_skills_plan(plan, canonical, owner, root=ROOT, claude_transport_root=peer)
+                installer._finalize_canonical_lead_receipt(plan, canonical, owner, reclaimed)
+                transaction.commit()
+            assert (peer / "provider_prompt.py").read_bytes() == (ROOT / "scripts/provider_prompt.py").read_bytes()
+            assert not (canonical / "lead/obsolete-example.txt").exists()
+        finally:
+            installer._discard_canonical_skills_plan(plan)
+    finally:
+        shutil.rmtree(desired.path)
+
+
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
