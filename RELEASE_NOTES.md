@@ -2,6 +2,16 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-11
+
+- **Shared rules fit the existing loading budget while preserving their protections.** Consolidated wording restores the always-loaded spine within its unchanged limit, retaining the operational rules and safety gates. Installed pack preparation can consume the complete shared contract without raising the budget or hiding requirements.
+
+- **Hook updates and installer rollback share one transaction owner.** Pure hook configuration and inventory plans feed the installer's recorded native state instead of untracked child afterimages. Ordinary and atomic writes, copied metadata, pointer bindings and borrowed openings preserve their distinct contracts; failures retain the original cause, safe sibling restoration and truthful usable or unresolved recovery.
+
+- **Accepted completed flat work-items can reach truthful archives.** The existing close branch previews bound original evidence and applies only with positive intent, preserving identity, history, links and strict UTC action time. Metadata version 2, the distinct lifecycle action receipt version 1 and the existing bug receipt remain separately verified. Matching recovery can finish verified finalization after original holds expire without inventing active or ledger history, while pending and foreign state stay protected. Physical support is limited to the exercised Windows native path; this does not confer Goal eligibility.
+
+- **Regression fixtures follow their actual output contracts.** Preserved hook and native inputs retain their accepted owner scopes, while Kimi finalizer fixtures supply captured context and complete semantic synthetic inputs. Developers can test useful output and rejection paths without stale caller failures; production privacy checks, durable receipt guards and negative assertions remain intact.
+
 ## 2026-10-10
 
 - **Owned transport generations upgrade from either provider installer.** Repository, explicit-target and global installs use the existing canonical Lead receipt to bind the settled authored tree. Complete receipted predecessor generations and matching scoped peer transports migrate through the shared owner without adding historical hash tuples or requiring an installer order. Absent or unproved unselected peers remain preserved and unclaimed. Replacement rollback retains bound beforeimages, follows nested physical moves and checks actual effects and parent snapshot currency, preserving foreign changes with visible recovery. Child migrations settle before their containing images are disposed, while explicit deferred migrations keep their recovery until their owner closes them. Snapshot copies track actual creators and partial bytes; late siblings and later occupants of consumed staging names remain unclaimed. Tested Windows NTFS cleanup uses native object handles and complete link metadata. Linux retains ordinary parent-relative member checks and result verification; atomic protection against intentional same-user replacement in the final syscall interval is not claimed. Remote and long-path Windows variants remain unverified. Verification children avoid incidental bytecode writes without weakening their checks.
