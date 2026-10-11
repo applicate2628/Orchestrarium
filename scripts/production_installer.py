@@ -6,7 +6,7 @@ import argparse
 import ast
 from collections import Counter
 from contextlib import contextmanager, ExitStack, nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import wraps
 import hashlib
 import importlib.util
@@ -1215,12 +1215,205 @@ class _SliceAMigratedFileRecord:
 
 
 @dataclass(frozen=True)
+class _CopySetterDiagnostic:
+    """Passive, value-free observations from one existing setter checkpoint."""
+
+    operation: str
+    direction: str
+    stage: str
+    ordinal: int
+    metadata_current: bool | None
+    metadata_projected: bool | None
+    identity_old: bool | None
+    identity_projected: bool | None
+    metadata_vs_current: tuple[str, ...] | None
+    metadata_vs_projected: tuple[str, ...] | None
+    identity_vs_old: tuple[str, ...] | None
+    identity_vs_projected: tuple[str, ...] | None
+
+    _metadata_fields = ("atime_ns", "mtime_ns", "flags", "xattrs")
+    _identity_fields = ("device", "inode", "mode", "file_attributes")
+
+    @classmethod
+    def attach(cls, error, operation, restored, stage, ordinal, current, projected,
+               old_identity, projected_identity, actual=None, actual_identity=None):
+        # This optional observation must never replace the original failure.
+        if cls is not _CopySetterDiagnostic:
+            _store_copy_setter_detail(error, ())
+            return
+        context = ()
+        try:
+            def metadata_values(image):
+                if type(image) is not _CopyMetadataImage:
+                    raise TypeError("nonprimitive diagnostic metadata")
+                storage = _passive_owner_storage(_CopyMetadataImage, image)
+                if storage is None:
+                    raise TypeError("nonpassive diagnostic metadata namespace")
+                values = tuple(dict.__getitem__(storage, name) for name in _CopySetterDiagnostic._metadata_fields)
+                if (type(values[0]) is not int or type(values[1]) is not int
+                        or (values[2] is not None and type(values[2]) is not int)):
+                    raise TypeError("nonprimitive diagnostic metadata field")
+                attributes = values[3]
+                if attributes is not None:
+                    if type(attributes) is not tuple:
+                        raise TypeError("nonprimitive diagnostic attributes")
+                    for attribute in attributes:
+                        if (type(attribute) is not tuple or len(attribute) != 2
+                                or type(attribute[0]) is not str or type(attribute[1]) is not bytes):
+                            raise TypeError("nonprimitive diagnostic attribute")
+                return values
+            def identity_values(identity):
+                if (type(identity) is not tuple or len(identity) != 4
+                        or any(type(value) is not int for value in identity)):
+                    raise TypeError("nonprimitive diagnostic identity")
+                return identity
+            if (type(operation) is not str or type(restored) is not bool
+                    or type(stage) is not str or type(ordinal) is not int):
+                raise TypeError("nonprimitive diagnostic category")
+            old_metadata = metadata_values(current)
+            projected_metadata = metadata_values(projected)
+            actual_metadata = None if actual is None else metadata_values(actual)
+            old_identity = identity_values(old_identity)
+            projected_identity = identity_values(projected_identity)
+            actual_identity = None if actual_identity is None else identity_values(actual_identity)
+            def metadata_difference(reference):
+                return None if actual_metadata is None else tuple(
+                    name for name, old, new in zip(cls._metadata_fields, reference, actual_metadata)
+                    if old != new)
+            def identity_difference(reference):
+                return None if actual_identity is None else tuple(
+                    name for name, old, new in zip(cls._identity_fields, reference, actual_identity)
+                    if old != new)
+            context = cls(operation, "inverse" if restored else "forward", stage, ordinal,
+                None if actual_metadata is None else actual_metadata == old_metadata,
+                None if actual_metadata is None else actual_metadata == projected_metadata,
+                None if actual_identity is None else actual_identity == old_identity,
+                None if actual_identity is None else actual_identity == projected_identity,
+                metadata_difference(old_metadata), metadata_difference(projected_metadata),
+                identity_difference(old_identity), identity_difference(projected_identity))
+        except BaseException:
+            # An unavailable diagnostic is evidence, never a new refusal.
+            context = ()
+        _store_copy_setter_detail(error, context)
+
+    def render(self) -> str:
+        if type(self) is not _CopySetterDiagnostic:
+            return "unavailable"
+        storage = _passive_owner_storage(_CopySetterDiagnostic, self)
+        if storage is None:
+            return "unavailable"
+        operation, direction, stage, ordinal = (
+            dict.__getitem__(storage, name) for name in ("operation", "direction", "stage", "ordinal"))
+        if (type(operation) is not str or type(direction) is not str
+                or type(stage) is not str or type(ordinal) is not int):
+            return "unavailable"
+        booleans = tuple(dict.__getitem__(storage, name) for name in (
+            "metadata_current", "metadata_projected", "identity_old", "identity_projected"))
+        differences = tuple(dict.__getitem__(storage, name) for name in (
+            "metadata_vs_current", "metadata_vs_projected", "identity_vs_old", "identity_vs_projected"))
+        # Admit every item before any equality, membership, hash or formatting.
+        for boolean in booleans:
+            if boolean is not None and type(boolean) is not bool:
+                return "unavailable"
+        for names in differences:
+            if names is not None and (type(names) is not tuple or any(type(name) is not str for name in names)):
+                return "unavailable"
+        if (re.fullmatch(r"[a-z][a-z0-9-]{0,31}", operation) is None
+                or direction not in ("forward", "inverse")
+                or stage not in ("operation", "metadata-acquisition", "identity-acquisition", "comparison")
+                or ordinal < 1):
+            return "unavailable"
+        for names, allowed in zip(differences, (_CopySetterDiagnostic._metadata_fields, _CopySetterDiagnostic._metadata_fields,
+                                               _CopySetterDiagnostic._identity_fields, _CopySetterDiagnostic._identity_fields)):
+            if names is not None and (type(names) is not tuple or names != tuple(name for name in allowed if name in names)):
+                return "unavailable"
+        def boolean(value):
+            return "unavailable" if value is None else "true" if value else "false"
+        def names(value):
+            return "unavailable" if value is None else ",".join(value) if value else "none"
+        return "; ".join((f"operation={operation}", f"direction={direction}",
+            f"stage={stage}", f"ordinal={ordinal}",
+            *(f"{name}={boolean(value)}" for name, value in zip(
+                ("metadata-current", "metadata-projected", "identity-old", "identity-projected"), booleans)),
+            *(f"{name}={names(value)}" for name, value in zip(
+                ("metadata-vs-current", "metadata-vs-projected", "identity-vs-old", "identity-vs-projected"), differences))))
+
+
+def _passive_owner_storage(owner, value):
+    """Admit the owner's native namespace before any field lookup or dispatch."""
+    try:
+        attributes = owner.__dict__["__dict__"].__get__(value)
+        if issubclass(type(attributes), dict) and all(type(key) is str for key in dict.keys(attributes)):
+            return attributes
+    except BaseException:
+        return None
+    return None
+
+
+def _store_copy_setter_detail(error, context):
+    attributes = _passive_owner_storage(BaseException, error)
+    if attributes is not None:
+        try:
+            dict.__setitem__(attributes, "_copy_setter_diagnostic", context)
+        except BaseException:
+            # Unsupported native storage remains an optional unavailable channel.
+            return
+
+
+def _copy_setter_detail(error):
+    """Read only the optional local carriage, without parsing exception text."""
+    attributes = _passive_owner_storage(BaseException, error)
+    if attributes is None or not dict.__contains__(attributes, "_copy_setter_diagnostic"):
+        return None
+    value = dict.__getitem__(attributes, "_copy_setter_diagnostic")
+    return value if type(value) is _CopySetterDiagnostic else ()
+
+
+def _installer_failure_text(error: BaseException) -> str:
+    """The CLI alone adds safe details; original exception strings stay intact."""
+    original = str(error)
+    try:
+        additions = []
+        def render(context):
+            try:
+                return _CopySetterDiagnostic.render(context) if type(context) is _CopySetterDiagnostic else "unavailable"
+            except BaseException:
+                return "unavailable"
+        context = _copy_setter_detail(error)
+        if context is not None:
+            additions.append("copy-setter=" + render(context))
+        if issubclass(type(error), _InstallFailure):
+            attributes = _passive_owner_storage(BaseException, error)
+            members = None if attributes is None else dict.get(attributes, "members")
+            if type(members) not in (tuple, list):
+                return " | ".join((original, *additions))
+            for member in members:
+                if type(member) is not _RollbackFailureMember:
+                    continue
+                storage = _passive_owner_storage(_RollbackFailureMember, member)
+                if storage is None:
+                    continue  # Unsupported association is not inferred from legacy text.
+                context = dict.get(storage, "copy_setter_diagnostic")
+                if context is not None:
+                    detail = render(context)
+                    phase, ordinal, stable_id = (dict.__getitem__(storage, name) for name in ("phase", "ordinal", "stable_id"))
+                    if (type(phase) is str and type(ordinal) is int and type(stable_id) is str):
+                        additions.append(f"cleanup-copy-setter={phase}:{ordinal}:{stable_id}:{detail}")
+                    else:
+                        additions.append("cleanup-copy-setter=unavailable")
+        return " | ".join((original, *additions))
+    except BaseException:
+        return original
+
+
+@dataclass(frozen=True)
 class _RollbackFailureMember:
     phase: str
     ordinal: int
     path: str
     stable_id: str
     cause: str
+    copy_setter_diagnostic: _CopySetterDiagnostic | tuple | None = field(default=None, compare=False, repr=False)
 
 
 class _InstallFailure(RuntimeError):
@@ -1244,6 +1437,9 @@ class _InstallFailure(RuntimeError):
         self.members = members
         self.recovery_path = recovery_path
         self.unresolved_paths = unresolved_paths
+        diagnostic = _copy_setter_detail(cause)
+        if diagnostic is not None:
+            _store_copy_setter_detail(self, diagnostic)
         details = [stable_id, f"context={context}"]
         if cause is not None:
             details.append(f"cause={cause}")
@@ -1701,10 +1897,12 @@ class _InstallTransaction:
         """Forward typed child data intact; classify an ordinary error once."""
         if isinstance(exc, _InstallFailure):
             members = (list(exc.members) if exc.members else
-                       [_RollbackFailureMember(phase, ordinal, str(path), exc.stable_id, str(exc.cause))])
+                        [_RollbackFailureMember(phase, ordinal, str(path), exc.stable_id, str(exc.cause),
+                                                _copy_setter_detail(exc))])
             paths = list(unsafe) + list(exc.unresolved_paths) + [Path(member.path) for member in members]
         else:
-            members = [_RollbackFailureMember(phase, ordinal, str(path), stable_id, str(exc))]
+            members = [_RollbackFailureMember(phase, ordinal, str(path), stable_id, str(exc),
+                                               _copy_setter_detail(exc))]
             paths = list(unsafe)
         return paths, members
 
@@ -1950,8 +2148,10 @@ class _InstallTransaction:
             known = self._copy_current.get(path)
             if known is not None and current.stable() != known.stable():
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy setter beforeimage drift")
-            def progress(operation, projected, *, identity=None):
-                nonlocal current, node
+            operation_ordinal = 0
+            def progress(operation, projected, *, identity=None, label):
+                nonlocal current, node, operation_ordinal
+                operation_ordinal += 1
                 if participant is not None:
                     participant.unknown = True
                 primary = None
@@ -1959,14 +2159,31 @@ class _InstallTransaction:
                     operation()
                 except BaseException as error:
                     primary = error
-                actual = self._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
-                actual_identity = self._capture_node(path, descriptor=descriptor, kind="file", data=node.data).python_identity
+                try:
+                    actual = self._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
+                except BaseException as error:
+                    _CopySetterDiagnostic.attach(error, label, restored, "metadata-acquisition", operation_ordinal,
+                        current, projected, node.python_identity, node.python_identity if identity is None else identity)
+                    raise
+                try:
+                    actual_identity = self._capture_node(path, descriptor=descriptor, kind="file", data=node.data).python_identity
+                except BaseException as error:
+                    _CopySetterDiagnostic.attach(error, label, restored, "identity-acquisition", operation_ordinal,
+                        current, projected, node.python_identity, node.python_identity if identity is None else identity,
+                        actual=actual)
+                    raise
                 valid_identity = node.python_identity if identity is None else identity
                 # Only an unchanged value or this setter's projected effect is known.
                 if actual not in (current, projected) or actual_identity not in (node.python_identity, valid_identity):
                     if primary is not None:
+                        _CopySetterDiagnostic.attach(primary, label, restored, "operation", operation_ordinal,
+                            current, projected, node.python_identity, valid_identity, actual, actual_identity)
                         raise primary
-                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unknown copy setter effect") from primary
+                    error = ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unknown copy setter effect")
+                    _CopySetterDiagnostic.attach(error, label, restored, "comparison", operation_ordinal,
+                        current, projected, node.python_identity, valid_identity, actual, actual_identity)
+                    raise error from primary
+                diagnostic_current, diagnostic_identity = current, node.python_identity
                 current = actual
                 self._copy_current[path] = current
                 node = replace(node, python_identity=actual_identity)
@@ -1976,9 +2193,14 @@ class _InstallTransaction:
                     if restored:
                         participant.restored = current
                 if primary is not None:
+                    _CopySetterDiagnostic.attach(primary, label, restored, "operation", operation_ordinal,
+                        diagnostic_current, projected, diagnostic_identity, valid_identity, actual, actual_identity)
                     raise primary
                 if actual != projected or actual_identity != valid_identity:
-                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: copy metadata readback")
+                    error = ValueError("E_MUTABLE_PATH_POSTCONDITION: copy metadata readback")
+                    _CopySetterDiagnostic.attach(error, label, restored, "comparison", operation_ordinal,
+                        diagnostic_current, projected, diagnostic_identity, valid_identity, actual, actual_identity)
+                    raise error
             if desired.xattrs is not None:
                 if current.xattrs is None:
                     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: copy xattr capability")
@@ -2002,7 +2224,7 @@ class _InstallTransaction:
                         operation = lambda name=name: os.removexattr(descriptor, name)
                     projected = replace(current, xattrs=tuple(sorted(updated.items())))
                     try:
-                        progress(operation, projected)
+                        progress(operation, projected, label="xattr-set" if name in wanted else "xattr-remove")
                     except OSError as error:
                         if restored or error.errno not in {errno.EPERM, errno.ENOTSUP, errno.ENODATA, errno.EINVAL}:
                             raise
@@ -2016,14 +2238,14 @@ class _InstallTransaction:
                 if os.utime not in os.supports_fd:
                     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: bound timestamp capability")
                 operation = lambda: os.utime(descriptor, ns=(desired.atime_ns, desired.mtime_ns))
-            progress(operation, projected)
+            progress(operation, projected, label="timestamps")
             requested_identity = self._chmod_identity(node.python_identity, mode)
             progress(lambda: self._chmod_owned(path, node.python_identity, mode, descriptor=descriptor),
-                     current, identity=requested_identity)
+                      current, identity=requested_identity, label="mode")
             if desired.flags is not None and desired.flags != current.flags:
                 if not hasattr(os, "fchflags"):
                     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: bound flags capability")
-                progress(lambda: os.fchflags(descriptor, desired.flags), replace(current, flags=desired.flags))
+                progress(lambda: os.fchflags(descriptor, desired.flags), replace(current, flags=desired.flags), label="flags")
             actual = self._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
             if actual != current:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final copy metadata drift")
@@ -10418,7 +10640,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         print(f"RESULT: OK - {provider.capitalize()} pack installed to {target}")
         return 0
     except (OSError, RuntimeError, ValueError) as exc:
-        print(f"FAIL: {exc}", file=sys.stderr)
+        print(f"FAIL: {_installer_failure_text(exc)}", file=sys.stderr)
         return 1
     finally:
         if canonical_plan is not None:

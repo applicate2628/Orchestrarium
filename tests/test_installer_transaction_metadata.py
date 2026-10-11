@@ -1,6 +1,11 @@
-"""Isolated parent-transaction mechanics; no public installer/helper execution."""
+"""Isolated transaction mechanics and the shared installer error boundary."""
+from contextlib import contextmanager
+from dataclasses import replace
+import errno
 import importlib.util
+import io
 import os
+from contextlib import redirect_stderr
 from pathlib import Path
 import stat
 import sys
@@ -42,6 +47,21 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob("orchestrarium-install-transaction-*")))
         self.assertFalse(list(self.root.rglob(".orchestrarium-retained-*")))
 
+    def through_install(self, action):
+        """Exercise the actual shared output/exit boundary before pack acquisition."""
+        escaped = []
+        def selected_target(*_args):
+            try:
+                action()
+            except BaseException as error:
+                escaped.append(error)
+                raise
+            raise AssertionError("the diagnostic fixture must fail")
+        stderr = io.StringIO()
+        with patch.object(PI, "_target", selected_target), redirect_stderr(stderr):
+            result = PI.install("claude", ["--target", str(self.root)])
+        return result, stderr.getvalue(), escaped
+
     def test_equal_bytes_different_mtime_is_effect_and_restores_original_times(self):
         primary = RuntimeError("later-checkpoint")
         transaction = self.transaction()
@@ -78,6 +98,9 @@ class CopyMetadataTests(unittest.TestCase):
             self.skipTest("receiving probe uses this host's native timestamp setter")
         setter = PI._WindowsBoundNode.set_copy_times
         primary = OSError("after-times-effect")
+        primary.__cause__ = ValueError("original-cause")
+        primary.__context__ = RuntimeError("original-context")
+        original_chain = (primary.args, primary.__cause__, primary.__context__)
         calls = []
         def fault(bound, atime, mtime):
             setter(bound, atime, mtime)
@@ -85,11 +108,21 @@ class CopyMetadataTests(unittest.TestCase):
             if len(calls) == 1:
                 raise primary
         transaction = self.transaction()
-        with self.assertRaises(OSError) as caught:
+        def action():
             with patch.object(PI._WindowsBoundNode, "set_copy_times", fault):
                 with transaction:
                     self.owner(transaction).copy_file(Path("target"), self.source)
-        self.assertIs(caught.exception, primary)
+        result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], primary)
+        self.assertEqual(primary.args, original_chain[0])
+        self.assertIs(primary.__cause__, original_chain[1])
+        self.assertIs(primary.__context__, original_chain[2])
+        self.assertIn("operation=timestamps", stderr)
+        self.assertEqual(stderr.count("operation=timestamps"), 1)
+        self.assertIn("stage=operation", stderr)
+        self.assertIn("metadata-projected=true", stderr)
+        self.assertNotIn("operation=timestamps", str(primary))
         self.assertEqual(self.target.stat().st_mtime_ns, self.before.st_mtime_ns)
         self.assertFalse(transaction._copy_metadata[self.target].unknown)
         self.assert_clean()
@@ -293,6 +326,452 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertEqual(self.target.stat().st_mtime_ns, self.before.st_mtime_ns)
         self.assertEqual(self.target.read_bytes(), b"same")
         self.assert_clean()
+
+    def diagnostic_case(self, current):
+        """Use a real held ordinary file; only test observations are substituted."""
+        transaction = PI._InstallTransaction([], enabled=False)
+        node = transaction._capture_node(self.target)
+        participant = PI._CopyMetadataParticipant(node, current, current)
+        records = []
+        def record(path, value):
+            records.append((path, value, participant.unknown))
+        return transaction, node, participant, records, record
+
+    @contextmanager
+    def no_timestamp_effect(self):
+        with patch.object(PI._WindowsBoundNode, "set_copy_times", lambda *_args: None):
+            yield
+
+    def test_mixed_full_image_rejection_keeps_unknown_and_recovery(self):
+        setter = PI._WindowsBoundNode.set_copy_times
+        reader = PI._InstallTransaction._read_copy_metadata
+        source_inode = self.source.stat().st_ino
+        def source_observation(metadata, descriptor, bound):
+            image = reader(metadata, descriptor, bound)
+            return replace(image, atime_ns=1_650_000_000_123_456_700) if metadata.st_ino == source_inode else image
+        def mixed_effect(bound, atime, mtime):
+            # Preserve actual old atime and apply only projected mtime.
+            old = os.fstat(bound.descriptor)
+            self.assertNotEqual(old.st_atime_ns, atime)
+            self.assertNotEqual(old.st_mtime_ns, mtime)
+            setter(bound, old.st_atime_ns, mtime)
+        transaction = self.transaction()
+        with patch.object(PI._InstallTransaction, "_read_copy_metadata", staticmethod(source_observation)), \
+                patch.object(PI._WindowsBoundNode, "set_copy_times", mixed_effect):
+            with self.assertRaises(PI._InstallFailure) as caught:
+                with transaction:
+                    self.owner(transaction).copy_file(Path("target"), self.source)
+        primary = caught.exception.cause
+        self.assertIs(type(primary), ValueError)
+        self.assertEqual(str(primary), "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unknown copy setter effect")
+        context = PI._copy_setter_detail(primary)
+        self.assertFalse(context.metadata_current)
+        self.assertFalse(context.metadata_projected)
+        self.assertEqual(context.metadata_vs_current, ("mtime_ns",))
+        self.assertEqual(context.metadata_vs_projected, ("atime_ns",))
+        self.assertTrue(context.identity_old)
+        self.assertTrue(transaction._copy_metadata[self.target].unknown)
+        self.assertTrue(caught.exception.recovery_path.exists())
+
+    def test_known_current_unmet_projection_reports_inverse_without_changing_record(self):
+        current = PI._CopyMetadataImage(100, 200, None, None)
+        desired = PI._CopyMetadataImage(300, 400, None, None)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, current]):
+            with self.assertRaises(ValueError) as caught:
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]),
+                                        record, participant, restored=True)
+        self.assertEqual(str(caught.exception), "E_MUTABLE_PATH_POSTCONDITION: copy metadata readback")
+        context = PI._copy_setter_detail(caught.exception)
+        self.assertEqual(context.direction, "inverse")
+        self.assertTrue(context.metadata_current)
+        self.assertFalse(context.metadata_projected)
+        self.assertEqual(context.metadata_vs_current, ())
+        self.assertEqual(context.metadata_vs_projected, ("atime_ns", "mtime_ns"))
+        self.assertEqual(len(records), 1)
+        self.assertTrue(records[0][2])  # Existing record precedes participant settlement.
+        self.assertFalse(participant.unknown)
+        self.assertEqual(participant.current, current)
+        self.assertEqual(participant.restored, current)
+
+    def test_metadata_acquisition_failure_has_no_fabricated_comparisons(self):
+        current = PI._CopyMetadataImage(100, 200, None, None)
+        desired = PI._CopyMetadataImage(300, 400, None, None)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        operation = OSError(errno.EIO, "operation-first")
+        primary = OSError(errno.EIO, "metadata-acquisition")
+        primary.__cause__ = RuntimeError("kept-cause")
+        chain = (primary.args, primary.__cause__, primary.__context__)
+        with patch.object(PI._WindowsBoundNode, "set_copy_times", side_effect=operation), \
+                patch.object(tx, "_read_copy_metadata", side_effect=[current, primary]):
+            with self.assertRaises(OSError) as caught:
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        self.assertIs(caught.exception, primary)
+        self.assertEqual((primary.args, primary.__cause__, primary.__context__), chain)
+        context = PI._copy_setter_detail(primary)
+        self.assertEqual(context.stage, "metadata-acquisition")
+        self.assertIsNone(context.metadata_current)
+        self.assertIsNone(context.identity_old)
+        self.assertIsNone(context.metadata_vs_current)
+        self.assertTrue(participant.unknown)
+        self.assertEqual(records, [])
+
+    def test_identity_acquisition_failure_reports_only_acquired_metadata(self):
+        current = PI._CopyMetadataImage(100, 200, None, None)
+        desired = PI._CopyMetadataImage(300, 400, None, None)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        primary = OSError(errno.EIO, "identity-acquisition")
+        chain = (primary.args, primary.__cause__, primary.__context__)
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, desired]), \
+                patch.object(tx, "_capture_node", side_effect=primary):
+            with self.assertRaises(OSError) as caught:
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        self.assertIs(caught.exception, primary)
+        self.assertEqual((primary.args, primary.__cause__, primary.__context__), chain)
+        context = PI._copy_setter_detail(primary)
+        self.assertEqual(context.stage, "identity-acquisition")
+        self.assertFalse(context.metadata_current)
+        self.assertTrue(context.metadata_projected)
+        self.assertIsNone(context.identity_old)
+        self.assertIsNone(context.identity_vs_old)
+        self.assertEqual(context.metadata_vs_projected, ())
+        self.assertTrue(participant.unknown)
+        self.assertEqual(records, [])
+
+    def test_raw_failure_observation_and_record_order_adds_no_getter(self):
+        tx = PI._InstallTransaction([], enabled=False)
+        node = tx._capture_node(self.target)
+        current = PI._CopyMetadataImage(self.before.st_atime_ns, self.before.st_mtime_ns, None, None)
+        desired = replace(current, mtime_ns=self.before.st_mtime_ns + 100)
+        participant = PI._CopyMetadataParticipant(node, current, current)
+        primary = OSError("completed-observed-operation")
+        events = []
+        setter = PI._WindowsBoundNode.set_copy_times
+        def fault(bound, atime, mtime):
+            self.assertTrue(participant.unknown)
+            events.append("operation")
+            setter(bound, atime, mtime)
+            raise primary
+        def record(_path, _node):
+            self.assertTrue(participant.unknown)
+            events.append("record")
+        def trace(frame, event, _argument):
+            if event == "call" and frame.f_code.co_filename == PI.__file__:
+                caller = frame.f_back.f_code.co_name
+                if frame.f_code.co_name == "_read_copy_metadata" and caller in ("progress", "_apply_copy_metadata"):
+                    events.append("metadata")
+                if frame.f_code.co_name == "_capture_node" and caller == "progress":
+                    events.append("identity")
+            return trace
+        try:
+            sys.settrace(trace)
+            with patch.object(PI._WindowsBoundNode, "set_copy_times", fault):
+                with self.assertRaises(OSError) as caught:
+                    tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        finally:
+            sys.settrace(None)
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(events, ["metadata", "operation", "metadata", "identity", "record"])
+        self.assertFalse(participant.unknown)
+
+    def test_aggregate_inverse_cli_keeps_member_identity_order_and_private_causes(self):
+        second = self.root / "second"
+        second.write_bytes(b"same")
+        os.utime(second, ns=(1_610_000_000_000_000_000,) * 2)
+        tx = PI._InstallTransaction([self.target, second], enabled=True, copy_paths=(self.target, second))
+        primary = RuntimeError("later-checkpoint")
+        setter = PI._WindowsBoundNode.set_copy_times
+        failure_objects = [OSError(errno.EIO, "PRIVATE-inverse-token-one"), OSError(errno.EIO, "PRIVATE-inverse-token-two")]
+        receipts = []
+        settlement = PI._InstallTransaction._settlement_failure
+        def observe(*args, **kwargs):
+            paths, members = settlement(*args, **kwargs)
+            receipts.extend(members)
+            return paths, members
+        count = 0
+        def inverse(bound, atime, mtime):
+            nonlocal count
+            setter(bound, atime, mtime)
+            error = failure_objects[count]
+            count += 1
+            raise error
+        # Keep inverse patch active during context exit, not just the raise.
+        def action():
+            inverse_patch = patch.object(PI._WindowsBoundNode, "set_copy_times", inverse)
+            with patch.object(PI._InstallTransaction, "_settlement_failure", staticmethod(observe)):
+                try:
+                    with tx:
+                        owner = self.owner(tx)
+                        owner.copy_file(Path("target"), self.source)
+                        owner.copy_file(Path("second"), self.source)
+                        inverse_patch.start()
+                        raise primary
+                finally:
+                    inverse_patch.stop()
+        result, stderr, escaped = self.through_install(action)
+        aggregate = escaped[0]
+        self.assertEqual(result, 1)
+        self.assertIs(aggregate.cause, primary)
+        self.assertEqual(len(aggregate.members), 2)
+        self.assertTrue(all(any(member is receipt for receipt in receipts) for member in aggregate.members))
+        self.assertEqual([member.ordinal for member in aggregate.members], sorted(member.ordinal for member in aggregate.members))
+        self.assertEqual({member.cause for member in aggregate.members}, {str(error) for error in failure_objects})
+        self.assertEqual(stderr.count("cleanup-copy-setter="), 2)
+        self.assertEqual(stderr.count("direction=inverse"), 2)
+        self.assertNotIn("PRIVATE-inverse-token", stderr)
+        self.assertNotIn("operation=timestamps", str(aggregate))
+        self.assertTrue(aggregate.recovery_path.exists())
+        self.assertTrue(all(not item.unknown and item.restored == item.before for item in tx._copy_metadata.values()))
+
+    def test_associated_unavailable_and_unrelated_errors_use_actual_cli_without_noise(self):
+        private = "PRIVATE-path-token-xattr-value"
+        associated = ValueError(private)
+        associated._copy_setter_diagnostic = {"unrecognized": private}
+        _paths, members = PI._InstallTransaction._settlement_failure(associated, "snapshot", 2, self.target, "E_CUSTOM_NEW_ID")
+        child = PI._InstallFailure("E_CHILD", "child", "original", members=tuple(members))
+        _paths, forwarded = PI._InstallTransaction._settlement_failure(child, "backup", 5, self.source, "E_OTHER")
+        self.assertIs(forwarded[0], members[0])
+        self.assertEqual(forwarded[0].cause, private)
+        legacy_member = PI._RollbackFailureMember("snapshot", 2, str(self.target), "E_CUSTOM_NEW_ID", private)
+        self.assertEqual(members[0], legacy_member)
+        self.assertEqual(hash(members[0]), hash(legacy_member))
+        self.assertEqual(repr(members[0]), repr(legacy_member))
+        def fail():
+            raise child
+        result, stderr, escaped = self.through_install(fail)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], child)
+        self.assertIn("cleanup-copy-setter=snapshot:2:E_CUSTOM_NEW_ID:unavailable", stderr)
+        self.assertNotIn(private, stderr)
+        missing = ValueError("associated detail missing")
+        missing._copy_setter_diagnostic = None
+        def missing_detail():
+            raise missing
+        result, stderr, escaped = self.through_install(missing_detail)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], missing)
+        self.assertEqual(stderr, "FAIL: associated detail missing | copy-setter=unavailable\n")
+        for error in (ValueError("ordinary legacy failure"),
+                      PI._InstallFailure("E_ORDINARY", "old", "primary", members=(PI._RollbackFailureMember("snapshot", 0, "ordinary", "E_OLD", private),))):
+            def fail():
+                raise error
+            result, stderr, _escaped = self.through_install(fail)
+            self.assertEqual(result, 1)
+            self.assertEqual(stderr, f"FAIL: {error}\n")
+
+    def test_unrelated_record_failure_stays_uninstrumented(self):
+        current = PI._CopyMetadataImage(100, 200, None, None)
+        desired = PI._CopyMetadataImage(300, 400, None, None)
+        tx, node, participant, _records, _record = self.diagnostic_case(current)
+        primary = ValueError("record-callback")
+        def record(*_args):
+            raise primary
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, desired]):
+            with self.assertRaises(ValueError) as caught:
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        self.assertIs(caught.exception, primary)
+        self.assertIsNone(PI._copy_setter_detail(primary))
+        self.assertTrue(participant.unknown)
+
+    def test_native_exception_storage_bypasses_mutating_foreign_carriage(self):
+        hooks = []
+        class NativeDictionary(dict):
+            def __getitem__(self, key):
+                hooks.append("dictionary-read")
+                raise RuntimeError("foreign dictionary read")
+            def __setitem__(self, key, value):
+                hooks.append("dictionary-write")
+                raise RuntimeError("foreign dictionary write")
+            def __contains__(self, key):
+                hooks.append("dictionary-membership")
+                raise RuntimeError("foreign dictionary membership")
+        class ForeignError(OSError):
+            @property
+            def __dict__(self):
+                hooks.append("dictionary-descriptor")
+                raise RuntimeError("foreign dictionary")
+            def __getattribute__(self, name):
+                if name == "_copy_setter_diagnostic":
+                    hooks.append("attribute-read")
+                    raise RuntimeError("foreign attribute read")
+                return super().__getattribute__(name)
+            def __setattr__(self, name, value):
+                if name == "_copy_setter_diagnostic":
+                    hooks.append("attribute-write")
+                    self.args = ("MUTATED-original-args",)
+                    self.__cause__ = ValueError("MUTATED-cause")
+                    self.__context__ = RuntimeError("MUTATED-context")
+                    raise RuntimeError("carriage unsupported")
+                super().__setattr__(name, value)
+        current = PI._CopyMetadataImage(100, 200, None, None)
+        tx, node, participant, _records, record = self.diagnostic_case(current)
+        primary = ForeignError(errno.EIO, "foreign-operation")
+        BaseException.__dict__["__dict__"].__set__(primary, NativeDictionary())
+        primary.__cause__ = ValueError("original-cause")
+        primary.__context__ = RuntimeError("original-context")
+        original = (primary.args, primary.__cause__, primary.__context__)
+        def action():
+            with patch.object(PI._WindowsBoundNode, "set_copy_times", side_effect=primary), \
+                    patch.object(tx, "_read_copy_metadata", side_effect=[current, current]):
+                tx._apply_copy_metadata(self.target, node, current, stat.S_IMODE(node.python_identity[2]), record, participant)
+        result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], primary)
+        self.assertEqual((primary.args, primary.__cause__, primary.__context__), original)
+        self.assertEqual(hooks, [])
+        self.assertEqual(PI._copy_setter_detail(primary).operation, "timestamps")
+        self.assertIn("stage=operation", stderr)
+        self.assertFalse(participant.unknown)
+
+    def test_foreign_inner_diagnostic_fields_are_unavailable_without_dispatch(self):
+        hooks = []
+        class ForeignLabel(str):
+            def __eq__(self, other):
+                hooks.append("equality")
+                return True
+            def __hash__(self):
+                hooks.append("hash")
+                return str.__hash__(self)
+            def __format__(self, spec):
+                hooks.append("format")
+                return "PRIVATE_FORMAT_SENTINEL"
+        ordinary = PI._CopySetterDiagnostic("owner-extension", "forward", "comparison", 1,
+                                           True, True, True, True, (), (), (), ())
+        malformed = (replace(ordinary, direction=ForeignLabel("forward"), stage=ForeignLabel("comparison")),
+                     replace(ordinary, metadata_vs_current=(ForeignLabel("PRIVATE_FIELD_SENTINEL"),)))
+        for context in malformed:
+            primary = ValueError("associated-original")
+            primary._copy_setter_diagnostic = context
+            def action():
+                raise primary
+            result, stderr, escaped = self.through_install(action)
+            self.assertEqual(result, 1)
+            self.assertIs(escaped[0], primary)
+            self.assertEqual(stderr, "FAIL: associated-original | copy-setter=unavailable\n")
+        self.assertEqual(hooks, [])
+        self.assertIn("operation=owner-extension", ordinary.render())
+
+    def test_owner_behavior_and_namespace_admission_precede_added_rendering(self):
+        hooks = []
+        class ForeignField(str):
+            def __eq__(self, other):
+                hooks.append("table-equality")
+                return True
+        class ForeignKey:
+            def __hash__(self):
+                return hash("direction")
+            def __eq__(self, other):
+                hooks.append("namespace-equality")
+                return False
+        ordinary = PI._CopySetterDiagnostic("owner-extension", "forward", "comparison", 1,
+                                           True, True, True, True, (), (), (), ())
+        table = replace(ordinary)
+        object.__setattr__(table, "_metadata_fields", (ForeignField("PRIVATE_TABLE"),))
+        method = replace(ordinary)
+        def foreign_render():
+            hooks.append("render")
+            return "PRIVATE_RENDER"
+        object.__setattr__(method, "render", foreign_render)
+        collision = replace(ordinary)
+        storage = PI._CopySetterDiagnostic.__dict__["__dict__"].__get__(collision)
+        original = dict.copy(storage)
+        dict.clear(storage)
+        dict.__setitem__(storage, ForeignKey(), "synthetic")
+        for name, value in dict.items(original):
+            dict.__setitem__(storage, name, value)
+        hooks.clear()
+        for context in (table, method, collision):
+            primary = ValueError("owner-original")
+            primary._copy_setter_diagnostic = context
+            def action():
+                raise primary
+            result, stderr, escaped = self.through_install(action)
+            self.assertEqual(result, 1)
+            self.assertIs(escaped[0], primary)
+            self.assertNotIn("PRIVATE", stderr)
+        self.assertEqual(hooks, [])
+
+    def test_capture_image_namespace_is_passive_before_field_lookup(self):
+        hooks = []
+        class ForeignKey:
+            def __hash__(self):
+                return hash("atime_ns")
+            def __eq__(self, other):
+                hooks.append("metadata-equality")
+                return False
+        image = PI._CopyMetadataImage(100, 200, None, None)
+        storage = PI._CopyMetadataImage.__dict__["__dict__"].__get__(image)
+        original = dict.copy(storage)
+        dict.clear(storage)
+        dict.__setitem__(storage, ForeignKey(), "synthetic")
+        for name, value in dict.items(original):
+            dict.__setitem__(storage, name, value)
+        hooks.clear()
+        primary = ValueError("capture-original")
+        PI._CopySetterDiagnostic.attach(primary, "timestamps", False, "comparison", 1,
+            image, image, (1, 2, 3, 4), (1, 2, 3, 4), image, (1, 2, 3, 4))
+        self.assertEqual(hooks, [])
+        self.assertEqual(PI._copy_setter_detail(primary), ())
+
+    def test_passive_capture_and_aggregate_carriage_share_the_primitive_boundary(self):
+        hooks = []
+        class ForeignInteger(int):
+            def __eq__(self, other):
+                hooks.append("value-equality")
+                return True
+            def __format__(self, spec):
+                hooks.append("value-format")
+                return "PRIVATE_INTEGER_SENTINEL"
+        current = PI._CopyMetadataImage(100, 200, None, None)
+        primary = ValueError("capture-original")
+        PI._CopySetterDiagnostic.attach(primary, "timestamps", False, "comparison", 1,
+            current, replace(current, flags=ForeignInteger(1)), (1, 2, 3, 4), (1, 2, 3, 4), current, (1, 2, 3, 4))
+        self.assertEqual(PI._copy_setter_detail(primary), ())
+        class ChildFailure(PI._InstallFailure):
+            def __setattr__(self, name, value):
+                if name == "_copy_setter_diagnostic":
+                    hooks.append("aggregate-write")
+                    raise RuntimeError("foreign aggregate write")
+                super().__setattr__(name, value)
+        child = ChildFailure("E_CHILD", "child", primary)
+        self.assertEqual(PI._copy_setter_detail(child), ())
+        member = PI._RollbackFailureMember("snapshot", 0, "ordinary", "E_OLD", "raw", ())
+        aggregate = PI._InstallFailure("E_AGGREGATE", "rollback", "primary", members=(member,))
+        # Keep the original cached base message; only added locator data is malformed.
+        object.__setattr__(member, "ordinal", ForeignInteger(0))
+        def action():
+            raise aggregate
+        result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], aggregate)
+        self.assertIn("cleanup-copy-setter=unavailable", stderr)
+        self.assertEqual(hooks, [])
+
+    def test_same_xattr_errno_continues_forward_and_escapes_inverse(self):
+        for restored in (False, True):
+            with self.subTest(inverse=restored):
+                current = PI._CopyMetadataImage(100, 200, None, ())
+                desired = replace(current, xattrs=(("PRIVATE-xattr-name", b"PRIVATE-value"),))
+                tx, node, participant, records, record = self.diagnostic_case(current)
+                participant.before = desired if restored else current
+                primary = OSError(errno.EPERM, "xattr-denied")
+                with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", return_value=current), \
+                        patch.object(PI.os, "setxattr", side_effect=primary, create=True):
+                    if restored:
+                        with self.assertRaises(OSError) as caught:
+                            tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant, restored=True)
+                        self.assertIs(caught.exception, primary)
+                        self.assertEqual(len(records), 1)
+                    else:
+                        actual = tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+                        self.assertEqual(actual, current)
+                        self.assertEqual(len(records), 3)
+                context = PI._copy_setter_detail(primary)
+                self.assertEqual(context.operation, "xattr-set")
+                self.assertEqual(context.direction, "inverse" if restored else "forward")
+                self.assertEqual(context.metadata_vs_projected, ("xattrs",))
+                self.assertNotIn("PRIVATE", context.render())
+                self.assertFalse(participant.unknown)
 
 
 class RetentionAndAnchorTests(unittest.TestCase):
