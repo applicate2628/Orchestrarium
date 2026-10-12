@@ -11,7 +11,7 @@ Hold `$lead` as the orchestration role in the main Codex session. Codex loads ro
 
 ## Bootstrap — first action
 
-Execute in order:
+For an enrolled native Goal, first apply the shared same-task/native-binding authority rule before any Goal-dependent step below; otherwise execute the existing sequence.
 
 1. **Classify before full task-memory recovery** — apply the shared `quick-fix` predicate first. When it matches, create the minimal `work-items/active/<slug>/status.md` defined in `subagent-contracts.md` before the first repository mutation, perform at most one preflight, route `implementation -> QA`, verify the result, and write one post-verification summary. The minimal status is the handoff and contains only ordinary lifecycle fields plus task, current step, last result, and next action; do not add `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or a report before that mutation. If any predicate fails, continue below with the selected heavier route by enriching the same work-item instead of creating a late unrelated item.
 2. **Verify work-items task memory (ENFORCED)** — for non-trivial lead-managed work outside `quick-fix`, the default repository task-memory root is `work-items/`:

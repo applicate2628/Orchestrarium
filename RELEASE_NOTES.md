@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-12
 
+- **Recovery checks enrolled native Goal authority before routing.** The shared rule and both provider bootstraps clarify that local active records cannot resume a paused native Goal. Owned resource and evidence settlement and independently authorized work retain their existing contracts; ordinary tasks without an enrolled Goal keep their existing workflow. This clarifies observation order, without claiming a proved Source cause or guaranteed model compliance.
+
 - **Installer failures retain the scalar checkpoint and actual target association.** Both installers add available before/projected/observed timestamps in Unix-epoch nanoseconds and decimal flags to their existing failure diagnostics. An opaque target-path digest identifies the selected copy entry, including nested and newly created targets, without adding its raw path to default output. Optional evidence has separate scalar, retention and per-occurrence display bounds; complete existing errors and rollback members remain visible. Metadata acceptance, original exceptions, exit status and recovery custody are unchanged. These diagnostics explain acquired values; they do not establish the cause of native timestamp changes or survive termination before ordinary failure output.
 
 ## 2026-10-11
