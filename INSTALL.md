@@ -51,6 +51,10 @@ The installer's `Target:` line names only the provider root (`.codex/` or `.clau
 
 When an admitted runtime subroot is a supported symbolic link or junction, the installer binds and mutates its resolved referent while preserving and rechecking that link identity.
 
+Copied metadata is checked at each operation boundary. Timestamp assignment must be proved exactly at the filesystem's supported precision by the current call's acquired result; a later observation cannot excuse a wrong or unproved assignment. Subsequent permitted reads can advance access time. A returned access-time observation therefore describes that later acquisition, not a permanent timestamp guarantee: acceptance still requires the same native object and content and the complete stable modification-time, mode, flags and extended-attribute effect. Rollback likewise proves the exact original timestamp restoration boundary and preserved stable effect; it does not promise that future reads leave access time unchanged.
+
+Forward extended-attribute copying is best effort only for an accounted record of an explicitly permitted error from that extended-attribute operation itself. A similar error from acquisition, identity checks, timestamps, mode or recording is not optional. Inverse metadata restoration errors remain mandatory failures. Unknown effects, foreign changes or missing operation proof preserve the primary cause and guarded recovery instead of continuing or reporting a clean rollback. A successful bounded metadata check does not establish installed pack delivery, global rollout success or settlement of earlier recovery.
+
 Maintainer note for this monorepo: `Orchestrarium/` is the installer/source tree, not automatically a repo-local installed Codex runtime. When you are editing this repository itself, a missing local `.agents/` tree can be perfectly valid if you are using the global install under `~/.codex/`. If you want this repository to behave as a repo-local install target, create that state intentionally through `scripts/install-codex.*` or the root router instead of hand-writing `.agents/` files.
 
 ## Init-time preset shortcuts

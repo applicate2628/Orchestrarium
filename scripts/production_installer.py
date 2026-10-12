@@ -1556,6 +1556,8 @@ SLICE_A_FAILURE_IDS = frozenset(
 
 @dataclass(frozen=True)
 class _CopyMetadataImage:
+    """Acquired values; atime is exact at assignment, read-variable afterwards."""
+
     atime_ns: int
     mtime_ns: int
     flags: int | None
@@ -1568,6 +1570,12 @@ class _CopyMetadataImage:
 
 @dataclass
 class _CopyMetadataParticipant:
+    """Original beforeimage plus observations, never an immutable later atime.
+
+    Restored means original times verified at the inverse assignment boundary;
+    current/restored images retain actual observations from their acquisition.
+    """
+
     origin: _PhysicalNode | None
     before: _CopyMetadataImage | None
     current: _CopyMetadataImage | None
@@ -2209,14 +2217,20 @@ class _InstallTransaction:
                              desired: _CopyMetadataImage, mode: int, record,
                              participant: _CopyMetadataParticipant | None = None,
                              *, restored=False) -> _CopyMetadataImage:
-        """Attributes, timestamps, restrictions, then metadata-only readback."""
+        """Verify time assignment exactly; later atime is a read-variable observation.
+
+        Stable metadata and physical/restriction identity remain constrained for
+        every effect and final readback. Returned atime is the final observation,
+        not a promise that assignment persists across subsequent observations.
+        """
         with self._copy_reference(path, node, metadata_only=True) as (descriptor, bound):
             current = self._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
             known = self._copy_current.get(path)
             if known is not None and current.stable() != known.stable():
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy setter beforeimage drift")
             operation_ordinal = 0
-            def progress(operation, projected, *, identity=None, label):
+            def progress(operation, projected, *, identity=None, label,
+                         sets_times=False, optional_operation_errnos=()):
                 nonlocal current, node, operation_ordinal
                 operation_ordinal += 1
                 if participant is not None:
@@ -2241,8 +2255,12 @@ class _InstallTransaction:
                         actual=actual, participant=participant)
                     raise
                 valid_identity = node.python_identity if identity is None else identity
-                # Only an unchanged value or this setter's projected effect is known.
-                if actual not in (current, projected) or actual_identity not in (node.python_identity, valid_identity):
+                # Time assignment constrains the complete image. Other effects
+                # constrain the whole stable tuple, never per-field mixtures.
+                actual_effect = actual if sets_times else actual.stable()
+                current_effect = current if sets_times else current.stable()
+                projected_effect = projected if sets_times else projected.stable()
+                if actual_effect not in (current_effect, projected_effect) or actual_identity not in (node.python_identity, valid_identity):
                     if primary is not None:
                         _CopySetterDiagnostic.attach(primary, label, restored, "operation", operation_ordinal,
                             current, projected, node.python_identity, valid_identity, actual, actual_identity, participant=participant)
@@ -2263,8 +2281,10 @@ class _InstallTransaction:
                 if primary is not None:
                     _CopySetterDiagnostic.attach(primary, label, restored, "operation", operation_ordinal,
                         diagnostic_current, projected, diagnostic_identity, valid_identity, actual, actual_identity, participant=participant)
+                    if isinstance(primary, OSError) and primary.errno in optional_operation_errnos:
+                        return  # Known optional operation error; recording already succeeded.
                     raise primary
-                if actual != projected or actual_identity != valid_identity:
+                if actual_effect != projected_effect or actual_identity != valid_identity:
                     error = ValueError("E_MUTABLE_PATH_POSTCONDITION: copy metadata readback")
                     _CopySetterDiagnostic.attach(error, label, restored, "comparison", operation_ordinal,
                         diagnostic_current, projected, diagnostic_identity, valid_identity, actual, actual_identity, participant=participant)
@@ -2291,11 +2311,9 @@ class _InstallTransaction:
                         updated.pop(name, None)
                         operation = lambda name=name: os.removexattr(descriptor, name)
                     projected = replace(current, xattrs=tuple(sorted(updated.items())))
-                    try:
-                        progress(operation, projected, label="xattr-set" if name in wanted else "xattr-remove")
-                    except OSError as error:
-                        if restored or error.errno not in {errno.EPERM, errno.ENOTSUP, errno.ENODATA, errno.EINVAL}:
-                            raise
+                    progress(operation, projected, label="xattr-set" if name in wanted else "xattr-remove",
+                             optional_operation_errnos=() if restored else
+                             (errno.EPERM, errno.ENOTSUP, errno.ENODATA, errno.EINVAL))
                     old = dict(current.xattrs)
             projected = replace(current, atime_ns=desired.atime_ns, mtime_ns=desired.mtime_ns)
             if bound is not None:
@@ -2306,7 +2324,7 @@ class _InstallTransaction:
                 if os.utime not in os.supports_fd:
                     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: bound timestamp capability")
                 operation = lambda: os.utime(descriptor, ns=(desired.atime_ns, desired.mtime_ns))
-            progress(operation, projected, label="timestamps")
+            progress(operation, projected, label="timestamps", sets_times=True)
             requested_identity = self._chmod_identity(node.python_identity, mode)
             progress(lambda: self._chmod_owned(path, node.python_identity, mode, descriptor=descriptor),
                       current, identity=requested_identity, label="mode")
@@ -2315,7 +2333,7 @@ class _InstallTransaction:
                     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: bound flags capability")
                 progress(lambda: os.fchflags(descriptor, desired.flags), replace(current, flags=desired.flags), label="flags")
             actual = self._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
-            if actual != current:
+            if actual.stable() != current.stable():
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final copy metadata drift")
             if participant is not None:
                 participant.current, participant.unknown = actual, False

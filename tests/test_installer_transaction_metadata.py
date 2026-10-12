@@ -275,10 +275,15 @@ class CopyMetadataTests(unittest.TestCase):
             participant = transaction._copy_metadata[self.target]
             desired = PI.replace(participant.before, atime_ns=participant.before.atime_ns + 73,
                                  mtime_ns=participant.before.mtime_ns + 173)
+            assignments = []
+            def record(member, value):
+                assignments.append(transaction._copy_current[member])
+                transaction._advance(member, {member: value})
             actual = transaction._apply_copy_metadata(self.target, node, desired,
                 stat.S_IMODE(node.python_identity[2]),
-                lambda member, value: transaction._advance(member, {member: value}), participant)
-            self.assertEqual(actual.atime_ns, desired.atime_ns // 100 * 100)
+                record, participant)
+            self.assertEqual(assignments[0].atime_ns, desired.atime_ns // 100 * 100)
+            self.assertEqual(assignments[0].mtime_ns, desired.mtime_ns // 100 * 100)
             self.assertEqual(actual.mtime_ns, desired.mtime_ns // 100 * 100)
             transaction.commit()
         self.assert_clean()
@@ -1002,6 +1007,165 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertIs(escaped[0], aggregate)
         self.assertIn("cleanup-copy-setter=unavailable", stderr)
         self.assertEqual(hooks, [])
+
+    def test_later_atime_observations_preserve_assignment_and_beforeimage(self):
+        for restored in (False, True):
+            with self.subTest(inverse=restored):
+                current = PI._CopyMetadataImage(100, 200, None, None)
+                desired = replace(current, atime_ns=300, mtime_ns=400)
+                later = replace(desired, atime_ns=500)
+                final = replace(later, atime_ns=700)
+                tx, node, participant, records, record = self.diagnostic_case(current)
+                participant.before = desired if restored else current
+                before = participant.before
+                with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata",
+                        side_effect=[current, desired, later, final]) as metadata:
+                    result = tx._apply_copy_metadata(self.target, node, desired,
+                        stat.S_IMODE(node.python_identity[2]), record, participant, restored=restored)
+                self.assertIs(result, final)
+                self.assertIs(participant.before, before)
+                self.assertIs(participant.current, final)
+                self.assertIs(participant.restored, final if restored else None)
+                self.assertFalse(participant.unknown)
+                self.assertEqual(metadata.call_count, 4)
+                self.assertEqual(len(records), 2)
+                self.assertTrue(all(entry[2] for entry in records))
+                self.assertEqual((desired.atime_ns, desired.mtime_ns), (300, 400))
+
+    def test_wrong_mtime_assignment_is_not_a_known_atime_only_observation(self):
+        current = PI._CopyMetadataImage(100, 200, None, None)
+        desired = replace(current, atime_ns=300, mtime_ns=400)
+        wrong = replace(desired, mtime_ns=current.mtime_ns)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, wrong]):
+            with self.assertRaises(ValueError) as caught:
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        self.assertEqual(PI._copy_setter_detail(caught.exception).metadata_vs_projected, ("mtime_ns",))
+        self.assertTrue(participant.unknown)
+        self.assertEqual(records, [])
+
+    def test_non_time_whole_stable_tuple_rejects_mixed_fields(self):
+        current = PI._CopyMetadataImage(100, 200, None, ())
+        desired = replace(current, xattrs=(("synthetic", b"value"),))
+        mixed = replace(desired, mtime_ns=400)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        with patch.object(tx, "_read_copy_metadata", side_effect=[current, mixed]), \
+                patch.object(PI.os, "setxattr", create=True), \
+                patch.object(PI._WindowsBoundNode, "set_copy_times") as times:
+            with self.assertRaises(ValueError):
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        self.assertTrue(participant.unknown)
+        self.assertEqual(records, [])
+        times.assert_not_called()
+
+    def test_optional_xattr_primary_cannot_hide_foreign_mtime(self):
+        current = PI._CopyMetadataImage(100, 200, None, ())
+        desired = replace(current, xattrs=(("synthetic", b"value"),))
+        foreign = replace(current, mtime_ns=400)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        tx._copy_metadata[self.target] = participant
+        primary = OSError(errno.EPERM, "xattr-primary")
+        primary.__cause__ = RuntimeError("original-cause")
+        chain = (primary.args, primary.__cause__, primary.__context__)
+        with patch.object(tx, "_read_copy_metadata", side_effect=[current, foreign]), \
+                patch.object(PI.os, "setxattr", side_effect=primary, create=True), \
+                patch.object(PI._WindowsBoundNode, "set_copy_times") as times, \
+                patch.object(PI._InstallTransaction, "_chmod_owned") as mode:
+            with self.assertRaises(OSError) as caught:
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        self.assertIs(caught.exception, primary)
+        self.assertEqual((primary.args, primary.__cause__, primary.__context__), chain)
+        self.assertEqual(PI._copy_setter_detail(primary).stage, "operation")
+        self.assertEqual(PI._copy_setter_detail(primary).metadata_vs_current, ("mtime_ns",))
+        self.assertTrue(participant.unknown)
+        self.assertEqual(records, [])
+        times.assert_not_called()
+        mode.assert_not_called()
+        with self.assertRaisesRegex(ValueError, "unknown"):
+            tx._assert_copy_metadata(self.target)
+
+    def test_optional_xattr_policy_does_not_admit_acquisition_identity_or_record_errno(self):
+        # These failures share EPERM but originate outside operation(), so none
+        # can admit continuation; their recording/diagnostic stages differ.
+        for stage in ("metadata", "identity", "record"):
+            with self.subTest(stage=stage):
+                current = PI._CopyMetadataImage(100, 200, None, ())
+                desired = replace(current, xattrs=(("synthetic", b"value"),))
+                tx, node, participant, records, record = self.diagnostic_case(current)
+                primary = OSError(errno.EPERM, stage + "-primary")
+                observed = [current, primary] if stage == "metadata" else [current, desired]
+                def recording(path, value):
+                    if stage == "record":
+                        raise primary
+                    record(path, value)
+                with patch.object(tx, "_read_copy_metadata", side_effect=observed), \
+                        patch.object(PI.os, "setxattr", create=True), \
+                        patch.object(tx, "_capture_node", side_effect=primary if stage == "identity" else None,
+                                     return_value=node), \
+                        patch.object(PI._WindowsBoundNode, "set_copy_times") as times, \
+                        patch.object(PI._InstallTransaction, "_chmod_owned") as mode:
+                    with self.assertRaises(OSError) as caught:
+                        tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), recording, participant)
+                self.assertIs(caught.exception, primary)
+                context = PI._copy_setter_detail(primary)
+                if stage == "record":
+                    self.assertIsNone(context)
+                else:
+                    self.assertEqual(context.stage, stage + "-acquisition")
+                self.assertTrue(participant.unknown)
+                self.assertEqual(records, [])
+                times.assert_not_called()
+                mode.assert_not_called()
+
+    def test_final_failure_retains_known_prefix_without_success(self):
+        for acquisition in (True, False):
+            with self.subTest(acquisition=acquisition):
+                current = PI._CopyMetadataImage(100, 200, None, None)
+                desired = replace(current, atime_ns=300, mtime_ns=400)
+                tx, node, participant, records, record = self.diagnostic_case(current)
+                primary = OSError(errno.EPERM, "final-acquisition")
+                final = primary if acquisition else replace(desired, mtime_ns=600)
+                with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata",
+                        side_effect=[current, desired, desired, final]):
+                    with self.assertRaises(OSError if acquisition else ValueError) as caught:
+                        tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+                if acquisition:
+                    self.assertIs(caught.exception, primary)
+                else:
+                    self.assertIn("final copy metadata drift", str(caught.exception))
+                self.assertFalse(participant.unknown)
+                self.assertIs(participant.current, desired)
+                self.assertEqual(len(records), 2)
+
+    def test_optional_xattr_foreign_effect_retains_guarded_transaction_recovery(self):
+        reader = PI._InstallTransaction._read_copy_metadata
+        source_inode = self.source.stat().st_ino
+        primary = OSError(errno.EPERM, "xattr-foreign-primary")
+        foreign_mtime = 1_750_000_000_000_000_000
+        def observation(metadata, descriptor, bound):
+            image = reader(metadata, descriptor, bound)
+            return replace(image, xattrs=(("synthetic", b"value"),) if metadata.st_ino == source_inode else ())
+        def foreign_effect(*_args):
+            os.utime(self.target, ns=(self.before.st_atime_ns, foreign_mtime))
+            raise primary
+        transaction = self.transaction()
+        with patch.object(PI._InstallTransaction, "_read_copy_metadata", staticmethod(observation)), \
+                patch.object(PI.os, "setxattr", side_effect=foreign_effect, create=True), \
+                patch.object(PI._WindowsBoundNode, "set_copy_times") as times, \
+                patch.object(PI._InstallTransaction, "_chmod_owned", wraps=PI._InstallTransaction._chmod_owned) as mode:
+            with self.assertRaises(PI._InstallFailure) as caught:
+                with transaction:
+                    # Snapshot acquisition has its own mandatory chmod; observe
+                    # that real producer and count only following copy setters.
+                    mode.reset_mock()
+                    self.owner(transaction).copy_file(Path("target"), self.source)
+        self.assertIs(caught.exception.cause, primary)
+        self.assertTrue(transaction._copy_metadata[self.target].unknown)
+        self.assertIsNotNone(caught.exception.recovery_path)
+        self.assertTrue(caught.exception.recovery_path.exists())
+        self.assertEqual(self.target.stat().st_mtime_ns, foreign_mtime)
+        times.assert_not_called()
+        mode.assert_not_called()
 
     def test_same_xattr_errno_continues_forward_and_escapes_inverse(self):
         for restored in (False, True):
