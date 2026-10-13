@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-13
 
+- **QA conclusions follow the commissioned scope.** Both QA role definitions distinguish successful preparation from unexecuted whole-outcome criteria. Intentional deferral alone creates no failed slice or bug; real missing required results, failed checks and genuine denials retain their consequences. Superseded-mechanism checks follow the changed scope, and the existing pack validators track the current owning clauses without changing their predicates or missing-evidence behavior.
+
 - **Review-loop premises use evidence sufficient for the exact claim.** The shared methodology, operative Codex/Claude bindings and thin Claude command distinguish directly inspected wording or logic from observed runtime causes, measured values and target outcomes. Driving unknowns still hold dependent work; actual-scenario performance profiling, functional receiving, reviewer independence and frozen loop identities remain required. Existing runtime-root/root-proven names stay compatible without implying measurement; no schema, helper or runtime-enforcement change is claimed.
 
 ## 2026-10-12
