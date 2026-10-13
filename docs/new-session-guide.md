@@ -7,7 +7,7 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 | Rule | Operational meaning |
 |---|---|
 | This repository is the source of truth | Fix Orchestrarium source first: `shared/`, `src.codex/`, `src.claude/`, `scripts/`, `docs/`, and root docs. |
-| Installed copies are runtime outputs | `$HOME/.agents/skills/` and `$HOME/.agents/contracts/` are the live canonical global Codex skill/contract surfaces; `$HOME/.codex/` holds Codex configuration and runtime metadata. `~/.claude/`, project `.agents/`, and project `.claude/` are also installed/runtime surfaces. Patch them only after the source owner is updated, and only when current sessions need the behavior before reinstall. |
+| Installed copies are runtime outputs | `$HOME/.agents/skills/` is the shared canonical installed skill tree for the current monorepo producer; `.claude/skills/` is its logical projection where the producer and actual binding establish that relationship. `$HOME/.agents/contracts/` remains the live canonical global Codex contract surface; skill-body mapping does not establish other contract-file origins. `$HOME/.codex/` holds Codex configuration and runtime metadata. `~/.claude/`, project `.agents/`, and project `.claude/` are also installed/runtime surfaces. Patch them only after the source owner is updated, and only when current sessions need the behavior before reinstall. |
 | Do not treat stale installs as canon | A broken or stale global/local install can explain a symptom, but the durable fix belongs in the owning source file unless the problem is purely local state. |
 | Do not create source from runtime guesses | Before adding a new path or mechanism, identify the owning source surface and installer propagation path. |
 | Keep provider boundaries explicit | Codex-specific runtime metadata belongs in `src.codex/`; Claude Agent-tool wrappers belong in `src.claude/`; shared semantics belong in `shared/` plus affected provider addenda. |
@@ -34,12 +34,12 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 |---|---|
 | Shared governance loaded into installed `AGENTS.md` | `shared/AGENTS.shared.md` |
 | Shared design-only methodology | `shared/references/` |
-| Codex roles and common skills | `src.codex/skills/<name>/SKILL.md` |
+| Canonical runtime skill bodies | Canonical runtime skill bodies for the current Codex/Claude monorepo install: `src.codex/skills/<name>/SKILL.md`; verify the installer materialization edge for the selected layout. |
 | Codex skill UI metadata | `src.codex/skills/<name>/agents/openai.yaml` |
 | Codex platform addendum and hooks | `src.codex/AGENTS.codex.md`, `src.codex/skills/lead/scripts/`, `src.codex/skills/lead/hooks/` |
-| Claude roles | `src.claude/agents/<role>.md` (the four Claude-owned curated role-skills `lead`, `product-manager`, `analyst`, `planner` have canonical contracts in `src.claude/skills/<role>/SKILL.md`; Architect's sole body is the universal `src.codex/skills/architect/SKILL.md`, projected at runtime through `.agents/skills/architect` and `.claude/skills/architect`; `agents/lead.md` activates `/lead` with main-agent `initialPrompt` and rejects stale dispatch, while the other wrappers retain provider routing authority) |
+| Claude role entrypoints | Claude Agent entrypoints/bootstrap: `src.claude/agents/<role>.md`. Wrappers activate installed skill entrypoints; their canonical skill body comes from the Source row above. In this production route, `src.claude/skills/` is historical migration-comparison input, not a separate live skill-body owner. `agents/lead.md` activates `/lead` with main-agent `initialPrompt` and rejects stale dispatch; the other wrappers retain provider routing authority. |
 | Claude slash commands | `src.claude/commands/agents-*.md` |
-| Claude common skills | `src.claude/skills/<name>/SKILL.md` |
+| Claude common-skill projections | Claude installed skill projections consume the canonical skill tree through the production installer; historical Source comparison trees stay protected unless compatibility migration is explicitly admitted. |
 | Provider-specific addenda | `references-codex/`, `references-claude/` |
 | Agents-mode schema and defaults | `shared/agents-mode.schema.json`, `shared/agents-mode.presets.json`, `shared/agents-mode.defaults.yaml` |
 | Installers | root `install.*`, `scripts/install-*.{sh,ps1}` |
@@ -49,7 +49,7 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 
 | Runtime surface | Meaning |
 |---|---|
-| `$HOME/.agents/skills/` | Live canonical global Codex skill surface. |
+| `$HOME/.agents/skills/` | Shared canonical installed skill tree for the current monorepo producer; `.claude/skills/` is its logical projection where the producer and actual binding establish it. Other layouts require their actual materialization owner. |
 | `$HOME/.agents/contracts/` | Live canonical global Codex contract surface. |
 | `$HOME/.codex/` | Codex configuration, hooks, native-role metadata, and retained provider-root compatibility outputs; not the canonical skills/contracts tree. |
 | `~/.claude/` | Global installed Claude Code pack and live Claude runtime state. |

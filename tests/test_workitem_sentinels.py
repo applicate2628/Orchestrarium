@@ -278,7 +278,13 @@ class TestSEN1DualState(unittest.TestCase):
 
 class TestEpicArchiveLifecycle(unittest.TestCase):
     def _root(self) -> Path:
-        root = make_git_repo()
+        temporary = tempfile.TemporaryDirectory(prefix="wi-sentinels-source-diagnostic-")
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / "SOURCE-DIAGNOSTIC-PURPOSE.md").write_text(
+            "Synthetic Source diagnostic observations; no real lifecycle or goal acceptance.\n",
+            encoding="utf-8",
+        )
         (root / "work-items" / "active").mkdir(parents=True)
         (root / "work-items" / "epics").mkdir(parents=True)
         return root
@@ -326,7 +332,8 @@ class TestEpicArchiveLifecycle(unittest.TestCase):
         findings = sentinels.evaluate_all(sentinels.build_context(str(root)))
         sen0 = [finding for finding in findings if finding.id == "SEN-0"]
         self.assertEqual(len(sen0), 1)
-        self.assertIn("remains in the active root", sen0[0].message)
+        self.assertIn("epic is physically current but its status text says closed", sen0[0].message)
+        self.assertIn("verify terminal evidence and the admitted archive transition", sen0[0].message)
 
     def test_archived_closed_epic_with_reopened_child_flags(self) -> None:
         root = self._root()
@@ -341,9 +348,11 @@ class TestEpicArchiveLifecycle(unittest.TestCase):
         findings = sentinels.evaluate_all(sentinels.build_context(str(root)))
         sen0 = [finding for finding in findings if finding.id == "SEN-0"]
         self.assertEqual(len(sen0), 1)
-        self.assertIn("archived epic has a child work-item that is not closed", sen0[0].message)
+        self.assertIn("archived epic has unresolved current child observations", sen0[0].message)
+        self.assertIn("preserve the archive", sen0[0].message)
+        self.assertIn("explicitly admitted successor", sen0[0].message)
 
-    def test_epic_child_terminality_is_archive_only(self) -> None:
+    def test_epic_child_archive_observation_does_not_prove_terminality(self) -> None:
         root = self._root()
         child = root / "work-items" / "active" / "kid"
         child.mkdir()
@@ -356,32 +365,31 @@ class TestEpicArchiveLifecycle(unittest.TestCase):
         )
 
         active_ctx = sentinels.build_context(str(root))
-        self.assertFalse(sentinels._slug_is_done(active_ctx, "kid"))
+        self.assertFalse(sentinels._slug_has_archive_observation(active_ctx, "kid"))
         self.assertEqual(sentinels._detect_epic_orphans(active_ctx), [])
 
         archived = root / "work-items" / "archive" / "2026-07" / "kid"
         archived.parent.mkdir(parents=True)
         child.replace(archived)
         archived_ctx = sentinels.build_context(str(root))
-        self.assertTrue(sentinels._slug_is_done(archived_ctx, "kid"))
+        self.assertTrue(sentinels._slug_has_archive_observation(archived_ctx, "kid"))
         self.assertEqual(
             sentinels._detect_epic_orphans(archived_ctx),
-            [("e1", "all child work-items are closed but the epic is still status: active (close it)")],
+            [("e1", "listed children have archive observations; verify unique current locations and the substantive epic goal before closure")],
         )
 
-    def test_archived_active_epic_requires_same_operation_restore(self) -> None:
+    def test_archived_active_epic_preserves_archive_and_requests_successor_scope(self) -> None:
         root = self._root()
         archived = root / "work-items" / "epics" / "archive" / "2026-07" / "e1.md"
         self._write_epic(archived, "active")
         findings = sentinels.evaluate_all(sentinels.build_context(str(root)))
         sen0 = [finding for finding in findings if finding.id == "SEN-0"]
         self.assertEqual(len(sen0), 1)
-        self.assertIn("restore it to the active root", sen0[0].message)
-
-        active = root / "work-items" / "epics" / "e1.md"
-        archived.replace(active)
-        findings = sentinels.evaluate_all(sentinels.build_context(str(root)))
-        self.assertFalse(any(finding.id == "SEN-0" for finding in findings))
+        self.assertIn("archived epic has active status text", sen0[0].message)
+        self.assertIn("preserve the archive", sen0[0].message)
+        self.assertIn("current successor scope", sen0[0].message)
+        self.assertTrue(archived.is_file())
+        self.assertFalse((root / "work-items" / "epics" / "e1.md").exists())
 
     def test_duplicate_epic_locations_flag_without_selecting_a_copy(self) -> None:
         root = self._root()
@@ -393,6 +401,40 @@ class TestEpicArchiveLifecycle(unittest.TestCase):
         self.assertEqual(len(sen0), 1)
         self.assertIn("resolves to multiple locations", sen0[0].message)
         self.assertIn("archive/2026-07/e1.md", sen0[0].message)
+
+    def test_closure_draft_and_status_claim_are_observations(self) -> None:
+        root = self._root()
+        draft = root / "work-items" / "active" / "draft"
+        draft.mkdir()
+        (draft / "closure.md").write_text("DRAFT: acceptance remains pending\n", encoding="utf-8")
+        claimed = root / "work-items" / "active" / "claimed"
+        claimed.mkdir()
+        (claimed / "status.md").write_text("status: completed\n", encoding="utf-8")
+        findings = sentinels.evaluate_all(sentinels.build_context(str(root)))
+        sen0 = [finding for finding in findings if finding.id == "SEN-0"]
+        self.assertEqual(len(sen0), 1)
+        self.assertEqual(sen0[0].severity, sentinels.RESOLVE)
+        self.assertIn("closure.md is present in an active item", sen0[0].message)
+        self.assertIn("status text claims completion while the item is physically active", sen0[0].message)
+        self.assertIn("These observations do not prove delivery or authorize closure", sen0[0].message)
+        self.assertTrue(draft.is_dir())
+        self.assertTrue(claimed.is_dir())
+
+    def test_competing_child_archive_observations_do_not_claim_unique_completion(self) -> None:
+        root = self._root()
+        (root / "work-items" / "active" / "kid").mkdir()
+        for month in ("2026-06", "2026-07"):
+            (root / "work-items" / "archive" / month / "kid").mkdir(parents=True)
+        self._write_epic(root / "work-items" / "epics" / "e1.md", "active", ("kid",))
+        ctx = sentinels.build_context(str(root))
+        self.assertTrue(sentinels._slug_has_archive_observation(ctx, "kid"))
+        self.assertEqual(len(sentinels.resolve_slug_locations(ctx, "kid")["archive"]), 2)
+        findings = {finding.id: finding for finding in sentinels.evaluate_all(ctx)}
+        self.assertIn("SEN-1", findings)
+        self.assertEqual(findings["SEN-0"].severity, sentinels.RESOLVE)
+        self.assertIn("listed children have archive observations", findings["SEN-0"].message)
+        self.assertIn("verify unique current locations and the substantive epic goal before closure", findings["SEN-0"].message)
+        self.assertIn("do not authorize close/reopen", findings["SEN-0"].message)
 
 
 class TestF4NonMonthArchiveLayout(unittest.TestCase):
@@ -428,26 +470,22 @@ class TestF4NonMonthArchiveLayout(unittest.TestCase):
         return root
 
     def test_active_epic_with_child_archived_under_non_month_category_flags(self) -> None:
-        # Old behaviour (archive_dir.glob(f"*/{slug}")) treated "kid" as done
-        # regardless of the intermediate directory's name: an active epic
-        # whose only child is fully archived must be flagged to close it.
-        # The month-only regression silently DROPPED this finding.
+        # Archive observations cover every intermediate category name. An
+        # active epic retains its observation without claiming its goal met.
         root = self._epic_with_child_archived_under("legacy", "active")
         ctx = sentinels.build_context(str(root))
         findings = sentinels.evaluate_all(ctx)
         sen0 = [f for f in findings if f.id == "SEN-0"]
         self.assertEqual(
             len(sen0), 1,
-            "a child archived under a non-month category dir must still count as done (F4) -- "
+            "a child archived under a non-month category dir must remain observable (F4) -- "
             "the guard must not be silently dropped",
         )
         self.assertIn("e1", sen0[0].message)
 
     def test_closed_epic_with_child_archived_under_non_month_category_does_not_flag(self) -> None:
-        # A closed epic whose only child IS actually archived (done) must NOT
-        # flag. The month-only regression treated "kid" as NOT done (since
-        # "legacy" is not month-shaped) and produced a NEW false
-        # decision:block here.
+        # This archived child creates no unresolved-child observation for the
+        # closed epic; absence of SEN-0 still supplies no goal acceptance proof.
         root = self._epic_with_child_archived_under("legacy", "closed")
         ctx = sentinels.build_context(str(root))
         findings = sentinels.evaluate_all(ctx)

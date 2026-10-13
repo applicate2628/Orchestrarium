@@ -3,9 +3,9 @@
 This module owns physical active/archive discovery, location resolution, and
 informational lifecycle findings used by
 ``scripts/check-work-items-state.py``. It is imported support code, not a
-registered hook entry. Physical location owns lifecycle membership: status and
-closure text can identify a move still due, but never make an active record
-terminal.
+registered hook entry. Physical location owns lifecycle membership; status and
+closure text supply observations for owner reconciliation, not proof of an
+accepted outcome, terminal evidence, or transition authority.
 
 The module does not write, move, delete, or rename repository data. Every git
 invocation is read-only and uses an argument vector. Per-finding evaluation is
@@ -102,22 +102,12 @@ def _disk_archive_slug_pairs(archive_dir: Path) -> list[tuple[str, str]]:
     <slug>/ layout, the flat/mis-filed work-items/archive/<slug>/ form, AND a
     non-month category directory work-items/archive/<anything>/<slug>/.
 
-    This is a verdict-equivalent migration of the shipped hook's
-    `_slug_is_done`, which checked `archive_dir / slug` (flat) and
-    `archive_dir.glob(f"*/{slug}")` (one level under ANY immediate
-    subdirectory, unconditional on what that subdirectory is named -- a
-    month-shaped name was never part of that contract). An earlier revision
-    of this function imposed a `^\\d{4}-\\d{2}$` check on the INTERMEDIATE
-    directory before descending into it; that silently dropped an archived
-    slug filed under a non-month category directory (e.g.
-    `archive/legacy/kid/`) from SEN-0's epic-orphan detection and SEN-1's
-    dual-state detection alike -- a real regression against the layout
-    present in `VFEM_fort/work-items/archive/clean-wave-port/`
-    (design.md review-grounding F4). Every immediate child of archive_dir is
-    therefore registered BOTH as a flat candidate slug (mirrors the old
-    `archive_dir / slug` check) and, if it itself has subdirectories, each of
-    those is registered too (mirrors the old `archive_dir.glob(f"*/{slug}")`
-    check, one level down, unconditional on the intermediate name)."""
+    Archive discovery includes both flat slugs and slugs one level below any
+    immediate category directory, regardless of its name. These observations
+    feed SEN-0 reconciliation and SEN-1 dual-state detection; they do not prove
+    unique current terminality or accepted completion. Each immediate child is
+    therefore recorded as a flat candidate, and each of its subdirectories is
+    recorded as an additional archive observation."""
     pairs: list[tuple[str, str]] = []
     try:
         children = sorted(p for p in archive_dir.iterdir() if p.is_dir())
@@ -278,15 +268,15 @@ def _read_status(item: Path) -> str:
     return ""
 
 
-def _slug_is_done(ctx: dict, slug: str) -> bool:
-    """A child work-item is done only after it physically enters archive/."""
+def _slug_has_archive_observation(ctx: dict, slug: str) -> bool:
+    """Return whether the captured context contains any archive observation."""
 
     return bool(resolve_slug_locations(ctx, slug)["archive"])
 
 
 # ---------------------------------------------------------------------------
-# SEN-0 -- periodic lifecycle diagnostic for evidence that an archive move is
-# still due. It reports only; physical location remains authoritative.
+# SEN-0 -- periodic lifecycle observations requiring owner reconciliation.
+# It reports only; observations never authorize a lifecycle transition.
 # ---------------------------------------------------------------------------
 
 # An active item counts as closed-but-not-moved when its status.md has a
@@ -400,11 +390,11 @@ def _detect_orphans(active_dir: Path) -> list[tuple[str, str]]:
         except Exception:
             has_closure = False
         if has_closure:
-            orphans.append((item.name, "has closure.md but is still in active/ (move it to archive/)"))
+            orphans.append((item.name, "closure.md is present in an active item; verify accepted outcome, terminal evidence, obligations and the admitted lifecycle transition"))
             continue
         text = _read_status(item)
         if text and DONE_STATE_LINE_REGEX.search(text):
-            orphans.append((item.name, "status.md marks it closed/done but it is still in active/"))
+            orphans.append((item.name, "status text claims completion while the item is physically active; reconcile the actual outcome and transition with the lifecycle owner"))
     return orphans
 
 
@@ -423,7 +413,7 @@ def _detect_epic_orphans(ctx: dict) -> list[tuple[str, str]]:
                 path.relative_to(epics_dir).as_posix()
                 for path in resolution["locations"]
             )
-            orphans.append((slug, f"epic slug resolves to multiple locations ({rendered}); reconcile to one location"))
+            orphans.append((slug, f"epic slug resolves to multiple locations ({rendered}); preserve all observations and reconcile identity with the lifecycle owner"))
             continue
         if resolution["state"] == "missing":
             continue
@@ -437,46 +427,46 @@ def _detect_epic_orphans(ctx: dict) -> list[tuple[str, str]]:
             continue
         location_state = resolution["state"]
         if location_state == "active" and status == "closed":
-            orphans.append((slug, "epic is status: closed but remains in the active root (archive it)"))
+            orphans.append((slug, "epic is physically current but its status text says closed; verify terminal evidence and the admitted archive transition"))
             continue
         if location_state == "archived" and status == "active":
-            orphans.append((slug, "epic is archived but status: active (restore it to the active root)"))
+            orphans.append((slug, "archived epic has active status text; preserve the archive and reconcile retained terminal evidence and current successor scope"))
             continue
         children = _parse_epic_children(text)
         if not children:
             continue  # a 0-child epic never flags
-        all_done = all(_slug_is_done(ctx, c) for c in children)
-        if location_state == "active" and status == "active" and all_done:
-            orphans.append((epic.stem, "all child work-items are closed but the epic is still status: active (close it)"))
-        elif location_state == "archived" and status == "closed" and not all_done:
-            orphans.append((epic.stem, "archived epic has a child work-item that is not closed (restore and reopen the epic)"))
+        all_children_have_archive_observations = all(
+            _slug_has_archive_observation(ctx, c) for c in children
+        )
+        if location_state == "active" and status == "active" and all_children_have_archive_observations:
+            orphans.append((epic.stem, "listed children have archive observations; verify unique current locations and the substantive epic goal before closure"))
+        elif location_state == "archived" and status == "closed" and not all_children_have_archive_observations:
+            orphans.append((epic.stem, "archived epic has unresolved current child observations; preserve the archive and reconcile history or an explicitly admitted successor"))
     return orphans
 
 
 def _sen0_block_reason(item_orphans: list[tuple[str, str]], epic_orphans: list[tuple[str, str]]) -> str:
-    parts = ["work-items periodic lifecycle check: archive reconciliation is still due."]
+    parts = ["work-items periodic lifecycle check: OBSERVATION requires lifecycle-owner reconciliation."]
     if item_orphans:
         lines = "\n".join(f"  - {name}: {why}" for name, why in item_orphans)
         parts.append(
-            "One or more delivered/closed work-items are still sitting in "
-            "work-items/active/ instead of being archived:\n\n"
+            "Active work-item closure/status observations:\n\n"
             f"{lines}\n\n"
-            "The Recovery rule's close step is as mandatory as the create step. "
-            "Close each item: write closure.md (outcome, residual risk, archive "
-            "location) if it is absent, move the folder to "
-            "work-items/archive/<YYYY-MM>/<slug>/ through the lifecycle owner, "
-            "which refreshes the generated work-items/README.md read-model."
+            "These observations do not prove delivery or authorize closure. "
+            "Verify accepted outcomes, exact terminal evidence, unique physical "
+            "identities, dispositions and obligations with the lifecycle owner "
+            "before an admitted transition and its required readback."
         )
     if epic_orphans:
         lines = "\n".join(f"  - {name}: {why}" for name, why in epic_orphans)
         parts.append(
-            "One or more epics violate the active/archive lifecycle contract:\n\n"
+            "Epic status/location and child archive observations:\n\n"
             f"{lines}\n\n"
-            "For closure, write status: closed + ## Closure, then move the file "
-            "to work-items/epics/archive/<YYYY-MM>/<slug>.md. For reopening, "
-            "move it back to work-items/epics/<slug>.md and set status: active "
-            "in the same lifecycle operation. Reconcile duplicate slugs before "
-            "selecting either copy."
+            "Archive observations do not prove child terminality or the epic "
+            "goal and do not authorize close/reopen. Preserve immutable archives "
+            "and ambiguous history; renewed work requires an explicitly admitted "
+            "successor. Reconcile duplicate identity with the lifecycle owner "
+            "without selecting a convenient copy."
         )
     return "\n\n".join(parts)
 

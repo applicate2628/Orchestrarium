@@ -14,7 +14,7 @@ Location is part of the lifecycle state:
 
 - active: `work-items/epics/<date>-<slug>.md`;
 - closed: `work-items/epics/archive/<YYYY-MM>/<date>-<slug>.md`, where the
-  archive month comes from the `Closed: <YYYY-MM-DD>` line.
+  archive month comes from the `Closed: <YYYY-MM-DDTHH:MM:SSZ>` line.
 
 Each epic remains one flat file (not a folder-per-item). A slug must resolve to
 exactly one location; a copy in both locations or in two archive months is an
@@ -38,8 +38,10 @@ milestone: <one-liner>
 - ...
 
 ## Closure          (only when status: closed)
-Closed: <YYYY-MM-DD>
-<outcome, residual risk>
+Closed: <YYYY-MM-DDTHH:MM:SSZ>
+Outcome: <nonempty accepted outcome>
+Evidence: <nonempty bound terminal evidence>
+Residual risk: <actual remaining risk or none>
 ## Retrospective    (optional; What went well / What didn't / Lessons filed in work-items/lessons/ by id)
 ```
 
@@ -75,19 +77,19 @@ all done -> `ready-to-close (n/n)`; some -> `in-progress (k/n)`; none -> `open`.
   an epic or record `No-epic rationale: <why these remain standalone>`.
 - `$lead` **links** children (stamps each child `Epic: <slug>`), derives the
   roll-up from physical child locations, and **closes** the epic
-  (`status: closed` + `## Closure`) ONLY when ALL children are closed AND the
-  epic goal is met.
-- `$knowledge-archivist` then moves that same file to
-  `work-items/epics/archive/<YYYY-MM>/<slug>.md`, reconciles physical lifecycle
-  locations, regenerates `work-items/README.md`, and verifies that the slug has
-  exactly one location.
+  (`status: closed` + `## Closure`) ONLY when ALL children resolve uniquely
+  archived AND the substantive epic goal is met. Strict UTC `Closed`, nonempty
+  `Outcome`/`Evidence` and actual `Residual risk` record accepted terminal
+  evidence; preparing these fields does not terminalize the active identity.
+- `$knowledge-archivist` uses the existing lifecycle owner's admitted rollback-safe
+  archive/read-model transition to `work-items/epics/archive/<YYYY-MM>/<slug>.md`,
+  reconciles physical locations and `work-items/README.md`, and jointly reads back
+  terminal evidence, unique archived identity and active absence.
 
 ### Edge cases
 - A 0-child epic rolls up as `open/empty`, never `ready-to-close`.
 - Work-items without an epic are valid — they simply omit the `Epic:` line.
-- Reopening a child of a closed epic MUST move the epic back to
-  `work-items/epics/<slug>.md` and set `status: active` in the same lifecycle
-  operation. An archived active epic is invalid transitional residue.
+- A successfully archived epic remains immutable. Renewed scope uses an explicitly admitted current successor linked through the existing reopening owner; never move the archived identity back. If a child reopens, Root reconciles its renewed scope and epic/successor relationship under that contract; no automatic new epic or archive rewrite. Failed-attempt rollback remains distinct and available under its own proofs.
 - An `Epic:` value with no unique active or archived epic file is invalid:
   report missing and duplicate targets distinctly.
 

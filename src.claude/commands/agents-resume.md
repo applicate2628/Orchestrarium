@@ -32,7 +32,7 @@ Resume an interrupted agent chain from its saved state.
 
 ## Rules
 
-- **Every stage MUST be invoked via the Agent tool** with the specified `subagent_type`. Do not role-play specialists inline.
+- Resume each admitted stage through its existing Lead-selected route: native Agent with the specified `subagent_type` for an internal specialist, direct external execution for an admitted external adapter, and the main Root for its coordination. Do not role-play specialists or substitute an internal relay for the selected external route.
 - Read-only until the user confirms resumption — do not auto-start agents.
 - If the interrupted chain was a bugfix with `status: open` bug file, link back to it.
 - If `status.md` is missing or corrupt, offer to reconstruct from available artifacts or start fresh.
