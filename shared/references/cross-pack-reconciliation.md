@@ -36,11 +36,11 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 
 | Block | Claude (`src.claude/agents/contracts/subagent-contracts.md`) | Codex (`src.codex/skills/lead/subagent-contracts.md`) | Notes |
 |-------|-------------------------------------------------------------|-------------------------------------------------------|-------|
-| Handoff template | §"Handoff template" | §"Shared handoff template" | Identical structure; Codex has extra placeholder lines |
+| Handoff template | §"Handoff template" | §"Shared handoff template" | Identical structure and admission-to-assignment input receiving plus result-to-dispatch correlation; shared field meanings are owned by the canonical shared blueprint; Codex has extra placeholder lines |
 | Artifact gate | §"Artifact gate" | §"Artifact gate — no delegation without brief" | Identical rules; Codex adds "if the repository uses one" qualifier |
 | status.md format | §"status.md format" | §"status.md format" | Identical format. Only diff: Codex says "role to invoke" vs Claude's "agent to launch" |
 | Response format | §"Response format" | §"Shared response format" | Same 5-line format. Codex adds fact-first note and consultant exception inline |
-| BLOCKED classification | §"BLOCKED classification" | §"BLOCKED classification" | Identical 2-class table. Codex: "configured bug registry path" vs Claude: `work-items/bugs/` |
+| BLOCKED classification | §"BLOCKED classification" | §"BLOCKED classification" | Shared subagent operating model owns classification; QA owns conditional bug admission. Preserve the two classes and actual cause/owner/next action; admitted proposals use Codex's configured registry path or Claude's `work-items/bugs/` |
 | Interaction rules | §"Interaction rules" | §"Interaction rules" | Same 5 rules; minor wording adaptation |
 | Test ownership boundary | §"Test ownership boundary" | — | **Claude only.** Codex has no equivalent. |
 | Structured completion report | §"Structured completion report" | §"Structured completion report" | Identical 4-item format |

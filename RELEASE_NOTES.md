@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-13
 
+- **Workflow choices preserve task and evidence boundaries.** Lead handoffs retain approved inputs and required remainder; research seeks better routes, early error prevention and ready solutions where useful. Typed execution evidence preserves primary outcomes and owned-resource settlement. Specialist reviews keep cleanup, current behavior and deferred work within their commissioned scope. These accepted instruction changes retain existing safety, publication and lifecycle gates.
+
 - **Role and handoff rules preserve task authority.** Instructions retain admitted scope, required remainder and phase authority while distinguishing real prerequisite failures from defect admission. Engineering guidance favors coherent owners and reused mechanisms without compulsory wrappers or stages. These are scoped rule changes; runtime, installed hook trust and full Goal acceptance remain separate.
 
 - **Recovery preserves terminal lifecycle and reports observations truthfully.** Lead, Archivist and resume guidance close epics through the lifecycle owner and use successors for immutable archived work. The work-item sentinel reports an observed archive without treating placement as delivered outcome, preserving its public result and exit behavior. The maintenance guide identifies the canonical Lead source shared by both installers, and evidence guidance requires only the categories the exact claim depends on. These corrections reduce false recovery holds while retaining terminal proof and full Goal acceptance.
