@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-13
+
+- **Review-loop premises use evidence sufficient for the exact claim.** The shared methodology, operative Codex/Claude bindings and thin Claude command distinguish directly inspected wording or logic from observed runtime causes, measured values and target outcomes. Driving unknowns still hold dependent work; actual-scenario performance profiling, functional receiving, reviewer independence and frozen loop identities remain required. Existing runtime-root/root-proven names stay compatible without implying measurement; no schema, helper or runtime-enforcement change is claimed.
+
 ## 2026-10-12
 
 - **Recovery checks enrolled native Goal authority before routing.** The shared rule and both provider bootstraps clarify that local active records cannot resume a paused native Goal. Owned resource and evidence settlement and independently authorized work retain their existing contracts; ordinary tasks without an enrolled Goal keep their existing workflow. This clarifies observation order, without claiming a proved Source cause or guaranteed model compliance.

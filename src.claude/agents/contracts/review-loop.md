@@ -47,7 +47,7 @@ Each angle is dispatched DIRECTLY by the orchestrator and returns its own result
 The orchestrator drives the loop to convergence **without a human gate per round**; the human sees only the converged result (or an escalation). Each round, while not yet converged and on course:
 
 1. **Revise the artifact** — fold in EVERY open blocker from the verdict angles and every unreconciled scout finding. Re-dispatching an unchanged artifact is forbidden — a verdict cannot change on identical input.
-2. **Anti-drift check (mandatory, every round)** — verify the revised artifact still serves the ORIGINAL pinned objective: goal, admitted scope, and runtime-verified root all unchanged. A revision that shifts the goal, widens scope, or rests on a new unverified premise is **drift** → stop and escalate; do not re-dispatch. Anti-drift is the course-keeper that replaces the human while the loop runs.
+2. **Anti-drift check (mandatory, every round)** — verify the revised artifact still serves the ORIGINAL pinned objective: goal, admitted scope, and verified premises and their claim/evidence scope all unchanged. A revision that shifts the goal, widens scope, or rests on a new unverified premise is **drift** → stop and escalate; do not re-dispatch. Anti-drift is the course-keeper that replaces the human while the loop runs.
 3. **Re-dispatch** only the receipt-admitted angles on the revised artifact, carrying the ORIGINAL objective verbatim. Initial and full-artifact rounds admit all three angles; an eligible exact-delta correction round admits only its affected angles.
 
 **Convergence** = both VERDICT angles PASS AND every scout finding is reconciled (none left dangling). Then gate the human.
@@ -66,8 +66,8 @@ Launch only fresh attempt IDs from committed canonical admission and independent
 
 Against false convergence (angles agreeing on a wrong-but-plausible result) and weak anti-drift:
 
-1. **Runtime-evidence is a hard gate, not a section.** The artifact's runtime-verified root must be captured THIS session; a second-hand root (commit message, prior plan, report) is runtime-verified first or the loop does not start. Never pin the root as `CONFIRMED — do not re-litigate`; that silences the loop's only defense against a wrong foundation.
-2. **Every angle answers** "root proven (runtime)?", "scope unchanged?", "verification adequate?" — not only its own scope.
+1. **Verified premises are a hard gate, not a section.** Before admitting the loop, directly acquire primary evidence THIS session sufficient for each decision-driving claim, and name its owner and falsifying probe. A report, plan or commit message is a pointer, never proof of its asserted root. Verify the underlying evidence and causal chain for the exact claim; rule out material alternatives. Current text or Source inspection proves only the inspected wording or logic, not an actual runtime cause, measured value or target outcome. Runtime and target-environment claims require the corresponding actual observation and functional receiving. For a reported runtime-performance symptom, the FIRST action remains live profiling of the actual reported scenario. Unmeasured runtime values and other unresolved driving premises remain ASSUMPTION (UNVERIFIED), advisory, and hold their dependent loop/design/fix until resolved. Never pin a premise `CONFIRMED — do not re-litigate`.
+2. **Every angle answers** "premises proven for these exact claims?", "scope unchanged?", "verification adequate?" — not only its own scope.
 3. **Reject bare PASS** — cite specific blockers (evidence / `file:line`) or a specific no-blocker rationale. "Looks good" is not a verdict.
 4. **Per-round diff** — record what changed and why (which blocker it answers).
 5. **Verify RESULTS, not notifications** — for an external angle, parse the returned result envelope and confirm that `resultText` contains a real verdict/findings while the combined status is acceptable. Cleanup failure, ledger failure, timeout, cancellation, empty result, or unverified gate is not a clean lane even when the primary provider outcome is preserved in metadata. A callback or "task done" notification never substitutes for the wrapper's terminal return.
@@ -85,7 +85,7 @@ Schema V2 records immutable objective/scope/runtime-root anchors, ordered idempo
 
 The personal/operator-owned exception stays outside `/agents-review-loop` and does not claim governed receipts. The legacy V1 shape below is retained only for read compatibility:
 
-- pinned `objective`, `scope`, `runtime_root` (MUST be identical across all rounds of one loop)
+- pinned `objective`, `scope`, `runtime_root` (MUST be identical across all rounds of one loop) `runtime_root`/`runtime-root` and `root_proven` remain compatibility names for the verified-premise anchor/question; their names do not assert runtime measurement.
 - `round` number (≤ cap)
 - `diff` (what changed since the prior round and why)
 - per verdict angle (`surgical`, `deep`): a non-empty successful `attempt_id` + `verdict` (PASS/REVISE, never bare — cites blockers or rationale) + answers to the three meta-questions (`root_proven`, `scope_unchanged`, `verification_adequate`)
@@ -100,7 +100,7 @@ A structural validator (`scripts/validate-review-loop-state.* --self-test`, a de
 ```yaml
 objective: <one-line goal, pinned, identical across rounds>
 scope: <admitted change surface, pinned, identical across rounds>
-runtime_root: <runtime-captured root cause this session, pinned, identical across rounds>
+runtime_root: <verified premise with current-session primary evidence sufficient for its exact claim, pinned across rounds>
 rounds:
   - round: 1
     diff: <what changed since the prior round and why; for round 1, "initial artifact">
