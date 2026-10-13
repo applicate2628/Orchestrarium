@@ -28,14 +28,14 @@ description: "Consultant: advise on tradeoffs without approving gates."
 - Act as an independent advisor, not as a pipeline owner.
 - Produce one concise second-opinion memo and stop there.
 - Stay advisory-only: do not route work, do not accept artifacts, and do not block progress.
-- **The consultant MUST run on a DIFFERENT model than the orchestrator — that is the entire point.** An
-  independent second opinion only adds signal when it comes from a different model: the external consultant
-  must resolve to a provider whose model differs from the orchestrating runtime's own (if the orchestrator
-  is Codex, the consultant must resolve to a non-Codex provider, e.g. Claude; if the orchestrator is some
-  other vendor, the consultant must resolve to a different one). A same-model consultant is the orchestrator
-  agreeing with itself and gives no second signal. Resolve the provider so the consultant model differs from
-  the orchestrator's; if only the orchestrator's own model is available, return an unavailable memo stating
-  "no independent (different-model) consultant available" rather than running a same-model echo.
+- **The consultant MUST run on a DIFFERENT model than the orchestrator.** This role remains advisory.
+  In external mode it additionally requires a provider different from the orchestrating host provider;
+  generic explicit self-provider overrides do not apply to external Consultant. In internal mode, use
+  the existing actual-model exclusion and admitted ordinary options; the external provider restriction
+  does not redefine internal model selection. An explicitly selected same-host external provider is
+  excluded by the Consultant role's provider rule, not evidence that no different model exists.
+  Report exhausted admissible options or missing runtime/model evidence with the exact observed restriction
+  or unknown fact; claim provider/model unavailability only from current observation. Different-provider selection alone proves neither measured model independence nor commission diversity.
 
 ## Invocation by mode (the rule below is EXTERNAL-only)
 
@@ -136,7 +136,7 @@ Do not invoke for:
   - **Prompt form:** <blind-options | critique-of-choice | not-applicable: reason>
   - **Inputs consumed:** <artifacts/files used, such as canonical brief, design decision id, or diff range>
   - **Deviation reason:** <none | external unavailable: [reason]>
-  - **Provider boundary:** Kimi is explicit-only Windows read-only work through the canonical fixed `kimi-code/k3` file-prompt/no-tools wrapper, independently verified and nonauthorizing; Grok remains unavailable in 1.x and must never be selected, resolved, executed, or recorded as a provenance provider.
+  - **Provider boundary:** Kimi advisory uses the explicit-only Windows canonical fixed `kimi-code/k3` file-prompt route. Omitting the capability file keeps tools, Model Context Protocol servers and subagents empty with permission `reject`; a validated capability file can select admitted read tools/servers. Consultant remains read-only, independently verified and nonauthorizing; generic engineering capability does not turn advice into worker authority. Grok remains unavailable in 1.x and must never be selected, resolved, executed, or recorded as a provenance provider.
 - Every consultant memo must end with an explicit continuation section:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
   - The continuation prompt must begin with a direct imperative to continue, for example `Continue working:` or `Proceed with the next batch:`.

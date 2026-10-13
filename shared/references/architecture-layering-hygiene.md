@@ -122,16 +122,16 @@ entry point; a second entry point is evidence, not a prerequisite. Without that 
 current decision with its current owner rather than extracting speculative reuse. [spine:
 Change-surface minimization, Ownership / extension-seam hygiene]
 
-**A6 — Dependency inversion: the contract goes on a stable surface, never reversed.** When a lower
-module must be INVOKED by, but cannot DEPEND ON, a higher module, define the narrow CONTRACT on a
-STABLE surface that both sides may depend on without reversing dependency direction — the lower module
-itself, or a neutral contract / interface module below both — and INJECT the implementation from
-above. The contract does NOT always live "in the lowest module": service contracts, plugin APIs,
-schema registries, and role/agent contracts often live on a neutral stable surface both sides import.
-The invariant that DOES hold everywhere: implementation-heavy / private modules must NOT be imported
-across layers — cross-layer consume is legal only against an interface leaf with no downward edges; an
-edge into a sibling's private/internal module across a band is presumptively a silo leak. [spine:
-Interface and encapsulation hygiene, SOLID reminder]
+**A6 — Dependency inversion: invert the dependency that requires it.** When a lower-level capability
+needs behavior supplied by a higher-level policy/implementation but must not depend on that higher
+module, keep the narrow contract on an existing STABLE surface both sides may depend on and INJECT
+the implementation from above. An accepted replaceability requirement can justify the same seam.
+Reuse the lower module's public contract or an existing neutral contract; create a neutral surface
+only when the dependency contract requires it. Ordinary downward calls through an adequate public
+API do not require an injected interface. Cross-layer access must respect the public contract and
+dependency direction; private/internal implementation imports remain prohibited. A public module
+can have legitimate lower dependencies; an interface leaf is an available shape, not the only public
+call shape. [spine: Interface and encapsulation hygiene, SOLID reminder]
 
 **A7 — Split a capability by level BEFORE calling anything a copy (graduate-the-core).** Decompose a
 capability by abstraction level. The lowest pure, dependency-light CORE (no feature / transport /
@@ -250,22 +250,29 @@ reports about itself, records provenance, owns lifetime, and shares data across 
 Same form as A-C: decidable tests with a named owner + enforcement probe, defaults with named
 exceptions, SHARPENING the tagged spine rules.
 
-**D1 — Failure is a typed RETURNED value; process termination is composition-root-owned.** A reusable
-module (library, leaf, engine, service component) reports failure as a typed RETURNED status/error value
-carrying SEVERITY, a STABLE failure ID, and an optional CAUSE CHAIN — never by invoking a
-process-termination primitive (`exit`/`abort`/`_exit`/`std::terminate`/`os.Exit`/`System.exit`/a panic
-that aborts the process). ONLY the composition root / app entry point owns process termination; on a
-fatal-severity returned failure IT makes an EXPLICIT termination / degradation / recovery decision (the
-severity is the input to that decision, not an implicit exit). A leaf that kills the process is
-UNEMBEDDABLE (in-process UI, API host, test harness, a second instance in one process) and erases the
-caller's diagnostic context. This is fail-loud UP the call chain, not by killing every other caller. The failure idiom is chosen per LAYER and is uniform within it: process exit at the composition root; typed returned status from libraries/leaves; an in-band poison value (e.g. NaN-poison) ONLY where no status channel exists (a numeric kernel with no side-band), documented at the contract. The
-three fields are load-bearing: severity → response choice; stable failure-id → a machine key for
-tooling/tests; cause chain → originating context. The severity must distinguish at minimum the response
-classes the composition root can select (e.g. recoverable / degrade / fatal). (Source L11: leaves NEVER
-terminate; only the composition root does — a genuine fail-stop on detected state corruption /
-memory-safety violation is the composition root's decision on a returned typed failure, or an explicit
-documented composition-root contract, never a leaf license.) OWNER: the composition root (process
-lifetime + the recovery decision) + the caller (diagnostic context). PROBE: grep the reusable-module
+**D1 — Failure uses the accepted typed channel; process termination is composition-root-owned.** A
+reusable module (library, leaf, engine, service component) reports failure through the accepted typed
+error mechanism of its language, framework and layer, such as returned status or typed exception.
+Preserve the originating cause/context and every distinction callers need to choose recovery,
+degradation or termination. A reusable leaf must not independently invoke a process-termination
+primitive (`exit`/`abort`/`_exit`/`std::terminate`/`os.Exit`/`System.exit`/a panic that aborts the process).
+ONLY the composition root / app entry point owns process termination and makes an EXPLICIT termination /
+degradation / recovery decision. A leaf that kills the process is UNEMBEDDABLE (in-process UI, API host,
+test harness, a second instance in one process) and erases the caller's diagnostic context. This is
+fail-loud UP the call chain. Keep one failure idiom for each failure class in each LAYER; translate only
+at an actual owning boundary and preserve meaning. An in-band poison value (e.g. NaN-poison) is allowed
+ONLY where no status channel exists (a numeric kernel with no side-band), documented at the contract.
+Severity/status codes, stable failure IDs and cause fields remain mandatory where an existing API,
+binary/wire contract, operational consumer or accepted requirement requires them; do not manufacture
+parallel fields when the existing mechanism already expresses the required distinctions. Severity
+distinguishes required response classes (e.g. recoverable / degrade / fatal); stable IDs preserve
+machine identity and cause fields preserve originating context where that contract requires them.
+Exceptions must not cross a boundary that forbids them. Never swallow failure, turn it into success,
+lower severity, change exit/retry behavior or relabel contract failures as optional diagnostics.
+(Source L11: leaves NEVER terminate; only the composition root does — a genuine fail-stop on detected
+state corruption / memory-safety violation is the composition root's decision on a typed failure, or an
+explicit documented composition-root contract, never a leaf license.) OWNER: the composition root
+(process lifetime + the recovery decision) + the caller (diagnostic context). PROBE: grep the reusable-module
 tree — the modules/libraries/packages explicitly DESIGNATED reusable (not composition roots, app entry
 points, or test-binary harnesses; the repo-local governance defines the boundary, as A1's probe defers
 to "the repo-standard gate"; where no boundary is declared, the scope is every source file NOT at an
@@ -275,28 +282,37 @@ the existing baseline is a frozen debt that only decreases — a repo CI counter
 else the probe is review-bound (the reviewer counts new termination primitives in the diff); idiom-uniformity: two failure idioms for one failure class within one layer is a finding (review-bound). [spine:
 Failure transparency and diagnosability, Operational-contract scope discipline]
 
-**D2 — Observability is one support-owned, injected diagnostic port with stable event IDs and a
+**D2 — Observability uses one appropriate diagnostic owner and the existing facility first, with a
 zero-cost disabled path on measured loops.** Diagnostics (trace, progress, profiling, correlation,
-structured logging) flow through ONE support-layer-owned diagnostic PORT, INJECTED from above (dependency
-inversion, A6-shaped) and threaded at a COARSE boundary, never re-passed per inner iteration on a
-measured loop (B3); it carries STRUCTURED events whose IDs come from a single CONST registry. The IDs are
-a VERSIONED API CONTRACT — downstream log/trace/alert tooling depends on them. On a MEASURED/hot path the
+structured logging) use the existing repository/framework observability facility under its owning
+contract, preserving causal context, routing, severity, redaction and operational visibility.
+Introduce an injected diagnostic PORT only where actual dependency direction, admitted variability or
+the boundary contract requires one; reuse an existing port when it already owns that concern. A
+supported logger or existing output contract can suffice without an extra wrapper. Stable event IDs,
+structured fields, registry ownership and version compatibility are required when actual log/trace/alert
+consumers or an accepted diagnostic contract depend on them; keep that owner and do not duplicate its
+registry. An existing structured framework event contract can suffice without a bespoke registry.
+Emitting diagnostics alone requires neither a custom port nor a versioned registry. Existing mandatory
+diagnostic channels remain mandatory; caller convenience cannot bypass them. Thread the diagnostic
+facility at a COARSE boundary, never re-pass it per inner iteration on a measured loop (B3).
+On a MEASURED/hot path the
 disabled path is COMPILE-TIME-ELIDABLE — when off, the hot path carries NO residual branch, call, or flag
 load. A per-iteration check on a RUNTIME variable flag is insufficient there (it costs the flag load and
 can block vectorization); a build-time-constant-false guard the optimizer folds away, or a compose-time
 non-instrumented path, is fine — the requirement is ZERO RESIDUE in the measured loop body, however
 achieved. Off measured loops a runtime-gated no-op is fine. This is the positive shape of C2's
-diagnostic-instrumentation exception — it does NOT restate C2's ambient-read ban nor C1's
-single-owner-registry rule (cross-reference both); its net-new delta is the single injected port + const
-ID registry + versioned-ID contract + compile-elision-on-a-measured-loop (adjacent to but not a
-restatement of B1/B3). EXCEPTION: a non-performance-critical module may use a runtime-gated port
-everywhere; a runtime that cannot elide (interpreted / JIT with no zero-cost abstraction) hoists the
-enable-check OUT of the hot loop or selects a compose-time non-instrumented path and records the
-limitation. OWNER: the support/observability layer (single diagnostic channel + versioned event-ID
-registry; the PROBE is facet-split across slices — impl owns the structural route-through-the-port part,
-perf owns the compile-elision residue check — mirroring how D3's OWNER flags its security-engineer
-facet). PROBE: (1) no diagnostic free-text emit or ambient env read for diagnostics outside the support
-owner (grep); (2) every emitted ID resolves in the const registry (fail-closed); (3) on a compiled
+diagnostic-instrumentation exception; C2's ambient business/policy-read ban and C1's single-owner
+constraints remain binding. Its diagnostic ownership/contract obligations and compile-elision on a
+measured loop are adjacent to, not a restatement of, B1/B3. EXCEPTION: a non-performance-critical module
+may use a runtime-gated port everywhere; a runtime that cannot elide (interpreted / JIT with no zero-cost
+abstraction) hoists the enable-check OUT of the hot loop or selects a compose-time non-instrumented path
+and records the limitation. OWNER: the support/observability layer (the owned diagnostic channel + its
+required event-ID registry; the PROBE is facet-split across slices — impl owns conformance to the actual
+diagnostic contract, perf owns the compile-elision residue check — mirroring D3's security-engineer
+facet). PROBE: (1) diagnostic routing, cause/context, severity, redaction and operational visibility
+conform to the actual owned contract; inspect unknown consumers before deciding what it requires, and
+preserve C2's ambient-read restriction; (2) when that contract has an ID registry, every emitted ID
+resolves in it (fail-closed); (3) on a compiled
 measured path the disabled-residue check is STRUCTURAL first — the diagnostic owner is NOT in the
 link/import set of the measured unit, OR the disabled path is a build-time constant the compiler provably
 folds (both checkable from the build/link graph); ONLY where the perf budget explicitly demands the
@@ -435,14 +451,15 @@ a regression in any is a blocking finding:
 - **Entry points hold no admitted-reuse decision** (A5) — probe: each decision in an app/tool stays with
   its current owner unless accepted or evidenced variation requires reusable capability.
 - **Test support deletes cleanly** (C4) — probe: removing an implementation edits no other tests.
-- **No leaf process-termination** (D1) — probe: termination-primitive grep over the repo-defined
-  reusable-module boundary (where none is declared: the non-entry-point/non-test tree, review-bound); NEW
-  hit in the change FAILS; existing baseline a frozen debt.
-- **Diagnostics through one injected port with registered IDs** (D2) — probe: no ad-hoc sink/env-read
-  outside the support owner; every ID resolves; disabled-path residue check is STRUCTURAL-LINK FIRST
-  (owner absent from the measured unit's link/import/macro-expansion set, or disabled path a build-time
-  constant — checkable from the build/link graph), release-build asm/IR ONLY where the perf budget demands
-  the zero-residue proof; review-bound on interpreted/JIT.
+- **No leaf process-termination; accepted typed failure channel** (D1) — probe: preserve caller
+  decision information and originating cause, contract-required fields and per-layer failure uniformity;
+  termination-primitive grep over the repo-defined reusable-module boundary (where none is declared:
+  the non-entry-point/non-test tree, review-bound); NEW hit in the change FAILS; existing baseline a frozen debt.
+- **Diagnostics conform to their existing owned contract** (D2) — probe: routing, context, severity,
+  redaction and visibility preserved; required IDs resolve in their owned registry; unknown consumers
+  inspected. Disabled-path residue check is STRUCTURAL-LINK FIRST (owner absent from the measured unit's
+  link/import/macro-expansion set, or disabled path a build-time constant — checkable from the build/link
+  graph), release-build asm/IR ONLY where the perf budget demands the zero-residue proof; review-bound on interpreted/JIT.
 - **Every D3-triggered artifact carries a publication-safe full-field manifest** (D3) — probe: packaging
   emits+diffs the manifest (toolchain/flags, pinned deps, platform identity, determinism/FP mode, seed,
   parallel config + reduction partitioning, input hashes, config snapshot, contract/schema versions,
@@ -465,9 +482,11 @@ check that catches a violation):
 
 - [ ] New capability lands in its single owning module; no second copy (grep the symbol/operation, not
       the name).
-- [ ] Every dependency edge points strictly down the graph or to an interface leaf; no edge into a
-      sibling's private/internal module across a band; no upward or cyclic edge — caught by the
-      repo-standard build/lint/import-graph/validator/CI gate (A1).
+- [ ] Every dependency edge respects the adequate public contract and points strictly down the graph
+      or to a stable contract surface; no private/internal cross-layer import, upward or cyclic edge —
+      caught by the repo-standard build/lint/import-graph/validator/CI gate (A1). Injection is required
+      for an actual inverted dependency or accepted replaceability requirement, not an ordinary adequate
+      public downward call (A6).
 - [ ] No generic engine include/symbol/edge names a specific consumer/feature/method (A3).
 - [ ] No entry-point unit holds a decision that admitted or evidenced variation requires another entry
       point to reuse; otherwise the current owner remains direct (A5).
@@ -491,12 +510,14 @@ check that catches a violation):
       absent admitted variation, the current owner is corrected directly.
 - [ ] Accepted debt is a tracked grandfathering entry (owner/scope/expiry/no-expansion), not a silent
       re-bless or a license for new violations (C5).
-- [ ] No reusable module terminates the process; failure is a typed RETURNED value (severity+id+cause);
-      the composition root owns termination + the recovery decision (D1).
-- [ ] Diagnostics route through one injected support-owned port (coarse-threaded); IDs resolve in the
-      const registry (versioned contract); disabled-path residue check is structural-link-first (owner
-      absent from the measured unit's link/import/macro-expansion set, or build-time constant), asm/IR only
-      on perf-budget demand, review-bound on JIT (D2).
+- [ ] No reusable module independently terminates the process; failure propagates through the accepted
+      typed channel with cause and caller decision information, contract-required fields and per-layer
+      uniformity; the composition root owns termination + the recovery decision (D1).
+- [ ] Diagnostics use the existing owned facility; an injected port and stable registered/versioned
+      IDs are required where the actual dependency/consumer contract requires them. Routing, context,
+      severity, redaction and visibility are preserved; disabled-path residue check is structural-link-first
+      (owner absent from the measured unit's link/import/macro-expansion set, or build-time constant),
+      asm/IR only on perf-budget demand, review-bound on JIT (D2).
 - [ ] Every D3-triggered published/packaged/golden/cross-environment-comparison/scientific-or-performance
       reproducibility artifact carries a publication-safe, allowlist-built run
       manifest — toolchain/flags, pinned deps, platform identity, determinism/FP mode, seed, parallel
@@ -526,10 +547,11 @@ check that catches a violation):
   (the anti-pattern).
 - **core / glue (A7)** — the lowest pure single-owner unit (reused, never re-typed) vs the
   per-consumer orchestration over it.
-- **dependency inversion (A6)** — contract defined on a stable surface both sides may depend on,
-  implementation injected from above.
-- **interface leaf** — an interface / protocol / contract module with no downward dependency edges,
-  safe to depend on across layers.
+- **dependency inversion (A6)** — a lower capability needs higher-supplied behavior without depending
+  on that higher module; a shared stable contract and implementation injected from above satisfy that
+  dependency or an accepted replaceability requirement. An adequate public downward call needs no new interface.
+- **interface leaf** — an interface / protocol / contract module with no downward dependency edges;
+  one available stable contract shape, not the sole legal public cross-layer call shape.
 - **adapter / binding / composition (A2)** — the thin edit surface where new scenarios are wired, on
   top of stable backends.
 - **dependency graph / DAG** — the directed graph of module dependencies (imports / requires / link
@@ -542,10 +564,10 @@ check that catches a violation):
   boundary across which a derived-from-one-source or drift-gated duplicate representation is tolerated.
 - **composition root / outer ring** — the app/entry layer that owns process termination + the recovery
   decision (D1) and resource/global lifetime (D4).
-- **diagnostic port (D2)** — the single support-owned, injected, coarse-threaded channel all diagnostics
-  flow through.
-- **event-ID registry / versioned diagnostic IDs (D2)** — the const registry of stable diagnostic event
-  IDs tooling depends on as an API contract.
+- **diagnostic port (D2)** — an injected, coarse-threaded diagnostic channel where the actual
+  dependency, admitted variability or boundary contract requires it; reuse the existing owned facility.
+- **event-ID registry / versioned diagnostic IDs (D2)** — the single owned registry of stable
+  diagnostic IDs where consumers or an accepted diagnostic contract require their API identity and compatibility.
 - **run manifest / run provenance (D3)** — the machine-readable record required for a D3-triggered run:
   toolchain, pinned deps, platform identity, determinism/FP mode, seed, parallel config, input hashes,
   contract/schema versions, strategy/algorithm.

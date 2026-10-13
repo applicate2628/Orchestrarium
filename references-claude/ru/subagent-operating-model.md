@@ -12,12 +12,12 @@
 
 - Claude runtime использует Agent tool и текущие Claude operator reference surfaces. Считайте этот файл локальным runtime addendum к shared blueprint, а не канонической полной копией методологии.
 - Consultant config живёт в `.claude/.agents-mode.yaml`.
-- Claude-line canonical config не включает `externalClaudeProfile`; Claude-side `externalProvider: auto` разрешается через active named production priority profile, shipped production `auto` использует только `codex | claude`. Explicit Kimi разрешён только для policy-admitted read-only работы; Grok остаётся unavailable, а удалённые Gemini/Qwen scalar values fail closed с `E_EXTERNAL_PROVIDER_REMOVED`.
+- Claude-line canonical config не включает `externalClaudeProfile`; Claude-side `externalProvider: auto` разрешается через active named production priority profile, shipped production `auto` использует только `codex | claude`. Явный выбор Kimi допускается для разрешённой политикой работы только на чтение либо инженерной работы, для которой допустимость задачи и назначенная профессия соответствуют `external-worker`. Выбранный файл возможностей предоставляет только ограниченные вызывающей стороной инструменты в рамках существующего класса мутаций и соответствия роли; он не предоставляет полномочий и не является песочницей. Grok остаётся unavailable, а удалённые Gemini/Qwen scalar values fail closed с `E_EXTERNAL_PROVIDER_REMOVED`.
 - `$external-worker` и `$external-reviewer` dispatch'ят из Claude Code в провайдера, выбранного `.claude/.agents-mode.yaml`.
 
 ## Claude-side repository concretization
 
-- Adjacent findings и `BLOCKED:prerequisite` идут в `work-items/bugs/`.
+- Допущенные предложения о смежных дефектах используют `work-items/bugs/` по контракту допуска ошибок `qa-engineer`. Типизированные остановки сохраняют фактическую причину, обязательный остаток работы, владельца и следующее действие по общему ядру.
 - Human-readable recovery начинается с generated `work-items/README.md`; состояние определяется по физическим `work-items/backlog/`, `work-items/active/<date>-<slug>/` и `work-items/archive/YYYY-MM/<date>-<slug>/` плюс owning artifacts. `work-items/index.md` остаётся только compatibility snapshot.
 - Periodic controls остаются pack-local в [periodic-control-matrix.md](periodic-control-matrix.md).
 - Claude-side examples используют `Gate: PASS | REVISE | BLOCKED:<class> | RETURN(role)`.

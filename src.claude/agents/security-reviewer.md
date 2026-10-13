@@ -63,7 +63,7 @@ For each applicable row report `found`, `not-applicable`, or `not-run`; `not-run
 
 ## Security finding registry
 
-- On `REVISE` or `BLOCKED`, include a proposed registry record in-band in the returned artifact for the root or lifecycle owner, using `work-items/bugs/<date>-<slug>.md`, the format owned by `qa-engineer`, and `found-by: security-reviewer`. Write the proposed registry record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. A direct registry write is a narrow canonical-artifact exception and does not otherwise broaden this role's write posture.
+- Apply the bug-admission contract owned by `qa-engineer`: include a proposed registry record in-band only for a concrete observed defect or an unexpected missing result required by the commissioned slice, with expected-versus-actual evidence. `REVISE` or `BLOCKED` alone does not admit a bug; retain a non-defect hold's actual cause, required remainder, owner and next action. Submit any admitted proposal in the returned artifact for the root or lifecycle owner, using `work-items/bugs/<date>-<slug>.md`, the format owned by `qa-engineer`, and `found-by: security-reviewer`. Write the proposed registry record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. A direct registry write is a narrow canonical-artifact exception and does not otherwise broaden this role's write posture.
 
 ## Architecture layering hygiene (security verification)
 

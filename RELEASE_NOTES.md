@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-13
 
+- **Role and handoff rules preserve task authority.** Instructions retain admitted scope, required remainder and phase authority while distinguishing real prerequisite failures from defect admission. Engineering guidance favors coherent owners and reused mechanisms without compulsory wrappers or stages. These are scoped rule changes; runtime, installed hook trust and full Goal acceptance remain separate.
+
 - **Recovery preserves terminal lifecycle and reports observations truthfully.** Lead, Archivist and resume guidance close epics through the lifecycle owner and use successors for immutable archived work. The work-item sentinel reports an observed archive without treating placement as delivered outcome, preserving its public result and exit behavior. The maintenance guide identifies the canonical Lead source shared by both installers, and evidence guidance requires only the categories the exact claim depends on. These corrections reduce false recovery holds while retaining terminal proof and full Goal acceptance.
 
 - **QA conclusions follow the commissioned scope.** Both QA role definitions distinguish successful preparation from unexecuted whole-outcome criteria. Intentional deferral alone creates no failed slice or bug; real missing required results, failed checks and genuine denials retain their consequences. Superseded-mechanism checks follow the changed scope, and the existing pack validators track the current owning clauses without changing their predicates or missing-evidence behavior.

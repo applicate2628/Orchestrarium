@@ -19,7 +19,7 @@ description: "Review or QA run on external CLI provider; read-only."
 - Require the approved reviewable artifact (implementation, governance/control-plane change, plan, or other routed artifact) to review.
 - Require the internal reviewer or QA role label being replaced for provenance.
 - Require an explicit review strategy: `claim-verify` or `adversarial`; if it is missing, ask the orchestrating owner instead of guessing.
-- In adversarial mode, send an artifact-only prompt containing the artifact and review scope but no builder claims or self-review, as required by the lead-owned review-strategy rule.
+- For an adversarial review strategy, carry the reviewable artifact and review scope together with original admission and genuine user amendments, accepted contracts/owner claims and their immutable revision, protected surfaces, named guard and required implementation evidence through the existing complete handoff's `Approved inputs`. Keep accepted contract-bearing artifacts unchanged; do not remove governing inputs or reconstruct authority from the builder's artifact. Exclude unaccepted builder persuasion/self-review and prior reviewer verdicts to avoid anchoring. When no upstream claim set exists, use accepted criteria instead of inventing claims. Retain the required remainder with Root as owner and its next action; the assigned review slice does not narrow the original outcome. Separately admitted blind artifact-only exploration is advisory and cannot replace the contract-aware gate.
 - Take only the minimal accepted artifact needed for the review.
 - Treat any eligible reviewer or QA role as replaceable by the external adapter.
 

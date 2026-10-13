@@ -30,7 +30,7 @@ Candidate launch arguments MUST NOT select or resume an existing provider sessio
 | `DP5 — Mandatory comparison` | The synthesis owner receives ALL valid candidates and produces an explicit comparison matrix. Surface-sweep panels take the verified union of compatible coverage; architecture-choice panels select or coherently combine options — never majority-vote or blind union of incompatible designs. |
 | `DP6 — Sole advance gate` | Only the synthesis artifact carries the Change-Surface Contract, final numbered `{guarantee, single-owner, enforcement-probe}` claims, and durable decision-registry identifiers, plus `PASS`. Candidate artifacts carry none of these. A panel invocation returns one public result: the synthesis or a non-success status. |
 | `DP7 — Fail closed` | Missing/errored/empty lanes are `UNVERIFIED`; duplicate framings invalidate quorum; unresolved conflicts return `REVISE`; fewer than two valid candidates return `BLOCKED:dependency`. |
-| `DP8 — One shot, then verify` | Candidate generation happens once; synthesis is the convergence step. No round counter or anti-drift ledger. Hand the synthesized design to `$review-loop` if independent verification is wanted. |
+| `DP8 — One shot, then verify` | Candidate generation happens once; synthesis is the convergence step. No round counter or anti-drift ledger. After synthesis, reassess the existing mandatory review-loop triggers. Perform required verification when a trigger remains; otherwise additional review needs its existing admission. A panel alone mandates neither a loop nor Planner and cannot waive an explicit full-loop request or unresolved owner/seam risk. Continue only the next selected authorized stage. |
 
 ## Steps
 

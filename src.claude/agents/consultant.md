@@ -28,14 +28,14 @@ description: "Consultant: advise on tradeoffs without approving gates."
 - Act as an independent advisor, not as a pipeline owner.
 - Produce one concise second-opinion memo and stop there.
 - Stay advisory-only: do not route work, do not accept artifacts, and do not block progress.
-- **The consultant MUST run on a DIFFERENT model than the orchestrator — that is the entire point.** An
-  independent second opinion only adds signal when it comes from a different model: if the orchestrating
-  runtime is Claude, the external consultant must resolve to a non-Claude provider (e.g. Codex); if the
-  orchestrator is Codex, the consultant must resolve to non-Codex (e.g. Claude). A same-model consultant is
-  the orchestrator agreeing with itself and gives no second signal. Resolve the provider so the consultant
-  model differs from the orchestrator's; if only the orchestrator's own model is available, return an
-  unavailable memo stating "no independent (different-model) consultant available" rather than running a
-  same-model echo.
+- **The consultant MUST run on a DIFFERENT model than the orchestrator.** This role remains advisory.
+  In external mode it additionally requires a provider different from the orchestrating host provider;
+  generic explicit self-provider overrides do not apply to external Consultant. In internal mode, use
+  the existing actual-model exclusion and admitted ordinary options; the external provider restriction
+  does not redefine internal model selection. An explicitly selected same-host external provider is
+  excluded by the Consultant role's provider rule, not evidence that no different model exists.
+  Report exhausted admissible options or missing runtime/model evidence with the exact observed restriction
+  or unknown fact; claim provider/model unavailability only from current observation. Different-provider selection alone proves neither measured model independence nor commission diversity.
 
 ## Invocation by mode (the rule below is EXTERNAL-only)
 

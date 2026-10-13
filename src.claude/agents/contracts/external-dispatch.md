@@ -105,7 +105,7 @@ The prompt file is the only governance an external Command-Line Interface (CLI) 
 - State the assigned role's gate vocabulary and one-artifact requirement.
 - Include a provenance-header echo instruction using this contract's header fields.
 - Include the evidence-citation discipline verbatim from the owning `Evidence discipline:` handoff field; this contract does not create a second copy.
-- For an adversarial review strategy, use an artifact-only prompt: include the artifact and review scope, but exclude builder claims and self-review.
+- For an adversarial review strategy, carry the reviewable artifact and review scope together with original admission and genuine user amendments, accepted contracts/owner claims and their immutable revision, protected surfaces, named guard and required implementation evidence through the existing complete handoff's `Approved inputs`. Keep accepted contract-bearing artifacts unchanged; do not remove governing inputs or reconstruct authority from the builder's artifact. Exclude unaccepted builder persuasion/self-review and prior reviewer verdicts to avoid anchoring. When no upstream claim set exists, use accepted criteria instead of inventing claims. Retain the required remainder with Root as owner and its next action; the assigned review slice does not narrow the original outcome. Separately admitted blind artifact-only exploration is advisory and cannot replace the contract-aware gate.
 - Immediately before an approved non-interactive Codex launch, `provider_prompt.py::launch` runs the installed Codex hook-health helper in `require` mode. A nonzero trust/liveness verdict prevents `codex exec`; this gate does not apply to Claude launches.
 
 ## Run-completion oracle

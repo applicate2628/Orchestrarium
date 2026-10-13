@@ -1,6 +1,6 @@
 # Review Loop
 
-Run the autonomous parallel-review-loop: dispatch three independent scope angles against one written fix-design artifact, converge autonomously under an anti-drift guard, and gate the human only at the converged result. This command is THIN — it reads the installed contract at runtime and executes the loop; it does not restate the methodology.
+Run the autonomous parallel-review-loop: dispatch three independent scope angles against one written fix-design artifact and converge autonomously under an anti-drift guard. Root receives the terminal outcome and continues already-authorized ready work under its existing gates; convergence itself adds no human approval step or execution authority. This command is THIN — it reads the installed contract at runtime and executes the loop; it does not restate the methodology.
 
 ## When to auto-invoke
 
@@ -33,9 +33,9 @@ Do NOT auto-invoke for trivial changes (one-line typo, doc edit, single-file ref
 
 6. **Converge autonomously through the state owner.** Use the preferred helper commands below or declared owner-equivalent transitions with the same state contract. Call `mark-running` before each launch; count a result/failure only after `record-result`/`record-failure` accepts the same round, attempt ID, and artifact revision. Reconcile failed lanes through `admit-retry`, finish each clean round through `complete-round`, and freeze every corrected artifact through `next-round` before re-dispatch. Use fresh operation IDs, replaying one only for an idempotent retry. Close through `close --outcome converged|drift|deadlock`.
 
-7. **Human gate at convergence only.** Return to the human in exactly three cases — never per round: (a) converged (both verdict angles PASS + all scout findings reconciled) — present the final design plus a short round history; (b) drift — present what would have drifted off the pinned objective and why you stopped; (c) deadlock — cap N=3 reached without convergence — present the aspect that never converged.
+7. **Receive the terminal outcome under existing authority.** Receive the terminal outcome through Root: on convergence, present the accepted design and short round history, verify both verdicts, reconciled scout findings and canonical closure/readback, then continue the next already-authorized ready action under its existing gates. A design-only request ends at its accepted handoff; an actual human, scope, pause or publication gate holds only its dependent action. Drift or deadlock stops the affected loop and escalates its unresolved decision/cap; independent admitted ready work may continue. No human gate is added per round or merely because convergence occurred.
 
-8. **Implement after acceptance.** Once the human accepts the converged design, implement its accepted guarantees and invariants, preserving upstream claim identity and required safety corrections that discharge genuine vetoes. Optional reviewer HOW or telemetry suggestions remain advisory/nonblocking unless separately admitted into scope; run the validation plan and capture evidence before the root's verified local checkpoint.
+8. **Implement under existing authority.** When Root receives the converged outcome and the next implementation action is already authorized with its required gates passed, the assigned implementer executes its accepted guarantees and invariants, preserving upstream claim identity and required safety corrections that discharge genuine vetoes. Optional reviewer HOW or telemetry suggestions remain advisory/nonblocking unless separately admitted into scope; run the validation plan and capture evidence before the root's verified local checkpoint. Read-only reviewer lanes gain no Source mutation authority.
 
 ## Disambiguation
 
@@ -48,5 +48,5 @@ See also `/agents-design-panel` — the generation-side analog: it independently
 - This is an operator command, not a new specialist role; the angles are dispatched via the Agent tool.
 - The methodology lives in `.claude/agents/contracts/review-loop.md`; this command points at it and must not restate it.
 - The mechanical scout is `analyst` and casts no verdict; never route it to `qa-engineer`.
-- The deep angle is a direct-verdict `architecture-reviewer` at `model: fable` (the flagship alias as of 2026-07); it is intentionally NOT `consultant` (external-mode consultant shells out — the role-confusion). `consultant.md` stays untouched.
+- The deep angle is a direct-verdict `architecture-reviewer` using a sufficient current policy/host-admitted profile. Preserve genuinely admitted exact model/effort/corridor/family requirements and record actual runtime metadata distinctly from requested/resolved controls; no dated alias establishes availability. It is intentionally NOT `consultant` (external-mode consultant shells out — the role-confusion). `consultant.md` stays untouched.
 - Do NOT commit, push, or install from this command. Return the accepted artifact to the root; verified local commit checkpoints remain the root's responsibility under shared governance. Human review remains required before push, release, or equivalent publication.

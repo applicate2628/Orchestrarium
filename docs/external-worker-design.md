@@ -4,7 +4,7 @@
 **Status:** Approved
 **Scope:** Orchestrarium skill-pack routing canon across the production Codex/Claude core plus explicit example integrations
 
-**2026-08-26 production note:** Shipped production `externalProvider: auto` routing remains limited to the Codex/Claude pair. Kimi Code is an explicit-only, read-only Windows route through the canonical fixed `kimi-code/k3` file-prompt/no-tools wrapper; normal launch does not require executable enrollment, remains independently verified and nonauthorizing, and does not attest the actual server-side model. Grok remains unavailable in 1.x. Neither participates in shipped production profiles.
+**Current production note:** Shipped production `externalProvider: auto` routing remains limited to the Codex/Claude pair. Kimi Code is an explicit-only Windows route through the canonical fixed `kimi-code/k3` file-prompt wrapper for policy-admitted read-only work or engineering whose task eligibility and assigned profession map to `external-worker`. Omitting the capability file keeps tools, Model Context Protocol servers and subagents empty with permission `reject`; a validated selected file can supply admitted read tools/servers or caller-scoped worker tools under the existing mutation class and role mapping, not authority or a sandbox. Normal launch does not require executable enrollment, remains independently verified and nonauthorizing, and does not attest the actual server-side model. Grok remains unavailable in 1.x. Neither participates in shipped production profiles.
 
 ## Problem
 

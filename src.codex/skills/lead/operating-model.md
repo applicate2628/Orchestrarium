@@ -237,10 +237,10 @@ Use review-loop for an explicit user loop/full-review request, materially compet
 
 Two independence techniques exist at different stages; pick the one that matches the stage:
 
-- **Design-panel** (`$design-panel`, skill `skills/design-panel/`) is independence at **generation**: N>=2 independently-framed design lanes on one pinned problem, converged through one mandatory synthesis, BEFORE a single design exists. Use it for the two admitted triggers — a high-surface-count mechanical sweep, or an open architecture choice — not for an ordinary single-architect design.
+- **Design-panel** (`$design-panel`, skill `skills/design-panel/`) is independence at **generation**: N>=2 independently-framed design lanes on one pinned problem, converged through one mandatory synthesis, BEFORE a single design exists. A high-surface-count sweep or open architecture choice can establish eligibility, not dispatch. Keep the ordinary single-architect route unless expressly requested or Root separately admits the panel for a concrete generation need/benefit.
 - **Review-loop** (`$review-loop`, skill `skills/review-loop/`) is independence at **verification**: multiple scope angles converge on ONE already-written fix-design artifact across autonomous rounds.
 
-Composition is sequential, not competing: design-panel generates and synthesizes once -> `design.md` -> optionally `$review-loop` verifies that one artifact to convergence -> `$planner`. Do not restate either skill's operative rules here; route to the binding.
+Design-panel generates and synthesizes once into `design.md`; then reassess the existing mandatory review-loop triggers. Required verification remains required; other review needs admission. A panel alone adds no loop or Planner. Continue only the next selected authorized stage, preserving explicit full-loop requests and unresolved owner/seam risk. Route to each operative binding rather than restating its rules.
 
 ## Review strategy selection
 
@@ -268,9 +268,9 @@ Use Claim-Verify when:
 
 ### Strategy B — Adversarial Review
 
-The reviewer receives the implementation artifact only. They do **not** receive the builder's design package or reasoning.
+Pass original admission and genuine user amendments, unchanged accepted contracts/upstream owner claims and their immutable revision, protected surfaces, named guard and actual implementation evidence. Do not reconstruct authority from the implementation. To avoid anchoring, withhold prior reviewer verdicts and unaccepted builder persuasion/self-review, not governing inputs. With no upstream claim set, use accepted criteria without inventing claims. Retain the required remainder, Root owner and next action; a review assignment does not narrow the original outcome.
 
-The reviewer's explicit mandate: assume an adversary or failure mode not anticipated by the builder. Find the three highest-probability ways this artifact fails, breaks, or is exploited. For each, show the exact mechanism.
+The reviewer's explicit mandate: Challenge unanticipated adversaries or failure mechanisms and report only substantiated material findings with exact evidence. Zero supported findings is representable; label speculative questions with their owner/falsifier, and zero findings cannot supply missing mandatory proof.
 
 Use Adversarial Review when:
 - The risk surface is novel, poorly understood, or the builder may have systematic blind spots
@@ -293,11 +293,11 @@ Use Adversarial Review when:
 
 **Claim-Verify:** Pass the unchanged upstream-owner claims, implementer evidence, accepted constraints, and claim identity explicitly. Tell the reviewer: "Verify each claim against the implementation evidence. Also identify any risk surfaces not covered by any claim."
 
-**Adversarial:** Pass the implementation artifact only. Tell the reviewer: "Do not read the upstream design package. Assume an adversary with full knowledge of the implementation. Find the three highest-probability failure or attack vectors and show the exact mechanism for each."
+**Adversarial:** Pass the accepted governing-input packet described above. Tell the reviewer: "Challenge unanticipated failure mechanisms; report only substantiated material findings with exact evidence. Zero supported findings is representable; speculative questions need an owner/falsifier and cannot supply missing mandatory proof."
 
 ### Combining both
 
-For critical changes, run both in sequence: Claim-Verify first (fast, catches execution errors), then Adversarial (slower, catches design-level blind spots). The Adversarial reviewer still does not receive the Claim-Verify report — independence must be preserved.
+Choose the strategy fitting the admitted risk. Add a complementary independent angle only for an evidenced uncovered risk or mandatory gate; overlapping labels alone add no review. Preserve mandatory domain/security/performance/geometry/scientific and commission gates. Each reviewer keeps accepted governing inputs and does not receive another reviewer's verdict.
 
 ---
 

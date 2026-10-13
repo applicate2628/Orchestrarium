@@ -10,7 +10,7 @@ Apply the binding shared **Workflow economy (binding)** rule: this loop starts o
 
 ## What the loop is
 
-Get **independent multi-angle convergence** on one written fix-design artifact BEFORE the change lands. It is an autonomous, multi-round, same-artifact loop with anti-drift, gating the human only at convergence. It is NOT a single advisory opinion (`/agents-second-opinion`), NOT disjoint parallel helper lanes (`/agents-external-brigade`), and NOT a post-implementation specialist chain (`/agents-review`).
+Get **independent multi-angle convergence** on one written fix-design artifact BEFORE the change lands. It is an autonomous, multi-round, same-artifact loop with anti-drift. Root receives the terminal outcome and continues already-authorized ready work under its existing gates; convergence itself adds no human approval step or execution authority. It is NOT a single advisory opinion (`/agents-second-opinion`), NOT disjoint parallel helper lanes (`/agents-external-brigade`), and NOT a post-implementation specialist chain (`/agents-review`).
 
 ## Admission and supported initial realization
 
@@ -44,13 +44,13 @@ Each angle is dispatched DIRECTLY by the orchestrator and returns its own result
 
 ## Autonomous convergence + anti-drift
 
-The orchestrator drives the loop to convergence **without a human gate per round**; the human sees only the converged result (or an escalation). Each round, while not yet converged and on course:
+The orchestrator drives the loop to convergence **without a human gate per round**; Root receives the terminal outcome under the convergence rule below and preserves actual human, scope, pause and publication gates. Each round, while not yet converged and on course:
 
 1. **Revise the artifact** — fold in EVERY open blocker from the verdict angles and every unreconciled scout finding. Re-dispatching an unchanged artifact is forbidden — a verdict cannot change on identical input.
 2. **Anti-drift check (mandatory, every round)** — verify the revised artifact still serves the ORIGINAL pinned objective: goal, admitted scope, and verified premises and their claim/evidence scope all unchanged. A revision that shifts the goal, widens scope, or rests on a new unverified premise is **drift** → stop and escalate; do not re-dispatch. Anti-drift is the course-keeper that replaces the human while the loop runs.
 3. **Re-dispatch** only the receipt-admitted angles on the revised artifact, carrying the ORIGINAL objective verbatim. Initial and full-artifact rounds admit all three angles; an eligible exact-delta correction round admits only its affected angles.
 
-**Convergence** = both VERDICT angles PASS AND every scout finding is reconciled (none left dangling). Then gate the human.
+**Convergence** = both VERDICT angles PASS AND every scout finding is reconciled (none left dangling). Receive the terminal outcome through Root: on convergence, present the accepted design and short round history, verify both verdicts, reconciled scout findings and canonical closure/readback, then continue the next already-authorized ready action under its existing gates. A design-only request ends at its accepted handoff; an actual human, scope, pause or publication gate holds only its dependent action. Drift or deadlock stops the affected loop and escalates its unresolved decision/cap; independent admitted ready work may continue. No human gate is added per round or merely because convergence occurred.
 
 **Runaway guard:** cap at **N = 3** rounds. If not converged by round 3, stop and escalate the deadlock. Escalate EARLY if the same blocker survives unchanged across two rounds.
 
