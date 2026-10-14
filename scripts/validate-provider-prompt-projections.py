@@ -332,6 +332,32 @@ def _validate_external_governance_projection(source_root: Path) -> None:
     )
     if actual != expected:
         raise _fail("external governance projection drift")
+    provider_raw = _read_bound_bytes(
+        Path(source_root) / _AUTHORED_SOURCE_PATHS["provider_prompt.py"],
+        "source/provider_prompt.py governance binding",
+    )
+    try:
+        tree = ast.parse(provider_raw.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, SyntaxError) as exc:
+        raise _fail("external governance digest literal") from exc
+    name = "EXTERNAL_GOVERNANCE_CAPSULE_SHA256"
+    declarations = [
+        node for node in ast.walk(tree)
+        if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == name)
+        or (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name)
+        or (isinstance(node, ast.alias) and (node.asname or node.name.split(".")[0]) == name)
+    ]
+    assignments = [
+        node for node in tree.body
+        if isinstance(node, ast.Assign) and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name) and node.targets[0].id == name
+        and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+    ]
+    if (
+        len(declarations) != 1 or len(assignments) != 1
+        or assignments[0].value.value != hashlib.sha256(expected).hexdigest()
+    ):
+        raise _fail("external governance digest literal")
 
 
 def _validate_external_role_taxonomy(source_root: Path) -> None:

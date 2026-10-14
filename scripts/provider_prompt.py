@@ -37,7 +37,9 @@ try:
         PreparedNativeWindowsLaunchV1,
         SettlePolicyV1,
         WindowsParserContractV1,
+        accept_windows_parser_contract,
         resolve_executable_identity,
+        write_all_bytes,
     )
 except ModuleNotFoundError:
     from scripts.process_supervision.process_runner import (
@@ -53,7 +55,9 @@ except ModuleNotFoundError:
         PreparedNativeWindowsLaunchV1,
         SettlePolicyV1,
         WindowsParserContractV1,
+        accept_windows_parser_contract,
         resolve_executable_identity,
+        write_all_bytes,
     )
 
 EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
@@ -192,8 +196,9 @@ PROVIDER_AUTH_CONTROL_ENV_KEYS_V1 = types.MappingProxyType(
 )
 PROMPT_SNAPSHOT_MAX_BYTES = 16 * 1024 * 1024
 EXTERNAL_GOVERNANCE_CAPSULE_NAME = "external-prompt-governance.md"
+# Derived from the canonical marked projection; validated without importing this module.
 EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = (
-    "c1a0080fffeac5da9bf2011c8ba8a8d4cafed337f238bfe8bf9fcc168693a039"
+    "11e9819974c7294bc0b5933e0c97e3a771eece59319d8a97cbe55701283ebab4"
 )
 EXTERNAL_GOVERNANCE_BEGIN = b"ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n"
 EXTERNAL_GOVERNANCE_END = b"END_ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n\n"
@@ -6821,6 +6826,12 @@ def finalize_reserved_run_once(
 ) -> int:
     terminal_receipt = reserved_run.receipt
     lifecycle = reserved_run.lifecycle
+
+    def deliver_terminal(payload: bytes) -> None:
+        binary_stdout = sys.stdout.buffer
+        write_all_bytes(payload, binary_stdout.write)
+        binary_stdout.flush()
+
     if output_context is None and reserved_run._output_context is not None:
         output_context = reserved_run._output_context
         credential_needles = output_context.needles
@@ -6848,7 +6859,8 @@ def finalize_reserved_run_once(
             print(f"FAIL: {minimal_scan}", file=sys.stderr)
             return 130 if cancelled else 124 if timed_out else exit_code if exit_code != 0 else 1
         try:
-            terminal_receipt.commit(line.encode("utf-8", errors="strict"))
+            terminal_bytes = line.encode("utf-8", errors="strict")
+            terminal_receipt.commit(terminal_bytes)
         except (OSError, ValueError) as exc:
             print(
                 f"FAIL: terminal receipt commit failed: {type(exc).__name__}",
@@ -6857,8 +6869,7 @@ def finalize_reserved_run_once(
             return 1
         reserved_run.mark_finalized()
         try:
-            sys.stdout.write(line)
-            sys.stdout.flush()
+            deliver_terminal(terminal_bytes)
         except Exception:
             print("FAIL: E_EXTERNAL_PROVIDER_RESULT_STDOUT_FAILED", file=sys.stderr)
             return 1
@@ -6913,22 +6924,12 @@ def finalize_reserved_run_once(
             context_valid = credential_needles == output_context.needles
         except (ValueError, UnicodeDecodeError):
             context_valid = False
-    if not context_valid:
+    # Private transport must be complete before selection; its content is not
+    # itself a public representation. The selected text is checked below.
+    if not context_valid or not (
+        (raw_streams_settled and attempted is not False) or prechild_setup_failure
+    ):
         scan_outcome = scan_unavailable
-    else:
-        try:
-            scan_outcome = (
-                provider_output_safety_scan_terminal(
-                    provider,
-                    credential_needles,
-                    stdout=b"" if prechild_setup_failure else raw_stdout,
-                    stderr=b"" if prechild_setup_failure else raw_stderr,
-                )
-                if (raw_streams_settled and attempted is not False) or prechild_setup_failure
-                else scan_unavailable
-            )
-        except Exception:
-            scan_outcome = scan_unavailable
     if (
         stream is not None
         and stream.overflow
@@ -6941,30 +6942,6 @@ def finalize_reserved_run_once(
             scan_outcome = scan_unavailable
         # Computed public capture metadata is taken from the actual observation.
         stream = observed_stream
-    child_nonzero_category = None
-    if (
-        provider == "kimi"
-        and scan_outcome is None
-        and process_result is not None
-        and process_result.target_exit_code not in (None, 0)
-        and process_result.failure_id is None
-        and not cancelled
-        and not timed_out
-        and launch_error is None
-        and (stream is None or not stream.issues)
-    ):
-        child_nonzero_category = classify_kimi_child_nonzero(raw_stderr)
-    public_stream = stream
-    if provider == "kimi":
-        public_stream = (
-            stream
-            if scan_outcome is not None and stream is not None and stream.overflow
-            else empty_provider_stream_result()
-            if scan_outcome is not None
-            else empty_provider_stream_result()
-            if process_result is None
-            else provider_stream_result(process_result, include_stderr=False)
-        )
     primary_terminal: TerminalResult | None = None
     combined_exit = exit_code
     if prechild_setup_failure and scan_outcome is None:
@@ -7022,7 +6999,22 @@ def finalize_reserved_run_once(
             print("FAIL: result materialization failed", file=sys.stderr)
         else:
             primary_terminal = terminal
-            if terminal.token.startswith("COMPLETE:"):
+            try:
+                scan_outcome = provider_output_safety_scan_terminal(
+                    provider,
+                    credential_needles,
+                    stdout=result_text.encode("utf-8", errors="strict"),
+                    stderr=b"",
+                )
+            except Exception:
+                scan_outcome = scan_unavailable
+            if scan_outcome is not None:
+                result_text = ""
+                terminal = replace(
+                    output_safety_scan_failure_terminal(lifecycle, scan_outcome),
+                    stderr_marker_count=primary_terminal.stderr_marker_count,
+                )
+            elif terminal.token.startswith("COMPLETE:"):
                 terminal = TerminalResult(
                     terminal.evidence_path,
                     terminal.status,
@@ -7031,6 +7023,30 @@ def finalize_reserved_run_once(
                     "COMPLETE:EXTERNAL_NONAUTHORIZING",
                     terminal.stderr_marker_count,
                 )
+    child_nonzero_category = None
+    if (
+        provider == "kimi"
+        and scan_outcome is None
+        and process_result is not None
+        and process_result.target_exit_code not in (None, 0)
+        and process_result.failure_id is None
+        and not cancelled
+        and not timed_out
+        and launch_error is None
+        and (stream is None or not stream.issues)
+    ):
+        child_nonzero_category = classify_kimi_child_nonzero(raw_stderr)
+    public_stream = stream
+    if provider == "kimi":
+        public_stream = (
+            stream
+            if scan_outcome is not None and stream is not None and stream.overflow
+            else empty_provider_stream_result()
+            if scan_outcome is not None
+            else empty_provider_stream_result()
+            if process_result is None
+            else provider_stream_result(process_result, include_stderr=False)
+        )
     cleanup = reserved_run.cleanup_once()
     outcome = combine_terminal_outcomes(
         combined_exit,
@@ -7123,7 +7139,8 @@ def finalize_reserved_run_once(
             return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
 
     try:
-        terminal_receipt.commit(line.encode("utf-8", errors="strict"))
+        terminal_bytes = line.encode("utf-8", errors="strict")
+        terminal_receipt.commit(terminal_bytes)
     except (OSError, ValueError) as exc:
         print(
             f"FAIL: terminal receipt commit failed: {type(exc).__name__}",
@@ -7133,8 +7150,7 @@ def finalize_reserved_run_once(
     reserved_run.mark_finalized()
 
     try:
-        sys.stdout.write(line)
-        sys.stdout.flush()
+        deliver_terminal(terminal_bytes)
     except Exception:
         print("FAIL: E_EXTERNAL_PROVIDER_RESULT_STDOUT_FAILED", file=sys.stderr)
         return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
@@ -7449,6 +7465,16 @@ def _launch_with_runner(
         else kimi_provider_args() if provider == "kimi" else flags
     )
     if os.name == "nt" and provider in {"codex", "claude"} and len(command) == 1:
+        if native_parser_contract is None and provider == "codex":
+            native_parser_contract = accept_windows_parser_contract(
+                family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+                basis=(
+                    "Built-in Codex integration declares modern CRT-compatible wide parsing; "
+                    "Codex rust-v0.162.0-alpha.17.2 args_os / Rust 1.95.0 Windows args. "
+                    "Operating premise, not installed-build or child-argv observation."
+                ),
+                origin="installed-integration",
+            )
         if native_parser_contract is None:
             return reserved_failure("PSV1-ARGV-CODEC-UNSUPPORTED")
         executable = Path(os.path.abspath(command[0]))

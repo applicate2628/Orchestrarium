@@ -513,6 +513,9 @@ def test_validator_rejects_provider_taxonomy_digest_literal_mismatch(
         'EXTERNAL_ROLE_TAXONOMY_SHA256 = "'
         + ("0" * 64)
         + '"\n'
+        + 'EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = "'
+        + _sha((source / "shared" / "external-prompt-governance.md").read_bytes())
+        + '"\n'
     ).encode("utf-8")
     for path in (
         source / "scripts" / "provider_prompt.py",
@@ -548,6 +551,56 @@ def test_source_manifest_binds_approved_codex_and_claude_thin_wrappers() -> None
     for name in ("invoke-codex-prompt.py", "invoke-claude-prompt.py"):
         assert manifest["files"][name]["source"] == f"scripts/{name}"
         assert (ROOT / "scripts" / name).is_file()
+
+
+@pytest.mark.parametrize("declaration", ("stale", "missing", "computed", "duplicate", "annotated-shadow"))
+def test_governance_binding_rejects_drift_even_with_rehashed_manifest(tmp_path, declaration):
+    validator = _load_validator()
+    source, canonical, claude, manifest_path = _fixture(tmp_path)
+    module = source / "scripts" / "provider_prompt.py"
+    original = module.read_text(encoding="utf-8")
+    binding = next(line for line in original.splitlines(True) if line.startswith("EXTERNAL_GOVERNANCE_CAPSULE_SHA256"))
+    replacement = {
+        "stale": 'EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = "' + "0" * 64 + '"\n',
+        "missing": "",
+        "computed": 'EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = str("computed")\n',
+        "duplicate": binding + binding,
+        "annotated-shadow": binding + 'EXTERNAL_GOVERNANCE_CAPSULE_SHA256: str = "shadow"\n',
+    }[declaration]
+    payload = original.replace(binding, replacement).encode("utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["provider_prompt.py"]["sha256"] = _sha(payload)
+    for path in (module, canonical / "provider_prompt.py", claude / "provider_prompt.py"):
+        path.write_bytes(payload)
+    encoded = json.dumps(manifest).encode("utf-8")
+    manifest_path.write_bytes(encoded)
+    (source / "shared" / manifest_path.name).write_bytes(encoded)
+    for validate in (
+        lambda: validator.validate_source_manifest(manifest_path, source),
+        lambda: validator.validate_projection_manifest(manifest_path, source, (("canonical", canonical), ("claude-host", claude))),
+    ):
+        with pytest.raises(validator.ProjectionParityError, match="external governance digest literal"):
+            validate()
+
+
+def test_governance_binding_accepts_regenerated_policy_projection(tmp_path):
+    validator = _load_validator()
+    source, canonical, claude, manifest_path = _fixture(tmp_path)
+    spine = source / "shared" / "AGENTS.shared.md"
+    spine.write_bytes(spine.read_bytes().replace(b"# external-prompt-governance.md\n", b"synthetic changed policy\n"))
+    capsule = validator.extract_external_governance_projection(spine)
+    module = source / "scripts" / "provider_prompt.py"
+    payload = module.read_bytes().replace(_sha(b"# external-prompt-governance.md\n").encode(), _sha(capsule).encode())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for name, raw in (("external-prompt-governance.md", capsule), ("provider_prompt.py", payload)):
+        for path in (_authored_transport_path(source, name), canonical / name, claude / name):
+            path.write_bytes(raw)
+        manifest["files"][name]["sha256"] = _sha(raw)
+    encoded = json.dumps(manifest).encode("utf-8")
+    manifest_path.write_bytes(encoded)
+    (source / "shared" / manifest_path.name).write_bytes(encoded)
+    validator.validate_source_manifest(manifest_path, source)
+    validator.validate_projection_manifest(manifest_path, source, (("canonical", canonical), ("claude-host", claude)))
 
 
 def test_governance_capsule_has_shared_authored_source_and_scripts_runtime_destination() -> None:
@@ -621,8 +674,10 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
             payload = taxonomy_payload
         elif name == "provider_prompt.py":
             taxonomy_digest = hashlib.sha256(taxonomy_payload).hexdigest()
+            governance_digest = _sha(b"# external-prompt-governance.md\n")
             payload = (
                 f'EXTERNAL_ROLE_TAXONOMY_SHA256 = "{taxonomy_digest}"\n'
+                f'EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = "{governance_digest}"\n'
             ).encode("utf-8")
         else:
             payload = f"# {name}\n".encode()
@@ -679,7 +734,9 @@ def _write_fixture_taxonomy(source: Path, roles: dict[str, str]) -> None:
     (source / "shared" / "external-role-taxonomy.v1.json").write_bytes(payload)
     digest = hashlib.sha256(payload).hexdigest()
     (source / "scripts" / "provider_prompt.py").write_text(
-        f'EXTERNAL_ROLE_TAXONOMY_SHA256 = "{digest}"\n', encoding="utf-8"
+        f'EXTERNAL_ROLE_TAXONOMY_SHA256 = "{digest}"\n'
+        f'EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = "{_sha((source / "shared" / "external-prompt-governance.md").read_bytes())}"\n',
+        encoding="utf-8"
     )
 
 

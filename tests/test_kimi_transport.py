@@ -1066,9 +1066,14 @@ def test_kimi_complete_stdout_overflow_still_blocks_secret_output(
     assert code != 0
     assert payload["resultText"] == ""
     assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
-    assert payload["primaryOutcome"]["token"] == (
-        "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
-    )
+    assert payload["primaryOutcome"] == {
+        "exitCode": 0, "token": "COMPLETE:PASS", "status": "completed",
+        "gate": "PASS", "note": "oracle: final-line Kimi GATE: PASS",
+    }
+    assert payload["exitCode"] == code == 1
+    assert payload["status"] == "blocked"
+    assert payload["gate"] == "none"
+    assert payload["stderrMarkerCount"] == 0
     assert "secret-canary" not in json.dumps(payload)
     assert not lifecycle.run_dir.exists()
 
@@ -1623,7 +1628,7 @@ def test_kimi_exit_zero_ignores_refusal_looking_stderr(
     assert "childNonzeroCategory" not in payload
 
 
-def test_kimi_empty_credential_needles_block_machine_path_before_result_materialization(
+def test_kimi_empty_credential_needles_block_selected_machine_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Catches Kimi output scanning being incorrectly gated on credential needles."""
@@ -1693,13 +1698,13 @@ def test_kimi_empty_credential_needles_fail_closed_when_raw_streams_are_unsettle
         b"C:" + br"\Users\synthetic-stderr-two\private.txt\n",
     ),
 )
-def test_kimi_stderr_machine_path_is_rejected_before_either_sink(
+def test_kimi_private_stderr_machine_path_never_enters_public_sinks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     stderr: bytes,
 ) -> None:
-    """Both settled channels enter the same admitted output-safety boundary."""
+    """Private stderr sensitivity does not veto safe selected whole stdout."""
 
     owner = _load_owner()
     stdout = b"\xe2\x80\xa2 KIMI_WRAPPER_SMOKE=PASS\n  GATE: PASS\n"
@@ -1707,9 +1712,11 @@ def test_kimi_stderr_machine_path_is_rejected_before_either_sink(
         owner, tmp_path, monkeypatch, capsys, stdout=stdout, stderr=stderr, with_ledger=True
     )
 
-    assert code != 0
-    assert payload["gate"] == "none"
-    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"
+    assert code == 0
+    assert payload["gate"] == "PASS"
+    assert payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+    assert payload["resultText"] == stdout.decode("utf-8")
+    assert payload["primaryOutcome"]["token"] == "COMPLETE:PASS"
     visible_terminal = json.dumps({"payload": payload, "notes": notes})
     assert stderr.decode("utf-8").strip() not in visible_terminal
     assert not lifecycle.run_dir.exists()
@@ -2167,7 +2174,7 @@ def test_kimi_mcp_credential_echo_keeps_nonzero_result_blocked(
         monkeypatch,
         capsys,
         stdout=b"nonzero-token\nGATE: PASS\n",
-        stderr=b"",
+        stderr=b"ERROR: synthetic refusal\n",
         exit_code=23,
         capabilities=selection,
         credential_needles=owner._merge_credential_needles(
@@ -2177,6 +2184,14 @@ def test_kimi_mcp_credential_echo_keeps_nonzero_result_blocked(
 
     assert code == 23
     assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert payload["primaryOutcome"] == {
+        "exitCode": 23, "token": "FAILED:nonzero-exit", "status": "blocked",
+        "gate": "none", "note": "oracle: nonzero exit (23)",
+    }
+    assert payload["exitCode"] == 23
+    assert payload["status"] == "blocked"
+    assert payload["gate"] == "none"
+    assert payload["stderrMarkerCount"] == 1
     assert "nonzero-token" not in json.dumps(payload)
     assert "nonzero-token" not in (tmp_path / "kimi-terminal.receipt").read_text(
         encoding="utf-8"
@@ -5271,6 +5286,10 @@ def test_external_safety_failure_returns_keep_single_safe_commit(
             raise ValueError("synthetic materializer refusal")
         monkeypatch.setattr(owner, "materialize_terminal", refuse)
     class RefusedStdout:
+        @property
+        def buffer(self):
+            return self
+
         def write(self, value):
             raise OSError("synthetic stdout refusal")
         def flush(self):

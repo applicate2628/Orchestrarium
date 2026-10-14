@@ -40,6 +40,20 @@ sys.modules[spec.name] = owner
 spec.loader.exec_module(owner)
 
 
+class _BinaryOutput:
+    def __init__(self):
+        self.buffer = io.BytesIO()
+
+    def getvalue(self):
+        return self.buffer.getvalue().decode("utf-8")
+
+    def write(self, value):
+        return self.buffer.write(value.encode("utf-8"))
+
+    def flush(self):
+        self.buffer.flush()
+
+
 class _FakePosixReceiptOS:
     """Minimal descriptor-bound POSIX namespace for receipt race tests."""
 
@@ -531,6 +545,104 @@ def _finalize_observed_fixture(*args, **kwargs):
     return owner.finalize_reserved_run_once(*args, **kwargs)
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected_token"),
+    (
+        ("private", "COMPLETE:EXTERNAL_NONAUTHORIZING"),
+        ("last-unsafe", "UNVERIFIED:E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"),
+        ("unsafe-error-marker", "UNVERIFIED:E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"),
+        ("unsafe-nonzero", "UNVERIFIED:E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"),
+        ("absent", "UNVERIFIED:result-materialization"),
+        ("malformed", "UNVERIFIED:result-materialization"),
+        ("empty", "UNVERIFIED:empty"),
+        ("over-limit", "UNVERIFIED:result-materialization"),
+        ("error-marker", "UNVERIFIED:err-markers"),
+        ("no-gate", "UNVERIFIED:no-gate-line"),
+        ("nonzero", "FAILED:nonzero-exit"),
+    ),
+)
+def test_codex_public_projection_preserves_selection_and_genuine_failures(
+    tmp_path, monkeypatch, mode, expected_token
+):
+    private_path = "Q:" + chr(92) + "Users" + chr(92) + "synthetic-owner" + chr(92) + "private.txt"
+    private_credential = b"synthetic-private-canary"
+
+    def record(item_type, text):
+        return json.dumps({
+            "type": "item.completed", "item": {"type": item_type, "text": text},
+        }).encode("utf-8") + b"\n"
+
+    raw = record("error", private_path)
+    selected = "GATE: PASS\n"
+    if mode in {"last-unsafe", "unsafe-error-marker", "unsafe-nonzero"}:
+        raw += record("agent_message", selected)
+        selected = private_path + "\nGATE: PASS\n"
+    elif mode == "empty":
+        selected = ""
+    elif mode == "no-gate":
+        selected = "safe answer without a terminal verdict\n"
+    if mode != "absent":
+        raw += record("agent_message", selected)
+    if mode == "malformed":
+        raw += b"{\n"
+    stderr = private_credential + b"\n"
+    if mode in {"error-marker", "unsafe-error-marker"}:
+        stderr += b"ERROR: synthetic failure\n"
+
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="codex")
+    _write_result(lifecycle, raw, stderr=stderr)
+    output = _BinaryOutput()
+    monkeypatch.setattr(owner.sys, "stdout", output)
+    receipt_path = (tmp_path / "projection.receipt").resolve()
+    control = owner.Control(
+        terminal_receipt=receipt_path,
+        result_max_bytes=len(selected.encode("utf-8")) - 1 if mode == "over-limit" else 1024,
+    )
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = _finalize_observed_fixture(
+            control, "codex", "fixture", "high", "fixture", "",
+            _initialized_reserved(receipt, lifecycle),
+            23 if mode in {"nonzero", "unsafe-nonzero"} else 0,
+            credential_needles=(private_credential,),
+        )
+    payload = owner.parse_provider_result(output.getvalue())
+    assert payload["token"] == expected_token
+    assert code == (
+        0 if mode == "private" else 23 if mode in {"nonzero", "unsafe-nonzero"} else 1
+    )
+    if mode == "private":
+        assert payload["resultText"] == selected
+        assert payload["primaryOutcome"]["token"] == "COMPLETE:PASS"
+    if mode in {"last-unsafe", "unsafe-error-marker", "unsafe-nonzero"}:
+        assert payload["resultText"] == ""
+        assert payload["exitCode"] == code
+        assert payload["status"] == "blocked"
+        assert payload["gate"] == "none"
+        assert payload["stderrMarkerCount"] == (1 if mode == "unsafe-error-marker" else 0)
+        expected_primary = {
+            "exitCode": 0, "token": "COMPLETE:PASS", "status": "completed",
+            "gate": "PASS", "note": "oracle: final-line GATE: PASS",
+        }
+        if mode == "unsafe-error-marker":
+            expected_primary.update(
+                token="UNVERIFIED:err-markers", status="blocked", gate="none",
+                note="oracle: err markers present (1)",
+            )
+        elif mode == "unsafe-nonzero":
+            expected_primary.update(
+                exitCode=23, token="FAILED:nonzero-exit", status="blocked", gate="none",
+                note="oracle: nonzero exit (23)",
+            )
+        assert payload["primaryOutcome"] == expected_primary
+    assert private_path not in output.getvalue()
+    assert private_credential.decode("ascii") not in output.getvalue()
+    assert receipt_path.read_text(encoding="utf-8") == output.getvalue()
+    assert payload["authorizing"] is False
+    assert payload["closesRunIds"] == []
+    assert payload["cleanupStatus"] == "complete"
+    assert not lifecycle.run_dir.exists()
+
+
 def _outcome() -> owner.FinalOutcome:
     return owner.FinalOutcome(
         exit_code=0,
@@ -645,7 +757,7 @@ def test_required_output_detectors_fail_closed_for_invalid_decode_or_classifier(
 def test_finalizer_distinguishes_prechild_from_missing_attempt_observations(tmp_path, monkeypatch, attempted):
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     receipt_path = (tmp_path / "phase.receipt").resolve()
-    output = io.StringIO()
+    output = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", output)
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
         reserved = _initialized_reserved(receipt, lifecycle)
@@ -1742,7 +1854,7 @@ def test_provider_launch_exception_without_settled_streams_emits_and_records_una
     output_root = (tmp_path / "captures").resolve()
     item = _make_work_item(tmp_path, f"exception-{exception_type.__name__}")
     receipt_path = (tmp_path / f"exception-{exception_type.__name__}.receipt").resolve()
-    emitted = io.StringIO()
+    emitted = _BinaryOutput()
     ledger_after_stdout: list[bool] = []
     original_record_terminal = owner.record_terminal
 
@@ -1927,7 +2039,7 @@ def test_oversize_finalize_is_nonpass_and_preserves_secure_recovery(
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     _write_result(lifecycle, b"123456789")
     receipt_path = (tmp_path / "oversize-finalize.receipt").resolve()
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", stream)
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
         code = _finalize_observed_fixture(
@@ -1957,7 +2069,7 @@ def test_unlaunched_ledger_failure_uses_one_v2_envelope_without_durable_ledger_c
 ) -> None:
     lifecycle = _lifecycle(tmp_path, monkeypatch, provider=provider)
     receipt_path = (tmp_path / f"{provider}-{failure_name.replace(' ', '-')}.receipt").resolve()
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     ledger_calls: list[list[str]] = []
     popen_calls: list[object] = []
     monkeypatch.setattr(owner.sys, "stdout", stream)
@@ -2055,14 +2167,14 @@ def test_explicit_none_ledger_role_cannot_masquerade_as_roleless() -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native parser preflight")
-@pytest.mark.parametrize("provider", ("codex", "claude"))
+@pytest.mark.parametrize("provider", ("claude", "codex"))
 def test_windows_native_provider_refuses_before_prompt_capture_or_launch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     provider: str,
 ) -> None:
-    """Missing trusted parser declaration fails before prompt, capture, or child work."""
+    """Missing Claude or explicit untrusted Codex declarations fail before prompt work."""
 
     executable = tmp_path / f"{provider}.exe"
     executable.write_bytes(b"native-provider-fixture")
@@ -2112,25 +2224,33 @@ def test_windows_native_provider_refuses_before_prompt_capture_or_launch(
     code = owner.launch(
         provider,
         ["fixture", *_terminal_receipt_args(tmp_path, f"native-{provider}")],
+        **({"native_parser_contract": object()} if provider == "codex" else {}),
     )
 
     assert code != 0
-    assert "PSV1-ARGV-CODEC-UNSUPPORTED" in capsys.readouterr().err
+    failure = "PSV1-ARGV-ATTESTATION" if provider == "codex" else "PSV1-ARGV-CODEC-UNSUPPORTED"
+    assert failure in capsys.readouterr().err
     assert calls == [f"resolve:{provider}", "auth"]
     assert not marker.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows trusted native preflight")
+@pytest.mark.parametrize("route", ("operator", "thin-default", "wrong-context"))
 def test_trusted_native_preflight_holds_then_releases_image_before_prompt_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    route: str,
 ) -> None:
-    executable = tmp_path / "codex.exe"
+    thin_default = route == "thin-default"
+    executable = tmp_path / "different name λ.exe"
     shutil.copy2(Path(sys.executable).resolve(), executable)
     monkeypatch.setattr(
         owner, "resolve_provider_command",
-        lambda _provider: _resolved_command(str(executable)),
+        lambda _provider: _resolved_command(
+            str(Path(sys.executable).resolve()) if route == "wrong-context" else str(executable),
+            *(["fixture.py"] if route == "wrong-context" else [])
+        ),
     )
     monkeypatch.setattr(
         owner, "resolve_provider_auth_configuration",
@@ -2139,10 +2259,26 @@ def test_trusted_native_preflight_holds_then_releases_image_before_prompt_failur
             output_scan_disposition="environment-exact",
         ),
     )
-    monkeypatch.setattr(
-        owner, "prompt_bytes",
-        lambda *_a, **_k: (_ for _ in ()).throw(ValueError("synthetic prompt failure")),
-    )
+    prepared = []
+    original_prepare = owner.ProcessRunnerV1.prepare_native_windows_launch
+
+    def record_prepare(runner, **kwargs):
+        result = original_prepare(runner, **kwargs)
+        prepared.append((result, kwargs["parser_contract"]))
+        return result
+
+    monkeypatch.setattr(owner.ProcessRunnerV1, "prepare_native_windows_launch", record_prepare)
+
+    def prompt_failure(*_args, **_kwargs):
+        assert len(prepared) == 1
+        declaration = prepared[0][1]
+        assert (declaration.family, declaration.domain, declaration.codec) == (
+            "msvcrt-v1", "wide-utf16-v1", "msvcrt-v1"
+        )
+        assert declaration.origin == ("installed-integration" if thin_default else "accepted-operator")
+        raise ValueError("synthetic prompt failure")
+
+    monkeypatch.setattr(owner, "prompt_bytes", prompt_failure)
     monkeypatch.setattr(
         owner, "run_provider_process",
         lambda *_a, **_k: pytest.fail("task launched after prompt failure"),
@@ -2153,12 +2289,27 @@ def test_trusted_native_preflight_holds_then_releases_image_before_prompt_failur
         basis="accepted test operator declares the Python wide CRT parser",
         origin="accepted-operator",
     )
-    code = owner.launch(
-        "codex", ["fixture", *_terminal_receipt_args(tmp_path, "trusted-native")],
-        native_parser_contract=contract,
-    )
+    args = ["fixture", *_terminal_receipt_args(tmp_path, "trusted-native")]
+    if thin_default:
+        entry_spec = importlib.util.spec_from_file_location(
+            "codex_thin_default_test", ROOT / "scripts/invoke-codex-prompt.py"
+        )
+        assert entry_spec and entry_spec.loader
+        entry = importlib.util.module_from_spec(entry_spec)
+        entry_spec.loader.exec_module(entry)
+        monkeypatch.setitem(sys.modules, "provider_prompt", owner)
+        code = entry.main(args)
+    else:
+        code = owner.launch("codex", args, native_parser_contract=contract)
     assert code != 0
+    if route == "wrong-context":
+        assert "PSV1-ARGV-ATTESTATION" in capsys.readouterr().err
+        assert not prepared
+        return
     assert "E_EXTERNAL_PROMPT_INVALID" in capsys.readouterr().err
+    assert len(prepared) == 1
+    assert prepared[0][0].executable_owner.descriptor == -1
+    assert prepared[0][0].lifecycle.observation.resources_closed
     with executable.open("r+b"):
         pass
 
@@ -2707,7 +2858,7 @@ def test_initialized_cleanup_exception_is_once_only_and_truthfully_incomplete(
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     _write_result(lifecycle, b"GATE: PASS\n")
     receipt_path = (tmp_path / "cleanup-exception.receipt").resolve()
-    output = io.StringIO()
+    output = _BinaryOutput()
     calls: list[str] = []
     monkeypatch.setattr(owner.sys, "stdout", output)
     monkeypatch.setattr(
@@ -2748,7 +2899,7 @@ def test_cleanup_preserves_verified_false_recovery_retention(
     _write_result(lifecycle, b"GATE: PASS\n")
     real_cleanup = lifecycle.cleanup
     receipt_path = (tmp_path / "verified-not-retained.receipt").resolve()
-    monkeypatch.setattr(owner.sys, "stdout", io.StringIO())
+    monkeypatch.setattr(owner.sys, "stdout", _BinaryOutput())
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
         reserved = _initialized_reserved(receipt, lifecycle)
         monkeypatch.setattr(
@@ -3070,7 +3221,7 @@ def test_settle_once_converts_unexpected_cleanup_failure_to_combined_terminal(
     assert outcome.cleanup_issue_count == 1
 
 
-@pytest.mark.parametrize("failure_stage", ("write", "flush"))
+@pytest.mark.parametrize("failure_stage", ("write", "flush", "zero", "missing-buffer"))
 def test_stdout_failure_is_nonzero_after_receipt_commit_without_terminal_ledger(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3083,10 +3234,17 @@ def test_stdout_failure_is_nonzero_after_receipt_commit_without_terminal_ledger(
     recorded: dict[str, object] = {}
 
     class BrokenOutput:
-        def write(self, _text: str) -> None:
+        @property
+        def buffer(self):
+            if failure_stage == "missing-buffer":
+                raise AttributeError("no binary buffer")
+            return self
+
+        def write(self, value) -> int:
             events.append("write")
             if failure_stage == "write":
                 raise OSError("C:\\private\\stdout-canary")
+            return 0 if failure_stage == "zero" else len(value)
 
         def flush(self) -> None:
             events.append("flush")
@@ -3115,12 +3273,46 @@ def test_stdout_failure_is_nonzero_after_receipt_commit_without_terminal_ledger(
             0,
         )
     assert code != 0
-    assert events == (["write"] if failure_stage == "write" else ["write", "flush"])
+    assert events == ([] if failure_stage == "missing-buffer" else ["write", "flush"] if failure_stage == "flush" else ["write"])
     assert recorded == {}
     assert owner.parse_provider_result(receipt_path.read_text(encoding="utf-8"))["gate"] == "PASS"
     assert "E_EXTERNAL_PROVIDER_RESULT_STDOUT_FAILED" in stderr.getvalue()
     assert "C:\\private\\stdout-canary" not in stderr.getvalue()
     assert "C:\\private\\stdout-canary" not in receipt_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("initialized", (False, True))
+def test_terminal_partial_binary_writes_match_committed_receipt(tmp_path, monkeypatch, initialized):
+    lifecycle = _lifecycle(tmp_path, monkeypatch) if initialized else None
+    if lifecycle is not None:
+        _write_result(lifecycle, b"GATE: PASS\n")
+    output = bytearray()
+
+    class PartialOutput:
+        @property
+        def buffer(self):
+            return self
+
+        def write(self, data):
+            count = min(7, len(data))
+            output.extend(data[:count])
+            return count
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(owner.sys, "stdout", PartialOutput())
+    path = (tmp_path / "partial.receipt").resolve()
+    with owner.TerminalReceiptV1.reserve(path) as receipt:
+        reserved = _initialized_reserved(receipt, lifecycle) if initialized else owner.ReservedExternalRunV1(receipt)
+        if initialized:
+            code = _finalize_observed_fixture(owner.Control(), "claude", "opus", "xhigh", "fixture", "", reserved, 0)
+        else:
+            code = owner.finalize_reserved_run_once(owner.Control(), "claude", "opus", "xhigh", "fixture", "", reserved, 1)
+    assert code == (0 if initialized else 1)
+    assert bytes(output) == path.read_bytes()
+    assert output.endswith(b"\n") and b"\r" not in output
+    owner.parse_provider_result(output.decode("utf-8"))
 
 
 def test_terminal_sequence_is_cleanup_scan_receipt_write_flush_then_ledger(
@@ -3148,9 +3340,14 @@ def test_terminal_sequence_is_cleanup_scan_receipt_write_flush_then_ledger(
         real_commit(line)
 
     class Output:
-        def write(self, value: str) -> None:
+        @property
+        def buffer(self):
+            return self
+
+        def write(self, value) -> int:
             events.append("write")
-            emitted.append(value)
+            emitted.append(bytes(value).decode("utf-8"))
+            return len(value)
 
         def flush(self) -> None:
             events.append("flush")
@@ -3179,6 +3376,7 @@ def test_terminal_sequence_is_cleanup_scan_receipt_write_flush_then_ledger(
     finally:
         receipt.close()
     assert code == 0
+
     assert events == ["scan", "cleanup", "scan", "receipt", "write", "flush", "ledger"]
     payload = owner.parse_provider_result("".join(emitted))
     assert payload["gate"] == "PASS"
@@ -3219,7 +3417,7 @@ def test_serialized_line_scan_failure_commits_only_minimal_blocked_envelope(
         return actual_scan(_provider, _needles, stdout=stdout, stderr=stderr, serialized_line=serialized_line)
 
     monkeypatch.setattr(owner, "provider_output_safety_scan_terminal", scan)
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", stream)
     dynamic_detail = "PRIVATE_DYNAMIC_DETAIL"
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
@@ -3256,7 +3454,7 @@ def test_full_builder_failure_uses_independent_minimal_receipt(
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     _write_result(lifecycle, b"GATE: PASS\n")
     receipt_path = (tmp_path / "builder-failure.receipt").resolve()
-    output = io.StringIO()
+    output = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", output)
     monkeypatch.setattr(
         owner,
@@ -3295,7 +3493,7 @@ def test_ledger_failure_after_stdout_returns_nonzero_with_stable_id_and_no_leak(
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     _write_result(lifecycle, b"GATE: PASS\n")
     receipt_path = (tmp_path / "ledger-failure.receipt").resolve()
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     stderr = io.StringIO()
     monkeypatch.setattr(owner.sys, "stdout", stream)
     monkeypatch.setattr(owner.sys, "stderr", stderr)
@@ -3422,7 +3620,7 @@ def test_envelope_contains_no_prompt_raw_stderr_or_capture_paths(
         b"GATE: PASS\n",
         stderr=b"ERROR: credential-like-secret-must-not-escape\n",
     )
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", stream)
     receipt_path = (tmp_path / "redaction.receipt").resolve()
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
@@ -3456,7 +3654,7 @@ def test_finalizer_counts_fatal_stderr_markers_after_first_64_kib(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lifecycle = _lifecycle(tmp_path, monkeypatch)
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", stream)
     stderr = (b"x" * (64 * 1024)) + b"\nFATAL: first\nAPI Error: second\n"
     receipt_path = (tmp_path / "late-stderr.receipt").resolve()
@@ -3559,30 +3757,32 @@ def test_real_transport_emits_one_envelope_then_path_free_terminal_ledger(
     ),
 )
 @pytest.mark.parametrize("stream_name", ("stdout", "stderr"))
-def test_exact_child_credential_echo_is_blocked_before_v2_result_materialization(
+def test_exact_child_credential_is_refused_only_on_selected_public_output(
     tmp_path: Path,
     provider: str,
     auth_environment: dict[str, str],
     credential_key: str,
     stream_name: str,
 ) -> None:
-    """Every direct provider credential becomes an exact raw-byte scan needle."""
+    """Known credentials guard selected output while private stderr stays private."""
 
     secret = auth_environment[credential_key].encode("ascii")
     if provider == "codex":
         stdout = json.dumps(
             {
                 "type": "item.completed",
-                "item": {"type": "agent_message", "text": "GATE: PASS\\n"},
+                "item": {
+                    "type": "agent_message",
+                    "text": (secret.decode("ascii") + "\n" if stream_name == "stdout" else "")
+                    + "GATE: PASS\n",
+                },
             }
         ).encode("utf-8") + b"\n"
     else:
         stdout = b"GATE: PASS\n"
-    if stream_name == "stdout":
+    if stream_name == "stdout" and provider != "codex":
         stdout = secret + b"\n" + stdout
-        stderr = b""
-    else:
-        stderr = secret + b"\n"
+    stderr = secret + b"\n" if stream_name == "stderr" else b""
     result, _item, _output_root = _run_transport(
         tmp_path,
         provider,
@@ -3592,11 +3792,22 @@ def test_exact_child_credential_echo_is_blocked_before_v2_result_materialization
         with_ledger=False,
     )
 
-    assert result.returncode != 0
     payload = owner.parse_provider_result(result.stdout)
     assert payload["schema"] == "orchestrarium.provider-result.v2"
-    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
-    assert payload["resultText"] == ""
+    if stream_name == "stdout":
+        assert result.returncode != 0
+        assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+        assert payload["resultText"] == ""
+    else:
+        assert result.returncode == 0
+        assert payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+        assert payload["resultText"] == "GATE: PASS\n"
+    assert payload["primaryOutcome"] == {
+        "exitCode": 0, "token": "COMPLETE:PASS", "status": "completed",
+        "gate": "PASS", "note": "oracle: final-line GATE: PASS",
+    }
+    assert payload["exitCode"] == result.returncode
+    assert payload["stderrMarkerCount"] == 0
     assert secret.decode("ascii") not in result.stdout
     assert secret.decode("ascii") not in result.stderr
 
@@ -3943,7 +4154,7 @@ def test_finalizer_uses_output_context_instead_of_coverage_labels(
         "claude",
     )
     lifecycle = _lifecycle(tmp_path, monkeypatch)
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", stream)
 
     receipt_path = (tmp_path / f"coverage-{disposition}.receipt").resolve()

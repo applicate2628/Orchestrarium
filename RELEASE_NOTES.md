@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-14
 
+- **Provider prompts bind current policy and preserve terminal bytes.** The marked shared policy owns the derived prompt capsule, independent runtime digest and projection manifest. Existing validation now checks that complete chain, so a changed rule cannot pass with an old generated copy. Both terminal paths emit the same committed UTF-8 bytes, retaining visible write and flush failures, primary errors and receipt provenance. Actual provider success and publication approval keep their separate checks.
+
 - **Repository-cleanup guidance keeps positive proof and action with the producing owner.** Required missing or failed proof stops the attempt before effects, and evidence distinguishes action-not-attempted, partial failure and completed cleanup. Admitted link-only disposal preserves the foreign target; ordinary-tree proof remains strict. The coordinator stays read-only, without a new deletion helper or stronger guessed identity rule.
 
 - **Performance-engineer handoffs preserve original admission before diagnosis.** Both provider role projections consume the shared comparison between admitted requirements and the assigned slice, retaining required remainder with its owner and next action. Missing inputs require bounded correction for the affected decision. Existing first actual-scenario profiling, workload budgets and architecture escalation remain unchanged; this adds no full-pipeline profiling requirement.
