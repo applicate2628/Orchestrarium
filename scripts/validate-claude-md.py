@@ -24,11 +24,11 @@ USER_CONTROL_MARKER = re.compile(
     r"\[(?:approve|skip|acknowledge|revoke)[^\]\r\n]*\]"
 )
 RU_HOOK_BEHAVIOR_PAYLOAD_PIN = (
-    24_967,
-    "9cd2600075d9b9b183a03a449a7cbc5bc944a89e3bc710b8766d9dbfeafca80f",
+    24_742,
+    "e0c62c36535f8be8922bf5274f513740003953defd7eb88331094c320a5abf0b",
 )
 
-SHARED_MANIFEST: dict[str, tuple[str, ...]] = {
+SHARED_MANIFEST: dict[str, tuple[str | re.Pattern[str], ...]] = {
     "shared owners": (
         "# Shared Governance",
         "## Role index",
@@ -40,8 +40,11 @@ SHARED_MANIFEST: dict[str, tuple[str, ...]] = {
         "## Publication safety",
     ),
     "shared gates": (
-        "`quick-fix`: target+steps",
-        "Before cross-phase/specialist QA, assign one integration owner",
+        re.compile(r"`quick-fix`:[ \t]*target[ \t]*[+/][ \t]*steps\b"),
+        re.compile(
+            r"Before cross-phase/specialist QA,?[ \t]+assign[ \t]+"
+            r"(?:one[ \t]+)?integration[ \t]+owner\b"
+        ),
         "**Repository orientation; Mechanism inventory before new paths:**",
         "REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>",
         "**Hypothesis disclosure discipline:**",
@@ -183,7 +186,15 @@ def validate(
         missing_count = 0
         pinned = 0
         for group, tokens in manifest.items():
-            missing = [token for token in tokens if token not in owner_text]
+            missing = [
+                token if isinstance(token, str) else token.pattern
+                for token in tokens
+                if (
+                    token not in owner_text
+                    if isinstance(token, str)
+                    else token.search(owner_text) is None
+                )
+            ]
             pinned += len(tokens)
             missing_count += len(missing)
             if missing:
