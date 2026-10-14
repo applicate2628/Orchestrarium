@@ -13,7 +13,6 @@ import re
 import stat
 import sys
 import tomllib
-import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -233,24 +232,16 @@ def _valid_luna_identifier(value: Any) -> bool:
     )
 
 
-def _luna_tool_identity(value: Any) -> tuple[str, ...] | None:
-    if not isinstance(value, str):
+def _luna_tool_identity(value: Any) -> str | None:
+    if not _valid_luna_identifier(value):
         return None
-    normalized = unicodedata.normalize("NFKC", value).casefold()
-    if not _valid_luna_identifier(normalized):
+    if value.casefold() in _LUNA_RESERVED_TOOL_SURFACES or re.fullmatch(
+        r"(?:runtime[._:-]+default|shell[._:-]+command|exec[._:-]+command)",
+        value,
+        flags=re.IGNORECASE,
+    ):
         return None
-    tokens = tuple(
-        token for token in re.split(r"[^a-z0-9]+", normalized) if token
-    )
-    if not tokens or any(token in _LUNA_RESERVED_TOOL_SURFACES for token in tokens):
-        return None
-    for start in range(len(tokens)):
-        adjacent = ""
-        for token in tokens[start:]:
-            adjacent += token
-            if adjacent in _LUNA_RESERVED_TOOL_SURFACES:
-                return None
-    return tokens
+    return value
 
 
 def _valid_luna_tool_id(value: Any) -> bool:

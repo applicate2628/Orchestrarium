@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-14
+
+- **Luna accepts exact discovered tool identities without confusing names with authority.** The shared native selector preserves qualified identifiers and their delimiters, rejects whole ambient selectors, and leaves operation capability and carrier validation to the caller. Legitimate names containing ordinary words no longer fail lexical checks; generic execution and missing input still refuse. Existing regression fixtures now bind their actual default-role producer, receipt generation and native transaction seams, with positive fault activation.
+
 ## 2026-10-13
 
 - **Workflow choices preserve task and evidence boundaries.** Lead handoffs retain approved inputs and required remainder; research seeks better routes, early error prevention and ready solutions where useful. Typed execution evidence preserves primary outcomes and owned-resource settlement. Specialist reviews keep cleanup, current behavior and deferred work within their commissioned scope. These accepted instruction changes retain existing safety, publication and lifecycle gates.

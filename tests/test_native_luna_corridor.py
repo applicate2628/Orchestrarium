@@ -141,6 +141,12 @@ def _seed_native_contract_prior(project: Path, kind: str) -> tuple[Path, Path]:
         (project / ".codex/agents/default.toml").write_bytes(
             INTERMEDIATE_MIGRATABLE_ROLE_BYTES["default"]
         )
+    # Bind the complete synthetic predecessor before callers inject drift/faults.
+    fixture_digest = installer._tree_sha256(lead, ignore_runtime_cache=True)
+    assert fixture_digest is not None
+    (lead.parent / installer._LEAD_RECEIPT_NAME).write_bytes(
+        installer._lead_receipt_bytes(fixture_digest)
+    )
     return policy, manifest
 
 
@@ -1018,19 +1024,15 @@ def test_luna_exact_root_walk_rejects_reparse_ancestor_for_literal_plan(
         "powershell",
         "pwsh",
         "cmd",
-        "mcp__shell__exec",
-        "shell.v2",
-        "mcp__runtime__default",
-        "auto.tool",
-        "mcp__PowerShell__read",
-        "mcp__power--shell__read",
-        "mcp__cmd__read",
-        "mcp__bash__read",
-        "mcp__terminal__read",
-        "mcp__command__read",
-        "mcp__exec__read",
-        "mcp__shell--command__read",
-        "mcp__exec--command__read",
+        "runtimedefault",
+        "shellcommand",
+        "execcommand",
+        "terminal",
+        "command",
+        "exec",
+        "RUNTIME__DEFAULT",
+        "shell._:-command",
+        "exec::command",
         "*",
     ),
 )
@@ -1087,14 +1089,14 @@ def test_luna_tools_preserve_exact_membership_and_explicit_empty_selection(
         duplicate, observed_git_root=ROOT
     )["valid"] is False
 
-    normalized_duplicate = _luna_literal_plan()
-    normalized_duplicate["allowedTools"] = [
+    raw_distinct = _luna_literal_plan()
+    raw_distinct["allowedTools"] = [
         "mcp__server__read",
         "MCP--server--read",
     ]
     assert resolver.validate_luna_execution_plan(
-        normalized_duplicate, observed_git_root=ROOT
-    )["valid"] is False
+        raw_distinct, observed_git_root=ROOT
+    )["valid"] is True
 
     exact_root = tmp_path / "exact-root"
     target = exact_root / "shared" / "example.txt"
@@ -1113,6 +1115,100 @@ def test_luna_tools_preserve_exact_membership_and_explicit_empty_selection(
     assert resolver.validate_luna_execution_plan(
         worker, observed_git_root=exact_root
     )["valid"] is False
+
+
+@pytest.mark.parametrize(
+    "tool_id",
+    (
+        "mcp__graft__graft_find_code",
+        "mcp__graft__graft_find_all",
+        "mcp__synthetic__any",
+        "mcp__synthetic__default",
+        "mcp__synthetic__command",
+        "shell.v2",
+        "functions.exec",
+        "tools.exec_command",
+    ),
+)
+def test_luna_tool_identity_preserves_raw_qualified_names(tool_id: str) -> None:
+    """Structural identity does not prove endpoint capability or dispatch authority."""
+
+    resolver = _resolver_module()
+    assert resolver._luna_tool_identity(tool_id) == tool_id
+    plan = _luna_literal_plan()
+    plan["allowedTools"] = [tool_id]
+    assert resolver.validate_luna_execution_plan(
+        plan, observed_git_root=ROOT
+    ) == {
+        "schemaVersion": 1,
+        "valid": True,
+        "stableId": None,
+        "fallback": "none",
+        "authorizing": False,
+    }
+
+
+@pytest.mark.parametrize("tool_id", ("MCP__server__read", "mcp--server--read"))
+def test_luna_tool_identity_keeps_case_and_delimiters_distinct(tool_id: str) -> None:
+    """Exact identities do not acquire aliases from casefolding or token splitting."""
+
+    resolver = _resolver_module()
+    original = "mcp__server__read"
+    assert resolver._luna_tool_identity(tool_id) == tool_id
+    assert resolver._valid_luna_tools([original, tool_id]) is True
+    assert resolver._valid_luna_tools([tool_id, tool_id]) is False
+
+
+@pytest.mark.parametrize("tool_id", (None, 0, "", "ｍｃｐ__server__read", "Kimi.read"))
+def test_luna_tool_identity_rejects_unsupported_raw_grammar(tool_id: object) -> None:
+    """Unsupported Unicode compatibility spellings are not rewritten into IDs."""
+
+    resolver = _resolver_module()
+    assert resolver._luna_tool_identity(tool_id) is None
+
+
+def test_luna_scout_observed_tools_preserve_exact_identity_and_order() -> None:
+    """Only exact acquired IDs satisfy scope and returned observation equality."""
+
+    resolver = _resolver_module()
+    plan = _luna_literal_plan()
+    plan["allowedTools"] = ["mcp__server__read", "MCP__server__read"]
+    facts = _luna_literal_facts()
+    facts["observedTools"] = ["mcp__server__read", "MCP__server__read"]
+    arguments = {"consumer_purpose": "facts-only", "observed_git_root": ROOT}
+    assert resolver.validate_scout_facts(
+        plan, facts, observed_tools=list(facts["observedTools"]), **arguments
+    )["valid"] is True
+    assert resolver.validate_scout_facts(
+        plan,
+        facts,
+        observed_tools=list(reversed(facts["observedTools"])),
+        **arguments,
+    )["stableId"] == "E_LUNA_FACTS_INVALID"
+    assert resolver.validate_scout_facts(
+        plan, facts, observed_tools=["mcp--server--read"], **arguments
+    )["stableId"] == "E_LUNA_TOOL_SCOPE_VIOLATION"
+    assert resolver.validate_scout_facts(
+        plan,
+        facts,
+        observed_tools=["mcp__server__read", "mcp__server__read"],
+        **arguments,
+    )["stableId"] == "E_LUNA_EXECUTION_ATTESTATION_UNAVAILABLE"
+
+
+def test_luna_worker_rejects_two_distinct_raw_tool_ids(tmp_path: Path) -> None:
+    """A second actual tool cannot be folded into the worker one-tool contract."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    target = exact_root / "shared" / "example.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("before\n", encoding="utf-8")
+    plan = _worker_plan(exact_root=exact_root, tool="mcp__server__read")
+    plan["allowedTools"] = ["mcp__server__read", "MCP__server__read"]
+    assert resolver.validate_luna_execution_plan(
+        plan, observed_git_root=exact_root
+    )["stableId"] == "E_LUNA_PLAN_INVALID"
 
 
 def test_scout_plan_rejects_worker_only_operation_fields() -> None:
@@ -1593,12 +1689,32 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
         # migration may differ; effort, authority, sandbox and all other bytes
         # must still match. Current model identity is asserted independently.
         role_bytes = (AGENTS_SOURCE / f"{role_name}.toml").read_bytes()
-        assert tomllib.loads(role_bytes.decode("utf-8"))["model"] == "gpt-6.1-sol"
-        assert role_bytes.count(b'model = "gpt-6.1-sol"') == 1
-        prior_bytes = role_bytes.replace(
-            b'model = "gpt-6.1-sol"', b'model = "gpt-6-sol"', 1
-        )
-        assert hashlib.sha256(prior_bytes).hexdigest() == expected_digest
+        role = tomllib.loads(role_bytes.decode("utf-8"))
+        assert manifest["roles"][role_name] == {
+            "relativePath": f"{role_name}.toml",
+            "sha256": hashlib.sha256(role_bytes).hexdigest(),
+        }
+        if "model" not in role:
+            description = _resolver_module().describe_ordinary_native_role_options(
+                role_name,
+                "recovery",
+                {
+                    "explicitModelControl": True,
+                    "explicitReasoningEffortControl": True,
+                },
+                repo_root=ROOT,
+            )
+            assert description["status"] == "available"
+            assert description["defaultInvocation"]["mode"] == "generic-explicit-profile"
+            assert description["defaultAgentTypeCapability"] == "not-applicable"
+            assert "model_reasoning_effort" not in role
+        else:
+            assert role["model"] == "gpt-6.1-sol"
+            assert role_bytes.count(b'model = "gpt-6.1-sol"') == 1
+            prior_bytes = role_bytes.replace(
+                b'model = "gpt-6.1-sol"', b'model = "gpt-6-sol"', 1
+            )
+            assert hashlib.sha256(prior_bytes).hexdigest() == expected_digest
 
 
 def test_sol_migrated_roles_keep_independent_nonmodel_contract() -> None:
@@ -1721,7 +1837,7 @@ def test_installer_rolls_back_stock_native_pair_and_leaf_after_migration_fault(
              project / ".codex/agents/default.toml", lead / "scripts/resolve-agents-mode.py")
     before = {path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path)) for path in focal}
     original = installer._CreateOnlyMutablePath.migrate_exact_file
-    original_replace = installer.os.replace
+    original_publish = installer._InstallTransaction._publish_retained
     reached = False
 
     def fail_manifest(self, relative: Path, expected_digest: str, payload: bytes, **kwargs):
@@ -1739,21 +1855,36 @@ def test_installer_rolls_back_stock_native_pair_and_leaf_after_migration_fault(
         assert (project / ".codex/agents/default.toml").read_bytes() == (AGENTS_SOURCE / "default.toml").read_bytes()
         raise RuntimeError("forced post-native-leaf failure")
 
-    def fail_transfer(source, target):
+    def fail_transfer(transaction, source, target, **kwargs):
         nonlocal reached
-        if Path(source).suffix == ".tmp" and Path(target) == policy:
+        migration = kwargs.get("migration")
+        if (
+            not reached
+            and migration is not None
+            and Path(target) == policy
+            and Path(source) == migration.prepared_path
+            and migration.leaf_path == policy
+        ):
             reached = True
+            assert not policy.exists()
+            assert migration.tombstone_path.read_bytes() == before[policy][0]
+            assert installer._CreateOnlyMutablePath._identity(
+                migration.tombstone_path
+            ) == before[policy][1]
+            assert Path(source).is_file()
+            assert Path(source).read_bytes() == POLICY_PATH.read_bytes()
             raise RuntimeError("forced replacement transfer failure")
-        return original_replace(source, target)
+        return original_publish(transaction, source, target, **kwargs)
 
     if fault == "manifest-migration":
         monkeypatch.setattr(installer._CreateOnlyMutablePath, "migrate_exact_file", fail_manifest)
     elif fault == "replacement-transfer":
-        monkeypatch.setattr(installer.os, "replace", fail_transfer)
+        monkeypatch.setattr(installer._InstallTransaction, "_publish_retained", fail_transfer)
     else:
         monkeypatch.setattr(installer, "_merge_codex_agents", fail_after_native)
-    assert installer.install("codex", arguments) == 1
+    result = installer.install("codex", arguments)
     assert reached
+    assert result == 1
     assert {path: path.read_bytes() for path in focal} == {path: data for path, (data, _identity) in before.items()}
     for path in (project / ".codex/config.toml", project / ".codex/agents/default.toml"):
         assert installer._CreateOnlyMutablePath._identity(path) == before[path][1]
@@ -1797,13 +1928,16 @@ def test_stock_pair_retention_settlement_refuses_changed_storage_or_cleanup_deni
     assert installer.install("codex", arguments) == 0
     _seed_native_contract_prior(project, "default-unbinding")
     finalize = installer._finalize_canonical_lead_receipt
-    rmdir = Path.rmdir
+    dispose_node = installer._InstallTransaction._dispose_node
     private = None
+    private_transaction = None
+    denial_hits = 0
     moved = None
     retained = {}
 
     def alter_storage(plan, target, owner, reclaimed=()):
-        nonlocal private, moved
+        nonlocal private, private_transaction, moved
+        private_transaction = owner.transaction
         private = next(iter(owner.transaction._migration_retention))
         for record in owner.transaction._slice_a_migrated:
             if record.tombstone_path.parent == private:
@@ -1817,14 +1951,26 @@ def test_stock_pair_retention_settlement_refuses_changed_storage_or_cleanup_deni
             (private / "foreign").write_bytes(b"foreign replacement")
         return finalize(plan, target, owner, reclaimed)
 
-    def deny_cleanup(path):
-        if fault == "cleanup-denied" and path == private:
+    def deny_cleanup(transaction, path, expected):
+        nonlocal denial_hits
+        if (
+            fault == "cleanup-denied"
+            and transaction is private_transaction
+            and Path(path) == private
+        ):
+            denial_hits += 1
+            assert expected.kind == "directory"
+            assert private.is_dir() and not list(private.iterdir())
             raise PermissionError("injected retention cleanup denial")
-        return rmdir(path)
+        return dispose_node(transaction, path, expected)
 
     monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", alter_storage)
-    monkeypatch.setattr(Path, "rmdir", deny_cleanup)
-    assert installer.install("codex", arguments) == 1
+    monkeypatch.setattr(installer._InstallTransaction, "_dispose_node", deny_cleanup)
+    result = installer.install("codex", arguments)
+    assert private is not None
+    if fault == "cleanup-denied":
+        assert denial_hits >= 1
+    assert result == 1
     assert "E_ROLLBACK_SETTLEMENT_FAILED" in capsys.readouterr().err
     assert private is not None and private.is_dir()
     if fault == "replaced-storage":
@@ -1843,31 +1989,47 @@ def test_stock_pair_retention_different_device_refuses_before_prior_rename(
     arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
     assert installer.install("codex", arguments) == 0
     policy, manifest = _seed_native_contract_prior(project, "default-unbinding")
-    before = (policy.read_bytes(), manifest.read_bytes())
+    before = {
+        path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path))
+        for path in (policy, manifest)
+    }
     source_stat = Path.stat
-    source_replace = installer.os.replace
+    publish = installer._InstallTransaction._publish_retained
+    volume_hits = 0
     renamed_prior = False
 
     def different_device(path, *args, **kwargs):
+        nonlocal volume_hits
         metadata = source_stat(path, *args, **kwargs)
         if path == project / ".agents":
+            volume_hits += 1
             fields = list(metadata)
             fields[2] += 1
             return os.stat_result(fields)
         return metadata
 
-    def record_replace(source, target):
+    def record_publication(transaction, source, target, **kwargs):
         nonlocal renamed_prior
-        if Path(source) in (policy, manifest):
+        migration = kwargs.get("migration")
+        if (
+            migration is not None
+            and migration.leaf_path in (policy, manifest)
+            and Path(source) == migration.leaf_path
+        ):
             renamed_prior = True
-        return source_replace(source, target)
+        return publish(transaction, source, target, **kwargs)
 
     monkeypatch.setattr(Path, "stat", different_device)
-    monkeypatch.setattr(installer.os, "replace", record_replace)
-    assert installer.install("codex", arguments) == 1
+    monkeypatch.setattr(installer._InstallTransaction, "_publish_retained", record_publication)
+    result = installer.install("codex", arguments)
+    assert volume_hits >= 1
+    assert result == 1
     assert "migration retention volume" in capsys.readouterr().err
     assert not renamed_prior
-    assert (policy.read_bytes(), manifest.read_bytes()) == before
+    assert {
+        path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path))
+        for path in (policy, manifest)
+    } == before
     assert not list((project / ".agents").glob(".orchestrarium-migration-retention-*"))
 
 
