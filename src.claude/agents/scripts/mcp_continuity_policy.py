@@ -38,6 +38,7 @@ TURN_ANCHOR_CONTEXT = (
     " concretely blocked. A block or required user decision pauses only dependent work; run"
     " useful independent ready work now. Earlier progress is not completion. A standalone"
     " question with no active task may end normally.\n"
+    "Before choosing a new design/mechanism, doing nontrivial implementation yourself, or assigning it, check the current owner and ready existing solutions; reuse adequate architecture and carry only a verified gap.\n"
     "Delegate useful ready work by task to the matching specialist. Under the current default,"
     " Root owns dispatch; provider and leaf agents do not spawn or recursively launch wrappers."
     " Give each lane only needed tools and context; keep mandatory gates.\n"
