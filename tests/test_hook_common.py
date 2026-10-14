@@ -82,8 +82,23 @@ def test_tool_input_acquisition_keeps_identity_and_requires_one_strict_carrier()
 def test_shell_carrier_acquisition_has_no_priority_fallback() -> None:
     assert hook_common.acquire_tool_input("functions.exec_command", {"cmd": "pytest -q"}).command == "pytest -q"
     assert hook_common.acquire_tool_input("PowerShell", {"command": "pytest -q"}).command == "pytest -q"
-    for payload in ({"cmd": "", "command": "pytest -q"}, {"cmd": "pytest -q", "command": "pytest -q"}):
+    for payload in (
+        {"cmd": "", "command": "pytest -q"},
+        {"cmd": "pytest -q", "command": "pytest -q"},
+        {"cmd": "first", "command": "second"},
+        {"cmd": "", "command": ""},
+        {"cmd": 0}, {"cmd": " "}, {},
+    ):
         assert not hook_common.acquire_tool_input("exec_command", payload).resolved
+    assert not hook_common.acquire_tool_input("Bash", {"cmd": "date"}).resolved
+    assert not hook_common.acquire_tool_input("Bash", {"cmd": "", "command": "date"}).resolved
+
+
+def test_tool_operation_is_acquired_before_shell_payload_quality() -> None:
+    assert hook_common.normalize_tool_operation("tools.PowerShell") == "powershell"
+    assert hook_common.normalize_tool_operation("functions.exec_command") == "exec_command"
+    for name in (None, "", "tools..Bash", " tools.Bash", "update_plan", "mcp__other__bash"):
+        assert hook_common.normalize_tool_operation(name) is None
 
 
 def test_dormant_delivery_activity_pipeline_is_retired() -> None:
@@ -144,6 +159,25 @@ def _write_transcript(entries: list) -> Path:
 
 
 class TestTypedShellCommandOccurrences(unittest.TestCase):
+    def test_recorded_exec_command_preserves_identity_and_rejects_dual_carriers(self) -> None:
+        for payload in ({"cmd": "Get-Date"}, {"command": "Get-Date"}):
+            entry = {"type": "response_item", "payload": {
+                "type": "function_call", "call_id": "actual-call", "name": "functions.exec_command",
+                "arguments": json.dumps(payload),
+            }}
+            self.assertEqual(hook_common.extract_model_shell_command_occurrences(entry), [
+                hook_common.ModelShellCommandOccurrence("actual-call", "functions.exec_command", "Get-Date")
+            ])
+        for payload in ({"cmd": "", "command": "Get-Date"}, {"cmd": "Get-Date", "command": "Get-Date"}):
+            entry = {"type": "response_item", "payload": {
+                "type": "function_call", "call_id": "actual-call", "name": "functions.exec_command",
+                "arguments": json.dumps(payload),
+            }}
+            self.assertEqual(hook_common.extract_model_shell_command_occurrences(entry), [])
+            claude = _tool_use_entry("claude-call")
+            claude["message"]["content"][0].update(name="functions.exec_command", input=payload)
+            self.assertEqual(hook_common.extract_model_shell_command_occurrences(claude), [])
+
     def test_claude_and_codex_preserve_actual_tool_name(self) -> None:
         claude = _tool_use_entry("claude-call", "echo claude")
         codex = {

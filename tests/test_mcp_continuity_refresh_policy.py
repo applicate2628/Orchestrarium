@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -57,11 +59,23 @@ def load_policy(path: Path, index: int):
     spec = importlib.util.spec_from_file_location(f"mcp_continuity_policy_{index}", path)
     assert spec is not None and spec.loader is not None
     policy = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(policy)
+    with patch.object(sys, "path", [str(path.parent), *sys.path]):
+        spec.loader.exec_module(policy)
     return policy
 
 
 class StatefulMcpRefreshPolicyTests(unittest.TestCase):
+    def test_navigation_uses_strict_shared_command_acquisition(self) -> None:
+        for index, path in enumerate(POLICY_PATHS):
+            policy = load_policy(path, index)
+            command = "rg -n symbol src"
+            for payload in ({"cmd": command}, {"command": command}):
+                self.assertTrue(policy.classify_tool_choice("functions.exec_command", payload, str(ROOT)))
+            for payload in ({"cmd": "", "command": command}, {"cmd": command, "command": command}):
+                self.assertFalse(policy.classify_tool_choice("exec_command", payload, str(ROOT)))
+            self.assertFalse(policy.classify_tool_choice("tools..exec_command", {"cmd": command}, str(ROOT)))
+            self.assertTrue(policy.classify_tool_choice("Grep", {"pattern": "symbol", "type": "py"}, str(ROOT)))
+
     def test_english_and_russian_references_carry_the_same_freshness_contract(self) -> None:
         for path, markers in REFERENCE_CONTRACTS.items():
             with self.subTest(reference=path.relative_to(ROOT).as_posix()):

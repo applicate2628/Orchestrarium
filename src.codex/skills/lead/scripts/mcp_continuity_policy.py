@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared semantic policy for MCP continuity across the three hook events.
 
-This module is dependency-free and side-effect-free.  It classifies untrusted
+This module shares hook_common's input acquisition and is side-effect-free. It classifies untrusted
 hook input as data; it never executes shell text and never emits configuration
 values.  Event adapters own envelope parsing and delivery.
 """
@@ -16,6 +16,8 @@ import shlex
 import stat
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple
+
+from hook_common import acquire_tool_input
 
 
 SESSION_START_CONTEXT = "\n".join(
@@ -372,7 +374,7 @@ def classify_tool_choice(
     raw_cwd: object = None,
 ) -> bool:
     """Classify one admitted PreToolUse choice as code navigation or not."""
-    if tool_name not in ADMITTED_TOOLS or not isinstance(tool_input, Mapping):
+    if not isinstance(tool_input, Mapping):
         return False
     coordinate = _ScopeCoordinate.from_cwd(raw_cwd)
     if tool_name == "Grep":
@@ -390,10 +392,10 @@ def classify_tool_choice(
             return False
         return bool(CODE_PATTERN_RE.search(pattern) or (path and _scope_is_source_like(path)))
 
-    command_key = "cmd" if tool_name == "exec_command" and tool_input.get("cmd") else "command"
-    command = tool_input.get(command_key)
-    if not isinstance(command, str) or not command.strip():
+    acquired = acquire_tool_input(tool_name, tool_input)
+    if not acquired.resolved or acquired.command is None:
         return False
+    command = acquired.command
     return any(
         _shell_search_is_navigation(executable, args, coordinate, relative_ambiguous)
         for executable, args, relative_ambiguous in _search_invocations(command)

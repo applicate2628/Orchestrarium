@@ -407,8 +407,8 @@ from git_push_gate_preflight import (
 
 # Per-turn override marker — honored ONLY from the last genuine user message.
 # User-side only by design: assistant prose can be steered by injected content
-# (see the consultant continuation-prompt untrusted-data rule), so unlike
-# [skip-bugfix-discipline] this marker never counts from the model's own reply.
+# (see the consultant continuation-prompt untrusted-data rule). Neither this
+# marker nor [skip-bugfix-discipline] gains authority from the model's own reply.
 
 PR_URL_REGEX = re.compile(
     r"^(?P<url>https://github\.com/"

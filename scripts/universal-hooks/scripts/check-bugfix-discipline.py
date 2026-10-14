@@ -20,8 +20,8 @@ Decision algorithm (fail-open everywhere on internal error):
      Handles both Claude (`message.content`) and Codex (`payload`/`input_text`)
      transcript shapes.
   4. Examine the genuine user message plus the assistant's PROSE this turn:
-     - If the override marker appears in the user message OR in assistant prose
-       → exit 0 (allow). It is NOT honored from tool output or tool-call input,
+      - If the override marker appears in the genuine user message
+        → exit 0 (allow). Assistant prose, tool output and tool-call input cannot grant it,
        because file content the model edits/reads can contain the literal
        marker (it is present in several tracked repo files).
      - If the user message contains no bug-trigger phrase → exit 0 (allow).
@@ -36,7 +36,7 @@ Decision algorithm (fail-open everywhere on internal error):
   6. If discipline engaged → exit 0 (allow).
   7. Otherwise → emit a structured deny payload telling the model exactly what
      to do (invoke /agents-bugfix, capture diagnostics and state the hypothesis
-     in the conversation, or write the override marker in its reply).
+      in the conversation; only the genuine user can supply the optional opt-out).
 
 The hook is bypassable in principle — the model can fake any signal — but
 it catches the common omission of "saw bug report, went straight to Edit"
@@ -243,17 +243,13 @@ def main() -> int:
         return 0
     user_text = extract_user_typed_text(last_user_entry)
 
-    # The override marker AND the broad discipline signals (a stated hypothesis,
-    # "diagnostic", "VERIFIED:", ...) come ONLY from the model's own PROSE reply
-    # — never from tool output, never from tool-call input. File content the
-    # model edits or reads can contain the literal `[skip-bugfix-discipline]`
-    # marker or those signal words (the marker is present in several tracked
-    # repo files), so matching them against tool I/O was a real bypass in both
-    # directions. extract_assistant_prose returns assistant text blocks only.
+    # Only acquired genuine user text can grant the override. Assistant prose
+    # supplies diagnostic signals, never user authority; tool input/output and
+    # file content supply neither. extract_assistant_prose returns text blocks only.
     prose_haystack = "\n".join(
         t for t in (extract_assistant_prose(e) for e in after_user_entries) if t
     )
-    if OVERRIDE_MARKER_REGEX.search(user_text) or OVERRIDE_MARKER_REGEX.search(prose_haystack):
+    if OVERRIDE_MARKER_REGEX.search(user_text):
         return 0  # explicit override; allow
 
     if not BUG_TRIGGER_REGEX.search(user_text):
@@ -288,11 +284,10 @@ def main() -> int:
         f"reported file:line, run a probe to reproduce the error, then "
         f"state your hypothesis chain explicitly in the conversation. After "
         f"that, retry the edit.\n\n"
-        f"  (c) If this is genuinely NOT a bug-fix task (e.g. user said "
-        f"'fix this typo' meaning a docs edit, or used a bug-trigger word "
-        f"in a non-bug context), reply to the user with `[skip-bugfix-"
-        f"discipline]` in your message acknowledging the override, then "
-        f"retry. The marker disables this guard for the next turn only."
+        f"  (c) Only a genuine user message containing `[skip-bugfix-discipline]` "
+        f"can opt out for that turn; assistant text cannot grant it on the user's "
+        f"behalf. Otherwise complete (a) or (b), then retry without an extra "
+        f"permission question."
     )
 
     payload = {

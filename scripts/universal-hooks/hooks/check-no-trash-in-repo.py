@@ -110,7 +110,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
 from git_push_gate_preflight import parse_shell_command, resolve_command_dialect
-from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
+from hook_common import acquire_tool_input, emit_advisory, parse_envelope, read_stdin_utf8
 
 
 # `git` global options that consume a SEPARATE following token as their value;
@@ -524,13 +524,10 @@ def main() -> int:
     except Exception:
         return 0  # malformed envelope -> fail open
 
-    tool_input = envelope.get("tool_input")
-    if not isinstance(tool_input, dict):
+    acquired = acquire_tool_input(envelope.get("tool_name"), envelope.get("tool_input"))
+    if not acquired.resolved or acquired.command is None:
         return 0
-
-    command = tool_input.get("command")
-    if not isinstance(command, str) or not command:
-        return 0
+    command = acquired.command
 
     reasons: list[str] = []
 

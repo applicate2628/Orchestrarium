@@ -28,6 +28,7 @@ from hook_common import (
     CURRENT_TURN_BYTE_CAP,
     NO_OBSERVED_FAILURE,
     STATUS_FOUND,
+    acquire_tool_input,
     extract_model_tool_calls_with_ids,
     extract_text,
     extract_tool_outputs_with_ids,
@@ -344,8 +345,8 @@ def _is_relevant_tool_call(tool_name: str, tool_input: object) -> bool:
     if not isinstance(tool_input, dict):
         return False
     if name in SHELL_TOOL_NAMES or name.endswith(("bash", "powershell")):
-        command = tool_input.get("cmd" if name == "exec_command" else "command")
-        return isinstance(command, str) and bool(SHELL_PROBE_REGEX.search(command))
+        acquired = acquire_tool_input(tool_name, tool_input)
+        return acquired.resolved and acquired.command is not None and bool(SHELL_PROBE_REGEX.search(acquired.command))
     if name in READ_TOOL_NAMES or name.endswith("read"):
         path = tool_input.get("file_path") or tool_input.get("path")
         return isinstance(path, str) and bool(READ_PROBE_PATH_REGEX.search(path))

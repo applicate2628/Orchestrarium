@@ -65,7 +65,7 @@ def run_hook(
     tool_input: object,
     raw: str | None = None,
     cwd: str = "/tmp",
-    tool_name: str | None = None,
+    tool_name: str | None = "Bash",
 ) -> subprocess.CompletedProcess:
     envelope = {"cwd": cwd, "tool_input": tool_input}
     if tool_name is not None:
@@ -78,6 +78,20 @@ def run_hook(
 
 
 class TestStrayArtifactHook(unittest.TestCase):
+    def test_supported_command_carriers_have_equal_advisory_polarity(self) -> None:
+        for script in HOOKS:
+            command = "git worktree add ../owned-test-subject"
+            baseline = run_hook(script, {"command": command}, tool_name="exec_command")
+            equivalent = run_hook(script, {"cmd": command}, tool_name="functions.exec_command")
+            self.assertEqual(baseline.returncode, 0)
+            self.assertEqual(equivalent.stdout, baseline.stdout)
+            self.assertTrue(baseline.stdout)
+            for payload in ({"cmd": command, "command": command}, {"cmd": "", "command": command}):
+                rejected = run_hook(script, payload, tool_name="exec_command")
+                self.assertEqual((rejected.returncode, rejected.stdout, rejected.stderr), (0, "", ""))
+            unsupported = run_hook(script, {"command": command}, tool_name=None)
+            self.assertEqual((unsupported.returncode, unsupported.stdout, unsupported.stderr), (0, "", ""))
+
     def assert_outcome(self, tool_input: object, should_warn: bool, raw: str | None = None) -> None:
         for script in HOOKS:
             with self.subTest(script=script.parent.parent.name):

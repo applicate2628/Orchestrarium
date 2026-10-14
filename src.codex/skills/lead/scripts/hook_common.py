@@ -146,15 +146,36 @@ def _patch_targets(patch: str) -> tuple[str, ...] | None:
     return tuple(targets) if targets else None
 
 
+def normalize_tool_operation(name: object) -> str | None:
+    """Recognize the declared qualified-name grammar independently of payload."""
+    if not isinstance(name, str) or not name.strip():
+        return None
+    if any(not part or part != part.strip() for part in name.split(".")):
+        return None
+    operation = name.rsplit(".", 1)[-1].lower()
+    return operation if operation in _DIRECT_FILE_TOOLS | _SHELL_TOOLS | {"apply_patch"} else None
+
+
+def _acquire_shell_command(operation: str | None, payload: object) -> str | None:
+    """Select one declared carrier; ambiguous presence never has priority."""
+    if not isinstance(payload, dict):
+        return None
+    present = [key for key in ("cmd", "command") if key in payload]
+    allowed = ("cmd", "command") if operation == "exec_command" else ("command",)
+    if len(present) != 1 or present[0] not in allowed:
+        return None
+    command = payload[present[0]]
+    return command if isinstance(command, str) and command.strip() else None
+
+
 def acquire_tool_input(name: object, payload: object) -> AcquiredToolInput:
     """Acquire supported tool identity and payload without guessing on ambiguity."""
-    if not isinstance(name, str) or not name.strip() or not isinstance(payload, dict):
-        return AcquiredToolInput(name if isinstance(name, str) and name.strip() else None, None, (), None, False)
-    if any(not part or part != part.strip() for part in name.split(".")):
-        return AcquiredToolInput(name, None, (), None, False)
-    operation = name.rsplit(".", 1)[-1].lower()
-    if not operation or operation not in _DIRECT_FILE_TOOLS | _SHELL_TOOLS | {"apply_patch"}:
-        return AcquiredToolInput(name, None, (), None, False)
+    raw_name = name if isinstance(name, str) and name.strip() else None
+    if not isinstance(payload, dict):
+        return AcquiredToolInput(raw_name, None, (), None, False)
+    operation = normalize_tool_operation(name)
+    if operation is None:
+        return AcquiredToolInput(raw_name, None, (), None, False)
     if operation == "apply_patch":
         keys = [key for key in ("command", "patch", "input") if key in payload]
         if len(keys) != 1 or not isinstance(payload[keys[0]], str):
@@ -162,11 +183,10 @@ def acquire_tool_input(name: object, payload: object) -> AcquiredToolInput:
         targets = _patch_targets(payload[keys[0]])
         return AcquiredToolInput(name, operation, targets or (), None, targets is not None)
     if operation in _SHELL_TOOLS:
-        keys = ("cmd", "command") if operation == "exec_command" else ("command",)
-        present = [key for key in keys if key in payload]
-        if len(present) != 1 or not isinstance(payload[present[0]], str) or not payload[present[0]].strip():
+        command = _acquire_shell_command(operation, payload)
+        if command is None:
             return AcquiredToolInput(name, operation, (), None, False)
-        return AcquiredToolInput(name, operation, (), payload[present[0]], True)
+        return AcquiredToolInput(name, operation, (), command, True)
     targets = tuple(value.strip() for key in ("file_path", "notebook_path", "path")
                     if isinstance((value := payload.get(key)), str) and value.strip())
     return AcquiredToolInput(name, operation, targets, None, bool(targets))
@@ -496,9 +516,8 @@ def is_assistant_message(entry: object) -> bool:
 
 def extract_assistant_prose(entry: object) -> str:
     """Assistant-authored PROSE text only — no tool_use blocks (and their
-    inputs), no tool output. Used for the override-marker gate, which must not
-    be trippable by file content the model edits/reads or by tool output (the
-    `[skip-bugfix-discipline]` marker literally appears in several repo files)."""
+    inputs), no tool output. Used for diagnostic signals, never user override
+    authority; edited/read file content and tool output are not assistant prose."""
     if not is_assistant_message(entry):
         return ""
     content = entry.get("content")
@@ -703,21 +722,16 @@ def extract_model_shell_command_occurrences(
     "..."}` is not a parseable shell command, the flattening was only ever
     meant for keyword search, not structural analysis.
 
-    Claude: any `tool_use` whose `input` is a dict with a STRING `command`
-    field (the Bash tool's own shape; not filtered by tool `name`, since
-    `command` is the load-bearing field regardless of what the tool happens
-    to be called).
-    Codex: a `function_call` payload whose `arguments` is a JSON string that
-    parses to an object with a STRING `command` field (verified against 65
-    real `function_call` entries in this machine's own `~/.codex/
-    archived_sessions/*.jsonl`, 2026-07-26 -- all 65 used a plain string,
-    none an argv-array form; real payloads carry `name: "shell_command"`,
-    NOT the `"shell"` name this module's own test fixtures had assumed, but
-    this extractor does not filter on `name` at all, so that naming
-    difference cannot cause a miss). A missing, non-string, or unparseable/
-    array-form `command` is skipped.
+    Both recorded protocols use the shared strict carrier selection. Declared
+    exec_command names support cmd or command, never both; other recorded names
+    retain the historical command carrier. Missing/unknown names stay typed
+    unsupported provenance, not an invented dialect or publication credit.
+    Codex function_call arguments must be JSON text containing an object;
+    Claude tool_use input is its recorded object. The actual raw name and call
+    ID remain attached to each acquired occurrence.
 
-    A call with no id, same as the sibling extractors, is skipped entirely
+    Ambiguous, unavailable or unsupported carriers are skipped. A call with no
+    id, same as the sibling extractors, is skipped entirely
     -- fail-closed: an uncorrelatable call can never be credited as a scan
     execution by a caller keying off this function's output."""
     occurrences: list[ModelShellCommandOccurrence] = []
@@ -727,6 +741,7 @@ def extract_model_shell_command_occurrences(
     if isinstance(payload, dict) and payload.get("type") == "function_call":
         call_id = payload.get("call_id")
         if isinstance(call_id, str) and call_id:
+            name = payload.get("name")
             raw_args = payload.get("arguments")
             command = None
             if isinstance(raw_args, str):
@@ -734,10 +749,8 @@ def extract_model_shell_command_occurrences(
                     parsed = json.loads(raw_args)
                 except Exception:
                     parsed = None
-                if isinstance(parsed, dict) and isinstance(parsed.get("command"), str):
-                    command = parsed["command"]
+                command = _acquire_shell_command(normalize_tool_operation(name), parsed)
             if command:
-                name = payload.get("name")
                 occurrences.append(ModelShellCommandOccurrence(
                     call_id,
                     name if isinstance(name, str) and name else None,
@@ -759,12 +772,13 @@ def extract_model_shell_command_occurrences(
             if not isinstance(call_id, str) or not call_id:
                 continue
             input_obj = item.get("input")
-            if isinstance(input_obj, dict) and isinstance(input_obj.get("command"), str):
-                name = item.get("name")
+            name = item.get("name")
+            command = _acquire_shell_command(normalize_tool_operation(name), input_obj)
+            if command is not None:
                 occurrences.append(ModelShellCommandOccurrence(
                     call_id,
                     name if isinstance(name, str) and name else None,
-                    strip_injected_spans(input_obj["command"]),
+                    strip_injected_spans(command),
                 ))
     return occurrences
 

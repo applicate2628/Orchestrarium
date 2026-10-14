@@ -224,10 +224,16 @@ class TestBugfixDisciplineGenuineUser(unittest.TestCase):
             should_deny=False,
         )
 
-    def test_override_marker_allows(self) -> None:
+    def test_assistant_override_marker_does_not_allow(self) -> None:
         self.assert_outcome(
             [user("fix this broken typo in the heading"),
              assistant("[skip-bugfix-discipline] this is a docs edit, not a bug fix.")],
+            should_deny=True,
+        )
+
+    def test_genuine_user_override_marker_allows(self) -> None:
+        self.assert_outcome(
+            [user("fix this broken typo [skip-bugfix-discipline]"), assistant("Looking now.")],
             should_deny=False,
         )
 
@@ -246,7 +252,7 @@ class TestBugfixDisciplineGenuineUser(unittest.TestCase):
 
     def test_override_marker_in_tool_result_does_not_allow(self) -> None:
         # The marker echoed in tool output (e.g. a grep of a doc that documents
-        # it) must NOT disable the guard — only the assistant's own reply can.
+        # it) must NOT disable the guard — only genuine user text can.
         # 8+ tracked repo files literally contain the marker, so this is reachable.
         self.assert_outcome(
             [user("the service is broken, fix it"), assistant("looking"),
@@ -275,7 +281,7 @@ class TestBugfixDisciplineGenuineUser(unittest.TestCase):
 
     def test_claude_tool_use_input_override_does_not_allow(self) -> None:
         # The marker inside a tool_use input (e.g. editing a doc that documents
-        # the marker) must NOT disable the guard — only the assistant's prose can.
+        # the marker) must NOT disable the guard — only genuine user text can.
         self.assert_outcome(
             [user("the parser is broken, fix it"),
              assistant_tool_use("Edit", {"file_path": "CLAUDE.md",

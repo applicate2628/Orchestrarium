@@ -73,6 +73,16 @@ def shell_receipt(**changes: object) -> dict:
 
 
 class TestPassivePollingStop(unittest.TestCase):
+    def test_shared_command_carrier_conflicts_do_not_supply_probe_credit(self) -> None:
+        for payload in ({"cmd": "Get-Date"}, {"command": "Get-Date"}):
+            self.assert_allowed(self.run_hook(
+                transcript_entries=[entry("user", "status?"), tool_entry("functions.exec_command", payload)]))
+        for payload in ({"cmd": "", "command": "Get-Date"}, {"cmd": "Get-Date", "command": "Get-Date"}):
+            self.assert_passive_blocked(self.run_hook(
+                transcript_entries=[entry("user", "status?"), tool_entry("exec_command", payload)]))
+        self.assert_passive_blocked(self.run_hook(
+            transcript_entries=[entry("user", "status?"), tool_entry("tools..exec_command", {"cmd": "Get-Date"})]))
+
     def test_predicate_local_polarity_and_mentions(self) -> None:
         transcript = [entry("user", "continue the admitted work")]
         for message in (

@@ -227,6 +227,62 @@ def test_r4_deep_contract_rejects_all_top_level_and_nested_mutations() -> None:
             raise AssertionError("R4-DEEP-FOREIGN-SHAPE-ACCEPTED")
 
 
+def test_shared_hook_input_applicability_preserves_publication_failure_contract() -> None:
+    for target in TARGETS:
+        owner = _load(target.preflight_path, f"shared_hook_input_{target.label}")
+        for name, payload in (
+            ("Bash", {"command": "git push origin main"}),
+            ("exec_command", {"command": "git push origin main"}),
+            ("functions.exec_command", {"cmd": "git push origin main"}),
+        ):
+            result = owner.build_preflight({"tool_name": name, "tool_input": payload})
+            assert owner.validate_preflight_result(result) is result
+            assert result.failure_id == "PRG-TRANSCRIPT-UNAVAILABLE"
+            assert result.reason_id == "PFP-DENY-TRANSCRIPT" and result.command == "git push origin main"
+        for payload in (None, {}, {"cmd": " "}, {"cmd": 0},
+                        {"cmd": "", "command": "git push origin main"},
+                        {"cmd": "git push origin main", "command": "git push origin main"}):
+            with mock.patch.object(owner, "parse_shell_command", side_effect=AssertionError("unacquired input reached parser")):
+                result = owner.build_preflight({"tool_name": "exec_command", "tool_input": payload})
+            assert owner.validate_preflight_result(result) is result
+            assert (result.outcome, result.reason_id, result.continuation, result.failure_id) == (
+                "DEFER", "PFP-DENY-KNOWN", "RENDER_DENY", "PGG-PARSE-UNCERTAIN")
+            assert result.command is None and result.dialect is None and result.parsed is None
+            assert result.current_turn_status is None and result.generic_decision is None
+            assert result.transcript_path == result.repository_workdir == result.repository_workdir_source == ""
+            assert result.transcript_diagnostic is None and not result.push_instruction and not result.simple_pr_approval
+        for envelope in (
+            {"tool_name": "update_plan", "tool_input": {"steps": []}},
+            {"tool_name": "legacy-shell", "tool_input": {"command": "git push origin main"}},
+            {"tool_input": {"command": "git push origin main"}},
+        ):
+            with mock.patch.object(owner, "parse_shell_command", side_effect=AssertionError("unrelated input reached parser")):
+                result = owner.build_preflight(envelope)
+            assert owner.validate_preflight_result(result) is result
+            assert (result.outcome, result.reason_id, result.continuation) == ("ALLOW_FINAL", "PFP-ALLOW-NO-COMMAND", "NONE")
+            assert result.command is None and result.dialect is None and result.parsed is None
+        with mock.patch.object(owner, "acquire_tool_input", side_effect=RuntimeError("synthetic private detail")):
+            result = owner.build_preflight({"tool_name": "Bash", "tool_input": {"command": "git push origin main"}})
+        assert owner.validate_preflight_result(result) is result
+        assert result.reason_id == "PFP-DENY-INTERNAL" and result.continuation == "RENDER_DENY"
+
+
+def test_shared_hook_input_unavailable_command_is_denied_by_the_public_runner() -> None:
+    for target in TARGETS:
+        for envelope, denied in (
+            ({"tool_name": "exec_command", "tool_input": {"cmd": "", "command": "git push origin main"}}, True),
+            ({"tool_name": "update_plan", "tool_input": {"steps": []}}, False),
+        ):
+            actual = _run(target, envelope)
+            assert actual.returncode == 0 and actual.stderr == ""
+            if denied:
+                body = json.loads(actual.stdout)
+                assert body["hookSpecificOutput"]["permissionDecision"] == "deny"
+                assert "PGG-PARSE-UNCERTAIN" in body["hookSpecificOutput"]["permissionDecisionReason"]
+            else:
+                assert actual.stdout == ""
+
+
 def test_transcript_diagnostic_is_finite_and_legacy_construction_survives() -> None:
     for target in TARGETS:
         module = _load(
@@ -820,8 +876,15 @@ def test_parse_uncertain_heavy_path_uses_same_reason_owner(tmp_path: Path) -> No
             preflight.parse_shell_command("printf 'synthetic", "posix"),
             None, None, False, "PGG-PARSE-UNCERTAIN",
         ))
-        heavy_result = preflight.build_preflight(_former_envelope("no-allow-deny", tmp_path))
-        assert heavy_result.continuation == "EVALUATE_HEAVY"
+        envelope = _former_envelope("no-allow-deny", tmp_path)
+        envelope["tool_input"]["workdir"] = str(tmp_path)
+        heavy_result = preflight.validate_preflight_result(preflight.build_preflight(envelope))
+        assert (heavy_result.outcome, heavy_result.reason_id, heavy_result.continuation) == (
+            "DEFER", "PFP-HEAVY", "EVALUATE_HEAVY",
+        )
+        assert heavy_result.command == envelope["tool_input"]["command"]
+        assert heavy_result.repository_workdir == str(tmp_path)
+        assert heavy_result.repository_workdir_source == "tool"
 
         def render(value, failure_id=None):
             stdout, stderr = io.StringIO(), io.StringIO()

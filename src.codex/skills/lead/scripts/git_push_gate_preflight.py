@@ -16,7 +16,9 @@ from hook_common import (
     HISTORY_STATUSES,
     STATUS_FOUND,
     TURN_BOUNDARY_STATUSES,
+    acquire_tool_input,
     extract_user_typed_text,
+    normalize_tool_operation,
     parse_envelope,
     read_stdin_utf8,
     scan_current_turn_boundary,
@@ -2259,11 +2261,12 @@ def _project_scan_execution_graph(
     return False
 
 def resolve_command_dialect(tool_name: object) -> CommandDialectResolution:
-    if tool_name == "PowerShell":
+    operation = normalize_tool_operation(tool_name)
+    if operation == "powershell":
         return CommandDialectResolution("powershell", True)
-    if tool_name == "Bash":
+    if operation == "bash":
         return CommandDialectResolution("posix", True)
-    if tool_name in ("shell_command", "exec_command"):
+    if operation in ("shell_command", "exec_command"):
         return CommandDialectResolution(
             "powershell" if os.name == "nt" else "posix", True
         )
@@ -2702,12 +2705,14 @@ def build_preflight(envelope: dict) -> PreflightResult:
     try:
         if envelope.get("agent_id"):
             return _result("ALLOW_FINAL", "PFP-ALLOW-SUBAGENT", "NONE")
+        operation = normalize_tool_operation(envelope.get("tool_name"))
+        if operation not in {"bash", "powershell", "shell_command", "exec_command"}:
+            return _result("ALLOW_FINAL", "PFP-ALLOW-NO-COMMAND", "NONE")
         tool_input = envelope.get("tool_input")
-        if not isinstance(tool_input, dict):
-            return _result("ALLOW_FINAL", "PFP-ALLOW-NO-COMMAND", "NONE")
-        command = tool_input.get("command")
-        if not isinstance(command, str) or not command:
-            return _result("ALLOW_FINAL", "PFP-ALLOW-NO-COMMAND", "NONE")
+        acquired = acquire_tool_input(envelope.get("tool_name"), tool_input)
+        if not acquired.resolved or acquired.command is None:
+            raise PrRouteDenied("PGG-PARSE-UNCERTAIN")
+        command = acquired.command
         resolution = resolve_command_dialect(envelope.get("tool_name"))
         parsed = parse_shell_command(command, resolution.dialect)
         resolution, parsed = _recover_mislabeled_command_dialect(
