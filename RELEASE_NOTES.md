@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-14
 
+- **Explicit process environments use their real host contract.** The process owner accepts typed environment rows and produces native Windows Unicode blocks through the shared kernel interface, without imposing shell-variable spelling or a fixed row-count cap. Missing, malformed, duplicate and invalid encoded inputs retain visible refusals; inherited, empty and explicit mappings remain distinct. Process and publication callers share the same supported API owner.
+
 - **Hook decisions consume actual tool envelopes and completed transport evidence.** The shared input owner preserves supported namespaced calls and code or shell carriers without treating prose as execution. Bug-fix, passive-wait, stray-artifact and push-preflight consumers use that same interpretation, preventing lexical false stops while preserving malformed, missing, pending and failed evidence refusals. Publication still requires its independent human approval and fresh leak evidence.
 
 - **Luna accepts exact discovered tool identities without confusing names with authority.** The shared native selector preserves qualified identifiers and their delimiters, rejects whole ambient selectors, and leaves operation capability and carrier validation to the caller. Legitimate names containing ordinary words no longer fail lexical checks; generic execution and missing input still refuse. Existing regression fixtures now bind their actual default-role producer, receipt generation and native transaction seams, with positive fault activation.

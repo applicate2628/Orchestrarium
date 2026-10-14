@@ -41,7 +41,6 @@ CAPABILITY_MAGIC = b"OPCAPV1\0"
 MAX_ARGV_COUNT = 1024
 MAX_ARG_BYTES = 32 * 1024
 MAX_ARGV_BYTES = 128 * 1024
-MAX_ENVIRONMENT_COUNT = 128
 MAX_ENVIRONMENT_NAME_BYTES = 128
 MAX_ENVIRONMENT_VALUE_BYTES = 64 * 1024
 MAX_ENVIRONMENT_BYTES = 128 * 1024
@@ -111,7 +110,6 @@ TERMINAL_STAGES = frozenset(
         "completed",
     }
 )
-_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _LOWER_HEX_32 = re.compile(r"[0-9a-f]{32}\Z")
 _LOWER_HEX_64 = re.compile(r"[0-9a-f]{64}\Z")
 _WINDOWS_SHELL_HOSTS = frozenset(
@@ -1956,32 +1954,62 @@ def hook_health_capture_policy() -> CapturePolicyV1:
     )
 
 
-def _validate_environment(rows: Sequence[EnvironmentRowV1]) -> None:
-    if len(rows) > MAX_ENVIRONMENT_COUNT:
+def _validate_environment(
+    rows: tuple[EnvironmentRowV1, ...],
+    windows_api: _WindowsKernelV1 | None = None,
+) -> None:
+    # A nonempty name, '=' and row NUL cost at least three UTF-8 bytes.
+    if type(rows) is not tuple or len(rows) > MAX_ENVIRONMENT_BYTES // 3:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     seen: set[str] = set()
+    items: list[tuple[str, str]] = []
     total = 0
     for row in rows:
-        if not isinstance(row, EnvironmentRowV1) or not _ENV_NAME.fullmatch(row.name):
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        name_bytes = row.name.encode("utf-8")
-        value_bytes = row.value.encode("utf-8")
         if (
-            "\0" in row.value
-            or len(name_bytes) > MAX_ENVIRONMENT_NAME_BYTES
+            not isinstance(row, EnvironmentRowV1)
+            or not isinstance(row.name, str)
+            or not isinstance(row.value, str)
+            or len(row.name) > MAX_ENVIRONMENT_NAME_BYTES
+            or len(row.value) > MAX_ENVIRONMENT_VALUE_BYTES
+            or not row.name
+            or "\0" in row.name
+            or "=" in row.name
+            or "\0" in row.value
+        ):
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+        try:
+            name_bytes = row.name.encode("utf-8")
+            value_bytes = row.value.encode("utf-8")
+            if os.name != "nt":
+                os.fsencode(row.name)
+                os.fsencode(row.value)
+        except UnicodeError as exc:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation") from exc
+        if (
+            len(name_bytes) > MAX_ENVIRONMENT_NAME_BYTES
             or len(value_bytes) > MAX_ENVIRONMENT_VALUE_BYTES
         ):
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        key = row.name.casefold() if os.name == "nt" else row.name
-        if key in seen:
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        seen.add(key)
         total += len(name_bytes) + 1 + len(value_bytes) + 1
-    if total > MAX_ENVIRONMENT_BYTES:
-        raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+        if total > MAX_ENVIRONMENT_BYTES:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+        if os.name == "nt":
+            items.append((row.name, row.value))
+        else:
+            if row.name in seen:
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            seen.add(row.name)
     if os.name == "nt":
-        ordered = sorted(rows, key=lambda row: row.name.casefold())
-        block = "\0".join(f"{row.name}={row.value}" for row in ordered) + "\0\0"
+        try:
+            if windows_api is None:
+                raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation")
+            block, duplicates = windows_api.serialize_environment(items)
+        except ProcessSupervisionError:
+            raise
+        except (AttributeError, OSError, ValueError, TypeError, _WINDOWS_JOB.WindowsJobError) as exc:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation") from exc
+        if duplicates:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
         if len(block.encode("utf-16-le")) // 2 > MAX_WINDOWS_ENVIRONMENT_UNITS:
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
 
@@ -2076,7 +2104,19 @@ def validate_process_request(
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     elif basename in _POSIX_SHELL_HOSTS:
         raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
-    _validate_environment(request.environment)
+    windows_api = None
+    if os.name == "nt":
+        try:
+            windows_api = (
+                _WindowsKernelV1()
+                if executable_launch_owner is None
+                else executable_launch_owner.windows_api
+            )
+            if windows_api is None:
+                raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation")
+        except (AttributeError, OSError, _WINDOWS_JOB.WindowsJobError) as exc:
+            raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation") from exc
+    _validate_environment(request.environment, windows_api)
     if request.stdin_bytes is not None and (
         not isinstance(request.stdin_bytes, bytes) or len(request.stdin_bytes) > MAX_STDIN_BYTES
     ):
@@ -2504,7 +2544,7 @@ def _acquire_executable_launch_owner(
         if os.name == "nt":
             import msvcrt
 
-            api = windows_api or _WindowsKernelV1()
+            api = windows_api if windows_api is not None else _WindowsKernelV1()
             owner.windows_api = api
             for component in reversed((absolute.parent, *absolute.parent.parents)):
                 metadata = component.lstat()
@@ -2951,7 +2991,7 @@ class _WindowsBackendV1:
     ) -> None:
         self.coordinator = coordinator
         self.admission_owner = admission_owner
-        self.api = api or _WindowsKernelV1()
+        self.api = api if api is not None else _WindowsKernelV1()
 
     def run(
         self,
@@ -3577,7 +3617,7 @@ class ProcessRunnerV1:
         result = _WindowsBackendV1(
             self.windows_inheritance_coordinator,
             self.windows_argv_admission_owner,
-            self._windows_api,
+            executable_launch_owner.windows_api,
         ).run(
             request,
             lifecycle,
@@ -3938,7 +3978,7 @@ class ProcessRunnerV1:
                 result = _WindowsBackendV1(
                     self.windows_inheritance_coordinator,
                     self.windows_argv_admission_owner,
-                    self._windows_api,
+                    executable_launch_owner.windows_api,
                 ).run(
                     request,
                     owned_lifecycle,

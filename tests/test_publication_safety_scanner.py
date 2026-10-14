@@ -111,6 +111,43 @@ def _load_find_machine_paths():
     return mod.find_machine_paths
 
 
+@unittest.skipUnless(os.name == "nt", "native Windows scanner environment")
+def test_windows_sync_scanner_keeps_direct_environment_domain():
+    module = _load_canonical_scanner("_environment_sync_scanner")
+    name = "N" * 129
+    code = "import os,sys;print(os.getenv(sys.argv[1])==sys.argv[2])"
+    result = module._run_windows_owned_process(
+        [sys.executable, "-c", code, name, "SYNTHETIC"],
+        text=True, timeout=5.0, env={name: "SYNTHETIC"},
+    )
+    assert result.returncode == 0 and result.stdout.strip() == "True"
+
+
+@unittest.skipUnless(os.name == "nt", "native Windows scanner environment")
+def test_windows_async_scanner_keeps_direct_environment_domain():
+    import asyncio
+    module = _load_canonical_scanner("_environment_async_scanner")
+    name = "N" * 129
+    code = "import os,sys;print(os.getenv(sys.argv[1])==sys.argv[2])"
+
+    async def receive():
+        process = await module._create_windows_owned_async_process(
+            (sys.executable, "-c", code, name, "SYNTHETIC"),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.DEVNULL, env={name: "SYNTHETIC"},
+        )
+        try:
+            output = await asyncio.wait_for(process.stdout.read(), 5.0)
+            assert await asyncio.wait_for(process.wait(), 5.0) == 0
+            assert output.strip() == b"True"
+            assert process.job.settle(time.monotonic() + 5.0).complete
+        finally:
+            process.job.close()
+            assert await process.close_io()
+
+    asyncio.run(receive())
+
+
 def _load_canonical_scanner(name: str):
     spec = importlib.util.spec_from_file_location(name, str(CANONICAL_SCANNER))
     mod = importlib.util.module_from_spec(spec)

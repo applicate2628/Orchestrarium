@@ -17,6 +17,86 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.parametrize("kind", ("cardinality", "native-names", "combined"))
+def test_environment_admits_native_names_and_byte_bounded_cardinality(kind: str) -> None:
+    runner = _load_runner()
+    pairs = [(f"Slot_{index}", "x") for index in range(129)]
+    native_names = [("1 ordinary (name)", "a=b"), ("Ω-name", ""), ("space name", "value")]
+    if kind == "native-names":
+        pairs = native_names
+    elif kind == "combined":
+        pairs += native_names
+    rows = tuple(runner.EnvironmentRowV1(name, value) for name, value in pairs)
+    api = runner._WindowsKernelV1() if os.name == "nt" else None
+    runner._validate_environment(rows, api)
+    assert tuple((row.name, row.value) for row in rows) == tuple(pairs)
+
+
+@pytest.mark.parametrize("kind", (
+    "none", "list", "row-type", "name-type", "value-type", "empty-name",
+    "name-nul", "name-equals", "value-nul", "name-surrogate", "value-surrogate",
+    "name-character-budget", "value-character-budget", "name-bytes", "value-bytes",
+))
+def test_environment_domain_refusals_are_typed(kind: str) -> None:
+    runner = _load_runner()
+    row = runner.EnvironmentRowV1
+    cases = {
+        "none": None, "list": [], "row-type": (object(),),
+        "name-type": (row(1, "x"),), "value-type": (row("A", 1),),
+        "empty-name": (row("", "x"),), "name-nul": (row("A\0B", "x"),),
+        "name-equals": (row("=C:", "x"),), "value-nul": (row("A", "x\0y"),),
+        "name-surrogate": (row("\ud800", "x"),),
+        "value-surrogate": (row("A", "\ud800"),),
+        "name-character-budget": (row("A" * 129, ""),),
+        "value-character-budget": (row("A", "x" * 65537),),
+        "name-bytes": (row("é" * 65, "x"),),
+        "value-bytes": (row("A", "é" * 32769),),
+    }
+    api = runner._WindowsKernelV1() if os.name == "nt" else None
+    with pytest.raises(runner.ProcessSupervisionError) as caught:
+        runner._validate_environment(cases[kind], api)
+    assert caught.value.failure_id == "PSV1-REQUEST-INVALID"
+
+
+def test_environment_cardinality_and_aggregate_stop_before_later_encoding() -> None:
+    runner = _load_runner()
+
+    class Untouched(str):
+        def encode(self, *_args, **_kwargs):
+            raise AssertionError("unadmitted row encoded")
+
+    api = runner._WindowsKernelV1() if os.name == "nt" else None
+    count = runner.MAX_ENVIRONMENT_BYTES // 3 + 1
+    rows = (runner.EnvironmentRowV1("A", Untouched("")),) * count
+    with pytest.raises(runner.ProcessSupervisionError):
+        runner._validate_environment(rows, api)
+    rows = (
+        runner.EnvironmentRowV1("A", "x" * runner.MAX_ENVIRONMENT_VALUE_BYTES),
+        runner.EnvironmentRowV1("B", "y" * runner.MAX_ENVIRONMENT_VALUE_BYTES),
+        runner.EnvironmentRowV1("C", Untouched("")),
+    )
+    with pytest.raises(runner.ProcessSupervisionError):
+        runner._validate_environment(rows, api)
+
+
+def test_environment_posix_exact_identity_and_native_encoding(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner()
+    rows = (runner.EnvironmentRowV1("A", ""), runner.EnvironmentRowV1("a", "a=b"))
+    with monkeypatch.context() as patch:
+        patch.setattr(runner.os, "name", "posix")
+        runner._validate_environment(rows)
+        with pytest.raises(runner.ProcessSupervisionError):
+            runner._validate_environment((rows[0], rows[0]))
+
+        def unavailable_codec(value):
+            raise UnicodeEncodeError("ascii", value, 0, 1, "native codec refusal")
+
+        patch.setattr(runner.os, "fsencode", unavailable_codec)
+        with pytest.raises(runner.ProcessSupervisionError) as caught:
+            runner._validate_environment((rows[0],))
+        assert caught.value.failure_id == "PSV1-REQUEST-INVALID"
+
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER_PATH = ROOT / "scripts" / "process_supervision" / "process_runner.py"
 CHILD = ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py"

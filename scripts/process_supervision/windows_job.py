@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 from dataclasses import dataclass
+from functools import cmp_to_key
 import math
 import os
 import subprocess
@@ -187,6 +188,33 @@ class WindowsKernelV1:
         k.WaitForSingleObject.restype = wintypes.DWORD
         k.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
         k.GetExitCodeProcess.restype = wintypes.BOOL
+        k.CompareStringOrdinal.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.LPCWSTR, ctypes.c_int, wintypes.BOOL]
+        k.CompareStringOrdinal.restype = ctypes.c_int
+
+    def serialize_environment(
+        self, items: Sequence[tuple[str, str]]
+    ) -> tuple[str, bool]:
+        """Preserve native strings and stable ordinal order, without caller policy."""
+        def compare(left: tuple[str, str], right: tuple[str, str]) -> int:
+            try:
+                left_units = len(left[0].encode("utf-16-le", "surrogatepass")) // 2
+                right_units = len(right[0].encode("utf-16-le", "surrogatepass")) // 2
+                result = self.k32.CompareStringOrdinal(
+                    left[0], left_units, right[0], right_units, True
+                )
+            except Exception:
+                # Preserve the private context, without exposing native input text.
+                raise WindowsJobError("WJOB-REQUEST", "environment-serialization") from None
+            if result not in (1, 2, 3):
+                raise WindowsJobError("WJOB-REQUEST", "environment-serialization")
+            return result - 2
+
+        ordered = sorted(items, key=cmp_to_key(compare))
+        duplicates = any(
+            compare(ordered[index - 1], ordered[index]) == 0
+            for index in range(1, len(ordered))
+        )
+        return "\0".join(f"{name}={value}" for name, value in ordered) + "\0\0", duplicates
 
     def close(self, handle: int | None) -> bool:
         return not handle or bool(self.k32.CloseHandle(handle))
@@ -391,7 +419,7 @@ class WindowsJobOwnerV1:
             coordinator = WindowsInheritanceCoordinatorV1()
         if coordinator.poisoned:
             raise WindowsJobError("WJOB-INHERITANCE-POISONED", "launch")
-        process = WindowsJobProcessV1(api or WindowsKernelV1())
+        process = WindowsJobProcessV1(api if api is not None else WindowsKernelV1())
         k = process._api.k32
         h = process._handles
         sa = SECURITY_ATTRIBUTES(ctypes.sizeof(SECURITY_ATTRIBUTES), None, False)
@@ -459,10 +487,10 @@ class WindowsJobOwnerV1:
             command = ctypes.create_unicode_buffer(subprocess.list2cmdline(tuple(argv)))
             env_block = None
             if environment is not None:
-                rows = sorted(environment.items(), key=lambda row: row[0].casefold())
-                env_block = ctypes.create_unicode_buffer(
-                    "\0".join(f"{key}={value}" for key, value in rows) + "\0\0"
+                block_text, _duplicates = process._api.serialize_environment(
+                    tuple(environment.items())
                 )
+                env_block = ctypes.create_unicode_buffer(block_text)
             child_names = ("stdin_child", "stdout_child", "stderr_child")
             with coordinator.lock:
                 if coordinator.poisoned:

@@ -15,6 +15,94 @@ import pytest
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows Job contract")
 
 
+def test_shared_environment_serialization_preserves_direct_native_domain() -> None:
+    job = importlib.import_module("scripts.process_supervision.windows_job")
+    api = job.WindowsKernelV1()
+    items = (("=C:", "C:\\"), ("A" * 129, ""), ("Case", "first"), ("CASE", "second"))
+    block, duplicates = api.serialize_environment(items)
+    assert duplicates
+    assert "=C:=C:\\" + "\0" in block and "A" * 129 + "=\0" in block
+    assert block.index("Case=first\0") < block.index("CASE=second\0")
+    assert api.serialize_environment(()) == ("\0\0", False)
+
+
+@pytest.mark.parametrize("mode", ("inherit", "empty", "mapping"))
+def test_direct_environment_states_and_exact_native_child_strings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    """GetEnvironmentStringsW, not Python's uppercased os.environ, is the oracle."""
+    import json
+    job = importlib.import_module("scripts.process_supervision.windows_job")
+    sentinel = "ENV_OWNER_NONSECRET"
+    monkeypatch.setenv(sentinel, "inherited")
+    long_name = "Native_" + "N" * 122
+    supplied = {sentinel: "explicit", long_name: "long", "ß": "one", "SS": "two"}
+    environment = None if mode == "inherit" else ({} if mode == "empty" else supplied)
+    expected = {sentinel: "inherited"} if mode == "inherit" else ({} if mode == "empty" else supplied)
+    code = (
+        "import ctypes,json,sys\n"
+        "k=ctypes.WinDLL('kernel32',use_last_error=True)\n"
+        "k.GetEnvironmentStringsW.restype=ctypes.c_void_p\n"
+        "k.FreeEnvironmentStringsW.argtypes=[ctypes.c_void_p]\n"
+        "p=k.GetEnvironmentStringsW(); assert p\n"
+        "actual={}; offset=0\n"
+        "try:\n"
+        " while True:\n"
+        "  row=ctypes.wstring_at(p+offset)\n"
+        "  if not row: break\n"
+        "  offset+=len(row.encode('utf-16-le','surrogatepass'))+2\n"
+        "  name,sep,value=row.partition('=')\n"
+        "  if name and sep: actual[name]=value\n"
+        "finally:\n"
+        " assert k.FreeEnvironmentStringsW(p)\n"
+        "expected=json.loads(sys.argv[1])\n"
+        "ok=all(actual.get(n)==v for n,v in expected.items())\n"
+        "if not expected: ok=ok and 'ENV_OWNER_NONSECRET' not in actual\n"
+        "print(json.dumps({'exact':ok}))\n"
+    )
+    process = job.WindowsJobOwnerV1.launch(
+        executable=sys.executable,
+        argv=(sys.executable, "-c", code, json.dumps(expected, ensure_ascii=False)),
+        cwd=str(tmp_path), environment=environment, stdin="null", stderr="null",
+    )
+    fd = process.take_stdout_fd()
+    try:
+        assert fd is not None
+        assert process.wait(time.monotonic() + 5.0) == 0
+        data = b""
+        while chunk := os.read(fd, 4096):
+            data += chunk
+        assert json.loads(data) == {"exact": True}
+        assert process.settle(time.monotonic() + 5.0).complete
+    finally:
+        if fd is not None:
+            os.close(fd)
+        process.close()
+
+
+def test_native_environment_comparator_failure_closes_prepared_resources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import traceback
+    job = importlib.import_module("scripts.process_supervision.windows_job")
+    api = job.WindowsKernelV1()
+    marker = "SYNTHETIC_ENV_PRIVATE"
+
+    def fail_compare(*_args):
+        raise RuntimeError(marker)
+
+    monkeypatch.setattr(api.k32, "CompareStringOrdinal", fail_compare)
+    environment = {"A": marker, "B": "other"}
+    with pytest.raises(job.WindowsJobError) as caught:
+        job.WindowsJobOwnerV1.launch(
+            executable=sys.executable, argv=(sys.executable, "-c", "pass"),
+            cwd=str(tmp_path), environment=environment, api=api,
+        )
+    assert caught.value.failure_id == "WJOB-REQUEST"
+    assert marker not in "".join(traceback.format_exception(caught.value))
+    assert caught.value.windows_job_closure.complete
+
+
 def test_job_membership_precedes_first_child_instruction(tmp_path: Path) -> None:
     """Removing suspended Job verification would let the marker appear early."""
     job = importlib.import_module("scripts.process_supervision.windows_job")
