@@ -195,7 +195,7 @@ def _exempt_write_target(envelope: dict) -> bool:
     acquired = acquire_tool_input(envelope.get("tool_name"), tool_input)
     if acquired.operation == "apply_patch":
         return acquired.resolved and all(
-            target.lower().endswith(".md") and _exempt_path(target) for target in acquired.targets
+            _exempt_path(target) for target in acquired.targets
         )
     if acquired.operation not in {"edit", "write", "notebookedit"}:
         return False

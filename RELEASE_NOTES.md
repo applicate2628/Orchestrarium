@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-14
 
+- **Bug-fix patch checks share the existing artifact-path policy.** Resolved patches to scratch, report, plan, task-memory and documentation paths now receive the same exemption as ordinary writes and edits, so JSON review results no longer trigger a false diagnostic gate. Every patch target is checked; mixed source changes, path traversal and unresolved or ambiguous patch input remain guarded.
+
 - **Claude composition checks accept the reviewed compact rule forms.** The existing validator recognizes the current quick-fix and integration-owner wording while keeping single-count requirements, missing-input refusals, size limits and the reviewed Russian hook payload pin. Maintainer validation no longer rejects the accepted policy solely because punctuation changed; unknown forms and altered payloads still fail.
 
 - **Provider prompts bind current policy and preserve terminal bytes.** The marked shared policy owns the derived prompt capsule, independent runtime digest and projection manifest. Existing validation now checks that complete chain, so a changed rule cannot pass with an old generated copy. Both terminal paths emit the same committed UTF-8 bytes, retaining visible write and flush failures, primary errors and receipt provenance. Actual provider success and publication approval keep their separate checks.

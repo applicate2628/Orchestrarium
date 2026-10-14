@@ -423,19 +423,18 @@ class TestBugfixExemptPaths(unittest.TestCase):
         self.assert_exempt({"command": "*** Begin Patch\n*** Update File: bug-inbox/report.md\n@@\n-old\n+new\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"},
                            exempt=False, tool_name="apply_patch")
 
-    def test_apply_patch_code_in_every_exempt_directory_still_denies(self) -> None:
-        for directory in ("docs", "work-items", ".reports", ".plans", ".scratch"):
-            with self.subTest(directory=directory):
-                self.assert_exempt({"command": f"*** Begin Patch\n*** Add File: {directory}/tool.py\n+print('x')\n*** End Patch"},
-                                   exempt=False, tool_name="apply_patch")
-
-    def test_apply_patch_mixed_markdown_and_code_inside_docs_still_denies(self) -> None:
-        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/guide.md\n@@\n-old\n+new\n*** Add File: docs/tool.py\n+print('x')\n*** End Patch"},
-                           exempt=False, tool_name="apply_patch")
-
-    def test_apply_patch_unknown_extension_inside_docs_still_denies(self) -> None:
-        self.assert_exempt({"command": "*** Begin Patch\n*** Add File: docs/data.txt\n+unknown\n*** End Patch"},
-                           exempt=False, tool_name="apply_patch")
+    def test_apply_patch_declared_paths_share_write_edit_exemption(self) -> None:
+        cases = (
+            ("scratch JSON add", "*** Add File: .scratch/reviews/result.json\n+{}"),
+            ("report update", "*** Update File: .reports/2026-06/result.csv\n@@\n-old\n+new"),
+            ("plan delete", "*** Delete File: .plans/2026-06/state.yaml"),
+            ("task-to-doc move", "*** Update File: work-items/active/x/tool.py\n*** Move to: docs/tool.py\n@@\n-old\n+new"),
+            ("docs text add", "*** Add File: docs/data.txt\n+artifact"),
+        )
+        for label, body in cases:
+            with self.subTest(case=label):
+                self.assert_exempt({"patch": f"*** Begin Patch\n{body}\n*** End Patch"},
+                                   exempt=True, tool_name="apply_patch")
 
     def test_write_code_under_docs_retains_existing_exemption(self) -> None:
         self.assert_exempt({"file_path": "docs/tool.py", "content": "x"}, exempt=True)
