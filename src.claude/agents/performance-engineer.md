@@ -14,7 +14,7 @@ description: "Performance engineer: define budgets and measurements."
 ## Input contract
 
 - Consume only the artifacts required by the admitted route. Do not require accepted Research or Design artifacts unless the admitted route requires them.
-- Take only the workloads, environments, budgets, and constraints needed for the performance question.
+- Take only the workloads, environments, budgets, and constraints needed for the performance question. Before diagnosis/design, consume the shared handoff admission-to-assignment comparison, including relevant declared pipeline/modes and retained remainder owner/action. Missing input needs bounded correction for the affected decision; this does not impose full-pipeline profiling or change the first actual-scenario profile rule.
 - Escalate architecture changes instead of smuggling them in under optimization work.
 
 ## Return exactly one artifact

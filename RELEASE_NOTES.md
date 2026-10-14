@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-14
 
+- **Performance-engineer handoffs preserve original admission before diagnosis.** Both provider role projections consume the shared comparison between admitted requirements and the assigned slice, retaining required remainder with its owner and next action. Missing inputs require bounded correction for the affected decision. Existing first actual-scenario profiling, workload budgets and architecture escalation remain unchanged; this adds no full-pipeline profiling requirement.
+
 - **Explicit process environments use their real host contract.** The process owner accepts typed environment rows and produces native Windows Unicode blocks through the shared kernel interface, without imposing shell-variable spelling or a fixed row-count cap. Missing, malformed, duplicate and invalid encoded inputs retain visible refusals; inherited, empty and explicit mappings remain distinct. Process and publication callers share the same supported API owner.
 
 - **Hook decisions consume actual tool envelopes and completed transport evidence.** The shared input owner preserves supported namespaced calls and code or shell carriers without treating prose as execution. Bug-fix, passive-wait, stray-artifact and push-preflight consumers use that same interpretation, preventing lexical false stops while preserving malformed, missing, pending and failed evidence refusals. Publication still requires its independent human approval and fresh leak evidence.
