@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-14
 
+- **Repository-cleanup guidance keeps positive proof and action with the producing owner.** Required missing or failed proof stops the attempt before effects, and evidence distinguishes action-not-attempted, partial failure and completed cleanup. Admitted link-only disposal preserves the foreign target; ordinary-tree proof remains strict. The coordinator stays read-only, without a new deletion helper or stronger guessed identity rule.
+
 - **Performance-engineer handoffs preserve original admission before diagnosis.** Both provider role projections consume the shared comparison between admitted requirements and the assigned slice, retaining required remainder with its owner and next action. Missing inputs require bounded correction for the affected decision. Existing first actual-scenario profiling, workload budgets and architecture escalation remain unchanged; this adds no full-pipeline profiling requirement.
 
 - **Explicit process environments use their real host contract.** The process owner accepts typed environment rows and produces native Windows Unicode blocks through the shared kernel interface, without imposing shell-variable spelling or a fixed row-count cap. Missing, malformed, duplicate and invalid encoded inputs retain visible refusals; inherited, empty and explicit mappings remain distinct. Process and publication callers share the same supported API owner.
