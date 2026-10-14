@@ -186,7 +186,14 @@ values DOWN. A lower module reading `getenv` / command-line policy / a global sc
 UPWARD CONTROL-FLOW LEAK even when no dependency edge exists. The only exception is documented
 diagnostic / observability instrumentation with no business, semantic, output, persistence, security,
 or control-flow effect, owned by a support / observability layer — never ordinary lower-layer domain
-logic. [spine: Determinism and ambient-input control, Anti-hardcoding]
+logic. Limits follow the same ownership: justify count, size, depth, duration, iteration and evidence
+bounds by an actual contract, algorithm invariant, evidenced reachable risk or accepted resource
+budget, not convenience or labels. Explain owner, scope, units, value/default, required function,
+evidence retention and safe overflow in the existing work or review; derive variable bounds from
+valid inputs or owned configuration without arbitrary refusals or silent truncation. Preserve
+justified safeguards and acquired outcomes; reassess task-implicated limits without a universal
+constants rewrite or a new artifact, approval or gate. [spine: Determinism and ambient-input control,
+Anti-hardcoding and justified limits]
 
 **C3 — Backend stability is a stability property (same seam as A2).** Backend modules (foundation,
 generic engines, storage, transport) absorb new scenarios through adapters / composition (A2); a

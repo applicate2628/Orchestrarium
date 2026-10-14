@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-14
 
+- **Shared-spine size is informational unless a local budget is selected.** The existing validator now reports code-point and UTF-8 byte counts without an automatic numerical veto, so intact required governance can grow without failing a manufacturer-derived default. Operators can still select the existing strict `--size-cap` budget; missing files, read/decode failures, protection-token loss, dead pointers and orphaned cards retain failed outcomes. This changes the current maintenance default, without certifying instruction loading, model adherence or separately frozen migration parity.
+
+- **Engineering limits require a concrete reason.** The shared rule and its English/Russian architecture guidance now make explicit that count, size, depth, duration, iteration and evidence limits need an actual contract, algorithm invariant, evidenced risk or accepted resource budget. Engineers explain variable bounds and safe overflow in the existing work, preserving required function and acquired results instead of imposing arbitrary refusals or silently truncating evidence. Justified safeguards and host restrictions remain binding; this clarification adds no numerical policy, blanket limit removal or approval gate.
+
 - **Bug-fix patch checks share the existing artifact-path policy.** Resolved patches to scratch, report, plan, task-memory and documentation paths now receive the same exemption as ordinary writes and edits, so JSON review results no longer trigger a false diagnostic gate. Every patch target is checked; mixed source changes, path traversal and unresolved or ambiguous patch input remain guarded.
 
 - **Claude composition checks accept the reviewed compact rule forms.** The existing validator recognizes the current quick-fix and integration-owner wording while keeping single-count requirements, missing-input refusals, size limits and the reviewed Russian hook payload pin. Maintainer validation no longer rejects the accepted policy solely because punctuation changed; unknown forms and altered payloads still fail.
