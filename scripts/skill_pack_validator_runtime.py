@@ -476,7 +476,11 @@ def detect_layout(script: Path, provider: str, requested_root: Path | None = Non
                     dev_repo=True,
                     standalone=not (root / "src.codex").is_dir(),
                     pack=root / "src.claude",
-                    skills=root / "src.claude/skills",
+                    skills=(
+                        root / "src.codex/skills"
+                        if (root / "src.codex").is_dir()
+                        else root / "src.claude/skills"
+                    ),
                     scripts=root / "src.claude/agents/scripts",
                     agents_text=_read(root / "shared/AGENTS.shared.md"),
                 )
@@ -769,7 +773,7 @@ class Validator:
                 return
         digests = tuple(common_skill_body_sha256(self.path(source).read_bytes()) for source in sources)
         (self.ok if digests[0] == digests[1] else self.fail)(
-            f"common-skill {name} cross-provider body parity"
+            f"common-skill {name} cross-provider body parity (historical Source comparison)"
         )
 
     def _run_python(
@@ -1417,7 +1421,7 @@ def _direct(
                 f"{role} in role index but {path} missing",
             )
         for name in sorted(common):
-            path = layout.pack / "skills" / name / "SKILL.md"
+            path = layout.skills / name / "SKILL.md"
             _verdict(
                 validator,
                 path.is_file(),
@@ -1436,32 +1440,37 @@ def _direct(
                 )
         return
     if kind == "curated_registry":
-        roles = extract_roles(layout.agents_text, "## Role index")
-        for role in roles:
-            skill = layout.pack / "skills" / role / "SKILL.md"
-            if not skill.is_file():
-                continue
-            _verdict(
-                validator,
-                role in curated_role_skills,
-                f"{role} skill surface is in the curated role-skill registry",
-                f"{role} has skills/{role}/SKILL.md but is not in the curated "
-                f"role-skill registry ({' '.join(sorted(curated_role_skills))}) "
-                "— roles-as-skills allowlist violation",
-            )
+        label = "Claude inline role identities match the curated role-skill registry"
+        content = validator._read_or_fail("@PACK/CLAUDE.md", label)
+        if content is None:
+            return
+        section = validator._h2(content, "## Delegation rule")
+        clauses = re.findall(
+            r"^- The curated inline role identities are exactly ([^\n.]*)\.",
+            section,
+            re.MULTILINE,
+        )
+        identities = re.findall(r"`([^`]+)`", clauses[0]) if len(clauses) == 1 else []
+        valid_clause = len(clauses) == 1 and not re.sub(
+            r"`[^`]*`|,|\band\b|\s+", "", clauses[0]
+        )
+        _verdict(
+            validator,
+            bool(curated_role_skills) and bool(identities) and valid_clause
+            and len(identities) == len(set(identities))
+            and frozenset(identities) == curated_role_skills,
+            label,
+            f"{label} (missing, empty or mismatched provider clause; "
+            f"expected {' '.join(sorted(curated_role_skills))}, "
+            f"actual {' '.join(identities) or 'none'})",
+        )
         return
     if kind == "layering_claude":
         paths = sorted((layout.pack / "agents").glob("*.md"))
         paths.extend(
-            layout.pack / "skills" / role / "SKILL.md"
-            for role in (
-                "lead",
-                "product-manager",
-                "analyst",
-                "architect",
-                "planner",
-            )
-            if (layout.pack / "skills" / role / "SKILL.md").is_file()
+            layout.skills / role / "SKILL.md"
+            for role in sorted(curated_role_skills)
+            if (layout.skills / role / "SKILL.md").is_file()
         )
         for path in paths:
             passed, unresolved = layering_ids_resolve(path)
@@ -1503,7 +1512,7 @@ def _direct(
     if kind == "skill_frontmatter":
         for directory in sorted(
             path
-            for path in (layout.pack / "skills").iterdir()
+            for path in layout.skills.iterdir()
             if path.is_dir()
         ):
             path = directory / "SKILL.md"

@@ -54,7 +54,7 @@ CURATED_ROLE_SKILLS = frozenset({"lead", "product-manager", "analyst", "architec
 _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
  ('direct', 'exists', 'shared/AGENTS.shared.md exists'),
  ('direct', 'exists', 'src.claude/agents/lead.md exists'),
- ('direct', 'exists', 'src.claude/skills/lead/SKILL.md exists'),
+ ('direct', 'exists', '@SKILLS/lead/SKILL.md exists'),
  ('direct', 'exists', 'src.claude/agents/consultant.md exists'),
  ('direct', 'exists', 'src.claude/agents/external-worker.md exists'),
  ('direct', 'exists', 'src.claude/agents/external-reviewer.md exists'),
@@ -158,11 +158,11 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'I will not dispatch or modify',
   'agents-status reserved-PM offer stays read-only (no dispatch/modify without confirmation)'),
  ('check_contains',
-  'src.claude/skills/lead/SKILL.md',
-  'hold the Lead role AS the main conversation',
+  '@SKILLS/lead/SKILL.md',
+  'the orchestration owner stays in the main session',
   'lead skill declares the Lead role is held AS the main conversation'),
  ('check_absent',
-  'src.claude/skills/lead/SKILL.md',
+  '@SKILLS/lead/SKILL.md',
   'context: fork',
   'lead skill is not dispatched as a forked subagent (no context: fork)'),
  ('direct', 'exists', '@ROOT/shared/references/README.md exists'),
@@ -427,51 +427,51 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
  ('check_common_skill_body_pin',
   'analyzing-video-bugs',
   'cf78ec0176f1726891045a2c2626363377994f34f081f9a9ad0ffbdb60740e91',
-  'src.claude/skills/analyzing-video-bugs/SKILL.md'),
+  '@SKILLS/analyzing-video-bugs/SKILL.md'),
  ('check_common_skill_body_pin',
   'bug-hunting',
   '56c6ed8a5a590559bdf29409102b2b8b654bf73c7be2b4ef23c4d2c74e019232',
-  'src.claude/skills/bug-hunting/SKILL.md'),
+  '@SKILLS/bug-hunting/SKILL.md'),
  ('check_common_skill_body_pin',
   'explain-simply',
   'f0f0e4dd1bed68aa8114adf6059fea32fedbee8fd06bf8bb12042dcd07ebb408',
-  'src.claude/skills/explain-simply/SKILL.md'),
+  '@SKILLS/explain-simply/SKILL.md'),
  ('check_common_skill_body_pin',
   'github-pr-review-bot',
   'aea0d0e4529326d6347368ce6d811e7f398a4cb0ee18df8504444e8d4f621935',
-  'src.claude/skills/github-pr-review-bot/SKILL.md'),
+  '@SKILLS/github-pr-review-bot/SKILL.md'),
  ('check_contains',
-   'src.claude/skills/github-pr-review-bot/SKILL.md',
+   '@SKILLS/github-pr-review-bot/SKILL.md',
   'Two or more unresolved same-head trigger candidates',
   'github-pr-review-bot refuses ambiguous same-head terminal ownership'),
  ('check_contains',
-  'src.claude/skills/github-pr-review-bot/SKILL.md',
+  '@SKILLS/github-pr-review-bot/SKILL.md',
   'gh api --paginate --slurp',
   'github-pr-review-bot merges every REST page before classification'),
  ('check_contains',
-  'src.claude/skills/github-pr-review-bot/SKILL.md',
+  '@SKILLS/github-pr-review-bot/SKILL.md',
   'Page-local `--jq`',
   'github-pr-review-bot rejects page-local REST filtering'),
  ('check_contains',
-  'src.claude/skills/github-pr-review-bot/SKILL.md',
+  '@SKILLS/github-pr-review-bot/SKILL.md',
   'fails or is incomplete',
   'github-pr-review-bot fails closed on incomplete GraphQL pagination'),
  ('check_contains',
-  'src.claude/skills/github-pr-review-bot/SKILL.md',
+  '@SKILLS/github-pr-review-bot/SKILL.md',
   'A `Completed` summary alone is never `clean`',
   'github-pr-review-bot does not treat summary completion as clean'),
  ('check_contains',
-  'src.claude/skills/github-pr-review-bot/SKILL.md',
+  '@SKILLS/github-pr-review-bot/SKILL.md',
   'Findings from the exact post-trigger review on the current head take precedence',
   'github-pr-review-bot prioritizes exact post-trigger current-head findings'),
  ('check_common_skill_body_pin',
   'generalize-from-instance',
   'c55e0d9389abce424e778c41816127c76948d67d92233e9afb26ab4d92cfaf97',
-  'src.claude/skills/generalize-from-instance/SKILL.md'),
+  '@SKILLS/generalize-from-instance/SKILL.md'),
  ('check_common_skill_body_pin',
   'implementation-to-theory',
   '2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78',
-  'src.claude/skills/implementation-to-theory/SKILL.md'),
+  '@SKILLS/implementation-to-theory/SKILL.md'),
  ('check_common_skill_body_parity',
   'manual-repo-transfer',
   'src.codex/skills/manual-repo-transfer/SKILL.md',
@@ -483,31 +483,31 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
  ('check_common_skill_body_pin',
   'mathtype-book-page',
   '615499de68dc03fccb23954e8ed94662076a9a744a493b71232ebdcce55357be',
-  'src.claude/skills/mathtype-book-page/SKILL.md'),
+  '@SKILLS/mathtype-book-page/SKILL.md'),
  ('check_common_skill_body_pin',
   'vak-dissertation-review',
   'e259d114a1ea2372d9152a07445aeba82c51493b9caf7b39f3b6b96678e9b261',
-  'src.claude/skills/vak-dissertation-review/SKILL.md'),
+  '@SKILLS/vak-dissertation-review/SKILL.md'),
  ('check_common_skill_body_pin',
   'vcpkg-builder',
    '72208f4bec6ebf30eb49e99da12cc4e3cef6ef2572bb1583232a5fb1ebe791dc',
-  'src.claude/skills/vcpkg-builder/SKILL.md'),
+  '@SKILLS/vcpkg-builder/SKILL.md'),
  ('check_common_skill_body_pin',
   'vcpkg-ports-updater',
   '17aedafce43a1de5c0917e2a14cba131fcd5dcccca67902ad42852108d90816f',
-  'src.claude/skills/vcpkg-ports-updater/SKILL.md'),
+  '@SKILLS/vcpkg-ports-updater/SKILL.md'),
  ('check_common_skill_body_pin',
   'windows-gui-manual-testing',
   '7dd186bbeee1fab2eb44e2d4f1c4772ffea87d918605efdcc00a5a8fb3c272b8',
-  'src.claude/skills/windows-gui-manual-testing/SKILL.md'),
+  '@SKILLS/windows-gui-manual-testing/SKILL.md'),
  ('direct', 'common_pin_completeness', 'common_pin_completeness'),
- ('check_file', 'src.claude/skills/lead/SKILL.md', 'lead has a curated role-skill file'),
+ ('check_file', '@SKILLS/lead/SKILL.md', 'lead has a curated role-skill file'),
  ('check_file',
-  'src.claude/skills/product-manager/SKILL.md',
+  '@SKILLS/product-manager/SKILL.md',
   'product-manager has a curated role-skill file'),
- ('check_file', 'src.claude/skills/analyst/SKILL.md', 'analyst has a curated role-skill file'),
- ('check_file', 'src.codex/skills/architect/SKILL.md', 'architect has the universal role-contract body'),
- ('check_file', 'src.claude/skills/planner/SKILL.md', 'planner has a curated role-skill file'),
+ ('check_file', '@SKILLS/analyst/SKILL.md', 'analyst has a curated role-skill file'),
+ ('check_file', '@SKILLS/architect/SKILL.md', 'architect has the universal role-contract body'),
+ ('check_file', '@SKILLS/planner/SKILL.md', 'planner has a curated role-skill file'),
  ('check_contains',
   'src.claude/agents/product-manager.md',
   'invoke the `Skill` tool with name `product-manager` to load the full role contract',
@@ -1264,30 +1264,15 @@ _INSTALLED_ACTIONS = (
 )
 
 _APAT_ACTIONS = (
-    ("check_file", "@PACK/skills/lead/SKILL.md", "APAT-E006-INSTALLED-MISSING: claude lead APAT projection file"),
-    ("check_file", "@PACK/skills/architect/SKILL.md", "APAT-E006-INSTALLED-MISSING: claude architect AP0-AP5 projection file"),
+    ("check_file", "@SKILLS/lead/SKILL.md", "APAT-E006-INSTALLED-MISSING: claude lead APAT projection file"),
+    ("check_file", "@SKILLS/architect/SKILL.md", "APAT-E006-INSTALLED-MISSING: claude architect AP0-AP5 projection file"),
     ("check_file", "@PACK/agents/architecture-reviewer.md", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT projection file"),
-    ("check_contains", "@PACK/skills/lead/SKILL.md", "<!-- APAT-BLOCK:LEAD-ROUTING:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude lead APAT-G04-PROVIDER-PARITY projection marker"),
-    ("check_contains", "@PACK/skills/lead/SKILL.md", "is not a universal Architect prelude", "APAT-E006-INSTALLED-MISSING: claude lead APAT-G05-INSTALLED-PARITY negative-selection wording"),
-    *(("check_contains", "@PACK/skills/architect/SKILL.md", f'<!-- APAT-SEMANTIC id="AP{number}.', f"APAT-E006-INSTALLED-MISSING: claude architect AP{number} marker") for number in range(6)),
-    ("check_contains", "@PACK/skills/architect/SKILL.md", "<!-- APAT-BLOCK:ARCHITECT-DISPOSITION:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude architect AP0-AP5 projection section marker"),
+    ("check_contains", "@SKILLS/lead/SKILL.md", "<!-- APAT-BLOCK:LEAD-ROUTING:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude lead APAT-G04-PROVIDER-PARITY projection marker"),
+    ("check_contains", "@SKILLS/lead/SKILL.md", "is not a universal Architect prelude", "APAT-E006-INSTALLED-MISSING: claude lead APAT-G05-INSTALLED-PARITY negative-selection wording"),
+    *(("check_contains", "@SKILLS/architect/SKILL.md", f'<!-- APAT-SEMANTIC id="AP{number}.', f"APAT-E006-INSTALLED-MISSING: claude architect AP{number} marker") for number in range(6)),
+    ("check_contains", "@SKILLS/architect/SKILL.md", "<!-- APAT-BLOCK:ARCHITECT-DISPOSITION:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude architect AP0-AP5 projection section marker"),
     ("check_contains", "@PACK/agents/architecture-reviewer.md", "<!-- APAT-BLOCK:ARCHITECTURE-REVIEW:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT projection section marker"),
     ("check_contains", "@PACK/agents/architecture-reviewer.md", "each evidence-triggered candidate that is rejected has explicit negative evidence; an unadmitted pattern needs no invented rejection", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT negative-selection wording"),
-)
-
-_APAT_ARCHITECT_INSTALLED_PATH = "@PACK/skills/architect/SKILL.md"
-_APAT_ARCHITECT_SOURCE_PATH = "@ROOT/src.codex/skills/architect/SKILL.md"
-_APAT_ARCHITECT_INSTALLED_ACTIONS = tuple(
-    action for action in _APAT_ACTIONS
-    if action[1] == _APAT_ARCHITECT_INSTALLED_PATH
-)
-_APAT_SHARED_ACTIONS = tuple(
-    action for action in _APAT_ACTIONS
-    if action[1] != _APAT_ARCHITECT_INSTALLED_PATH
-)
-_APAT_ARCHITECT_SOURCE_ACTIONS = tuple(
-    (action[0], _APAT_ARCHITECT_SOURCE_PATH, *action[2:])
-    for action in _APAT_ARCHITECT_INSTALLED_ACTIONS
 )
 
 _APAT_DEV_ACTIONS = (
@@ -1347,8 +1332,7 @@ _SOURCE_ONLY_MAINTAINER_OPERATIONS = (
 
 def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
     return (
-        action[:2] == ("direct", "curated_registry")
-        or any(
+        any(
             str(value).startswith(
                 ("src.claude/skills/lead/", "src.claude/skills/architect/", "src.codex/skills/architect/")
             )
@@ -1363,11 +1347,26 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 
 
 _ALL_ACTIONS = (
-    _DECLARED_ACTIONS[0:42]
+    _DECLARED_ACTIONS[0:40]
+    + _DECLARED_ACTIONS[41:42]
     + _DECLARED_ACTIONS[113:257]
-    + _APAT_SHARED_ACTIONS
+    + _APAT_ACTIONS
 )
 
+
+_CURRENT_SKILL_ACTIONS = (
+    _DECLARED_ACTIONS[40],
+    (
+        "check_contains", "@SKILLS/lead/SKILL.md",
+        "apply the current-owner reuse check",
+        "lead skill requires current-owner reuse before approach or assignment",
+    ),
+    (
+        "check_contains", "@SKILLS/lead/subagent-contracts.md",
+        "An accepted plan is an input, not proof the capability is still missing",
+        "specialist handoff requires current-owner reuse before implementation",
+    ),
+)
 
 ACTIONS = (
     (
@@ -1390,7 +1389,13 @@ ACTIONS = (
             action for action in _ALL_ACTIONS
             if _is_source_only_maintainer_action(action)
         )
-        + _APAT_ARCHITECT_SOURCE_ACTIONS
+        + (
+            (
+                "check_contains", "src.claude/skills/lead/SKILL.md",
+                "hold the Lead role AS the main conversation",
+                "historical Claude Source Lead declares main-conversation ownership",
+            ),
+        )
         + _APAT_DEV_ACTIONS
         + _UI_CONTINUITY_DEV_ACTIONS,
     ),
@@ -1399,9 +1404,10 @@ ACTIONS = (
         _DECLARED_ACTIONS[257:270]
         + _DECLARED_ACTIONS[274:275]
         + _DECLARED_ACTIONS[280:281]
-        + _DECLARED_ACTIONS[287:294],
+        + _DECLARED_ACTIONS[287:294]
+        + _CURRENT_SKILL_ACTIONS,
     ),
-    ("installed", _INSTALLED_ACTIONS + _APAT_ARCHITECT_INSTALLED_ACTIONS),
+    ("installed", _INSTALLED_ACTIONS + _CURRENT_SKILL_ACTIONS),
 )
 
 def validate(root: Path | None = None):

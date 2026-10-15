@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-15
+
+- **Skill validation follows the canonical installed skill owner.** Both provider validators now inspect the shared canonical skill tree and its real installed projections, so valid shared installations are accepted without treating the historical Claude comparison tree as a second live owner. Provider-specific script checks, protected files and genuine missing or inconsistent inputs retain their existing checks.
+
 ## 2026-10-14
 
 - **Check the current owner before choosing or assigning implementation.** Lead and handoff instructions now compare required behavior with current methods, callers, rollback and ready solutions before direct work or dispatch, so an old accepted plan does not justify rebuilding behavior already supplied by an adequate owner. Receivers return verified reuse or only the real missing behavior through existing fields. One existing turn reminder carries the same duty; ordinary edits gain no new inventory report, checker, stage or permission loop, and required safety, performance and scope remain protected.

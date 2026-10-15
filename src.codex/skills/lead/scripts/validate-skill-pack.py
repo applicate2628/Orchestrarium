@@ -1654,6 +1654,18 @@ _ALL_ACTIONS = (
     # Include declaration 372 so its @ROOT/docs prefix routes it to dev_repo.
     + _DECLARED_ACTIONS[367:374]
     + _APAT_ACTIONS
+    + (
+        (
+            "check_contains", "@SKILLS/lead/SKILL.md",
+            "apply the current-owner reuse check",
+            "lead skill requires current-owner reuse before approach or assignment",
+        ),
+        (
+            "check_contains", "@SKILLS/lead/subagent-contracts.md",
+            "An accepted plan is an input, not proof the capability is still missing",
+            "specialist handoff requires current-owner reuse before implementation",
+        ),
+    )
 )
 
 ACTIONS = (

@@ -245,10 +245,18 @@ def _materialize_installed_pack(
         scripts = pack / "skills" / "lead" / "scripts"
     else:
         pack = target / ".claude"
-        shutil.copytree(ROOT / "src.claude", pack)
-        universal_architect = target / ".agents" / "skills" / "architect"
-        shutil.copytree(ROOT / "src.codex" / "skills" / "architect", universal_architect)
-        _create_directory_link(pack / "skills" / "architect", universal_architect)
+        shutil.copytree(
+            ROOT / "src.claude", pack,
+            ignore=lambda path, names: {"skills"}
+            if Path(path) == ROOT / "src.claude" else set(),
+        )
+        universal_skills = target / ".agents" / "skills"
+        shutil.copytree(ROOT / "src.codex" / "skills", universal_skills)
+        # Fixture receiving uses canonical bodies and the existing projection owner.
+        (pack / "skills").mkdir()
+        for skill in universal_skills.iterdir():
+            if skill.is_dir():
+                _create_directory_link(pack / "skills" / skill.name, skill)
         shutil.copy2(ROOT / "shared" / "AGENTS.shared.md", pack / "AGENTS.md")
         scripts = pack / "agents" / "scripts"
     for name in (
@@ -1302,7 +1310,11 @@ def test_current_provider_currency_pins_accept_source_and_reject_protected_drift
     assert len(actions) == 1
     action = actions[0]
     file_index = 3 if surface == "gui-body" else 1
-    data = (ROOT / action[file_index].removeprefix("@ROOT/")).read_bytes()
+    path_resolver = runtime.Validator(layout)
+    try:
+        data = path_resolver.path(action[file_index]).read_bytes()
+    finally:
+        path_resolver.close()
     candidate = tmp_path / "protected.md"
     redirected = list(action)
     redirected[file_index] = str(candidate)
@@ -2034,3 +2046,188 @@ def test_retained_posix_surface_is_only_a_thin_python_launcher(
     assert 'exec "$PYTHON_CMD"' in text
     assert "check_contains" not in text
     assert "check_absent" not in text
+
+
+
+def _minimal_claude_skill_layout(tmp_path: Path):
+    """Synthetic bodies only; never copies or executes lifecycle Source."""
+    module = _load(VALIDATORS[1], "current_claude_skill_owner")
+    runtime = module._ENGINE
+    root = tmp_path / "repo"
+    contents = {
+        "shared/AGENTS.shared.md": "## Role index\n- `$lead`.\n## Common skills\n- `$lead`.\n",
+        "src.codex/AGENTS.codex.md": "fixture provider addendum\n",
+        "src.claude/agents/lead.md": "fixture Claude wrapper\n",
+        "src.claude/commands/agents-status.md": "fixture Claude command\n",
+        "src.claude/CLAUDE.md": (ROOT / "src.claude/CLAUDE.md").read_text(encoding="utf-8"),
+        "src.codex/skills/lead/SKILL.md": (
+            "---\nname: lead\ndescription: fixture\n---\n"
+            "the orchestration owner stays in the main session\n"
+            "apply the current-owner reuse check\n"
+            "<!-- APAT-BLOCK:LEAD-ROUTING:BEGIN -->\n"
+            "is not a universal Architect prelude\n"
+        ),
+        "src.codex/skills/lead/subagent-contracts.md": (
+            "An accepted plan is an input, not proof the capability is still missing\n"
+        ),
+        "src.claude/skills/lead/SKILL.md": (
+            "---\nname: lead\ndescription: historical fixture\n---\n"
+            "hold the Lead role AS the main conversation\n"
+        ),
+    }
+    for relative, content in contents.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    (root / "src.codex/skills/lead/scripts").mkdir()
+    scripts = root / "src.claude/agents/scripts"
+    scripts.mkdir()
+    return module, runtime, root, scripts / "validate-skill-pack.py"
+
+
+@pytest.mark.parametrize(
+    "mutation", ("healthy", "main-context", "reuse", "handoff", "missing", "missing-root", "historical-decoy")
+)
+def test_claude_current_body_actions_use_canonical_owner_and_fail_visibly(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], mutation: str
+) -> None:
+    module, runtime, root, script = _minimal_claude_skill_layout(tmp_path)
+    body = root / "src.codex/skills/lead/SKILL.md"
+    if mutation == "missing":
+        body.unlink()
+    elif mutation == "missing-root":
+        shutil.rmtree(root / "src.codex/skills")
+    elif mutation in ("main-context", "reuse"):
+        pattern = (
+            "the orchestration owner stays in the main session"
+            if mutation == "main-context" else "apply the current-owner reuse check"
+        )
+        body.write_text(body.read_text(encoding="utf-8").replace(pattern, "fixture removed"), encoding="utf-8")
+    elif mutation == "handoff":
+        (body.parent / "subagent-contracts.md").write_text("fixture removed\n", encoding="utf-8")
+    elif mutation == "historical-decoy":
+        (root / "src.claude/skills/lead/SKILL.md").write_text("unrelated historical body\n", encoding="utf-8")
+    actions = tuple(
+        (scope, tuple(action for action in group if
+            action[1].startswith("@SKILLS/lead/")
+            or action[:2] == ("direct", "exists") and action[2].startswith("@SKILLS/lead/")
+        ))
+        for scope, group in module.ACTIONS
+    )
+    layout = runtime.detect_layout(script, "claude", root)
+    assert layout.skills == root / "src.codex/skills"
+    assert not layout.standalone
+    observed = tuple(runtime._applicable_actions(actions, layout))
+    assert any("the orchestration owner stays in the main session" in action for action in observed)
+    assert any("apply the current-owner reuse check" in action for action in observed)
+    assert any("An accepted plan is an input, not proof the capability is still missing" in action for action in observed)
+    exit_code = runtime.run_validator_cli(
+        script=script, provider="claude", actions=actions,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(), curated_role_skills=module.CURATED_ROLE_SKILLS,
+        argv=["--root", str(root)],
+    )
+    failed = mutation not in ("healthy", "historical-decoy")
+    assert exit_code == int(failed)
+    output = capsys.readouterr().out
+    assert ("  RESULT: FAIL" if failed else "  RESULT: PASS") in output
+    assert "Warnings: 0" in output
+
+
+@pytest.mark.parametrize("kind", ("skill_frontmatter", "role_index_claude", "layering_claude"))
+def test_claude_body_enumerators_observe_canonical_mutation(
+    tmp_path: Path, kind: str
+) -> None:
+    module, runtime, root, script = _minimal_claude_skill_layout(tmp_path)
+    body = root / "src.codex/skills/lead/SKILL.md"
+    if kind == "skill_frontmatter":
+        body.write_text("---\nname: wrong\ndescription: fixture\n---\n", encoding="utf-8")
+    elif kind == "role_index_claude":
+        body.unlink()
+    else:
+        body.write_text(body.read_text(encoding="utf-8") + "\nC1\n", encoding="utf-8")
+    result = runtime.validate_pack(
+        script=script, provider="claude", actions=(("direct", kind, kind),), root=root,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(), curated_role_skills=module.CURATED_ROLE_SKILLS,
+    )
+    assert result.errors == 1
+
+
+@pytest.mark.parametrize("mutation", ("healthy-extra-body", "omitted", "extra", "empty", "both-empty", "missing", "unquoted-extra"))
+def test_claude_curated_registry_uses_actual_provider_clause(
+    tmp_path: Path, mutation: str
+) -> None:
+    module, runtime, root, script = _minimal_claude_skill_layout(tmp_path)
+    extra = root / "src.codex/skills/backend-engineer/SKILL.md"
+    extra.parent.mkdir()
+    extra.write_text("---\nname: backend-engineer\ndescription: fixture\n---\n", encoding="utf-8")
+    clause = root / "src.claude/CLAUDE.md"
+    content = clause.read_text(encoding="utf-8")
+    if mutation == "missing":
+        clause.unlink()
+    elif mutation == "omitted":
+        clause.write_text(content.replace("`lead`, `product-manager`,", "`lead`,", 1), encoding="utf-8")
+    elif mutation in ("extra", "unquoted-extra"):
+        extra_name = "`backend-engineer`" if mutation == "extra" else "backend-engineer"
+        clause.write_text(content.replace("and `planner`.", f"`planner`, and {extra_name}.", 1), encoding="utf-8")
+    elif mutation in ("empty", "both-empty"):
+        clause.write_text(re.sub(r"(- The curated inline role identities are exactly )[^\n.]*", r"\1", content), encoding="utf-8")
+    result = runtime.validate_pack(
+        script=script, provider="claude", actions=(("direct", "curated_registry", "curated_registry"),), root=root,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset() if mutation == "both-empty" else module.CURATED_ROLE_SKILLS,
+    )
+    assert result.errors == int(mutation != "healthy-extra-body")
+    assert result.checks == 1
+    validator = runtime.Validator(result.layout)
+    try:
+        assert validator.path("@PACK/agents/lead.md") == root / "src.claude/agents/lead.md"
+        assert validator.path("@PACK/commands/agents-status.md") == root / "src.claude/commands/agents-status.md"
+        assert validator.path("@SCRIPTS/validate-skill-pack.py") == script
+    finally:
+        validator.close()
+
+
+def test_claude_extracted_source_keeps_local_body_and_historical_main_context(
+    tmp_path: Path,
+) -> None:
+    module, runtime, root, script = _minimal_claude_skill_layout(tmp_path)
+    shutil.rmtree(root / "src.codex")
+    layout = runtime.detect_layout(script, "claude", root)
+    assert layout.standalone
+    assert layout.skills == root / "src.claude/skills"
+    applicable = tuple(runtime._applicable_actions(module.ACTIONS, layout))
+    assert not any(action in applicable for action in module._CURRENT_SKILL_ACTIONS)
+    historical = tuple(action for action in applicable if
+        action[0] == "check_contains" and "hold the Lead role AS the main conversation" in action
+    )
+    assert len(historical) == 1
+    result = runtime.validate_pack(
+        script=script, provider="claude", actions=historical, root=root,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(), curated_role_skills=module.CURATED_ROLE_SKILLS,
+    )
+    assert result.passed == 1
+    assert result.errors == 0
+
+
+@pytest.mark.parametrize("validator", VALIDATORS)
+def test_current_owner_reuse_actions_cover_current_source_and_installed_scopes(
+    validator: Path,
+) -> None:
+    module = _load(validator, f"current_reuse_scope_{validator.parent.parent.name}")
+    patterns = (
+        "apply the current-owner reuse check",
+        "An accepted plan is an input, not proof the capability is still missing",
+    )
+    for pattern in patterns:
+        selected = tuple((scope, action) for scope, group in module.ACTIONS
+                         for action in group if pattern in action)
+        assert selected
+        assert all(action[0] == "check_contains" and action[1].startswith("@SKILLS/lead/")
+                   for _, action in selected)
+        assert {scope for scope, _ in selected} == (
+            {"all"} if module.PROVIDER == "codex" else {"dev_repo_nonstandalone", "installed"}
+        )
