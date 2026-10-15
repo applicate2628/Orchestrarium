@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-15
 
+- **Lifecycle transactions reconcile owned effects without losing failures.** The lifecycle owner receives actual file placement before fallible domain checks, compares directory observations through its existing stable identity contract, and settles every acquired resource on failed entry and exit. Primary failures, failed cleanup and unfinished dependencies remain distinct and visible; real public completion, rollback, receipt, link and README checks retain their authority.
+
 - **Linked runtime paths distinguish completed targets from dependency cycles.** Directory and scalar consumers now share witnessed target-completion traversal, so valid repeated links and finite chains remain usable without an arbitrary encounter limit. Active cycles, changed link observations, native read failures and each consumer's existing admission, rollback and current-state guarantees retain their checks.
 
 - **Selective skill updates preserve managed members and protected files.** The canonical installer now reads strict whole-tree or member receipts at the same location and carries one selected managed-after plan through both provider receivers and receipt publication. Partial removals preserve unselected parents and siblings, while necessary new directories remain explicit effects; unknown files are never adopted. Drifting legacy receipts still require genuine historical receiving before conversion.

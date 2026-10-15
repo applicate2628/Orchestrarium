@@ -40,6 +40,246 @@ def load_module():
     return module
 
 
+def _runtime_authority_fixture(tmp_path, monkeypatch, layout="codex", linked=True):
+    module = load_module()
+    home = tmp_path / "synthetic-home"
+    home.mkdir()
+    physical = tmp_path / "runtime-backing"
+    physical.mkdir()
+    alias = home / (".agents" if layout == "codex" else ".claude")
+    if linked:
+        alias.symlink_to(physical, target_is_directory=True)
+    else:
+        alias.mkdir()
+    runtime = alias / ("skills/lead" if layout == "codex" else "agents")
+    scripts = runtime / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("mutate-work-item.py", "validate-work-item-state.py", "linked_runtime_subroots.py"):
+        shutil.copyfile(ROOT / "scripts" / name, scripts / name)
+    schema = runtime / "shared/schemas/agent-runs.schema.json"
+    schema.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / "shared/schemas/agent-runs.schema.json", schema)
+    monkeypatch.setattr(module, "__file__", str(scripts / "mutate-work-item.py"))
+    monkeypatch.setattr(module.Path, "home", classmethod(lambda cls: home))
+    subject = tmp_path / "subject"
+    (subject / "work-items").mkdir(parents=True)
+    return module, runtime, alias, physical, subject
+
+
+@pytest.mark.parametrize("layout", ("codex", "claude"))
+def test_runtime_source_authority_declared_global_load_and_reuse(tmp_path, monkeypatch, layout):
+    module, runtime, alias, physical, subject = _runtime_authority_fixture(tmp_path, monkeypatch, layout)
+    with module.LifecycleTransaction(subject) as tx:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(tx)
+        try:
+            validator = module._validator_module()
+            assert module._validator_module() is validator
+            assert validator.__file__ == str(runtime / "scripts/validate-work-item-state.py")
+            assert tx._runtime_source_authority is not None
+            snapshot = module._capture_runtime_source(Path("scripts/mutate-work-item.py"), failure_id="TEST")
+            assert snapshot.data == SCRIPT.read_bytes()
+            leaf = subject / "linked-status.md"
+            leaf.symlink_to(runtime / "shared/schemas/agent-runs.schema.json")
+            with pytest.raises(module.LifecycleError):
+                module._capture_file_snapshot(leaf, failure_id="TEST-SUBJECT")
+            parent_link = subject / "linked-parent"
+            parent_link.symlink_to(runtime / "shared", target_is_directory=True)
+            with pytest.raises(module.LifecycleError):
+                module._capture_file_snapshot(parent_link / "schemas/agent-runs.schema.json", failure_id="TEST-SUBJECT")
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+    assert tx._validator_reuse is None and tx._runtime_source_authority is not None
+
+
+@pytest.mark.parametrize("fault", ("imitation", "filename", "missing-home", "relative-home", "missing-helper", "linked-leaf"))
+def test_runtime_source_authority_refuses_unadmitted_origins(tmp_path, monkeypatch, fault):
+    module, runtime, alias, physical, subject = _runtime_authority_fixture(tmp_path, monkeypatch)
+    if fault == "imitation":
+        monkeypatch.setattr(module.Path, "home", classmethod(lambda cls: tmp_path / "independent-other-home"))
+    elif fault == "filename":
+        monkeypatch.setattr(module, "__file__", str(runtime / "scripts/other.py"))
+    elif fault == "missing-home":
+        def absent(cls):
+            raise RuntimeError("no home")
+        monkeypatch.setattr(module.Path, "home", classmethod(absent))
+    elif fault == "relative-home":
+        monkeypatch.setattr(module.Path, "home", classmethod(lambda cls: Path("relative")))
+    elif fault == "missing-helper":
+        (runtime / "scripts/linked_runtime_subroots.py").unlink()
+    else:
+        leaf = runtime / "scripts/validate-work-item-state.py"
+        raw = leaf.read_bytes()
+        leaf.unlink()
+        other = tmp_path / "validator.py"
+        other.write_bytes(raw)
+        leaf.symlink_to(other)
+    with pytest.raises(module.LifecycleError):
+        module._capture_runtime_source(Path("scripts/validate-work-item-state.py"), failure_id="TEST")
+
+
+@pytest.mark.parametrize("fault", ("alias", "validator", "schema"))
+def test_runtime_source_authority_reuse_rejects_drift(tmp_path, monkeypatch, fault):
+    module, runtime, alias, physical, subject = _runtime_authority_fixture(tmp_path, monkeypatch)
+    tx = module.LifecycleTransaction(subject)
+    original_authority = tx._runtime_source_authority
+    with pytest.raises(module.LifecycleError) as closing, tx:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(tx)
+        try:
+            module._validator_module()
+            if fault == "alias":
+                replacement = tmp_path / "replacement"
+                shutil.copytree(physical, replacement)
+                alias.unlink()
+                alias.symlink_to(replacement, target_is_directory=True)
+            else:
+                path = runtime / ("scripts/validate-work-item-state.py" if fault == "validator" else "shared/schemas/agent-runs.schema.json")
+                original = path.read_bytes()
+                path.write_bytes(original + b"\n")
+            with pytest.raises(module.LifecycleError) as first:
+                module._validator_module()
+            assert tx._validator_reuse is None and tx._runtime_source_authority is original_authority
+            move_source = subject / "move-source"
+            move_source.mkdir()
+            missing = subject / "not-created" / "output.md"
+            for operation in (tx.verify, module._validator_module,
+                              lambda: module._capture_runtime_source(Path("scripts/mutate-work-item.py"), failure_id="TEST", authority=object()),
+                              lambda: tx.replace_directory(move_source, subject / "moved"),
+                              lambda: module.LifecycleWriteTarget(missing, failure_id="TEST").__enter__(),
+                              tx.__enter__):
+                with pytest.raises(module.LifecycleError) as repeated:
+                    operation()
+                assert repeated.value is first.value
+            assert not missing.parent.exists() and move_source.exists() and not (subject / "moved").exists()
+            assert len(tx._retained_observations) == 2
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+    assert closing.value is first.value and tx._file is None and not tx._locked
+
+
+@pytest.mark.parametrize("fault", ("origin", "content", "compile", "spec"))
+def test_runtime_source_authority_schema_failure_clears_cache(tmp_path, monkeypatch, fault):
+    module, runtime, alias, physical, subject = _runtime_authority_fixture(tmp_path, monkeypatch)
+    path = runtime / "scripts/validate-work-item-state.py"
+    addition = "\ninvalid syntax !\n" if fault == "compile" else "\nAGENT_RUN_SCHEMA = {}\n" if fault == "content" else "\nAGENT_RUN_SCHEMA_PATH = AGENT_RUN_SCHEMA_PATH.with_name('other.json')\n"
+    path.write_bytes(path.read_bytes() + addition.encode())
+    tx = module.LifecycleTransaction(subject)
+    original_authority = tx._runtime_source_authority
+    if fault == "spec":
+        monkeypatch.setattr(module.importlib.util, "spec_from_file_location", lambda *a, **kw: None)
+    with pytest.raises((module.LifecycleError, SyntaxError)) as closing, tx:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(tx)
+        try:
+            with pytest.raises((module.LifecycleError, SyntaxError)) as first:
+                module._validator_module()
+            assert tx._validator_reuse is None and tx._runtime_source_authority is original_authority
+            alias.unlink()
+            shutil.copytree(physical, alias)
+            (runtime / "scripts/validate-work-item-state.py").write_bytes(STATE_VALIDATOR.read_bytes())
+            with pytest.raises(type(first.value)) as second:
+                module._validator_module()
+            assert second.value is first.value
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+    assert closing.value is first.value and tx._file is None and not tx._locked
+
+
+def test_runtime_source_failure_keeps_subject_domain_and_owned_compensation(tmp_path, monkeypatch):
+    module, runtime, alias, physical, subject = _runtime_authority_fixture(tmp_path, monkeypatch)
+    tx = module.LifecycleTransaction(subject)
+    composer = module.LifecycleOutcomeComposer()
+    composer_token = module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.set(composer)
+    try:
+        with tx:
+            token = module._CURRENT_LIFECYCLE_TRANSACTION.set(tx)
+            try:
+                module._validator_module()
+                leaf = subject / "status.md"
+                leaf.write_bytes(b"before")
+                snapshot = module._capture_file_snapshot(leaf, failure_id="TEST")
+                tx.observe_retained_inputs((snapshot,))
+                leaf.write_bytes(b"after")
+                with pytest.raises(module.LifecycleError):
+                    tx.verify()
+                assert tx._source_admission_failure is None
+                leaf.write_bytes(b"before")
+                tx.verify()
+                with module.LifecycleWriteTarget(subject / "owned.md", failure_id="TEST") as target:
+                    module._atomic_write(target.path, b"owned", target=target)
+                    image = target.owned_image()
+                    alias.unlink()
+                    replacement = tmp_path / "replacement"
+                    shutil.copytree(physical, replacement)
+                    alias.symlink_to(replacement, target_is_directory=True)
+                    with pytest.raises(module.LifecycleError) as first:
+                        tx.verify()
+                    def nested(root):
+                        pytest.fail("nested body ran after source refusal")
+                    with pytest.raises(module.LifecycleError) as repeated:
+                        module._lifecycle_participant(nested)(subject)
+                    assert repeated.value is first.value
+                    target.remove_owned(target.leaf, image)
+                    assert not target.path.exists()
+            finally:
+                module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+        bundle = composer.finalize()
+        assert bundle.primary is first.value and not bundle.cleanup_failures
+        assert tx._file is None and not tx._locked
+    finally:
+        module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(composer_token)
+
+
+def test_runtime_source_first_failure_precedes_later_body_error(tmp_path, monkeypatch):
+    module, runtime, alias, physical, subject = _runtime_authority_fixture(tmp_path, monkeypatch)
+    first = []
+    transactions = []
+    bundles = []
+    original_finalize = module.LifecycleOutcomeComposer.finalize
+    def record_bundle(composer):
+        bundle = original_finalize(composer)
+        bundles.append(bundle)
+        return bundle
+    monkeypatch.setattr(module.LifecycleOutcomeComposer, "finalize", record_bundle)
+    def action(root):
+        transactions.append(module._CURRENT_LIFECYCLE_TRANSACTION.get())
+        module._validator_module()
+        replacement = tmp_path / "replacement"
+        shutil.copytree(physical, replacement)
+        alias.unlink()
+        alias.symlink_to(replacement, target_is_directory=True)
+        try:
+            transactions[0].verify()
+        except module.LifecycleError as failure:
+            first.append(failure)
+        raise ValueError("later body failure")
+    with pytest.raises(BaseException) as received:
+        module._lifecycle_participant(action)(subject)
+    assert len(first) == 1
+    assert received.value is first[0]
+    assert bundles[-1].primary is first[0] and not bundles[-1].cleanup_failures
+    assert transactions[0]._file is None and not transactions[0]._locked
+
+
+def test_runtime_source_authority_ordinary_layout_stays_strict(tmp_path, monkeypatch):
+    module, runtime, alias, physical, subject = _runtime_authority_fixture(tmp_path, monkeypatch, linked=False)
+    # An ordinary custom layout remains supported without global declaration.
+    monkeypatch.setattr(module.Path, "home", classmethod(lambda cls: tmp_path / "unrelated-home"))
+    assert module._declared_runtime_source_authority() is None
+    samples = []
+    def sample_once(cls):
+        samples.append(True)
+        return tmp_path / "unrelated-home"
+    monkeypatch.setattr(module.Path, "home", classmethod(sample_once))
+    with module.LifecycleTransaction(subject) as tx:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(tx)
+        try:
+            assert module._validator_module().AGENT_RUN_SCHEMA
+            assert tx._runtime_source_authority is None
+            assert module._validator_module().AGENT_RUN_SCHEMA
+            assert len(samples) == 1
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
 def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
@@ -13799,7 +14039,7 @@ class PartialMigrationRecoveryCliTests(unittest.TestCase):
                 ],
             )
 
-    def test_outcome_composer_preserves_primary_and_exact_eight_cleanup_slots(self):
+    def test_outcome_composer_preserves_primary_and_exact_cleanup_slots(self):
         module = load_module()
         primary = module.LifecycleError(
             "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
@@ -13811,6 +14051,12 @@ class PartialMigrationRecoveryCliTests(unittest.TestCase):
             phase for phase in module.LIFECYCLE_CLEANUP_PHASES
             if phase not in module.LIFECYCLE_WRITE_CLEANUP_PHASES
         )
+        self.assertEqual(generic_phases, (
+            "receipt-final", "receipt-pending", "rollback-parent-chain", "rollback-readme",
+            "rollback-status:work-item:2026-08-11-pr600-review-fix",
+            "rollback-status:work-item:2026-08-11-pr598-review-fix", "rollback-postcheck",
+            "transaction-release", "transaction-file-close", "transaction-verification",
+        ))
         for index, phase in enumerate(generic_phases, start=1):
             composer.record_cleanup(
                 phase=phase,
@@ -13827,7 +14073,7 @@ class PartialMigrationRecoveryCliTests(unittest.TestCase):
             tuple(record.phase for record in bundle.cleanup_failures),
             generic_phases,
         )
-        self.assertEqual(len(bundle.cleanup_failures), 8)
+        self.assertEqual(len(set(record.phase for record in bundle.cleanup_failures)), 10)
         self.assertEqual(bundle.rollback, "incomplete")
         with self.assertRaises(Exception):
             bundle.cleanup_failures += ()
@@ -14251,6 +14497,347 @@ def _relocation_observation_fixture(tmp_path: Path):
     return module, root, source, destination, leaf, outside
 
 
+def _directory_observation_stat(info, **changes):
+    """Change selected stat fields while preserving every other captured field."""
+    values = list(info)
+    fields = ("st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid",
+              "st_size", "st_atime", "st_mtime", "st_ctime")
+    # The first seven tuple slots are named; tuple time slots are unnamed
+    # and have separate public float/nanosecond attributes.
+    tuple_fields = fields[:7]
+    attributes = {name: getattr(info, name) for name in dir(info)
+                  if name.startswith("st_") and name not in tuple_fields}
+    for name, value in changes.items():
+        if name not in tuple_fields:
+            attributes[name] = value
+        if name in fields:
+            values[fields.index(name)] = value
+    return os.stat_result(values, attributes)
+
+
+def _directory_observation_atime_change(module, snapshot):
+    def changed(info):
+        return _directory_observation_stat(info, st_atime=info.st_atime + 1,
+                                           st_atime_ns=info.st_atime_ns + 1_000_000_000)
+    current = replace(snapshot, metadata=changed(snapshot.metadata),
+                      members=tuple((name, changed(info)) for name, info in snapshot.members))
+    return replace(current, capture_binding=module._directory_capture_binding(current))
+
+
+def test_retained_directory_observation_accepts_root_and_member_atime_only(tmp_path: Path) -> None:
+    module, root, source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    original = module._capture_owned_directory_snapshot(source, failure_id="TEST-PROOF")
+    current = _directory_observation_atime_change(module, original)
+    assert original.members and current != original
+    assert current.metadata.st_atime_ns != original.metadata.st_atime_ns
+    assert all(new.st_atime_ns != old.st_atime_ns
+               for (_name, new), (_old_name, old) in zip(current.members, original.members))
+    assert module._directory_capture_binding(current) == module._directory_capture_binding(original)
+    with module.LifecycleTransaction(root) as transaction:
+        transaction.observe_retained_inputs((original,))
+        observations = transaction._retained_observations
+        transaction.observe_retained_inputs((current,))
+        assert transaction._retained_observations is observations
+        assert observations[source] is current
+        assert current.metadata is not original.metadata and current.members is not original.members
+        module._verify_owned_directory_snapshot(current, "TEST-PROOF")
+
+
+def test_directory_effect_collection_uses_physical_observation_equivalence(tmp_path: Path, monkeypatch) -> None:
+    module, root, _source, _destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    original = module._capture_owned_directory_snapshot(leaf.parent, failure_id="TEST-PROOF")
+    current = _directory_observation_atime_change(module, original)
+    class CollectionReached(Exception):
+        pass
+    with module.LifecycleTransaction(root) as transaction:
+        transaction.observe_retained_inputs((original,))
+        observations = transaction._retained_observations
+        # Feed the collection's direct-binding representation branch only. Stop
+        # before native/evidence verification; this is not effect admission.
+        evidence = transaction._binding_evidence
+        reached = []
+        def stop_after_collection(values, **kwargs):
+            reached.append(values)
+            raise CollectionReached
+        try:
+            with monkeypatch.context() as scoped:
+                scoped.setattr(transaction, "_verify_observation_map", stop_after_collection)
+                transaction._binding_evidence = evidence + (("file", current),)
+                with pytest.raises(CollectionReached):
+                    transaction.prepare_owned_effect(object(), leaf, None)
+                assert len(reached) == 1 and reached[0][original.path] is original
+                drift = replace(current, metadata=_directory_observation_stat(
+                    current.metadata, st_mtime_ns=current.metadata.st_mtime_ns + 1))
+                transaction._binding_evidence = evidence + (("file", drift),)
+                with pytest.raises(module.LifecycleError, match="directory representations disagree before effect") as caught:
+                    transaction.prepare_owned_effect(object(), leaf, None)
+                assert caught.value.failure_id == "WI-LIFECYCLE-EFFECT" and len(reached) == 1
+                assert transaction._retained_observations is observations and observations[original.path] is original
+                assert leaf.read_bytes() == b"original retained evidence"
+        finally:
+            transaction._binding_evidence = evidence
+
+
+def test_retained_directory_observation_refuses_stable_membership_and_parent_drift(tmp_path: Path) -> None:
+    module, root, source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    original = module._capture_owned_directory_snapshot(source, failure_id="TEST-PROOF")
+    name, member = original.members[0]
+    participant, identity = original.parent_chain.participants[-1]
+    variants = (
+        replace(original, metadata=_directory_observation_stat(original.metadata, st_ino=original.metadata.st_ino + 1)),
+        replace(original, metadata=_directory_observation_stat(original.metadata, st_mtime_ns=original.metadata.st_mtime_ns + 1)),
+        replace(original, members=((name, _directory_observation_stat(member, st_ctime_ns=member.st_ctime_ns + 1)),)),
+        replace(original, members=((name + "-changed", member),)),
+        replace(original, members=()),
+        replace(original, parent_chain=replace(original.parent_chain,
+            participants=original.parent_chain.participants[:-1] + ((participant, (identity[0], identity[1] + 1)),))),
+    )
+    with module.LifecycleTransaction(root) as transaction:
+        transaction.observe_retained_inputs((original,))
+        observations = transaction._retained_observations
+        for current in variants:
+            with pytest.raises(module.LifecycleError, match="retained-input observation changed during selection") as caught:
+                transaction.observe_retained_inputs((current,))
+            assert caught.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+            assert transaction._retained_observations is observations and observations[source] is original
+
+
+def test_retained_file_observation_keeps_content_identity_policy_and_kind_strict(tmp_path: Path) -> None:
+    module, root, source, _destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    original = module._capture_file_snapshot(leaf, failure_id="TEST-PROOF", require_single_link=True)
+    directory = module._capture_owned_directory_snapshot(source, failure_id="TEST-PROOF")
+    variants = (
+        replace(original, require_single_link=False),
+        replace(original, data=b"X" + original.data[1:]),
+        replace(original, identity=(original.identity[0], original.identity[1] + 1)),
+        replace(directory, path=leaf),
+    )
+    with module.LifecycleTransaction(root) as transaction:
+        transaction.observe_retained_inputs((original,))
+        observations = transaction._retained_observations
+        for current in variants:
+            with pytest.raises(module.LifecycleError, match="retained-input observation changed during selection"):
+                transaction.observe_retained_inputs((current,))
+            assert transaction._retained_observations is observations and observations[leaf] is original
+        same = replace(original)
+        transaction.observe_retained_inputs((same,))
+        assert observations[leaf] is same
+    unsupported = object()
+    assert not module._captured_observations_equivalent(unsupported, unsupported)
+
+
+@pytest.mark.parametrize("transport", ("direct", "participant"))
+def test_transaction_failed_acquired_entry_keeps_primary_and_both_closer_failures(tmp_path: Path, monkeypatch, transport) -> None:
+    module, root, _source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    primary = module.LifecycleError("TEST-ENTRY", "actual acquired entry receiving failure")
+    events, transactions, exits, body = [], [], [], []
+    native_lock, native_unlock = module.LifecycleTransaction._native_lock, module.LifecycleTransaction._native_unlock
+    real_exit = module.LifecycleTransaction.__exit__
+    class CloseFailure:
+        def __init__(self, stream):
+            self.stream = stream
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+        def close(self):
+            events.append("close")
+            self.stream.close()
+            raise OSError("actual entry close secondary")
+    def acquire(transaction):
+        native_lock(transaction)
+        transactions.append(transaction)
+        transaction._file = CloseFailure(transaction._file)
+    def fail_receiving(transaction, **kwargs):
+        assert transaction._locked
+        events.append("entry")
+        raise primary
+    def unlock(transaction):
+        events.append("unlock")
+        native_unlock(transaction)
+        raise OSError("actual entry unlock secondary")
+    def exit_once(transaction, *args):
+        exits.append(transaction)
+        return real_exit(transaction, *args)
+    monkeypatch.setattr(module.LifecycleTransaction, "_native_lock", acquire)
+    monkeypatch.setattr(module.LifecycleTransaction, "verify", fail_receiving)
+    monkeypatch.setattr(module.LifecycleTransaction, "_native_unlock", unlock)
+    monkeypatch.setattr(module.LifecycleTransaction, "__exit__", exit_once)
+    observer = module.LifecycleDiagnosticObserver()
+    def action(root):
+        body.append(True)
+    with pytest.raises(module.LifecycleError) as caught:
+        if transport == "participant":
+            module._lifecycle_participant(action)(root, diagnostic_observer=observer)
+        else:
+            with module.LifecycleTransaction(root):
+                action(root)
+    assert caught.value is primary and not body and not exits
+    assert events == ["entry", "unlock", "close"]
+    assert len(transactions) == 1 and not transactions[0]._locked and transactions[0]._file.closed
+    if transport == "participant":
+        assert tuple(row.phase for row in observer.snapshot.cleanupFailures) == ("transaction-release", "transaction-file-close")
+        assert tuple(row.failureId for row in observer.snapshot.cleanupFailures) == ("WI-LIFECYCLE-LOCK-IDENTITY",) * 2
+    else:
+        assert any("actual entry unlock secondary" in note for note in primary.__notes__)
+        assert any("actual entry close secondary" in note for note in primary.__notes__)
+
+
+@pytest.mark.parametrize("acquisition", ("absent", "stream"))
+def test_transaction_entry_settles_only_actual_acquisitions(tmp_path: Path, monkeypatch, acquisition) -> None:
+    module, root, _source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    primary = module.LifecycleError("TEST-ENTRY", "actual entry acquisition refusal")
+    events, transactions, body = [], [], []
+    ensure = module.LifecycleTransaction._ensure_lock_file
+    class ObservedStream:
+        def __init__(self, stream):
+            self.stream = stream
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+        def close(self):
+            events.append("close")
+            self.stream.close()
+    def prepare(transaction):
+        transactions.append(transaction)
+        if acquisition == "absent":
+            raise primary
+        return ensure(transaction)
+    def lock(transaction):
+        assert not transaction._locked and transaction._file is not None
+        transaction._file = ObservedStream(transaction._file)
+        raise primary
+    monkeypatch.setattr(module.LifecycleTransaction, "_ensure_lock_file", prepare)
+    monkeypatch.setattr(module.LifecycleTransaction, "_native_lock", lock)
+    monkeypatch.setattr(module.LifecycleTransaction, "_native_unlock", lambda transaction: events.append("unexpected-unlock"))
+    observer = module.LifecycleDiagnosticObserver()
+    @module._lifecycle_participant
+    def action(root):
+        body.append(True)
+    with pytest.raises(module.LifecycleError) as caught:
+        action(root, diagnostic_observer=observer)
+    assert caught.value is primary and not body
+    assert events == ([] if acquisition == "absent" else ["close"])
+    assert transactions[0]._file is None and not transactions[0]._locked
+    assert observer.snapshot.cleanupFailures == ()
+
+
+@pytest.mark.parametrize("transport", ("direct", "participant"))
+def test_transaction_exit_retains_verification_unlock_and_close_outcomes(tmp_path: Path, monkeypatch, transport) -> None:
+    module, root, _source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    primary = module.LifecycleError("TEST-BODY", "actual body primary")
+    verification = module.LifecycleError("TEST-VERIFY", "actual exit verification secondary")
+    events, transactions = [], []
+    native_unlock = module.LifecycleTransaction._native_unlock
+    class CloseFailure:
+        def __init__(self, stream):
+            self.stream = stream
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+        def close(self):
+            events.append("close")
+            self.stream.close()
+            raise OSError("actual exit close secondary")
+    def unlock(transaction):
+        events.append("unlock")
+        native_unlock(transaction)
+        raise OSError("actual exit unlock secondary")
+    def fail_verification(**kwargs):
+        events.append("verify")
+        raise verification
+    def action(root):
+        transaction = module._CURRENT_LIFECYCLE_TRANSACTION.get() if transport == "participant" else transactions[0]
+        if transport == "participant":
+            transactions.append(transaction)
+        transaction._file = CloseFailure(transaction._file)
+        monkeypatch.setattr(transaction, "verify", fail_verification)
+        raise primary
+    monkeypatch.setattr(module.LifecycleTransaction, "_native_unlock", unlock)
+    observer = module.LifecycleDiagnosticObserver()
+    with pytest.raises(module.LifecycleError) as caught:
+        if transport == "participant":
+            module._lifecycle_participant(action)(root, diagnostic_observer=observer)
+        else:
+            with module.LifecycleTransaction(root) as transaction:
+                transactions.append(transaction)
+                action(root)
+    assert caught.value is primary
+    assert events == ["verify", "unlock", "close"]
+    assert not transactions[0]._locked and transactions[0]._file.closed
+    if transport == "participant":
+        rows = observer.snapshot.cleanupFailures
+        assert tuple(row.phase for row in rows) == ("transaction-release", "transaction-file-close", "transaction-verification")
+        assert tuple(row.failureId for row in rows) == ("WI-LIFECYCLE-LOCK-IDENTITY", "WI-LIFECYCLE-LOCK-IDENTITY", "TEST-VERIFY")
+        assert rows[-1].resource is None
+        assert all(row.causeType == "OSError" for row in rows[:2]) and rows[-1].causeType == "LifecycleError"
+    else:
+        assert all(any(word in note for note in primary.__notes__) for word in (
+            "actual exit unlock secondary", "actual exit close secondary", "actual exit verification secondary"))
+
+
+def test_transaction_cleanup_delivery_failure_keeps_acquired_outcomes_and_closers(tmp_path: Path, monkeypatch) -> None:
+    module, root, _source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    primary = module.LifecycleError("TEST-BODY", "original before failed outcome delivery")
+    events, phases = [], []
+    record = module.LifecycleOutcomeComposer.record_cleanup
+    unlock = module.LifecycleTransaction._native_unlock
+    def release(transaction):
+        unlock(transaction)
+        events.append("unlock")
+        raise OSError("real native unlock observation")
+    def record_then_fail(composer, **kwargs):
+        assert events == ["unlock"]
+        phases.append(kwargs["phase"])
+        if kwargs["phase"] == "transaction-release":
+            raise RuntimeError("actual optional delivery failure")
+        return record(composer, **kwargs)
+    monkeypatch.setattr(module.LifecycleTransaction, "_native_unlock", release)
+    monkeypatch.setattr(module.LifecycleOutcomeComposer, "record_cleanup", record_then_fail)
+    @module._lifecycle_participant
+    def action(root):
+        transaction = module._CURRENT_LIFECYCLE_TRANSACTION.get()
+        def verify(**kwargs):
+            raise ValueError("actual untyped verification")
+        monkeypatch.setattr(transaction, "verify", verify)
+        raise primary
+    observer = module.LifecycleDiagnosticObserver()
+    with pytest.raises(module.LifecycleError) as caught:
+        action(root, diagnostic_observer=observer)
+    assert caught.value is primary and events == ["unlock"]
+    assert phases == ["transaction-release", "transaction-verification"]
+    assert any("real native unlock observation" in note for note in primary.__notes__)
+    assert any("actual untyped verification" in note for note in primary.__notes__)
+    assert any("actual optional delivery failure" in note for note in primary.__notes__)
+    assert tuple(row.phase for row in observer.snapshot.cleanupFailures) == ("transaction-verification",)
+    assert observer.snapshot.cleanupFailures[0].failureId == "WI-LIFECYCLE-EFFECT"
+
+
+def test_placement_receiving_precedes_fallible_readback_and_allows_verified_reuse(tmp_path: Path, monkeypatch) -> None:
+    module, root, _source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    path = root / "placed.bin"
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            with module.LifecycleWriteTarget(path, failure_id="TEST-PLACEMENT") as writer:
+                read = writer.read
+                primary = module.LifecycleError("TEST-READBACK", "actual postplacement readback failure")
+                def read_then_fail(**kwargs):
+                    assert read(**kwargs) == b"placed"
+                    record = writer._creations[-1]
+                    assert record.phase == "final-placed" and not record.finished
+                    raise primary
+                with monkeypatch.context() as scoped:
+                    scoped.setattr(writer, "read", read_then_fail)
+                    with pytest.raises(module.LifecycleError) as caught:
+                        writer.publish(b"placed")
+                assert caught.value is primary
+                record = writer._creations[-1]
+                assert record.phase == "final-placed" and record.finished and record.release_complete
+                assert record.raw_failure is primary and path.read_bytes() == b"placed"
+                writer.publish(b"restored")
+                assert path.read_bytes() == b"restored"
+                writer.verify()
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
 def test_transaction_directory_move_preserves_exact_descendants_and_inverse(tmp_path: Path) -> None:
     module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
     original = module._capture_file_snapshot(leaf, failure_id="TEST-PROOF", require_single_link=True)
@@ -14280,7 +14867,7 @@ def test_transaction_directory_native_failure_keeps_observation_map(tmp_path: Pa
         before = transaction._retained_observations
         def failed_replace(*_args):
             raise PermissionError("injected native directory failure")
-        monkeypatch.setattr(module.os, "replace", failed_replace)
+        monkeypatch.setattr(module.os, "rename" if module.os.name == "nt" else "replace", failed_replace)
         with pytest.raises(PermissionError, match="native directory failure"):
             transaction.replace_directory(source, destination)
         assert transaction._retained_observations is before
@@ -14289,60 +14876,264 @@ def test_transaction_directory_native_failure_keeps_observation_map(tmp_path: Pa
 
 
 def test_transaction_postmove_proof_failure_compensates_before_return(tmp_path: Path, monkeypatch) -> None:
-    module, root, source, destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
     snapshot = module._capture_file_snapshot(leaf, failure_id="TEST-PROOF")
+    separate = module._capture_file_snapshot(outside, failure_id="TEST-PROOF")
     identity = source.stat().st_dev, source.stat().st_ino
     with module.LifecycleTransaction(root) as transaction:
-        transaction.observe_retained_inputs((snapshot,))
+        # Acquire after the lock namespace exists: the selected originals must
+        # include the direct parent AND the ancestor that represents its key.
+        originals = tuple(module._capture_owned_directory_snapshot(path, failure_id="TEST-PROOF")
+                          for path in (root, destination.parent))
+        transaction.observe_retained_inputs((snapshot, separate, *originals))
+        transaction._binding_evidence += (("membership", (destination.parent, ())),
+                                         ("chain", originals[1].parent_chain))
         before = transaction._retained_observations
+        evidence_before = transaction.current_binding_evidence
+        keys_before = tuple(module._lifecycle_file_snapshot_key(value.metadata) for value in originals)
+        bindings_before = tuple(value.capture_binding for value in originals)
         verify = transaction._verify_observation_map
+        primary = module.LifecycleError("TEST-POST-MOVE", "injected postmove proof failure")
+        rejected = []
         def fail_after_real_candidate_check(observations):
             verify(observations)
-            if destination / "nested/proof.bin" in observations:
-                raise module.LifecycleError("TEST-POST-MOVE", "injected postmove proof failure")
+            if not rejected and destination / "nested/proof.bin" in observations:
+                assert transaction._retained_observations is before
+                assert transaction.current_binding_evidence is evidence_before
+                changed_parent = observations[destination.parent]
+                assert module._lifecycle_file_snapshot_key(changed_parent.metadata) != keys_before[1]
+                ancestor = observations[root]
+                assert module._lifecycle_file_snapshot_key(dict(ancestor.members)[destination.parent.name]) == (
+                    module._lifecycle_file_snapshot_key(changed_parent.metadata))
+                rejected.append(observations)
+                raise primary
         monkeypatch.setattr(transaction, "_verify_observation_map", fail_after_real_candidate_check)
-        with pytest.raises(module.LifecycleError, match="postmove proof failure"):
+        with pytest.raises(module.LifecycleError, match="postmove proof failure") as caught:
             transaction.replace_directory(source, destination)
-        assert transaction._retained_observations is before
+        assert caught.value is primary and len(rejected) == 1
+        assert transaction._retained_observations is not before
+        assert transaction.current_binding_evidence is not evidence_before
+        assert transaction._retained_observations is not rejected[0]
+        assert transaction._retained_observations[leaf] is snapshot
+        assert transaction._retained_observations[outside] is separate
+        assert tuple(module._lifecycle_file_snapshot_key(value.metadata) for value in originals) == keys_before
+        assert tuple(value.capture_binding for value in originals) == bindings_before
+        current_root = transaction._retained_observations[root]
+        current_parent = transaction._retained_observations[destination.parent]
+        assert module._lifecycle_file_snapshot_key(current_parent.metadata) != keys_before[1]
+        assert module._lifecycle_file_snapshot_key(dict(current_root.members)[destination.parent.name]) == (
+            module._lifecycle_file_snapshot_key(current_parent.metadata))
+        assert set(name for name, _meta in current_parent.members) == set(name for name, _meta in originals[1].members)
+        assert current_parent.capture_binding == module._directory_capture_binding(current_parent)
+        assert current_root.capture_binding == module._directory_capture_binding(current_root)
+        membership = next(value for kind, value in transaction.current_binding_evidence
+                          if kind == "membership" and value[0] == destination.parent)
+        assert membership[1] == tuple(name for name, _meta in current_parent.members)
+        assert ("chain", current_parent.parent_chain) in transaction.current_binding_evidence
         assert (source.stat().st_dev, source.stat().st_ino) == identity
         assert not destination.exists() and leaf.read_bytes() == snapshot.data
         assert transaction._unsettled_relocations == ()
         transaction.verify()
 
 
-def test_transaction_relocation_does_not_recapture_replacement_leaf(tmp_path: Path, monkeypatch) -> None:
+def test_transaction_file_postmove_proof_failure_compensates_before_return(tmp_path: Path, monkeypatch) -> None:
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    target = destination.parent / "moved-proof.bin"
+    snapshot = module._capture_file_snapshot(leaf, failure_id="TEST-PROOF", require_single_link=True)
+    separate = module._capture_file_snapshot(outside, failure_id="TEST-PROOF")
+    primary = module.LifecycleError("TEST-POST-MOVE", "injected file postmove proof failure")
+    with module.LifecycleTransaction(root) as transaction:
+        originals = tuple(module._capture_owned_directory_snapshot(path, failure_id="TEST-PROOF")
+                          for path in (leaf.parent, source, root, destination.parent))
+        transaction.observe_retained_inputs((snapshot, separate, *originals))
+        transaction._binding_evidence += (("node", module._capture_structural_node(leaf, "TEST-PROOF")),)
+        before = transaction._retained_observations
+        evidence_before = transaction.current_binding_evidence
+        verify = transaction._verify_observation_map
+        rejected = []
+        def fail_after_real_candidate_check(observations):
+            verify(observations)
+            if not rejected and target in observations:
+                assert transaction._retained_observations is before
+                assert transaction.current_binding_evidence is evidence_before
+                assert observations[target].identity == snapshot.identity
+                assert observations[target].data == snapshot.data
+                assert observations[target].require_single_link
+                rejected.append(observations)
+                raise primary
+        monkeypatch.setattr(transaction, "_verify_observation_map", fail_after_real_candidate_check)
+        with pytest.raises(module.LifecycleError, match="file postmove proof failure") as caught:
+            transaction.replace_directory(leaf, target, directory=False)
+        assert caught.value is primary and len(rejected) == 1
+        assert not target.exists() and leaf.read_bytes() == snapshot.data
+        assert (leaf.stat().st_dev, leaf.stat().st_ino) == snapshot.identity
+        assert transaction._retained_observations is not before
+        assert transaction.current_binding_evidence is not evidence_before
+        assert transaction.current_observation(snapshot) == snapshot
+        assert transaction._retained_observations[outside] is separate
+        assert before[leaf] is snapshot and snapshot.path == leaf
+        assert transaction._unsettled_relocations == ()
+        assert any(kind == "node" and value[0] == leaf for kind, value in transaction.current_binding_evidence)
+        transaction.verify()
+
+
+def test_transaction_compensation_refuses_restored_descendant_byte_drift(tmp_path: Path, monkeypatch) -> None:
     module, root, source, destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
     snapshot = module._capture_file_snapshot(leaf, failure_id="TEST-PROOF")
-    real_replace = module.os.replace
-    replacement = root / "same-bytes.bin"
-    replacement.write_bytes(snapshot.data)
+    real_replace = (module.os.rename if module.os.name == "nt" else module.os.replace)
+    primary = module.LifecycleError("TEST-POST-MOVE", "injected postmove proof failure")
     transaction = module.LifecycleTransaction(root)
     transaction.__enter__()
     transaction.observe_retained_inputs((snapshot,))
+    before = transaction._retained_observations
+    evidence_before = transaction.current_binding_evidence
+    verify = transaction._verify_observation_map
+    rejected = []
+    reverse_checks = []
+    def fail_after_real_candidate_check(observations):
+        verify(observations)
+        if not rejected and destination / "nested/proof.bin" in observations:
+            rejected.append(observations)
+            raise primary
+    def replace_then_change_restored_leaf(old, new):
+        real_replace(old, new)
+        if Path(old) == destination and Path(new) == source:
+            paths = (source, root, destination.parent)
+            directories = tuple(module._capture_owned_directory_snapshot(path, failure_id="TEST-PROOF")
+                                for path in paths)
+            leaf.write_bytes(b"unowned changed retained evidence")
+            current = tuple(module._capture_owned_directory_snapshot(path, failure_id="TEST-PROOF")
+                            for path in paths)
+            # A descendant payload write leaves these immediate directory
+            # views intact; only the original retained file proof catches it.
+            for original, observed in zip(directories, current):
+                assert module._lifecycle_file_snapshot_key(original.metadata) == (
+                    module._lifecycle_file_snapshot_key(observed.metadata))
+                assert tuple((name, module._lifecycle_file_snapshot_key(meta)) for name, meta in original.members) == (
+                    tuple((name, module._lifecycle_file_snapshot_key(meta)) for name, meta in observed.members))
+            reverse_checks.append(current)
+    monkeypatch.setattr(transaction, "_verify_observation_map", fail_after_real_candidate_check)
+    monkeypatch.setattr(module.os, "rename" if module.os.name == "nt" else "replace", replace_then_change_restored_leaf)
+    try:
+        with pytest.raises(module.LifecycleError, match="postmove proof failure.*rollback failed.*identity or content changed") as caught:
+            transaction.replace_directory(source, destination)
+        assert caught.value.failure_id == "WI-LIFECYCLE-RELOCATION-ROLLBACK"
+        assert caught.value.__cause__ is primary
+        assert len(rejected) == len(reverse_checks) == 1
+        assert transaction._retained_observations is before
+        assert transaction.current_binding_evidence is evidence_before
+        assert transaction._retained_observations[leaf] is snapshot
+        assert leaf.read_bytes() == b"unowned changed retained evidence"
+        assert source.is_dir() and not destination.exists()
+        assert len(transaction._unsettled_relocations) == 1
+    finally:
+        with pytest.raises(module.LifecycleError):
+            transaction.__exit__(None, None, None)
+
+
+def test_transaction_directory_projection_refuses_unowned_sibling_metadata(tmp_path: Path, monkeypatch) -> None:
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    snapshot = module._capture_file_snapshot(leaf, failure_id="TEST-PROOF")
+    real_replace = (module.os.rename if module.os.name == "nt" else module.os.replace)
+    sibling = outside.parent
+    transaction = module.LifecycleTransaction(root)
+    transaction.__enter__()
+    original_root = module._capture_owned_directory_snapshot(root, failure_id="TEST-PROOF")
+    transaction.observe_retained_inputs((snapshot, original_root))
+    before = transaction._retained_observations
+    evidence_before = transaction.current_binding_evidence
+    sibling_before = module._lifecycle_file_snapshot_key(dict(original_root.members)[sibling.name])
+    def replace_then_change_sibling(old, new):
+        real_replace(old, new)
+        if Path(old) == source:
+            (sibling / "unowned-entry.bin").write_bytes(b"foreign sibling namespace")
+    monkeypatch.setattr(module.os, "rename" if module.os.name == "nt" else "replace", replace_then_change_sibling)
+    try:
+        with pytest.raises(module.LifecycleError, match="unrelated directory member changed.*rollback failed") as caught:
+            transaction.replace_directory(source, destination)
+        assert caught.value.failure_id == "WI-LIFECYCLE-RELOCATION-ROLLBACK"
+        assert "unrelated directory member changed" in str(caught.value.__cause__)
+        assert module._lifecycle_file_snapshot_key(sibling.stat()) != sibling_before
+        assert (sibling / "unowned-entry.bin").read_bytes() == b"foreign sibling namespace"
+        assert transaction._retained_observations is before
+        assert transaction.current_binding_evidence is evidence_before
+        assert len(transaction._unsettled_relocations) == 1
+        assert not source.exists() and destination.is_dir()
+    finally:
+        with pytest.raises(module.LifecycleError):
+            transaction.__exit__(None, None, None)
+
+
+def test_transaction_relocation_does_not_recapture_replacement_leaf(tmp_path: Path, monkeypatch) -> None:
+    module, root, source, destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    snapshot = module._capture_file_snapshot(leaf, failure_id="TEST-PROOF")
+    real_replace = (module.os.rename if module.os.name == "nt" else module.os.replace)
+    replacement = root / "same-bytes.bin"
+    replacement.write_bytes(snapshot.data)
+    replacement_identity = replacement.stat().st_dev, replacement.stat().st_ino
+    directory_identity = source.stat().st_dev, source.stat().st_ino
+    transaction = module.LifecycleTransaction(root)
+    transaction.__enter__()
+    transaction.observe_retained_inputs((snapshot,))
+    before = transaction._retained_observations
+    evidence_before = transaction.current_binding_evidence
+    publish = transaction.publish_owned_effect
+    publication_failures = []
+    def publish_and_retain_failure(*args, **kwargs):
+        try:
+            return publish(*args, **kwargs)
+        except BaseException as failure:
+            publication_failures.append(failure)
+            raise
     def replace_then_substitute(old, new):
         real_replace(old, new)
         if Path(old) == source:
-            real_replace(replacement, destination / "nested/proof.bin")
-    monkeypatch.setattr(module.os, "replace", replace_then_substitute)
+            module.os.replace(replacement, destination / "nested/proof.bin")
+    monkeypatch.setattr(module.os, "rename" if module.os.name == "nt" else "replace", replace_then_substitute)
+    monkeypatch.setattr(transaction, "publish_owned_effect", publish_and_retain_failure)
     try:
-        with pytest.raises(module.LifecycleError):
+        with pytest.raises(module.LifecycleError, match="rollback failed") as caught:
             transaction.replace_directory(source, destination)
+        assert caught.value.failure_id == "WI-LIFECYCLE-RELOCATION-ROLLBACK"
+        assert len(publication_failures) == 2
+        assert caught.value.__cause__ is publication_failures[0]
+        assert str(publication_failures[1]) in str(caught.value)
+        assert transaction._retained_observations is before
+        assert transaction.current_binding_evidence is evidence_before
         assert transaction._retained_observations[leaf] is snapshot
-        assert (leaf.stat().st_dev, leaf.stat().st_ino) != snapshot.identity
-        assert leaf.read_bytes() == snapshot.data
+        moved_leaf = destination / "nested/proof.bin"
+        assert not source.exists()
+        assert (destination.stat().st_dev, destination.stat().st_ino) == directory_identity
+        assert (moved_leaf.stat().st_dev, moved_leaf.stat().st_ino) == replacement_identity != snapshot.identity
+        assert moved_leaf.read_bytes() == snapshot.data
+        descriptor, = transaction._unsettled_relocations
+        assert (descriptor.source, descriptor.destination, descriptor.identity) == (
+            source, destination, directory_identity)
     finally:
         with pytest.raises(module.LifecycleError):
             transaction.__exit__(None, None, None)
 
 
 def test_transaction_zero_observation_move_and_overlapping_refusal(tmp_path: Path) -> None:
-    module, root, source, destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    identities = tuple(module._lifecycle_file_identity(path.lstat()) for path in (source, leaf.parent, leaf, outside))
+    original_bytes, outside_bytes = leaf.read_bytes(), outside.read_bytes()
     with module.LifecycleTransaction(root) as transaction:
+        admission = transaction._admission_evidence
         with pytest.raises(module.LifecycleError, match="overlaps"):
             transaction.replace_directory(source, source / "nested/new")
         assert transaction._retained_observations == {} and source.is_dir()
         transaction.replace_directory(source, destination)
-        assert destination.is_dir() and transaction._retained_observations == {}
+        assert destination.is_dir() and not source.exists()
+        assert set(transaction._retained_observations) == {destination}
+        current = transaction._retained_observations[destination]
+        assert isinstance(current, module.CapturedDirectorySnapshotV1) and current.path == destination
+        assert module._lifecycle_file_identity(current.metadata) == identities[0]
+        assert tuple((name, module._lifecycle_file_identity(info)) for name, info in current.members) == (("nested", identities[1]),)
+        moved = destination / "nested/proof.bin"
+        assert tuple(module._lifecycle_file_identity(path.lstat()) for path in (destination, moved.parent, moved, outside)) == identities
+        assert moved.read_bytes() == original_bytes and outside.read_bytes() == outside_bytes
+        assert transaction._admission_evidence is admission
         transaction.verify()
 
 
@@ -14396,7 +15187,7 @@ def test_transaction_substituted_directory_is_preserved_and_never_adopted(tmp_pa
     snapshot = module._capture_file_snapshot(leaf, failure_id="TEST-PROOF")
     identity = source.stat().st_dev, source.stat().st_ino
     displaced = root / "displaced-original"
-    real_replace = module.os.replace
+    real_replace = (module.os.rename if module.os.name == "nt" else module.os.replace)
     transaction = module.LifecycleTransaction(root)
     transaction.__enter__()
     transaction.observe_retained_inputs((snapshot,))
@@ -14406,7 +15197,7 @@ def test_transaction_substituted_directory_is_preserved_and_never_adopted(tmp_pa
             real_replace(destination, displaced)
             (destination / "nested").mkdir(parents=True)
             (destination / "nested/proof.bin").write_bytes(snapshot.data)
-    monkeypatch.setattr(module.os, "replace", replace_then_substitute_directory)
+    monkeypatch.setattr(module.os, "rename" if module.os.name == "nt" else "replace", replace_then_substitute_directory)
     try:
         with pytest.raises(module.LifecycleError, match="original moved directory.*rollback failed"):
             transaction.replace_directory(source, destination)
@@ -14498,6 +15289,8 @@ def test_caught_inverse_error_cannot_complete_unsettled_rollback(tmp_path: Path,
     module, root, source, destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
     bundles = []
     strings = []
+    transactions = []
+    primary = module.LifecycleError("TEST-CALLER-PRIMARY", "primary before inverse")
     finalize = module.LifecycleOutcomeComposer.finalize
     def capture(self):
         bundle = finalize(self)
@@ -14507,9 +15300,10 @@ def test_caught_inverse_error_cannot_complete_unsettled_rollback(tmp_path: Path,
     @module._lifecycle_participant
     def caller(root):
         transaction = module._CURRENT_LIFECYCLE_TRANSACTION.get()
+        transactions.append(transaction)
         composer = module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
         transaction.replace_directory(source, destination)
-        composer.capture_primary(module.LifecycleError("TEST-CALLER-PRIMARY", "primary before inverse"))
+        composer.capture_primary(primary)
         verify = transaction._verify_observation_map
         def fail_inverse(observations):
             verify(observations)
@@ -14524,14 +15318,386 @@ def test_caught_inverse_error_cannot_complete_unsettled_rollback(tmp_path: Path,
             strings.append(str(secondary))
         composer.set_rollback("completed")
         return "caller bookkeeping completed"
-    with pytest.raises(module.LifecycleError, match="primary before inverse"):
+    with pytest.raises(module.LifecycleError, match="primary before inverse") as caught:
         caller(root)
+    assert caught.value is primary and bundles[-1].primary is primary
     assert strings == ["secondary inverse failure"]
     assert bundles[-1].rollback == "incomplete"
-    assert len(bundles[-1].cleanup_failures) == 1
-    assert bundles[-1].cleanup_failures[0].phase == "rollback-parent-chain"
+    assert tuple(row.phase for row in bundles[-1].cleanup_failures) == ("rollback-parent-chain", "transaction-verification")
+    assert tuple(row.failure_id for row in bundles[-1].cleanup_failures) == ("WI-LIFECYCLE-RELOCATION-ROLLBACK", "WI-CATEGORY-MIGRATION-INVENTORY")
+    assert transactions[-1]._file is None and not transactions[-1]._locked
     assert (source / "nested/proof.bin").read_bytes() == b"original retained evidence"
     assert (destination / "foreign.bin").read_bytes() == b"foreign inverse source"
+
+
+def test_bound_relocation_authority_without_ambient_and_with_conflicting_context(tmp_path: Path, monkeypatch) -> None:
+    module, root, source, destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    if module.os.name != "nt":
+        pytest.skip("held-source authority is the selected Windows contract")
+    other_root = tmp_path / "other-repository"
+    other_root.mkdir()
+    release = module.LifecycleWriteTarget._release_handle
+    probes = []
+    with module.LifecycleTransaction(root) as transaction, module.LifecycleTransaction(other_root) as other:
+        def receiving(owner, handle, primary=None):
+            try:
+                movement = transaction._active_relocation
+                if movement is not None and owner is movement.source_owner and handle == movement.handle and not probes:
+                    assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+                    assert not movement._creation_observation_active
+                    identity = owner._identity(handle)
+                    with pytest.raises(module.LifecycleError, match="no close authority"):
+                        movement.target_owner._close(handle)
+                    with pytest.raises(module.LifecycleError, match="no creator disposition authority"):
+                        owner._windows_delete(handle)
+                    token = module._CURRENT_LIFECYCLE_TRANSACTION.set(other)
+                    try:
+                        for action in (lambda: owner._assert_creation_settlement(),
+                                       lambda: owner._borrow_directory(destination),
+                                       lambda: owner._close(handle),
+                                       lambda: owner._windows_delete(handle),
+                                       lambda: movement.target_owner._windows_rename(handle, destination.name, replace=False)):
+                            with pytest.raises(module.LifecycleError, match="operation context differs"):
+                                action()
+                        assert not transaction._unsettled_relocations
+                        assert not other._unsettled_relocations
+                        primary = module.LifecycleError("TEST-CONTEXT-PRIMARY", "primary before refused release")
+                        release(owner, handle, primary)
+                        assert any("write-target-release" in note for note in primary.__notes__)
+                        assert len(transaction._unsettled_relocations) == 1
+                        unsettled = transaction._unsettled_relocations[0]
+                        assert (unsettled.source, unsettled.destination, unsettled.identity) == (source, destination, identity)
+                        assert not other._unsettled_relocations
+                        assert owner._identity(handle) == identity
+                    finally:
+                        module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+                    assert owner._identity(handle) == identity
+                    assert module._lifecycle_file_identity(destination.lstat()) == identity
+                    probes.append(identity)
+            finally:
+                release(owner, handle, primary)
+        monkeypatch.setattr(module.LifecycleWriteTarget, "_release_handle", receiving)
+        transaction.replace_directory(source, destination, expected_identity=module._lifecycle_file_identity(source.lstat()))
+        assert len(probes) == 1
+        assert transaction.cleanup_intersects_unsettled((source, destination))
+
+
+@pytest.mark.parametrize("receiving", ["composer", "typed-error", "primary-note"])
+def test_moved_handle_close_failure_reaches_unsettled_before_receiving(tmp_path: Path, monkeypatch, receiving) -> None:
+    module, root, source, destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    if module.os.name != "nt":
+        pytest.skip("actual moved handle close is the selected Windows contract")
+    close = module.LifecycleWriteTarget._close
+    retained = []
+    primary = module.LifecycleError("TEST-CLOSE-PRIMARY", "real candidate primary")
+    composer = module.LifecycleOutcomeComposer() if receiving == "composer" else None
+    token = module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.set(composer)
+    try:
+        with module.LifecycleTransaction(root) as transaction:
+            def failed_close(owner, handle):
+                movement = transaction._active_relocation
+                if movement is not None and owner is movement.source_owner and handle == movement.handle and not retained:
+                    retained.append((owner, handle, owner._identity(handle)))
+                    raise OSError("injected actual native close refusal")
+                return close(owner, handle)
+            verify = transaction._verify_observation_map
+            rejected = []
+            def failed_candidate(observations, **kwargs):
+                verify(observations, **kwargs)
+                if receiving == "primary-note" and destination in observations and not rejected:
+                    rejected.append(True)
+                    raise primary
+            with monkeypatch.context() as change:
+                change.setattr(module.LifecycleWriteTarget, "_close", failed_close)
+                change.setattr(transaction, "_verify_observation_map", failed_candidate)
+                try:
+                    if receiving == "typed-error":
+                        with pytest.raises(module.LifecycleError, match="handle release.*native close refusal"):
+                            transaction.replace_directory(source, destination, expected_identity=module._lifecycle_file_identity(source.lstat()))
+                    elif receiving == "primary-note":
+                        with pytest.raises(module.LifecycleError) as caught:
+                            transaction.replace_directory(source, destination, expected_identity=module._lifecycle_file_identity(source.lstat()))
+                        assert caught.value is primary
+                        assert any("write-target-release" in note for note in primary.__notes__)
+                    else:
+                        transaction.replace_directory(source, destination, expected_identity=module._lifecycle_file_identity(source.lstat()))
+                        assert composer.finalize().cleanup_failures
+                    assert transaction.cleanup_intersects_unsettled((source, destination))
+                    assert retained and retained[0][0]._identity(retained[0][1]) == retained[0][2]
+                finally:
+                    for owner, handle, _identity in retained:
+                        close(owner, handle)
+    finally:
+        module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(token)
+
+
+def test_held_relocation_native_boundary_preserves_foreign_forward_and_inverse(tmp_path: Path, monkeypatch) -> None:
+    module, root, source, destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    if module.os.name != "nt":
+        pytest.skip("held no-clobber primitive is Windows")
+    rename = module.LifecycleWriteTarget._windows_rename
+    foreign = b"foreign held-branch endpoint"
+    entered = []
+    foreign_identities = []
+    foreign_directory_identities = []
+    original_directory_identity = module._lifecycle_file_identity(source.lstat())
+    original_nested_identity = module._lifecycle_file_identity(leaf.parent.lstat())
+    original_leaf_identity = module._lifecycle_file_identity(leaf.lstat())
+    with module.LifecycleTransaction(root) as transaction:
+        def occupied(owner, handle, leaf, *, replace):
+            movement = transaction._active_relocation
+            if movement is not None and handle == movement.handle:
+                assert movement.source_owner is not None and movement.target_owner is not None
+                assert replace is False
+                destination.mkdir()
+                (destination / "foreign.bin").write_bytes(foreign)
+                foreign_identities.append(module._lifecycle_file_identity((destination / "foreign.bin").lstat()))
+                foreign_directory_identities.append(module._lifecycle_file_identity(destination.lstat()))
+                entered.append("forward")
+                try:
+                    return rename(owner, handle, leaf, replace=replace)
+                except OSError:
+                    assert movement.source_owner._identity(handle) == original_directory_identity
+                    raise
+            return rename(owner, handle, leaf, replace=replace)
+        with monkeypatch.context() as change:
+            change.setattr(module.LifecycleWriteTarget, "_windows_rename", occupied)
+            with pytest.raises(OSError):
+                transaction.replace_directory(source, destination, expected_identity=module._lifecycle_file_identity(source.lstat()))
+        assert (destination / "foreign.bin").read_bytes() == foreign
+        assert module._lifecycle_file_identity((destination / "foreign.bin").lstat()) == foreign_identities[0]
+        assert module._lifecycle_file_identity(destination.lstat()) == foreign_directory_identities[0]
+        assert module._lifecycle_file_identity(source.lstat()) == original_directory_identity
+        assert module._lifecycle_file_identity(leaf.parent.lstat()) == original_nested_identity
+        assert module._lifecycle_file_identity(leaf.lstat()) == original_leaf_identity
+        assert leaf.read_bytes() == b"original retained evidence"
+        (destination / "foreign.bin").unlink(); destination.rmdir()
+        verify = transaction._verify_observation_map
+        rejected = []
+        def reject_current(observations, **kwargs):
+            verify(observations, **kwargs)
+            if destination in observations and not rejected:
+                rejected.append(True)
+                raise module.LifecycleError("TEST-HELD-PRIMARY", "held forward proof failure")
+        def occupied_inverse(owner, handle, leaf, *, replace):
+            movement = transaction._active_relocation
+            if movement is not None and handle == movement.handle and owner is movement.source_owner:
+                source.mkdir()
+                (source / "foreign.bin").write_bytes(foreign)
+                foreign_identities.append(module._lifecycle_file_identity((source / "foreign.bin").lstat()))
+                foreign_directory_identities.append(module._lifecycle_file_identity(source.lstat()))
+                entered.append("inverse")
+                try:
+                    return rename(owner, handle, leaf, replace=replace)
+                except OSError:
+                    assert movement.source_owner._identity(handle) == original_directory_identity
+                    raise
+            return rename(owner, handle, leaf, replace=replace)
+        with monkeypatch.context() as change:
+            change.setattr(transaction, "_verify_observation_map", reject_current)
+            change.setattr(module.LifecycleWriteTarget, "_windows_rename", occupied_inverse)
+            with pytest.raises(module.LifecycleError, match="held forward proof failure.*rollback failed"):
+                transaction.replace_directory(source, destination, expected_identity=module._lifecycle_file_identity(source.lstat()))
+        assert entered == ["forward", "inverse"]
+        assert (source / "foreign.bin").read_bytes() == foreign
+        assert module._lifecycle_file_identity((source / "foreign.bin").lstat()) == foreign_identities[1]
+        assert module._lifecycle_file_identity(source.lstat()) == foreign_directory_identities[1]
+        moved = destination / leaf.relative_to(source)
+        assert module._lifecycle_file_identity(destination.lstat()) == original_directory_identity
+        assert module._lifecycle_file_identity(moved.parent.lstat()) == original_nested_identity
+        assert module._lifecycle_file_identity(moved.lstat()) == original_leaf_identity
+        assert moved.read_bytes() == b"original retained evidence"
+        assert transaction.cleanup_intersects_unsettled((source, destination))
+
+
+def test_transaction_native_boundary_refuses_foreign_forward_and_inverse(tmp_path: Path, monkeypatch) -> None:
+    module, root, source, destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    real = module.os.rename if module.os.name == "nt" else module.os.replace
+    if module.os.name != "nt":
+        pytest.skip("selected atomic no-clobber boundary is Windows")
+    foreign = b"foreign syscall-boundary bytes"
+    def occupied_forward(old, new):
+        destination.mkdir()
+        (destination / "foreign.bin").write_bytes(foreign)
+        return real(old, new)
+    with module.LifecycleTransaction(root) as transaction:
+        with monkeypatch.context() as change:
+            change.setattr(module.os, "rename", occupied_forward)
+            with pytest.raises(FileExistsError):
+                transaction.replace_directory(source, destination)
+        assert (destination / "foreign.bin").read_bytes() == foreign
+        assert leaf.read_bytes() == b"original retained evidence"
+        (destination / "foreign.bin").unlink(); destination.rmdir()
+        verify = transaction._verify_observation_map
+        failed = []
+        primary = module.LifecycleError("TEST-BOUNDARY", "actual forward proof failure")
+        def fail_candidate(observations, **kwargs):
+            verify(observations, **kwargs)
+            if destination in observations and not failed:
+                failed.append(True)
+                raise primary
+        def occupied_inverse(old, new):
+            if Path(old) == destination:
+                source.mkdir()
+                (source / "foreign.bin").write_bytes(foreign)
+            return real(old, new)
+        with monkeypatch.context() as change:
+            change.setattr(transaction, "_verify_observation_map", fail_candidate)
+            change.setattr(module.os, "rename", occupied_inverse)
+            with pytest.raises(module.LifecycleError, match="actual forward proof failure.*rollback failed"):
+                transaction.replace_directory(source, destination)
+        assert (source / "foreign.bin").read_bytes() == foreign
+        assert (destination / "nested/proof.bin").read_bytes() == b"original retained evidence"
+        assert transaction.cleanup_intersects_unsettled((source, destination))
+
+
+@pytest.mark.parametrize("transactional", [False, True])
+def test_native_creation_directory_observation_borrows_target_ancestor_and_member(tmp_path: Path, monkeypatch, transactional) -> None:
+    module, root, _source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    from contextlib import nullcontext
+    created = root / "created" / "nested"
+    with module.LifecycleTransaction(root) if transactional else nullcontext() as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction) if transactional else None
+        try:
+            with module.LifecycleWriteTarget(created / "leaf.bin", failure_id="TEST-BORROW") as creator:
+                records = tuple(creator._creations)
+                handles = tuple(record.handle for record in records)
+                with monkeypatch.context() as observation:
+                    retained = module.LifecycleWriteTarget._retain_directory
+                    released = module.LifecycleWriteTarget._release_handle
+                    def retain(reader, path, handle, **kwargs):
+                        if reader is not creator:
+                            assert handle not in handles
+                        return retained(reader, path, handle, **kwargs)
+                    def release(reader, handle, *args):
+                        if reader is not creator:
+                            assert handle not in handles
+                        return released(reader, handle, *args)
+                    observation.setattr(module.LifecycleWriteTarget, "_retain_directory", retain)
+                    observation.setattr(module.LifecycleWriteTarget, "_release_handle", release)
+                    for path in (created, created.parent, root):
+                        snapshot = module._capture_owned_directory_snapshot(path, failure_id="TEST-BORROW", creation_owner=creator)
+                        module._verify_owned_directory_snapshot(snapshot, "TEST-BORROW", creation_owner=creator)
+                        assert snapshot.parent_chain.participants[-1][0] == path
+                        assert snapshot.parent_chain.participants[-1][1] == (path.stat().st_dev, path.stat().st_ino)
+                    assert not creator._creation_observation_active
+                    for record in records:
+                        assert creator._identity(record.handle) == record.identity
+                        assert not record.release_attempted and not record.finished
+                    creator.verify()
+            assert all(record.release_complete and record.finished for record in records)
+        finally:
+            if transactional:
+                module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+    module._capture_owned_directory_snapshot(created, failure_id="TEST-BORROW")
+
+
+def test_native_creation_directory_observation_refuses_invalid_lifetime_and_epoch(tmp_path: Path, monkeypatch) -> None:
+    module, root, _source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    created = root / "created"
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            with module.LifecycleWriteTarget(created / "leaf.bin", failure_id="TEST-BORROW") as creator:
+                record = creator._creations[-1]
+                for field, invalid in (("seal", object()), ("owner", object()), ("release_attempted", True)):
+                    original = getattr(record, field)
+                    setattr(record, field, invalid)
+                    try:
+                        with pytest.raises(module.LifecycleError):
+                            module._capture_owned_directory_snapshot(created, failure_id="TEST-BORROW", creation_owner=creator)
+                        assert not creator._creation_observation_active
+                    finally:
+                        setattr(record, field, original)
+                thread = creator._creation_thread
+                creator._creation_thread = object()
+                try:
+                    with pytest.raises(module.LifecycleError, match="thread differs"):
+                        module._capture_owned_directory_snapshot(created, failure_id="TEST-BORROW", creation_owner=creator)
+                finally:
+                    creator._creation_thread = thread
+                evidence = transaction._binding_evidence
+                scandir = module.os.scandir
+                def change_epoch(path):
+                    if path == created:
+                        transaction._binding_evidence = evidence + (("absent", created / "epoch-marker"),)
+                    return scandir(path)
+                with monkeypatch.context() as change:
+                    change.setattr(module.os, "scandir", change_epoch)
+                    try:
+                        with pytest.raises(module.LifecycleError, match="current operation changed"):
+                            module._capture_owned_directory_snapshot(created, failure_id="TEST-BORROW", creation_owner=creator)
+                    finally:
+                        transaction._binding_evidence = evidence
+                creator.verify()
+            with pytest.raises(module.LifecycleError):
+                module._capture_owned_directory_snapshot(created, failure_id="TEST-BORROW", creation_owner=creator)
+            assert not creator._creation_observation_active
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+def test_native_creation_directory_observation_refuses_in_place_current_selection(tmp_path: Path, monkeypatch) -> None:
+    module, root, _source, _destination, _leaf, outside = _relocation_observation_fixture(tmp_path)
+    selected = module._capture_file_snapshot(outside, failure_id="TEST-BORROW")
+    created = root / "created"
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            with module.LifecycleWriteTarget(created / "leaf.bin", failure_id="TEST-BORROW") as creator:
+                record = creator._creations[-1]
+                current = transaction._retained_observations
+                original_creator = current[created]
+                scandir = module.os.scandir
+                def select_during_capture(path):
+                    if path == created:
+                        transaction.observe_retained_inputs((selected,))
+                    return scandir(path)
+                with monkeypatch.context() as change:
+                    change.setattr(module.os, "scandir", select_during_capture)
+                    with pytest.raises(module.LifecycleError, match="current operation changed"):
+                        module._capture_owned_directory_snapshot(created, failure_id="TEST-BORROW", creation_owner=creator)
+                assert transaction._retained_observations is current
+                assert current[created] is original_creator and current[outside] is selected
+                assert not creator._creation_observation_active and not record.release_attempted
+                assert creator._identity(record.handle) == record.identity
+                # Selection before a fresh capture belongs to its actual current epoch.
+                module._capture_owned_directory_snapshot(created, failure_id="TEST-BORROW", creation_owner=creator)
+                creator.verify()
+            assert record.release_complete and record.finished
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+def test_native_creation_directory_observation_partial_failure_preserves_creator_custody(tmp_path: Path, monkeypatch) -> None:
+    module, root, _source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    created = root / "created"
+    with module.LifecycleWriteTarget(created / "leaf.bin", failure_id="TEST-BORROW") as creator:
+        record = creator._creations[-1]
+        scandir = module.os.scandir
+        primary = RuntimeError("injected borrowed inventory failure")
+        def fail_inventory(path):
+            if path == created:
+                for settle in (lambda: creator.__exit__(None, None, None),
+                               lambda: creator._finish_creation(record, None, abort=True),
+                               lambda: creator._release_creation(record, None),
+                               lambda: creator._close(record.handle)):
+                    with pytest.raises(module.LifecycleError, match="active observation"):
+                        settle()
+                with pytest.raises(module.LifecycleError, match="active observation"):
+                    module._capture_owned_directory_snapshot(created, failure_id="TEST-BORROW", creation_owner=creator)
+                assert not record.release_attempted and creator._open
+                raise primary
+            return scandir(path)
+        with monkeypatch.context() as change:
+            change.setattr(module.os, "scandir", fail_inventory)
+            with pytest.raises(RuntimeError) as caught:
+                module._capture_owned_directory_snapshot(created, failure_id="TEST-BORROW", creation_owner=creator)
+        assert caught.value is primary
+        assert not creator._creation_observation_active
+        assert creator._identity(record.handle) == record.identity
+        creator.verify()
+    assert record.release_complete and record.finished
 
 
 def _adapt_test(function):
@@ -15347,3 +16513,121 @@ def test_selected_absence_and_parent_replacement_revalidate_under_owner(tmp_path
     (root / "active").mkdir()
     with pytest.raises(module.LifecycleError):
         module._verify_project_binding_evidence(tuple(evidence), "WI-README-STALE")
+
+
+def test_native_target_whole_read_repeats_after_write(tmp_path: Path) -> None:
+    module = load_module()
+    assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+    assert module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get() is None
+    path = tmp_path / "whole-read.bin"
+    payload = b"0123456789ABCDEF"
+    record = None
+    with module.LifecycleWriteTarget(path, failure_id="WI-LIFECYCLE-WRITE-BOUNDARY") as target:
+        primary = None
+        try:
+            record = target._new_creation(path, None, target._parent)
+            handle = target._file(target.leaf, create=True, delete=True, _creation=record)
+            record.identity = target._identity(handle)
+            target._write_handle(handle, payload)
+            assert target._read_handle(handle, len(payload)) == payload
+            assert target._read_handle(handle, len(payload)) == payload
+            assert target._identity(handle) == record.identity
+            fresh = target._file(target.leaf)
+            fresh_primary = None
+            try:
+                assert target._identity(fresh) == record.identity
+                assert target._read_handle(fresh, len(payload)) == payload
+            except BaseException as error:
+                fresh_primary = error
+                raise
+            finally:
+                target._release_handle(fresh, fresh_primary)
+            assert target.read(maximum_bytes=len(payload)) == payload
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            if record is not None and not record.finished:
+                target._finish_creation(record, primary, abort=True)
+    assert record is not None and record.creator and record.finished
+    assert record.deletion_accepted and record.release_complete and record.projection_complete
+    assert record.phase == "disposed" and record.holder == "released" and not record.secondary
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("payload,maximum,refused", (
+    pytest.param(b"", 0, False, id="empty-zero"),
+    pytest.param(b"x", 0, True, id="nonempty-zero"),
+    pytest.param(b"0123456789ABCDEF", 15, True, id="over-bound-at-eof"),
+))
+def test_native_target_whole_read_envelope_at_eof(tmp_path: Path, payload: bytes, maximum: int, refused: bool) -> None:
+    module = load_module()
+    path = tmp_path / "bounded-read.bin"
+    path.write_bytes(payload)
+    with module.LifecycleWriteTarget(path, failure_id="WI-LIFECYCLE-WRITE-BOUNDARY") as target:
+        handle = target._file(target.leaf)
+        primary = None
+        try:
+            assert target._read_handle(handle, len(payload)) == payload
+            if refused:
+                with pytest.raises(OSError, match="admitted byte envelope"):
+                    target._read_handle(handle, maximum)
+            else:
+                assert target._read_handle(handle, maximum) == b""
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            target._release_handle(handle, primary)
+    assert path.read_bytes() == payload
+
+
+@pytest.mark.parametrize("fault", ("seek", "read"))
+def test_native_target_whole_read_failure_preserves_primary_and_release(tmp_path: Path, monkeypatch, fault: str) -> None:
+    module = load_module()
+    path = tmp_path / "failed-read.bin"
+    payload = b"0123456789ABCDEF"
+    path.write_bytes(payload)
+    read_calls = []
+    released = []
+    with module.LifecycleWriteTarget(path, failure_id="WI-LIFECYCLE-WRITE-BOUNDARY") as target:
+        original_close = module.LifecycleWriteTarget._close
+        def close_then_report(owner, handle):
+            original_close(owner, handle)
+            released.append(handle)
+            raise OSError("secondary-release-cause")
+        with monkeypatch.context() as scoped:
+            scoped.setattr(module.LifecycleWriteTarget, "_close", close_then_report)
+            if os.name == "nt":
+                c, _w, kernel, _nt, _types = target._native
+                if fault == "seek":
+                    def fail_seek(*args):
+                        c.set_last_error(5)
+                        return 0
+                    scoped.setattr(kernel, "SetFilePointerEx", fail_seek)
+                def fail_read(*args):
+                    read_calls.append(1)
+                    assert fault == "read", "read continued after failed positioning"
+                    c.set_last_error(5)
+                    return 0
+                scoped.setattr(kernel, "ReadFile", fail_read)
+            else:
+                if fault == "seek":
+                    def fail_seek(*args):
+                        raise OSError(5, "positioning denied")
+                    scoped.setattr(module.os, "lseek", fail_seek)
+                def fail_read(*args):
+                    read_calls.append(1)
+                    assert fault == "read", "read continued after failed positioning"
+                    raise OSError(5, "read denied")
+                scoped.setattr(module.os, "read", fail_read)
+            with pytest.raises(module.LifecycleError) as failure:
+                target.read(maximum_bytes=len(payload))
+            assert failure.value.failure_id == "WI-LIFECYCLE-WRITE-BOUNDARY"
+            assert isinstance(failure.value.__cause__, OSError) and failure.value.__cause__.errno == 5
+            expected_cause = "positioning" if fault == "seek" else "read"
+            assert expected_cause in str(failure.value)
+            assert any("secondary write-target-release: OSError" in note for note in failure.value.__notes__)
+            assert read_calls == ([] if fault == "seek" else [1])
+            assert len(released) == 1
+    assert path.read_bytes() == payload

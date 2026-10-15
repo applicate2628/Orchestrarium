@@ -265,6 +265,54 @@ class LegacyFlatTerminalTests(unittest.TestCase):
             "--legacy-evidence-file", str(request)]
         return request.read_bytes(), arguments
 
+    def test_pending_progress_accepts_both_directory_parent_wire_forms_and_refuses_drift(self):
+        _evidence, arguments = self.legacy_request()
+        validate = m._legacy_validate_intent
+        captured = []
+        def retain_intent(root, intent):
+            validate(root, intent)
+            captured.append(json.loads(m._migration_receipt_bytes(intent)))
+        m._legacy_validate_intent = retain_intent
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(m.main(arguments), 0)
+        finally:
+            m._legacy_validate_intent = validate
+        intent = captured[-1]
+        intent_path = m._transition_intent_path(self.root, intent["operationId"])
+        m._legacy_save_intent(intent_path, intent)
+        with m.LifecycleTransaction(self.root) as transaction:
+            token = m._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            try:
+                plan = m._PendingLegacyCompletionPlan.admit(self.root, intent_path, intent)
+                plan.check_progress(intent)
+                ancestors = json.loads(m._migration_receipt_bytes(intent))
+                for row in ancestors["capturedBindings"]:
+                    if row["nodeKind"] == "directory":
+                        self.assertEqual(row["parentChain"][-1],
+                            {"path": row["path"], "identity": row["identity"]["value"]})
+                        row["parentChain"] = row["parentChain"][:-1]
+                plan.check_progress(ancestors)
+                different = json.loads(m._migration_receipt_bytes(ancestors))
+                directory = next(row for row in different["capturedBindings"] if row["nodeKind"] == "directory")
+                directory["parentChain"][-1]["identity"][1] += 1
+                with self.assertRaisesRegex(m.LifecycleError, "producer parent proof differs"):
+                    plan.check_progress(different)
+                different = json.loads(m._migration_receipt_bytes(intent))
+                directory = next(row for row in different["capturedBindings"] if row["nodeKind"] == "directory")
+                directory["parentChain"][-1]["identity"][1] += 1
+                with self.assertRaisesRegex(m.LifecycleError, "directory identity and captured ancestry disagree"):
+                    plan.check_progress(different)
+                different = json.loads(m._migration_receipt_bytes(intent))
+                file = next(row for row in different["capturedBindings"] if row["nodeKind"] == "file")
+                file["parentChain"].append({"path": file["path"], "identity": file["image"]["identity"]["value"]})
+                with self.assertRaisesRegex(m.LifecycleError, "ordered native ancestry differs"):
+                    plan.check_progress(different)
+                plan.check_progress(intent)
+                transaction.verify()
+            finally:
+                m._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
     def test_public_legacy_close_requires_the_additive_evidence_and_apply_surface(self):
         _evidence, arguments = self.legacy_request()
         before = self.canonical_images()
@@ -553,14 +601,14 @@ print('FRESH_PUBLIC_READERS_OK')
             image, _ = m._legacy_local_image(path)
             original = self.root / f"fixture-original-{label}.bin"
             preserved = self.root / f"fixture-foreign-{label}.bin"
-            m._legacy_move_owned(path, original, image)
+            path.rename(original)
             m._atomic_write(path, raw)
             foreign, _ = m._legacy_local_image(path)
             self.assertNotEqual(foreign["identity"], image["identity"])
             refusal(pattern)
             self.assertEqual(path.read_bytes(), raw)
-            m._legacy_move_owned(path, preserved, foreign)
-            m._legacy_move_owned(original, path, image)
+            path.rename(preserved)
+            original.rename(path)
             self.assertEqual(preserved.read_bytes(), raw)
 
         # Each replacement keeps the original native object alive, so equal bytes
@@ -575,11 +623,11 @@ print('FRESH_PUBLIC_READERS_OK')
         board = self.root / "work-items/README.md"
         board_image, _ = m._legacy_local_image(board)
         board_saved = self.root / "fixture-current-board.bin"
-        m._legacy_move_owned(board, board_saved, board_image)
+        board.rename(board_saved)
         readme_binding["postImage"] = None
         m._legacy_save_intent(intent_path, intent)
         refusal("indeterminate finalization")
-        m._legacy_move_owned(board_saved, board, board_image)
+        board_saved.rename(board)
         readme_binding["postImage"] = board_image
         m._legacy_save_intent(intent_path, intent)
         changed_request = json.loads(evidence)
@@ -594,15 +642,15 @@ print('FRESH_PUBLIC_READERS_OK')
         parent = Path(created["path"])
         original_parent = self.root / "fixture-original-parent"
         foreign_parent = self.root / "fixture-foreign-parent"
-        m._legacy_move_owned(parent, original_parent, None, directory_identity=created["identity"])
+        parent.rename(original_parent)
         foreign_binding = m._legacy_create_directory(parent)
         self.assertNotEqual(foreign_binding["identity"], created["identity"])
         with self.assertRaisesRegex(m.LifecycleError, "parent identity changed|stage parent changed"):
             m.recover_transition(self.root, "flat-terminal-001")
         self.assertTrue(parent.exists())
         self.assertTrue(intent_path.exists())
-        m._legacy_move_owned(parent, foreign_parent, None, directory_identity=foreign_binding["identity"])
-        m._legacy_move_owned(original_parent, parent, None, directory_identity=created["identity"])
+        parent.rename(foreign_parent)
+        original_parent.rename(parent)
         foreign_child = parent / "fixture-foreign-child.bin"
         foreign_child.write_bytes(b"fixture-owned child must survive recovery refusal\n")
         with self.assertRaises((m.LifecycleError, OSError)):
@@ -619,34 +667,34 @@ print('FRESH_PUBLIC_READERS_OK')
     def test_creator_rollback_and_foreign_replacement_preserve_then_real_recovery(self):
         evidence, _arguments = self.legacy_request()
         before = self.canonical_images()
-        move = m._legacy_move_owned
-        def refuse_promotion(path, destination, image, **kwargs):
-            if image is None:
+        move = m.LifecycleTransaction.replace_directory
+        def refuse_promotion(transaction, path, destination, *, directory=True, **kwargs):
+            if directory:
                 raise m.LifecycleError("WI-TEST-PROMOTION", "actual pre-promotion fault")
-            return move(path, destination, image, **kwargs)
-        m._legacy_move_owned = refuse_promotion
+            return move(transaction, path, destination, directory=directory, **kwargs)
+        m.LifecycleTransaction.replace_directory = refuse_promotion
         try:
             with self.assertRaisesRegex(m.LifecycleError, "actual pre-promotion fault"):
                 m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
         finally:
-            m._legacy_move_owned = move
+            m.LifecycleTransaction.replace_directory = move
         self.assertEqual(before, self.canonical_images())
         self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
         self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "open")
         archive = self.root / "work-items/archive/2026-10" / self.slug
         retained = archive / "legacy-source" / self.source.name
         foreign = b"caller-owned replacement must be preserved\n"
-        def replace_after_promotion(path, destination, image, **kwargs):
-            result = move(path, destination, image, **kwargs)
-            if image is None:
+        def replace_after_promotion(transaction, path, destination, *, directory=True, **kwargs):
+            result = move(transaction, path, destination, directory=directory, **kwargs)
+            if directory:
                 m._atomic_write(retained, foreign)
             return result
-        m._legacy_move_owned = replace_after_promotion
+        m.LifecycleTransaction.replace_directory = replace_after_promotion
         try:
             with self.assertRaisesRegex(m.LifecycleError, "compensation"):
                 m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
         finally:
-            m._legacy_move_owned = move
+            m.LifecycleTransaction.replace_directory = move
         self.assertEqual(retained.read_bytes(), foreign)
         self.assertTrue(m._transition_intent_path(self.root, "flat-terminal-001").exists())
         with self.assertRaises(m.LifecycleError):
@@ -655,12 +703,316 @@ print('FRESH_PUBLIC_READERS_OK')
         # native image; the lifecycle owner never removes the foreign replacement.
         foreign_image, _parents = m._legacy_local_image(retained)
         preserved = self.root / "foreign-preserved.bin"
-        move(retained, preserved, foreign_image)
+        retained.rename(preserved)
         action = m.recover_transition(self.root, "flat-terminal-001")
         self.assertEqual(action["status"], "settled")
         self.assertEqual(preserved.read_bytes(), foreign)
         self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
         m.check_readme(self.root)
+
+    def test_shared_relocation_observation_excludes_both_actual_custodians(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        scan = m.os.scandir
+        probes = []
+        def observe(path):
+            transaction = m._CURRENT_LIFECYCLE_TRANSACTION.get()
+            movement = transaction._active_relocation if transaction is not None else None
+            if movement is not None and movement.directory and movement.handle is not None and movement._creation_observation_active and not probes:
+                source, target = movement.source_owner, movement.target_owner
+                self.assertIsNot(source, target)
+                self.assertEqual(source._creations, [])
+                identity = source._identity(movement.handle)
+                for action in (lambda: source._close(movement.handle),
+                               lambda: source._windows_delete(movement.handle),
+                               lambda: target._windows_rename(movement.handle, "fixture-refused", replace=False),
+                               lambda: target._close(target._parent),
+                               lambda: target.__exit__(None, None, None)):
+                    with self.assertRaisesRegex(m.LifecycleError, "active observation"):
+                        action()
+                self.assertEqual(source._identity(movement.handle), identity)
+                target._verify_owned()
+                probes.append(identity)
+            return scan(path)
+        with patch.object(m.os, "scandir", observe):
+            m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+        self.assertEqual(len(probes), 1)
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
+
+    def test_reconciled_placement_precedes_fallible_domain_receiving(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        before = self.canonical_images()
+        primary = m.LifecycleError("WI-TEST-PROGRESS", "first actual native progress receiving failure")
+        fired, writers, received = [], [], []
+        reconcile = m._PendingLegacyCompletionPlan.reconcile_progress_writer
+        check = m._PendingLegacyCompletionPlan.check_progress
+        class ReceivingFault:
+            def __get__(descriptor, plan, owner):
+                if plan is None:
+                    return descriptor
+                if "native_progress" not in plan.__dict__:
+                    raise AttributeError("native_progress")
+                return plan.__dict__["native_progress"]
+            def __set__(descriptor, plan, value):
+                transaction = getattr(plan, "transaction", None)
+                movement = transaction._active_relocation if transaction is not None else None
+                if (movement is not None and movement.directory and movement.handle is not None and not fired):
+                    fired.append(True)
+                    raise primary
+                plan.__dict__["native_progress"] = value
+        def receive_writer(plan, writer, failure):
+            writers.append(writer)
+            return reconcile(plan, writer, failure)
+        def check_actual_placement(plan, candidate):
+            if writers and writers[-1]._operation_owner is plan:
+                active = [record for record in writers[-1]._creations if not record.finished and record.placement is not None]
+                for record in active:
+                    self.assertEqual(record.phase, "final-placed")
+                    self.assertEqual(writers[-1]._identity(record.handle), record.identity)
+                    self.assertFalse(record.release_attempted)
+                    received.append(record)
+            return check(plan, candidate)
+        with patch.object(m._PendingLegacyCompletionPlan, "native_progress", ReceivingFault(), create=True), patch.object(
+                m._PendingLegacyCompletionPlan, "reconcile_progress_writer", receive_writer), patch.object(
+                m._PendingLegacyCompletionPlan, "check_progress", check_actual_placement):
+            with self.assertRaises(m.LifecycleError) as caught:
+                m.close_item(self.root, self.slug, self.closure, self.instant,
+                    legacy_evidence_data=evidence, apply=True)
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(fired, [True])
+        self.assertTrue(received)
+        self.assertEqual(self.canonical_images(), before)
+        self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+
+    def test_shared_relocation_progress_failures_use_real_outer_compensation(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        before = self.canonical_images()
+        # Each field is an actual distinct receiving prefix, all exercised at
+        # the same real directory advancement rather than an epoch/kind matrix.
+        fields = ("native_progress", "intent", "durable", "durable_image", "original_bindings")
+        for field in fields:
+            for boundary in ("before", "after"):
+                with self.subTest(field=field, boundary=boundary):
+                    primary = m.LifecycleError("WI-TEST-PROGRESS", f"actual {field} {boundary} receiving fault")
+                    fired = []
+                    class ReceivingFault:
+                        def __get__(descriptor, plan, owner):
+                            if plan is None:
+                                return descriptor
+                            if field not in plan.__dict__:
+                                raise AttributeError(field)
+                            return plan.__dict__[field]
+                        def __set__(descriptor, plan, value):
+                            movement = plan.transaction._active_relocation
+                            selected = movement is not None and movement.directory and movement.handle is not None and not fired
+                            if selected and boundary == "before":
+                                fired.append(True)
+                                raise primary
+                            plan.__dict__[field] = value
+                            if selected and boundary == "after":
+                                fired.append(True)
+                                raise primary
+                    with patch.object(m._PendingLegacyCompletionPlan, field, ReceivingFault(), create=True):
+                        with self.assertRaisesRegex(m.LifecycleError, "actual .* receiving fault"):
+                            m.close_item(self.root, self.slug, self.closure, self.instant,
+                                legacy_evidence_data=evidence, apply=True)
+                    self.assertEqual(fired, [True])
+                    self.assertEqual(self.canonical_images(), before)
+                    self.assertTrue(self.source.is_file())
+                    self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+        derive = m._PendingLegacyCompletionPlan._derive_relocation_progress
+        primary = m.LifecycleError("WI-TEST-PROGRESS", "actual progress derivation fault")
+        fired = []
+        def fail_derivation(plan, candidate, movement, binding, field, **kwargs):
+            if movement.directory and not fired:
+                self.assertFalse(movement.source.exists())
+                self.assertTrue(movement.destination.exists())
+                fired.append(True)
+                raise primary
+            return derive(plan, candidate, movement, binding, field, **kwargs)
+        with patch.object(m._PendingLegacyCompletionPlan, "_derive_relocation_progress", fail_derivation):
+            with self.assertRaisesRegex(m.LifecycleError, "actual progress derivation fault"):
+                m.close_item(self.root, self.slug, self.closure, self.instant,
+                    legacy_evidence_data=evidence, apply=True)
+        self.assertEqual(fired, [True])
+        self.assertEqual(self.canonical_images(), before)
+        self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+
+    def test_shared_relocation_actual_publication_prefixes_keep_joint_receiving(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        before = self.canonical_images()
+        prepared_fields = ("forward_evidence", "forward_observations", "forward_observation_values")
+        live_fields = ("_binding_evidence", "_retained_observations")
+        for field in (*prepared_fields, *live_fields):
+            for boundary in ("before", "after"):
+                with self.subTest(field=field, boundary=boundary):
+                    primary = m.LifecycleError("WI-TEST-PREFIX", f"actual {field} {boundary} publication fault")
+                    fired, placed = [], []
+                    class PreparedPrefix:
+                        def __init__(descriptor, name):
+                            descriptor.name = name
+                        def __get__(descriptor, effect, owner):
+                            return descriptor if effect is None else effect.__dict__.get(descriptor.name)
+                        def __set__(descriptor, effect, value):
+                            owner = effect.owner
+                            plan = getattr(owner, "_operation_owner", None)
+                            movement = effect.transaction._active_relocation
+                            selected = (isinstance(plan, m._PendingLegacyCompletionPlan) and movement is not None
+                                and movement.directory and effect.destination == plan.intent_path)
+                            reject = selected and descriptor.name == field and not fired
+                            if reject and boundary == "before":
+                                fired.append(True); raise primary
+                            effect.__dict__[descriptor.name] = value
+                            if selected and descriptor.name == "forward_observation_values":
+                                placed[:] = [effect]
+                            if reject and boundary == "after":
+                                fired.append(True); raise primary
+                    setter = m.LifecycleTransaction.__setattr__
+                    def live_prefix(transaction, name, value):
+                        reject = name == field and placed and not fired
+                        if reject and boundary == "before":
+                            fired.append(True); raise primary
+                        setter(transaction, name, value)
+                        if reject and boundary == "after":
+                            fired.append(True); raise primary
+                    with contextlib.ExitStack() as stack:
+                        for name in prepared_fields:
+                            stack.enter_context(patch.object(m._PreparedLifecycleEffect, name, PreparedPrefix(name)))
+                        stack.enter_context(patch.object(m.LifecycleTransaction, "__setattr__", live_prefix))
+                        with self.assertRaisesRegex(m.LifecycleError, "actual .* publication fault"):
+                            m.close_item(self.root, self.slug, self.closure, self.instant,
+                                legacy_evidence_data=evidence, apply=True)
+                    self.assertEqual(fired, [True])
+                    self.assertEqual(self.canonical_images(), before)
+                    self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+
+    def test_shared_relocation_real_save_fsync_retain_and_unavailable_recovery(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        before = self.canonical_images()
+        save = m._legacy_save_intent
+        fsync = m._transition_fsync_directory
+        retain = m._PendingLegacyCompletionPlan.retain_progress
+        for boundary in ("placed", "fsync", "retain"):
+            with self.subTest(boundary=boundary):
+                primary = m.LifecycleError("WI-TEST-PROGRESS", f"actual {boundary} progress failure")
+                fired = []
+                def selected():
+                    transaction = m._CURRENT_LIFECYCLE_TRANSACTION.get()
+                    movement = transaction._active_relocation if transaction is not None else None
+                    return movement is not None and movement.directory and movement.progress_before is not None and not fired
+                def after_save(path, intent, **kwargs):
+                    result = save(path, intent, **kwargs)
+                    if boundary == "placed" and selected():
+                        fired.append(True); raise primary
+                    return result
+                def fail_fsync(path):
+                    if boundary == "fsync" and selected():
+                        fired.append(True); raise primary
+                    return fsync(path)
+                def fail_retain(plan, intent):
+                    if boundary == "retain" and selected():
+                        fired.append(True); raise primary
+                    return retain(plan, intent)
+                with patch.object(m, "_legacy_save_intent", after_save), patch.object(m, "_transition_fsync_directory", fail_fsync), patch.object(m._PendingLegacyCompletionPlan, "retain_progress", fail_retain):
+                    with self.assertRaisesRegex(m.LifecycleError, "actual .* progress failure"):
+                        m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+                self.assertEqual(fired, [True])
+                self.assertEqual(self.canonical_images(), before)
+                self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+        primary = m.LifecycleError("WI-TEST-PROGRESS", "actual placed progress with unavailable restoring writer")
+        source_identity = m._lifecycle_file_identity(self.source.lstat())
+        source_bytes = self.source.read_bytes()
+        bundles = []
+        finalize = m.LifecycleOutcomeComposer.finalize
+        def capture_outcome(composer):
+            bundle = finalize(composer)
+            bundles.append(bundle)
+            return bundle
+        failed = []
+        def unavailable_restore(path, intent, **kwargs):
+            transaction = m._CURRENT_LIFECYCLE_TRANSACTION.get()
+            movement = transaction._active_relocation if transaction is not None else None
+            if movement is not None and movement.directory and movement.progress_before is not None:
+                if failed:
+                    raise m.LifecycleError("WI-TEST-RESTORE", "restoring writer unavailable")
+                result = save(path, intent, **kwargs)
+                failed.append(True)
+                raise primary
+            return save(path, intent, **kwargs)
+        with patch.object(m, "_legacy_save_intent", unavailable_restore), patch.object(m.LifecycleOutcomeComposer, "finalize", capture_outcome):
+            with self.assertRaisesRegex(m.LifecycleError, "actual placed progress") as caught:
+                m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+        self.assertIs(caught.exception, primary)
+        self.assertIs(bundles[-1].primary, primary)
+        self.assertEqual(bundles[-1].rollback, "incomplete")
+        self.assertEqual(failed, [True])
+        self.assertTrue(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+        self.assertTrue(self.source.is_file())
+        intent_path = m._transition_intent_path(self.root, "flat-terminal-001")
+        pending_bytes = intent_path.read_bytes()
+        pending = json.loads(pending_bytes)
+        stage = self.root / ".scratch/work-items/legacy-flat-terminal" / pending["operationId"] / "archive"
+        archive = self.root / pending["archivePath"]
+        self.assertTrue(stage.is_dir())
+        stage_identity = m._lifecycle_file_identity(stage.lstat())
+        self.assertFalse(archive.exists())
+        self.assertTrue((stage / m.LEGACY_COMPLETION_METADATA).is_file())
+        self.assertFalse((stage / m.LEGACY_COMPLETION_RECEIPT).exists())
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "open")
+        self.assertEqual(intent_path.read_bytes(), pending_bytes)
+        self.assertEqual(self.source.read_bytes(), source_bytes)
+        self.assertEqual(m._lifecycle_file_identity(self.source.lstat()), source_identity)
+        self.assertEqual(m._lifecycle_file_identity(stage.lstat()), stage_identity)
+        self.assertFalse(archive.exists())
+
+    def test_shared_relocation_failed_close_keeps_outer_rollback_incomplete(self):
+        from unittest.mock import patch
+        if m.os.name != "nt":
+            self.skipTest("held-source close receiving is the selected Windows contract")
+        evidence, _arguments = self.legacy_request()
+        derive = m._PendingLegacyCompletionPlan._derive_relocation_progress
+        close = m.LifecycleWriteTarget._close
+        rollback = m.LifecycleOutcomeComposer.set_rollback
+        primary = m.LifecycleError("WI-TEST-PROGRESS", "actual progress primary before failed close")
+        failed = []
+        retained = []
+        states = []
+        def fail_derivation(plan, candidate, movement, binding, field, **kwargs):
+            if movement.directory and not failed:
+                failed.append(plan.transaction)
+                raise primary
+            return derive(plan, candidate, movement, binding, field, **kwargs)
+        def fail_close(owner, handle):
+            transaction = owner._operation_transaction()
+            movement = transaction._active_relocation if transaction is not None else None
+            if (movement is not None and owner is movement.source_owner
+                    and handle == movement.handle and not retained):
+                retained.append((owner, handle, owner._identity(handle)))
+                raise OSError("actual held native close refusal")
+            return close(owner, handle)
+        def receive_rollback(composer, state):
+            states.append(state)
+            return rollback(composer, state)
+        try:
+            with patch.object(m._PendingLegacyCompletionPlan, "_derive_relocation_progress", fail_derivation), patch.object(m.LifecycleWriteTarget, "_close", fail_close), patch.object(m.LifecycleOutcomeComposer, "set_rollback", receive_rollback):
+                with self.assertRaisesRegex(m.LifecycleError, "actual progress primary before failed close"):
+                    m.close_item(self.root, self.slug, self.closure, self.instant,
+                        legacy_evidence_data=evidence, apply=True)
+            self.assertEqual(len(failed), 1)
+            self.assertEqual(len(retained), 1)
+            self.assertTrue(failed[0]._unsettled_relocations)
+            self.assertEqual(retained[0][0]._identity(retained[0][1]), retained[0][2])
+            self.assertIn("incomplete", states)
+            self.assertNotIn("completed", states)
+            self.assertTrue(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+            self.assertTrue(self.source.is_file())
+        finally:
+            for owner, handle, _identity in retained:
+                close(owner, handle)
 
     def test_real_bug_incoming_documents_and_distinct_same_basename_targets(self):
         spec = importlib.util.spec_from_file_location("flat_terminal_bug_producer", ROOT / "tests/test_mutate_work_item.py")
