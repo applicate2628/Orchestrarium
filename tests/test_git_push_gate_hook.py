@@ -56,7 +56,7 @@ from typing import NamedTuple
 from unittest import mock
 from urllib.parse import quote
 
-from git_push_gate_target import GateTarget, target_for
+from git_push_gate_target import GateTarget, derive_pr_grant, target_for
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CANONICAL_HOOK = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-git-push-gate.py"
@@ -4917,8 +4917,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
         command: str,
         *,
         tool_name: str | None = None,
-        history_byte_cap: int | None = None,
-        history_record_cap: int | None = None,
         history_line_byte_cap: int | None = None,
         omit_tool_workdir: bool = False,
         tool_workdir: str | None = None,
@@ -4973,8 +4971,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                  mock.patch.object(module, "_run_process", side_effect=self._oracle(module, observed, **oracle_changes)), \
                  mock.patch.object(module, "_resolve_generic_scan_binding", side_effect=generic_binding), \
                  mock.patch.object(module, "_run_authoritative_scan", side_effect=authoritative), \
-                 mock.patch.object(module, "TRANSCRIPT_HISTORY_BYTE_CAP", module.TRANSCRIPT_HISTORY_BYTE_CAP if history_byte_cap is None else history_byte_cap), \
-                 mock.patch.object(module, "TRANSCRIPT_HISTORY_RECORD_CAP", module.TRANSCRIPT_HISTORY_RECORD_CAP if history_record_cap is None else history_record_cap), \
                  mock.patch.object(module, "TRANSCRIPT_HISTORY_LINE_BYTE_CAP", module.TRANSCRIPT_HISTORY_LINE_BYTE_CAP if history_line_byte_cap is None else history_line_byte_cap), \
                  mock.patch.object(module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE", dialect_override), \
                  contextlib.redirect_stdout(stdout):
@@ -5090,13 +5086,13 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
         for script in (CANONICAL_HOOK, *HOOKS):
             module = _load_gate_module(script, f"historical_short_{script.parent.parent.name}")
             with self.subTest(script=script, state="retained"):
-                state, intent = module._derive_pr_grant(
+                state, intent = derive_pr_grant(module,
                     [user(self.GRANT), user(short)], str(REPO_ROOT.resolve())
                 )
                 self.assertEqual(state, "simple")
                 self.assertEqual(intent.prior_scoped_grant.url, expected)
             with self.subTest(script=script, state="revoke-clears"):
-                state, intent = module._derive_pr_grant(
+                state, intent = derive_pr_grant(module,
                     [user(self.GRANT), user("[revoke-pr-publication:v1]"), user(short)],
                     str(REPO_ROOT.resolve()),
                 )
@@ -5535,7 +5531,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 script, f"pr_grant_order_{script.parent.parent.name}"
             )
             with self.subTest(script=script, state="later-valid"):
-                state, grant = module._derive_pr_grant(
+                state, grant = derive_pr_grant(module,
                     [user(old_malformed), user(self.GRANT)],
                     str(REPO_ROOT.resolve()),
                 )
@@ -5558,14 +5554,14 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             ):
                 with self.subTest(script=script, state=label):
                     self.assertEqual(
-                        module._derive_pr_grant(
+                        derive_pr_grant(module,
                             [user(self.GRANT), user(latest)],
                             str(REPO_ROOT.resolve()),
                         ),
                         ("malformed", None),
                     )
             with self.subTest(script=script, state="quoted-examples"):
-                state, grant = module._derive_pr_grant(
+                state, grant = derive_pr_grant(module,
                     [user(self.GRANT), *quoted], str(REPO_ROOT.resolve())
                 )
                 self.assertEqual((state, grant), (
@@ -5610,7 +5606,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
         ).read_text(encoding="utf-8")
         required = (
             "original genuine-user JSONL records",
-            "byte or record cap",
             "complete stable transcript",
             "bounded memory",
             "compaction summaries never reconstruct authorization",
@@ -5732,12 +5727,11 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 script,
                 entries,
                 self._literal_command(script),
-                history_byte_cap=512,
             )
             self.assertFalse(denies_text(stdout), stdout)
             self.assertTrue(any(argv[1:3] == ["pr", "view"] for argv in observed))
 
-    def test_history_limit_streams_grant_past_real_byte_and_record_caps(self) -> None:
+    def test_complete_history_streams_grant_past_large_byte_and_record_counts(self) -> None:
         summary = user(f"compacted summary quotes {self.GRANT}")
         summary["isCompactSummary"] = True
         entries = [user(self.GRANT)]
@@ -5751,7 +5745,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
         self.assertFalse(denies_text(stdout), stdout)
         self.assertTrue(any(argv[1:3] == ["pr", "view"] for argv in observed))
 
-    def test_history_limit_reducer_preserves_latest_grant_revoke_state(self) -> None:
+    def test_complete_history_reducer_preserves_latest_grant_revoke_state(self) -> None:
         summary = user(f"summary quotes {self.GRANT}")
         summary["isCompactSummary"] = True
         cases = (
@@ -5776,7 +5770,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             (
                 [assistant("a"), summary, assistant(self.GRANT),
                  tool_result(self.GRANT, tool_id="foreign"), user("continue")],
-                "PRG-TRANSCRIPT-HISTORY-LIMIT",
+                "generic-denial",
                 False,
             ),
         )
@@ -5787,7 +5781,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         script,
                         entries,
                         self._literal_command(script),
-                        history_record_cap=3,
                     )
                     if allowed:
                         self.assertFalse(denies_text(stdout), stdout)
@@ -5845,7 +5838,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     script,
                     [neutral, user(self.GRANT), user("push now")],
                     self._literal_command(script),
-                    history_byte_cap=1024,
                 )
                 self.assertFalse(denies_text(stdout), stdout)
                 self.assertTrue(
@@ -5862,7 +5854,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         user("push now"),
                     ],
                     self._literal_command(script),
-                    history_byte_cap=1024,
                 )
                 self.assertTrue(denies_text(stdout), stdout)
                 self.assertNotIn("PRG-TRANSCRIPT-HISTORY-LIMIT", stdout)
@@ -5874,9 +5865,8 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     script,
                     [fake_markers, user("continue")],
                     self._literal_command(script),
-                    history_byte_cap=1024,
                 )
-                self.assertIn("PRG-TRANSCRIPT-HISTORY-LIMIT", stdout)
+                self.assertTrue(denies_text(stdout), stdout)
                 self.assertNotIn("PRG-AUTH-MALFORMED", stdout)
                 self.assertEqual(observed, [])
 
@@ -5889,7 +5879,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         user("push now"),
                     ],
                     self._literal_command(script),
-                    history_byte_cap=1024,
                 )
                 self.assertIn("PRG-AUTH-MALFORMED", stdout)
                 self.assertEqual(observed, [])
@@ -5906,17 +5895,16 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     script,
                     [oversized, user(self.GRANT), user("push now")],
                     self._literal_command(script),
-                    history_byte_cap=1024,
                 )
                 self.assertIn("PRG-TRANSCRIPT-UNAVAILABLE", stdout)
-                self.assertIn("history=limit; recovery=limit", stdout)
+                self.assertIn("history=limit; recovery=not-run", stdout)
                 self.assertEqual(observed, [])
 
     def test_oversized_history_revocation_malformed_and_absent_deny(self) -> None:
         cases = (
             ([assistant("x" * 2048), user(self.GRANT), user("[revoke-pr-publication:v1]")], "generic-denial"),
             ([assistant("x" * 2048), user(self.GRANT), user("[approve-pr-publication:v1 broken]")], "PRG-AUTH-MALFORMED"),
-            ([assistant("x" * 2048), user("continue")], "PRG-TRANSCRIPT-HISTORY-LIMIT"),
+            ([assistant("x" * 2048), user("continue")], "generic-denial"),
         )
         for script in (CANONICAL_HOOK, *HOOKS):
             for entries, failure_id in cases:
@@ -5925,7 +5913,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         script,
                         entries,
                         self._literal_command(script),
-                        history_byte_cap=1024,
                     )
                     if failure_id == "generic-denial":
                         self.assertTrue(denies_text(stdout), stdout)
@@ -5945,12 +5932,11 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     script,
                     entries,
                     self._literal_command(script),
-                    history_byte_cap=1024,
                 )
-                self.assertIn("PRG-TRANSCRIPT-HISTORY-LIMIT", stdout)
+                self.assertTrue(denies_text(stdout), stdout)
                 self.assertEqual(observed, [])
 
-    def test_readable_history_limit_is_distinct_from_unreadable_stream(self) -> None:
+    def test_required_history_unreadable_stream_stays_non_authorizing(self) -> None:
         module = _load_gate_module(CANONICAL_HOOK, "pr_grant_unreadable_distinction")
         with synthetic_transcript([user("continue")]) as transcript_path:
             preflight = module._a3_preflight.build_preflight(
@@ -5965,8 +5951,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 }
             )
             with mock.patch.object(
-                module, "read_transcript_history", return_value=([], "limit")
-            ), mock.patch.object(
                 module,
                 "_stream_stable_pr_grant",
                 return_value=("absent", None, "unreadable"),
@@ -6277,6 +6261,18 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 "unreadable",
                 (("absent", None, "unreadable"),),
                 ("absent", None, "unreadable"),
+                1,
+            ),
+            (
+                "invalid",
+                (("absent", None, "invalid"),),
+                ("absent", None, "invalid"),
+                1,
+            ),
+            (
+                "record-limit",
+                (("absent", None, "limit"),),
+                ("absent", None, "limit"),
                 1,
             ),
         )
@@ -6627,8 +6623,7 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
         script: Path,
         envelope: dict,
         *,
-        history_byte_cap: int | None = None,
-        recovery_byte_cap: int | None = None,
+        line_byte_cap: int | None = None,
     ) -> str:
         module = _load_gate_module(
             script,
@@ -6641,13 +6636,9 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
                 "read_stdin_utf8",
                 return_value=json.dumps(envelope),
             ))
-            if history_byte_cap is not None:
+            if line_byte_cap is not None:
                 stack.enter_context(mock.patch.object(
-                    module, "TRANSCRIPT_HISTORY_BYTE_CAP", history_byte_cap
-                ))
-            if recovery_byte_cap is not None:
-                stack.enter_context(mock.patch.object(
-                    module, "TRANSCRIPT_RECOVERY_BYTE_CAP", recovery_byte_cap
+                    module, "TRANSCRIPT_HISTORY_LINE_BYTE_CAP", line_byte_cap
                 ))
             stack.enter_context(contextlib.redirect_stdout(stdout))
             self.assertEqual(module.main(), 0)
@@ -6685,6 +6676,24 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
             module._a3_preflight.validate_transcript_diagnostic(diagnostic),
             diagnostic,
         )
+
+    def test_primary_stream_status_is_reported_as_history_without_fallback(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "primary_stream_diagnostics")
+        with synthetic_transcript([user("continue")]) as path:
+            envelope = self._base_envelope()
+            envelope["transcript_path"] = str(path)
+            preflight = module._a3_preflight.build_preflight(envelope)
+            for status in ("unreadable", "identity-drift", "limit", "invalid"):
+                with self.subTest(status=status), mock.patch.object(
+                    module, "_recover_stable_pr_grant",
+                    return_value=("absent", None, status),
+                ):
+                    with self.assertRaises(module.PrRouteDenied) as raised:
+                        module.evaluate_heavy(preflight)
+                self.assertEqual(raised.exception.failure_id, "PRG-TRANSCRIPT-UNAVAILABLE")
+                diagnostic = raised.exception.transcript_diagnostic
+                self.assertEqual((diagnostic.history, diagnostic.recovery), (status, "not-run"))
+                self.assertIn(f"history={status}; recovery=not-run", module._format_transcript_diagnostic(diagnostic))
 
     def test_missing_null_and_non_string_envelope_categories_are_distinct(self) -> None:
         canary = "PRIVATE_TRANSCRIPT_CANARY_7719"
@@ -6744,17 +6753,16 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
                     envelope = self._base_envelope()
                     envelope["transcript_path"] = str(path)
                     output = self._run_envelope(
-                        script, envelope, history_byte_cap=1
+                        script, envelope, line_byte_cap=1
                     )
-                self.assertIn("PRG-TRANSCRIPT-HISTORY-LIMIT", output)
-                self.assertNotIn("PR-scoped publication denied", output)
-                self.assertIn(
-                    "Transcript diagnostics: envelope=string; current-turn=found; "
-                    "history=limit; recovery=found.",
+                self.assert_transcript_denial(
                     output,
+                    "Transcript diagnostics: envelope=string; current-turn=found; "
+                    "history=limit; recovery=not-run.",
+                    remediation="Cannot verify historical publication permission within bounded transcript history",
                 )
 
-    def test_history_limit_diagnostic_does_not_claim_current_transcript_is_unreadable(self) -> None:
+    def test_record_limit_diagnostic_preserves_readable_current_turn(self) -> None:
         for script in (CANONICAL_HOOK, *HOOKS):
             with self.subTest(script=script):
                 with synthetic_transcript([user("continue")]) as path:
@@ -6763,8 +6771,7 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
                     output = self._run_envelope(
                         script,
                         envelope,
-                        history_byte_cap=1,
-                        recovery_byte_cap=1,
+                        line_byte_cap=1,
                     )
                 self.assert_transcript_denial(
                     output,
@@ -6778,12 +6785,12 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
                 )
                 self.assertIn(
                     "Transcript diagnostics: envelope=string; current-turn=found; "
-                    "history=limit; recovery=limit.",
+                    "history=limit; recovery=not-run.",
                     output,
                 )
                 self.assertNotIn("Retry from a readable current session transcript", output)
 
-    def test_expired_generic_approval_with_limited_history_requests_fresh_latest_message(self) -> None:
+    def test_expired_generic_approval_with_record_limit_requests_fresh_latest_message(self) -> None:
         with synthetic_transcript([
             user("push [approve-publication]"),
             user("continue"),
@@ -6793,13 +6800,12 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
             output = self._run_envelope(
                 CANONICAL_HOOK,
                 envelope,
-                history_byte_cap=1,
-                recovery_byte_cap=1,
+                line_byte_cap=1,
             )
         self.assertIn('"permissionDecision": "deny"', output)
         self.assertIn("PRG-TRANSCRIPT-UNAVAILABLE", output)
         self.assertIn(
-            "current-turn=found; history=limit; recovery=limit", output
+            "current-turn=found; history=limit; recovery=not-run", output
         )
         self.assertIn("fresh `[approve-publication]`", output)
         self.assertIn("latest genuine user message", output)
@@ -9989,51 +9995,277 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                         self.assertNotIn(sentinel, combined)
 
 
-class TestBoundedPrGrantRecovery(unittest.TestCase):
-    def test_recovery_total_limits_include_blank_lines_and_allow_exact_boundary(self):
-        module = _load_gate_module(CANONICAL_HOOK, "bounded_pr_grant_recovery")
-        cases = (
-            (b"{}\n{}\n", 5, 10, "limit"),
-            (b"{}\n{}\n", 100, 1, "limit"),
-            (b"\n\n\n", 100, 2, "limit"),
-            (b"{}\n{}\n", 6, 2, "found"),
-        )
-        for payload, byte_cap, record_cap, expected in cases:
-            with self.subTest(payload=payload, byte_cap=byte_cap, record_cap=record_cap):
-                with synthetic_raw_transcript(payload) as transcript_path, \
-                     mock.patch.object(module, "TRANSCRIPT_RECOVERY_BYTE_CAP", byte_cap, create=True), \
-                     mock.patch.object(module, "TRANSCRIPT_RECOVERY_RECORD_CAP", record_cap, create=True), \
-                     mock.patch.object(module, "_canonicalize_numeric_pr_grant") as canonicalize:
-                    result = module._recover_stable_pr_grant(
-                        str(transcript_path), str(REPO_ROOT.resolve())
-                    )
-                self.assertEqual(result, ("absent", None, expected))
-                canonicalize.assert_not_called()
+class TestFinitePrGrantRecovery(unittest.TestCase):
+    GRANT = '[approve-pr-publication:v1 pr=https://github.com/acme/project/pull/7]'
+    REVOKE = '[revoke-pr-publication:v1]'
 
-    def test_recovery_byte_limit_covers_growth_after_initial_size_check(self):
-        module = _load_gate_module(CANONICAL_HOOK, "growing_pr_grant_recovery")
-        real_fstat = module.os.fstat
-        with synthetic_raw_transcript(b"{}\n") as transcript_path:
-            snapshots = []
+    @staticmethod
+    def raw(entry):
+        return (json.dumps(entry, ensure_ascii=False) + '\n').encode('utf-8')
 
-            def append_after_snapshot(descriptor):
-                before = real_fstat(descriptor)
-                snapshots.append(before)
-                if len(snapshots) == 1:
-                    with Path(transcript_path).open("ab") as writer:
-                        writer.write(b"{}\n")
-                return before
 
-            with mock.patch.object(module, "TRANSCRIPT_RECOVERY_BYTE_CAP", 5), \
-                 mock.patch.object(module.os, "fstat", append_after_snapshot), \
-                 mock.patch.object(module, "_canonicalize_numeric_pr_grant") as canonicalize:
-                result = module._recover_stable_pr_grant(
-                    str(transcript_path), str(REPO_ROOT.resolve())
-                )
-        self.assertEqual(result, ("absent", None, "limit"))
-        self.assertEqual(len(snapshots), 1)
-        canonicalize.assert_not_called()
+    def setUp(self):
+        self._owned_root = tempfile.TemporaryDirectory(prefix='finite-pr-history-')
+        self.addCleanup(self._owned_root.cleanup)
+        self.root = Path(self._owned_root.name)
+        self.m = _load_gate_module(CANONICAL_HOOK, 'finite_history_' + self._testMethodName)
+        self.p = self.root / 'control.jsonl'
+        self.opened = []
 
+    def tearDown(self):
+        if self.p.exists():
+            self.p.unlink()
+        for stream in self.opened:
+            self.assertTrue(stream.closed)
+        self._owned_root.cleanup()
+
+    def result(self, payload, recover=False):
+        self.p.write_bytes(payload)
+        fn = self.m._recover_stable_pr_grant if recover else self.m._stream_stable_pr_grant
+        return fn(str(self.p), str(self.root))
+
+    def instrument(self, *, initial=None, line=None, read=None, seek=None):
+        real_open = Path.open
+        real_fstat = os.fstat
+        owner = self
+
+        class Recording:
+
+            def __init__(self, f):
+                self.f = f
+                self.phase = 1
+                self.events = []
+                self.initial = True
+                owner.opened.append(self)
+
+            @property
+            def closed(self):
+                return self.f.closed
+
+            def __enter__(self):
+                self.f.__enter__()
+                return self
+
+            def __exit__(self, *args):
+                return self.f.__exit__(*args)
+
+            def fileno(self):
+                return self.f.fileno()
+
+            def readline(self, n):
+                value = line(self, n) if line else self.f.readline(n)
+                self.events.append(('line', self.phase, n, len(value)))
+                return value
+
+            def read(self, n):
+                value = read(self, n) if read else self.f.read(n)
+                self.events.append(('read', self.phase, n, len(value)))
+                return value
+
+            def seek(self, *args):
+                if seek:
+                    seek(self)
+                self.phase = 2
+                return self.f.seek(*args)
+
+        def op(p, mode='r', *a, **kw):
+            f = real_open(p, mode, *a, **kw)
+            return Recording(f) if Path(p) == owner.p and mode == 'rb' else f
+
+        def fs(fd):
+            stat = real_fstat(fd)
+            for stream in owner.opened:
+                if not stream.closed and stream.f.fileno() == fd and stream.initial:
+                    stream.initial = False
+                    if initial:
+                        initial(stream, stat)
+                    break
+            return stat
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(Path, 'open', op))
+        stack.enter_context(mock.patch.object(os, 'fstat', fs))
+        return stack
+
+    def test_stable_frontier_requests_counts_sentinels_and_digest(self):
+        data = b'\n' + self.raw(assistant('neutral')) + self.raw(user('[approve-pr-publication]')).rstrip(b'\n')
+        with self.instrument():
+            r = self.result(data)
+        self.assertEqual((r[0], r[2]), ('simple', 'found'))
+        self.assertEqual(r[1].record, 2)
+        self.assertEqual(r[1].sha256, hashlib.sha256(self.raw(user('[approve-pr-publication]')).rstrip(b'\n')).hexdigest())
+        events = self.opened[0].events
+        for phase in (1, 2):
+            selected = [e for e in events if e[1] == phase]
+            self.assertEqual(selected[-1], ('read', phase, 1, 0))
+            remaining = len(data)
+            for kind, _, requested, returned in selected[:-1]:
+                self.assertGreater(requested, 0)
+                self.assertLessEqual(requested, remaining)
+                self.assertLessEqual(requested, self.m.TRANSCRIPT_HISTORY_LINE_BYTE_CAP + 1 if kind == 'line' else 1024 * 1024)
+                remaining -= returned
+            self.assertEqual(remaining, 0)
+        self.assertEqual(sum((e[3] for e in events)), 2 * len(data))
+
+    def test_empty_and_valid_final_record_without_newline(self):
+        for payload, state in [(b'', 'absent'), (b'\n', 'absent'), (b'{}', 'absent'), (self.raw(user(self.GRANT)).rstrip(b'\n'), 'active')]:
+            with self.subTest(payload=payload):
+                self.assertEqual((lambda r: (r[0], r[2]))(self.result(payload)), (state, 'found'))
+
+    def test_exact_record_guard_and_overflow(self):
+        with mock.patch.object(self.m, 'TRANSCRIPT_HISTORY_LINE_BYTE_CAP', 3):
+            self.assertEqual(self.result(b'{}\n'), ('absent', None, 'found'))
+            self.assertEqual(self.result(b'{} \n'), ('absent', None, 'limit'))
+
+    def test_guard_rejects_before_decode_with_bounded_request(self):
+        with mock.patch.object(self.m, 'TRANSCRIPT_HISTORY_LINE_BYTE_CAP', 3), self.instrument(), mock.patch.object(self.m.json, 'loads', side_effect=AssertionError('decode after record overflow')):
+            self.assertEqual(self.result(b'x' * 30), ('absent', None, 'limit'))
+        self.assertEqual(self.opened[0].events, [('line', 1, 4, 4)])
+
+    def test_invalid_utf8_json_nonobject_partial_cannot_grant(self):
+        for payload in [b'\xff\n', b'not json\n', b'[]\n', b'null\n', self.raw(user(self.GRANT)) + b'{', b' ']:
+            with self.subTest(payload=payload):
+                expected = 'found' if payload == b' ' else 'invalid'
+                self.assertEqual(self.result(payload), ('absent', None, expected))
+
+    def test_growth_stops_at_initial_frontier_and_retry_reduces_fresh_revocation(self):
+        sizes = []
+
+        def initial(s, meta):
+            sizes.append(meta.st_size)
+            if len(sizes) == 1:
+                with self.p.open('ab') as f:
+                    f.write(self.raw(user(self.REVOKE)))
+        with self.instrument(initial=initial):
+            r = self.result(self.raw(user(self.GRANT)), True)
+        self.assertEqual(r, ('revoked', None, 'found'))
+        self.assertEqual(len(self.opened), 2)
+        self.assertGreater(sizes[1], sizes[0])
+        first = self.opened[0].events
+        self.assertEqual(first[-1], ('read', 1, 1, 1))
+        self.assertEqual(sum((e[3] for e in first)), sizes[0] + 1)
+
+    def test_repeated_growth_allows_only_one_retry_and_no_finish(self):
+
+        def initial(s, meta):
+            with self.p.open('ab') as f:
+                f.write(b'\n')
+        with self.instrument(initial=initial), mock.patch.object(self.m._PrGrantReducer, 'finish', side_effect=AssertionError('unstable finish')):
+            self.assertEqual(self.result(self.raw(user(self.GRANT)), True), ('absent', None, 'identity-drift'))
+        self.assertEqual(len(self.opened), 2)
+        for stream in self.opened:
+            self.assertEqual(stream.events[-1], ('read', 1, 1, 1))
+
+    def test_early_eof_each_pass_is_drift_without_finish(self):
+        for phase in (1, 2):
+            self.opened = []
+            with self.subTest(phase=phase), self.instrument(line=(lambda s, n: b'') if phase == 1 else None, read=(lambda s, n: b'' if s.phase == 2 else s.f.read(n)) if phase == 2 else None), mock.patch.object(self.m._PrGrantReducer, 'finish', side_effect=AssertionError('short finish')):
+                self.assertEqual(self.result(self.raw(user(self.GRANT))), ('absent', None, 'identity-drift'))
+
+    def test_verify_growth_sentinel_is_bounded(self):
+
+        def seek(s):
+            with self.p.open('ab') as f:
+                f.write(b'\n' * 100)
+        with self.instrument(seek=seek):
+            self.assertEqual(self.result(self.raw(user(self.GRANT))), ('absent', None, 'identity-drift'))
+        self.assertEqual(self.opened[0].events[-1], ('read', 2, 1, 1))
+
+    def test_same_size_rewrite_with_equal_metadata_fails_hash(self):
+        data = self.raw(user(self.GRANT))
+        replacement = data.replace(b'/7', b'/8')
+        self.assertEqual(len(data), len(replacement))
+        self.p.write_bytes(data)
+        meta = self.p.stat()
+
+        def seek(s):
+            with self.p.open('r+b') as f:
+                f.write(replacement)
+        with self.instrument(seek=seek), mock.patch.object(self.m.os, 'fstat', return_value=meta), mock.patch.object(self.m.Path, 'stat', return_value=meta):
+            self.assertEqual(self.m._stream_stable_pr_grant(str(self.p), str(self.root)), ('absent', None, 'identity-drift'))
+
+    def test_descriptor_and_path_identity_changes(self):
+        self.p.write_bytes(self.raw(user(self.GRANT)))
+        original = self.p.stat()
+
+        def changed(**kw):
+            return SimpleNamespace(**{n: kw.get(n, getattr(original, n)) for n in ('st_dev', 'st_ino', 'st_mode', 'st_size', 'st_mtime_ns', 'st_ctime_ns')})
+        for surface in ('descriptor-before', 'descriptor-after', 'path-after'):
+            with self.subTest(surface=surface):
+                with contextlib.ExitStack() as stack:
+                    if surface == 'descriptor-before':
+                        stack.enter_context(mock.patch.object(self.m.os, 'fstat', return_value=changed(st_ino=original.st_ino + 1)))
+                    if surface == 'descriptor-after':
+                        stack.enter_context(mock.patch.object(self.m.os, 'fstat', side_effect=[original, changed(st_mtime_ns=original.st_mtime_ns + 1), original]))
+                    if surface == 'path-after':
+                        stack.enter_context(mock.patch.object(Path, 'stat', side_effect=[original, changed(st_ino=original.st_ino + 1)]))
+                    self.assertEqual(self.m._stream_stable_pr_grant(str(self.p), str(self.root)), ('absent', None, 'identity-drift'))
+
+    def test_nonregular_file_rejected_before_open(self):
+        self.p.write_bytes(b'{}')
+        observed = self.p.stat()
+        meta = SimpleNamespace(st_mode=0)
+        with mock.patch.object(Path, 'stat', return_value=meta), mock.patch.object(Path, 'open', side_effect=AssertionError('nonregular opened')):
+            self.assertEqual(self.m._stream_stable_pr_grant(str(self.p), str(self.root)), ('absent', None, 'unreadable'))
+
+    def test_read_io_error_and_finish_route_denial_remain_distinct(self):
+
+        def fail(s, n):
+            raise OSError('synthetic')
+        with self.instrument(line=fail):
+            self.assertEqual(self.result(b'{}\n'), ('absent', None, 'unreadable'))
+        with mock.patch.object(self.m._PrGrantReducer, 'finish', side_effect=self.m.PrRouteDenied('PRG-PR-UNAVAILABLE')):
+            with self.assertRaises(self.m.PrRouteDenied):
+                self.result(b'{}\n')
+
+    def test_chronology_grant_revoke_malformed_tool_and_genuine_answer(self):
+        cases = [([user(self.GRANT)], 'active'), ([user(self.GRANT), user(self.REVOKE)], 'revoked'), ([user(self.GRANT), user('[approve-pr-publication:v1 broken]')], 'malformed'), ([assistant(self.GRANT), tool_result(self.GRANT)], 'absent'), ([question_reply(self.GRANT)], 'active')]
+        for entries, state in cases:
+            payload = b''.join(map(self.raw, entries))
+            with self.subTest(state=state):
+                small = self.result(payload)
+                large = self.result(b'\n' * 200001 + payload)
+                self.assertEqual((small[0], small[2]), (state, 'found'))
+                self.assertEqual(large, small)
+
+    def test_public_heavy_composition_and_truthful_diagnostics(self):
+        m = self.m
+        p = m._a3_preflight
+        self.p.write_bytes(self.raw(user('continue')))
+        envelope = {'tool_name': 'Bash', 'cwd': str(self.root), 'tool_input': {'command': 'git push origin main', 'workdir': str(self.root)}, 'transcript_path': str(self.p)}
+        pre = p.build_preflight(envelope)
+        self.assertEqual(pre.reason_id, 'PFP-HEAVY')
+        with mock.patch.object(m, '_complete_generic_publication', side_effect=AssertionError('absent authority')):
+            self.assertFalse(m.evaluate_heavy(pre))
+        with mock.patch.object(m, '_recover_stable_pr_grant', return_value=('absent', None, 'unreadable')):
+            with self.assertRaises(m.PrRouteDenied) as error:
+                m.evaluate_heavy(pre)
+        self.assertEqual(error.exception.failure_id, 'PRG-TRANSCRIPT-UNAVAILABLE')
+        self.assertEqual((error.exception.transcript_diagnostic.history, error.exception.transcript_diagnostic.recovery), ('unreadable', 'not-run'))
+        self.p.write_bytes(self.raw(user('push [approve-publication]')))
+        fresh = p.build_preflight(envelope)
+        self.assertEqual(fresh.reason_id, 'PFP-CONSENT-GENERIC')
+        with mock.patch.object(m, '_recover_stable_pr_grant', side_effect=AssertionError('irrelevant history')), mock.patch.object(m, '_complete_generic_publication', return_value=True) as complete:
+            self.assertTrue(m.evaluate_heavy(fresh))
+            complete.assert_called_once_with(fresh)
+
+    def test_all_heavy_reducer_dispositions_route_to_existing_owners(self):
+        m = self.m
+        p = m._a3_preflight
+        self.p.write_bytes(self.raw(user('push the branch')))
+        pre = p.build_preflight({'tool_name': 'Bash', 'cwd': str(self.root), 'tool_input': {'command': 'git push origin main', 'workdir': str(self.root)}, 'transcript_path': str(self.p)})
+        active = m.ActivePrGrant('https://github.com/acme/project/pull/7', 'acme', 'project', 7)
+        simple = m.SimplePrIntent(0, 'a' * 64, None)
+        for state, grant in [('active', active), ('simple', simple), ('revoked', None), ('malformed', None), ('absent', None)]:
+            with self.subTest(state=state), mock.patch.object(m, '_recover_stable_pr_grant', return_value=(state, grant, 'found')), mock.patch.object(m, '_evaluate_active_pr_route', return_value=True) as active_owner, mock.patch.object(m, '_evaluate_simple_pr_route', return_value=True) as simple_owner, mock.patch.object(m, '_revoke_simple_binding') as revoke, mock.patch.object(m, '_complete_generic_publication', return_value=True) as generic:
+                if state == 'malformed':
+                    with self.assertRaises(m.PrRouteDenied):
+                        m.evaluate_heavy(pre)
+                else:
+                    self.assertEqual(m.evaluate_heavy(pre), state != 'revoked')
+                self.assertEqual(active_owner.call_count, int(state == 'active'))
+                self.assertEqual(simple_owner.call_count, int(state == 'simple'))
+                self.assertEqual(revoke.call_count, int(state == 'revoked'))
+                self.assertEqual(generic.call_count, int(state == 'absent'))
 
 if __name__ == "__main__":
     unittest.main()

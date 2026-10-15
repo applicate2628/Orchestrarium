@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 from unittest import mock
 
-from git_push_gate_target import GateTarget, target_for
+from git_push_gate_target import GateTarget, derive_pr_grant, target_for
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -524,9 +524,9 @@ def test_r4_gate_target_is_consumed_by_both_complete_layout_suites() -> None:
         encoding="utf-8"
     )
     runner_source = Path(__file__).read_text(encoding="utf-8")
-    assert "from git_push_gate_target import GateTarget, target_for" in hook_source
+    assert "from git_push_gate_target import GateTarget, derive_pr_grant, target_for" in hook_source
     assert "TARGETS = tuple(" in hook_source
-    assert "from git_push_gate_target import GateTarget, target_for" in runner_source
+    assert "from git_push_gate_target import GateTarget, derive_pr_grant, target_for" in runner_source
     assert tuple(target.label for target in TARGETS) == ("canonical", "codex", "claude")
     hook_tree = ast.parse(hook_source)
     runner_tree = ast.parse(runner_source)
@@ -697,7 +697,7 @@ def test_batch_reducer_retains_original_record_and_standing_chronology(tmp_path)
     malformed = _batch_user((("Approve?", "[approve-pr-publication:v1 invalid]"),))
     for later, expected in ((revoke, "revoked"), (malformed, "malformed")):
         transcript.write_bytes(raw + json.dumps(later).encode("utf-8") + b"\n")
-        assert policy._derive_pr_grant([batch, later], str(tmp_path)) == (expected, None)
+        assert derive_pr_grant(policy,[batch, later], str(tmp_path)) == (expected, None)
         assert policy._stream_stable_pr_grant(str(transcript), str(tmp_path)) == (expected, None, "found")
     pending = policy._PrGrantReducer(str(tmp_path))
     pending.consume(_batch_user((("Approve?", "[approve-pr-publication:v1 pr=7]"),)))
@@ -724,7 +724,7 @@ def test_fresh_generic_consent_public_handlers_reach_refusing_scanner(tmp_path):
             raise policy.PrRouteDenied("PGG-SCAN-PROVENANCE")
         output = io.StringIO()
         with mock.patch.object(preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
-             mock.patch.object(policy, "read_transcript_history", side_effect=AssertionError("irrelevant history read")), \
+             mock.patch.object(policy, "_recover_stable_pr_grant", side_effect=AssertionError("irrelevant history read")), \
              mock.patch.object(policy, "_resolve_executable", return_value="synthetic-git"), \
              mock.patch.object(policy, "_prove_repository_root", side_effect=lambda path, _git: path), \
              mock.patch.object(policy, "_resolve_generic_scan_binding", return_value=binding), \
@@ -754,7 +754,7 @@ def test_fresh_generic_consent_cannot_bypass_grammar_or_current_binding(tmp_path
                 "command": command}, "transcript_path": str(transcript)}
             output = io.StringIO()
             with mock.patch.object(preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
-                 mock.patch.object(policy, "read_transcript_history", side_effect=AssertionError("irrelevant history read")), \
+                 mock.patch.object(policy, "_recover_stable_pr_grant", side_effect=AssertionError("irrelevant history read")), \
                  mock.patch.object(policy, "_resolve_executable", return_value="synthetic-git"), \
                  mock.patch.object(policy, "_prove_repository_root", side_effect=lambda path, _git: path), \
                  mock.patch.object(policy, "_resolve_generic_scan_binding", side_effect=policy.PrRouteDenied(failure_id)) as binding, \
@@ -840,7 +840,7 @@ def test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(tmp_pat
                 return evidence
             stdout, stderr = io.StringIO(), io.StringIO()
             with mock.patch.object(preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
-                 mock.patch.object(policy, "read_transcript_history", side_effect=AssertionError("irrelevant standing history read")), \
+                 mock.patch.object(policy, "_recover_stable_pr_grant", side_effect=AssertionError("irrelevant standing history read")), \
                  mock.patch.object(policy, "_run_authoritative_scan", side_effect=scan), \
                  mock.patch.object(runner, "_load_preflight", return_value=(target.runner_path, preflight)), \
                  mock.patch.object(runner, "_load_policy", return_value=policy), \
@@ -943,32 +943,27 @@ def _exercise_former_row(target: GateTarget, row, tmp_path: Path, root: str):
         mock.patch.object(policy, "build_preflight_from_stdin", side_effect=counted_build),
         mock.patch.object(policy, "evaluate_heavy", side_effect=counted_heavy),
     ]
-    if scenario in {"active-pr", "generic-scan", "plain-deny", "malformed-pr"}:
-        patches.append(mock.patch.object(
-            policy, "read_transcript_history", return_value=([{"type": "user"}], "found")
-        ))
     if scenario == "active-pr":
         grant = object()
         patches.extend((
-            mock.patch.object(policy, "_derive_pr_grant", return_value=("active", grant)),
+            mock.patch.object(policy, "_recover_stable_pr_grant", return_value=("active", grant, "found")),
             mock.patch.object(policy, "_evaluate_active_pr_route", side_effect=lambda *_args: counters.update({"owner": 1}) or True),
         ))
     elif scenario in {"generic-scan", "approved"}:
         patches.extend((
-            mock.patch.object(policy, "_derive_pr_grant", return_value=("none", None)),
+            mock.patch.object(policy, "_recover_stable_pr_grant", return_value=("absent", None, "found")),
             mock.patch.object(policy, "_resolve_generic_scan_binding", return_value=object()),
             mock.patch.object(policy, "_run_authoritative_scan", side_effect=lambda *_args: counters.update({"owner": 1})),
         ))
     elif scenario == "plain-deny":
-        patches.append(mock.patch.object(policy, "_derive_pr_grant", return_value=("none", None)))
+        patches.append(mock.patch.object(policy, "_recover_stable_pr_grant", return_value=("absent", None, "found")))
     elif scenario == "history-unavailable":
-        patches.append(mock.patch.object(policy, "read_transcript_history", return_value=([], "unreadable")))
+        patches.append(mock.patch.object(policy, "_recover_stable_pr_grant", return_value=("absent", None, "unreadable")))
     elif scenario == "malformed-pr":
-        patches.append(mock.patch.object(policy, "_derive_pr_grant", return_value=("malformed", None)))
+        patches.append(mock.patch.object(policy, "_recover_stable_pr_grant", return_value=("malformed", None, "found")))
     elif scenario == "generic-deny":
         patches.extend((
-            mock.patch.object(policy, "read_transcript_history", return_value=([{"type": "user"}], "found")),
-            mock.patch.object(policy, "_derive_pr_grant", return_value=("none", None)),
+            mock.patch.object(policy, "_recover_stable_pr_grant", return_value=("absent", None, "found")),
         ))
 
     stdout, stderr = io.StringIO(), io.StringIO()

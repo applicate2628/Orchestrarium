@@ -251,11 +251,11 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      continue through the existing publication checks even under uncertainty.
   5. Every exact direct push proving a standalone positive long `--dry-run`,
      with no negation, ambiguous option role, or conservative candidate → exit 0.
-  6. Missing, unreadable, or invalid transcript data denies with
-     `PRG-TRANSCRIPT-UNAVAILABLE`. When full history exceeds the in-memory
-     bound, reduce the complete stable JSONL file in forward order with bounded
-     memory. No active grant denies with `PRG-TRANSCRIPT-HISTORY-LIMIT`; an
-     active grant still enters the unchanged strict route.
+  6. Missing, unreadable, invalid, or unstable required history denies with
+     `PRG-TRANSCRIPT-UNAVAILABLE`. Reduce the complete stable JSONL history in
+     forward order, binding both bounded-read passes to its opened descriptor's
+     initial byte size. Complete history alone supplies no publication authority;
+     active grants still enter the unchanged strict route.
   7. Qualified current-turn consent from `[approve-publication]` in one genuine
      answer enters the common strict command, repository/range binding and
      fresh authoritative-scan completion BEFORE unrelated standing history.
@@ -380,7 +380,6 @@ from hook_common import (
     is_user_message,
     parse_envelope,
     read_stdin_utf8,
-    read_transcript_history,
     scan_current_turn_boundary,
 )
 
@@ -418,13 +417,7 @@ PR_URL_REGEX = re.compile(
 PR_BINDING_SIDECAR_SUFFIX = ".pr-publication-binding-v1.json"
 PR_BINDING_LOCK_SUFFIX = ".lock"
 PR_BINDING_SIDECAR_BYTE_CAP = 8192
-TRANSCRIPT_HISTORY_BYTE_CAP = 32 * 1024 * 1024
-TRANSCRIPT_HISTORY_RECORD_CAP = 50_000
 TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 4 * 1024 * 1024
-# Recovery handles histories beyond the ordinary in-memory caps, but never
-# treats a prefix as complete authorization evidence.
-TRANSCRIPT_RECOVERY_BYTE_CAP = 128 * 1024 * 1024
-TRANSCRIPT_RECOVERY_RECORD_CAP = 200_000
 PROCESS_OUTPUT_BYTE_CAP = 256 * 1024
 PROCESS_TIMEOUT_SECONDS = 8.0
 ORACLE_TIMEOUT_SECONDS = 45.0
@@ -1528,19 +1521,10 @@ class _PrGrantReducer:
         return self.state, self.grant
 
 
-def _derive_pr_grant(
-    entries: list[dict], envelope_repository_workdir: str
-) -> tuple[str, ActivePrGrant | SimplePrIntent | None]:
-    reducer = _PrGrantReducer(envelope_repository_workdir)
-    for entry in entries:
-        reducer.consume(entry)
-    return reducer.finish()
-
-
 def _stream_stable_pr_grant(
     transcript_path: str, envelope_repository_workdir: str
 ) -> tuple[str, ActivePrGrant | SimplePrIntent | None, str]:
-    """Reduce one complete, identity-stable JSONL transcript."""
+    """Reduce exactly the opened descriptor's initial, identity-stable history."""
 
     if not transcript_path:
         return "absent", None, HISTORY_STATUS_ABSENT
@@ -1548,6 +1532,8 @@ def _stream_stable_pr_grant(
     reducer = _PrGrantReducer(envelope_repository_workdir)
     try:
         path_before = path.stat()
+        if not stat.S_ISREG(path_before.st_mode):
+            return "absent", None, HISTORY_STATUS_UNREADABLE
         with path.open("rb") as stream:
             before = os.fstat(stream.fileno())
             identity_fields = ("st_dev", "st_ino", "st_mode")
@@ -1555,26 +1541,19 @@ def _stream_stable_pr_grant(
                 getattr(path_before, name) for name in identity_fields
             ):
                 return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
-            if before.st_size > TRANSCRIPT_RECOVERY_BYTE_CAP:
-                return "absent", None, HISTORY_STATUS_LIMIT
+            frontier = before.st_size
             total_bytes = 0
-            total_records = 0
             content_digest = hashlib.sha256()
-            while True:
+            while total_bytes < frontier:
                 raw_line = stream.readline(min(
-                    TRANSCRIPT_HISTORY_LINE_BYTE_CAP,
-                    TRANSCRIPT_RECOVERY_BYTE_CAP - total_bytes,
-                ) + 1)
+                    TRANSCRIPT_HISTORY_LINE_BYTE_CAP + 1,
+                    frontier - total_bytes,
+                ))
                 if not raw_line:
-                    break
+                    return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
                 total_bytes += len(raw_line)
-                total_records += 1
                 content_digest.update(raw_line)
-                if (
-                    len(raw_line) > TRANSCRIPT_HISTORY_LINE_BYTE_CAP
-                    or total_bytes > TRANSCRIPT_RECOVERY_BYTE_CAP
-                    or total_records > TRANSCRIPT_RECOVERY_RECORD_CAP
-                ):
+                if len(raw_line) > TRANSCRIPT_HISTORY_LINE_BYTE_CAP:
                     return "absent", None, HISTORY_STATUS_LIMIT
                 if not raw_line.strip():
                     continue
@@ -1585,20 +1564,21 @@ def _stream_stable_pr_grant(
                 if not isinstance(entry, dict):
                     return "absent", None, HISTORY_STATUS_INVALID
                 reducer.consume(entry, raw_line)
+            if stream.read(1):
+                return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
             first_digest = content_digest.digest()
             after = os.fstat(stream.fileno())
             stream.seek(0)
             verify_digest = hashlib.sha256()
             verify_bytes = 0
-            while True:
-                remaining = TRANSCRIPT_RECOVERY_BYTE_CAP - verify_bytes
-                chunk = stream.read(min(1024 * 1024, remaining) + 1)
+            while verify_bytes < frontier:
+                chunk = stream.read(min(1024 * 1024, frontier - verify_bytes))
                 if not chunk:
-                    break
+                    return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
                 verify_bytes += len(chunk)
-                if verify_bytes > TRANSCRIPT_RECOVERY_BYTE_CAP:
-                    return "absent", None, HISTORY_STATUS_LIMIT
                 verify_digest.update(chunk)
+            if stream.read(1):
+                return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
             after_verify = os.fstat(stream.fileno())
             current = path.stat()
     except PrRouteDenied:
@@ -1616,7 +1596,8 @@ def _stream_stable_pr_grant(
         != tuple(getattr(after_verify, name) for name in stable_fields)
         or tuple(getattr(path_before, name) for name in stable_fields)
         != tuple(getattr(current, name) for name in stable_fields)
-        or total_bytes != verify_bytes
+        or total_bytes != frontier
+        or verify_bytes != frontier
         or first_digest != verify_digest.digest()
     ):
         return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
@@ -3804,48 +3785,13 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
     validate_preflight_result(preflight)
     if preflight.reason_id == "PFP-CONSENT-GENERIC":
         return _complete_generic_publication(preflight)
-    history_entries, history_status = read_transcript_history(
-        preflight.transcript_path,
-        byte_cap=TRANSCRIPT_HISTORY_BYTE_CAP,
-        record_cap=TRANSCRIPT_HISTORY_RECORD_CAP,
-        line_byte_cap=TRANSCRIPT_HISTORY_LINE_BYTE_CAP,
+    pr_state, pr_grant, history_status = _recover_stable_pr_grant(
+        preflight.transcript_path, preflight.repository_workdir
     )
-    stream_recovery = history_status == HISTORY_STATUS_LIMIT
-    transcript_diagnostic = preflight.transcript_diagnostic
-    if stream_recovery:
-        pr_state, pr_grant, recovery_status = _recover_stable_pr_grant(
-            preflight.transcript_path, preflight.repository_workdir
-        )
-        transcript_diagnostic = _with_transcript_read_status(
-            transcript_diagnostic, history_status, recovery_status
-        )
-    else:
-        transcript_diagnostic = _with_transcript_read_status(
-            transcript_diagnostic, history_status, "not-run"
-        )
-        if history_status != HISTORY_STATUS_FOUND:
-            raise PrRouteDenied(
-                "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
-            )
-        pr_state, pr_grant = _derive_pr_grant(
-            history_entries, preflight.repository_workdir
-        )
-        if (
-            pr_state == "simple"
-            and isinstance(pr_grant, SimplePrIntent)
-            and not pr_grant.sha256
-        ):
-            pr_state, pr_grant, stable_status = _recover_stable_pr_grant(
-                preflight.transcript_path, preflight.repository_workdir
-            )
-            transcript_diagnostic = _with_transcript_read_status(
-                transcript_diagnostic, history_status, stable_status
-            )
-            if stable_status != HISTORY_STATUS_FOUND:
-                raise PrRouteDenied(
-                    "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
-                )
-    if stream_recovery and recovery_status != HISTORY_STATUS_FOUND:
+    transcript_diagnostic = _with_transcript_read_status(
+        preflight.transcript_diagnostic, history_status, "not-run"
+    )
+    if history_status != HISTORY_STATUS_FOUND:
         raise PrRouteDenied(
             "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
         )
@@ -3863,17 +3809,12 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         return _evaluate_simple_pr_route(
             pr_grant, preflight.simple_pr_approval, preflight
         )
-    if stream_recovery:
-        raise PrRouteDenied(
-            "PRG-TRANSCRIPT-HISTORY-LIMIT", transcript_diagnostic
-        )
     if preflight.push_instruction:
         return _complete_generic_publication(preflight)
     return False
 
 _TRANSCRIPT_FAILURE_IDS = frozenset((
     "PRG-TRANSCRIPT-UNAVAILABLE",
-    "PRG-TRANSCRIPT-HISTORY-LIMIT",
 ))
 
 
@@ -3977,7 +3918,6 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         **SCAN_DENIAL_REASONS,
         "PRG-AUTH-MALFORMED": "Use the exact version-1 PR approval or revocation line in a genuine user message.",
         "PRG-TRANSCRIPT-UNAVAILABLE": "Retry from a readable current session transcript; summaries cannot authorize publication.",
-        "PRG-TRANSCRIPT-HISTORY-LIMIT": "History exceeds the in-memory PR-grant window and the complete stable transcript has no active grant. The user must send a new genuine exact PR grant for repeated pushes or `[approve-publication]` for one generic push; summaries, assistant text, and tool output do not authorize.",
         "PRG-COMMAND-SHAPE": "Use one solitary direct `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>` for a simple bound grant; existing Version 1 grants retain the exact absolute Git literal requirement.",
         "PRG-PR-UNAVAILABLE": "Restore authenticated GitHub state access, then retry so the pull request can be checked afresh.",
         "PRG-PR-STATE": "The pull request is not open; obtain a new grant only for an open pull request.",

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-16
 
+- **Complete publication history uses its captured file boundary.** The existing streaming reducer now handles every required full-history route without artificial aggregate byte or record cutoffs, reading and verifying a finite acquired frontier with bounded per-record memory. Growth, invalid input, identity drift, revocation and missing authority retain their checks; both handlers still require the bound unpublished-range scan and receipt.
+
 - **Supervised Luna is available for ordinary producer work.** Task-first routing now explicitly considers Luna/high for admitted exploration and engineering professions when useful-result time including verification and correction fits the task. Role authority, exact tool scope, native defaults, the mechanical corridor and protected review/recovery floors stay intact; observed pilot limits remain visible.
 
 ## 2026-10-15
