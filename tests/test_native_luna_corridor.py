@@ -1393,7 +1393,7 @@ def test_luna_facts_require_explicit_facts_only_consumption() -> None:
 
 
 def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> None:
-    """Catches a Luna corridor that admits a lower effort, Terra, or a non-mechanical role."""
+    """Named mechanical V1 stays exact while ordinary producers may select Luna/high."""
 
     policy = _policy()
     resolved = _resolve(tmp_path)["rolePolicy"]
@@ -1404,7 +1404,9 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
         "modelTier": "mechanical",
         "effort": "high",
         "codexModel": "gpt-6-luna",
+        "useCriteria": policy["profiles"]["luna-high"]["useCriteria"],
     }
+    assert policy["profiles"]["luna-high"]["useCriteria"]
     assert {
         name: policy["taskClasses"][name]
         for name in ("micro", "mechanical-read", "mechanical")
@@ -1449,11 +1451,15 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
         for role_name, role in policy["roles"].items()
         if luna_profiles.intersection(role["allowedProfiles"])
     }
-    assert luna_consumers == {"mechanical-scout", "mechanical-worker"}
+    assert luna_consumers == {
+        "mechanical-scout", "mechanical-worker", "explorer", "analyst", "worker",
+        "backend-engineer", "platform-engineer", "knowledge-archivist",
+        "scientific-software-engineer",
+    }
     assert policy["roles"]["explorer"]["defaultProfile"] == "frontier-high"
-    assert not luna_profiles.intersection(
+    assert luna_profiles.intersection(
         policy["roles"]["explorer"]["allowedProfiles"]
-    )
+    ) == {"luna-high"}
     assert "mechanical-scout" not in policy["taskRoleEligibility"]["review"]
     assert "mechanical-worker" not in policy["taskRoleEligibility"]["engineering"]
 
@@ -1467,6 +1473,7 @@ def test_luna_policy_and_dispatch_are_speed_neutral() -> None:
         "modelTier": "mechanical",
         "effort": "high",
         "codexModel": "gpt-6-luna",
+        "useCriteria": policy["profiles"]["luna-high"]["useCriteria"],
     }
     assert not {"luna-low", "luna-medium"}.intersection(policy["profiles"])
     for task_name in ("micro", "mechanical-read", "mechanical"):
@@ -1629,7 +1636,7 @@ def test_luna_roles_are_native_required_only_when_feature_is_enabled() -> None:
 
 
 def test_luna_semantic_task_matrix_never_authorizes_write_or_decision() -> None:
-    """No task wording gives Luna authority to decide, recommend, or author a patch."""
+    """Named mechanical task wording cannot grant decision or patch-authoring authority."""
 
     resolver = _resolver_module()
     for task_class, role_name in (

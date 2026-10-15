@@ -824,3 +824,133 @@ def test_historical_review_profile_keeps_policy_manifest_binding(
     assert stale["status"] == "denied"
     assert stale["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
     assert stale["fallback"] == "none"
+
+
+def _supervised_luna_host() -> dict:
+    """Full synthetic catalog matching the current host's disclosed controls."""
+    return {
+        "explicitModelControl": True,
+        "explicitReasoningEffortControl": True,
+        "reportedModels": [
+            "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol",
+        ],
+        "reportedEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "reportedAgentTypes": [
+            "algorithm-scientist", "analyst", "architect", "architecture-reviewer",
+            "backend-engineer", "computational-scientist", "default", "explorer",
+            "knowledge-archivist", "mechanical-scout", "mechanical-worker", "planner",
+            "platform-engineer", "qa-engineer", "scientific-software-engineer",
+            "security-engineer", "security-reviewer", "worker",
+        ],
+    }
+
+
+@pytest.mark.parametrize("task", ("exploration", "engineering"))
+def test_supervised_luna_producers_use_ordinary_explicit_route_keep_defaults(task: str) -> None:
+    policy, _ = RESOLVER.load_role_policy(ROOT)
+    host = _supervised_luna_host()
+    scope = {"authority": "parent-dispatcher-only", "purpose": "supervised producer pilot"}
+    for role in policy["taskRoleEligibility"][task]:
+        description = RESOLVER.describe_ordinary_native_role_options(
+            role, task, host, repo_root=ROOT,
+        )
+        assert description["status"] == "available", role
+        assert description["hostObservation"] == host
+        assert any(option["profile"] == "luna-high" and option["useCriteria"]
+                   for option in description["options"]), role
+        default = RESOLVER.resolve_ordinary_native_dispatch(
+            description, caller_rationale="Preserve the existing omitted default.",
+            approved_execution_scope=scope,
+        )
+        explicit = RESOLVER.resolve_ordinary_native_dispatch(
+            description, requested_model="gpt-6-luna", requested_effort="high",
+            caller_rationale="Accepted bounded contract; supervise time to verified result.",
+            approved_execution_scope=scope,
+        )
+        assert default["status"] == explicit["status"] == "resolved", role
+        assert default["resolvedModel"] == "gpt-6.1-sol", role
+        assert default["resolvedEffort"] == ("medium" if role == "knowledge-archivist" else "high")
+        assert explicit["resolvedProfile"] == "luna-high"
+        assert explicit["invocation"]["mode"] == "generic-explicit-profile"
+        assert explicit["invocation"]["model"] == "gpt-6-luna"
+        assert explicit["invocation"]["reasoningEffort"] == "high"
+        assert explicit["invocation"]["forkTurns"] == "none"
+        assert "agentType" not in explicit["invocation"]
+        assert explicit["profession"] == default["profession"] == description["profession"]
+        assert explicit["approvedExecutionScope"] == scope
+        assert explicit["failurePolicy"] == default["failurePolicy"]
+        assert explicit["fallback"] == "none"
+        if description["roleKind"] == "native":
+            assert default["invocation"] == {"mode": "named-role-default", "agentType": role}
+        else:
+            assert default["invocation"]["model"] == "gpt-6.1-sol"
+            assert default["invocation"]["forkTurns"] == "none"
+            assert "agentType" not in default["invocation"]
+
+
+def test_supervised_luna_does_not_admit_protected_tasks_or_other_efforts() -> None:
+    policy, _ = RESOLVER.load_role_policy(ROOT)
+    scope = {"authority": "parent-dispatcher-only", "purpose": "protected task probe"}
+    for task in ("planning", "review", "critical-design", "critical-security", "recovery"):
+        assert "luna-high" not in policy["taskClasses"][task]["admissibleProfiles"]
+        for role in policy["taskRoleEligibility"][task]:
+            description = RESOLVER.describe_ordinary_native_role_options(
+                role, task, _supervised_luna_host(), repo_root=ROOT,
+            )
+            decision = RESOLVER.resolve_ordinary_native_dispatch(
+                description, requested_model="gpt-6-luna", requested_effort="high",
+                caller_rationale="Confirm the producer pilot cannot cross protected gates.",
+                approved_execution_scope=scope,
+            )
+            assert decision["status"] == "denied", (task, role)
+            assert decision["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
+            assert decision["fallback"] == "none"
+    for effort in ("low", "medium", "xhigh", "max", "ultra"):
+        description = RESOLVER.describe_ordinary_native_role_options(
+            "backend-engineer", "engineering", _supervised_luna_host(), repo_root=ROOT,
+        )
+        decision = RESOLVER.resolve_ordinary_native_dispatch(
+            description, requested_model="gpt-6-luna", requested_effort=effort,
+            caller_rationale="Ordinary pilot admits only the existing exact high profile.",
+            approved_execution_scope=scope, user_approved_max=True,
+        )
+        assert decision["status"] == "denied", effort
+        assert decision["fallback"] == "none"
+
+
+@pytest.mark.parametrize("drift", ("malformed-policy", "mixed-manifest", "custom-role"))
+def test_supervised_luna_keeps_input_pairing_and_preserves_refused_bytes(
+    tmp_path: Path, drift: str,
+) -> None:
+    paths = (
+        "shared/role-routing-policy.v1.json",
+        "src.codex/agents/orchestrarium-role-manifest.json",
+        "src.codex/agents/backend-engineer.toml",
+    )
+    for name in paths:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / name).read_bytes())
+    coherent = RESOLVER.describe_ordinary_native_role_options(
+        "backend-engineer", "engineering", _supervised_luna_host(), repo_root=tmp_path,
+    )
+    assert coherent["status"] == "available"
+    assert any(option["profile"] == "luna-high" for option in coherent["options"])
+    if drift == "malformed-policy":
+        (tmp_path / paths[0]).write_bytes(b"{}\n")
+    elif drift == "mixed-manifest":
+        path = tmp_path / paths[1]
+        manifest = json.loads(path.read_bytes())
+        manifest["policySha256"] = "0" * 64
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+    else:
+        path = tmp_path / paths[2]
+        path.write_bytes(path.read_bytes() + b"# user-owned customization\n")
+    before = {name: (tmp_path / name).read_bytes() for name in paths}
+    refused = RESOLVER.describe_ordinary_native_role_options(
+        "backend-engineer", "engineering", _supervised_luna_host(), repo_root=tmp_path,
+    )
+    assert refused["status"] == "denied"
+    assert refused["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
+    assert refused["fallback"] == "none"
+    assert {name: (tmp_path / name).read_bytes() for name in paths} == before

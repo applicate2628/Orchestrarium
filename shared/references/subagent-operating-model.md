@@ -698,6 +698,8 @@ When admitting a new candidate approach into discovery, the roadmap decision pac
 11. **Integration serialization.** Integration-owner and shared integration-surface work is serialized.
 12. **Execution truth.** Model and effort truth comes only from route-authoritative evidence; never infer either value from a role name, provider name, or requested profile. When actual runtime metadata is absent, record `unspecified by runtime`. Provider addenda define which configuration declares defaults or policy floors, but neither a declaration nor a request proves the values used by one run.
 
+Model choice follows the shared spine's **Task-first dispatch economics** owner. Prefer policy-admitted supervised Luna/high for ordinary producer work when expected time to a verified useful result, including drafting, verification, correction and supervision, favors it; select a stronger admissible profile directly when the reasoning benefit warrants it. Named mechanical roles retain their exact caller contract; ordinary professions retain their scope and independent gates. The pilot awaits real-task evidence of speed and coding quality. Omitted defaults and final review, critical and recovery membership remain unchanged; no quota, forced cheaper-first failure or universal strongest default is introduced.
+
 ---
 
 ## 11. Governance notes
