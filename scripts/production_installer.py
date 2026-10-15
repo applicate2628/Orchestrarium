@@ -7430,12 +7430,22 @@ class _CanonicalSkillPlan:
     accepted_prior: str | None
     ignore_runtime_cache: bool
     accepted_prior_files: tuple[tuple[Path, str], ...] = ()
+    managed_before: tuple[tuple[str, str], ...] | None = None
+    selection: tuple[tuple[str, str | None], ...] | None = None
+    managed_after: tuple[tuple[str, str], ...] | None = None
+    installed_witnesses: tuple[tuple[Path, _PhysicalNode], ...] = ()
+    source_witnesses: tuple[tuple[Path, _PhysicalNode], ...] = ()
+    source_absent: tuple[Path, ...] = ()
+    full_selection: bool = True
+    container_witnesses: tuple[tuple[Path, _PhysicalNode], ...] = ()
 
 
 _LEAD_RECEIPT_NAME = ".orchestrarium-lead-receipt.v1.json"
 _LEAD_RECEIPT_SCHEMA = "orchestrarium.canonical-lead-install.v1"
 _NONLEAD_RECEIPT_NAME = ".orchestrarium-nonlead-skills-receipt.v1.json"
 _NONLEAD_RECEIPT_SCHEMA = "orchestrarium.canonical-nonlead-skills-install.v1"
+_NONLEAD_MEMBER_RECEIPT_SCHEMA = "orchestrarium.canonical-nonlead-skills-install.v2"
+_NONLEAD_RECEIPT_MAX_BYTES = 65536
 
 
 def _lead_receipt_bytes(digest: str) -> bytes:
@@ -7479,10 +7489,43 @@ def _read_lead_receipt(path: Path) -> tuple[bytes, tuple[int, int, int, int], st
     return payload, identity, record["treeSha256"]
 
 
-def _nonlead_receipt_bytes(skills: dict[str, str]) -> bytes:
-    ordered = {name: skills[name] for name in sorted(skills)}
-    return (json.dumps({"schema": _NONLEAD_RECEIPT_SCHEMA, "skills": ordered},
-                       separators=(",", ":")) + "\n").encode("utf-8")
+def _nonlead_receipt_bytes(skills: dict[str, Any], *, schema: str | None = None) -> bytes:
+    ordered = {name: ({"members": dict(sorted(skills[name]["members"].items()))}
+                      if isinstance(skills[name], dict) else skills[name])
+               for name in sorted(skills)}
+    if schema is None:
+        schema = (_NONLEAD_MEMBER_RECEIPT_SCHEMA if any(isinstance(value, dict) for value in ordered.values())
+                  else _NONLEAD_RECEIPT_SCHEMA)
+    payload = (json.dumps({"schema": schema, "skills": ordered},
+                          separators=(",", ":")) + "\n").encode("utf-8")
+    if len(payload) > _NONLEAD_RECEIPT_MAX_BYTES:
+        raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: oversized receipt")
+    return payload
+
+
+def _validate_nonlead_members(members: object) -> tuple[tuple[str, str], ...]:
+    """Validate the existing manifest representation without gaining tree authority."""
+    if not isinstance(members, dict) or not members:
+        raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: empty members")
+    folded: set[str] = set()
+    for relative, value in members.items():
+        if (not isinstance(relative, str) or not relative or "\\" in relative
+            or ":" in relative or relative.startswith("/")
+            or any(part in {"", ".", ".."} or part.rstrip(" .") != part
+                   or any(ord(character) < 32 for character in part)
+                   for part in relative.split("/"))
+            or relative.casefold() in folded
+            or not isinstance(value, str)
+            or (value != "directory" and re.fullmatch(r"[0-9a-f]{64}", value) is None)):
+            raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: member shape")
+        folded.add(relative.casefold())
+    for relative in members:
+        for parent in Path(relative).parents:
+            if parent == Path("."):
+                continue
+            if members.get(parent.as_posix()) != "directory":
+                raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: member parent")
+    return tuple(sorted(members.items()))
 
 
 def _safe_nonlead_name(name: object) -> bool:
@@ -7494,7 +7537,9 @@ def _safe_nonlead_name(name: object) -> bool:
 class _NonLeadReceiptObservation:
     payload: bytes
     identity: tuple[int, int, int, int]
-    entries: tuple[tuple[str, str], ...]
+    entries: tuple[tuple[str, str | tuple[tuple[str, str], ...]], ...]
+    schema: str = _NONLEAD_RECEIPT_SCHEMA
+    native_node: _PhysicalNode | None = None
 
 
 def _read_nonlead_receipt(path: Path) -> _NonLeadReceiptObservation | None:
@@ -7506,7 +7551,7 @@ def _read_nonlead_receipt(path: Path) -> _NonLeadReceiptObservation | None:
         raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID")
     try:
         payload = path.read_bytes()
-        if len(payload) > 65536:
+        if len(payload) > _NONLEAD_RECEIPT_MAX_BYTES:
             raise ValueError("oversized receipt")
         def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             result = dict(pairs)
@@ -7515,23 +7560,41 @@ def _read_nonlead_receipt(path: Path) -> _NonLeadReceiptObservation | None:
             return result
         record = json.loads(payload.decode("utf-8"), object_pairs_hook=unique_pairs)
         if (not isinstance(record, dict) or set(record) != {"schema", "skills"}
-            or record["schema"] != _NONLEAD_RECEIPT_SCHEMA
+            or not isinstance(record["schema"], str)
+            or record["schema"] not in {_NONLEAD_RECEIPT_SCHEMA, _NONLEAD_MEMBER_RECEIPT_SCHEMA}
             or not isinstance(record["skills"], dict)
-            or any(not _safe_nonlead_name(name) or not isinstance(digest, str)
-                   or re.fullmatch(r"[0-9a-f]{64}", digest) is None
-                   for name, digest in record["skills"].items())
-            or payload != _nonlead_receipt_bytes(record["skills"])):
+            or any(not _safe_nonlead_name(name) for name in record["skills"])):
             raise ValueError("receipt shape")
+        if (record["schema"] == _NONLEAD_MEMBER_RECEIPT_SCHEMA
+            and len({name.casefold() for name in record["skills"]}) != len(record["skills"])):
+            raise ValueError("receipt skill alias")
+        entries = []
+        for name, value in record["skills"].items():
+            if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None:
+                entries.append((name, value))
+            elif (record["schema"] == _NONLEAD_MEMBER_RECEIPT_SCHEMA
+                  and isinstance(value, dict) and set(value) == {"members"}):
+                entries.append((name, _validate_nonlead_members(value["members"])))
+            else:
+                raise ValueError("receipt entry")
+        if payload != _nonlead_receipt_bytes(record["skills"], schema=record["schema"]):
+            raise ValueError("receipt encoding")
         current = path.lstat()
         if (current.st_dev, current.st_ino, current.st_mode, current.st_size, current.st_mtime_ns) != (
             metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_size, metadata.st_mtime_ns
         ):
             raise ValueError("receipt identity")
+        native_node = _InstallTransaction._capture_node(path)
+        if (native_node.data != hashlib.sha256(payload).hexdigest()
+            or native_node.python_identity != (metadata.st_dev, metadata.st_ino, metadata.st_mode,
+                                               getattr(metadata, "st_file_attributes", 0))
+            or not _InstallTransaction._point_matches(path, native_node, check_file_content=True)):
+            raise ValueError("receipt native identity")
     except (OSError, UnicodeError, ValueError) as exc:
         raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID") from exc
     identity = (metadata.st_dev, metadata.st_ino, metadata.st_mode,
                 getattr(metadata, "st_file_attributes", 0))
-    return _NonLeadReceiptObservation(payload, identity, tuple(sorted(record["skills"].items())))
+    return _NonLeadReceiptObservation(payload, identity, tuple(sorted(entries)), record["schema"], native_node)
 
 
 def _parse_nonlead_grants(values: tuple[str, ...], source_names: frozenset[str]) -> dict[str, str]:
@@ -7559,15 +7622,166 @@ class _CanonicalSkillsPlan:
     transport_stage: _ClaudeTransportProjectionStage | None
     lead_receipt: _LeadReceiptPlan | None = None
     nonlead_receipt: _NonLeadReceiptObservation | None = None
-    nonlead_expected: tuple[tuple[str, str], ...] | None = None
+    nonlead_expected: tuple[tuple[str, str | tuple[tuple[str, str], ...]], ...] | None = None
     nonlead_source: Path | None = None
     directory_move_parents: tuple[tuple[Path, tuple[int, int, int, int]], ...] = ()
+    member_selection: tuple[tuple[str, tuple[str, ...]], ...] | None = None
+
+
+def _plan_canonical_skill_members(
+    skill: _CanonicalSkillPlan, installed: Path, managed_before: tuple[tuple[str, str], ...],
+    selected: tuple[str, ...] | None,
+) -> _CanonicalSkillPlan:
+    """Derive the one B/S/D transition; physical extras supply no ownership."""
+    if _tree_sha256(installed, ignore_runtime_cache=True) != skill.installed_digest:
+        raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: authenticated tree {skill.name}")
+    before = dict(_validate_nonlead_members(dict(managed_before)))
+    observed = dict(_stage_tree_manifest(installed, ignore_runtime_cache=True))
+    if any(observed.get(relative) != value for relative, value in before.items()):
+        raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: {skill.name}")
+    source = dict(_stage_tree_manifest(skill.source, ignore_runtime_cache=True))
+    _validate_nonlead_members(source)
+    if selected is None:
+        names = set(before) | set(source)
+    else:
+        if (not isinstance(selected, tuple) or any(not isinstance(relative, str) for relative in selected)
+            or len(set(selected)) != len(selected)):
+            raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: member selection")
+        names = set(selected)
+        for relative in tuple(names):
+            # Validate spelling even for a selected, Source-proven removal.
+            parts = relative.split("/")
+            _validate_nonlead_members({
+                **{"/".join(parts[:index]): "directory" for index in range(1, len(parts))},
+                relative: source.get(relative, before.get(relative, "directory")),
+            })
+            if relative not in before and relative not in source:
+                raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: unknown selected member")
+    # Only positive explicit effects need new containers. Existing managed
+    # parents retain B's value; traversal never selects their Source value.
+    new_directories = {parent.as_posix() for relative in names & source.keys()
+                       for parent in Path(relative).parents if parent != Path(".")
+                       and parent.as_posix() not in before and parent.as_posix() not in names
+                       and source.get(parent.as_posix()) == "directory"}
+    names.update(new_directories)
+    selection = tuple((relative, source.get(relative)) for relative in sorted(names))
+    after = dict(before)
+    observed_aliases = {relative.casefold(): relative for relative in observed}
+    for relative, value in selection:
+        if observed_aliases.get(relative.casefold(), relative) != relative:
+            raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: member alias {skill.name}/{relative}")
+        if relative in observed and relative not in before:
+            raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: protected member {skill.name}/{relative}")
+        if value is None:
+            after.pop(relative, None)
+        else:
+            after[relative] = value
+        if relative in before and value is not None and (before[relative] == "directory") != (value == "directory"):
+            raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: member kind {skill.name}/{relative}")
+    desired = _validate_nonlead_members(after)
+    witnesses = tuple(sorted(_InstallTransaction._observe(installed).items()))
+    if (not _InstallTransaction._image_matches(installed, dict(witnesses))
+        or _stage_tree_manifest(installed, ignore_runtime_cache=True) != tuple(sorted(observed.items()))
+        or _tree_sha256(installed, ignore_runtime_cache=True) != skill.installed_digest):
+        raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: member observation")
+    source_paths = {skill.source}
+    for relative, value in selection:
+        candidate = skill.source / relative
+        source_paths.update(parent for parent in candidate.parents if parent == skill.source or skill.source in parent.parents)
+        if value is not None:
+            source_paths.add(candidate)
+    source_witnesses = tuple((path, _InstallTransaction._capture_node(path))
+                             for path in sorted(source_paths) if path.exists())
+    for path, node in source_witnesses:
+        if path == skill.source:
+            continue
+        value = source.get(path.relative_to(skill.source).as_posix())
+        if value is not None and ("directory" if node.kind == "directory" else node.data) != value:
+            raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: source observation")
+    return replace(skill, accepted_prior=None, managed_before=tuple(sorted(before.items())),
+                   selection=selection, managed_after=desired, installed_witnesses=witnesses,
+                   source_witnesses=source_witnesses,
+                   source_absent=tuple(skill.source / relative for relative, value in selection if value is None),
+                   full_selection=selected is None,
+                   container_witnesses=((installed.parent, _InstallTransaction._capture_node(installed.parent)),))
+
+
+def _assert_canonical_member_source_current(skill: _CanonicalSkillPlan) -> None:
+    for path, node in skill.source_witnesses:
+        if not _InstallTransaction._point_matches(path, node, check_file_content=True):
+            raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: source member {skill.name}")
+    if any(path.exists() or path.is_symlink() for path in skill.source_absent):
+        raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: source absence {skill.name}")
+    if skill.full_selection and _stage_tree_manifest(skill.source, ignore_runtime_cache=True) != skill.managed_after:
+        raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: source membership {skill.name}")
+
+
+def _assert_canonical_member_state(
+    skill: _CanonicalSkillPlan, installed: Path, *, after: bool,
+    transaction: _InstallTransaction | None = None,
+) -> None:
+    """Check the same D/P at apply and both projection receivers."""
+    assert skill.managed_before is not None and skill.managed_after is not None and skill.selection is not None
+    _assert_canonical_member_source_current(skill)
+    if any(not _InstallTransaction._point_matches(path, node) for path, node in skill.container_witnesses):
+        raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: member container identity")
+    original = dict(skill.installed_witnesses)
+    expected = dict(skill.managed_after if after else skill.managed_before)
+    changed = {installed / relative for relative, value in skill.selection
+               if dict(skill.managed_before).get(relative) != value}
+    current_image = dict(original)
+    if transaction is not None:
+        for record in transaction._slice_a_migrated:
+            path = record.leaf_path
+            if path not in changed:
+                continue
+            old = original.get(path)
+            if old is None or old.python_identity != record.old_identity or old.data != record.old_digest:
+                raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: migration origin")
+            if _InstallTransaction._point_matches(path, record.new_current, check_file_content=True):
+                current_image[path] = record.new_current
+        for effect in transaction._effects:
+            if effect.path not in changed or effect.published_state is None and effect.retained_state is None:
+                continue
+            old = original.get(effect.path)
+            if effect.before != ({effect.path: old} if old is not None else {}):
+                raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: selected effect origin")
+            transaction.assert_effect_current(effect)
+            current_image.pop(effect.path, None)
+            current_image.update(effect.actual)
+        for record in transaction._slice_a_created:
+            if record.leaf_path in changed and not record.consumed:
+                if record.leaf_path in original:
+                    raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: creator replaced existing member")
+                current_image[record.leaf_path] = record.current_node
+    if transaction is not None or not after:
+        if not _InstallTransaction._image_matches(installed, current_image):
+            raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: selected native state {skill.name}")
+    if not after:
+        return
+    for path, node in original.items():
+        relative = path.relative_to(installed).as_posix()
+        if transaction is None and (path not in changed or node.kind == "directory"):
+            if not _InstallTransaction._point_matches(path, node, check_file_content=True):
+                raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: protected or unselected {skill.name}/{relative}")
+        if path == installed or relative in expected:
+            continue
+        if node.kind != "directory" and path in changed:
+            continue
+        if ((node.kind == "directory" and path.name == "__pycache__")
+            or _is_ordinary_runtime_cache_file(Path(relative), path.lstat())):
+            continue
+        if node.kind == "directory" or path not in changed:
+            expected[relative] = "directory" if node.kind == "directory" else node.data
+    actual = dict(_stage_tree_manifest(installed, ignore_runtime_cache=True))
+    if actual != expected:
+        raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: managed postcondition {skill.name}")
 
 
 def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: Path) -> tuple[tuple[Path, tuple[int, int, int, int]], ...]:
     """Probe required native directory moves before any coupled live effects."""
     parents = { (target / skill.name).parent for skill in plan.skills
-                if skill.accepted_prior is not None }
+                if skill.accepted_prior is not None and skill.managed_before is None }
     witnesses = []
     for parent in sorted(parents):
         parent_identity = _CreateOnlyMutablePath._identity(parent)
@@ -7647,9 +7861,18 @@ def _preflight_canonical_skills(
     replace_unreceipted_lead_sha256: str | None = None,
     replace_unreceipted_skill_sha256: tuple[str, ...] = (),
     claude_transport_optional: bool = False,
+    member_selection: tuple[tuple[str, tuple[str, ...]], ...] | None = None,
 ) -> _CanonicalSkillsPlan:
     """Bind the complete affected set before the transaction applies any member."""
 
+    selected_names = None
+    if member_selection is not None:
+        if (not global_install or not isinstance(member_selection, tuple) or not member_selection
+            or any(not isinstance(row, tuple) or len(row) != 2 or not _safe_nonlead_name(row[0])
+                   or not isinstance(row[1], tuple) for row in member_selection)
+            or len({row[0] for row in member_selection}) != len(member_selection)):
+            raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: explicit member selection")
+        selected_names = {name for name, _paths in member_selection}
     skills = tuple(
         skill
         for skill in sorted(source.iterdir())
@@ -7679,11 +7902,15 @@ def _preflight_canonical_skills(
         if nonlead_receipt is not None and grants:
             raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
         nonlead_prior_map = dict(nonlead_receipt.entries) if nonlead_receipt is not None else {}
+        if selected_names is not None and (nonlead_receipt is None or not selected_names <= nonlead_names):
+            raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: selected ownership missing")
         if not nonlead_prior_map.keys() <= nonlead_names:
             raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: removed source skill")
         consumed_grants: set[str] = set()
         planned: list[_CanonicalSkillPlan] = []
         for skill in skills:
+            if selected_names is not None and skill.name not in selected_names:
+                continue
             materialized = stage.path if skill.name == "lead" else skill
             ignore_runtime_cache = True
             current = _tree_sha256(
@@ -7738,6 +7965,21 @@ def _preflight_canonical_skills(
                 if not _safe_nonlead_name(skill.name):
                     raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: source name")
                 recorded = nonlead_prior_map.get(skill.name)
+                if isinstance(recorded, tuple) or selected_names is not None:
+                    if recorded is None or observed is None:
+                        raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: {skill.name}")
+                    if isinstance(recorded, str):
+                        if recorded != observed:
+                            raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: {skill.name}")
+                        managed_before = _stage_tree_manifest(installed, ignore_runtime_cache=True)
+                    else:
+                        managed_before = recorded
+                    selected = (dict(member_selection)[skill.name] if member_selection is not None else None)
+                    planned.append(_plan_canonical_skill_members(
+                        _CanonicalSkillPlan(skill.name, materialized, current, observed, None, ignore_runtime_cache),
+                        installed, managed_before, selected,
+                    ))
+                    continue
                 if nonlead_receipt is not None:
                     if recorded is None and observed is not None:
                         raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_INVALID: missing member {skill.name}")
@@ -7802,7 +8044,7 @@ def _preflight_canonical_skills(
         if set(grants) != consumed_grants:
             raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
         transport_stage: _ClaudeTransportProjectionStage | None = None
-        if claude_transport_root is not None:
+        if claude_transport_root is not None and member_selection is None:
             predecessor = None
             try:
                 predecessor = _transport_predecessor(root, target, claude_transport_root)
@@ -7819,12 +8061,21 @@ def _preflight_canonical_skills(
                 )
             # Optional peers lacking complete ownership stay preserved/unclaimed.
 
+        nonlead_expected = dict(nonlead_prior_map) if member_selection is not None else {}
+        nonlead_expected.update((skill.name, skill.managed_after if skill.managed_after is not None else skill.source_digest)
+                               for skill in planned if skill.name != "lead")
+        if global_install:
+            _nonlead_receipt_bytes({name: {"members": dict(value)} if isinstance(value, tuple) else value
+                                    for name, value in nonlead_expected.items()},
+                                   schema=nonlead_receipt.schema if nonlead_receipt is not None
+                                   and nonlead_receipt.schema == _NONLEAD_MEMBER_RECEIPT_SCHEMA else None)
         plan = _CanonicalSkillsPlan(
             stage, tuple(planned), transport_stage,
-            _LeadReceiptPlan(receipt, stage.digest, lead_source),
+            _LeadReceiptPlan(receipt, stage.digest, lead_source) if member_selection is None else None,
             nonlead_receipt,
-            tuple((skill.name, skill.source_digest) for skill in planned if skill.name != "lead") if global_install else None,
+            tuple(sorted(nonlead_expected.items())) if global_install else None,
             source if global_install else None,
+            member_selection=member_selection,
         )
         return replace(plan, directory_move_parents=_preflight_directory_move_capabilities(plan, target))
     except BaseException:
@@ -7847,7 +8098,7 @@ def _assert_canonical_skills_plan_current(
     """Reject any post-preflight drift before the transaction writes its first path."""
 
     required_parents = {(target / skill.name).parent for skill in plan.skills
-                        if skill.accepted_prior is not None}
+                        if skill.accepted_prior is not None and skill.managed_before is None}
     if required_parents != {parent for parent, _identity in plan.directory_move_parents}:
         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing directory move capability observation")
     for parent, identity in plan.directory_move_parents:
@@ -7856,6 +8107,9 @@ def _assert_canonical_skills_plan_current(
 
     lead_effect = None
     for skill in plan.skills:
+        if skill.managed_before is not None:
+            _assert_canonical_member_state(skill, target / skill.name, after=False, transaction=transaction)
+            continue
         current = _tree_sha256(
             skill.source, ignore_runtime_cache=skill.ignore_runtime_cache
         )
@@ -7905,7 +8159,7 @@ def _assert_canonical_skills_plan_current(
         assert plan.nonlead_source is not None
         names = {path.name for path in plan.nonlead_source.iterdir()
                  if path.name != "lead" and path.is_dir() and not path.is_symlink()}
-        if names != {name for name, _digest in plan.nonlead_expected}:
+        if plan.member_selection is None and names != {name for name, _digest in plan.nonlead_expected}:
             raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: source membership preflight drift")
         if _read_nonlead_receipt(target / _NONLEAD_RECEIPT_NAME) != plan.nonlead_receipt:
             raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: preflight drift")
@@ -7955,6 +8209,40 @@ def _apply_canonical_skills_plan(
     for skill in plan.skills:
         if skill.name == "lead":
             continue
+        if skill.managed_before is not None:
+            assert skill.selection is not None and skill.managed_after is not None
+            before = dict(skill.managed_before)
+            relative_root = target_relative / skill.name
+            if owner.dry_run:
+                pending = sum(before.get(relative) != value
+                              and not (value is None and before.get(relative) == "directory")
+                              for relative, value in skill.selection)
+                protected = len(skill.installed_witnesses) - len(skill.managed_before) - 1
+                print(f"  [dry-run] canonical managed members {skill.name}: {pending} selected data effects; "
+                      f"{protected} protected objects preserved")
+            for relative, value in sorted(skill.selection, key=lambda row: (len(Path(row[0]).parts), row[0])):
+                if value != "directory" or before.get(relative) == value:
+                    continue
+                _assert_canonical_member_state(skill, target / skill.name, after=False, transaction=owner.transaction)
+                if not owner.dry_run:
+                    owner._ensure_directory_path(owner.destination(relative_root / relative))
+            for relative, value in skill.selection:
+                if value == "directory" or before.get(relative) == value:
+                    continue
+                _assert_canonical_member_state(skill, target / skill.name, after=False, transaction=owner.transaction)
+                member = relative_root / relative
+                if value is None:
+                    # A container is a witness, never recursive deletion authority.
+                    if before.get(relative) != "directory":
+                        owner.remove_exact_file(member, before[relative])
+                elif relative in before:
+                    owner.migrate_exact_file(member, before[relative], (skill.source / relative).read_bytes(),
+                                             retention_parent=target_relative.parent)
+                else:
+                    owner.create_file(member, (skill.source / relative).read_bytes())
+            if not owner.dry_run:
+                _assert_canonical_member_state(skill, target / skill.name, after=True, transaction=owner.transaction)
+            continue
         if skill.accepted_prior is not None:
             owner.replace_exact_tree(
                 target_relative / skill.name,
@@ -7977,10 +8265,13 @@ def _apply_canonical_skills_plan(
             claude_transport_owner or owner,
         )
 
-    lead = next(skill for skill in plan.skills if skill.name == "lead")
+    lead = next((skill for skill in plan.skills if skill.name == "lead"), None)
     already_published = next((effect for effect in owner.transaction._effects
                               if effect.path == target / "lead" and effect.published_state is not None), None)
-    if already_published is not None:
+    if lead is None:
+        if plan.member_selection is None:
+            raise ValueError("E_CANONICAL_LEAD_STAGE_INVALID: missing selected Lead")
+    elif already_published is not None:
         owner.transaction.assert_effect_current(already_published)
         if already_published.proposed_manifest != plan.stage.manifest:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: declared Lead publication")
@@ -8009,15 +8300,37 @@ def _apply_canonical_skills_plan(
     if plan.nonlead_expected is not None:
         if not owner.dry_run:
             for name, digest in plan.nonlead_expected:
+                member = next((skill for skill in plan.skills if skill.name == name and skill.managed_after is not None), None)
+                if member is not None:
+                    _assert_canonical_member_state(member, target / name, after=True, transaction=owner.transaction)
+                    continue
+                if plan.member_selection is not None:
+                    continue  # Other receipt entries retain their exact authenticated meanings.
                 if _tree_sha256(target / name, ignore_runtime_cache=True) != digest:
                     raise ValueError(f"E_MUTABLE_PATH_POSTCONDITION: non-Lead {name}")
-        payload = _nonlead_receipt_bytes(dict(plan.nonlead_expected))
+        if _read_nonlead_receipt(target / _NONLEAD_RECEIPT_NAME) != plan.nonlead_receipt:
+            raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: before receipt effect")
+        expected_entries = {name: ({"members": dict(value)} if isinstance(value, tuple) else value)
+                            for name, value in plan.nonlead_expected}
+        schema = (_NONLEAD_MEMBER_RECEIPT_SCHEMA if plan.nonlead_receipt is not None
+                  and plan.nonlead_receipt.schema == _NONLEAD_MEMBER_RECEIPT_SCHEMA else None)
+        payload = _nonlead_receipt_bytes(expected_entries, schema=schema)
         relative = target_relative / _NONLEAD_RECEIPT_NAME
         prior_receipt = plan.nonlead_receipt
+        if owner.dry_run and (prior_receipt is None or prior_receipt.payload != payload):
+            action = "creation" if prior_receipt is None else "update"
+            print(f"  [dry-run] canonical skill ownership receipt: {action} pending")
         if prior_receipt is None:
             owner.create_file(relative, payload)
         elif prior_receipt.payload != payload:
             owner.replace_exact_file(relative, hashlib.sha256(prior_receipt.payload).hexdigest(), payload)
+        if not owner.dry_run:
+            observed_receipt = _read_nonlead_receipt(target / _NONLEAD_RECEIPT_NAME)
+            if observed_receipt is None or observed_receipt.payload != payload or observed_receipt.entries != plan.nonlead_expected:
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: joint member receipt readback")
+            for skill in plan.skills:
+                if skill.managed_after is not None:
+                    _assert_canonical_member_state(skill, target / skill.name, after=True, transaction=owner.transaction)
 
     if plan.transport_stage is not None and not owner.dry_run:
         _validate_committed_transport_projection(
@@ -8066,6 +8379,7 @@ class _SkillProjectionPlan:
     backup_target: Path | None = None
     target_identity: tuple[int, int, int, int] | None = None
     backup_digest: str | None = None
+    canonical_skill: _CanonicalSkillPlan | None = None
 
 
 _ClaudeSkillProjectionPlan = _SkillProjectionPlan
@@ -8076,12 +8390,16 @@ def _preflight_claude_skill_projections(
     historical_claude_source: Path,
     canonical_target: Path,
     projection_root: Path,
+    *, canonical_plan: _CanonicalSkillsPlan | None = None,
 ) -> tuple[_ClaudeSkillProjectionPlan, ...]:
     """Freeze each Claude skill projection state before any install write."""
 
     plans: list[_ClaudeSkillProjectionPlan] = []
+    canonical_by_name = {skill.name: skill for skill in canonical_plan.skills} if canonical_plan is not None else {}
     for skill in sorted(canonical_source.iterdir()):
         if not skill.is_dir() or skill.is_symlink():
+            continue
+        if canonical_plan is not None and canonical_plan.member_selection is not None and skill.name not in canonical_by_name:
             continue
         canonical = canonical_target / skill.name
         digest = _tree_sha256(skill, ignore_runtime_cache=skill.name == "lead")
@@ -8105,7 +8423,8 @@ def _preflight_claude_skill_projections(
             action = "migrate"
         plans.append(
             _ClaudeSkillProjectionPlan(
-                skill.name, canonical, digest, action, historical_digest
+                skill.name, canonical, digest, action, historical_digest,
+                canonical_skill=canonical_by_name.get(skill.name),
             )
         )
     return tuple(plans)
@@ -8117,10 +8436,16 @@ def _assert_skill_projection_plan_current(
     projection_root: Path,
     *,
     failure_id: str,
+    dry_run: bool = False,
 ) -> None:
     for item in plan:
         source = canonical_source / item.name
-        if _tree_sha256(source, ignore_runtime_cache=item.name == "lead") != item.canonical_digest:
+        member = item.canonical_skill
+        if member is not None and member.managed_after is not None:
+            _assert_canonical_member_source_current(member)
+            if not dry_run:
+                _assert_canonical_member_state(member, item.canonical_target, after=True)
+        elif _tree_sha256(source, ignore_runtime_cache=item.name == "lead") != item.canonical_digest:
             raise ValueError(f"{failure_id}: preflight drift {item.name}")
         installed = projection_root / item.name
         if item.action == "create":
@@ -8139,12 +8464,14 @@ def _assert_claude_skill_projection_plan_current(
     plan: tuple[_ClaudeSkillProjectionPlan, ...],
     canonical_source: Path,
     projection_root: Path,
+    *, dry_run: bool = False,
 ) -> None:
     _assert_skill_projection_plan_current(
         plan,
         canonical_source,
         projection_root,
         failure_id="E_CREATE_ONLY_PROJECTION_COLLISION",
+        dry_run=dry_run,
     )
 
 
@@ -8155,7 +8482,7 @@ def _apply_claude_skill_projection_plan(
     owner: _CreateOnlyMutablePath,
 ) -> None:
     _assert_claude_skill_projection_plan_current(
-        plan, canonical_source, projection_root
+        plan, canonical_source, projection_root, dry_run=owner.dry_run
     )
     projection_relative = projection_root.relative_to(owner.anchor)
     for item in plan:
@@ -8304,7 +8631,11 @@ def _assert_codex_legacy_skill_projection_plan_current(
         raise ValueError("E_LEGACY_CODEX_SKILL_COLLISION:<root>")
     for item in plan:
         canonical = canonical_by_name[item.name]
-        if (
+        if canonical.managed_after is not None:
+            _assert_canonical_member_source_current(canonical)
+            if not dry_run:
+                _assert_canonical_member_state(canonical, item.canonical_target, after=True)
+        elif (
             _tree_sha256(
                 canonical.source,
                 ignore_runtime_cache=canonical.ignore_runtime_cache,
@@ -10173,12 +10504,6 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         owned_peer_transport_authority: Any | None = None
         if provider == "claude":
             assert claude_skills_projection_target is not None
-            claude_skill_projection_plan = _preflight_claude_skill_projections(
-                root / "src.codex" / "skills",
-                source / "skills",
-                canonical_skills_target,
-                claude_skills_projection_target,
-            )
             canonical_plan = _preflight_canonical_skills(
                 root / "src.codex" / "skills",
                 canonical_skills_target,
@@ -10187,6 +10512,13 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 global_install=mode == "global",
                 replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
                 replace_unreceipted_skill_sha256=tuple(args.replace_unreceipted_skill_sha256),
+            )
+            claude_skill_projection_plan = _preflight_claude_skill_projections(
+                root / "src.codex" / "skills",
+                source / "skills",
+                canonical_skills_target,
+                claude_skills_projection_target,
+                canonical_plan=canonical_plan,
             )
             if (
                 args.dry_run

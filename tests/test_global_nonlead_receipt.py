@@ -422,3 +422,397 @@ def test_nonlead_mixed_case_safe_names_install_then_upgrade(tmp_path: Path) -> N
         assert second["skills"][name] == installer._tree_sha256(
             skills / name, ignore_runtime_cache=True
         )
+
+
+def _member_fixture(tmp_path: Path):
+    installer, source, home, skills, receipt = _fixture(tmp_path)
+    (source / "analyst" / "agents").mkdir()
+    (source / "analyst" / "agents" / "openai.yaml").write_bytes(b"genuine old metadata\n")
+    _apply(installer, source, home, skills)
+    entries = json.loads(receipt.read_bytes())["skills"]
+    entries["analyst"] = {"members": dict(installer._stage_tree_manifest(skills / "analyst"))}
+    receipt.write_bytes(installer._nonlead_receipt_bytes(entries))
+    (skills / "analyst" / "operator-note.bin").write_bytes(b"protected operator bytes")
+    (source / "analyst" / "SKILL.md").write_bytes(b"selected new body\n")
+    (source / "analyst" / "agents" / "openai.yaml").write_bytes(b"unselected new metadata\n")
+    return installer, source, home, skills, receipt
+
+
+def _apply_member_plan(installer, plan, home: Path, skills: Path) -> None:
+    with installer._InstallTransaction([skills], enabled=True) as transaction:
+        owner = installer._CreateOnlyMutablePath(home, transaction, dry_run=False)
+        installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+        transaction.commit()
+
+
+def test_member_receipt_mixed_wire_and_explicit_v2_roundtrip(tmp_path: Path) -> None:
+    installer = _installer()
+    entries = {"analyst": {"members": {"SKILL.md": "1" * 64}}, "knowledge-archivist": "2" * 64}
+    receipt = tmp_path / RECEIPT
+    payload = installer._nonlead_receipt_bytes(entries)
+    receipt.write_bytes(payload)
+    observed = installer._read_nonlead_receipt(receipt)
+    assert observed.schema == "orchestrarium.canonical-nonlead-skills-install.v2"
+    assert observed.entries == (("analyst", (("SKILL.md", "1" * 64),)), ("knowledge-archivist", "2" * 64))
+    assert observed.payload == payload
+    legacy = {"analyst": "1" * 64}
+    receipt.write_bytes(installer._nonlead_receipt_bytes(legacy, schema=observed.schema))
+    assert installer._read_nonlead_receipt(receipt).schema == observed.schema
+
+
+@pytest.mark.parametrize("members", [
+    {}, {"../escape": "1" * 64}, {"/absolute": "1" * 64}, {"C:/drive": "1" * 64},
+    {"agents\\meta": "1" * 64}, {"./SKILL.md": "1" * 64}, {"SKILL.md": "A" * 64},
+    {"SKILL.md": "1" * 64, "skill.md": "1" * 64},
+    {"agents": "1" * 64, "agents/meta": "1" * 64}, {"agents/meta": "1" * 64},
+    {"agents ": "directory"},
+])
+def test_member_receipt_invalid_paths_and_parent_relations(tmp_path: Path, members) -> None:
+    installer = _installer()
+    record = {"schema": "orchestrarium.canonical-nonlead-skills-install.v2",
+              "skills": {"analyst": {"members": members}}}
+    receipt = tmp_path / RECEIPT
+    receipt.write_bytes((json.dumps(record, separators=(",", ":")) + "\n").encode())
+    with pytest.raises(ValueError, match="E_CANONICAL_SKILLS_RECEIPT_INVALID"):
+        installer._read_nonlead_receipt(receipt)
+
+
+def test_member_receipt_duplicate_nested_keys_and_v1_object_refuse(tmp_path: Path) -> None:
+    installer = _installer()
+    receipt = tmp_path / RECEIPT
+    receipt.write_bytes(b'{"schema":"orchestrarium.canonical-nonlead-skills-install.v2","skills":{"analyst":{"members":{"SKILL.md":"'
+                        + b"1" * 64 + b'","SKILL.md":"' + b"1" * 64 + b'"}}}}\n')
+    with pytest.raises(ValueError, match="E_CANONICAL_SKILLS_RECEIPT_INVALID"):
+        installer._read_nonlead_receipt(receipt)
+    receipt.write_bytes(installer._nonlead_receipt_bytes({"analyst": {"members": {"SKILL.md": "1" * 64}}}, schema=SCHEMA))
+    with pytest.raises(ValueError, match="E_CANONICAL_SKILLS_RECEIPT_INVALID"):
+        installer._read_nonlead_receipt(receipt)
+
+
+def test_member_selected_body_preserves_old_yaml_extras_and_other_entries(tmp_path: Path) -> None:
+    installer, source, home, skills, receipt = _member_fixture(tmp_path)
+    before_entries = json.loads(receipt.read_bytes())["skills"]
+    protected = [skills / "analyst", skills / "analyst" / "agents",
+                 skills / "analyst" / "agents" / "openai.yaml", skills / "analyst" / "operator-note.bin"]
+    witnesses = {path: installer._InstallTransaction._capture_node(path) for path in protected}
+    (source / "knowledge-archivist" / "SKILL.md").write_bytes(b"unselected other skill")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                                member_selection=(("analyst", ("SKILL.md",)),))
+    try:
+        selected = plan.skills[0]
+        assert selected.managed_after != installer._stage_tree_manifest(source / "analyst")
+        (source / "analyst" / "agents" / "openai.yaml").write_bytes(b"later unselected Source metadata\n")
+        _apply_member_plan(installer, plan, home, skills)
+        assert (skills / "analyst" / "SKILL.md").read_bytes() == b"selected new body\n"
+        assert all(installer._InstallTransaction._point_matches(path, node, check_file_content=True)
+                   for path, node in witnesses.items())
+        current = json.loads(receipt.read_bytes())["skills"]
+        assert current["analyst"] == {"members": dict(selected.managed_after)}
+        assert current["knowledge-archivist"] == before_entries["knowledge-archivist"]
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+def test_member_full_selection_updates_yaml_but_preserves_extra(tmp_path: Path) -> None:
+    installer, source, home, skills, _receipt = _member_fixture(tmp_path)
+    extra = installer._InstallTransaction._capture_node(skills / "analyst" / "operator-note.bin")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+    try:
+        member = next(skill for skill in plan.skills if skill.name == "analyst")
+        assert member.managed_after == installer._stage_tree_manifest(source / "analyst")
+        _apply_member_plan(installer, plan, home, skills)
+        assert (skills / "analyst" / "agents" / "openai.yaml").read_bytes() == b"unselected new metadata\n"
+        assert installer._InstallTransaction._point_matches(skills / "analyst" / "operator-note.bin", extra, check_file_content=True)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+def test_member_matching_v1_explicit_empty_selection_changes_only_receipt(tmp_path: Path) -> None:
+    installer, source, home, skills, receipt = _fixture(tmp_path)
+    _apply(installer, source, home, skills)
+    before = _inventory(skills)
+    nodes = installer._InstallTransaction._observe(skills / "analyst")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                                member_selection=(("analyst", ()),))
+    try:
+        assert plan.skills[0].selection == ()
+        assert plan.skills[0].managed_before == plan.skills[0].managed_after
+        _apply_member_plan(installer, plan, home, skills)
+        after = _inventory(skills)
+        assert {path: value for path, value in before.items() if path != RECEIPT} == {
+            path: value for path, value in after.items() if path != RECEIPT}
+        assert installer._InstallTransaction._image_matches(skills / "analyst", nodes)
+        assert isinstance(json.loads(receipt.read_bytes())["skills"]["analyst"], dict)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+def test_member_drifting_v1_cannot_be_reconstructed_from_current_source(tmp_path: Path) -> None:
+    installer, source, home, skills, _receipt = _fixture(tmp_path)
+    _apply(installer, source, home, skills)
+    (skills / "analyst" / "SKILL.md").write_bytes(b"same new bytes")
+    (source / "analyst" / "SKILL.md").write_bytes(b"same new bytes")
+    before = _inventory(skills)
+    with pytest.raises(ValueError, match="E_CANONICAL_SKILLS_RECEIPT_DRIFT"):
+        installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                             member_selection=(("analyst", ()),))
+    assert _inventory(skills) == before
+
+
+@pytest.mark.parametrize("selected", ["operator-note.bin", "operator-note.bin/child"])
+def test_member_selected_addition_cannot_adopt_protected_collision(tmp_path: Path, selected: str) -> None:
+    installer, source, _home, skills, _receipt = _member_fixture(tmp_path)
+    candidate = source / "analyst" / selected
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_bytes(b"protected operator bytes")
+    before = _inventory(skills)
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: protected member"):
+        installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                             member_selection=(("analyst", (selected,)),))
+    assert _inventory(skills) == before
+
+
+@pytest.mark.parametrize("drift", ["selected-identity", "protected", "source-selected", "receipt-identity"])
+def test_member_preflight_drift_refuses_before_effects(tmp_path: Path, drift: str) -> None:
+    installer, source, home, skills, receipt = _member_fixture(tmp_path)
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                                member_selection=(("analyst", ("SKILL.md",)),))
+    try:
+        if drift in {"selected-identity", "receipt-identity"}:
+            path = skills / "analyst" / "SKILL.md" if drift == "selected-identity" else receipt
+            replacement = home / "replacement"
+            replacement.write_bytes(path.read_bytes())
+            os.replace(replacement, path)
+        elif drift == "protected":
+            (skills / "analyst" / "operator-note.bin").write_bytes(b"foreign change")
+        else:
+            (source / "analyst" / "SKILL.md").write_bytes(b"late source change")
+        before = _inventory(skills)
+        with pytest.raises(ValueError, match="E_CANONICAL_SKILLS_RECEIPT_DRIFT"):
+            _apply_member_plan(installer, plan, home, skills)
+        assert _inventory(skills) == before
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+@pytest.mark.parametrize("failure", ["member", "receipt", "cancel"])
+def test_member_and_receipt_failure_restore_native_preimages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    installer, source, home, skills, _receipt = _member_fixture(tmp_path)
+    before = _inventory(skills)
+    physical = installer._InstallTransaction._observe(skills / "analyst")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                                member_selection=(("analyst", ("SKILL.md",)),))
+    method_name = "replace_exact_file" if failure == "receipt" else "migrate_exact_file"
+    original = getattr(installer._CreateOnlyMutablePath, method_name)
+    error = KeyboardInterrupt if failure == "cancel" else RuntimeError
+    def fail_after(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        raise error("injected member receipt failure")
+    monkeypatch.setattr(installer._CreateOnlyMutablePath, method_name, fail_after)
+    try:
+        with pytest.raises(error, match="injected member receipt failure"):
+            _apply_member_plan(installer, plan, home, skills)
+        assert _inventory(skills) == before
+        assert installer._InstallTransaction._image_matches(skills / "analyst", physical)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+def test_member_both_projection_consumers_receive_same_selected_after_map(tmp_path: Path) -> None:
+    installer, source, home, skills, _receipt = _member_fixture(tmp_path)
+    codex = home / ".codex" / "skills"
+    claude = home / ".claude" / "skills"
+    codex.mkdir(parents=True)
+    claude.mkdir(parents=True)
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                                member_selection=(("analyst", ("SKILL.md",)),))
+    try:
+        codex_plan, identity = installer._preflight_codex_legacy_skill_projections(
+            plan, skills, codex, home / "backups", frozenset())
+        claude_plan = installer._preflight_claude_skill_projections(
+            source, tmp_path / "historical", skills, claude, canonical_plan=plan)
+        assert claude_plan[0].canonical_skill is plan.skills[0]
+        _apply_member_plan(installer, plan, home, skills)
+        installer._assert_codex_legacy_skill_projection_plan_current(codex_plan, plan, codex, identity, dry_run=False)
+        installer._assert_claude_skill_projection_plan_current(claude_plan, source, claude)
+        (skills / "analyst" / "operator-note.bin").write_bytes(b"foreign postcondition drift")
+        with pytest.raises(ValueError, match="E_CANONICAL_SKILLS_RECEIPT_DRIFT"):
+            installer._assert_codex_legacy_skill_projection_plan_current(codex_plan, plan, codex, identity, dry_run=False)
+        with pytest.raises(ValueError, match="E_CANONICAL_SKILLS_RECEIPT_DRIFT"):
+            installer._assert_claude_skill_projection_plan_current(claude_plan, source, claude)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+@pytest.mark.parametrize("source_parent", ["absent", "file"])
+def test_member_partial_removal_preserves_unselected_sibling_and_required_parent(
+    tmp_path: Path, source_parent: str
+) -> None:
+    installer, source, home, skills, receipt = _member_fixture(tmp_path)
+    sibling = skills / "analyst" / "agents" / "retained.yaml"
+    sibling.write_bytes(b"unselected managed sibling\n")
+    entries = json.loads(receipt.read_bytes())["skills"]
+    entries["analyst"]["members"]["agents/retained.yaml"] = hashlib.sha256(sibling.read_bytes()).hexdigest()
+    receipt.write_bytes(installer._nonlead_receipt_bytes(entries))
+    protected = [skills / "analyst", sibling.parent, sibling, skills / "analyst" / "operator-note.bin"]
+    witnesses = {path: installer._InstallTransaction._capture_node(path) for path in protected}
+    before = _inventory(skills)
+    (source / "analyst" / "agents" / "openai.yaml").unlink()
+    (source / "analyst" / "agents").rmdir()
+    if source_parent == "file":
+        (source / "analyst" / "agents").write_bytes(b"unselected Source parent file\n")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                                member_selection=(("analyst", ("agents/openai.yaml",)),))
+    try:
+        member = plan.skills[0]
+        expected_members = dict(entries["analyst"]["members"])
+        del expected_members["agents/openai.yaml"]
+        assert member.selection == (("agents/openai.yaml", None),)
+        assert dict(member.managed_after) == expected_members
+        _apply_member_plan(installer, plan, home, skills)
+        assert not (skills / "analyst" / "agents" / "openai.yaml").exists()
+        assert all(installer._InstallTransaction._point_matches(path, node, check_file_content=True)
+                   for path, node in witnesses.items())
+        assert _inventory(skills) == {path: value for path, value in before.items()
+                                     if path not in {RECEIPT, "analyst/agents/openai.yaml"}} | {
+                                         RECEIPT: ("file", receipt.read_bytes())}
+        entries["analyst"] = {"members": expected_members}
+        assert json.loads(receipt.read_bytes())["skills"] == entries
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+def test_member_last_child_removal_retains_unselected_directory(tmp_path: Path) -> None:
+    installer, source, home, skills, receipt = _member_fixture(tmp_path)
+    entries = json.loads(receipt.read_bytes())["skills"]
+    nodes = installer._InstallTransaction._observe(skills / "analyst")
+    (source / "analyst" / "agents" / "openai.yaml").unlink()
+    (source / "analyst" / "agents").rmdir()
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                                member_selection=(("analyst", ("agents/openai.yaml",)),))
+    try:
+        member = plan.skills[0]
+        expected = dict(entries["analyst"]["members"])
+        del expected["agents/openai.yaml"]
+        assert member.selection == (("agents/openai.yaml", None),)
+        assert dict(member.managed_after) == expected
+        _apply_member_plan(installer, plan, home, skills)
+        assert not (skills / "analyst" / "agents" / "openai.yaml").exists()
+        assert all(installer._InstallTransaction._point_matches(path, node, check_file_content=True)
+                   for path, node in nodes.items() if path != skills / "analyst" / "agents" / "openai.yaml")
+        entries["analyst"] = {"members": expected}
+        assert json.loads(receipt.read_bytes())["skills"] == entries
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+@pytest.mark.parametrize("conflict", ["explicit-parent-removal", "existing-file-parent"])
+def test_member_directory_closure_refuses_parent_conflicts(tmp_path: Path, conflict: str) -> None:
+    installer, source, _home, skills, receipt = _member_fixture(tmp_path)
+    if conflict == "explicit-parent-removal":
+        (source / "analyst" / "agents" / "openai.yaml").unlink()
+        (source / "analyst" / "agents").rmdir()
+        selected = "agents"
+    else:
+        (skills / "analyst" / "assets").write_bytes(b"authenticated managed file\n")
+        entries = json.loads(receipt.read_bytes())["skills"]
+        entries["analyst"]["members"]["assets"] = hashlib.sha256(
+            (skills / "analyst" / "assets").read_bytes()).hexdigest()
+        receipt.write_bytes(installer._nonlead_receipt_bytes(entries))
+        (source / "analyst" / "assets").mkdir()
+        (source / "analyst" / "assets" / "child").write_bytes(b"selected child\n")
+        selected = "assets/child"
+    before = _inventory(skills)
+    nodes = installer._InstallTransaction._observe(skills / "analyst")
+    with pytest.raises(ValueError, match="E_CANONICAL_SKILLS_RECEIPT_INVALID: member parent"):
+        installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                             member_selection=(("analyst", (selected,)),))
+    assert _inventory(skills) == before
+    assert installer._InstallTransaction._image_matches(skills / "analyst", nodes)
+
+
+def test_member_directory_closure_and_owned_file_removal_preserve_container_identity(tmp_path: Path) -> None:
+    installer, source, home, skills, receipt = _member_fixture(tmp_path)
+    container = installer._InstallTransaction._capture_node(skills / "analyst" / "agents")
+    (source / "analyst" / "agents" / "openai.yaml").unlink()
+    (source / "analyst" / "agents").rmdir()
+    (source / "analyst" / "assets").mkdir()
+    (source / "analyst" / "assets" / "body.txt").write_bytes(b"selected new child")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                                member_selection=(("analyst", ("agents", "agents/openai.yaml", "assets/body.txt")),))
+    try:
+        member = plan.skills[0]
+        assert member.selection == (("agents", None), ("agents/openai.yaml", None),
+                                    ("assets", "directory"),
+                                    ("assets/body.txt", hashlib.sha256(b"selected new child").hexdigest()))
+        _apply_member_plan(installer, plan, home, skills)
+        assert not (skills / "analyst" / "agents" / "openai.yaml").exists()
+        assert installer._InstallTransaction._point_matches(skills / "analyst" / "agents", container)
+        assert (skills / "analyst" / "assets" / "body.txt").read_bytes() == b"selected new child"
+        members = json.loads(receipt.read_bytes())["skills"]["analyst"]["members"]
+        assert "agents" not in members and "agents/openai.yaml" not in members
+        assert members["assets"] == "directory"
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+def test_member_partial_write_retains_original_failure_and_restores_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer, source, home, skills, _receipt = _member_fixture(tmp_path)
+    before = _inventory(skills)
+    physical = installer._InstallTransaction._observe(skills / "analyst")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                                member_selection=(("analyst", ("SKILL.md",)),))
+    original = installer._InstallTransaction._write_owned_file
+    def fail_partial(self, path, descriptor, chunks, record, digest, **kwargs):
+        if path.parent != skills / "analyst":
+            return original(self, path, descriptor, chunks, record, digest, **kwargs)
+        def interrupted():
+            yield b"partial selected bytes"
+            raise OSError("injected member partial write")
+        return original(self, path, descriptor, interrupted(), record, digest, **kwargs)
+    monkeypatch.setattr(installer._InstallTransaction, "_write_owned_file", fail_partial)
+    try:
+        with pytest.raises(OSError, match="injected member partial write"):
+            _apply_member_plan(installer, plan, home, skills)
+        assert _inventory(skills) == before
+        assert installer._InstallTransaction._image_matches(skills / "analyst", physical)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+def test_member_failed_descriptor_close_attempts_final_closer_and_restores_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer, source, home, skills, _receipt = _member_fixture(tmp_path)
+    before = _inventory(skills)
+    physical = installer._InstallTransaction._observe(skills / "analyst")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True,
+                                                member_selection=(("analyst", ("SKILL.md",)),))
+    original_write = installer._InstallTransaction._write_owned_file
+    original_close = installer.os.close
+    captured = {"descriptor": None, "attempts": 0}
+    def capture(self, path, descriptor, *args, **kwargs):
+        result = original_write(self, path, descriptor, *args, **kwargs)
+        if path.parent == skills / "analyst":
+            captured["descriptor"] = descriptor
+        return result
+    def fail_first_close(descriptor):
+        if descriptor == captured["descriptor"]:
+            captured["attempts"] += 1
+            if captured["attempts"] == 1:
+                raise OSError("injected member descriptor close")
+        return original_close(descriptor)
+    monkeypatch.setattr(installer._InstallTransaction, "_write_owned_file", capture)
+    monkeypatch.setattr(installer.os, "close", fail_first_close)
+    try:
+        with pytest.raises(OSError, match="injected member descriptor close"):
+            _apply_member_plan(installer, plan, home, skills)
+        assert captured["attempts"] >= 2
+        assert _inventory(skills) == before
+        assert installer._InstallTransaction._image_matches(skills / "analyst", physical)
+    finally:
+        installer._discard_canonical_skills_plan(plan)

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-15
 
+- **Selective skill updates preserve managed members and protected files.** The canonical installer now reads strict whole-tree or member receipts at the same location and carries one selected managed-after plan through both provider receivers and receipt publication. Partial removals preserve unselected parents and siblings, while necessary new directories remain explicit effects; unknown files are never adopted. Drifting legacy receipts still require genuine historical receiving before conversion.
+
 - **Skill validation follows the canonical installed skill owner.** Both provider validators now inspect the shared canonical skill tree and its real installed projections, so valid shared installations are accepted without treating the historical Claude comparison tree as a second live owner. Provider-specific script checks, protected files and genuine missing or inconsistent inputs retain their existing checks.
 
 ## 2026-10-14
