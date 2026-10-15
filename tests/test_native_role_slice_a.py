@@ -5641,3 +5641,91 @@ def test_native_private_descriptor_failure_preserves_primary_and_creator_custody
                 os.fstat(creator_descriptors[0])
         transaction._dispose_image(target, created)
         assert not target.exists()
+
+
+def test_runtime_completed_recurrence_keeps_every_witness_and_same_endpoint_retarget(tmp_path: Path) -> None:
+    backing = tmp_path / "backing"
+    backing.mkdir()
+    (backing / "leaf").mkdir()
+    (backing / "leaf/SKILL.md").write_bytes(b"ordinary selected role")
+    alias, again = tmp_path / "alias", backing / "again"
+    kind = "junction" if os.name == "nt" else "symlink"
+    _make_runtime_directory_link(alias, backing, kind)
+    _make_runtime_directory_link(again, alias, kind)
+    logical = alias / "again/again/leaf"
+    expected = logical.resolve(strict=True)
+    authority = LinkedRuntimeSubrootAuthority.bind(logical, scope="global",
+        trusted_global_roots=(logical,), allow_linked_ancestors=True)
+    assert authority is not None and authority.resolved_root == expected == backing / "leaf"
+    assert tuple(Path(row[0]) for row in authority.link_chain) == (alias, again, alias, again, alias)
+    assert tuple(row[2] for row in authority.link_chain) == tuple(os.readlink(path) for path in (alias, again, alias, again, alias))
+    authority.assert_current()
+    assert authority.ordinary_file(Path("SKILL.md")).read_bytes() == b"ordinary selected role"
+    if kind == "junction":
+        again.rmdir()
+    else:
+        again.unlink()
+    _make_runtime_directory_link(again, backing, kind)
+    assert logical.resolve(strict=True) == expected
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_IDENTITY_CHANGED"):
+        authority.assert_current()
+
+
+def test_runtime_growing_active_target_refuses_at_first_dependency_reentry(tmp_path: Path, monkeypatch) -> None:
+    growing = tmp_path / "growing"
+    try:
+        growing.symlink_to(growing / "tail", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"growing directory symlink unavailable: {exc}")
+    readlink = os.readlink
+    encountered = []
+    def observe(path):
+        encountered.append(Path(path))
+        if len(encountered) > 2:
+            pytest.fail("an active target must refuse at its first repeated dependency")
+        return readlink(path)
+    monkeypatch.setattr(runtime_subroots.os, "readlink", observe)
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_TARGET_INVALID"):
+        LinkedRuntimeSubrootAuthority.bind(growing, scope="global", trusted_global_roots=(growing,))
+    assert encountered == [growing, growing]
+
+
+@pytest.mark.parametrize("encounters", (64, 65))
+def test_runtime_complete_finite_chain_has_no_wrapper_encounter_cutoff(tmp_path: Path, monkeypatch, encounters: int) -> None:
+    # Controlled component observations distinguish the retired wrapper budget
+    # from actual platform lookup limits; this is not native authority evidence.
+    links, terminal = tmp_path / "links", tmp_path / "terminal"
+    links.mkdir()
+    terminal.mkdir()
+    paths = tuple(links / f"link-{index}" for index in range(encounters))
+    targets = dict(zip(paths, (*paths[1:], terminal)))
+    metadata = {path: SimpleNamespace(st_dev=1, st_ino=index + 1,
+        st_mode=stat.S_IFLNK | 0o777, st_file_attributes=0) for index, path in enumerate(paths)}
+    lstat, readlink = Path.lstat, os.readlink
+    def observed_stat(path, *args, **kwargs):
+        return metadata[path] if path in metadata else lstat(path, *args, **kwargs)
+    def observed_target(path, *args, **kwargs):
+        selected = Path(path)
+        return str(targets[selected]) if selected in targets else readlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "lstat", observed_stat)
+    monkeypatch.setattr(runtime_subroots.os, "readlink", observed_target)
+    resolved, witnesses = runtime_subroots._resolve_linked_directory(paths[0])
+    assert resolved == terminal and len(witnesses) == encounters
+    assert tuple(Path(row[0]) for row in witnesses) == paths
+    assert tuple(row[2] for row in witnesses) == tuple(str(targets[path]) for path in paths)
+
+
+def test_directory_readlink_failure_is_not_missing_and_retains_native_cause(tmp_path: Path, monkeypatch) -> None:
+    target, logical = tmp_path / "target", tmp_path / "logical"
+    target.mkdir()
+    try:
+        logical.symlink_to(target, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    primary = FileNotFoundError("link vanished after its successful lstat")
+    def fail_read(path):
+        raise primary
+    monkeypatch.setattr(runtime_subroots.os, "readlink", fail_read)
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_TARGET_INVALID") as caught:
+        LinkedRuntimeSubrootAuthority.bind(logical, scope="global", trusted_global_roots=(logical,))
+    assert caught.value.__cause__ is primary

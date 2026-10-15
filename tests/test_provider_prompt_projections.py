@@ -1059,7 +1059,7 @@ def test_global_scope_rejects_linked_leaf_below_authorized_canonical_agents_root
 
 def test_linked_runtime_subroots_helper_is_pinned_to_canonical_digest() -> None:
     validator = _load_validator()
-    expected_digest = "7df6b9d36875eb4588fee959e29dc46adac3ed1753839031ae5d04885b28fb11"
+    expected_digest = "eaf91693f8ccd63c23206e95175f353b503b9cb45e643a25fad82f918fbb26e0"
 
     assert validator._LINKED_RUNTIME_SUBROOTS_SHA256 == expected_digest
     assert _sha((ROOT / "scripts" / "linked_runtime_subroots.py").read_bytes()) == expected_digest

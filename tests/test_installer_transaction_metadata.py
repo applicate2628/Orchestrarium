@@ -2371,5 +2371,107 @@ class BorrowedOpeningTests(unittest.TestCase):
                     self.assertFalse(path.exists())
 
 
+class ScalarLinkedTraversalTests(unittest.TestCase):
+    setUp = CreatedDirectorySnapshotHandoffTests.setUp
+
+    def link(self, path, target, *, directory=False):
+        try:
+            path.symlink_to(target, target_is_directory=directory)
+        except OSError as exc:
+            self.skipTest(f"scalar symlink unavailable: {exc}")
+
+    def test_actual_file_parent_alias_linked_leaf_and_missing_suffix_contracts(self):
+        storage = self.root / "storage"
+        storage.mkdir()
+        file = storage / "data.bin"
+        file.write_bytes(b"actual scalar payload")
+        alias = self.root / "alias"
+        self.link(alias, storage, directory=True)
+        linked = storage / "selected.link"
+        self.link(linked, Path("data.bin"))
+        transaction = PI._InstallTransaction([], enabled=True)
+        cases = (
+            (file, file, file, False),
+            (alias / "data.bin", file, file, False),
+            (alias / "selected.link", file, linked, False),
+            (alias / "missing.bin", storage / "missing.bin", storage / "missing.bin", True),
+            (alias / "absent/nested/new.bin", storage / "absent/nested/new.bin", storage / "absent/nested/new.bin", True),
+        )
+        for logical, expected, selected_leaf, missing in cases:
+            with self.subTest(logical=logical):
+                actual, origin, components, leaf = transaction._bind_scalar_storage(logical)
+                self.assertEqual(actual, expected)
+                self.assertEqual(leaf, selected_leaf)
+                self.assertEqual(origin is None, missing)
+                if not missing:
+                    self.assertEqual(actual, logical.resolve(strict=True))
+                    self.assertEqual(origin, transaction._capture_node(file))
+                    self.assertEqual(origin.data, hashlib.sha256(b"actual scalar payload").hexdigest())
+                    if os.name == "nt":
+                        self.assertIsNotNone(origin.native_proof)
+                self.assertTrue(components)
+                for path, node in components:
+                    self.assertEqual(node, transaction._capture_node(path))
+                if logical != file:
+                    self.assertIn(alias, dict(components))
+                if logical == alias / "selected.link":
+                    self.assertEqual(dict(components)[linked].data, os.readlink(linked))
+                if missing:
+                    self.assertFalse(actual.exists())
+                    self.assertNotIn(storage / "absent", dict(components))
+        self.assertEqual(file.read_bytes(), b"actual scalar payload")
+
+    @unittest.skipUnless(os.name == "nt", "native file-id proof is Windows-specific")
+    def test_scalar_binding_rechecks_full_native_proof_not_only_python_identity(self):
+        file, other = self.root / "file", self.root / "other"
+        file.write_bytes(b"same")
+        other.write_bytes(b"same")
+        transaction = PI._InstallTransaction([], enabled=True)
+        capture = transaction._capture_node
+        foreign_proof = capture(other).native_proof
+        original = capture(file)
+        self.assertNotEqual(original.native_proof, foreign_proof)
+        def wrong_proof(path, **kwargs):
+            node = capture(path, **kwargs)
+            return replace(node, native_proof=foreign_proof) if path == file else node
+        with patch.object(transaction, "_capture_node", wrong_proof):
+            with self.assertRaisesRegex(ValueError, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar pointer drift"):
+                transaction._bind_scalar_storage(file)
+        self.assertEqual(capture(file), original)
+
+    def test_same_endpoint_raw_link_retarget_during_native_receiving_refuses(self):
+        file, link = self.root / "data.bin", self.root / "selected.link"
+        file.write_bytes(b"untouched referent")
+        self.link(link, Path("data.bin"))
+        transaction = PI._InstallTransaction([], enabled=True)
+        capture = transaction._capture_node
+        changed = []
+        def retarget_after_capture(path, **kwargs):
+            node = capture(path, **kwargs)
+            if path == link and not changed:
+                link.unlink()
+                self.link(link, "." + os.sep + "data.bin")
+                changed.append(True)
+            return node
+        with patch.object(transaction, "_capture_node", retarget_after_capture):
+            with self.assertRaisesRegex(ValueError, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar raw target"):
+                transaction._bind_scalar_storage(link)
+        self.assertEqual(changed, [True])
+        self.assertEqual(link.resolve(strict=True), file)
+        self.assertEqual(file.read_bytes(), b"untouched referent")
+
+    def test_scalar_readlink_failure_after_lstat_remains_native_failure(self):
+        file, link = self.root / "file", self.root / "link"
+        file.write_bytes(b"untouched")
+        self.link(link, file)
+        transaction = PI._InstallTransaction([], enabled=True)
+        primary = FileNotFoundError("link vanished during readlink")
+        with patch.object(PI.os, "readlink", side_effect=primary):
+            with self.assertRaises(FileNotFoundError) as caught:
+                transaction._bind_scalar_storage(link)
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(file.read_bytes(), b"untouched")
+
+
 if __name__ == "__main__":
     unittest.main()

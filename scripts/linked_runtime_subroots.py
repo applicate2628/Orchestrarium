@@ -13,7 +13,6 @@ from pathlib import Path
 import stat
 
 
-MAX_LINK_DEPTH = 64
 Identity = tuple[int, int, int, int]
 LinkWitness = tuple[str, Identity, str, str]
 
@@ -26,7 +25,10 @@ def _lexical_absolute(path: Path) -> Path:
 
 
 def _identity(path: Path) -> Identity:
-    metadata = path.lstat()
+    return _metadata_identity(path.lstat())
+
+
+def _metadata_identity(metadata: os.stat_result) -> Identity:
     return (
         metadata.st_dev,
         metadata.st_ino,
@@ -69,45 +71,86 @@ def _path_walk(path: Path) -> tuple[Path, list[str]]:
     return Path(path.anchor), list(path.parts[1:])
 
 
-def _resolve_linked_directory(logical_root: Path) -> tuple[Path, tuple[LinkWitness, ...]]:
-    """Follow only the declared root's chain and require an ordinary directory."""
-
-    selected = _lexical_absolute(logical_root)
+def _walk_linked_path(selected: Path, *, read_link):
+    """Resolve each target completely before its saved caller continuation."""
     current, pending = _path_walk(selected)
-    witnesses: list[LinkWitness] = []
-    seen: set[str] = set()
-    while pending:
-        candidate = current / pending.pop(0)
+    observations = []
+    observed = {}
+    active = set()
+    selected_leaf = None
+    remaining = len(pending)
+
+    def observe(path, metadata):
+        kind = _link_kind(path, metadata)
+        raw_target = read_link(path) if kind is not None else None
+        key = os.path.normcase(str(path))
+        binding = (_metadata_identity(metadata), raw_target, kind)
+        previous = observed.get(key)
+        if previous is not None and previous != binding:
+            raise ValueError("E_RUNTIME_SUBROOT_IDENTITY_CHANGED")
+        observed[key] = binding
+        observations.append((path, metadata, raw_target, kind))
+        return key, raw_target, kind
+
+    observe(current, current.lstat())
+    frames = [(current, list(reversed(pending)), None)]
+    while frames:
+        current, pending, target_key = frames[-1]
+        if not pending:
+            frames.pop()
+            if target_key is not None:
+                active.remove(target_key)
+            if not frames:
+                return current, tuple(observations), selected_leaf or current, False
+            _previous, continuation, parent_key = frames[-1]
+            frames[-1] = (current, continuation, parent_key)
+            continue
+        candidate = current / pending.pop()
+        remaining -= 1
+        if remaining == 0 and selected_leaf is None:
+            selected_leaf = candidate
         try:
             metadata = candidate.lstat()
-        except FileNotFoundError as exc:
-            raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID") from exc
-        kind = _link_kind(candidate, metadata)
+        except FileNotFoundError:
+            suffix = list(reversed(pending))
+            for _parent, continuation, _key in reversed(frames[:-1]):
+                suffix.extend(reversed(continuation))
+            missing = candidate.joinpath(*suffix)
+            return missing, tuple(observations), selected_leaf or missing, True
+        key, raw_target, kind = observe(candidate, metadata)
         if kind is not None:
-            if len(witnesses) >= MAX_LINK_DEPTH:
-                raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID")
-            key = os.path.normcase(str(candidate))
-            if key in seen:
-                raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID")
-            seen.add(key)
-            try:
-                raw_target = os.readlink(candidate)
-            except OSError as exc:
-                raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID") from exc
-            witnesses.append((str(candidate), _identity(candidate), raw_target, kind))
-            current, pending = _path_walk(
-                _link_target(candidate, raw_target).joinpath(*pending)
-            )
+            if key in active:
+                raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID: active link cycle")
+            active.add(key)
+            root, target = _path_walk(_link_target(candidate, raw_target))
+            observe(root, root.lstat())
+            remaining += len(target)
+            frames.append((root, list(reversed(target)), key))
             continue
-        if pending:
-            if not stat.S_ISDIR(metadata.st_mode):
-                raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID")
-            current = candidate
-            continue
-        if not stat.S_ISDIR(metadata.st_mode):
-            raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID")
-        return candidate, tuple(witnesses)
+        if remaining and not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID: parent type")
+        frames[-1] = (candidate, pending, target_key)
     raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID")
+
+
+def _resolve_linked_directory(logical_root: Path) -> tuple[Path, tuple[LinkWitness, ...]]:
+    """Require this traversal's terminal directory and retain every link witness."""
+    def read_link(path):
+        try:
+            return os.readlink(path)
+        except OSError as exc:
+            raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID") from exc
+
+    try:
+        resolved, observations, _leaf, missing = _walk_linked_path(
+            _lexical_absolute(logical_root), read_link=read_link)
+    except FileNotFoundError as exc:
+        raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID") from exc
+    if missing or not stat.S_ISDIR(observations[-1][1].st_mode):
+        raise ValueError("E_RUNTIME_SUBROOT_TARGET_INVALID")
+    witnesses = tuple((str(path), _metadata_identity(metadata), raw_target, kind)
+                      for path, metadata, raw_target, kind in observations if kind is not None)
+    return resolved, witnesses
 
 
 def _logical_leaf_link_kind(selected: Path) -> str | None:

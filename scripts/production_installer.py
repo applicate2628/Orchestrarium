@@ -2415,41 +2415,38 @@ class _InstallTransaction:
         return node.python_identity[:2] == identity[:2] and node.native_proof == proof
 
     def _bind_scalar_storage(self, logical: Path) -> tuple[Path, _PhysicalNode | None, tuple[tuple[Path, _PhysicalNode], ...], Path]:
-        """Bind the components actually traversed to this one selected scalar."""
+        """Receive the shared traversal through this owner's full native captures."""
         geometry = _linked_runtime_subroots_module(Path(__file__).resolve().parent.parent)
-        current, pending = geometry._path_walk(Path(os.path.abspath(logical)))
-        components = {current: self._capture_node(current)}
-        seen = set()
-        leaf = None
-        while pending:
-            candidate = current / pending.pop(0)
-            if not pending and leaf is None:
-                leaf = candidate
-            try:
-                metadata = candidate.lstat()
-            except FileNotFoundError:
-                return candidate.joinpath(*pending), None, tuple(components.items()), leaf or candidate.joinpath(*pending)
-            kind = geometry._link_kind(candidate, metadata)
+        try:
+            storage, observations, leaf, missing = geometry._walk_linked_path(Path(os.path.abspath(logical)), read_link=os.readlink)
+        except ValueError as exc:
+            if str(exc).startswith(("E_RUNTIME_SUBROOT_TARGET_INVALID", "E_RUNTIME_SUBROOT_IDENTITY_CHANGED")):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar traversal") from exc
+            raise
+        components = {}
+        for candidate, metadata, raw_target, kind in observations:
             node = self._capture_node(candidate)
-            if kind is not None:
-                key = os.path.normcase(str(candidate))
-                if key in seen or len(seen) >= geometry.MAX_LINK_DEPTH:
-                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar link cycle")
-                seen.add(key)
-                components[candidate] = node
-                current, pending = geometry._path_walk(geometry._link_target(candidate, node.data).joinpath(*pending))
-                components.setdefault(current, self._capture_node(current))
-                continue
-            if pending:
-                if node.kind != "directory":
-                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar parent type")
-                components[candidate] = node
-                current = candidate
-                continue
-            if node.kind != "file":
-                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar storage type")
-            return candidate, node, tuple(components.items()), leaf or candidate
-        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar selection")
+            expected_kind = ("link" if kind == "symlink" else "reparse" if kind == "junction" else
+                             "directory" if stat.S_ISDIR(metadata.st_mode) else "file" if stat.S_ISREG(metadata.st_mode) else None)
+            if node.python_identity != geometry._metadata_identity(metadata) or node.kind != expected_kind:
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar observed component")
+            if kind is not None and (os.readlink(candidate) != raw_target or (kind == "symlink" and node.data != raw_target)):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar raw target")
+            previous = components.get(candidate)
+            if previous is not None and previous != node:
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar repeated component")
+            components[candidate] = node
+        for candidate, node in components.items():
+            if not self._point_matches(candidate, node, check_file_content=node.kind == "file"):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar pointer drift")
+        if missing:
+            if not self._node_metadata_matches(storage, None):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar missing storage")
+            return storage, None, tuple(components.items()), leaf
+        node = components.pop(storage)
+        if node.kind != "file":
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar storage type")
+        return storage, node, tuple(components.items()), leaf
 
     def _bind_scalar_parent(self, path: Path, expected: _PhysicalNode, resources: ExitStack):
         if os.name == "nt":
