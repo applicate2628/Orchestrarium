@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-15
 
+- **Publication consent batches keep mandatory scan checks.** Genuine answer batches are interpreted atomically at one reply owner, and fresh generic consent reaches the existing repository binding and authoritative unpublished-range scan in both public handlers. Quoted markers retain their original meaning; question text, conflicts and revocation do not grant authority. Required receipts, safety checks and human publication review remain intact.
+
 - **Native reviews distinguish completion from diagnostic health.** Codex wrappers now require a coherent completed native turn before accepting review text. Auxiliary diagnostics remain visible without independently rejecting a completed task; genuine terminal, privacy, capture, receipt and task failures still reject. Full safe cause notes reach existing receipts, and optional emitted observations disclose their limits without becoming a blanket task gate. Both provider dispatch contracts and shared transport fingerprints stay synchronized.
 
 - **Simplify by responsibility while preserving justified boundaries.** Shared guidance now judges representations, validation and forwarding by the required guarantees and concrete value they own, so useful thin adapters and meaningful domain structures survive simplification while redundant checks and reboxing can be removed. Both provider operating models defer artifact invalidation to their own canonical handoff rule, preserving accepted producing baselines and affected re-review without duplicating procedures.

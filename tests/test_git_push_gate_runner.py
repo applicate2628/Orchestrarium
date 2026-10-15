@@ -10,6 +10,7 @@ import subprocess
 import sys
 import ast
 import hashlib
+import dataclasses
 from collections import Counter
 from pathlib import Path
 from unittest import mock
@@ -53,7 +54,7 @@ PREFLIGHT_REASON_BRANCHES = {
     "PFP-ALLOW-NON-PUSH": ("ALLOW_FINAL", "NONE"),
     "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE": ("ABSTAIN", "NONE"),
     "PFP-ALLOW-DRY-RUN": ("ALLOW_FINAL", "NONE"),
-    "PFP-ALLOW-USER-APPROVED": ("ALLOW_FINAL", "NONE"),
+    "PFP-CONSENT-GENERIC": ("DEFER", "EVALUATE_HEAVY"),
     "PFP-ALLOW-MALFORMED": ("ALLOW_FINAL", "NONE"),
     "PFP-DENY-PARSE": ("DEFER", "RENDER_DENY"),
     "PFP-DENY-TRANSCRIPT": ("DEFER", "RENDER_DENY"),
@@ -67,9 +68,9 @@ PREFLIGHT_REASON_PRESENT_FIELDS = {
     "PFP-ALLOW-NON-PUSH": frozenset(("command", "dialect", "parsed")),
     "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE": frozenset(("command", "dialect", "parsed")),
     "PFP-ALLOW-DRY-RUN": frozenset(("command", "dialect", "parsed")),
-    "PFP-ALLOW-USER-APPROVED": frozenset((
+    "PFP-CONSENT-GENERIC": frozenset((
         "command", "dialect", "transcript_path", "parsed",
-        "current_turn_status", "generic_decision",
+        "current_turn_status", "generic_decision", "repository_workdir", "repository_workdir_source",
     )),
     "PFP-ALLOW-MALFORMED": frozenset(),
     "PFP-DENY-PARSE": frozenset(("command", "dialect", "parsed", "failure_id")),
@@ -386,6 +387,7 @@ def _builder_positive_results(module, tmp_path: Path):
     )
     approved = module.build_preflight({
         "tool_name": "Bash",
+        "cwd": str(ROOT),
         "tool_input": {"command": "git push origin main"},
         "transcript_path": str(approved_transcript),
     })
@@ -451,7 +453,7 @@ def test_r5_preflight_reason_branches_are_exhaustive_and_coherent(tmp_path: Path
                 raise AssertionError(
                     f"R5-BRANCH-FIELD-ACCEPTED:{reason_id}:{field}"
                 )
-        if reason_id not in {"PFP-ALLOW-USER-APPROVED", "PFP-HEAVY"}:
+        if reason_id not in {"PFP-CONSENT-GENERIC", "PFP-HEAVY"}:
             try:
                 module.validate_preflight_result(
                     result._replace(push_instruction=True)
@@ -610,9 +612,272 @@ def _load_gate_target(target: GateTarget, suffix: str):
             sys.path.remove(script_dir)
 
 
+def _batch_user(answers):
+    payload = [{"questionItemId": f"synthetic-{index}", "question": question, "answer": answer}
+               for index, (question, answer) in enumerate(answers)]
+    return {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text":
+        "<send_user_message_question_reply>\n" + json.dumps(payload, ensure_ascii=False)
+        + "\n</send_user_message_question_reply>"}]}}
+
+
+def test_batch_reply_valid_answers_reach_current_generic_consent(tmp_path):
+    _common, preflight, _policy, _runner = _load_gate_target(TARGETS[0], "batch_red")
+    answer = "[approve-publication] — отправить abcdef01 в checkpoint/test-rebaseline-20260912"
+    assert len(answer) == 80
+    for index, answers in enumerate((
+        (("Remove temporary worktree?", "Yes"), ("Approve publication?", answer)),
+        (("Approve publication?", answer), ("Unrelated long question" * 30, "Neutral " * 100)),
+    )):
+        transcript = tmp_path / f"batch-{index}.jsonl"
+        transcript.write_text(json.dumps(_batch_user(answers)) + "\n", encoding="utf-8")
+        result = preflight.build_preflight({
+            "tool_name": "Bash", "cwd": str(ROOT),
+            "tool_input": {"command": "git push origin HEAD:refs/heads/topic"},
+            "transcript_path": str(transcript),
+        })
+        assert (result.outcome, result.reason_id, result.continuation) == (
+            "DEFER", "PFP-CONSENT-GENERIC", "EVALUATE_HEAVY",
+        )
+
+
+def test_batch_disposition_preserves_atomic_answer_boundaries(tmp_path):
+    _common, preflight, policy, _runner = _load_gate_target(TARGETS[0], "batch_atomic")
+    generic = "[approve-publication]"
+    simple = "[approve-pr-publication]"
+    targeted = "[approve-pr-publication:v1 pr=https://github.com/acme/project/pull/7]"
+    other = "[approve-pr-publication:v1 pr=https://github.com/acme/project/pull/8]"
+    revoke = "[revoke-pr-publication:v1]"
+    malformed = "[approve-pr-publication:v1 pr=not-a-pr]"
+    for answers, expected in (
+        ((generic, "Neutral"), "generic"),
+        (("[approve-", "publication]"), "neutral"),
+        (("YES", "NO"), "neutral"),
+        ((generic, simple), "malformed"),
+        ((targeted, other), "malformed"),
+        ((targeted, "`[approve-pr-publication pr=https://github.com/acme/project/pull/7]`"), "targeted"),
+        ((generic, malformed), "malformed"),
+        ((generic, revoke), "revoked"),
+        ((malformed, revoke), "revoked"),
+    ):
+        for order in (answers, tuple(reversed(answers))):
+            entry = _batch_user(tuple(("Question quotes " + generic, value) for value in order))
+            reply = preflight.extract_publication_user_reply(entry)
+            assert reply.publication_action()[0] == expected
+            assert reply.text == ""
+            reducer = policy._PrGrantReducer(str(tmp_path))
+            reducer.consume(entry, json.dumps(entry).encode("utf-8") + b"\n")
+            assert reducer.record_position == 1
+            if expected in {"malformed", "revoked"}:
+                assert reducer.state == expected and reducer.grant is None
+            if expected == "revoked":
+                assert reducer.last_genuine_user_position == 0
+    valid = {"questionItemId": "same", "question": generic, "answer": revoke}
+    invalid = {"questionItemId": "same", "question": "Question", "answer": generic, "extra": True}
+    entry = _batch_user(())
+    entry["message"]["content"][0]["text"] = "<send_user_message_question_reply>\n" + json.dumps([valid, invalid]) + "\n</send_user_message_question_reply>"
+    reply = preflight.extract_publication_user_reply(entry)
+    assert reply.kind == "recognized-malformed" and reply.publication_action()[0] == "revoked"
+    for answers, expected in (((targeted, targeted), "targeted"), ((targeted, other), "malformed")):
+        members = [{"questionItemId": "same-id", "question": "Metadata only", "answer": value} for value in answers]
+        entry["message"]["content"][0]["text"] = "<send_user_message_question_reply>\n" + json.dumps(members) + "\n</send_user_message_question_reply>"
+        assert preflight.extract_publication_user_reply(entry).publication_action()[0] == expected
+
+
+def test_batch_reducer_retains_original_record_and_standing_chronology(tmp_path):
+    _common, preflight, policy, _runner = _load_gate_target(TARGETS[0], "batch_chronology")
+    batch = _batch_user((("Unrelated", "Neutral"), ("Approve?", "[approve-pr-publication]")))
+    raw = json.dumps(batch).encode("utf-8") + b"\n"
+    reducer = policy._PrGrantReducer(str(tmp_path))
+    reducer.consume(batch, raw)
+    state, intent = reducer.finish()
+    assert state == "simple" and intent.record == 1
+    assert intent.sha256 == hashlib.sha256(raw).hexdigest() and reducer.record_position == 1
+    revoke = _batch_user((("Revoke?", "[revoke-pr-publication:v1]"), ("Unrelated", "Neutral")))
+    transcript = tmp_path / "history.jsonl"
+    malformed = _batch_user((("Approve?", "[approve-pr-publication:v1 invalid]"),))
+    for later, expected in ((revoke, "revoked"), (malformed, "malformed")):
+        transcript.write_bytes(raw + json.dumps(later).encode("utf-8") + b"\n")
+        assert policy._derive_pr_grant([batch, later], str(tmp_path)) == (expected, None)
+        assert policy._stream_stable_pr_grant(str(transcript), str(tmp_path)) == (expected, None, "found")
+    pending = policy._PrGrantReducer(str(tmp_path))
+    pending.consume(_batch_user((("Approve?", "[approve-pr-publication:v1 pr=7]"),)))
+    assert pending.pending_numeric is not None
+    pending.consume(_batch_user((("One", "Neutral"), ("Two", "Also neutral"))))
+    assert pending.finish() == ("malformed", None)
+    assert pending.record_position == 2 and pending.last_genuine_user_position == 1
+
+
+def test_fresh_generic_consent_public_handlers_reach_refusing_scanner(tmp_path):
+    target = TARGETS[0]
+    for surface in ("runner", "direct"):
+        _common, preflight, policy, runner = _load_gate_target(target, f"mandatory_scan_{surface}")
+        transcript = tmp_path / f"fresh-{surface}.jsonl"
+        transcript.write_text(json.dumps({"type": "user", "message": {
+            "role": "user", "content": [{"type": "text", "text": "[approve-publication]"}],
+        }}) + "\n", encoding="utf-8")
+        envelope = {"tool_name": "Bash", "cwd": str(ROOT), "tool_input": {
+            "command": "git push origin HEAD:refs/heads/topic"}, "transcript_path": str(transcript)}
+        binding = policy.PushScanBinding("generic", "origin", "refs/heads/topic", "a" * 40, "a" * 40)
+        observed = []
+        def refused(actual_binding, *_args):
+            observed.append(actual_binding)
+            raise policy.PrRouteDenied("PGG-SCAN-PROVENANCE")
+        output = io.StringIO()
+        with mock.patch.object(preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
+             mock.patch.object(policy, "read_transcript_history", side_effect=AssertionError("irrelevant history read")), \
+             mock.patch.object(policy, "_resolve_executable", return_value="synthetic-git"), \
+             mock.patch.object(policy, "_prove_repository_root", side_effect=lambda path, _git: path), \
+             mock.patch.object(policy, "_resolve_generic_scan_binding", return_value=binding), \
+             mock.patch.object(policy, "_run_authoritative_scan", side_effect=refused), \
+             mock.patch.object(runner, "_load_preflight", return_value=(target.runner_path, preflight)), \
+             mock.patch.object(runner, "_load_policy", return_value=policy), \
+             contextlib.redirect_stdout(output):
+            result = runner.main() if surface == "runner" else policy.main()
+        assert observed == [binding]
+        assert result == 0
+        specific = json.loads(output.getvalue())["hookSpecificOutput"]
+        assert specific["permissionDecision"] == "deny"
+        assert "PGG-SCAN-PROVENANCE" in specific["permissionDecisionReason"]
+
+
+def test_fresh_generic_consent_cannot_bypass_grammar_or_current_binding(tmp_path):
+    for surface in ("runner", "direct"):
+        for command, failure_id, reaches_binding in (
+            ("git push --force origin HEAD:refs/heads/topic", "PGG-PUSH-OPTION", False),
+            ("git push origin HEAD:refs/heads/topic", "PGG-RANGE-TIP-BINDING", True),
+        ):
+            target = TARGETS[0]
+            _common, preflight, policy, runner = _load_gate_target(target, f"refused_{surface}_{failure_id}")
+            transcript = tmp_path / f"{surface}-{failure_id}.jsonl"
+            transcript.write_text(json.dumps(_batch_user((("Approve?", "[approve-publication]"),))) + "\n", encoding="utf-8")
+            envelope = {"tool_name": "Bash", "cwd": str(ROOT), "tool_input": {
+                "command": command}, "transcript_path": str(transcript)}
+            output = io.StringIO()
+            with mock.patch.object(preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
+                 mock.patch.object(policy, "read_transcript_history", side_effect=AssertionError("irrelevant history read")), \
+                 mock.patch.object(policy, "_resolve_executable", return_value="synthetic-git"), \
+                 mock.patch.object(policy, "_prove_repository_root", side_effect=lambda path, _git: path), \
+                 mock.patch.object(policy, "_resolve_generic_scan_binding", side_effect=policy.PrRouteDenied(failure_id)) as binding, \
+                 mock.patch.object(policy, "_run_authoritative_scan", side_effect=AssertionError("invalid binding reached scan")), \
+                 mock.patch.object(runner, "_load_preflight", return_value=(target.runner_path, preflight)), \
+                 mock.patch.object(runner, "_load_policy", return_value=policy), \
+                 contextlib.redirect_stdout(output):
+                result = runner.main() if surface == "runner" else policy.main()
+            assert result == 0
+            specific = json.loads(output.getvalue())["hookSpecificOutput"]
+            assert specific["permissionDecision"] == "deny" and failure_id in specific["permissionDecisionReason"]
+            assert binding.call_count == int(reaches_binding)
+
+
+def test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(tmp_path):
+    """No push: seed a private file remote before creating one unpublished commit."""
+    git = str(Path(shutil.which("git") or "").resolve(strict=True))
+    repo, remote, empty = tmp_path / "repo", tmp_path / "remote.git", tmp_path / "empty"
+    empty.mkdir()
+    evidence_root = Path(os.environ.get("ORCHESTRARIUM_PUBLICATION_TEST_EVIDENCE_DIR", str(tmp_path / "evidence")))
+    evidence_root.mkdir(parents=True, exist_ok=False)
+    sequence = []
+    environment = {
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull, "GIT_TEMPLATE_DIR": str(empty),
+    }
+    def run_git(*args):
+        argv = [git, "-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid",
+                "-c", f"core.hooksPath={empty}", *map(str, args)]
+        result = subprocess.run(argv, capture_output=True, timeout=20)
+        index = len(sequence)
+        # Keep complete acquired bytes before decoding/assertion or fixture cleanup.
+        (evidence_root / f"git-{index}.stdout").write_bytes(result.stdout)
+        (evidence_root / f"git-{index}.stderr").write_bytes(result.stderr)
+        sequence.append({"args": result.args, "returncode": result.returncode})
+        (evidence_root / "git-commands.json").write_text(json.dumps(sequence, indent=2) + "\n", encoding="utf-8")
+        assert result.returncode == 0, result.stderr
+        return result.stdout.decode("utf-8").strip()
+    with mock.patch.dict(os.environ, environment):
+        run_git("init", "-q", "--initial-branch=topic", repo)
+        (repo / "seed.txt").write_text("synthetic clean baseline\n", encoding="utf-8")
+        run_git("-C", repo, "add", "seed.txt")
+        run_git("-C", repo, "commit", "-q", "-m", "synthetic baseline")
+        run_git("clone", "-q", "--bare", repo, remote)
+        run_git("-C", repo, "remote", "add", "origin", remote.as_uri())
+        (repo / "next.txt").write_text("synthetic unpublished content\n", encoding="utf-8")
+        run_git("-C", repo, "add", "next.txt")
+        run_git("-C", repo, "commit", "-q", "-m", "synthetic unpublished change")
+        head = run_git("-C", repo, "rev-parse", "HEAD")
+        for surface in ("runner", "direct"):
+            target = TARGETS[0]
+            _common, preflight, policy, runner = _load_gate_target(target, f"real_scan_{surface}")
+            transcript = tmp_path / f"real-{surface}.jsonl"
+            transcript.write_text(json.dumps(_batch_user((("Unrelated", "Neutral"), ("Approve?", "[approve-publication]")))) + "\n", encoding="utf-8")
+            envelope = {"tool_name": "Bash", "cwd": str(repo), "tool_input": {
+                "command": "git push origin HEAD:refs/heads/topic"}, "transcript_path": str(transcript)}
+            actual_scan = policy._run_authoritative_scan
+            observed = []
+            def scan(*args):
+                evidence = actual_scan(*args)
+                observed.append(evidence)
+                execution = evidence.execution
+                (evidence_root / f"{surface}-scan.stdout").write_bytes(execution.stdout)
+                (evidence_root / f"{surface}-scan.stderr").write_bytes(execution.stderr)
+                metadata = {
+                    "exitCode": execution.exit_code, "boundedCompletion": execution.bounded_completion,
+                    "binding": evidence.binding._asdict(), "receipt": evidence.parsed_outcome.receipt._asdict(),
+                    "pendingState": execution.pending.state.value, "consumptionId": evidence.consumption_id,
+                    "invocationId": evidence.invocation_id,
+                    "settlement": dataclasses.asdict(execution.settlement.certificate),
+                    "exactArgv": list(execution.launched.exact_argv),
+                    "provenanceVerdict": execution.provenance_verdict,
+                    "interpreter": execution.interpreter_identity_after._asdict(),
+                    "sourceClosure": {
+                        "layout": execution.closure_after.layout.name,
+                        "digest": execution.closure_after.digest,
+                        "bootstrapDigest": execution.closure_after.bootstrap_digest,
+                        "nodes": [{"role": node.role, "path": node.expected_path, "bytes": node.size,
+                                   "sha256": node.sha256} for node in execution.closure_after.nodes],
+                    },
+                }
+                (evidence_root / f"{surface}-scan-result.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+                return evidence
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with mock.patch.object(preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
+                 mock.patch.object(policy, "read_transcript_history", side_effect=AssertionError("irrelevant standing history read")), \
+                 mock.patch.object(policy, "_run_authoritative_scan", side_effect=scan), \
+                 mock.patch.object(runner, "_load_preflight", return_value=(target.runner_path, preflight)), \
+                 mock.patch.object(runner, "_load_policy", return_value=policy), \
+                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = runner.main() if surface == "runner" else policy.main()
+            (evidence_root / f"{surface}-hook.stdout").write_text(stdout.getvalue(), encoding="utf-8")
+            (evidence_root / f"{surface}-hook.stderr").write_text(stderr.getvalue(), encoding="utf-8")
+            assert result == 0 and stdout.getvalue() == stderr.getvalue() == ""
+            assert len(observed) == 1
+            evidence = observed[0]
+            assert evidence.parsed_outcome.kind == "valid-v3"
+            receipt = evidence.parsed_outcome.receipt
+            assert receipt.commits == 1 and receipt.objects > 0 and receipt.blobs > 0 and receipt.paths > 0
+            assert receipt.remote == "origin" and receipt.destination == "refs/heads/topic"
+            assert receipt.source == receipt.tip == evidence.binding.source_oid == evidence.binding.head_oid == head
+            assert evidence.execution.pending.state is policy.PendingState.CONSUMED
+            assert evidence.execution.settlement.complete
+            assert evidence.execution.launched.supervisor_token.process.poll() == 0
+            try:
+                evidence.execution.pending.correlate_and_consume_once(
+                    evidence.execution.launched, (evidence.execution,), evidence.execution.closure_after,
+                    evidence.execution.interpreter_identity_after, evidence.binding,
+                    evidence.execution.pending.closure_fresh_tick,
+                )
+            except policy.PrRouteDenied as error:
+                (evidence_root / f"{surface}-reuse-denial.json").write_text(
+                    json.dumps({"failureId": error.failure_id, "pendingState": evidence.execution.pending.state.value}) + "\n",
+                    encoding="utf-8",
+                )
+                assert error.failure_id == "PGG-RECEIPT-USED"
+            else:
+                raise AssertionError("same invocation was consumed twice")
+
+
 def _former_envelope(row_id: str, tmp_path: Path):
     if row_id == "approval-allow":
-        text, command = "[approve-publication]", "git push origin main"
+        text, command = "[approve-publication]", "git push origin HEAD:refs/heads/main"
     elif row_id == "active-pr-result":
         text, command = "continue", "git push origin main"
     elif row_id == "generic-scan-allow":
@@ -688,7 +953,7 @@ def _exercise_former_row(target: GateTarget, row, tmp_path: Path, root: str):
             mock.patch.object(policy, "_derive_pr_grant", return_value=("active", grant)),
             mock.patch.object(policy, "_evaluate_active_pr_route", side_effect=lambda *_args: counters.update({"owner": 1}) or True),
         ))
-    elif scenario == "generic-scan":
+    elif scenario in {"generic-scan", "approved"}:
         patches.extend((
             mock.patch.object(policy, "_derive_pr_grant", return_value=("none", None)),
             mock.patch.object(policy, "_resolve_generic_scan_binding", return_value=object()),
@@ -729,13 +994,13 @@ def _exercise_former_row(target: GateTarget, row, tmp_path: Path, root: str):
         "subagent-allow", "non-dict-allow", "missing-command-allow"
     } else 1
     assert counters["parse"] == expected_parse
-    expected_heavy = 1 if owner == "heavy" else 0
+    expected_heavy = 1 if owner == "heavy" or scenario == "approved" else 0
     assert counters["heavy"] == expected_heavy
-    if scenario in {"active-pr", "generic-scan"}:
+    if scenario in {"active-pr", "generic-scan", "approved"}:
         assert counters["owner"] == 1
     # Preserve the former path inventory; its zero-signal refusal now abstains.
     expected_policy_load = 0 if (
-        kind == "return" and owner == "preflight" or row_id == "parse-uncertain"
+        kind == "return" and owner == "preflight" and scenario != "approved" or row_id == "parse-uncertain"
     ) else 1
     if root == "runner":
         assert counters["policy_load"] == expected_policy_load

@@ -2,9 +2,9 @@
 """Git-push publication gate (PreToolUse, BLOCKING) — structural backstop for
 the human-review-before-push rule.
 
-WHAT THIS DENIES: a command that confidently runs `git push` when neither the
-genuine user's per-turn approval marker nor one fresh gate-owned canonical
-range scan authorizes the exact pending push. The gate derives the only scanner
+WHAT THIS DENIES: a real non-dry `git push` without applicable genuine-user
+publication authority and one fresh gate-owned canonical range scan for the
+exact pending push. The gate derives the only scanner
 producer as one held gate plus gate-relative four-module closure (`hook_common.py`, the
 machine-path classifier, the POSIX process-group helper, and `check-publication-safety.py`), snapshots and
 executes those bytes directly with its current trusted interpreter, and binds
@@ -256,17 +256,15 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      bound, reduce the complete stable JSONL file in forward order with bounded
      memory. No active grant denies with `PRG-TRANSCRIPT-HISTORY-LIMIT`; an
      active grant still enters the unchanged strict route.
-  7. If the LAST GENUINE USER MESSAGE contains `[approve-publication]` AND
-     that message is no longer than MARKER_MAX_MESSAGE_LENGTH characters →
-     exit 0. The marker is honored ONLY from the user's own text — never from
-     assistant prose, tool calls, or tool output — because prior provider or
-     file content quoting the marker must not approve a publication. The
-     length bound (2026-07-26 hardening; see MARKER_MAX_MESSAGE_LENGTH's own
-     comment for the full contract decision and measurements) exists because
-     the deny reason at step 10 embeds this same marker verbatim, so an
-     operator who copies that reason back into chat reproduces the identical
-     marker; a message shaped like a copied multi-paragraph deny block does
-     not count as an approval here.
+  7. Qualified current-turn consent from `[approve-publication]` in one genuine
+     answer enters the common strict command, repository/range binding and
+     fresh authoritative-scan completion BEFORE unrelated standing history.
+     Consent never returns an unconditional real-push allowance. Validate the
+     entire answer batch atomically, honor revocation/conflicts, and apply the
+     existing MARKER_MAX_MESSAGE_LENGTH guard to each candidate answer only.
+     Questions, identifiers, assistant/tool/file content and joined fragments
+     grant no authority. The existing length guard rejects copied long denial
+     prose; its known short-quote ambiguity is not claimed solved.
   8. Derive the latest exact PR grant/revoke/malformed state from the complete
      bounded readable transcript. A malformed reserved signal denies. An
      active grant runs only the strict PR route: fresh GitHub/Git binding and
@@ -405,7 +403,8 @@ from git_push_gate_preflight import (
 )
 
 
-# Per-turn override marker — honored ONLY from the last genuine user message.
+# Per-turn consent marker — honored ONLY from the last genuine user message;
+# it never replaces mandatory command, binding and authoritative-scan checks.
 # User-side only by design: assistant prose can be steered by injected content
 # (see the consultant continuation-prompt untrusted-data rule). Neither this
 # marker nor [skip-bugfix-discipline] gains authority from the model's own reply.
@@ -415,11 +414,6 @@ PR_URL_REGEX = re.compile(
     r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/"
     r"(?P<repo>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/pull/"
     r"(?P<number>[1-9][0-9]*))$"
-)
-PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
-PR_RESERVED_PREFIXES = (
-    "[approve-pr-publication:", "[revoke-pr-publication:",
-    "[approve-pr-publication pr=", "[approve-publication pr=",
 )
 PR_BINDING_SIDECAR_SUFFIX = ".pr-publication-binding-v1.json"
 PR_BINDING_LOCK_SUFFIX = ".lock"
@@ -1470,11 +1464,11 @@ class _PrGrantReducer:
         if not is_user_message(entry):
             return
         reply = extract_publication_user_reply(entry)
-        if reply.kind == "recognized-malformed":
+        action, text = reply.publication_action()
+        if action == "malformed":
             self.state, self.grant, self.pending_numeric = "malformed", None, None
             return
-        text = reply.text
-        if not text:
+        if not any(reply.answers):
             return
         normalized = normalize_publication_approval_text(text)
 
@@ -1482,7 +1476,7 @@ class _PrGrantReducer:
             self.state, self.grant, self.pending_numeric = "malformed", None, None
         self.last_genuine_user_position = position
 
-        if normalized == PR_REVOKE_MARKER:
+        if action == "revoked":
             self.state, self.grant, self.pending_numeric = "revoked", None, None
             self.prior_scoped_grant = None
             return
@@ -1517,8 +1511,6 @@ class _PrGrantReducer:
             self.state, self.grant = "active", None
             self.pending_numeric = (parsed_grant, authorization_workdir, position)
             return
-        if normalized.startswith(PR_RESERVED_PREFIXES):
-            self.state, self.grant, self.pending_numeric = "malformed", None, None
 
     def finish(self) -> tuple[str, ActivePrGrant | SimplePrIntent | None]:
         if self.pending_numeric is None:
@@ -3789,9 +3781,29 @@ def _revoke_simple_binding(transcript_path: str) -> None:
 
 
 
+def _complete_generic_publication(preflight: PreflightResult) -> bool:
+    """One owner for mandatory generic command, binding and scan completion."""
+    grammar = preflight.generic_decision
+    if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
+        raise PrRouteDenied(grammar.status)
+    remote, destination, source = grammar.binding
+    repository_workdir = _normalize_repository_workdir(preflight.repository_workdir)
+    git_exe = _resolve_executable("git", repository_workdir)
+    if git_exe is None:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    binding = _resolve_generic_scan_binding(
+        remote, destination, source, repository_workdir, git_exe
+    )
+    _run_authoritative_scan(binding, repository_workdir, git_exe)
+    return True
+
+
 def evaluate_heavy(preflight: PreflightResult) -> bool:
     """Evaluate only transcript history, PR, scan, receipt and deny policy."""
     validate_preflight_result(preflight)
+    if preflight.reason_id == "PFP-CONSENT-GENERIC":
+        return _complete_generic_publication(preflight)
     history_entries, history_status = read_transcript_history(
         preflight.transcript_path,
         byte_cap=TRANSCRIPT_HISTORY_BYTE_CAP,
@@ -3855,25 +3867,8 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         raise PrRouteDenied(
             "PRG-TRANSCRIPT-HISTORY-LIMIT", transcript_diagnostic
         )
-    grammar = preflight.generic_decision
     if preflight.push_instruction:
-        if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
-            raise PrRouteDenied(grammar.status)
-        remote, destination, source = grammar.binding
-        repository_workdir = _normalize_repository_workdir(
-            preflight.repository_workdir
-        )
-        git_exe = _resolve_executable("git", repository_workdir)
-        if git_exe is None:
-            raise PrRouteDenied("PRG-WORKDIR-INVALID")
-        repository_workdir = _prove_repository_root(
-            repository_workdir, git_exe
-        )
-        binding = _resolve_generic_scan_binding(
-            remote, destination, source, repository_workdir, git_exe
-        )
-        _run_authoritative_scan(binding, repository_workdir, git_exe)
-        return True
+        return _complete_generic_publication(preflight)
     return False
 
 _TRANSCRIPT_FAILURE_IDS = frozenset((

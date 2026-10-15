@@ -1,24 +1,18 @@
 """Behavioral tests for the git-push publication-gate PreToolUse hook (F8).
 
-The gate is the structural backstop for the prose-only rule "human review
-before `git push` must include a leak-check of staged changes": it denies a
-Bash `git push` in command position unless (a) the LAST GENUINE USER MESSAGE
-carries the per-turn override `[approve-publication]` (user-side only — never
-honored from assistant prose, tool calls, or tool output), or (b) the current
-turn's model tool CALLS show a publication-safety scan invocation AND that
-SAME invocation's OWN tool OUTPUT this turn — correlated by call identity,
-never by mere co-occurrence in the turn — reports one clean, non-empty,
-complete-history version-3 range receipt bound to the admitted solitary direct
-push. Tracked, path, legacy, and zero-commit results are non-authorizing. The 2026-07-26 hardening made
-branch (b) key on a CORRELATED result, not merely invocation and not an
-uncorrelated result appearing anywhere in the turn; see
-check-git-push-gate.py's module docstring and the adversarial-gate correction
-that found the first cut of this hardening joined two independent haystacks
-instead of correlating. The last genuine user message must also contain an
-explicit push instruction. A solitary direct `git push --dry-run` with the
-standalone, unambiguous long option is allowed; a `git push` inside a quoted string is data, not
-a command; subagent contexts (envelope `agent_id`) are allowed; a detected
-non-dry push without a readable transcript fails closed.
+The gate requires applicable genuine-user publication authority and a fresh,
+complete gate-owned range scan for a real non-dry push. The last genuine
+user's short approval marker supplies current-turn human consent; it does not
+replace strict command grammar, repository/range binding or the authoritative
+scan. Standing pull-request grants retain their complete chronology, binding
+and revocation checks. Transcript-looking scan calls and outputs remain
+untrusted diagnostic data rather than publication credit.
+
+A solitary direct long-option dry run and nonpublication commands retain their
+separate fast paths. Provider-pack projections use the same canonical decoder,
+atomic answer-batch disposition, policy composition and authoritative scan
+owner. Registered-runner tests exercise the full public handler path, including
+real owned scanner evidence and mandatory refusal behavior.
 
 Fixture id/call_id fields matter here, not just cosmetically: every
 call/result PAIR meant to represent one real invocation shares the SAME
@@ -1454,13 +1448,17 @@ def user(text: str) -> dict:
     return {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}}
 
 
-def question_reply(answer: str, *, question: str = "Approve this PR?") -> dict:
+def question_reply(answer: str, *, question: str = "Approve this PR?", additional_answers: tuple[str, ...] = ()) -> dict:
     """Synthetic exact structured UI user-reply carrier."""
     payload = [{
         "questionItemId": '["request_user_input_async","call_synthetic",0]',
         "question": question,
         "answer": answer,
     }]
+    payload.extend({
+        "questionItemId": f'["request_user_input_async","call_synthetic",{index}]',
+        "question": "Unrelated question", "answer": extra,
+    } for index, extra in enumerate(additional_answers, start=1))
     return user(
         "<send_user_message_question_reply>\n"
         + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -2063,21 +2061,21 @@ class TestGitPushGate(unittest.TestCase):
 
     # --- allow: user-side per-turn override marker ---
 
-    def test_user_marker_allows(self) -> None:
+    def test_user_marker_requires_gate_owned_scan(self) -> None:
         self.assert_outcome(
             [user("looks good, push it [approve-publication]"), assistant("pushing")],
             "git push origin main",
-            should_deny=False,
+            should_deny=True,
         )
 
-    def test_lead_sync_flow_marker_allows(self) -> None:
+    def test_lead_sync_flow_marker_does_not_bypass_range_binding(self) -> None:
         # The Lead's own legitimate sync flow: explicit user approval carried in
         # the dispatch message, then a direct `git push` from Bash.
         self.assert_outcome(
             [user("Wave E approved after review — sync all branches [approve-publication]"),
              assistant("Running the branch sync now.")],
             "git push origin feat/audit-wave-e",
-            should_deny=False,
+            should_deny=True,
         )
 
     def test_marker_in_assistant_prose_does_not_allow(self) -> None:
@@ -2157,15 +2155,14 @@ class TestGitPushGate(unittest.TestCase):
             should_deny=True,
         )
 
-    def test_short_genuine_approval_with_marker_still_allows(self) -> None:
-        # Regression guard: the length bound must not break a realistic,
-        # slightly more verbose genuine approval that stays under the bound.
+    def test_short_genuine_approval_still_requires_owned_scan(self) -> None:
+        # The short answer supplies consent, not missing owned scan evidence.
         genuine = "Approved -- security review passed, RELEASE_NOTES updated, please push now [approve-publication]"
         self.assertLessEqual(len(genuine), 200)
         self.assert_outcome(
             [user(genuine), assistant("pushing")],
             "git push origin main",
-            should_deny=False,
+            should_deny=True,
         )
 
     # --- allow: scan evidence (invocation AND clean non-empty result) + explicit user push instruction ---
@@ -5034,7 +5031,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                             for argv in observed
                         ))
 
-    def test_structured_user_reply_rejects_malformed_and_multi_question_carriers(self) -> None:
+    def test_structured_user_reply_rejects_malformed_and_question_only_markers(self) -> None:
         malformed = user(
             "<send_user_message_question_reply>\n"
             '[{"questionItemId":"id","question":"[approve-publication]","answer":"YES","extra":"x"}]\n'
@@ -5057,6 +5054,20 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     self.assertTrue(denies_text(stdout), stdout)
                     self.assertEqual(snapshots, [])
                     self.assertEqual(observed, [])
+
+    def test_structured_user_reply_batch_preserves_targeted_grant_with_neutral_answer(self) -> None:
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                stdout, observed = self._run_module(
+                    script,
+                    [question_reply(
+                        "[approve-pr-publication:v1 pr=https://github.com/acme/project/pull/7]",
+                        additional_answers=("Neutral unrelated answer " * 30,),
+                    )],
+                    self._literal_command(script),
+                )
+                self.assertFalse(denies_text(stdout), stdout)
+                self.assertEqual(sum(argv[1:4] == ["pr", "view", "https://github.com/acme/project/pull/7"] for argv in observed), 1)
 
     def test_structured_targeted_reply_rejects_invalid_url(self) -> None:
         for script in (CANONICAL_HOOK, *HOOKS):

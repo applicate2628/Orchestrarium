@@ -28,6 +28,10 @@ APPROVE_MARKER_REGEX = re.compile(r"\[approve-publication\]", re.IGNORECASE)
 SIMPLE_PR_APPROVAL_MARKER = "[approve-pr-publication]"
 PR_GRANT_PREFIX = "[approve-pr-publication:v1 pr="
 PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
+PR_RESERVED_PREFIXES = (
+    "[approve-pr-publication:", "[revoke-pr-publication:",
+    "[approve-pr-publication pr=", "[approve-publication pr=",
+)
 PR_URL_REGEX = re.compile(
     r"^(?P<url>https://github\.com/"
     r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/"
@@ -44,7 +48,37 @@ _QUESTION_REPLY_CLOSE = "\n</send_user_message_question_reply>"
 
 class PublicationUserReply(NamedTuple):
     kind: str
-    text: str
+    answers: tuple[str, ...]
+
+    @property
+    def text(self) -> str:
+        """Compatibility view; a batch never becomes flattened authority."""
+        return self.answers[0] if self.kind != "recognized-malformed" and len(self.answers) == 1 else ""
+
+    def publication_action(self) -> tuple[str, str]:
+        """One atomic event disposition, using existing per-answer grammars."""
+        choices: set[tuple[str, str]] = set()
+        malformed = self.kind == "recognized-malformed"
+        revoked = False
+        for answer in self.answers:
+            normalized = normalize_publication_approval_text(answer)
+            if normalized == PR_REVOKE_MARKER:
+                revoked = True
+            elif is_simple_pr_approval(answer):
+                choices.add(("simple", SIMPLE_PR_APPROVAL_MARKER))
+            else:
+                grant = parse_publication_pr_grant(answer)
+                if grant is not None:
+                    choices.add(("targeted", f"[approve-pr-publication:v1 pr={grant.url}]"))
+                elif normalized.startswith(PR_RESERVED_PREFIXES):
+                    malformed = True
+                elif APPROVE_MARKER_REGEX.search(answer) and len(answer) <= MARKER_MAX_MESSAGE_LENGTH:
+                    choices.add(("generic", "[approve-publication]"))
+        if revoked:
+            return "revoked", PR_REVOKE_MARKER
+        if malformed or len(choices) > 1:
+            return "malformed", ""
+        return next(iter(choices)) if choices else ("neutral", "")
 
 
 class PublicationPrGrant(NamedTuple):
@@ -68,26 +102,35 @@ def normalize_publication_approval_text(text: str) -> str:
 
 
 def extract_publication_user_reply(entry: object) -> PublicationUserReply:
-    """Decode the one observed structured UI reply without trusting its question."""
+    """Validate the entire observed UI reply, preserving answer boundaries."""
     text = extract_user_typed_text(entry)
     if not text.startswith("<send_user_message_question_reply>"):
-        return PublicationUserReply("plain", text)
+        return PublicationUserReply("plain", (text,))
     if not (text.startswith(_QUESTION_REPLY_OPEN) and text.endswith(_QUESTION_REPLY_CLOSE)):
-        return PublicationUserReply("recognized-malformed", "")
+        return PublicationUserReply("recognized-malformed", ())
     encoded = text[len(_QUESTION_REPLY_OPEN):-len(_QUESTION_REPLY_CLOSE)]
     try:
         payload = json.loads(encoded)
     except (TypeError, ValueError):
-        return PublicationUserReply("recognized-malformed", "")
-    if (
-        type(payload) is not list
-        or len(payload) != 1
-        or type(payload[0]) is not dict
-        or set(payload[0]) != {"questionItemId", "question", "answer"}
-        or any(type(payload[0][key]) is not str for key in payload[0])
-    ):
-        return PublicationUserReply("recognized-malformed", "")
-    return PublicationUserReply("structured-answer", payload[0]["answer"])
+        return PublicationUserReply("recognized-malformed", ())
+    if type(payload) is not list or not payload:
+        return PublicationUserReply("recognized-malformed", ())
+    answers: list[str] = []
+    malformed = False
+    for member in payload:
+        if (
+            type(member) is not dict
+            or set(member) != {"questionItemId", "question", "answer"}
+            or any(type(member[key]) is not str for key in member)
+        ):
+            malformed = True
+        else:
+            answers.append(member["answer"])
+    # Retained valid answers in a malformed carrier may only preserve an
+    # explicit revocation; publication_action forbids every positive effect.
+    return PublicationUserReply(
+        "recognized-malformed" if malformed else "structured-answer", tuple(answers)
+    )
 
 
 def parse_publication_pr_grant(text: str) -> PublicationPrGrant | None:
@@ -2423,7 +2466,7 @@ _TRANSCRIPT_HISTORY_STATUSES = frozenset((_TRANSCRIPT_NOT_RUN, *HISTORY_STATUSES
 _PREFLIGHT_REASONS = frozenset((
     "PFP-ALLOW-SUBAGENT", "PFP-ALLOW-NO-COMMAND", "PFP-ALLOW-NON-PUSH",
     "PFP-DENY-PARSE", "PFP-ALLOW-DRY-RUN", "PFP-DENY-TRANSCRIPT",
-    "PFP-ALLOW-USER-APPROVED", "PFP-HEAVY", "PFP-DENY-KNOWN",
+    "PFP-CONSENT-GENERIC", "PFP-HEAVY", "PFP-DENY-KNOWN",
     "PFP-DENY-INTERNAL", "PFP-ALLOW-MALFORMED",
     "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE",
 ))
@@ -2450,11 +2493,12 @@ _PREFLIGHT_BRANCHES = {
     "PFP-ALLOW-DRY-RUN": (
         "ALLOW_FINAL", "NONE", frozenset(("command", "dialect", "parsed")), None,
     ),
-    "PFP-ALLOW-USER-APPROVED": (
-        "ALLOW_FINAL", "NONE",
+    "PFP-CONSENT-GENERIC": (
+        "DEFER", "EVALUATE_HEAVY",
         frozenset((
             "command", "dialect", "transcript_path", "parsed",
-            "current_turn_status", "generic_decision",
+            "current_turn_status", "generic_decision", "repository_workdir",
+            "repository_workdir_source",
         )),
         None,
     ),
@@ -2659,10 +2703,12 @@ def validate_preflight_result(result: object) -> PreflightResult:
         elif value != default:
             raise ValueError(f"unexpected branch field: {field}")
     if (
-        result.reason_id not in {"PFP-ALLOW-USER-APPROVED", "PFP-HEAVY"}
+        result.reason_id not in {"PFP-CONSENT-GENERIC", "PFP-HEAVY"}
         and result.push_instruction
     ):
         raise ValueError("unexpected branch push instruction")
+    if result.reason_id == "PFP-CONSENT-GENERIC" and result.current_turn_status != STATUS_FOUND:
+        raise ValueError("generic consent requires a genuine current-turn boundary")
     if result.reason_id != "PFP-HEAVY" and result.simple_pr_approval:
         raise ValueError("unexpected simple PR approval")
     if expected_failure == "REGISTERED":
@@ -2774,10 +2820,12 @@ def build_preflight(envelope: dict) -> PreflightResult:
         reply = (
             extract_publication_user_reply(last_user)
             if status == STATUS_FOUND and last_user is not None
-            else PublicationUserReply("plain", "")
+            else PublicationUserReply("plain", ())
         )
-        user_text = reply.text
-        instruction = PUSH_INSTRUCTION_REGEX.search(user_text) is not None
+        action, _ = reply.publication_action()
+        instruction = action not in {"malformed", "revoked"} and any(
+            PUSH_INSTRUCTION_REGEX.search(answer) is not None for answer in reply.answers
+        )
         grammar = classify_generic_push(parsed)
         transcript_diagnostic = TranscriptDiagnostic(
             envelope_status,
@@ -2785,17 +2833,20 @@ def build_preflight(envelope: dict) -> PreflightResult:
             _TRANSCRIPT_NOT_RUN,
             _TRANSCRIPT_NOT_RUN,
         )
-        if APPROVE_MARKER_REGEX.search(user_text) and len(user_text) <= MARKER_MAX_MESSAGE_LENGTH:
+        repository_workdir, repository_workdir_source = _repository_workdir(
+            envelope, tool_input
+        )
+        if action == "generic":
             return _result(
-                "ALLOW_FINAL", "PFP-ALLOW-USER-APPROVED", "NONE",
+                "DEFER", "PFP-CONSENT-GENERIC", "EVALUATE_HEAVY",
                 command=command, dialect=resolution.dialect,
                 transcript_path=transcript_path, parsed=parsed,
                 current_turn_status=status, generic_decision=grammar,
                 push_instruction=instruction,
+                repository_workdir=repository_workdir,
+                repository_workdir_source=repository_workdir_source,
+                transcript_diagnostic=transcript_diagnostic,
             )
-        repository_workdir, repository_workdir_source = _repository_workdir(
-            envelope, tool_input
-        )
         return _result(
             "DEFER", "PFP-HEAVY", "EVALUATE_HEAVY",
             command=command, dialect=resolution.dialect,
@@ -2804,7 +2855,7 @@ def build_preflight(envelope: dict) -> PreflightResult:
             push_instruction=instruction, repository_workdir=repository_workdir,
             repository_workdir_source=repository_workdir_source,
             transcript_diagnostic=transcript_diagnostic,
-            simple_pr_approval=is_simple_pr_approval(user_text),
+            simple_pr_approval=action == "simple",
         )
     except PrRouteDenied as exc:
         return _result(
