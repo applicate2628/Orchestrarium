@@ -22,7 +22,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 | Interaction types | §"Interaction types" table | §"Interaction types" table | Same 8 types; Claude has prose descriptions, Codex has compact table |
 | Cross-domain escalation | §"Cross-domain escalation protocol" | §"Cross-domain escalation protocol" | Identical 4-step protocol; Claude adds target-domain mapping table |
 | Adjacent-issue protocol | §"Adjacent-issue protocol" | §"Adjacent-issue protocol" | Identical semantics; Codex says "configured bug registry path" vs Claude's `work-items/bugs/` |
-| Artifact invalidation | §"Artifact invalidation protocol" | §"Artifact invalidation protocol" | Claude has 3 detailed steps; Codex condensed to 3 points. Same dependency chain. |
+| Artifact invalidation | §"Artifact invalidation protocol" | §"Artifact invalidation protocol" | Both blocks point to their platform-local canonical producing-scope and accepted-baseline handoff rule; neither defines another invalidation procedure. |
 | REVISE correction cap | §"REVISE iteration cap" | §"REVISE iteration cap procedure" | Both bindings cite the shared spine's consecutive same-role/same-artifact cap and escalation procedure; neither binding owns its numeric value |
 | Periodic controls | §"Periodic controls" table | §"Periodic controls" | Claude has full 11-row control matrix; Codex defers to repo-defined matrix |
 | How to instruct reviewers | §"How to instruct reviewers" | §"Review strategy selection" | Claude: 2 compact paragraphs. Codex: full strategy A/B with decision table. Semantics identical. |

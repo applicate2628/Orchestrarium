@@ -4,7 +4,7 @@
   "files": {
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "4c31e8eef617e502ac67b5ff1a231700b261d5cfa34c12057d0c58ccbc12b6ed",
+      "sha256": "83a7e746f9ebed486795ff7a021a78fe0c91a9ab60c423b03259a7ad05d35174",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
@@ -34,7 +34,7 @@
     },
     "external-prompt-governance.md": {
       "source": "shared/external-prompt-governance.md",
-      "sha256": "a133e0bd20f811136dd80d330cf80cf725ab04b0e01dc783d9ab760fd2f4ba5b",
+      "sha256": "e192572869ca666b779c9b301862da63a1137b96911195923d71f91f74fecd11",
       "destination": "scripts/external-prompt-governance.md"
     },
     "external-role-taxonomy.v1.json": {

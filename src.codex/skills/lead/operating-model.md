@@ -390,11 +390,7 @@ When any role discovers a bug, risk, or improvement outside the approved change 
 
 ## Artifact invalidation protocol
 
-When an upstream artifact is revised after downstream artifacts have been accepted:
-
-1. Mark each dependent downstream artifact as stale in `status.md` with `stale-since: <YYYY-MM-DD HH:MM>`.
-2. The orchestrator must re-validate each stale artifact before using it as input to the next stage.
-3. Invalidation follows the dependency chain: research → design → plan → implementation. A revision to research may invalidate design, plan, and implementation artifacts.
+Apply the producing-scope and accepted-baseline rule in [Subagent Contracts](subagent-contracts.md#shared-handoff-template).
 
 ## REVISE iteration cap procedure
 

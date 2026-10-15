@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-15
 
+- **Simplify by responsibility while preserving justified boundaries.** Shared guidance now judges representations, validation and forwarding by the required guarantees and concrete value they own, so useful thin adapters and meaningful domain structures survive simplification while redundant checks and reboxing can be removed. Both provider operating models defer artifact invalidation to their own canonical handoff rule, preserving accepted producing baselines and affected re-review without duplicating procedures.
+
 - **Lifecycle transactions reconcile owned effects without losing failures.** The lifecycle owner receives actual file placement before fallible domain checks, compares directory observations through its existing stable identity contract, and settles every acquired resource on failed entry and exit. Primary failures, failed cleanup and unfinished dependencies remain distinct and visible; real public completion, rollback, receipt, link and README checks retain their authority.
 
 - **Linked runtime paths distinguish completed targets from dependency cycles.** Directory and scalar consumers now share witnessed target-completion traversal, so valid repeated links and finite chains remain usable without an arbitrary encounter limit. Active cycles, changed link observations, native read failures and each consumer's existing admission, rollback and current-state guarantees retain their checks.
