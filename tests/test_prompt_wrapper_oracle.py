@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import re
 import os
 import signal
 import shutil
@@ -344,7 +345,7 @@ def _make_fake_provider(
         f"sys.stdout.buffer.write({raw_stdout!r}); sys.stdout.buffer.flush()\n"
         if raw_stdout is not None
         else (
-            "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GATE: PASS\\n'}}))\n"
+            f"sys.stdout.buffer.write({_codex_turn(_codex_agent())!r})\n"
             if provider == "codex" and write_result
             else ("print('GATE: PASS')\n" if provider == "claude" and write_result else "")
         )
@@ -556,7 +557,7 @@ def _finalize_observed_fixture(*args, **kwargs):
         ("malformed", "UNVERIFIED:result-materialization"),
         ("empty", "UNVERIFIED:empty"),
         ("over-limit", "UNVERIFIED:result-materialization"),
-        ("error-marker", "UNVERIFIED:err-markers"),
+        ("error-marker", "COMPLETE:EXTERNAL_NONAUTHORIZING"),
         ("no-gate", "UNVERIFIED:no-gate-line"),
         ("nonzero", "FAILED:nonzero-exit"),
     ),
@@ -569,7 +570,7 @@ def test_codex_public_projection_preserves_selection_and_genuine_failures(
 
     def record(item_type, text):
         return json.dumps({
-            "type": "item.completed", "item": {"type": item_type, "text": text},
+            "type": "item.completed", "item": {"id": "synthetic-item", "type": item_type, "text": text, "message": text},
         }).encode("utf-8") + b"\n"
 
     raw = record("error", private_path)
@@ -585,6 +586,7 @@ def test_codex_public_projection_preserves_selection_and_genuine_failures(
         raw += record("agent_message", selected)
     if mode == "malformed":
         raw += b"{\n"
+    raw = _codex_turn(raw)
     stderr = private_credential + b"\n"
     if mode in {"error-marker", "unsafe-error-marker"}:
         stderr += b"ERROR: synthetic failure\n"
@@ -608,7 +610,7 @@ def test_codex_public_projection_preserves_selection_and_genuine_failures(
     payload = owner.parse_provider_result(output.getvalue())
     assert payload["token"] == expected_token
     assert code == (
-        0 if mode == "private" else 23 if mode in {"nonzero", "unsafe-nonzero"} else 1
+        0 if mode in {"private", "error-marker"} else 23 if mode in {"nonzero", "unsafe-nonzero"} else 1
     )
     if mode == "private":
         assert payload["resultText"] == selected
@@ -623,17 +625,15 @@ def test_codex_public_projection_preserves_selection_and_genuine_failures(
             "exitCode": 0, "token": "COMPLETE:PASS", "status": "completed",
             "gate": "PASS", "note": "oracle: final-line GATE: PASS",
         }
-        if mode == "unsafe-error-marker":
-            expected_primary.update(
-                token="UNVERIFIED:err-markers", status="blocked", gate="none",
-                note="oracle: err markers present (1)",
-            )
-        elif mode == "unsafe-nonzero":
+        if mode == "unsafe-nonzero":
             expected_primary.update(
                 exitCode=23, token="FAILED:nonzero-exit", status="blocked", gate="none",
                 note="oracle: nonzero exit (23)",
             )
-        assert payload["primaryOutcome"] == expected_primary
+        actual_note = payload["primaryOutcome"]["note"]
+        assert actual_note.startswith("codex-native-v1(")
+        assert expected_primary.pop("note") in actual_note
+        assert {k: v for k, v in payload["primaryOutcome"].items() if k != "note"} == expected_primary
     assert private_path not in output.getvalue()
     assert private_credential.decode("ascii") not in output.getvalue()
     assert receipt_path.read_text(encoding="utf-8") == output.getvalue()
@@ -791,7 +791,7 @@ def test_output_replacement_preserves_primary_failure_and_cleanup_uncertainty():
         _outcome(), exit_code=9, primary_exit_code=9,
         primary_token="FAILED:nonzero-exit", primary_status="blocked", primary_gate="none",
         primary_note="token=REJECTED_DYNAMIC_DETAIL", cleanup_status="incomplete",
-        cleanup_issue_count=2, recovery_retained=True,
+        cleanup_issue_count=2, recovery_retained=True, stderr_marker_count=3,
     )
     rejected = owner.serialized_safety_failure_outcome(original, "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO")
     line = owner.build_minimal_provider_failure_line(
@@ -806,6 +806,7 @@ def test_output_replacement_preserves_primary_failure_and_cleanup_uncertainty():
     assert payload["primaryOutcome"]["token"] == "FAILED:nonzero-exit"
     assert payload["cleanupStatus"] == "incomplete" and payload["captureRecoveryRetained"] is True
     assert payload["cleanupIssueCount"] == 2 and "REJECTED_DYNAMIC_DETAIL" not in line
+    assert payload["stderrMarkerCount"] == 3
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows synthetic provider transport")
@@ -1447,25 +1448,345 @@ def test_empty_provisional_directory_uses_only_rmdir(
     assert not provisional.exists()
 
 
+def _codex_record(kind, **fields):
+    return json.dumps({"type": kind, **fields}, ensure_ascii=False).encode("utf-8") + b"\n"
+
+
+def _codex_turn(*items, terminal="turn.completed"):
+    return (
+        _codex_record("thread.started", thread_id="synthetic-thread")
+        + _codex_record("turn.started")
+        + b"".join(items)
+        + (_codex_record(terminal, **(
+            {"usage": {"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1, "reasoning_output_tokens": 0}}
+            if terminal == "turn.completed" else {"error": {"message": "synthetic failure"}}
+        )) if terminal else b"")
+    )
+
+
+def _codex_agent(text="GATE: PASS\n"):
+    return _codex_record("item.completed", item={
+        "id": "synthetic-agent", "type": "agent_message", "text": text,
+    })
+
+
+@pytest.mark.parametrize("ending", ("missing", "failed", "fatal", "contradictory", "late-item"))
+def test_codex_native_terminal_rejects_agent_only_and_invalid_outcomes(ending):
+    data = _codex_turn(_codex_agent(), terminal=None if ending == "missing" else
+                       "turn.failed" if ending == "failed" else "turn.completed")
+    if ending == "fatal":
+        data += _codex_record("error", message="synthetic critical error")
+    elif ending == "contradictory":
+        data += _codex_record("turn.failed", error={"message": "synthetic failure"})
+    elif ending == "late-item":
+        data += _codex_agent()
+    with pytest.raises(owner.ResultMaterializationError):
+        owner.parse_codex_jsonl_result(data, 1024)
+
+
+def _emitted_observation(payload):
+    """Read optional scoped diagnostics; unknown format does not invent zeroes."""
+    return re.match(
+        r"codex-native-v1\(parse=(complete|incomplete),turn=([a-z]+),"
+        r"operationRecords=([0-9]+),unknownRecords=([0-9]+),"
+        r"coverage=(complete|incomplete),diagnosticRecords=([0-9]+),"
+        r"failedOperationRecords=([0-9]+),materialization=(ok|failed)\)(?:; |$)",
+        payload["note"],
+    )
+
+
+def _ordinary_review_receiving(payload, required_text):
+    """Model the original required task predicates, independently of quality."""
+    core = _emitted_observation(payload)
+    observed_forbidden_use = core is not None and int(core.group(3)) > 0
+    return bool(
+        not observed_forbidden_use
+        and payload["status"] == "completed" and payload["gate"] == "PASS"
+        and payload["exitCode"] == 0 and payload["cleanupStatus"] == "complete"
+        and payload["authorizing"] is False
+        and payload["independentVerificationRequired"] is True
+        and payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+        and payload["provider"] == "codex" and payload["model"] == "fixture"
+        and payload["actualExecutionPath"] == "direct-external-cli"
+        and payload["resultText"] == required_text
+    )
+
+
+@pytest.mark.parametrize("operation,accepted", (
+    ("none", True), ("completed", False), ("failed", False),
+    ("attempted", False), ("unknown-status", False),
+    ("unknown-item", True), ("unknown-event", True), ("missing-core", True),
+))
+def test_codex_native_observation_receipt_and_emitted_record_receiver(
+    tmp_path, monkeypatch, operation, accepted
+):
+    records = _codex_record("item.completed", item={
+        "id": "private-diagnostic-id", "type": "error", "message": "private-warning-payload",
+    })
+    if operation in {"completed", "failed", "attempted", "unknown-status"}:
+        status = {"attempted": "in_progress", "unknown-status": "future"}.get(operation, operation)
+        records += _codex_record(
+            "item.started" if operation == "attempted" else "item.completed",
+            item={"id": "private-operation-id", "type": "mcp_tool_call", "status": status,
+                  "server": "private-server", "tool": "private-tool", "arguments": {"private": "payload"},
+                  "result": None, "error": {"message": "private-failure"} if status == "failed" else None},
+        )
+    elif operation == "unknown-item":
+        records += _codex_record("item.completed", item={"id": "private-id", "type": "future-tool"})
+    elif operation == "unknown-event":
+        records += _codex_record("future.event", payload="private-event-payload")
+    elif operation == "missing-core":
+        monkeypatch.setattr(owner._CodexNativeResult, "note", lambda _result: "emitted observation unavailable")
+    required_text = "Synthetic review: supplied packet checked.\nGATE: PASS\n"
+    raw = _codex_turn(records, _codex_agent(required_text))
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="codex")
+    _write_result(lifecycle, raw, stderr=b"ERROR: private-startup-diagnostic\n")
+    output = _BinaryOutput()
+    monkeypatch.setattr(owner.sys, "stdout", output)
+    receipt_path = (tmp_path / "native.receipt").resolve()
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = _finalize_observed_fixture(
+            owner.Control(terminal_receipt=receipt_path), "codex", "fixture", "high", "fixture", "",
+            _initialized_reserved(receipt, lifecycle), 0,
+        )
+    receipt_bytes = receipt_path.read_bytes()
+    retention_root = os.environ.get("ORCHESTRARIUM_TEST_RECEIPTS_DIR")
+    if retention_root is not None:
+        # Preserve exact acquired public receipt bytes in the test caller's
+        # explicit existing sink before assertions or fixture cleanup.
+        target = Path(retention_root).resolve(strict=True) / f"{operation}.provider-result-line"
+        with target.open("xb") as retained:
+            retained.write(receipt_bytes)
+        assert target.read_bytes() == receipt_bytes
+    assert code == 0
+    encoded = receipt_bytes.decode("utf-8")
+    assert encoded == output.getvalue()
+    payload = owner.parse_provider_result(encoded)
+    assert _ordinary_review_receiving(payload, required_text) is accepted
+    core = _emitted_observation(payload)
+    limited_quality = core is None or core.group(4) != "0" or core.group(5) != "complete"
+    assert limited_quality is (operation in {"unknown-status", "unknown-item", "unknown-event", "missing-core"})
+    assert payload["stderrMarkerCount"] == 1
+    assert "diagnostic-health=adverse" in payload["note"]
+    if operation == "missing-core":
+        assert "emitted observation unavailable" in payload["note"]
+        assert "operationRecords=" not in payload["note"]
+    else:
+        assert "diagnosticRecords=1" in payload["note"]
+        assert f"failedOperationRecords={1 if operation == 'failed' else 0}" in payload["note"]
+    assert not lifecycle.run_dir.exists()
+    assert "private-" not in encoded
+    if operation == "none":
+        for field, unavailable_required in (
+            ("token", "UNVERIFIED:result-materialization"), ("exitCode", 1),
+            ("cleanupStatus", "incomplete"), ("authorizing", True),
+            ("independentVerificationRequired", False), ("model", "different-producer"),
+            ("resultText", "GATE: PASS\n"),
+        ):
+            assert not _ordinary_review_receiving({**payload, field: unavailable_required}, required_text)
+
+
+@pytest.mark.parametrize("terminal,cleanup_failed", (
+    ("turn.failed", False), (None, False), ("turn.failed", True),
+))
+def test_codex_native_nonzero_interpretation_and_cleanup_preserve_all_outcomes(
+    tmp_path, monkeypatch, terminal, cleanup_failed
+):
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="codex")
+    _write_result(lifecycle, _codex_turn(_codex_agent(), terminal=terminal),
+                  stderr=b"ERROR: private-native-failure\n")
+    receipt_path = (tmp_path / "native-failure.receipt").resolve()
+    output = _BinaryOutput()
+    monkeypatch.setattr(owner.sys, "stdout", output)
+    if cleanup_failed:
+        original_cleanup = owner.ReservedExternalRunV1.cleanup_once
+        def cleanup(run):
+            result = original_cleanup(run)
+            assert result.clean
+            return owner.CleanupResult(("synthetic-cleanup-failure",))
+        monkeypatch.setattr(owner.ReservedExternalRunV1, "cleanup_once", cleanup)
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = _finalize_observed_fixture(
+            owner.Control(terminal_receipt=receipt_path), "codex", "fixture", "high", "fixture", "",
+            _initialized_reserved(receipt, lifecycle), 23,
+        )
+    encoded = receipt_path.read_text(encoding="utf-8")
+    assert encoded == output.getvalue()
+    payload = owner.parse_provider_result(encoded)
+    assert code == payload["exitCode"] == payload["primaryOutcome"]["exitCode"] == 23
+    assert payload["primaryOutcome"]["token"] == "FAILED:nonzero-exit"
+    assert "oracle: nonzero exit (23)" in payload["primaryOutcome"]["note"]
+    assert payload["token"] == ("UNVERIFIED:E_EXTERNAL_CAPTURE_CLEANUP" if cleanup_failed
+                                 else "UNVERIFIED:result-materialization")
+    assert payload["status"] == "blocked" and payload["gate"] == "none"
+    assert payload["stderrMarkerCount"] == 1
+    assert "materialization=failed)" in payload["note"]
+    assert "result materialization failed" in payload["note"]
+    assert "private-native-failure" not in encoded
+    assert not lifecycle.run_dir.exists()
+
+
+def test_codex_native_partial_stream_retains_observed_operations():
+    raw = _codex_turn(_codex_record("item.started", item={
+        "id": "private-id", "type": "command_execution", "command": "private-command",
+        "aggregated_output": "", "exit_code": None, "status": "in_progress",
+    }), terminal=None) + b'{"type":'
+    with pytest.raises(owner.ResultMaterializationError) as caught:
+        owner.parse_codex_jsonl_result(raw, 1024)
+    observation = caught.value.observation
+    assert observation.operation_records == 1
+    assert "parse=incomplete" in observation.note() and "coverage=incomplete" in observation.note()
+
+
+def test_codex_native_invalid_selected_unicode_retains_partial_observation():
+    raw = _codex_turn(_codex_record("item.started", item={
+        "type": "command_execution", "status": "in_progress",
+    }), _codex_agent())
+    raw = raw.replace(b"GATE: PASS", b"\\ud800")
+    with pytest.raises(owner.ResultMaterializationError) as caught:
+        owner.parse_codex_jsonl_result(raw, 1024)
+    assert caught.value.observation.operation_records == 1
+    assert caught.value.observation.parse_complete is False
+
+
+@pytest.mark.parametrize("item_type", (
+    "command_execution", "file_change", "mcp_tool_call", "collab_tool_call", "web_search",
+))
+def test_codex_native_operation_union_counts_lifecycle_records(item_type):
+    item = {"id": "private-id", "type": item_type}
+    records = b""
+    for event, status in (("item.started", "in_progress"), ("item.updated", "in_progress"),
+                          ("item.completed", "completed")):
+        records += _codex_record(event, item={**item, "status": status})
+    result = owner.parse_codex_jsonl_result(_codex_turn(records, _codex_agent()), 1024)
+    assert result.operation_records == 3 and result.unknown_records == 0
+    assert result.failed_operation_records == 0
+
+
+def test_codex_native_completion_preserves_informational_compatibility():
+    raw = (_codex_record("item.completed", item={"type": "error", "message": "private-warning"})
+           + _codex_record("thread.started") + _codex_record("turn.started")
+           + _codex_agent() + _codex_record("turn.completed", extra_information={"future": True}))
+    result = owner.parse_codex_jsonl_result(raw, 1024)
+    assert result.selected == b"GATE: PASS\n"
+    assert result.unknown_records == 0 and result.diagnostic_records == 1
+
+
+@pytest.mark.parametrize("data", (
+    _codex_agent(),
+    _codex_record("error", message="private-fatal") + _codex_turn(_codex_agent()),
+    _codex_turn(_codex_agent()) + _codex_record("turn.completed"),
+    _codex_record("thread.started") + _codex_record("turn.started") + _codex_record("turn.started") + _codex_agent() + _codex_record("turn.completed"),
+    _codex_turn(_codex_agent()) + b"\n",
+    _codex_turn(_codex_agent()) + b"[]\n",
+    _codex_turn(_codex_agent()) + b"\xff\n",
+    _codex_turn(_codex_agent()) + _codex_record("turn.started"),
+))
+def test_codex_native_framing_and_order_fail_closed(data):
+    with pytest.raises(owner.ResultMaterializationError):
+        owner.parse_codex_jsonl_result(data, 1024)
+
+
+def test_shared_nonzero_primary_survives_non_codex_materialization_failure(tmp_path, monkeypatch):
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="claude")
+    _write_result(lifecycle, b"GATE: PASS\n", stderr=b"ERROR: private-native-failure\n")
+    receipt_path = (tmp_path / "shared-native-failure.receipt").resolve()
+    output = _BinaryOutput()
+    monkeypatch.setattr(owner.sys, "stdout", output)
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = _finalize_observed_fixture(
+            owner.Control(terminal_receipt=receipt_path, result_max_bytes=1), "claude", "fixture", "high", "fixture", "",
+            _initialized_reserved(receipt, lifecycle), 23,
+        )
+    payload = owner.parse_provider_result(output.getvalue())
+    assert code == payload["primaryOutcome"]["exitCode"] == 23
+    assert payload["primaryOutcome"]["token"] == "FAILED:nonzero-exit"
+    assert payload["token"] == "UNVERIFIED:result-materialization"
+    assert payload["stderrMarkerCount"] == 1
+    assert receipt_path.read_text(encoding="utf-8") == output.getvalue()
+    assert not lifecycle.run_dir.exists()
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude", "kimi"))
+def test_shared_public_builder_preserves_complete_safe_notes(provider):
+    core = owner._CodexNativeResult(
+        parse_complete=True, turn="completed", materialization="ok",
+    ).note()
+    note = core + ";" + " safe optional explanation" * 32
+    assert len(core) < 512 < len(note)  # Reproduce the removed presentation ceiling.
+    outcome = replace(_outcome(), note=note, primary_note=note)
+    line = owner.build_provider_result_line(
+        provider, "fixture", "high", "GATE: PASS\n", outcome,
+        cancelled=False, timed_out=False,
+    )
+    assert owner._provider_terminal_line_safety(provider, (), line) is None
+    payload = owner.parse_provider_result(line)
+    assert payload["note"] == payload["primaryOutcome"]["note"] == note
+
+
+def test_long_safe_note_receipt_preserves_native_interpretation_and_cleanup(
+    tmp_path, monkeypatch
+):
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="codex")
+    _write_result(lifecycle, _codex_turn(_codex_agent(), terminal="turn.failed"),
+                  stderr=b"ERROR: private-native-failure\n")
+    actual_note = owner._CodexNativeResult.note
+    safe_prose = ";" + " safe optional explanation" * 32
+    monkeypatch.setattr(owner._CodexNativeResult, "note", lambda result: actual_note(result) + safe_prose)
+    actual_cleanup = owner.ReservedExternalRunV1.cleanup_once
+    def cleanup(run):
+        assert actual_cleanup(run).clean
+        return owner.CleanupResult(("synthetic-cleanup-failure",))
+    monkeypatch.setattr(owner.ReservedExternalRunV1, "cleanup_once", cleanup)
+    actual_scan = owner._provider_terminal_line_safety
+    scanned = []
+    def scan(provider, needles, line):
+        scanned.append(line)
+        return actual_scan(provider, needles, line)
+    monkeypatch.setattr(owner, "_provider_terminal_line_safety", scan)
+    output = _BinaryOutput()
+    monkeypatch.setattr(owner.sys, "stdout", output)
+    receipt_path = (tmp_path / "long-note.receipt").resolve()
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = _finalize_observed_fixture(
+            owner.Control(terminal_receipt=receipt_path), "codex", "fixture", "high", "fixture", "",
+            _initialized_reserved(receipt, lifecycle), 23,
+        )
+    encoded = receipt_path.read_text(encoding="utf-8")
+    payload = owner.parse_provider_result(encoded)
+    assert code == payload["exitCode"] == payload["primaryOutcome"]["exitCode"] == 23
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_CAPTURE_CLEANUP"
+    assert payload["primaryOutcome"]["token"] == "FAILED:nonzero-exit"
+    assert payload["stderrMarkerCount"] == 1 and payload["cleanupStatus"] == "incomplete"
+    assert "current=UNVERIFIED:result-materialization" in payload["note"]
+    for note in (payload["note"], payload["primaryOutcome"]["note"]):
+        assert len(note) > 512
+        assert note.startswith("codex-native-v1(") and "materialization=failed)" in note
+        assert "result materialization failed" in note and safe_prose in note
+    assert "oracle: nonzero exit (23)" in payload["primaryOutcome"]["note"]
+    assert encoded == output.getvalue() and scanned == [encoded]
+    assert "private-native-failure" not in encoded and not lifecycle.run_dir.exists()
+
+
 def test_codex_jsonl_selects_last_complete_agent_message_and_enforces_result_limit() -> None:
     def record(text: str) -> bytes:
         return (
             json.dumps(
                 {
                     "type": "item.completed",
-                    "item": {"type": "agent_message", "text": text},
+                    "item": {"id": "synthetic-agent", "type": "agent_message", "text": text},
                 },
                 separators=(",", ":"),
             ).encode("utf-8")
             + b"\n"
         )
 
-    data = b'{"type":"thread.started"}\n' + record("first") + record("last")
-    assert owner.parse_codex_jsonl_result(data, 4) == b"last"
+    data = _codex_turn(record("first"), record("last"))
+    assert owner.parse_codex_jsonl_result(data, 4).selected == b"last"
     exact = "x" * owner.RESULT_MAX_BYTES_DEFAULT
-    assert len(owner.parse_codex_jsonl_result(record(exact), len(exact))) == len(exact)
+    assert len(owner.parse_codex_jsonl_result(_codex_turn(record(exact)), len(exact)).selected) == len(exact)
     with pytest.raises(owner.ResultMaterializationError, match="exceeds"):
-        owner.parse_codex_jsonl_result(record(exact + "x"), len(exact))
+        owner.parse_codex_jsonl_result(_codex_turn(record(exact + "x")), len(exact))
     with pytest.raises(owner.ResultMaterializationError, match="malformed"):
         owner.parse_codex_jsonl_result(b"{bad}\n", 100)
     with pytest.raises(owner.ResultMaterializationError, match="truncated"):
@@ -1481,14 +1802,14 @@ def test_codex_jsonl_treats_literal_unicode_separators_as_record_data(
         json.dumps(
             {
                 "type": "item.completed",
-                "item": {"type": "agent_message", "text": text},
+                "item": {"id": "synthetic-agent", "type": "agent_message", "text": text},
             },
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
         + b"\n"
     )
-    assert owner.parse_codex_jsonl_result(record, 100) == text.encode("utf-8")
+    assert owner.parse_codex_jsonl_result(_codex_turn(record), 100).selected == text.encode("utf-8")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
@@ -3768,16 +4089,17 @@ def test_exact_child_credential_is_refused_only_on_selected_public_output(
 
     secret = auth_environment[credential_key].encode("ascii")
     if provider == "codex":
-        stdout = json.dumps(
+        stdout = _codex_turn(json.dumps(
             {
                 "type": "item.completed",
                 "item": {
+                    "id": "synthetic-agent",
                     "type": "agent_message",
                     "text": (secret.decode("ascii") + "\n" if stream_name == "stdout" else "")
                     + "GATE: PASS\n",
                 },
             }
-        ).encode("utf-8") + b"\n"
+        ).encode("utf-8") + b"\n")
     else:
         stdout = b"GATE: PASS\n"
     if stream_name == "stdout" and provider != "codex":
@@ -3802,10 +4124,13 @@ def test_exact_child_credential_is_refused_only_on_selected_public_output(
         assert result.returncode == 0
         assert payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
         assert payload["resultText"] == "GATE: PASS\n"
-    assert payload["primaryOutcome"] == {
+    expected_primary = {
         "exitCode": 0, "token": "COMPLETE:PASS", "status": "completed",
         "gate": "PASS", "note": "oracle: final-line GATE: PASS",
     }
+    if provider == "codex":
+        expected_primary["note"] = owner.parse_codex_jsonl_result(stdout, 1024).note() + "; " + expected_primary["note"]
+    assert payload["primaryOutcome"] == expected_primary
     assert payload["exitCode"] == result.returncode
     assert payload["stderrMarkerCount"] == 0
     assert secret.decode("ascii") not in result.stdout

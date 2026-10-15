@@ -1739,8 +1739,35 @@ class ClaudeUserSettingsSurface:
     forwarded_config_dir: str | None
 
 
+@dataclass
+class _CodexNativeResult:
+    """Selected representation and the native facts that make it eligible."""
+
+    selected: bytes | None = None
+    parse_complete: bool = False
+    turn: str = "missing"
+    operation_records: int = 0
+    unknown_records: int = 0
+    diagnostic_records: int = 0
+    failed_operation_records: int = 0
+    materialization: str = "failed"
+
+    def note(self) -> str:
+        coverage = "complete" if self.parse_complete and not self.unknown_records else "incomplete"
+        return (
+            f"codex-native-v1(parse={'complete' if self.parse_complete else 'incomplete'},"
+            f"turn={self.turn},operationRecords={self.operation_records},"
+            f"unknownRecords={self.unknown_records},coverage={coverage},"
+            f"diagnosticRecords={self.diagnostic_records},"
+            f"failedOperationRecords={self.failed_operation_records},"
+            f"materialization={self.materialization})"
+        )
+
+
 class ResultMaterializationError(RuntimeError):
-    pass
+    def __init__(self, message: str, observation: _CodexNativeResult | None = None):
+        super().__init__(message)
+        self.observation = observation
 
 
 class ClaudeSubscriptionRefusal(ValueError):
@@ -5369,41 +5396,126 @@ def _kimi_final_gate(text: str) -> str | None:
     return gate if gate_like == [lines[-1]] else None
 
 
-def parse_codex_jsonl_result(data: bytes, result_max_bytes: int) -> bytes:
-    if not data or not data.endswith(b"\n"):
-        raise ResultMaterializationError("Codex JSONL is empty or truncated")
-    selected: bytes | None = None
-    for encoded_line in data[:-1].split(b"\n"):
+def parse_codex_jsonl_result(data: bytes, result_max_bytes: int) -> _CodexNativeResult:
+    observation = _CodexNativeResult()
+
+    def refuse(message: str) -> None:
+        raise ResultMaterializationError(message, observation)
+
+    framing_complete = bool(data) and data.endswith(b"\n")
+    thread_started = False
+    in_turn = False
+    invalid_order = False
+    fatal = False
+    for encoded_line in data.split(b"\n")[:-1]:
         if not encoded_line:
-            raise ResultMaterializationError("Codex JSONL contains an empty record")
+            refuse("Codex JSONL contains an empty record")
         try:
             line = encoded_line.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
-            raise ResultMaterializationError("Codex JSONL is not valid UTF-8") from exc
+            raise ResultMaterializationError("Codex JSONL is not valid UTF-8", observation) from exc
         try:
             record = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ResultMaterializationError("Codex JSONL contains a malformed record") from exc
+        except (ValueError, RecursionError) as exc:
+            raise ResultMaterializationError("Codex JSONL contains a malformed record", observation) from exc
         if not isinstance(record, dict):
-            raise ResultMaterializationError("Codex JSONL record is not an object")
+            refuse("Codex JSONL record is not an object")
+        kind = record.get("type")
+        if not isinstance(kind, str):
+            observation.unknown_records += 1
+            continue
+        if kind == "thread.started":
+            invalid_order |= thread_started or in_turn or observation.turn != "missing"
+            thread_started = True
+        elif kind == "turn.started":
+            invalid_order |= not thread_started or in_turn or observation.turn == "failed"
+            in_turn = True
+            observation.turn = "incomplete"
+            observation.selected = None
+        elif kind in {"turn.completed", "turn.failed"}:
+            invalid_order |= not in_turn
+            in_turn = False
+            if kind == "turn.failed":
+                fatal = True
+                observation.turn = "failed"
+            else:
+                observation.turn = "completed"
+        elif kind == "error":
+            fatal = True
+            observation.diagnostic_records += 1
+        elif kind not in {"item.started", "item.updated", "item.completed"}:
+            observation.unknown_records += 1
+            continue
         item = record.get("item")
+        if kind not in {"item.started", "item.updated", "item.completed"}:
+            continue
+        if not isinstance(item, dict):
+            observation.unknown_records += 1
+            continue
+        item_kind = item.get("type")
+        if not isinstance(item_kind, str):
+            observation.unknown_records += 1
+            continue
+        # Native warnings may be emitted outside a turn during initialization.
+        invalid_order |= not in_turn and item_kind != "error"
+        if item_kind == "error":
+            observation.diagnostic_records += 1
+            if not isinstance(item.get("message"), str):
+                observation.unknown_records += 1
+        elif item_kind in {
+            "command_execution", "file_change", "mcp_tool_call",
+            "collab_tool_call", "web_search",
+        }:
+            # rust-v0.162.1 exec_events::ThreadItemDetails; count lifecycle
+            # records, never guessed distinct calls or payload-derived names.
+            observation.operation_records += 1
+            if item_kind != "web_search":
+                operation_status = item.get("status")
+                statuses = {"in_progress", "completed", "failed"}
+                if item_kind == "command_execution":
+                    statuses.add("declined")
+                if not isinstance(operation_status, str) or operation_status not in statuses or (
+                    kind == "item.completed" and operation_status == "in_progress"
+                ):
+                    observation.unknown_records += 1
+                if isinstance(operation_status, str) and operation_status in {"failed", "declined"}:
+                    observation.failed_operation_records += 1
+        elif item_kind not in {"agent_message", "reasoning", "todo_list"}:
+            observation.unknown_records += 1
+        elif item_kind in {"agent_message", "reasoning"} and not isinstance(item.get("text"), str):
+            observation.unknown_records += 1
+        elif item_kind == "todo_list" and not isinstance(item.get("items"), list):
+            observation.unknown_records += 1
         if (
-            record.get("type") == "item.completed"
-            and isinstance(item, dict)
-            and item.get("type") == "agent_message"
+            kind == "item.completed"
+            and item_kind == "agent_message"
             and isinstance(item.get("text"), str)
         ):
-            candidate = item["text"].encode("utf-8")
-            selected = candidate
-    if selected is None:
-        raise ResultMaterializationError(
-            "Codex JSONL contains no completed agent_message item"
-        )
-    if len(selected) > result_max_bytes:
-        raise ResultMaterializationError(
-            f"provider result exceeds configured maximum of {result_max_bytes} bytes"
-        )
-    return selected
+            try:
+                candidate = item["text"].encode("utf-8", errors="strict")
+            except UnicodeEncodeError as exc:
+                raise ResultMaterializationError("Codex agent text is not valid UTF-8", observation) from exc
+            observation.selected = candidate
+        elif kind == "item.completed" and item_kind == "agent_message":
+            observation.selected = None
+    if not framing_complete:
+        refuse("Codex JSONL is empty or truncated")
+    observation.parse_complete = True
+    if invalid_order:
+        observation.turn = "inconsistent"
+        refuse("Codex JSONL contains inconsistent native event ordering")
+    if fatal:
+        if observation.turn != "failed":
+            observation.turn = "fatal"
+        refuse("Codex JSONL reports native failure")
+    if in_turn or observation.turn != "completed":
+        refuse("Codex JSONL has no successful completed native turn")
+    if observation.selected is None:
+        refuse("Codex JSONL contains no completed agent_message item")
+    if len(observation.selected) > result_max_bytes:
+        refuse(f"provider result exceeds configured maximum of {result_max_bytes} bytes")
+    observation.materialization = "ok"
+    return observation
 
 
 def provider_capture_policy(capture_max_bytes: int) -> CapturePolicyV1:
@@ -5922,6 +6034,13 @@ def output_safety_scan_failure_terminal(
     )
 
 
+def _stderr_marker_count(data: bytes) -> int:
+    return sum(
+        1 for line in data.decode("utf-8", errors="replace").splitlines()
+        if ERROR_MARKER.match(line)
+    )
+
+
 def materialize_terminal(
     lifecycle: RunCaptureLifecycle,
     provider: str,
@@ -5930,13 +6049,17 @@ def materialize_terminal(
     *,
     stdout: bytes | None = None,
     stderr: bytes | None = None,
+    stderr_marker_count: int | None = None,
 ) -> tuple[TerminalResult, str]:
     evidence_path = lifecycle.prompt_path
     captured_stdout = (
         stdout if stdout is not None else getattr(lifecycle, "_test_stdout", b"")
     )
+    observation = None
     if provider == "codex":
-        result_bytes = parse_codex_jsonl_result(captured_stdout, result_max_bytes)
+        observation = parse_codex_jsonl_result(captured_stdout, result_max_bytes)
+        result_bytes = observation.selected
+        assert result_bytes is not None
     else:
         if len(captured_stdout) > result_max_bytes:
             raise ResultMaterializationError(
@@ -5945,10 +6068,7 @@ def materialize_terminal(
         result_bytes = captured_stdout
     stderr_bytes = stderr if stderr is not None else getattr(lifecycle, "_test_stderr", b"")
     result_text = result_bytes.decode("utf-8", errors="replace")
-    stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-    marker_count = sum(
-        1 for line in stderr_text.splitlines() if ERROR_MARKER.match(line)
-    )
+    marker_count = _stderr_marker_count(stderr_bytes) if stderr_marker_count is None else stderr_marker_count
     final_line = _final_nonblank_line(result_text)
     status, gate = "blocked", "none"
     if exit_code != 0:
@@ -5957,7 +6077,7 @@ def materialize_terminal(
     elif not result_bytes:
         note = "oracle: empty provider result"
         token = "UNVERIFIED:empty"
-    elif marker_count:
+    elif marker_count and provider != "codex":
         note = f"oracle: err markers present ({marker_count})"
         token = "UNVERIFIED:err-markers"
     elif provider == "kimi":
@@ -5983,6 +6103,10 @@ def materialize_terminal(
     else:
         note = "oracle: final line is not an anchored GATE verdict"
         token = "UNVERIFIED:no-gate-line"
+    if observation is not None:
+        note = observation.note() + "; " + note
+        if marker_count or observation.diagnostic_records or observation.failed_operation_records:
+            note += "; diagnostic-health=adverse"
     return (
         TerminalResult(evidence_path, status, gate, note, token, marker_count),
         result_text,
@@ -6022,8 +6146,8 @@ def combine_terminal_outcomes(
         )
         status, gate = "blocked", "none"
         note = (
-            f"cleanup: incomplete ({len(cleanup.issues)}); "
-            f"primary={primary.token}"
+            f"{terminal.note}; cleanup: incomplete ({len(cleanup.issues)}); "
+            f"current={terminal.token}; primary={primary.token}"
         )
     return FinalOutcome(
         combined_exit,
@@ -6104,7 +6228,7 @@ def serialized_safety_failure_outcome(
         outcome.cleanup_issue_count,
         "",
         outcome.recovery_retained,
-        0,
+        outcome.stderr_marker_count,
     )
 
 
@@ -6374,7 +6498,7 @@ def build_provider_result_line(
         "token": outcome.token,
         "status": outcome.status,
         "gate": outcome.gate,
-        "note": outcome.note[:512],
+        "note": outcome.note,
         "cancelled": cancelled,
         "timedOut": timed_out,
         "stderrMarkerCount": outcome.stderr_marker_count,
@@ -6386,7 +6510,7 @@ def build_provider_result_line(
             "token": outcome.primary_token,
             "status": outcome.primary_status,
             "gate": outcome.primary_gate,
-            "note": outcome.primary_note[:512],
+            "note": outcome.primary_note,
         },
         "authorizing": False,
         "closesRunIds": [],
@@ -6530,6 +6654,9 @@ def build_minimal_provider_failure_line(
             "gate": primary_outcome.primary_gate,
             "note": primary_note,
         }
+        if type(primary_outcome.stderr_marker_count) is not int or primary_outcome.stderr_marker_count < 0:
+            raise ValueError("E_EXTERNAL_TERMINAL_MARKER_COUNT_INVALID")
+        payload["stderrMarkerCount"] = primary_outcome.stderr_marker_count
     return RESULT_PREFIX + json.dumps(
         payload, ensure_ascii=True, separators=(",", ":")
     ) + "\n"
@@ -6942,7 +7069,13 @@ def finalize_reserved_run_once(
             scan_outcome = scan_unavailable
         # Computed public capture metadata is taken from the actual observation.
         stream = observed_stream
-    primary_terminal: TerminalResult | None = None
+    marker_count = _stderr_marker_count(raw_stderr or b"")
+    primary_terminal: TerminalResult | None = (
+        TerminalResult(
+            lifecycle.prompt_path, "blocked", "none",
+            f"oracle: nonzero exit ({exit_code})", "FAILED:nonzero-exit", marker_count,
+        ) if exit_code != 0 else None
+    )
     combined_exit = exit_code
     if prechild_setup_failure and scan_outcome is None:
         result_text = ""
@@ -6964,7 +7097,7 @@ def finalize_reserved_run_once(
                 "supervision: cancelled" if cancelled else "supervision: timeout" if timed_out
                 else _sanitized_diagnostic(launch_error, lifecycle) if launch_error
                 else f"oracle: nonzero exit ({exit_code})",
-                "FAILED:nonzero-exit", 0,
+                "FAILED:nonzero-exit", marker_count,
             )
         combined_exit = exit_code if exit_code != 0 else 1
     elif (
@@ -6984,17 +7117,26 @@ def finalize_reserved_run_once(
                 control.result_max_bytes,
                 stdout=raw_stdout,
                 stderr=raw_stderr,
+                stderr_marker_count=marker_count,
             )
         except (OSError, ValueError, ResultMaterializationError) as exc:
             result_text = ""
+            observation = getattr(exc, "observation", None)
+            note = "result materialization failed"
+            if isinstance(observation, _CodexNativeResult):
+                note = observation.note() + "; " + note
+                if marker_count or observation.diagnostic_records or observation.failed_operation_records:
+                    note += "; diagnostic-health=adverse"
             terminal = TerminalResult(
                 lifecycle.prompt_path,
                 "blocked",
                 "none",
-                "result materialization failed",
+                note,
                 "UNVERIFIED:result-materialization",
-                0,
+                marker_count,
             )
+            if primary_terminal is not None and observation is not None:
+                primary_terminal = replace(primary_terminal, note=note + "; " + primary_terminal.note)
             combined_exit = exit_code if exit_code != 0 else 1
             print("FAIL: result materialization failed", file=sys.stderr)
         else:
@@ -7047,6 +7189,7 @@ def finalize_reserved_run_once(
             if process_result is None
             else provider_stream_result(process_result, include_stderr=False)
         )
+    terminal = replace(terminal, stderr_marker_count=marker_count)
     cleanup = reserved_run.cleanup_once()
     outcome = combine_terminal_outcomes(
         combined_exit,

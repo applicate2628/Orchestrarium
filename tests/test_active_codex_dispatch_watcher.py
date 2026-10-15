@@ -314,7 +314,10 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
         f"pathlib.Path({str(env_capture)!r}).write_text("
         "os.environ.get('ORCHESTRARIUM_DISPATCHED_REVIEW', ''), encoding='utf-8')\n"
         + (
-            "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GATE: PASS\\n'}}))\n"
+            "print(json.dumps({'type':'thread.started','thread_id':'synthetic-thread'}))\n"
+            "print(json.dumps({'type':'turn.started'}))\n"
+            "print(json.dumps({'type':'item.completed','item':{'id':'synthetic-agent','type':'agent_message','text':'GATE: PASS\\n'}}))\n"
+            "print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1,'cached_input_tokens':0,'output_tokens':1,'reasoning_output_tokens':0}}))\n"
             if provider == "codex"
             else "print('GATE: PASS')\n"
         ),
