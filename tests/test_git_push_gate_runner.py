@@ -769,7 +769,9 @@ def test_fresh_generic_consent_cannot_bypass_grammar_or_current_binding(tmp_path
             assert binding.call_count == int(reaches_binding)
 
 
-def test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(tmp_path):
+def test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(
+    tmp_path, command="git push origin HEAD:refs/heads/topic",
+):
     """No push: seed a private file remote before creating one unpublished commit."""
     git = str(Path(shutil.which("git") or "").resolve(strict=True))
     repo, remote, empty = tmp_path / "repo", tmp_path / "remote.git", tmp_path / "empty"
@@ -810,9 +812,39 @@ def test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(tmp_pat
             transcript = tmp_path / f"real-{surface}.jsonl"
             transcript.write_text(json.dumps(_batch_user((("Unrelated", "Neutral"), ("Approve?", "[approve-publication]")))) + "\n", encoding="utf-8")
             envelope = {"tool_name": "Bash", "cwd": str(repo), "tool_input": {
-                "command": "git push origin HEAD:refs/heads/topic"}, "transcript_path": str(transcript)}
+                "command": command}, "transcript_path": str(transcript)}
             actual_scan = policy._run_authoritative_scan
             observed = []
+            loaded_policy = [policy]
+            actual_loader = runner._load_policy
+            actual_preflight_loader = runner._load_preflight
+            parse_records = []
+            def observe_parse(actual, owner):
+                def parse(*args, **kwargs):
+                    parsed = actual(*args, **kwargs)
+                    parse_records.append({
+                        "rawCommand": parsed.raw_command, "dialect": parsed.dialect,
+                        "identity": parsed.identity._asdict(),
+                        "preflightPath": owner.__file__,
+                        "preflightSha256": hashlib.sha256(Path(owner.__file__).read_bytes()).hexdigest(),
+                        "normalizations": [value._asdict() for value in parsed.normalizations],
+                        "atoms": [value._asdict() for value in parsed.lexical.atoms],
+                        "tokens": list(parsed.commands[0].tokens),
+                        "normalizationState": parsed.commands[0].normalization_state,
+                    })
+                    return parsed
+                return parse
+            def load_preflight():
+                path, owner = actual_preflight_loader()
+                owner.parse_shell_command = observe_parse(owner.parse_shell_command, owner)
+                return path, owner
+            def load_policy(path):
+                nonlocal actual_scan
+                loaded = actual_loader(path)
+                loaded_policy[0] = loaded
+                actual_scan = loaded._run_authoritative_scan
+                loaded._run_authoritative_scan = scan
+                return loaded
             def scan(*args):
                 evidence = actual_scan(*args)
                 observed.append(evidence)
@@ -828,10 +860,13 @@ def test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(tmp_pat
                     "exactArgv": list(execution.launched.exact_argv),
                     "provenanceVerdict": execution.provenance_verdict,
                     "interpreter": execution.interpreter_identity_after._asdict(),
+                    "originalParse": parse_records,
                     "sourceClosure": {
                         "layout": execution.closure_after.layout.name,
                         "digest": execution.closure_after.digest,
                         "bootstrapDigest": execution.closure_after.bootstrap_digest,
+                        "rootLocator": dataclasses.asdict(execution.closure_after.root_locator),
+                        "executingGate": loaded_policy[0].__file__,
                         "nodes": [{"role": node.role, "path": node.expected_path, "bytes": node.size,
                                    "sha256": node.sha256} for node in execution.closure_after.nodes],
                     },
@@ -839,17 +874,21 @@ def test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(tmp_pat
                 (evidence_root / f"{surface}-scan-result.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
                 return evidence
             stdout, stderr = io.StringIO(), io.StringIO()
-            with mock.patch.object(preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
+            with mock.patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps(envelope).encode("utf-8")), encoding="utf-8")), \
                  mock.patch.object(policy, "_recover_stable_pr_grant", side_effect=AssertionError("irrelevant standing history read")), \
                  mock.patch.object(policy, "_run_authoritative_scan", side_effect=scan), \
-                 mock.patch.object(runner, "_load_preflight", return_value=(target.runner_path, preflight)), \
-                 mock.patch.object(runner, "_load_policy", return_value=policy), \
+                 mock.patch.object(preflight, "parse_shell_command", side_effect=observe_parse(preflight.parse_shell_command, preflight)), \
+                 mock.patch.object(runner, "_load_preflight", side_effect=load_preflight), \
+                 mock.patch.object(runner, "_load_policy", side_effect=load_policy), \
                  contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 result = runner.main() if surface == "runner" else policy.main()
+            policy = loaded_policy[0]
             (evidence_root / f"{surface}-hook.stdout").write_text(stdout.getvalue(), encoding="utf-8")
             (evidence_root / f"{surface}-hook.stderr").write_text(stderr.getvalue(), encoding="utf-8")
             assert result == 0 and stdout.getvalue() == stderr.getvalue() == ""
             assert len(observed) == 1
+            assert len(parse_records) == 1 and parse_records[0]["rawCommand"] == command
+            assert parse_records[0]["normalizationState"] == ("normalized" if "\\\n" in command else "literal")
             evidence = observed[0]
             assert evidence.parsed_outcome.kind == "valid-v3"
             receipt = evidence.parsed_outcome.receipt
@@ -873,6 +912,59 @@ def test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(tmp_pat
                 assert error.failure_id == "PGG-RECEIPT-USED"
             else:
                 raise AssertionError("same invocation was consumed twice")
+
+
+def test_materialized_root_alias_public_handlers_use_real_owned_range_scan(
+    tmp_path, command="git push origin HEAD:refs/heads/topic",
+):
+    """Installer-equivalent complete payload; actual direct and fixed loaders."""
+    physical = tmp_path / "ordinary-component"
+    script_dir = physical / "scripts"
+    for filename in (POLICY_NAME, RUNNER_NAME, "git_push_gate_preflight.py", "hook_common.py", "check-publication-safety.py"):
+        destination = script_dir / filename
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((CANON_DIR / filename).read_bytes())
+    for filename in ("posix_process_group.py", "windows_job.py"):
+        destination = script_dir / "process_supervision" / filename
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / "scripts/process_supervision" / filename).read_bytes())
+    classifier = physical / "hooks/check-machine-local-path.py"
+    classifier.parent.mkdir(parents=True)
+    classifier.write_bytes((CANON_DIR.parent / "hooks/check-machine-local-path.py").read_bytes())
+    alias = tmp_path / "logical-component"
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(str(physical), str(alias))
+    else:
+        alias.symlink_to(physical, target_is_directory=True)
+    try:
+        scenario = tmp_path / "scenario"
+        scenario.mkdir()
+        with mock.patch.dict(globals(), TARGETS=(target_for("materialized-logical", alias / "scripts"),)):
+            test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(scenario, command)
+        evidence_root = Path(os.environ.get("ORCHESTRARIUM_PUBLICATION_TEST_EVIDENCE_DIR", str(scenario / "evidence")))
+        for surface in ("direct", "runner"):
+            observed = json.loads((evidence_root / f"{surface}-scan-result.json").read_text(encoding="utf-8"))
+            locator = observed["sourceClosure"]["rootLocator"]
+            assert locator["physical_root"] == str(physical.resolve())
+            assert locator["logical_gate"] == observed["sourceClosure"]["executingGate"]
+            assert locator["kind"] == ("directory" if surface == "runner" else "junction" if os.name == "nt" else "symlink")
+            assert Path(locator["logical_gate"]) == (physical if surface == "runner" else alias) / "scripts" / POLICY_NAME
+    finally:
+        if os.name == "nt": alias.rmdir()
+        else: alias.unlink()
+
+
+def test_continued_generic_consent_public_handlers_use_real_owned_range_scan(tmp_path):
+    test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(
+        tmp_path, "git pu\\\nsh origin HEAD:refs/heads/topic",
+    )
+
+
+def test_continued_materialized_root_alias_public_handlers_use_real_owned_range_scan(tmp_path):
+    test_materialized_root_alias_public_handlers_use_real_owned_range_scan(
+        tmp_path, "git pu\\\nsh origin HEAD:refs/heads/topic",
+    )
 
 
 def _former_envelope(row_id: str, tmp_path: Path):

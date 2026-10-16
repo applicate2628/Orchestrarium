@@ -5,8 +5,9 @@ the human-review-before-push rule.
 WHAT THIS DENIES: a real non-dry `git push` without applicable genuine-user
 publication authority and one fresh gate-owned canonical range scan for the
 exact pending push. The gate derives the only scanner
-producer as one held gate plus gate-relative four-module closure (`hook_common.py`, the
-machine-path classifier, the POSIX process-group helper, and `check-publication-safety.py`), snapshots and
+producer as one held gate plus a fixed five-module closure (`hook_common.py`, the
+machine-path classifier, the POSIX process-group helper, the Windows Job helper,
+and `check-publication-safety.py`), snapshots and
 executes those bytes directly with its current trusted interpreter, and binds
 the exactly correlated typed result to remote, destination, source, current
 HEAD, and receipt tip. Scanner-
@@ -577,14 +578,32 @@ class SourceLayout:
     name: str
     gate_suffix: tuple[str, ...]
     trust_root_up: int
+    role_paths: tuple[tuple[str, str], ...]
 
 
 SOURCE_LAYOUTS = (
-    SourceLayout("universal", ("scripts", "universal-hooks", "scripts", "check-git-push-gate.py"), 2),
-    SourceLayout("generated-codex", ("src.codex", "skills", "lead", "scripts", "check-git-push-gate.py"), 1),
-    SourceLayout("generated-claude", ("src.claude", "agents", "scripts", "check-git-push-gate.py"), 1),
-    SourceLayout("global", (".codex", "skills", "lead", "scripts", "check-git-push-gate.py"), 1),
-    SourceLayout("project-local", (".agents", "skills", "lead", "scripts", "check-git-push-gate.py"), 1),
+    SourceLayout(
+        "universal", ("scripts", "universal-hooks", "scripts", "check-git-push-gate.py"), 2,
+        (
+            ("gate", "universal-hooks/scripts/check-git-push-gate.py"),
+            ("hook_common", "universal-hooks/scripts/hook_common.py"),
+            ("classifier", "universal-hooks/hooks/check-machine-local-path.py"),
+            ("posix_helper", "process_supervision/posix_process_group.py"),
+            ("windows_job", "process_supervision/windows_job.py"),
+            ("scanner", "universal-hooks/scripts/check-publication-safety.py"),
+        ),
+    ),
+    SourceLayout(
+        "component", ("scripts", "check-git-push-gate.py"), 1,
+        (
+            ("gate", "scripts/check-git-push-gate.py"),
+            ("hook_common", "scripts/hook_common.py"),
+            ("classifier", "hooks/check-machine-local-path.py"),
+            ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
+            ("windows_job", "scripts/process_supervision/windows_job.py"),
+            ("scanner", "scripts/check-publication-safety.py"),
+        ),
+    ),
 )
 
 
@@ -593,6 +612,19 @@ class PathComponentIdentity:
     root_relative_name: str
     kind: str
     identity: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class RootLocatorIdentity:
+    logical_gate: str
+    logical_root: str
+    kind: str
+    locator_identity: tuple[int, ...]
+    raw_target: str | None
+    physical_root: str
+    physical_root_identity: tuple[int, ...]
+    physical_gate: str
+    gate_identity: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -605,6 +637,7 @@ class CanonicalSourceClosure:
     gate_identity: tuple[int, ...]
     bootstrap_digest: str
     interpreter_identity: InterpreterIdentity
+    root_locator: RootLocatorIdentity
 
 
 class PendingState(str, Enum):
@@ -1461,7 +1494,7 @@ class _PrGrantReducer:
         if action == "malformed":
             self.state, self.grant, self.pending_numeric = "malformed", None, None
             return
-        if not any(reply.answers):
+        if reply.kind != "structured-answer" and not any(reply.answers):
             return
         normalized = normalize_publication_approval_text(text)
 
@@ -2324,18 +2357,57 @@ def _capture_interpreter_handle(
 
 def _layout_for_gate(gate: Path) -> tuple[SourceLayout, Path]:
     parts = gate.parts
-    matches = [
+    # The canonical source producer has a distinct helper placement. Select it
+    # before the materialized component shape, never by peer availability.
+    layout = next((
         layout for layout in SOURCE_LAYOUTS
         if len(parts) >= len(layout.gate_suffix)
         and tuple(parts[-len(layout.gate_suffix):]) == layout.gate_suffix
-    ]
-    if len(matches) != 1:
+    ), None)
+    if layout is None:
         raise ValueError("layout")
-    layout = matches[0]
     trust_root = gate.parent
     for _index in range(layout.trust_root_up):
         trust_root = trust_root.parent
     return layout, trust_root
+
+
+def _observe_root_locator(
+    gate: Path, layout: SourceLayout, logical_root: Path,
+) -> RootLocatorIdentity:
+    value = os.lstat(logical_root)
+    raw_target = None
+    if _is_link_or_reparse(value):
+        tag = int(getattr(value, "st_reparse_tag", 0))
+        if os.name == "nt":
+            if tag == stat.IO_REPARSE_TAG_SYMLINK:
+                kind = "symlink"
+            elif tag == stat.IO_REPARSE_TAG_MOUNT_POINT:
+                kind = "junction"
+            else:
+                raise ValueError("root-locator-kind")
+        elif stat.S_ISLNK(value.st_mode):
+            kind = "symlink"
+        else:
+            raise ValueError("root-locator-kind")
+        raw_target = os.readlink(logical_root)
+    else:
+        _directory_identity(value)
+        kind = "directory"
+    # Only the selected root is resolved. Fixed descendants are acquired with
+    # the ordinary/no-follow owners, so in-component links remain observable.
+    physical_root = logical_root.resolve(strict=True)
+    physical_gate = physical_root / layout.role_paths[0][1]
+    root_identity = _directory_generation(physical_root)
+    if _directory_identity(os.stat(logical_root)) != root_identity:
+        raise ValueError("root-terminal-identity")
+    gate_identity = _regular_identity(gate, single_link=True)
+    if _regular_identity(physical_gate, single_link=True) != gate_identity:
+        raise ValueError("logical-gate-identity")
+    return RootLocatorIdentity(
+        str(gate), str(logical_root), kind, _stat_identity(value), raw_target,
+        str(physical_root), root_identity, str(physical_gate), gate_identity,
+    )
 
 
 def _component_paths(trust_root: Path, paths: tuple[Path, ...]) -> tuple[tuple[str, Path], ...]:
@@ -2391,25 +2463,14 @@ def _capture_path_components(
 
 def _capture_source_closure() -> tuple[tuple[int, ...], CanonicalSourceClosure]:
     gate = Path(os.path.abspath(__file__))
-    layout, trust_root_path = _layout_for_gate(gate)
-    parent = gate.parent
-    posix_helper = (
-        gate.parents[2] / "process_supervision" / "posix_process_group.py"
-        if layout.name == "universal"
-        else parent / "process_supervision" / "posix_process_group.py"
-    )
-    paths = (
-        ("gate", gate),
-        ("hook_common", parent / "hook_common.py"),
-        ("classifier", parent.parent / "hooks" / "check-machine-local-path.py"),
-        ("posix_helper", posix_helper),
-        ("windows_job", posix_helper.with_name("windows_job.py")),
-        ("scanner", parent / "check-publication-safety.py"),
-    )
+    layout, logical_root = _layout_for_gate(gate)
+    locator = _observe_root_locator(gate, layout, logical_root)
+    trust_root_path = Path(locator.physical_root)
+    paths = tuple((role, trust_root_path / name) for role, name in layout.role_paths)
     fds: list[int] = []
     nodes: list[SourceNode] = []
     try:
-        component_paths = (gate,) + tuple(path for _role, path in paths)
+        component_paths = tuple(path for _role, path in paths)
         component_fds, components = _capture_path_components(
             trust_root_path, component_paths
         )
@@ -2421,8 +2482,18 @@ def _capture_source_closure() -> tuple[tuple[int, ...], CanonicalSourceClosure]:
         bootstrap_digest = hashlib.sha256(_SCAN_BOOTSTRAP.encode("utf-8")).hexdigest()
         interpreter_identity = _interpreter_identity()
         fds.append(_capture_interpreter_handle(interpreter_identity))
-        digest_owner = hashlib.sha256(b"publication-safety-closure-v2\0")
+        if (
+            components[0].identity != locator.physical_root_identity
+            or nodes[0].file_identity != locator.gate_identity
+            or _observe_root_locator(gate, layout, logical_root) != locator
+        ):
+            raise ValueError("root-locator-capture-drift")
+        digest_owner = hashlib.sha256(b"publication-safety-closure-v3\0")
         digest_owner.update(layout.name.encode("ascii") + b"\0")
+        digest_owner.update(json.dumps(
+            (layout.role_paths, tuple(getattr(locator, name) for name in locator.__dataclass_fields__)),
+            ensure_ascii=True, separators=(",", ":"),
+        ).encode("ascii"))
         digest_owner.update(bootstrap_digest.encode("ascii"))
         for component in components:
             digest_owner.update(b"\0" + component.root_relative_name.encode("utf-8") + b"\0")
@@ -2434,7 +2505,7 @@ def _capture_source_closure() -> tuple[tuple[int, ...], CanonicalSourceClosure]:
         gate_identity = nodes[0].file_identity
         return tuple(fds), CanonicalSourceClosure(
             layout, trust_root, components, tuple(nodes), digest_owner.hexdigest(),
-            gate_identity, bootstrap_digest, interpreter_identity,
+            gate_identity, bootstrap_digest, interpreter_identity, locator,
         )
     except Exception:
         for fd in fds:
@@ -2452,11 +2523,24 @@ def _recheck_source_closure(
     node_fds = fds[component_count:component_count + len(before.nodes)]
     interpreter_fd = fds[-1]
     gate = Path(os.path.abspath(__file__))
-    layout, trust_root_path = _layout_for_gate(gate)
+    layout, logical_root = _layout_for_gate(gate)
     if layout != before.layout:
         raise ValueError("layout-drift")
+    locator = _observe_root_locator(gate, layout, logical_root)
+    if locator != before.root_locator:
+        raise ValueError("root-locator-drift")
+    trust_root_path = Path(locator.physical_root)
+    paths = tuple(trust_root_path / name for _role, name in layout.role_paths)
+    if (
+        tuple(node.role for node in before.nodes) != tuple(role for role, _name in layout.role_paths)
+        or tuple(node.expected_path for node in before.nodes) != tuple(map(str, paths))
+        or before.trust_root != before.components[0]
+        or before.trust_root.identity != locator.physical_root_identity
+        or before.gate_identity != locator.gate_identity
+    ):
+        raise ValueError("component-relation-drift")
     current_component_paths = _component_paths(
-        trust_root_path, (gate,) + tuple(Path(node.expected_path) for node in before.nodes)
+        trust_root_path, paths
     )
     if tuple(name for name, _path in current_component_paths) != tuple(
         component.root_relative_name for component in before.components
@@ -2519,6 +2603,8 @@ def _recheck_source_closure(
         != before.bootstrap_digest
     ):
         raise ValueError("gate-drift")
+    if _observe_root_locator(gate, layout, logical_root) != locator:
+        raise ValueError("root-locator-recheck-drift")
     return before
 
 

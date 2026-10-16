@@ -4,11 +4,17 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-16
 
+- **Empty publication replies preserve genuine-user chronology.** A valid structured answer batch remains one user event even when every answer is empty, so earlier context-free numeric pull-request intent cannot survive that later reply. Empty answers add no permission; bound grants and ordinary empty-message behavior retain their existing rules in both provider packs.
+
 - **Complete publication history uses its captured file boundary.** The existing streaming reducer now handles every required full-history route without artificial aggregate byte or record cutoffs, reading and verifying a finite acquired frontier with bounded per-record memory. Growth, invalid input, identity drift, revocation and missing authority retain their checks; both handlers still require the bound unpublished-range scan and receipt.
 
 - **Supervised Luna is available for ordinary producer work.** Task-first routing now explicitly considers Luna/high for admitted exploration and engineering professions when useful-result time including verification and correction fits the task. Role authority, exact tool scope, native defaults, the mechanical corridor and protected review/recovery floors stay intact; observed pilot limits remain visible.
 
 - **Lifecycle rollback conserves physical failures and owned custody.** Actual admitted filesystem failures remain bound to the existing lifecycle owner across rollback and verification, while invalid or reused mutations stop before physical observation and create no false failure. Disjoint rollback proceeds only through qualified owned effects; original primary failures, outward results, cleanup failures and acquired-resource settlement stay distinct, and foreign or unowned state is preserved.
+
+- **Publication scans recognize the approved component topology.** The existing gate now identifies the canonical source and complete materialized component layouts by their fixed file roles and selected physical root, independent of surrounding install directory names. A supported logical-root link is checked against the same physical component by its native kind, identity and raw target. Descendant identity and no-follow checks, host approval, the unpublished-range scan, receipt format, one-use consumption and cleanup remain in force; incomplete raw source projections still refuse.
+
+- **The generic publication route preserves a proven POSIX (Portable Operating System Interface) line continuation.** A backslash followed by a line feed can qualify only when the existing parser's exact source span and quote context and a non-executing argument-vector comparison prove the same literal arguments. The original command remains the gate input. Consent, current repository/source/HEAD binding, fresh nonempty version-3 scan and receipt, one-use consumption, and human review remain required; other unproved forms retain their existing handling. Strict pull-request routes and dry-run behavior are unchanged.
 
 ## 2026-10-15
 

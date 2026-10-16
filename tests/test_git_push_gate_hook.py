@@ -3736,6 +3736,218 @@ class TestOracleFailClosed(unittest.TestCase):
         self.assertFalse(root.exists())
 
 
+class TestPosixContinuationQualification(unittest.TestCase):
+    def parser(self):
+        return _load_gate_module(CANONICAL_HOOK, "continuation_" + secrets.token_hex(8))._a3_preflight
+
+    def test_static_literal_proof_preserves_raw_identity_and_one_parse(self):
+        owner = self.parser()
+        cases = (
+            "git pu\\\nsh origin main",
+            "g\\\nit pu\\\nsh ori\\\ngin ma\\\nin",
+            '"g\\\nit" \'push\' "ori\\\ngin" "ma\\\nin"',
+            "git pu\\\nsh origin 'to$pic'",
+            "git pu\\\nsh origin topic/☃",
+            'git pu\\\nsh origin "to\\\n☃pic"',
+            "git pu\\\nsh origin main~literal",
+            "git pu\\\nsh origin main\n",
+            'git pu\\\nsh origin "topic[*]{x}~"',
+            "git pu\\\nsh origin topic/\u200b",
+            'git pu\\\nsh origin "to\tpic"',
+        )
+        for raw in cases:
+            with self.subTest(raw=raw), mock.patch.object(owner, "_build_shell_lexical_state", wraps=owner._build_shell_lexical_state) as lexer:
+                parsed = owner.parse_shell_command(raw, "posix")
+                identity = parsed.identity
+                decision = owner.classify_generic_push(parsed)
+                lexer.assert_called_once()
+                self.assertEqual(decision.status, "PGG-ADMISSIBLE")
+                self.assertEqual(decision.binding, ("origin", parsed.commands[0].tokens[-1], parsed.commands[0].tokens[-1]))
+                self.assertIs(parsed.identity, identity)
+                self.assertEqual(parsed.raw_command, raw)
+                self.assertTrue(parsed.normalizations)
+                self.assertEqual(parsed.commands[0].normalization_state, "normalized")
+                self.assertEqual(parsed.strict_projection.status, "noncanonical")
+
+    def test_tilde_ordinary_equals_prefix_preserves_quotes_and_membership(self):
+        owner = self.parser()
+        proof = owner._has_static_posix_continuation_proof
+        lines, first_line = inspect.getsourcelines(proof)
+        query_line = first_line + next(index for index, line in enumerate(lines) if "if not prefix or (" in line)
+        atom_line = first_line + next(index for index, line in enumerate(lines) if "start, end = item.source_span" in line)
+        observations = []
+
+        def trace(frame, event, arg):
+            if frame.f_code is not proof.__code__:
+                return None
+            if event == "line" and frame.f_lineno in (query_line, atom_line):
+                groups = frame.f_locals["groups"]
+                expected = {key for key, group in groups.items() if any(atom.state == "ordinary" and atom.value == "=" for atom in group)}
+                if "ordinary_equals_memberships" in frame.f_locals:
+                    self.assertEqual(frame.f_locals["ordinary_equals_memberships"], expected)
+                if frame.f_lineno == query_line:
+                    membership = frame.f_locals["item"].token_membership
+                    self.assertEqual(frame.f_locals["assignment_prefix"], membership in expected)
+                    observations.append((membership, membership in expected))
+            return trace
+
+        def check(parsed, expected):
+            previous_trace = sys.gettrace()
+            try:
+                sys.settrace(trace)
+                self.assertEqual(proof(parsed), expected)
+            finally:
+                sys.settrace(previous_trace)
+
+        for remote, destination, expected in (
+            ("origin", "x:~", True),
+            ("origin", "x=:~", False),
+            ("origin", "'x=':~", True),
+            ("origin", "'x='y=:~", False),
+            ("origin", "x'='~", True),
+            ("origin", "x=':'~", True),
+            ("or=igin", "x:~:~", True),
+            ("origin", "ab=cdx~", True),
+        ):
+            with self.subTest(remote=remote, destination=destination):
+                check(owner.parse_shell_command("git pu\\\nsh " + remote + " " + destination, "posix"), expected)
+
+        parsed = owner.parse_shell_command("git pu\\\nsh origin ab=cdx~", "posix")
+        atom_index = next(index for index, atom in enumerate(parsed.lexical.atoms) if atom.value == "c" and atom.source_span[0] > parsed.raw_command.index("origin"))
+        # A key revisit preserves its old accepted prefix, then the unchanged
+        # final token/provenance agreement refuses the inconsistent record.
+        changed_atoms = list(parsed.lexical.atoms)
+        changed_atoms[atom_index] = changed_atoms[atom_index]._replace(token_membership=7)
+        before = len(observations)
+        check(parsed._replace(lexical=parsed.lexical._replace(atoms=tuple(changed_atoms))), False)
+        self.assertEqual(observations[before:], [(3, True)])
+        equals_index = next(index for index, atom in enumerate(parsed.lexical.atoms) if atom.value == "=")
+        for change in ({"token_membership": -1}, {"state": "single-quoted"}):
+            with self.subTest(malformed=change):
+                changed_atoms = list(parsed.lexical.atoms)
+                changed_atoms[equals_index] = changed_atoms[equals_index]._replace(**change)
+                check(parsed._replace(lexical=parsed.lexical._replace(atoms=tuple(changed_atoms))), False)
+        self.assertTrue(any(value for _, value in observations))
+        self.assertTrue(any(not value for _, value in observations))
+
+    def test_dynamic_control_empty_and_other_transform_proofs_refuse(self):
+        owner = self.parser()
+        cases = (
+            'git pu\\\nsh origin "$HOME"',
+            "git pu\\\nsh origin $(printf main)",
+            "git pu\\\nsh origin $((1+2))",
+            "git pu\\\nsh origin ~root",
+            "git pu\\\nsh origin {main,other}",
+            "git pu\\\nsh origin ma*",
+            "git pu\\\nsh origin '' main",
+            "git pu\\\nsh origin 'ma\\\nin'",
+            "git pu\\\nsh ori\\gin main",
+            "git pu\\\r\nsh origin main",
+            "git pu\\\nsh origin main; echo tail",
+            "git pu\\\nsh origin\nmain",
+            "git pu\\\nsh origin main # unmatched raw data",
+            "git pu\\\nsh origin ma\0in",
+        )
+        for raw in cases:
+            with self.subTest(raw=raw):
+                parsed = owner.parse_shell_command(raw, "posix")
+                self.assertNotEqual(owner.classify_generic_push(parsed).status, "PGG-ADMISSIBLE")
+        for dialect in ("powershell", "posix-compat", "unsupported"):
+            with self.subTest(dialect=dialect):
+                parsed = owner.parse_shell_command("git pu\\\nsh origin main", dialect)
+                self.assertNotEqual(owner.classify_generic_push(parsed).status, "PGG-ADMISSIBLE")
+
+    def test_missing_or_inconsistent_original_provenance_refuses(self):
+        owner = self.parser()
+        parsed = owner.parse_shell_command("git pu\\\nsh origin main", "posix")
+        operation = parsed.normalizations[0]
+        bad_operation = operation._replace(contribution="quoted-argument")
+        changed = (
+            parsed._replace(normalizations=()),
+            parsed._replace(lexical=parsed.lexical._replace(removed_spans=())),
+            parsed._replace(lexical=parsed.lexical._replace(atoms=parsed.lexical.atoms[1:])),
+            parsed._replace(normalizations=(bad_operation,), lexical=parsed.lexical._replace(operations=(bad_operation,), removed_spans=(bad_operation,))),
+        )
+        for index, value in enumerate(changed):
+            with self.subTest(provenance=index):
+                self.assertEqual(owner.classify_generic_push(value).status, "PGG-LEXICAL-NORMALIZATION")
+
+    def test_qualified_words_still_obey_repository_options_and_target_contracts(self):
+        owner = self.parser()
+        for raw, expected in (
+            ("FOO=1 git -C .. pu\\\nsh --force origin main refs/heads/extra", "PGG-REPOSITORY-REDIRECT"),
+            ("git pu\\\nsh --force origin main", "PGG-PUSH-OPTION"),
+            ("git pu\\\nsh origin main other", "PGG-REFSPEC-CARDINALITY"),
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(owner.classify_generic_push(owner.parse_shell_command(raw, "posix")).status, expected)
+        parsed = owner.parse_shell_command("git pu\\\nsh --dry-run origin main", "posix")
+        self.assertFalse(owner._has_solitary_direct_dry_credit(parsed))
+        self.assertEqual(owner.classify_generic_push(parsed).status, "PGG-PUSH-OPTION")
+        module = _load_gate_module(CANONICAL_HOOK, "continuation_strict_boundary")
+        with self.assertRaises(module.PrRouteDenied) as strict_denial:
+            module._prepare_simple_pr_push("posix", parsed, str(REPO_ROOT), "tool")
+        self.assertEqual(strict_denial.exception.failure_id, "PRG-COMMAND-SHAPE")
+        for raw in ("bash -c 'git pu\\\nsh origin main'", "git pu\\\nsh origin main && git push other main"):
+            self.assertNotEqual(owner.classify_generic_push(owner.parse_shell_command(raw, "posix")).status, "PGG-ADMISSIBLE")
+
+    @unittest.skipUnless(os.name == "nt", "target-native Git Bash oracle")
+    def test_native_static_literal_argv_matches_original_parser_tokens(self):
+        bash_value = os.environ.get("ORCHESTRARIUM_PUBLICATION_TEST_BASH")
+        if not bash_value:
+            self.skipTest("explicit native Bash oracle not configured")
+        bash = Path(bash_value).resolve(strict=True)
+        module = _load_gate_module(CANONICAL_HOOK, "continuation_native")
+        owner = module._a3_preflight
+        with tempfile.TemporaryDirectory(prefix="continuation-native-") as directory:
+            root = Path(directory)
+            empty = root / "empty"
+            empty.mkdir()
+            evidence = Path(os.environ.get("ORCHESTRARIUM_PUBLICATION_NORMALIZATION_EVIDENCE", str(root / "evidence")))
+            evidence.mkdir(parents=True, exist_ok=False)
+            pairs = (
+                ("git push origin main", "g\\\nit pu\\\nsh ori\\\ngin ma\\\nin"),
+                ("git push origin main", '"g\\\nit" \'push\' "ori\\\ngin" "ma\\\nin"'),
+                ("git push origin topic/☃", "git pu\\\nsh origin topic/☃"),
+                ("git push origin 'to$pic'", "git pu\\\nsh origin 'to$pic'"),
+                ('git push origin "to☃pic"', 'git pu\\\nsh origin "to\\\n☃pic"'),
+                ('git push origin "topic[*]{x}~"', 'git pu\\\nsh origin "topic[*]{x}~"'),
+                ("git push origin main\n", "git pu\\\nsh origin main\n"),
+                ("git push origin topic/\u200b", "git pu\\\nsh origin topic/\\\n\u200b"),
+                ('git push origin "to\tpic"', 'git pu\\\nsh origin "to\\\n\tpic"'),
+            )
+            rows = []
+            image = bash.read_bytes()
+            (evidence / "bash-identity.json").write_text(json.dumps({
+                "path": str(bash), "bytes": len(image), "sha256": hashlib.sha256(image).hexdigest(),
+                "controlledEnvironment": {"PATH": str(empty), "BASH_ENV": "", "ENV": ""},
+                "importedFunctionsAndShellOptionsRemoved": True,
+            }, indent=2) + "\n", encoding="utf-8")
+            environment = {key: value for key, value in os.environ.items() if not key.startswith("BASH_FUNC_") and key not in ("SHELLOPTS", "BASHOPTS")}
+            environment.update(PATH=str(empty), BASH_ENV="", ENV="")
+            with mock.patch.dict(os.environ, environment, clear=True):
+                for index, pair in enumerate(pairs):
+                    observed = []
+                    for version, raw in enumerate(pair):
+                        script = root / f"{index}-{version}.sh"
+                        script.write_bytes(("function git() { builtin printf '%s\\0' \"$PWD\" \"$@\"; }\n" + raw).encode("utf-8"))
+                        (evidence / f"{index}-{version}.sh").write_bytes(script.read_bytes())
+                        result = module._run_process([str(bash), "--noprofile", "--norc", str(script)], 20.0, str(root.resolve()))
+                        row = {"pair": index, "version": version, "raw": raw, "scriptSha256": hashlib.sha256(script.read_bytes()).hexdigest(), "result": None if result is None else {"returncode": result.returncode}}
+                        if result is not None:
+                            (evidence / f"{index}-{version}.stdout").write_bytes(result.stdout)
+                            (evidence / f"{index}-{version}.stderr").write_bytes(result.stderr)
+                        rows.append(row)
+                        (evidence / "results.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+                        self.assertIsNotNone(result)
+                        self.assertEqual(result.returncode, 0)
+                        self.assertEqual(result.stderr, b"")
+                        parsed = owner.parse_shell_command(raw, "posix")
+                        self.assertEqual(result.stdout.split(b"\0")[1:-1], [word.encode("utf-8") for word in parsed.commands[0].tokens[1:]])
+                        observed.append(result.stdout)
+                    self.assertEqual(observed[0], observed[1])
+
+
 class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
     ALL_HOOKS = (CANONICAL_HOOK, *HOOKS)
 
@@ -4208,19 +4420,19 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                     self.assertEqual(parsed.commands[0].boundary_after, "end")
                     self.assertEqual(len(module._a3_preflight.find_git_push_records(parsed)), 1)
 
-    def test_normalized_push_is_detected_but_not_creditable(self) -> None:
+    def test_normalization_requires_qualified_posix_static_literal_proof(self) -> None:
         cases = (
-            ("posix", "git pu\\\nsh origin main"),
-            ("powershell", "git pu`sh origin main"),
+            ("posix", "git pu\\\nsh origin main", "PGG-ADMISSIBLE"),
+            ("powershell", "git pu`sh origin main", "PGG-LEXICAL-NORMALIZATION"),
         )
-        for script, module in self._modules("normalized_noncreditable"):
-            for dialect, command in cases:
+        for script, module in self._modules("normalization_proof"):
+            for dialect, command, expected in cases:
                 with self.subTest(script=script, dialect=dialect):
                     parsed = module._a3_preflight.parse_shell_command(command, dialect)
                     self.assertEqual(len(module._a3_preflight.find_git_push_records(parsed)), 1)
                     self.assertEqual(
                         module._a3_preflight.classify_generic_push(parsed).status,
-                        "PGG-LEXICAL-NORMALIZATION",
+                        expected,
                     )
 
     def test_normalized_dry_run_never_uses_fast_allowance(self) -> None:
@@ -4235,17 +4447,27 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         entries = [user("push the branch"), scan_call, scan_result]
         self.assert_gate(
             entries, "git push --dry-\\\nrun origin main", should_deny=True,
-            failure_id="PGG-LEXICAL-NORMALIZATION",
+            failure_id="PGG-PUSH-OPTION",
         )
         self.assert_gate(
             entries, "git pu`sh --dry-run origin main", should_deny=True,
             failure_id="PGG-LEXICAL-NORMALIZATION", tool_name="PowerShell",
         )
         self.assert_gate([], "git push --dry-run origin main", should_deny=False, transcript=False)
-        self.assert_gate(
-            [user("[approve-publication] push")],
-            "git pu\\\nsh origin main", should_deny=False,
-        )
+        raw = "git pu\\\nsh origin main"
+        for script in self.ALL_HOOKS:
+            completion = mock.Mock(return_value=True)
+            with synthetic_transcript([user("[approve-publication] push")]) as transcript_path:
+                output = TestTranscriptFailureDiagnostics()._run_envelope(script, {
+                    "tool_name": "Bash", "cwd": str(REPO_ROOT),
+                    "tool_input": {"command": raw}, "transcript_path": str(transcript_path),
+                }, generic_completion=completion)
+            self.assertEqual(output, "")
+            completion.assert_called_once()
+            parsed = completion.call_args.args[0].parsed
+            self.assertEqual(parsed.raw_command, raw)
+            self.assertEqual(parsed.commands[0].normalization_state, "normalized")
+            self.assertFalse(_load_gate_module(script, "normalized_dry_separation")._a3_preflight._has_solitary_direct_dry_credit(parsed))
 
     def test_posix_heredoc_data_regions_are_not_commands_for_either_consumer(self) -> None:
         fixtures = (
@@ -4632,11 +4854,12 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for command, failure_id in cases:
             self.assert_gate(entries, command, should_deny=True, failure_id=failure_id)
 
-    def test_marker_and_exact_long_dry_run_precede_generic_grammar(self) -> None:
+    def test_marker_cannot_bypass_repository_binding_and_dry_run_stays_allowed(self) -> None:
         self.assert_gate(
             [user("[approve-publication] push")],
             "FOO=1 git -C .. push --force origin main refs/heads/extra",
-            should_deny=False,
+            should_deny=True,
+            failure_id="PGG-REPOSITORY-REDIRECT",
         )
         self.assert_gate(
             [],
@@ -4921,6 +5144,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
         omit_tool_workdir: bool = False,
         tool_workdir: str | None = None,
         sidecar_snapshots: list[dict] | None = None,
+        boundary_observations: list[dict] | None = None,
         **oracle_changes,
     ):
         module = _load_gate_module(script, f"pr_grant_{script.parent.parent.name}_{id(entries)}")
@@ -4969,12 +5193,19 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             with mock.patch.object(module._a3_preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
                  mock.patch.object(module, "_resolve_executable", side_effect=resolver), \
                  mock.patch.object(module, "_run_process", side_effect=self._oracle(module, observed, **oracle_changes)), \
-                 mock.patch.object(module, "_resolve_generic_scan_binding", side_effect=generic_binding), \
-                 mock.patch.object(module, "_run_authoritative_scan", side_effect=authoritative), \
+                 mock.patch.object(module, "_resolve_generic_scan_binding", side_effect=generic_binding) as binding_owner, \
+                 mock.patch.object(module, "_run_authoritative_scan", side_effect=authoritative) as scan_owner, \
+                 mock.patch.object(module, "_recover_stable_pr_grant", wraps=module._recover_stable_pr_grant) as history_owner, \
                  mock.patch.object(module, "TRANSCRIPT_HISTORY_LINE_BYTE_CAP", module.TRANSCRIPT_HISTORY_LINE_BYTE_CAP if history_line_byte_cap is None else history_line_byte_cap), \
                  mock.patch.object(module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE", dialect_override), \
                  contextlib.redirect_stdout(stdout):
                 rc = module.main()
+                if boundary_observations is not None:
+                    boundary_observations.append({
+                        "history_calls": history_owner.call_count,
+                        "binding_calls": binding_owner.call_args_list,
+                        "scan_calls": scan_owner.call_args_list,
+                    })
             sidecar = Path(
                 str(transcript_path) + ".pr-publication-binding-v1.json"
             )
@@ -5064,6 +5295,41 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 )
                 self.assertFalse(denies_text(stdout), stdout)
                 self.assertEqual(sum(argv[1:4] == ["pr", "view", "https://github.com/acme/project/pull/7"] for argv in observed), 1)
+
+    def test_empty_structured_reply_advances_chronology_without_authority(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "empty_structured_chronology")
+        numeric = user("[approve-pr-publication:v1 pr=7]")
+        for additional in ((), ("",)):
+            empty = question_reply("", additional_answers=additional)
+            with self.subTest(additional=additional), mock.patch.object(
+                module, "_canonicalize_numeric_pr_grant",
+                side_effect=AssertionError("stale numeric authorization resolved"),
+            ) as resolver:
+                reducer = module._PrGrantReducer(str(REPO_ROOT))
+                reducer.consume(numeric)
+                reducer.consume(empty)
+                self.assertEqual(reducer.finish(), ("malformed", None))
+                self.assertIsNone(reducer.pending_numeric)
+                self.assertEqual((reducer.record_position, reducer.last_genuine_user_position), (2, 1))
+                resolver.assert_not_called()
+
+        empty = question_reply("")
+        reducer = module._PrGrantReducer(str(REPO_ROOT))
+        reducer.consume(empty)
+        self.assertEqual(reducer.finish(), ("absent", None))
+        self.assertEqual((reducer.record_position, reducer.last_genuine_user_position), (1, 0))
+        resolved = module.ActivePrGrant("https://github.com/acme/project/pull/7", "acme", "project", 7)
+        for grant in (dict(numeric, cwd=str(REPO_ROOT)), user(self.GRANT)):
+            with self.subTest(grant=grant), mock.patch.object(
+                module, "_canonicalize_numeric_pr_grant", return_value=resolved,
+            ):
+                reducer = module._PrGrantReducer(str(REPO_ROOT))
+                reducer.consume(grant)
+                reducer.consume(empty)
+                state, retained = reducer.finish()
+                self.assertEqual(state, "active")
+                self.assertEqual(retained.url, resolved.url)
+                self.assertEqual((reducer.record_position, reducer.last_genuine_user_position), (2, 1))
 
     def test_structured_targeted_reply_rejects_invalid_url(self) -> None:
         for script in (CANONICAL_HOOK, *HOOKS):
@@ -5681,13 +5947,34 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
 
     def test_legacy_approve_publication_precedes_pr_route(self) -> None:
         for script in HOOKS:
-            stdout, observed = self._run_module(
-                script,
-                [user("[approve-pr-publication:v1 broken]"), user("push [approve-publication]")],
-                "git push origin main",
-            )
-            self.assertFalse(denies_text(stdout))
-            self.assertEqual(observed, [])
+            for scan_failure in (None, "PGG-SCAN-FINDING"):
+                boundaries = []
+                changes = {} if scan_failure is None else {"scan_failure_id": scan_failure}
+                stdout, observed = self._run_module(
+                    script,
+                    [user("[approve-pr-publication:v1 broken]"), user("push [approve-publication]")],
+                    "git push origin main",
+                    boundary_observations=boundaries,
+                    **changes,
+                )
+                # Generic authority skips historical/PR work, while retaining
+                # the exact root proof, range binding and mandatory scanner.
+                self.assertEqual(observed, [[self.OWNED_GIT_IDENTITY, "rev-parse", "--show-toplevel"]])
+                self.assertEqual(len(boundaries), 1)
+                self.assertEqual(boundaries[0]["history_calls"], 0)
+                self.assertEqual(len(boundaries[0]["binding_calls"]), 1)
+                self.assertEqual(boundaries[0]["binding_calls"][0].args, (
+                    "origin", "main", "main", str(REPO_ROOT.resolve()), self.OWNED_GIT_IDENTITY,
+                ))
+                self.assertEqual(len(boundaries[0]["scan_calls"]), 1)
+                binding, root, executable = boundaries[0]["scan_calls"][0].args
+                self.assertEqual(tuple(binding), ("generic", "origin", "main", self.LOCAL_TIP, self.LOCAL_TIP))
+                self.assertEqual((root, executable), (str(REPO_ROOT.resolve()), self.OWNED_GIT_IDENTITY))
+                if scan_failure is None:
+                    self.assertEqual(stdout, "")
+                else:
+                    self.assertTrue(denies_text(stdout))
+                    self.assertIn(scan_failure, stdout)
 
     def test_pr_grant_dry_run_needs_no_provider_or_receipt(self) -> None:
         for script in HOOKS:
@@ -6525,11 +6812,11 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         module._a3_preflight.parse_shell_command(noncanonical, own_dialect), self.OWNED_GIT_IDENTITY, own_dialect
                     )
 
-            denied, observed = self._run_module(
-                script, entries, own_command, tool_name="UnsupportedShell"
-            )
-            self.assertIn("PRG-COMMAND-SHAPE", denied)
-            self.assertEqual(observed, [])
+            unsupported = module._a3_preflight.parse_shell_command(own_command, "unsupported")
+            self.assertEqual(unsupported.status, "SCG-UNSUPPORTED-DIALECT")
+            with self.assertRaises(module.PrRouteDenied) as rejected:
+                module._parse_pr_literal_command(unsupported, self.OWNED_GIT_IDENTITY, "unsupported")
+            self.assertEqual(rejected.exception.failure_id, "PRG-COMMAND-SHAPE")
 
             for head_ref in invalid_heads:
                 denied, observed = self._run_module(
@@ -6624,6 +6911,7 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
         envelope: dict,
         *,
         line_byte_cap: int | None = None,
+        generic_completion=None,
     ) -> str:
         module = _load_gate_module(
             script,
@@ -6639,6 +6927,10 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
             if line_byte_cap is not None:
                 stack.enter_context(mock.patch.object(
                     module, "TRANSCRIPT_HISTORY_LINE_BYTE_CAP", line_byte_cap
+                ))
+            if generic_completion is not None:
+                stack.enter_context(mock.patch.object(
+                    module, "_complete_generic_publication", side_effect=generic_completion,
                 ))
             stack.enter_context(contextlib.redirect_stdout(stdout))
             self.assertEqual(module.main(), 0)
@@ -6836,17 +7128,28 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
                 )
 
     def test_readable_authorization_and_missing_authorization_controls_are_unchanged(self) -> None:
+        # Transcript/authority unit boundary only. Complete physical packages,
+        # real default scans and receipt reuse are public-runner test oracles.
         for script in (CANONICAL_HOOK, *HOOKS):
+            completed = mock.Mock(return_value=True)
             with synthetic_transcript([user("[approve-publication]")]) as path:
                 approved = self._base_envelope()
                 approved["transcript_path"] = str(path)
-                output = self._run_envelope(script, approved)
+                output = self._run_envelope(script, approved, generic_completion=completed)
             self.assertEqual(output, "")
+            completed.assert_called_once()
+            preflight = completed.call_args.args[0]
+            self.assertEqual(preflight.reason_id, "PFP-CONSENT-GENERIC")
+            self.assertEqual(preflight.current_turn_status, "found")
+            self.assertEqual(preflight.generic_decision.status, "PGG-ADMISSIBLE")
+            self.assertEqual(preflight.generic_decision.binding, ("origin", "refs/heads/feature", "HEAD"))
 
+            unrequested = mock.Mock(side_effect=AssertionError("missing authority reached completion"))
             with synthetic_transcript([user("continue")]) as path:
                 unapproved = self._base_envelope()
                 unapproved["transcript_path"] = str(path)
-                output = self._run_envelope(script, unapproved)
+                output = self._run_envelope(script, unapproved, generic_completion=unrequested)
+            unrequested.assert_not_called()
             self.assertIn("Git-push publication gate", output)
             self.assertIn('"permissionDecision": "deny"', output)
             self.assertNotIn("Transcript diagnostics:", output)
@@ -7017,11 +7320,31 @@ class TestBoundedCurrentTurnPushGate(unittest.TestCase):
     def test_current_turn_131_record_reachability_allows_marker(self) -> None:
         entries = [user("[approve-publication] push")]
         entries.extend(assistant(f"step {index}") for index in range(130))
+        authority_fixture = TestTranscriptFailureDiagnostics()
         for script in HOOKS:
             with self.subTest(script=script):
-                result = run_hook(script, entries, "git push origin main")
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertFalse(denies(result), result.stdout)
+                # Exercise the real current-turn reader and authority route;
+                # downstream completion is explicitly modeled by the existing
+                # unit fixture, rather than inferred from absent scan rows.
+                completion = mock.Mock(return_value=True)
+                with synthetic_transcript(entries) as transcript_path:
+                    envelope = {
+                        "tool_name": "Bash", "cwd": str(REPO_ROOT),
+                        "tool_input": {"command": "git push origin main"},
+                        "transcript_path": str(transcript_path),
+                    }
+                    output = authority_fixture._run_envelope(
+                        script, envelope, generic_completion=completion,
+                    )
+                self.assertEqual(output, "")
+                completion.assert_called_once()
+                preflight = completion.call_args.args[0]
+                self.assertEqual(preflight.reason_id, "PFP-CONSENT-GENERIC")
+                self.assertEqual(preflight.current_turn_status, "found")
+                self.assertTrue(preflight.push_instruction)
+                self.assertEqual(preflight.command, "git push origin main")
+                self.assertEqual(preflight.generic_decision.status, "PGG-ADMISSIBLE")
+                self.assertEqual(preflight.generic_decision.binding, ("origin", "main", "main"))
 
 class TestCrashWhileDecidingFallsThroughToDeny(unittest.TestCase):
     """2026-07-26, HIGH-severity finding, `$security-reviewer` (fable) --
@@ -8320,6 +8643,7 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
         closure = module.CanonicalSourceClosure(
             module.SOURCE_LAYOUTS[0], root, (root,), (), "a" * 64, (),
             "b" * 64, interpreter,
+            module.RootLocatorIdentity("gate.py", ".", "directory", (), None, ".", (), "gate.py", ()),
         )
         return module.PendingScanInvocation(
             "invocation", "attempt", binding, closure,
@@ -8547,6 +8871,12 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
             )
             backing.write_text("# scanner fixture\n", encoding="utf-8")
             os.link(backing, scanner)
+            helpers = scripts / "process_supervision"
+            helpers.mkdir()
+            for filename in ("posix_process_group.py", "windows_job.py"):
+                (helpers / filename).write_bytes(
+                    (REPO_ROOT / "scripts/process_supervision" / filename).read_bytes()
+                )
             original_file = module.__file__
             try:
                 module.__file__ = str(gate)
@@ -8631,6 +8961,249 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
         self.assertEqual(hits, [], "R2-CURRENT-TRUTH-RESIDUE")
 
 
+class TestPublicationComponentRoot(unittest.TestCase):
+    @contextlib.contextmanager
+    def component(self):
+        with tempfile.TemporaryDirectory(prefix="publication-component-") as directory:
+            root = Path(directory)
+            physical = root / "ordinary-component"
+            sources = (
+                ("scripts/check-git-push-gate.py", CANONICAL_HOOK),
+                ("scripts/hook_common.py", CANONICAL_HOOK.with_name("hook_common.py")),
+                ("scripts/check-publication-safety.py", CANONICAL_HOOK.with_name("check-publication-safety.py")),
+                ("hooks/check-machine-local-path.py", CANONICAL_HOOK.parent.parent / "hooks/check-machine-local-path.py"),
+                ("scripts/process_supervision/posix_process_group.py", REPO_ROOT / "scripts/process_supervision/posix_process_group.py"),
+                ("scripts/process_supervision/windows_job.py", REPO_ROOT / "scripts/process_supervision/windows_job.py"),
+            )
+            for relative, source in sources:
+                target = physical / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(source.read_bytes())
+            module = _load_gate_module(CANONICAL_HOOK, "publication_component_" + secrets.token_hex(8))
+            yield module, root, physical
+
+    def link_root(self, alias, target):
+        if os.name == "nt":
+            import _winapi
+            _winapi.CreateJunction(str(target), str(alias))
+        else:
+            alias.symlink_to(target, target_is_directory=True)
+
+    def unlink_root(self, alias):
+        if os.name == "nt":
+            alias.rmdir()
+        else:
+            alias.unlink()
+
+    def test_complete_component_and_selected_root_alias_capture_same_physical_gate(self):
+        with self.component() as (module, root, physical):
+            alias = root / "logical-component"
+            self.link_root(alias, physical)
+            try:
+                for selected in (physical, alias):
+                    module.__file__ = str(selected / "scripts/check-git-push-gate.py")
+                    fds, closure = module._capture_source_closure()
+                    try:
+                        self.assertEqual(closure.layout.name, "component")
+                        self.assertEqual(closure.root_locator.physical_root, str(physical.resolve()))
+                        self.assertEqual(closure.root_locator.gate_identity, closure.nodes[0].file_identity)
+                        self.assertEqual(closure.root_locator.raw_target, os.readlink(alias) if selected == alias else None)
+                        self.assertEqual(closure.root_locator.kind, "junction" if selected == alias and os.name == "nt" else "symlink" if selected == alias else "directory")
+                        self.assertIs(module._recheck_source_closure(fds, closure), closure)
+                        payload = json.loads(module._closure_payload(closure))
+                        self.assertEqual(set(payload), {node.role for node in closure.nodes if node.role != "gate"})
+                        self.assertNotIn("root_locator", payload)
+                    finally:
+                        for fd in fds: os.close(fd)
+            finally:
+                self.unlink_root(alias)
+
+    def test_selected_root_retarget_and_same_target_replacement_deny(self):
+        with self.component() as (module, root, physical):
+            second = root / "second-complete-component"
+            shutil.copytree(physical, second)
+            alias = root / "logical-component"
+            for target in (second, physical):
+                self.link_root(alias, physical)
+                module.__file__ = str(alias / "scripts/check-git-push-gate.py")
+                fds, closure = module._capture_source_closure()
+                old = root / "retained-alias"
+                try:
+                    alias.rename(old)
+                    self.link_root(alias, target)
+                    self.assertNotEqual(os.lstat(alias).st_ino, closure.root_locator.locator_identity[1])
+                    with self.assertRaises(ValueError):
+                        module._recheck_source_closure(fds, closure)
+                finally:
+                    for fd in fds: os.close(fd)
+                    self.unlink_root(alias)
+                    self.unlink_root(old)
+
+    def test_capture_window_root_replacement_refuses_and_closes_every_descriptor(self):
+        with self.component() as (module, root, physical):
+            alias = root / "logical-component"
+            old = root / "retained-alias"
+            self.link_root(alias, physical)
+            module.__file__ = str(alias / "scripts/check-git-push-gate.py")
+            acquired = []
+            capture_node = module._capture_source_node
+            capture_directory = module._capture_directory
+            capture_interpreter = module._capture_interpreter_handle
+            def node(path, role):
+                result = capture_node(path, role)
+                acquired.append(result[0])
+                if role == "scanner":
+                    alias.rename(old)
+                    self.link_root(alias, physical)
+                return result
+            def directory(path):
+                result = capture_directory(path); acquired.append(result[0]); return result
+            def interpreter(identity):
+                fd = capture_interpreter(identity); acquired.append(fd); return fd
+            binding = module.PushScanBinding("generic", "origin", "refs/heads/topic", "a" * 40, "a" * 40)
+            try:
+                with mock.patch.object(module, "_capture_source_node", side_effect=node), \
+                     mock.patch.object(module, "_capture_directory", side_effect=directory), \
+                     mock.patch.object(module, "_capture_interpreter_handle", side_effect=interpreter), \
+                     mock.patch.object(module, "_run_snapshot_child") as child:
+                    with self.assertRaises(module.PrRouteDenied) as denied:
+                        module._run_authoritative_scan(binding, str(root), "unused-before-child")
+                    self.assertEqual(denied.exception.failure_id, "PGG-SCAN-PROVENANCE")
+                    child.assert_not_called()
+                self.assertTrue(acquired)
+                for fd in acquired:
+                    with self.assertRaises(OSError): os.fstat(fd)
+            finally:
+                self.unlink_root(alias)
+                if old.exists(): self.unlink_root(old)
+
+    @unittest.skipUnless(os.name == "nt", "Windows junction raw-target mutation")
+    def test_native_root_raw_target_change_preserving_terminal_denies(self):
+        import ctypes
+        import struct
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        create = kernel.CreateFileW
+        create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+        create.restype = wintypes.HANDLE
+        control = kernel.DeviceIoControl
+        control.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID)
+        control.restype = wintypes.BOOL
+        close = kernel.CloseHandle
+        close.argtypes = (wintypes.HANDLE,)
+        close.restype = wintypes.BOOL
+        with self.component() as (module, root, physical):
+            alias = root / "logical-component"
+            self.link_root(alias, physical)
+            module.__file__ = str(alias / "scripts/check-git-push-gate.py")
+            fds, closure = module._capture_source_closure()
+            handle = None
+            try:
+                handle = create(str(alias), 0x40000000, 7, None, 3, 0x02200000, None)
+                if handle == ctypes.c_void_p(-1).value:
+                    handle = None
+                    raise ctypes.WinError(ctypes.get_last_error())
+                # Mount-point reparse wire format: offsets/lengths are UTF-16
+                # byte units, followed by the substitute and display strings.
+                substitute = ("\\??\\" + str(physical).upper()).encode("utf-16-le")
+                display = str(physical).encode("utf-16-le")
+                paths = substitute + b"\0\0" + display + b"\0\0"
+                data = struct.pack("<IHHHHHH", stat.IO_REPARSE_TAG_MOUNT_POINT, 8 + len(paths), 0, 0, len(substitute), len(substitute) + 2, len(display)) + paths
+                buffer = ctypes.create_string_buffer(data)
+                returned = wintypes.DWORD()
+                if not control(handle, 0x000900A4, buffer, len(data), None, 0, ctypes.byref(returned), None):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                current = module._observe_root_locator(Path(module.__file__), closure.layout, alias)
+                self.assertEqual(current.locator_identity[:2], closure.root_locator.locator_identity[:2])
+                self.assertEqual(current.physical_root, closure.root_locator.physical_root)
+                self.assertEqual(current.gate_identity, closure.root_locator.gate_identity)
+                self.assertNotEqual(current.raw_target, closure.root_locator.raw_target)
+                with self.assertRaises(ValueError): module._recheck_source_closure(fds, closure)
+            finally:
+                if handle is not None: self.assertTrue(close(handle))
+                for fd in fds: os.close(fd)
+                self.unlink_root(alias)
+
+    def test_closing_physical_recheck_reobserves_locator(self):
+        with self.component() as (module, root, physical):
+            alias = root / "logical-component"
+            old = root / "retained-alias"
+            self.link_root(alias, physical)
+            module.__file__ = str(alias / "scripts/check-git-push-gate.py")
+            fds, closure = module._capture_source_closure()
+            original_interpreter = module._interpreter_identity
+            def replace_after_physical_check():
+                alias.rename(old)
+                self.link_root(alias, physical)
+                return original_interpreter()
+            try:
+                with mock.patch.object(module, "_interpreter_identity", side_effect=replace_after_physical_check), self.assertRaises(ValueError):
+                    module._recheck_source_closure(fds, closure)
+            finally:
+                for fd in fds: os.close(fd)
+                self.unlink_root(alias)
+                if old.exists(): self.unlink_root(old)
+
+    def test_incomplete_raw_packages_and_malformed_entrypoints_refuse(self):
+        module = _load_gate_module(CANONICAL_HOOK, "publication_incomplete_component")
+        for projection in HOOKS:
+            module.__file__ = str(projection)
+            with self.subTest(projection=projection), self.assertRaises((ValueError, OSError)):
+                module._capture_source_closure()
+        with self.component() as (module, root, physical):
+            for invalid in (physical / "check-git-push-gate.py", physical / "scripts/other.py"):
+                module.__file__ = str(invalid)
+                with self.assertRaises(ValueError): module._capture_source_closure()
+            module.__file__ = str(physical / "scripts/check-git-push-gate.py")
+            layout, _root = module._layout_for_gate(Path(module.__file__))
+            for role, relative in layout.role_paths:
+                path = physical / relative
+                source = path.read_bytes()
+                path.unlink()
+                try:
+                    with self.subTest(missing_role=role), self.assertRaises(OSError):
+                        module._capture_source_closure()
+                finally:
+                    path.write_bytes(source)
+
+    def test_opaque_root_and_wrong_logical_gate_relation_refuse(self):
+        with self.component() as (module, root, physical):
+            module.__file__ = str(physical / "scripts/check-git-push-gate.py")
+            actual_lstat = os.lstat
+            def opaque_root(path, *args, **kwargs):
+                if Path(path) == physical:
+                    return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400, st_reparse_tag=0x80000023)
+                return actual_lstat(path, *args, **kwargs)
+            with mock.patch.object(os, "lstat", side_effect=opaque_root), self.assertRaises(ValueError):
+                module._capture_source_closure()
+            actual_identity = module._regular_identity
+            calls = 0
+            def wrong_gate(path, **kwargs):
+                nonlocal calls
+                identity = actual_identity(path, **kwargs)
+                calls += 1
+                return identity + (99,) if calls == 1 else identity
+            with mock.patch.object(module, "_regular_identity", side_effect=wrong_gate), self.assertRaises(ValueError):
+                module._capture_source_closure()
+
+    def test_below_root_link_and_hardlinked_file_remain_refused(self):
+        with self.component() as (module, root, physical):
+            module.__file__ = str(physical / "scripts/check-git-push-gate.py")
+            hooks = physical / "hooks"
+            outside = root / "outside-hooks"
+            hooks.rename(outside)
+            self.link_root(hooks, outside)
+            try:
+                with self.assertRaises(ValueError): module._capture_source_closure()
+            finally:
+                self.unlink_root(hooks)
+                outside.rename(hooks)
+            scanner = physical / "scripts/check-publication-safety.py"
+            other = root / "scanner-hardlink.py"
+            os.link(scanner, other)
+            with self.assertRaises(ValueError): module._capture_source_closure()
+
+
 class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
     """R3 RED/GREEN guards for closure, correlation, cleanup, and C6 truth."""
 
@@ -8649,6 +9222,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
         return module.CanonicalSourceClosure(
             module.SOURCE_LAYOUTS[0], root, (root,), (), "a" * 64, (),
             "b" * 64, interpreter,
+            module.RootLocatorIdentity("gate.py", ".", "directory", (), None, ".", (), "gate.py", ()),
         )
 
     def test_frozen_bootstrap_injects_held_windows_job_module(self) -> None:
@@ -8868,10 +9442,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
 
         layouts = (
             Path("source") / "scripts" / "universal-hooks" / "scripts",
-            Path("generated-codex") / "src.codex" / "skills" / "lead" / "scripts",
-            Path("generated-claude") / "src.claude" / "agents" / "scripts",
-            Path("global") / ".codex" / "skills" / "lead" / "scripts",
-            Path("project-local") / ".agents" / "skills" / "lead" / "scripts",
+            Path("materialized-component") / "scripts",
         )
         sources = {
             "gate": CANONICAL_HOOK.read_bytes(),
@@ -8891,7 +9462,9 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                 REPO_ROOT / "scripts" / "process_supervision" /
                 "posix_process_group.py"
             ).read_bytes(),
-            "windows_job": b"WINDOWS_JOB_SENTINEL = True\n",
+            "windows_job": (
+                REPO_ROOT / "scripts" / "process_supervision" / "windows_job.py"
+            ).read_bytes(),
         }
         original_file = module.__file__
         with tempfile.TemporaryDirectory() as td:
@@ -9199,6 +9772,7 @@ class TestPublicationSafetyTrustedScanR4(unittest.TestCase):
             closure = module.CanonicalSourceClosure(
                 module.SOURCE_LAYOUTS[0], root, (root,), (), "a" * 64,
                 (2,), "b" * 64, interpreter,
+                module.RootLocatorIdentity("gate.py", ".", "directory", (1,), None, ".", (1,), "gate.py", (2,)),
             )
             pending = module.PendingScanInvocation(
                 "invocation", "attempt", binding, closure, interpreter,
@@ -9330,12 +9904,12 @@ class TestPublicationSafetyTrustedScanR4(unittest.TestCase):
             with self.subTest(identity_field=field_name), self.assertRaises(AttributeError):
                 setattr(pending, field_name, getattr(pending, field_name))
 
-    def test_r4_closure_declares_five_layouts_and_complete_components(self) -> None:
+    def test_r4_closure_declares_two_topologies_and_complete_components(self) -> None:
         module = self._module("closure")
-        self.assertEqual(len(module.SOURCE_LAYOUTS), 5, "R4-LAYOUT-CARDINALITY")
+        self.assertEqual(len(module.SOURCE_LAYOUTS), 2, "R4-TOPOLOGY-CARDINALITY")
         self.assertEqual(
             {layout.name for layout in module.SOURCE_LAYOUTS},
-            {"universal", "generated-codex", "generated-claude", "global", "project-local"},
+            {"universal", "component"},
         )
         self.assertIn("bootstrap_digest", {field.name for field in dataclasses.fields(module.CanonicalSourceClosure)})
         self.assertIn("components", {field.name for field in dataclasses.fields(module.CanonicalSourceClosure)})
@@ -9368,7 +9942,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
     def test_r5_proof_inventory(self) -> None:
         required = {
             "test_r5_gate_certificate_retry_and_pending_participant_matrix",
-            "test_r5_five_layout_closure_and_actual_redaction_channels",
+            "test_r5_two_topology_closure_and_actual_redaction_channels",
         }
         self.assertEqual(required - set(dir(self.__class__)), set(), "R5-MISSING-PROBE")
 
@@ -9391,6 +9965,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
         closure = module.CanonicalSourceClosure(
             module.SOURCE_LAYOUTS[0], root, (root,), (node,), "a" * 64,
             (2,), "b" * 64, interpreter,
+            module.RootLocatorIdentity("gate.py", ".", "directory", (1,), None, ".", (1,), "gate.py", (2,)),
         )
         pending = module.PendingScanInvocation(
             "invocation", "attempt", binding, closure, interpreter,
@@ -9736,14 +10311,11 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                         )
                     parser.assert_not_called()
 
-    def test_r5_five_layout_closure_and_actual_redaction_channels(self) -> None:
+    def test_r5_two_topology_closure_and_actual_redaction_channels(self) -> None:
         module = self._module("closure_redaction")
         layouts = (
             Path("source") / "scripts" / "universal-hooks" / "scripts",
-            Path("generated-codex") / "src.codex" / "skills" / "lead" / "scripts",
-            Path("generated-claude") / "src.claude" / "agents" / "scripts",
-            Path("global") / ".codex" / "skills" / "lead" / "scripts",
-            Path("project-local") / ".agents" / "skills" / "lead" / "scripts",
+            Path("materialized-component") / "scripts",
         )
         sources = {
             "gate": CANONICAL_HOOK.read_bytes(),
@@ -9763,7 +10335,9 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                 REPO_ROOT / "scripts" / "process_supervision" /
                 "posix_process_group.py"
             ).read_bytes(),
-            "windows_job": b"WINDOWS_JOB_SENTINEL = True\n",
+            "windows_job": (
+                REPO_ROOT / "scripts" / "process_supervision" / "windows_job.py"
+            ).read_bytes(),
         }
         original_file = module.__file__
         scratch = REPO_ROOT / ".scratch"

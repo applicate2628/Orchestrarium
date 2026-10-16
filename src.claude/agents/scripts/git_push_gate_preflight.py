@@ -2163,11 +2163,153 @@ def find_git_push_records(parsed: ShellParseResult) -> list[GitPushInvocation]:
     """Return the one parser-owned effective publication projection."""
     return [record.push for record in parsed.effective_publications.records]
 
+def _has_static_posix_continuation_proof(parsed: ShellParseResult) -> bool:
+    """Qualify one existing lexical record; never produce a replacement parse.
+
+    Static fragments follow the shell's quoted/unquoted literal productions,
+    independently of Git spelling or Unicode character categories. Expansion,
+    pattern and unresolved shell productions cannot be certified by token
+    equality. Full raw coverage cannot substitute for this context proof.
+    """
+    identity = parsed.identity
+    lexical = parsed.lexical
+    if (
+        parsed.dialect != "posix" or identity.dialect != "posix"
+        or identity.input_kind != "SHELL_TEXT" or identity.depth != 0
+        or identity.parent is not None or identity.wrapper_id is not None
+        or parsed.status != "SCG-PARSED" or parsed.candidates
+        or parsed.data_regions or lexical.data_regions
+        or parsed.wrapper_projections or parsed.children
+        or len(parsed.commands) != 1 or len(parsed.segments) != 1
+        or lexical.segments != parsed.segments
+        or not parsed.normalizations
+        or parsed.normalizations != lexical.operations
+        or parsed.normalizations != lexical.removed_spans
+        or len(parsed.effective_publications.records) != 1
+        or parsed.effective_publications.records[0].kind != "DIRECT"
+    ):
+        return False
+    command = parsed.commands[0]
+    segment = parsed.segments[0]
+    if command.tokens != segment.tokens or command.token_records != segment.token_records:
+        return False
+    raw = parsed.raw_command
+    operations = parsed.normalizations
+    atoms = lexical.atoms
+    for values in (operations, atoms):
+        previous_end = 0
+        for item in values:
+            span = item.source_span
+            if (
+                type(span) is not tuple or len(span) != 2
+                or any(type(value) is not int for value in span)
+                or not 0 <= previous_end <= span[0] < span[1] <= len(raw)
+            ):
+                return False
+            previous_end = span[1]
+    cursor = atom_index = operation_index = 0
+    quote = None
+    groups: dict[int, list[LexicalAtom]] = {}
+    ordinary_equals_memberships: set[int] = set()
+    comparison: list[str] = []
+    while atom_index < len(atoms) or operation_index < len(operations):
+        is_operation = operation_index < len(operations) and (
+            atom_index == len(atoms)
+            or operations[operation_index].source_span[0] <= atoms[atom_index].source_span[0]
+        )
+        item = operations[operation_index] if is_operation else atoms[atom_index]
+        start, end = item.source_span
+        if start < cursor:
+            return False
+        # Only actual quote delimiters may be absent from the existing atoms.
+        # This validates their provenance; it does not tokenize raw text again.
+        for delimiter in raw[cursor:start]:
+            if delimiter not in ("'", '"') or (quote is not None and delimiter != quote):
+                return False
+            quote = delimiter if quote is None else None
+        comparison.append(raw[cursor:start])
+        if is_operation:
+            if (
+                item.kind != "posix-continuation" or raw[start:end] != "\\\n"
+                or quote == "'"
+                or item.contribution != ("quoted-argument" if quote == '"' else "command-token")
+            ):
+                return False
+            operation_index += 1
+        else:
+            expected_state = "ordinary" if quote is None else "single-quoted" if quote == "'" else "double-quoted"
+            value = raw[start:end]
+            if len(value) != 1 or value != item.value or item.state != expected_state:
+                return False
+            raw_operator = quote is None and value in "();<>|&\n"
+            if item.operator_capable != raw_operator or item.literalized != (quote is not None):
+                return False
+            if item.operator_capable:
+                if not (value == "\n" and command.trailing_linebreak_only and not raw[start:].strip("\n")):
+                    return False
+            elif quote is None and value in " \t":
+                if item.token_membership != -1:
+                    return False
+            else:
+                # Literalness comes from the verified raw quote production:
+                # single-quote data is inert; double-quote ordinary data is
+                # inert except expansion/escape introducers. Unquoted WORD
+                # data additionally excludes pattern, brace and tilde/history
+                # productions. These syntax forms remain unproved here; no
+                # character-domain or Git/ref alphabet supplies the proof.
+                # NUL has no literal source-word representation in this
+                # carrier; retained CR/LF are outside the admitted LF-removal
+                # class. Other Unicode data is classified by shell context,
+                # never by an identifier/printable-character category.
+                literal = value not in "\0\r\n"
+                if quote != "'" and value in "$`\\":
+                    literal = False
+                if quote is None and value in "*?[{!":
+                    literal = False
+                if quote is None and value == "~":
+                    prefix = groups.get(item.token_membership, [])
+                    assignment_prefix = item.token_membership in ordinary_equals_memberships
+                    if not prefix or (
+                        prefix[-1].state == "ordinary"
+                        and (prefix[-1].value == "=" or (assignment_prefix and prefix[-1].value == ":"))
+                    ):
+                        literal = False
+                if not literal or item.token_membership < 0:
+                    return False
+                groups.setdefault(item.token_membership, []).append(item)
+                if item.state == "ordinary" and item.value == "=":
+                    ordinary_equals_memberships.add(item.token_membership)
+            comparison.append(value)
+            atom_index += 1
+        cursor = end
+    for delimiter in raw[cursor:]:
+        if delimiter not in ("'", '"') or (quote is not None and delimiter != quote):
+            return False
+        quote = delimiter if quote is None else None
+    comparison.append(raw[cursor:])
+    if quote is not None or len(groups) != len(command.token_records):
+        return False
+    for group, token in zip(groups.values(), command.token_records, strict=True):
+        if (
+            "".join(atom.value for atom in group) != token.value
+            or tuple(atom.source_span for atom in group) != token.source_spans
+            or tuple(dict.fromkeys(atom.state for atom in group)) != token.states
+        ):
+            return False
+    try:
+        return tuple(shlex.split("".join(comparison), comments=False, posix=True)) == command.tokens
+    except ValueError:
+        return False
+
+
 def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     projection = parsed.effective_publications
     if not projection.exact_complete:
         return GenericPushDecision("PGG-PARSE-UNCERTAIN", None)
-    if parsed.normalizations:
+    if (
+        parsed.normalizations or parsed.lexical.operations or parsed.lexical.removed_spans
+        or any(command.normalization_state != "literal" for command in parsed.commands)
+    ) and not _has_static_posix_continuation_proof(parsed):
         return GenericPushDecision("PGG-LEXICAL-NORMALIZATION", None)
     if (
         len(parsed.commands) != 1
