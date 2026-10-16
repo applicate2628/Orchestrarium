@@ -2107,14 +2107,9 @@ class TestGitPushGate(unittest.TestCase):
             should_deny=True,
         )
 
-    # --- deny: marker present but message shape is a copied deny block, not
-    # an approval (2026-07-26 `$security-engineer` contract decision) ---
-    # `work-items/bugs/2026-07-26-the-deny-message-teaches-the-marker-that-
-    # opens-the-gate.md`: the deny reason embeds the marker verbatim, so an
-    # operator who copies that reason back into chat ("what does this
-    # mean?") reproduces the identical marker. MARKER_MAX_MESSAGE_LENGTH
-    # bounds this: the marker only counts in a message short enough to
-    # plausibly be a deliberate one-line approval.
+    # Copied denial samples contain a code-wrapped marker and ordinary push
+    # prose. The marker is nonauthorizing; the independent instruction still
+    # requires the existing owned scan. Length is not an authority predicate.
 
     def test_marker_inside_full_pasted_deny_block_denies(self) -> None:
         # The literal accident named in the bug: the operator pastes the
@@ -2131,7 +2126,9 @@ class TestGitPushGate(unittest.TestCase):
             "message; then retry. The marker is honored only from the user's own message and only for "
             "that turn."
         )
-        self.assertGreater(len(pasted_deny), 200)  # sanity: this is the long-message shape under test
+        module = _load_gate_module(CANONICAL_HOOK, "copied_full_denial_authority")
+        preflight = module._a3_preflight
+        self.assertEqual(preflight.extract_publication_user_reply(user(pasted_deny)).publication_action()[0], "neutral")
         self.assert_outcome(
             [user(pasted_deny), assistant("explaining the gate")],
             "git push origin main",
@@ -2139,16 +2136,15 @@ class TestGitPushGate(unittest.TestCase):
         )
 
     def test_marker_inside_single_pasted_deny_clause_denies(self) -> None:
-        # A shorter, still-realistic partial quote (just clause (a) from the
-        # deny message, measured at 284-305 characters) -- still over the
-        # bound, still must not approve.
+        # The partial copied clause has the same embedded-code boundary.
         clause_a_quote = (
             "what does clause (a) mean: (a) If the user has NOT explicitly approved this push: STOP, "
             "report readiness to push, and ask the user to approve. The user approves by including "
             "`[approve-publication]` in their next message; then retry. The marker is honored only "
             "from the user's own message and only for that turn."
         )
-        self.assertGreater(len(clause_a_quote), 200)
+        module = _load_gate_module(CANONICAL_HOOK, "copied_clause_authority")
+        self.assertEqual(module._a3_preflight.extract_publication_user_reply(user(clause_a_quote)).publication_action()[0], "neutral")
         self.assert_outcome(
             [user(clause_a_quote), assistant("explaining")],
             "git push origin main",
@@ -2158,7 +2154,6 @@ class TestGitPushGate(unittest.TestCase):
     def test_short_genuine_approval_still_requires_owned_scan(self) -> None:
         # The short answer supplies consent, not missing owned scan evidence.
         genuine = "Approved -- security review passed, RELEASE_NOTES updated, please push now [approve-publication]"
-        self.assertLessEqual(len(genuine), 200)
         self.assert_outcome(
             [user(genuine), assistant("pushing")],
             "git push origin main",

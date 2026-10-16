@@ -95,7 +95,7 @@ def test_scratch_is_temporary_until_canonical_results_are_promoted() -> None:
     for required in (
         "`.scratch/` is disposable task storage",
         "before completion, canonically promote load-bearing results",
-        "then remove owned temp state",
+        "then settle owned temp state",
         "Never delete unfinished/foreign/ambiguous/host-denied state",
     ):
         assert required in spine
@@ -148,7 +148,7 @@ def test_host_refusal_preserves_target_without_bypass_or_false_pass() -> None:
         "same validated action",
         "root main conversation and its existing current work-item",
         "independent non-overlapping work continues",
-        "dependent zero-residue predicates remain `fail`",
+        "Artifact disposition and project hygiene",
     )
     for path in surfaces:
         text = path.read_text(encoding="utf-8")
@@ -248,7 +248,7 @@ def test_lead_intermediate_acceptance_uses_producer_owned_resource_echo() -> Non
             "current-invocation `RepoCleanupReportV1` with status `PASS`",
             "same physical repository identity and `HEAD`/unborn state",
             "missing, stale, incomplete, null, non-`PASS`, or non-zero "
-            "residue/unclassified rows",
+            "unsettled residue/unclassified rows",
             "Valid `ephemeral-volume-exempt` rows",
             "never authorizes cleanup or substitutes for an owner verdict",
         ):

@@ -53,7 +53,9 @@ class PublicationUserReply(NamedTuple):
     @property
     def text(self) -> str:
         """Compatibility view; a batch never becomes flattened authority."""
-        return self.answers[0] if self.kind != "recognized-malformed" and len(self.answers) == 1 else ""
+        if self.kind == "recognized-malformed" or len(self.answers) != 1:
+            return ""
+        return self.answers[0].strip() if self.kind == "plain" else self.answers[0]
 
     def publication_action(self) -> tuple[str, str]:
         """One atomic event disposition, using existing per-answer grammars."""
@@ -72,7 +74,10 @@ class PublicationUserReply(NamedTuple):
                     choices.add(("targeted", f"[approve-pr-publication:v1 pr={grant.url}]"))
                 elif normalized.startswith(PR_RESERVED_PREFIXES):
                     malformed = True
-                elif APPROVE_MARKER_REGEX.search(answer) and len(answer) <= MARKER_MAX_MESSAGE_LENGTH:
+                elif (
+                    APPROVE_MARKER_REGEX.fullmatch(normalized)
+                    or _has_publication_signal(answer, APPROVE_MARKER_REGEX)
+                ):
                     choices.add(("generic", "[approve-publication]"))
         if revoked:
             return "revoked", PR_REVOKE_MARKER
@@ -103,9 +108,10 @@ def normalize_publication_approval_text(text: str) -> str:
 
 def extract_publication_user_reply(entry: object) -> PublicationUserReply:
     """Validate the entire observed UI reply, preserving answer boundaries."""
-    text = extract_user_typed_text(entry)
+    preserved = extract_user_typed_text(entry, preserve_outer_whitespace=True)
+    text = preserved.strip()  # transport framing/blank compatibility, not authority input
     if not text.startswith("<send_user_message_question_reply>"):
-        return PublicationUserReply("plain", (text,))
+        return PublicationUserReply("plain", (preserved if text else "",))
     if not (text.startswith(_QUESTION_REPLY_OPEN) and text.endswith(_QUESTION_REPLY_CLOSE)):
         return PublicationUserReply("recognized-malformed", ())
     encoded = text[len(_QUESTION_REPLY_OPEN):-len(_QUESTION_REPLY_CLOSE)]
@@ -165,6 +171,173 @@ def parse_publication_pr_grant(text: str) -> PublicationPrGrant | None:
 def is_simple_pr_approval(text: str) -> bool:
     """Accept only the three finite whole-message display forms."""
     return normalize_publication_approval_text(text) == SIMPLE_PR_APPROVAL_MARKER
+
+
+def _publication_quote_end(text: str, start: int) -> int:
+    """Consume boundary-opened quotes, nesting different pairs and escapes.
+
+    ASCII single/double, curly single/double and guillemets are pairs. A
+    word-internal apostrophe is not a delimiter. Unclosed quotes own the tail.
+    """
+    pairs = {"'": "'", '"': '"', "‘": "’", "“": "”", "«": "»"}
+    stack = [pairs[text[start]]]
+    index = start + 1
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        internal = (
+            char in {"'", "’"} and index > 0 and index + 1 < len(text)
+            and text[index - 1].isalnum() and text[index + 1].isalnum()
+        )
+        if not internal and char == stack[-1]:
+            stack.pop()
+            if not stack:
+                return index + 1
+        elif not internal and char in pairs and (
+            index == 0 or not (text[index - 1].isalnum() or text[index - 1] == "_")
+        ):
+            stack.append(pairs[char])
+        index += 1
+    return len(text)
+
+
+def _reject_publication_json_constant(value: str) -> None:
+    raise ValueError("nonstandard JSON constant: " + value)
+
+
+def _publication_json_frame_end(text: str, start: int) -> int | None:
+    """None: no admitted candidate; -1: admitted malformed data; else end.
+
+    A tentative header owns no range until its complete unambiguous end AND
+    lexical JSON start. Decode original JSON before inspecting its closer.
+    """
+    if start + 1 == len(text) or text[start + 1].isspace() or text[start + 1] in "/!?":
+        return None
+    index = start + 1
+    quote = None
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+        elif char in "\"'":
+            quote = char
+        elif char == "<":
+            return None
+        elif char == ">":
+            break
+        index += 1
+    if index == len(text) or quote is not None:
+        return None
+    header_end = index + 1
+    index = header_end
+    while index < len(text) and text[index] in " \t\r\n":
+        index += 1
+    if index == len(text):
+        return None
+    first = text[index]
+    candidate = first in '{["' or first in "0123456789" or (
+        first == "-" and index + 1 < len(text) and text[index + 1] in "0123456789"
+    )
+    if not candidate:
+        candidate = any(
+            text.startswith(literal, index) and (
+                index + len(literal) == len(text)
+                or text[index + len(literal)] in " \t\r\n<"
+            ) for literal in ("true", "false", "null")
+        )
+    if not candidate:
+        return None
+    header = re.fullmatch(r"<([A-Za-z_][A-Za-z0-9_.:-]*)[ \t\r\n]*>", text[start:header_end])
+    if header is None:
+        return -1
+    try:
+        _value, end = json.JSONDecoder(parse_constant=_reject_publication_json_constant).raw_decode(text, index)
+    except (ValueError, RecursionError):
+        return -1
+    while end < len(text) and text[end] in " \t\r\n":
+        end += 1
+    close = re.match(r"</" + re.escape(header[1]) + r"[ \t\r\n]*>", text[end:])
+    return end + close.end() if close is not None else -1
+
+
+def _publication_eligible_text(text: str) -> str:
+    """Qualify original occurrences only; NUL masks cannot splice words.
+
+    Fences open after at most three spaces with >=3 equal backticks/tildes;
+    close with the same character and at least that run length, then spaces.
+    Four spaces/a tab own an indented line. Blockquote lazy continuation lasts
+    until a blank line. Inline backticks close only with an equal-length run.
+    Quotes open at nonword boundaries. This is publication syntax, not markup
+    rendering or a general-purpose parser. Raw answers are never rewritten.
+    """
+    eligible = list(text)
+    index = 0
+    blockquote = False
+    while index < len(text):
+        end = None
+        if index == 0 or text[index - 1] == "\n":
+            line_end = text.find("\n", index)
+            line_end = len(text) if line_end < 0 else line_end + 1
+            line = text[index:line_end]
+            if not line.strip():
+                blockquote = False
+            elif blockquote or re.match(r" {0,3}>", line):
+                blockquote = True
+                end = line_end
+            elif line.startswith(("    ", "\t")):
+                end = line_end
+            else:
+                fence = re.match(r" {0,3}(`{3,}|~{3,})", line)
+                if fence is not None:
+                    delimiter = fence[1]
+                    closing = re.compile(r" {0,3}" + re.escape(delimiter[0]) +
+                                         "{" + str(len(delimiter)) + r",}[ \t]*(?:\r?\n|$)")
+                    end = line_end
+                    while end < len(text):
+                        next_end = text.find("\n", end)
+                        next_end = len(text) if next_end < 0 else next_end + 1
+                        if closing.fullmatch(text[end:next_end]):
+                            end = next_end
+                            break
+                        end = next_end
+        if end is None and text[index] == "`":
+            run = re.match(r"`+", text[index:])[0]
+            end = len(text)
+            for closing in re.finditer(r"`+", text[index + len(run):]):
+                if len(closing[0]) == len(run):
+                    end = index + len(run) + closing.end()
+                    break
+        if end is None and text[index] in "\"'‘“«" and (
+            index == 0 or not (text[index - 1].isalnum() or text[index - 1] == "_")
+        ):
+            end = _publication_quote_end(text, index)
+        if end is None and text[index] == "<":
+            end = _publication_json_frame_end(text, index)
+            if end == -1:
+                return ""  # admitted malformed data cannot authorize any suffix
+        if end is not None:
+            eligible[index:end] = "\0" * (end - index)
+            index = end
+        else:
+            index += 1
+    return "".join(eligible)
+
+
+def _has_publication_signal(answer: str, pattern: re.Pattern[str]) -> bool:
+    eligible = _publication_eligible_text(answer)
+    # Match ORIGINAL bytes first: masking must not create a regex boundary or
+    # whitespace sequence that was absent from the acquired answer.
+    return any(
+        eligible[match.start():match.end()] == match[0]
+        for match in pattern.finditer(answer)
+    )
+
 
 class DataRegion(NamedTuple):
     kind: str
@@ -652,8 +825,6 @@ class WrapperGrammarRegistry:
             if candidate in names:
                 return row
         return None
-
-MARKER_MAX_MESSAGE_LENGTH = 200
 
 PUSH_INSTRUCTION_REGEX = re.compile(
     r"(?ix)"
@@ -2966,7 +3137,7 @@ def build_preflight(envelope: dict) -> PreflightResult:
         )
         action, _ = reply.publication_action()
         instruction = action not in {"malformed", "revoked"} and any(
-            PUSH_INSTRUCTION_REGEX.search(answer) is not None for answer in reply.answers
+            _has_publication_signal(answer, PUSH_INSTRUCTION_REGEX) for answer in reply.answers
         )
         grammar = classify_generic_push(parsed)
         transcript_diagnostic = TranscriptDiagnostic(

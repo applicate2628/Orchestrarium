@@ -261,11 +261,11 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      answer enters the common strict command, repository/range binding and
      fresh authoritative-scan completion BEFORE unrelated standing history.
      Consent never returns an unconditional real-push allowance. Validate the
-     entire answer batch atomically, honor revocation/conflicts, and apply the
-     existing MARKER_MAX_MESSAGE_LENGTH guard to each candidate answer only.
+     entire answer batch atomically and honor revocation/conflicts. P qualifies
+     original occurrences for both consent and push instructions, excluding
+     formal quote/code/tagged-JSON data without a whole-answer length limit.
      Questions, identifiers, assistant/tool/file content and joined fragments
-     grant no authority. The existing length guard rejects copied long denial
-     prose; its known short-quote ambiguity is not claimed solved.
+     grant no authority. Original whole-token display forms remain accepted.
   8. Derive the latest exact PR grant/revoke/malformed state from the complete
      bounded readable transcript. A malformed reserved signal denies. An
      active grant runs only the strict PR route: fresh GitHub/Git binding and
@@ -295,18 +295,11 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      decision is carried by the stdout payload, not the exit code).
 
 WHAT THE GENERIC NON-PR ROUTE STILL DOES NOT COVER (disclosed, not silently assumed away):
-  - SHORT QUOTES OF THE BARE MARKER (2026-07-26, `$security-engineer`
-    contract decision on `work-items/bugs/2026-07-26-the-deny-message-
-    teaches-the-marker-that-opens-the-gate.md`). The MARKER_MAX_MESSAGE_LENGTH
-    bound (see step 7 and that constant's own comment) closes a long, copied
-    deny-block from opening the gate, but a SHORT quote of or question about
-    just the marker itself ("what does `[approve-publication]` mean?") is
-    still indistinguishable, by length or content, from a genuine short
-    approval — no fixed-string match at this layer can tell them apart with
-    certainty, because the marker is disclosed text a human can always
-    retype into either shape. Fully closing this needs a per-event nonce or
-    an out-of-band confirmation channel; both are larger contract changes
-    than this bounded fix makes.
+  - UNMARKED COPIED PROSE. Formal quotation/data contributes neither generic
+    signal, but unmarked prose is byte-identical to direct prose. The public
+    fixed marker and existing instruction vocabulary cannot infer intent.
+    A copied denial's code-wrapped marker is excluded while independently
+    unquoted push prose can still request the mandatory scan completion.
   - RECEIPTS DO NOT BIND REPOSITORY / WORKTREE IDENTITY. Command-local
     repository selectors (`GIT_DIR`, `GIT_WORK_TREE`, `-C`, `--git-dir`,
     `--work-tree`, `--namespace`, and push `--repo`) are retained and denied
@@ -954,66 +947,11 @@ AuthoritativeScanObservation = ConsumedAuthoritativeEvidence
 
 
 
-# MARKER-HONORING LENGTH BOUND (2026-07-26, `$security-engineer` contract
-# decision — work-items/bugs/2026-07-26-the-deny-message-teaches-the-marker-
-# that-opens-the-gate.md). The deny reason below embeds the marker verbatim
-# so the operator knows what to type; an operator who copies that SAME text
-# back into chat ("what does this mean?", pasting it into a bug report)
-# reproduces the identical marker byte-for-byte. A bare substring search
-# cannot distinguish that from a deliberate approval — both are the same
-# bytes. The marker is a disclosed, shared, non-secret token, not a nonce; no
-# fixed-string match at this layer separates "operator approved" from
-# "operator quoted the denial" with certainty, because a human can always
-# retype or paste any substring of already-disclosed text into either shape.
-#
-# Candidates considered and rejected (full comparison in the filed bug):
-#   - Marker-must-be-on-its-own-line: rejected — it BREAKS the existing,
-#     tested, documented approval convention. Both `test_user_marker_allows`
-#     ("looks good, push it [approve-publication]") and
-#     `test_lead_sync_flow_marker_allows` ("Wave E approved after review —
-#     sync all branches [approve-publication]") carry the marker inline at
-#     the end of an ordinary sentence, never alone on a line. A "fix" that
-#     invalidates the documented contract it is meant to protect is a
-#     regression, not a hardening.
-#   - Recognize-the-gate's-own-output (exclude when deny-text vocabulary
-#     co-occurs): rejected as the PRIMARY mechanism — it couples this
-#     matcher to the deny reason's prose. This file's own history
-#     (CORRELATION / COLLISION REJECTION / ORDERING / CALL-SIDE UNIQUENESS
-#     notes above) is a record of exactly this kind of self-referential
-#     pattern-matching drifting once real transcripts and real wording
-#     changes are thrown at it; adding a fourth self-referential layer here,
-#     on the strength of a single review pass with no adversarial pressure
-#     yet applied, is not a risk this fix should take on.
-#   - Change the marker string: rejected — the new string still has to
-#     appear verbatim in the deny text for the operator to know what to
-#     type, recreating the identical echo path under a new name, while
-#     breaking every existing workflow/doc/habit across all four provider
-#     packs for no structural gain.
-#
-# Chosen mitigation: a LENGTH BOUND, decoupled from the deny text's wording
-# entirely (robust to future edits of that prose, unlike the rejected
-# recognize-own-output approach). The marker is honored only when the
-# carrying message is short enough to plausibly be a deliberate one-line
-# approval, not a copied multi-paragraph block. Measured, not guessed
-# (2026-07-26): the two documented genuine approvals above are 41 and 70
-# characters; the shipped deny reason text is 2384 characters; a realistic
-# PARTIAL quote of just one deny clause (clause (a) alone, a plausible
-# "what does this bullet mean?" paste) measures 284-305 characters.
-# MARKER_MAX_MESSAGE_LENGTH sits below both measured accident sizes with
-# margin, while sitting well above both measured genuine-approval sizes —
-# closing the bug's own named scenario ("pasting it into a bug report")
-# with high confidence.
-#
-# NOT CLOSED (disclosed, not silently assumed away): a SHORT quote of, or
-# question about, just the bare marker itself ("what does `[approve-
-# publication]` mean?" — well under any length bound) is indistinguishable
-# by length OR content from a genuine short approval. This residual is
-# shared by every candidate considered above, not unique to this one;
-# closing it fully needs a per-event nonce or an out-of-band confirmation
-# channel, both larger contract changes than this bounded fix makes.
-# MARKER_MAX_MESSAGE_LENGTH is a tunable judgment call, not a measured
-# physical constant — recalibrate it if it is ever seen rejecting a genuine
-# operator approval in practice.
+# P owns publication-specific original-occurrence qualification for BOTH
+# generic consent and explicit instructions. Raw answers/event digests and
+# this policy's chronology, binding and scan completion remain unchanged.
+# Explicit quote/code/tagged-JSON syntax is data; plain inline markers retain
+# their existing placement and exact whole-token display compatibility.
 
 # Explicit user push-instruction signal (English + Russian). Matched against
 # the last genuine user message only; used together with scan evidence.

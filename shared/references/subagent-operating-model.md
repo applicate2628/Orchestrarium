@@ -35,6 +35,8 @@ The lead assigns a task like this:
 - here is the **acceptance criterion**
 - here is the **gate** without which work does not move forward
 
+Every producing role and receiving gate applies the shared Engineering hygiene **Artifact disposition and project hygiene** rule in `AGENTS.md` through this existing scope/artifact/acceptance contract. No repository-cleanup invocation or extra stage is needed; accepted manual custody and explicit physical-deletion duties remain distinct.
+
 ### Core management rules
 
 1. **Do not mix roles.** One subagent owns one profession, not the whole lifecycle.

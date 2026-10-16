@@ -431,14 +431,22 @@ def is_compact_summary(entry: object) -> bool:
     return bool(entry.get("isCompactSummary") or entry.get("isMeta"))
 
 
-def extract_user_typed_text(entry: object) -> str:
+def extract_user_typed_text(
+    entry: object, *, preserve_outer_whitespace: bool = False
+) -> str:
     """The human-typed text of a user entry only.
 
     Excludes tool_result and tool_use blocks (those are tool I/O recorded under
     role=user in Claude Code, not anything the human typed), skips the harness's
     post-compaction continuation prompt (see `is_compact_summary`), and strips
     harness-injected spans. Returns "" for an entry that carries no genuine
-    user text (e.g. a pure tool_result or a pure task-notification)."""
+    user text (e.g. a pure tool_result or a pure task-notification).
+
+    The default trims outer whitespace. Explicit True preserves layout after
+    the same selection/filtering, for consumers with syntax-sensitive input.
+    """
+    if type(preserve_outer_whitespace) is not bool:
+        raise TypeError("preserve_outer_whitespace must be a bool")
     if not isinstance(entry, dict):
         return ""
     if is_compact_summary(entry):
@@ -473,7 +481,8 @@ def extract_user_typed_text(entry: object) -> str:
         top = entry.get("text")
         if isinstance(top, str):
             text = top
-    return strip_injected_spans(text).strip()
+    filtered = strip_injected_spans(text)
+    return filtered if preserve_outer_whitespace else filtered.strip()
 
 
 def last_genuine_user_message(entries: list[dict]) -> tuple[dict | None, str, list[dict]]:

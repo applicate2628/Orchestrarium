@@ -15,6 +15,8 @@ from collections import Counter
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from git_push_gate_target import GateTarget, derive_pr_grant, target_for
 
 
@@ -620,6 +622,227 @@ def _batch_user(answers):
         + "\n</send_user_message_question_reply>"}]}}
 
 
+def _publication_authority_cases():
+    marker = "[approve-publication]"
+    cases = [
+        ("empty", "", False, False),
+        ("whole-code-display", "`" + marker + "`", True, False),
+        ("whole-bold-display", "**" + marker + "**", True, False),
+        ("case-policy", "Approved [APPROVE-PUBLICATION]", True, False),
+        ("contraction", "Don't stop; please push " + marker, True, True),
+        ("instruction-only", "Please push " + "ordinary context " * 70, False, True),
+    ]
+    for length, position in ((199, "first"), (200, "middle"), (201, "last"), (816, "first")):
+        filler = "x" * (length - len(marker) - 2)
+        text = {"first": marker + "  " + filler,
+                "middle": filler[:len(filler)//2] + " " + marker + " " + filler[len(filler)//2:],
+                "last": filler + "  " + marker}[position]
+        cases.append((f"length-{length}-{position}", text, True, False))
+    framed = "# Response annotations:\n" + "Synthetic context. " * 25 + '\n<response-annotations>[{"text":"approve-publication]"}]</response-annotations>\n## My request:\n'
+    cases.append(("flat-carrier-816", framed + "x" * (816-len(framed)-len(marker)-1) + " " + marker, True, False))
+    for label, text in (
+        ("inline-code", "Example `push " + marker + "`"),
+        ("equal-run-code", "Example ``literal ` push " + marker + "``"),
+        ("long-code", "`" + "context " * 35 + "push " + marker + "`"),
+        ("backtick-fence", "```text\npush " + marker + "\n```"),
+        ("tilde-fence", "~~~~\npush " + marker + "\n~~~~"),
+        ("unclosed-fence", "```\npush " + marker),
+        ("unclosed-inline", "Example `push " + marker),
+        ("indent-spaces", "    push " + marker),
+        ("indent-tab", "\tpush " + marker),
+        ("blockquote-lazy", "> quoted paragraph\npush " + marker),
+        ("single-quote", "Example 'push " + marker + "'"),
+        ("double-quote", 'Example "push ' + marker + '"'),
+        ("curly-quote", "Example “push " + marker + "”"),
+        ("curly-single", "Example ‘push " + marker + "’"),
+        ("guillemets", "Example «push " + marker + "»"),
+        ("escaped-quote", 'Example "escaped \\" push ' + marker + '"'),
+        ("nested-quote", 'Example "outer \'inner\' push ' + marker + '"'),
+        ("multiline-quote", 'Example "first line\npush ' + marker + '"'),
+        ("unclosed-quote", 'Example "push ' + marker),
+        ("tag-note", '<note>{"text":"push ' + marker + '"}</note>'),
+        ("tag-alternate", '<ctx:selection.v2>[{"text":"push ' + marker + '"}]</ctx:selection.v2>'),
+        ("tag-whitespace", '<note \t>{"text":"push ' + marker + '"}\r\n</note >'),
+        ("json-fake-close", '<note>{"text":"</note> push ' + marker + '"}</note>'),
+        ("json-escapes", '<note>{"text":"\\\" \\u003c/note> \\u005bapprove-publication] push"}</note>'),
+        ("json-string", '<note>"push ' + marker + '"</note>'),
+        ("repeated-frames", '<a>{"text":"push"}</a><b>["' + marker + '"]</b>'),
+        ("later-inner-frame", 'Text <unfinished then <note>{"x":"push ' + marker + '"}</note>'),
+        ("anti-splice-marker", '[approve-<note>{"x":1}</note>publication]'),
+        ("anti-splice-instruction", 'pu<note>{"x":1}</note>sh'),
+    ):
+        cases.append((label, text, False, False))
+    for label, text in (
+        ("invalid-name", '<9bad>{"x":1}</9bad>'),
+        ("attribute", '<note x="v">{"x":1}</note>'),
+        ("self-close", '<note/>{"x":1}</note>'),
+        ("case-mismatch", '<Note>{"x":1}</note>'),
+        ("invalid-json", '<note>{"x":</note>'),
+        ("missing-close", '<note>{"x":1}'),
+        ("mismatch-close", '<note>{"x":1}</other>'),
+        ("overlap", '<note>{"x":1}<other>{"x":2}</other></note>'),
+        ("nonstandard-json", '<note>{"x":NaN}</note>'),
+        ("numeric-prose", '<T> 123 prose'),
+    ):
+        cases.append((label, text + " please push " + marker, False, False))
+    for label, prefix in (
+        ("ordinary-tag", "<T> prose"), ("ordinary-tag-closed", "<T> prose</T>"),
+        ("literal-prefix", "<T> trueish"), ("null-prefix", "<T> nullify"),
+        ("unfinished-angle", "The limit is <3;"),
+        ("ambiguous-angle", "Text <alpha <beta;"),
+        ("after-code", "`data`"), ("after-quote", '"data"'),
+        ("after-blockquote", "> data\nlazy data\n\n"),
+        ("after-fence", "```\ndata\n```\n"),
+        ("after-json", '<note>{"x":"</note> push"}</note>'),
+    ):
+        cases.append((label, prefix + " approved " + marker, True, False))
+    for label, text in (("angle-instruction", "The limit is <3; please push"),
+                        ("nested-angle-instruction", "Text <alpha <beta; please push")):
+        cases.append((label, text, False, True))
+    for value in ("true", "false", "null", "123", '[{"x":[1,2]}]'):
+        cases.append(("scalar-" + value, "<T>" + value + "</T>", False, False))
+    return cases
+
+
+@pytest.mark.parametrize("label,text,generic,instruction", _publication_authority_cases(),
+                         ids=[row[0] for row in _publication_authority_cases()])
+@pytest.mark.parametrize("carrier", ("flat", "structured"))
+def test_publication_authority_original_occurrences(tmp_path, label, text, generic, instruction, carrier):
+    """AP-current-authority-20261016: original dual-signal classification."""
+    if label.startswith("length-"):
+        assert len(text) == int(label.split("-")[1])
+    elif label == "flat-carrier-816":
+        assert len(text) == 816
+    for target in TARGETS:
+        _common, preflight, _policy, _runner = _load_gate_target(target, label)
+        entry = (_batch_user((("Metadata only", text),)) if carrier == "structured" else
+                 {"type": "response_item", "payload": {"type": "message", "role": "user",
+                  "content": [{"type": "input_text", "text": text}]}})
+        raw = json.dumps(entry, ensure_ascii=False).encode("utf-8")
+        reply = preflight.extract_publication_user_reply(entry)
+        assert reply.answers == (text,)
+        assert (reply.publication_action()[0] == "generic") is generic, target.label
+        transcript = tmp_path / (target.label + ".jsonl")
+        transcript.write_bytes(raw + b"\n")
+        result = preflight.build_preflight({"tool_name": "Bash", "cwd": str(ROOT),
+            "tool_input": {"command": "git push origin HEAD:refs/heads/topic"},
+            "transcript_path": str(transcript)})
+        assert result.push_instruction is instruction, target.label
+        assert result.reason_id == ("PFP-CONSENT-GENERIC" if generic else "PFP-HEAVY")
+        assert result.outcome == "DEFER" and result.continuation == "EVALUATE_HEAVY"
+        assert json.dumps(entry, ensure_ascii=False).encode("utf-8") == raw
+
+
+def test_publication_layout_acquisition_and_compatibility():
+    specimens = ("    push [approve-publication]", "\tpush [approve-publication]",
+                 "\n    push [approve-publication] \t\n", " \n\tpush [approve-publication]\n    data \t")
+    for target in TARGETS:
+        common, preflight, policy, _runner = _load_gate_target(target, "layout_views")
+        for text in specimens:
+            plain = {"type": "user", "message": {"role": "user", "content": text}}
+            assert common.extract_user_typed_text(plain) == text.strip()
+            assert common.extract_user_typed_text(plain, preserve_outer_whitespace=True) == text
+            for entry, kind, compatibility in ((plain, "plain", text.strip()),
+                    (_batch_user((("Metadata", text),)), "structured-answer", text)):
+                raw = json.dumps(entry).encode()
+                reply = preflight.extract_publication_user_reply(entry)
+                assert (reply.kind, reply.answers, reply.text) == (kind, (text,), compatibility)
+                assert reply.publication_action() == ("neutral", "")
+                assert json.dumps(entry).encode() == raw
+        for blank in ("", " \t\n "):
+            plain = {"type": "user", "message": {"role": "user", "content": blank}}
+            reply = preflight.extract_publication_user_reply(plain)
+            assert (reply.kind, reply.answers, reply.text) == ("plain", ("",), "")
+            structured = preflight.extract_publication_user_reply(_batch_user((("Metadata", blank),)))
+            assert (structured.kind, structured.answers, structured.text) == ("structured-answer", (blank,), blank)
+            reducer = policy._PrGrantReducer(str(ROOT))
+            reducer.consume(plain)
+            assert reducer.last_genuine_user_position == -1
+            reducer.consume(_batch_user((("Metadata", blank),)))
+            assert reducer.last_genuine_user_position == 1
+        padded = _batch_user((("Metadata", "\tanswer \n"),))
+        padded["message"]["content"][0]["text"] = " \n" + padded["message"]["content"][0]["text"] + "\t "
+        reply = preflight.extract_publication_user_reply(padded)
+        assert (reply.kind, reply.answers, reply.text) == ("structured-answer", ("\tanswer \n",), "\tanswer \n")
+        malformed = {"content": " \n<send_user_message_question_reply>\n[]\n</send_user_message_question_reply>\t"}
+        assert preflight.extract_publication_user_reply(malformed).kind == "recognized-malformed"
+        for text in (" \t[approve-publication] \n", " \n`[approve-publication]`\t", "  **[approve-publication]**  "):
+            assert preflight.extract_publication_user_reply({"content": text}).publication_action()[0] == "generic"
+
+
+def test_original_flat_indentation_public_routes_have_no_authority(tmp_path):
+    for target in TARGETS:
+        for text in ("    push [approve-publication]", "\tpush [approve-publication]"):
+            for surface in ("runner", "direct"):
+                common, preflight, policy, runner = _load_gate_target(target, "flat_indent_" + surface)
+                entry = {"type": "response_item", "payload": {"type": "message", "role": "user",
+                         "content": [{"type": "input_text", "text": text}]}}
+                raw = json.dumps(entry, separators=(",", ":")).encode()
+                assert common.extract_user_typed_text(entry) == "push [approve-publication]"
+                assert preflight.extract_publication_user_reply(entry).answers == (text,)
+                transcript = tmp_path / (target.label + surface + str(len(text)) + ".jsonl")
+                transcript.write_bytes(raw + b"\n")
+                envelope = {"tool_name": "Bash", "cwd": str(ROOT), "tool_input": {
+                    "command": "git push origin HEAD:refs/heads/topic"}, "transcript_path": str(transcript)}
+                result = preflight.build_preflight(envelope)
+                assert result.reason_id == "PFP-HEAVY" and result.push_instruction is False
+                output = io.StringIO()
+                with mock.patch.object(preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
+                     mock.patch.object(policy, "_recover_stable_pr_grant", return_value=("absent", None, "found")), \
+                     mock.patch.object(policy, "_complete_generic_publication", side_effect=AssertionError("indented data entered completion")) as completion, \
+                     mock.patch.object(policy, "_run_authoritative_scan", side_effect=AssertionError("indented data entered scan")) as scan, \
+                     mock.patch.object(runner, "_load_preflight", return_value=(target.runner_path, preflight)), \
+                     mock.patch.object(runner, "_load_policy", return_value=policy), contextlib.redirect_stdout(output):
+                    code = runner.main() if surface == "runner" else policy.main()
+                assert code == 0 and json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"] == "deny"
+                assert completion.call_count == scan.call_count == 0
+                assert json.dumps(entry, separators=(",", ":")).encode() == raw
+
+
+def test_new_publication_with_old_helper_fails_closed(tmp_path):
+    for target in TARGETS:
+        for surface in ("runner", "direct"):
+            _common, preflight, policy, runner = _load_gate_target(target, "old_helper_" + surface)
+            entry = {"content": "    push [approve-publication]", "role": "user"}
+            transcript = tmp_path / (target.label + surface + ".jsonl")
+            transcript.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+            envelope = {"tool_name": "Bash", "cwd": str(ROOT), "tool_input": {
+                "command": "git push origin HEAD:refs/heads/topic"}, "transcript_path": str(transcript)}
+            def old_signature(entry):
+                return "push [approve-publication]"
+            output = io.StringIO()
+            with mock.patch.object(preflight, "extract_user_typed_text", side_effect=old_signature) as extractor, \
+                 mock.patch.object(preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
+                 mock.patch.object(policy, "_complete_generic_publication", side_effect=AssertionError("mixed helper entered completion")) as completion, \
+                 mock.patch.object(policy, "_run_authoritative_scan", side_effect=AssertionError("mixed helper entered scan")) as scan, \
+                 mock.patch.object(runner, "_load_preflight", return_value=(target.runner_path, preflight)), \
+                 mock.patch.object(runner, "_load_policy", return_value=policy), contextlib.redirect_stdout(output):
+                result = runner.main() if surface == "runner" else policy.main()
+            assert result == 0
+            specific = json.loads(output.getvalue())["hookSpecificOutput"]
+            assert specific["permissionDecision"] == "deny"
+            assert completion.call_count == scan.call_count == 0
+            assert extractor.call_count == 1 and extractor.call_args.kwargs == {"preserve_outer_whitespace": True}
+
+
+def test_flat_annotation_carrier_preserves_the_same_original_answer(tmp_path):
+    _common, preflight, _policy, _runner = _load_gate_target(TARGETS[0], "flat_annotation")
+    text = next(row[1] for row in _publication_authority_cases() if row[0] == "flat-carrier-816")
+    entry = {"type": "response_item", "payload": {"type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": text}]}}
+    raw = json.dumps(entry).encode("utf-8")
+    reply = preflight.extract_publication_user_reply(entry)
+    assert reply.kind == "plain" and reply.answers == (text,)
+    assert reply.publication_action() == ("generic", "[approve-publication]")
+    transcript = tmp_path / "flat.jsonl"
+    transcript.write_bytes(raw + b"\n")
+    result = preflight.build_preflight({"tool_name": "Bash", "cwd": str(ROOT),
+        "tool_input": {"command": "git push origin HEAD:refs/heads/topic"},
+        "transcript_path": str(transcript)})
+    assert result.reason_id == "PFP-CONSENT-GENERIC" and result.push_instruction is False
+    assert hashlib.sha256(json.dumps(entry).encode("utf-8")).digest() == hashlib.sha256(raw).digest()
+
+
 def test_batch_reply_valid_answers_reach_current_generic_consent(tmp_path):
     _common, preflight, _policy, _runner = _load_gate_target(TARGETS[0], "batch_red")
     answer = "[approve-publication] — отправить abcdef01 в checkpoint/test-rebaseline-20260912"
@@ -713,7 +936,7 @@ def test_fresh_generic_consent_public_handlers_reach_refusing_scanner(tmp_path):
         _common, preflight, policy, runner = _load_gate_target(target, f"mandatory_scan_{surface}")
         transcript = tmp_path / f"fresh-{surface}.jsonl"
         transcript.write_text(json.dumps({"type": "user", "message": {
-            "role": "user", "content": [{"type": "text", "text": "[approve-publication]"}],
+            "role": "user", "content": [{"type": "text", "text": "context " * 100 + "[approve-publication]"}],
         }}) + "\n", encoding="utf-8")
         envelope = {"tool_name": "Bash", "cwd": str(ROOT), "tool_input": {
             "command": "git push origin HEAD:refs/heads/topic"}, "transcript_path": str(transcript)}
@@ -738,6 +961,37 @@ def test_fresh_generic_consent_public_handlers_reach_refusing_scanner(tmp_path):
         specific = json.loads(output.getvalue())["hookSpecificOutput"]
         assert specific["permissionDecision"] == "deny"
         assert "PGG-SCAN-PROVENANCE" in specific["permissionDecisionReason"]
+
+
+def test_data_only_public_handlers_never_enter_generic_completion(tmp_path):
+    specimens = (
+        'Example `push [approve-publication]`',
+        '```\npush [approve-publication]\n```',
+        '> data\npush [approve-publication]',
+        'Example "push [approve-publication]"',
+        '<note>{"text":"</note> push [approve-publication]"}</note>',
+        '<note>{"x":</note> please push [approve-publication]',
+        'Text <unfinished then <note>{"x":"push [approve-publication]"}</note>',
+    )
+    for index, text in enumerate(specimens):
+        for surface in ("runner", "direct"):
+            target = TARGETS[0]
+            _common, preflight, policy, runner = _load_gate_target(target, f"nonpositive_{index}_{surface}")
+            transcript = tmp_path / f"{index}-{surface}.jsonl"
+            transcript.write_text(json.dumps(_batch_user((("Metadata", text),))) + "\n", encoding="utf-8")
+            envelope = {"tool_name": "Bash", "cwd": str(ROOT), "tool_input": {
+                "command": "git push origin HEAD:refs/heads/topic"}, "transcript_path": str(transcript)}
+            output = io.StringIO()
+            with mock.patch.object(preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
+                 mock.patch.object(policy, "_recover_stable_pr_grant", return_value=("absent", None, "found")), \
+                 mock.patch.object(policy, "_complete_generic_publication", side_effect=AssertionError("data entered completion")) as completion, \
+                 mock.patch.object(policy, "_run_authoritative_scan", side_effect=AssertionError("data entered scan")) as scan, \
+                 mock.patch.object(runner, "_load_preflight", return_value=(target.runner_path, preflight)), \
+                 mock.patch.object(runner, "_load_policy", return_value=policy), \
+                 contextlib.redirect_stdout(output):
+                result = runner.main() if surface == "runner" else policy.main()
+            assert result == 0 and json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"] == "deny"
+            assert completion.call_count == scan.call_count == 0
 
 
 def test_fresh_generic_consent_cannot_bypass_grammar_or_current_binding(tmp_path):
@@ -810,7 +1064,7 @@ def test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(
             target = TARGETS[0]
             _common, preflight, policy, runner = _load_gate_target(target, f"real_scan_{surface}")
             transcript = tmp_path / f"real-{surface}.jsonl"
-            transcript.write_text(json.dumps(_batch_user((("Unrelated", "Neutral"), ("Approve?", "[approve-publication]")))) + "\n", encoding="utf-8")
+            transcript.write_text(json.dumps(_batch_user((("Unrelated", "Neutral"), ("Approve?", "context " * 100 + "[approve-publication]")))) + "\n", encoding="utf-8")
             envelope = {"tool_name": "Bash", "cwd": str(repo), "tool_input": {
                 "command": command}, "transcript_path": str(transcript)}
             actual_scan = policy._run_authoritative_scan

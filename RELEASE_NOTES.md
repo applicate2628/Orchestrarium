@@ -4,6 +4,12 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-16
 
+- Long genuine human approval replies now reach the existing publication checks reliably, while quoted examples and JSON-formatted data still grant no approval. Operators keep the same human-review and bound-scan workflow without shortening a valid reply.
+
+- A proved selected handoff of owned disposable material to trash can fulfill the agent's disposition duty without waiting for the human to empty it. Physical deletion remains pending where explicitly required; host refusals, valuable evidence, foreign state and live-resource duties retain their safeguards.
+
+- The new `post-spawn-cleanup` common skill helps creators settle selected spawned resources using stable ownership, actual exit readback and honest accounting for probe-created processes. A completed task or a test Job is not mistaken for native Model Context Protocol (MCP) cleanup.
+
 - **Empty publication replies preserve genuine-user chronology.** A valid structured answer batch remains one user event even when every answer is empty, so earlier context-free numeric pull-request intent cannot survive that later reply. Empty answers add no permission; bound grants and ordinary empty-message behavior retain their existing rules in both provider packs.
 
 - **Complete publication history uses its captured file boundary.** The existing streaming reducer now handles every required full-history route without artificial aggregate byte or record cutoffs, reading and verifying a finite acquired frontier with bounded per-record memory. Growth, invalid input, identity drift, revocation and missing authority retain their checks; both handlers still require the bound unpublished-range scan and receipt.

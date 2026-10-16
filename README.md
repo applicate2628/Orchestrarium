@@ -195,6 +195,7 @@ Currently shipped:
 - `$windows-gui-manual-testing` — delegate-style; Windows desktop GUI manual visual verification with screen capture, hard crop validation, and theme/state evidence across toolkit/runtime variants.
 - `$analyzing-video-bugs` — knowledge-style; frame extraction, scene-change detection, and dense sampling for any UI/animation/layout bug video.
 - `$bug-hunting` — knowledge-style; systematic runtime-bug investigation via diagnostic logging.
+- `$post-spawn-cleanup` — knowledge-style; settle selected spawn-owned resources through their existing creator and supported lifecycle controls, with stable identity and physical-teardown evidence.
 - `$mathtype-book-page` — knowledge-style; bring translated technical-book DOCX pages to accepted MathType format.
 - `$repo-cleanup` — knowledge-style coordinator; classify repository residue, route separately authorized owner work, recheck fresh evidence, and prepare transfer without becoming a mutation engine.
 - `$manual-repo-transfer` — knowledge-style; inventory local state, create and validate a selected transfer bundle, and emit preview-only cleanup evidence.

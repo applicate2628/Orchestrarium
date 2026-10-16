@@ -64,6 +64,52 @@ def _load_hook_common():
 hook_common = _load_hook_common()
 
 
+class TestHumanTextWhitespaceView(unittest.TestCase):
+    @staticmethod
+    def cases():
+        text = " \tfirst line\n    second line \t\n"
+        return (
+            ("direct", {"content": text}, text),
+            ("blocks", {"content": [{"type": "text", "text": "  first "},
+                                    {"type": "tool_result", "text": "excluded"},
+                                    {"type": "text", "text": "\tsecond \n"}]}, "  first \n\tsecond \n"),
+            ("nested", {"message": {"role": "user", "content": text}}, text),
+            ("codex", {"type": "response_item", "payload": {"type": "message", "role": "user",
+                       "content": [{"type": "input_text", "text": text}]}}, text),
+            ("fallback", {"text": text}, text),
+            ("injected", {"content": " \tleft <system-reminder>excluded</system-reminder> right \n"},
+                         " \tleft   right \n"),
+            ("injected-only", {"content": "<system-reminder>excluded</system-reminder>"}, " "),
+            ("compact", {"isCompactSummary": True, "content": text}, ""),
+            ("tool-only", {"content": [{"type": "tool_use", "text": text},
+                                      {"type": "tool_result", "text": text}]}, ""),
+            ("mixed-join", {"content": [{"type": "text", "text": "  first "}, 9]}, "  first \n9"),
+            ("missing", {}, ""), ("null-entry", None, ""),
+            ("null-content", {"content": None}, ""),
+            ("empty", {"content": ""}, ""),
+            ("blank", {"content": " \t\n "}, " \t\n "),
+        )
+
+    def test_existing_omitted_default_has_frozen_results(self):
+        for label, entry, filtered in self.cases():
+            with self.subTest(label=label):
+                self.assertEqual(hook_common.extract_user_typed_text(entry), filtered.strip())
+
+    def test_explicit_mode_changes_only_outer_whitespace(self):
+        for label, entry, filtered in self.cases():
+            with self.subTest(label=label):
+                self.assertEqual(hook_common.extract_user_typed_text(entry, preserve_outer_whitespace=False), filtered.strip())
+                self.assertEqual(hook_common.extract_user_typed_text(entry, preserve_outer_whitespace=True), filtered)
+
+    def test_mode_requires_an_actual_boolean_before_empty_input_returns(self):
+        for entry in ({"content": "  human "}, None, {}):
+            for mode in (0, 1, None, "", "true", [], {}, 0.0):
+                with self.subTest(entry=entry, mode=mode), self.assertRaises(TypeError):
+                    hook_common.extract_user_typed_text(entry, preserve_outer_whitespace=mode)
+        with self.assertRaises(TypeError):
+            hook_common.extract_user_typed_text({"content": "human"}, True)
+
+
 def test_tool_input_acquisition_keeps_identity_and_requires_one_strict_carrier() -> None:
     patch = "*** Begin Patch\n*** Update File: docs/guide.md\n*** Move to: docs/new.md\n@@\n-old\n+new\n*** End Patch"
     for name in ("apply_patch", "functions.apply_patch", "TOOLS.Apply_Patch"):
