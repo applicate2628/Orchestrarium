@@ -40,6 +40,12 @@ def load_module():
     return module
 
 
+def _recover_pending_transitions(module, root):
+    """Exercise each actual pending intent through its public held-owner entry."""
+    for intent_path in module._iter_transition_intents(root):
+        module.recover_transition(root, intent_path.stem)
+
+
 def _runtime_authority_fixture(tmp_path, monkeypatch, layout="codex", linked=True):
     module = load_module()
     home = tmp_path / "synthetic-home"
@@ -1204,6 +1210,207 @@ def test_local_index_keeps_uncertain_sources_and_selected_close_strict(tmp_path:
         assert not (root / "work-items" / "archive" / "2026-10" / slug).exists()
 
 
+@pytest.mark.parametrize("owner_state", ["absent", "unheld", "wrong", "off-root"])
+def test_structural_directory_requires_explicit_held_owner_before_effect(tmp_path, owner_state):
+    module = load_module()
+    root = tmp_path / "repo"
+    (root / "work-items").mkdir(parents=True)
+    destination = root / "work-items" / "archive" / "2026-10"
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            selected = transaction
+            if owner_state == "absent":
+                selected = None
+            elif owner_state in {"unheld", "wrong"}:
+                selected = module.LifecycleTransaction(root)
+            elif owner_state == "off-root":
+                destination = tmp_path / "foreign" / "archive"
+            if owner_state == "wrong":
+                wrong_token = module._CURRENT_LIFECYCLE_TRANSACTION.set(selected)
+                try:
+                    with pytest.raises(module.LifecycleError):
+                        module.LifecycleWriteTarget.make_directories(destination, transaction)
+                finally:
+                    module._CURRENT_LIFECYCLE_TRANSACTION.reset(wrong_token)
+            else:
+                with pytest.raises(module.LifecycleError):
+                    module.LifecycleWriteTarget.make_directories(destination, selected)
+            assert not destination.parent.exists()
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+def test_structural_directory_native_creation_settles_and_owns_empty_rollback(tmp_path, monkeypatch):
+    module = load_module()
+    root = tmp_path / "repo"
+    (root / "work-items").mkdir(parents=True)
+    destination = root / "work-items" / "archive" / "2026-10"
+    observations = []
+    verify_snapshot = module._verify_owned_directory_snapshot
+    def verify_removal(snapshot, failure_id, *, creation_owner=None):
+        removal = creation_owner._source_observation if creation_owner is not None else None
+        if removal is not None:
+            assert removal.source == snapshot.path and removal.destination is None
+            assert removal.source_owner is creation_owner and removal.handle is not None
+            assert removal.current_pair_is_bound()
+            observations.append(removal)
+        return verify_snapshot(snapshot, failure_id, creation_owner=creation_owner)
+    monkeypatch.setattr(module, "_verify_owned_directory_snapshot", verify_removal)
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            records = module.LifecycleWriteTarget.make_directories(destination, transaction)
+            assert [record.locator for record in records] == [destination.parent, destination]
+            assert all(record.creator and record.creation_published and record.finished
+                       and record.release_complete and record.identity == module._lifecycle_file_identity(record.locator.lstat())
+                       for record in records)
+            if os.name == "nt":
+                assert all(record.native_result == 2 for record in records)
+            assert module.LifecycleWriteTarget.make_directories(destination, transaction) == ()
+            transaction.verify()
+            for record in reversed(records):
+                module.LifecycleWriteTarget.remove_created_directory(record, transaction)
+            assert len(observations) == len(records)
+            assert all(removal.owner._source_observation is None and not removal.owner._open
+                       for removal in observations)
+            assert not destination.parent.exists()
+            transaction.verify()
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+def test_structural_directory_unpublished_abort_retains_actual_creator_result(tmp_path, monkeypatch):
+    module = load_module()
+    root = tmp_path / "repo"
+    (root / "work-items").mkdir(parents=True)
+    destination = root / "work-items" / "archive"
+    original = module.LifecycleWriteTarget._publish_effect
+    failure = module.LifecycleError("TEST-PUBLICATION", "controlled pre-publication failure")
+    def refuse(owner, prepared, identity):
+        if prepared.directory and prepared.source is None and prepared.destination == destination:
+            raise failure
+        return original(owner, prepared, identity)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_publish_effect", refuse)
+    records = []
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            with pytest.raises(module.LifecycleError) as failed:
+                module.LifecycleWriteTarget.make_directories(destination, transaction, created=records)
+            assert failed.value is failure
+            assert len(records) == 1
+            record = records[0]
+            assert record.creator and record.finished and record.release_complete
+            assert record.deletion_accepted and record.projection_complete
+            assert record.primary is failure and record.phase == "disposed"
+            assert not destination.exists()
+            transaction.verify()
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native creator sharing boundary")
+@pytest.mark.parametrize("retarget", ["child", "parent"])
+def test_structural_directory_windows_native_create_prevents_retarget(tmp_path, monkeypatch, retarget):
+    module = load_module()
+    root = tmp_path / "repo"
+    existing = root / "work-items" / "archive"
+    existing.mkdir(parents=True)
+    destination = existing / "2026-10"
+    original = module.LifecycleWriteTarget._publish_effect
+    attempts = []
+    def probe(owner, prepared, identity):
+        if prepared.directory and prepared.source is None and prepared.destination == destination:
+            record = owner._creations[-1]
+            assert record.native_result == 2 and owner._identity(record.handle) == identity
+            selected = destination if retarget == "child" else existing
+            with pytest.raises(OSError) as denied:
+                selected.rename(selected.with_name(selected.name + "-substituted"))
+            attempts.append(denied.value.winerror)
+            assert owner._identity(record.handle) == module._lifecycle_file_identity(destination.lstat())
+        return original(owner, prepared, identity)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_publish_effect", probe)
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            records = module.LifecycleWriteTarget.make_directories(destination, transaction)
+            assert len(records) == 1 and len(attempts) == 1
+            assert records[0].finished and records[0].release_complete
+            # Ordinary readers work after the delete-capable creator is settled.
+            assert module._capture_owned_directory_snapshot(destination, failure_id="TEST").members == ()
+            transaction.verify()
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+@pytest.mark.parametrize("foreign", ["replacement", "nonempty"])
+def test_structural_directory_rollback_preserves_foreign_or_nonempty_state(tmp_path, foreign):
+    module = load_module()
+    root = tmp_path / "repo"
+    (root / "work-items").mkdir(parents=True)
+    destination = root / "work-items" / "archive"
+    with pytest.raises(module.LifecycleError):
+        with module.LifecycleTransaction(root) as transaction:
+            token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            try:
+                record, = module.LifecycleWriteTarget.make_directories(destination, transaction)
+                if foreign == "replacement":
+                    destination.rename(root / "held-original")
+                    destination.mkdir()
+                else:
+                    (destination / "foreign.txt").write_bytes(b"Preserve this author state.\n")
+                with pytest.raises(module.LifecycleError):
+                    module.LifecycleWriteTarget.remove_created_directory(record, transaction)
+                assert destination.is_dir()
+                if foreign == "nonempty":
+                    assert (destination / "foreign.txt").read_bytes() == b"Preserve this author state.\n"
+            finally:
+                module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+    assert destination.is_dir()
+
+
+def test_lifecycle_prediction_failure_restores_tokens_after_disposable_cleanup(tmp_path, monkeypatch):
+    module = load_module()
+    root = tmp_path / "repo"
+    bug, _ = seed_fixed_bug_with_active_parent(module, root, "prediction-exception")
+    failure = RuntimeError("controlled shadow write failure")
+    original_write = module._atomic_write
+    original_cleanup = module.tempfile.TemporaryDirectory.cleanup
+    cleanups = []
+    def fail_shadow(path, *args, **kwargs):
+        if not path.is_relative_to(root):
+            assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+            assert module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get() is None
+            raise failure
+        return original_write(path, *args, **kwargs)
+    def cleanup(temporary):
+        cleanups.append((module._CURRENT_LIFECYCLE_TRANSACTION.get(),
+                         module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()))
+        return original_cleanup(temporary)
+    monkeypatch.setattr(module, "_atomic_write", fail_shadow)
+    monkeypatch.setattr(module.tempfile.TemporaryDirectory, "cleanup", cleanup)
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        composer = object()
+        composer_token = module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.set(composer)
+        try:
+            with pytest.raises(RuntimeError) as failed:
+                module._precompute_single_bug_readme_sha256(root, bug,
+                    root / "work-items/bugs/archive/2026-10/prediction-exception.md", bug.read_bytes(), [])
+            assert failed.value is failure
+            assert cleanups == [(None, None)]
+            assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is transaction
+            assert module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get() is composer
+            monkeypatch.setattr(module, "_atomic_write", original_write)
+            with pytest.raises(module.LifecycleError, match="escapes admitted repository"):
+                module._atomic_write(tmp_path / "off-root.md", b"No canonical authority.\n")
+            assert not (tmp_path / "off-root.md").exists()
+        finally:
+            module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(composer_token)
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
 def seed_fixed_bug_with_active_parent(module, root: Path, slug: str) -> tuple[Path, Path]:
     parent_slug = "fixed-bug-parent"
     seed_active(module, root, parent_slug)
@@ -1784,7 +1991,7 @@ def test_archive_fixed_bug_precommit_restores_and_postcommit_recovers(tmp_path: 
             else "WI-FIXED-BUG-ROLLFORWARD-INDETERMINATE"
         )
 
-        module._recover_all_transitions(root)
+        _recover_pending_transitions(module, root)
 
         archive = root / "work-items" / "bugs" / "archive" / "2026-09" / f"{slug}.md"
         receipt = archive.with_name(f"{slug}.fixed-archive-receipt.json")
@@ -1813,7 +2020,7 @@ def test_archive_fixed_bug_readme_failure_recovers_after_move(tmp_path: Path) ->
     assert failure.exception.failure_id == "WI-FIXED-BUG-ROLLFORWARD-INDETERMINATE"
     assert not bug.exists() and archive.is_file()
     assert module._safe_refresh_readme is original_refresh
-    module._recover_all_transitions(root)
+    _recover_pending_transitions(module, root)
     receipt = archive.with_name(f"{slug}.fixed-archive-receipt.json")
     assert module._verify_fixed_bug_archive_settlement(root, receipt)["status"] == "settled"
 
@@ -1835,7 +2042,7 @@ def test_archive_fixed_bug_recovery_errors_name_fixed_archive_not_supersession(t
         target.write_bytes(b"foreign mutation\n")
 
         with unittest.TestCase().assertRaises(module.LifecycleError) as failed_recovery:
-            module._recover_all_transitions(root)
+            _recover_pending_transitions(module, root)
 
         assert failed_recovery.exception.failure_id == (
             "WI-FIXED-BUG-ROLLBACK-INDETERMINATE" if phase == "F1"
@@ -1845,7 +2052,7 @@ def test_archive_fixed_bug_recovery_errors_name_fixed_archive_not_supersession(t
         assert "supersession" not in str(failed_recovery.exception)
         assert target.read_bytes() == b"foreign mutation\n"
         target.write_bytes(target_before_drift)
-        module._recover_all_transitions(root)
+        _recover_pending_transitions(module, root)
         assert not list((root / ".scratch" / "work-items-lifecycle-transitions").glob("*.json"))
 
     root = tmp_path / "F3-readme"
@@ -1861,13 +2068,13 @@ def test_archive_fixed_bug_recovery_errors_name_fixed_archive_not_supersession(t
     assert not bug.exists()
     with patch.object(module, "_safe_refresh_readme", return_value="0" * 64):
         with unittest.TestCase().assertRaises(module.LifecycleError) as readme_mismatch:
-            module._recover_all_transitions(root)
+            _recover_pending_transitions(module, root)
 
     assert readme_mismatch.exception.failure_id == "WI-FIXED-BUG-ROLLFORWARD-INDETERMINATE"
     assert str(readme_mismatch.exception) == "fixed-bug archive README afterimage differs"
     assert archive.read_bytes() == archive_before
     assert not archive.with_name(f"{slug}.fixed-archive-receipt.json").exists()
-    module._recover_all_transitions(root)
+    _recover_pending_transitions(module, root)
     assert not list((root / ".scratch" / "work-items-lifecycle-transitions").glob("*.json"))
 
 
@@ -4602,13 +4809,13 @@ def test_shared_bug_recovery_preserves_supersession_error_text(tmp_path: Path) -
     source.write_bytes(b"foreign mutation\n")
 
     with unittest.TestCase().assertRaises(module.LifecycleError) as failed_recovery:
-        module._recover_all_transitions(root)
+        _recover_pending_transitions(module, root)
 
     assert failed_recovery.exception.failure_id == "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE"
     assert str(failed_recovery.exception) == "bug supersession rollback identity differs"
     assert source.read_bytes() == b"foreign mutation\n"
     source.write_bytes(source_before_drift)
-    module._recover_all_transitions(root)
+    _recover_pending_transitions(module, root)
     assert not list((root / ".scratch" / "work-items-lifecycle-transitions").glob("*.json"))
 
 
@@ -14049,7 +14256,7 @@ class PartialMigrationRecoveryCliTests(unittest.TestCase):
         composer.capture_primary(primary)
         generic_phases = tuple(
             phase for phase in module.LIFECYCLE_CLEANUP_PHASES
-            if phase not in module.LIFECYCLE_WRITE_CLEANUP_PHASES
+            if phase not in module.LIFECYCLE_REPEATABLE_CLEANUP_PHASES
         )
         self.assertEqual(generic_phases, (
             "receipt-final", "receipt-pending", "rollback-parent-chain", "rollback-readme",
@@ -14085,6 +14292,8 @@ class PartialMigrationRecoveryCliTests(unittest.TestCase):
                 resource=f"write-resource-{index}",
                 diagnostic=f"write-cleanup-{index}",
             )
+        composer.record_rollback_action(failure_id="WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED",
+            resource="work-items", diagnostic="actual failed rollback obligation")
         combined = composer.finalize()
         self.assertIs(combined.primary, primary)
         self.assertEqual(tuple(record.phase for record in combined.cleanup_failures),
@@ -14602,14 +14811,251 @@ def test_retained_directory_observation_refuses_stable_membership_and_parent_dri
             assert transaction._retained_observations is observations and observations[source] is original
 
 
+def test_outcome_explicit_outward_preserves_original_and_actual_cleanup_occurrences():
+    module = load_module()
+    original = module.LifecycleError("ORIGINAL", "first substantive failure")
+    outward = module.LifecycleError("WI-BUG-DISPOSITIONS-ROLLBACK", "existing domain aggregate")
+    outward.__cause__ = original
+    composer = module.LifecycleOutcomeComposer()
+    with pytest.raises(ValueError):
+        composer.designate_outward_failure(outward)
+    composer.capture_primary(original)
+    first, second, release = OSError(5, "inverse refused"), module.LifecycleError("DELETE", "delete refused"), OSError(6, "release refused")
+    composer.record_rollback_action(failure_id="ROLLBACK", resource="first", diagnostic="inverse", cause=first)
+    composer.record_rollback_action(failure_id=second.failure_id, resource="second", diagnostic="remove directory", cause=second)
+    composer.record_write_cleanup(phase="write-target-release", failure_id="RELEASE", resource="handle", diagnostic="release", cause=release)
+    composer.set_rollback("incomplete")
+    composer.designate_outward_failure(outward)
+    composer.capture_primary(second)
+    bundle = composer.finalize()
+    assert bundle.primary is original and bundle.outward_failure is outward
+    assert module.LifecycleOutcomeComposer.top_level(bundle) is outward and outward.__cause__ is original
+    assert [cause for _record, cause in composer.rollback_actions] == [first, second]
+    assert "inverse: " in composer.rollback_message() and "delete refused" in composer.rollback_message()
+    projection = module._lifecycle_diagnostic_bundle(bundle)
+    assert projection.primaryFailureId == "ORIGINAL"
+    assert projection.topLevelKind == "typed-outward" and projection.topLevelFailureId == outward.failure_id
+    assert tuple(row.phase for row in projection.cleanupFailures) == ("write-target-release", "rollback-action")
+    assert "occurrences=2" in projection.cleanupFailures[-1].diagnostic
+    with pytest.raises(ValueError):
+        composer.designate_outward_failure(module.LifecycleError("OTHER", "conflicting designation"))
+    default = module.LifecycleOutcomeBundle(None, original, (), "not-needed")
+    assert module.LifecycleOutcomeComposer.top_level(default) is original and default.outward_failure is None
+    with pytest.raises(ValueError):
+        composer.record_cleanup(phase="rollback-action", failure_id="WRONG", resource=None, diagnostic="wrong owner")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="actual native directory deletion refusal")
+def test_close_native_cleanup_failure_keeps_original_and_existing_outward_aggregate(tmp_path, monkeypatch):
+    module = load_module()
+    root, slug, instant = tmp_path / "repo", "close-dual-native", "2026-10-08T00:00:00Z"
+    seed_active(module, root, slug)
+    write_empty_bug_dispositions(root, slug, instant)
+    module.refresh_readme(root)
+    active = root / "work-items/active" / slug
+    status_before = (active / "status.md").read_bytes()
+    readme_before = (root / "work-items/README.md").read_bytes()
+    observer = module.LifecycleDiagnosticObserver()
+    sentinel = module.LifecycleError("TEST-NATIVE-DELETE", "actual qualified deletion refused")
+    native_delete = module.LifecycleWriteTarget._windows_delete
+    owners = []
+    def refuse(owner, handle):
+        effect = owner._source_observation
+        if effect is not None:
+            assert effect.handle == handle and effect.source_owner is owner and effect.current_pair_is_bound()
+            owners.append(owner)
+            raise sentinel
+        return native_delete(owner, handle)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_windows_delete", refuse)
+    with pytest.raises(module.LifecycleError) as failed:
+        module.close_item(root, slug, closure(instant).encode(), instant,
+            inject_readme_failure=True, diagnostic_observer=observer)
+    assert failed.value.failure_id == "WI-BUG-DISPOSITIONS-ROLLBACK"
+    assert failed.value.__cause__.failure_id == "WI-README-STALE"
+    assert observer.snapshot.primaryFailureId == "WI-README-STALE"
+    assert observer.snapshot.topLevelKind == "typed-outward"
+    assert observer.snapshot.topLevelFailureId == failed.value.failure_id
+    assert observer.snapshot.rollback == "incomplete"
+    assert any(row.phase == "rollback-action" and row.failureId == sentinel.failure_id
+               for row in observer.snapshot.cleanupFailures)
+    assert owners and all(not owner._open and owner._source_observation is None for owner in owners)
+    assert (active / "status.md").read_bytes() == status_before
+    assert (root / "work-items/README.md").read_bytes() == readme_before
+
+
+@pytest.mark.parametrize("rollback", [False, True])
+def test_retirement_native_creator_stage_is_empty_and_released_after_settled_custody(tmp_path, monkeypatch, rollback):
+    module = load_module()
+    root, slug = tmp_path / "repo", "native-stage-release"
+    source, before = _seed_legacy_backlog(root, slug, {"design.md": b"native creator custody\n"})
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    make = module.LifecycleWriteTarget.make_directories
+    stages = []
+    def capture(cls, path, transaction, **kwargs):
+        result = make(path, transaction, **kwargs)
+        if Path(path).parent == source.parent:
+            assert len(kwargs["created"]) == 1
+            record = kwargs["created"][0]
+            assert record.locator == path and record.creator and record.creation_published
+            assert record.finished and record.release_complete
+            if os.name == "nt":
+                assert record.native_result == 2
+            stages.append(record)
+        return result
+    monkeypatch.setattr(module.LifecycleWriteTarget, "make_directories", classmethod(capture))
+    if rollback:
+        with pytest.raises(module.LifecycleError) as failed:
+            module.retire_legacy_backlog(root, slug, b"Rejected.\n", "2026-08-01T00:00:00Z", inject_readme_failure=True)
+        assert failed.value.failure_id == "WI-README-STALE"
+        assert (source / "design.md").read_bytes() == before["design.md"]
+    else:
+        target = module.retire_legacy_backlog(root, slug, b"Rejected.\n", "2026-08-01T00:00:00Z")
+        assert (target / "design.md").read_bytes() == before["design.md"] and not source.exists()
+    assert len(stages) == 1 and not stages[0].locator.exists()
+
+
+@pytest.mark.parametrize("mutation", ["foreign-member", "replacement"])
+def test_retirement_stage_disposal_preserves_foreign_or_replaced_directory(tmp_path, monkeypatch, mutation):
+    module = load_module()
+    root, slug = tmp_path / "repo", "stage-foreign-disposal"
+    source, before = _seed_legacy_backlog(root, slug, {"design.md": b"original committed payload\n"})
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    remove = module.LifecycleWriteTarget.remove_created_directory
+    foreign = b"separately owned stage member\n"
+    observed = {}
+    def interfere(cls, record, transaction, **kwargs):
+        if record.locator.parent == source.parent:
+            assert record.creator and record.finished and record.release_complete
+            observed["record"] = record
+            if mutation == "replacement":
+                preserved = record.locator.with_name(record.locator.name + ".preserved")
+                record.locator.rename(preserved)
+                record.locator.mkdir()
+                observed["preserved"] = preserved
+            member = record.locator / "foreign.bin"
+            member.write_bytes(foreign)
+            observed["member"] = member
+            observed["identity"] = module._lifecycle_file_identity(member.lstat())
+        return remove(record, transaction, **kwargs)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "remove_created_directory", classmethod(interfere))
+    observer = module.LifecycleDiagnosticObserver()
+    with pytest.raises(module.LifecycleError):
+        module.retire_legacy_backlog(root, slug, b"Rejected.\n", "2026-08-01T00:00:00Z", diagnostic_observer=observer)
+    assert observed["member"].read_bytes() == foreign
+    assert module._lifecycle_file_identity(observed["member"].lstat()) == observed["identity"]
+    assert (root / "work-items/archive/2026-08" / slug / "design.md").read_bytes() == before["design.md"]
+    assert any(row.phase == "rollback-action" for row in observer.snapshot.cleanupFailures)
+    if mutation == "replacement":
+        assert module._lifecycle_file_identity(observed["preserved"].lstat()) == observed["record"].identity
+        assert module._lifecycle_file_identity(observed["record"].locator.lstat()) != observed["record"].identity
+
+
+def test_retirement_occupied_restore_target_preserves_both_foreign_and_original_stage(tmp_path, monkeypatch):
+    module = load_module()
+    root, slug = tmp_path / "repo", "occupied-source-custody"
+    source, before = _seed_legacy_backlog(root, slug, {"design.md": b"original retained stage payload\n"})
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    move = module.LifecycleTransaction.replace_directory
+    stage, observed = [], {"hits": 0}
+    foreign = b"foreign restoration target\n"
+    def occupy(transaction, current, destination, *args, **kwargs):
+        restoring_stage = bool(stage) and current == observed.get("archive") and destination == stage[0]
+        if restoring_stage:
+            inverse = kwargs["inverse"]
+            assert transaction is observed["transaction"]
+            assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is transaction and transaction._locked
+            assert inverse.transaction is transaction and inverse.source == current and inverse.destination == destination
+            assert not inverse.fulfilled and inverse.current_pair_is_bound()
+        result = move(transaction, current, destination, *args, **kwargs)
+        if current == source and not stage:
+            assert kwargs.get("inverse") is None and destination.is_dir() and not source.exists()
+            stage.append(destination)
+            observed["transaction"] = transaction
+        elif stage and current == stage[0] and kwargs.get("inverse") is None:
+            observed["archive"] = destination
+        if restoring_stage:
+            assert inverse.fulfilled and inverse.current_pair_is_bound()
+            assert not source.exists() and stage[0].is_dir()
+            assert all((stage[0] / name).read_bytes() == body for name, body in before.items())
+            observed["hits"] += 1
+            assert observed["hits"] == 1
+            source.mkdir()
+            (source / "foreign.bin").write_bytes(foreign)
+            observed["original"] = module._lifecycle_file_identity(stage[0].lstat())
+            observed["foreign"] = module._lifecycle_file_identity(source.lstat())
+        return result
+    monkeypatch.setattr(module.LifecycleTransaction, "replace_directory", occupy)
+    observer = module.LifecycleDiagnosticObserver()
+    with pytest.raises(module.LifecycleError) as failed:
+        module.retire_legacy_backlog(root, slug, b"Rejected.\n", "2026-08-01T00:00:00Z",
+            inject_readme_failure=True, diagnostic_observer=observer)
+    assert observed["hits"] == 1
+    assert failed.value.failure_id == "WI-README-STALE"
+    assert (source / "foreign.bin").read_bytes() == foreign
+    assert (stage[0] / "design.md").read_bytes() == before["design.md"]
+    assert module._lifecycle_file_identity(source.lstat()) == observed["foreign"]
+    assert module._lifecycle_file_identity(stage[0].lstat()) == observed["original"]
+    assert observer.snapshot.rollback == "incomplete"
+
+
+def test_retirement_existing_uuid_stage_is_never_adopted(tmp_path, monkeypatch):
+    module = load_module()
+    root, slug = tmp_path / "repo", "stage-collision"
+    source, before = _seed_legacy_backlog(root, slug, {"design.md": b"original remains current\n"})
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    fixed = module.uuid.UUID(int=1234)
+    collision = source.parent / f".{slug}.legacy-retire.{fixed.hex}"
+    collision.mkdir()
+    (collision / "foreign.bin").write_bytes(b"pre-existing stage candidate\n")
+    identity = module._lifecycle_file_identity(collision.lstat())
+    monkeypatch.setattr(module.uuid, "uuid4", lambda: fixed)
+    with pytest.raises(module.LifecycleError) as failed:
+        module.retire_legacy_backlog(root, slug, b"Rejected.\n", "2026-08-01T00:00:00Z")
+    assert failed.value.failure_id == "WI-LEGACY-RETIREMENT-INVALID"
+    assert module._lifecycle_file_identity(collision.lstat()) == identity
+    assert (collision / "foreign.bin").read_bytes() == b"pre-existing stage candidate\n"
+    assert (source / "design.md").read_bytes() == before["design.md"]
+
+
+def test_absent_preimage_readme_restore_keeps_native_ownership_and_invalid_context_refusal(tmp_path):
+    module = load_module()
+    root = tmp_path / "repo"
+    (root / "work-items").mkdir(parents=True)
+    readme = root / "work-items/README.md"
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            module._restore_readme_snapshot(readme, None)
+            assert not readme.exists()
+            module._atomic_write(readme, b"owned README\n")
+            module._restore_readme_snapshot(readme, None)
+            assert not readme.exists() and readme not in transaction._retained_observations
+            readme.write_bytes(b"foreign README\n")
+            identity = module._lifecycle_file_identity(readme.lstat())
+            with pytest.raises(module.LifecycleError):
+                module._restore_readme_snapshot(readme, None)
+            assert readme.read_bytes() == b"foreign README\n"
+            assert module._lifecycle_file_identity(readme.lstat()) == identity
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+    token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+    try:
+        with pytest.raises(module.LifecycleError):
+            module._restore_readme_snapshot(readme, None)
+        assert readme.read_bytes() == b"foreign README\n"
+    finally:
+        module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
 def test_retained_file_observation_keeps_content_identity_policy_and_kind_strict(tmp_path: Path) -> None:
     module, root, source, _destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
     original = module._capture_file_snapshot(leaf, failure_id="TEST-PROOF", require_single_link=True)
     directory = module._capture_owned_directory_snapshot(source, failure_id="TEST-PROOF")
     variants = (
-        replace(original, require_single_link=False),
         replace(original, data=b"X" + original.data[1:]),
+        replace(original, length=original.length + 1),
         replace(original, identity=(original.identity[0], original.identity[1] + 1)),
+        replace(original, parent_chain=module.CapturedPathParentChain(())),
         replace(directory, path=leaf),
     )
     with module.LifecycleTransaction(root) as transaction:
@@ -14624,6 +15070,187 @@ def test_retained_file_observation_keeps_content_identity_policy_and_kind_strict
         assert observations[leaf] is same
     unsupported = object()
     assert not module._captured_observations_equivalent(unsupported, unsupported)
+
+
+@pytest.mark.parametrize("before, incoming", [(False, False), (False, True), (True, False), (True, True)])
+def test_retained_file_qualification_joins_verified_boolean_directions(tmp_path, before, incoming):
+    module, root, _source, _destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    original = module._capture_file_snapshot(leaf, failure_id="TEST", require_single_link=before)
+    current = replace(original, require_single_link=incoming)
+    assert module._captured_observations_equivalent(original, current)
+    assert (original == current) is (before == incoming)
+    assert not module._captured_observations_equivalent(original, replace(current, path=outside))
+    with module.LifecycleTransaction(root) as transaction:
+        transaction.observe_retained_inputs((original,))
+        observations = transaction._retained_observations
+        transaction.observe_retained_inputs((current,))
+        retained = observations[leaf]
+        assert transaction._retained_observations is observations
+        assert retained.require_single_link is (before or incoming)
+        module._verify_captured_file(retained, "TEST")
+        transaction.verify()
+
+
+@pytest.mark.parametrize("before, incoming", [(False, True), (True, False)])
+def test_retained_file_qualification_checks_real_hardlink_in_both_mixed_directions(tmp_path, before, incoming):
+    module, root, _source, _destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    original = module._capture_file_snapshot(leaf, failure_id="TEST", require_single_link=before)
+    link = outside.with_name("hardlink.bin")
+    from contextlib import nullcontext
+    transaction = module.LifecycleTransaction(root)
+    final = pytest.raises(module.LifecycleError) if before else nullcontext()
+    with final as outcome:
+        with transaction:
+            transaction.observe_retained_inputs((original,))
+            os.link(leaf, link)
+            try:
+                weak = module._capture_file_snapshot(leaf, failure_id="TEST")
+                assert weak.identity == original.identity and leaf.stat().st_nlink == 2
+                current = replace(weak, require_single_link=incoming)
+                assert module._captured_observations_equivalent(original, current)
+                with pytest.raises(module.LifecycleError) as refused:
+                    transaction.observe_retained_inputs((current,))
+                assert refused.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+                assert transaction._retained_observations[leaf] is original
+            finally:
+                link.unlink()
+            negatives = [value for kind, value in transaction.current_binding_evidence if kind == "integrity-failure"]
+            assert bool(negatives) is before
+    if before:
+        assert outcome.value is refused.value
+    assert transaction._file is None and not transaction._locked
+
+
+def test_retained_file_qualification_refuses_missing_or_malformed_requirements(tmp_path):
+    module, root, _source, _destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    original = module._capture_file_snapshot(leaf, failure_id="TEST")
+    missing = replace(original)
+    object.__delattr__(missing, "require_single_link")
+    with module.LifecycleTransaction(root) as transaction:
+        transaction.observe_retained_inputs(())
+        assert transaction._retained_observations == {}
+        for current in (missing, *(replace(original, require_single_link=value) for value in (None, 0, "false"))):
+            with pytest.raises(module.LifecycleError) as refused:
+                transaction.observe_retained_inputs((current,))
+            assert refused.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+            assert leaf not in transaction._retained_observations
+        transaction.observe_retained_inputs((original,))
+        with pytest.raises(module.LifecycleError):
+            transaction.observe_retained_inputs((replace(original, require_single_link=None),))
+        assert transaction._retained_observations[leaf] is original
+
+
+def test_retained_file_qualification_verifier_refusal_keeps_previous_entry(tmp_path, monkeypatch):
+    module, root, _source, _destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    original = module._capture_file_snapshot(leaf, failure_id="TEST")
+    first = module.LifecycleError("TEST-QUALIFICATION", "native verifier refused")
+    with module.LifecycleTransaction(root) as transaction:
+        transaction.observe_retained_inputs((original,))
+        verify = module._verify_captured_file
+        with monkeypatch.context() as scoped:
+            def refuse(snapshot, failure_id):
+                assert snapshot.path == leaf
+                if snapshot.require_single_link is True:
+                    raise first
+                return verify(snapshot, failure_id)
+            scoped.setattr(module, "_verify_captured_file", refuse)
+            with pytest.raises(module.LifecycleError) as refused:
+                transaction.observe_retained_inputs((replace(original, require_single_link=True),))
+            assert refused.value is first
+            assert transaction._retained_observations[leaf] is original
+
+
+def test_retained_file_qualification_missing_file_and_native_lock_proof_refuse(tmp_path, monkeypatch):
+    module, root, _source, _destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    original = module._capture_file_snapshot(leaf, failure_id="TEST")
+    current = replace(original, require_single_link=True)
+    held = leaf.with_name("held.bin")
+    transaction = module.LifecycleTransaction(root)
+    with pytest.raises(module.LifecycleError) as final:
+        with transaction:
+            transaction.observe_retained_inputs((original,))
+            leaf.rename(held)
+            try:
+                with pytest.raises(module.LifecycleError):
+                    transaction.observe_retained_inputs((current,))
+                assert transaction._retained_observations[leaf] is original
+            finally:
+                held.rename(leaf)
+            with monkeypatch.context() as scoped:
+                scoped.setattr(transaction, "_identity", (0, 0))
+                with pytest.raises(module.LifecycleError) as refused:
+                    transaction.observe_retained_inputs((current,))
+                assert refused.value.failure_id == "WI-LIFECYCLE-LOCK-IDENTITY"
+                assert transaction._retained_observations[leaf] is original
+            assert any(kind == "integrity-failure" for kind, _value in transaction.current_binding_evidence)
+    assert final.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+    with pytest.raises(module.LifecycleError) as released:
+        transaction.observe_retained_inputs((current,))
+    assert released.value.failure_id == "WI-LIFECYCLE-LOCK-IDENTITY"
+    assert transaction._retained_observations[leaf] is original
+
+
+def test_retained_file_qualification_source_failure_is_sticky_and_clears_validator(tmp_path, monkeypatch):
+    module, root, _source, _destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    original = module._capture_file_snapshot(leaf, failure_id="TEST")
+    first = module.LifecycleError("TEST-SOURCE", "selected source verification refused")
+    with pytest.raises(module.LifecycleError) as final:
+        with module.LifecycleTransaction(root) as transaction:
+            transaction.observe_retained_inputs((original,))
+            transaction._validator_reuse = object()
+            verify = module._verify_captured_file
+            def refuse(snapshot, failure_id):
+                if snapshot.path == leaf and snapshot.require_single_link:
+                    raise first
+                return verify(snapshot, failure_id)
+            monkeypatch.setattr(transaction, "_is_runtime_source", lambda path: path == leaf)
+            monkeypatch.setattr(module, "_verify_captured_file", refuse)
+            with pytest.raises(module.LifecycleError) as refused:
+                transaction.observe_retained_inputs((replace(original, require_single_link=True),))
+            assert refused.value is first
+            assert transaction._retained_observations[leaf] is original
+            assert transaction._source_admission_failure is first
+            assert transaction._validator_reuse is None
+            transaction.observe_retained_inputs((original,))
+    assert final.value is first and not transaction._locked
+
+
+def test_retained_file_qualification_strengthening_invalidates_prepared_effect(tmp_path):
+    module, root, _source, _destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    original = module._capture_file_snapshot(leaf, failure_id="TEST")
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            transaction.observe_retained_inputs((original,))
+            with module.LifecycleWriteTarget(leaf, failure_id="TEST", _operation_owner=transaction) as owner:
+                prepared = transaction.prepare_owned_effect(owner, None, leaf, data=original.data, replace_existing=True)
+                assert prepared.current_pair_is_bound()
+                transaction.observe_retained_inputs((replace(original, require_single_link=True),))
+                assert not prepared.current_pair_is_bound()
+                with pytest.raises(module.LifecycleError) as refused:
+                    transaction.publish_owned_effect(prepared, native_identity=original.identity)
+                assert refused.value.failure_id == "WI-LIFECYCLE-EFFECT"
+            module._atomic_write(leaf, b"qualified next image")
+            assert transaction._retained_observations[leaf].require_single_link is True
+            transaction.verify()
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+def test_retained_file_qualification_keeps_zero_byte_and_weak_hardlinked_files_valid(tmp_path):
+    module, root, _source, _destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    leaf.write_bytes(b"")
+    link = outside.with_name("weak-hardlink.bin")
+    os.link(leaf, link)
+    try:
+        snapshot = module._capture_file_snapshot(leaf, failure_id="TEST")
+        assert snapshot.data == b"" and snapshot.length == 0 and leaf.stat().st_nlink == 2
+        with module.LifecycleTransaction(root) as transaction:
+            transaction.observe_retained_inputs((snapshot, replace(snapshot)))
+            assert transaction._retained_observations[leaf].require_single_link is False
+            transaction.verify()
+    finally:
+        link.unlink()
 
 
 @pytest.mark.parametrize("transport", ("direct", "participant"))
@@ -16247,7 +16874,7 @@ def test_write_cleanup_composer_repeated_causes_bounded_projection_and_strict_ol
     assert len(bundle.cleanup_failures) == 1
     assert "occurrences=2" in bundle.cleanup_failures[0].diagnostic
     assert all(cause.strerror in bundle.cleanup_failures[0].diagnostic for cause in (first, second))
-    assert composer._write_cleanup["write-target-release"][0][1] is first
+    assert composer._cleanup_occurrences["write-target-release"][0][1] is first
     assert module.LifecycleOutcomeComposer.top_level(bundle) is not None
     primary = module.LifecycleError("primary", "original primary")
     composer.capture_primary(primary)
@@ -16262,7 +16889,7 @@ def test_write_cleanup_composer_repeated_causes_bounded_projection_and_strict_ol
             resource=f"write-{index}", diagnostic="x" * 500, cause=OSError(f"cause-{index}"))
     output = next(row for row in composer.finalize().cleanup_failures if row.phase == "write-temp-cleanup")
     assert len(output.diagnostic) <= 512 and "occurrences=10" in output.diagnostic and "omitted-details=" in output.diagnostic
-    assert len(composer._write_cleanup["write-temp-cleanup"]) == 10
+    assert len(composer._cleanup_occurrences["write-temp-cleanup"]) == 10
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows write cleanup receiving")
@@ -16631,3 +17258,702 @@ def test_native_target_whole_read_failure_preserves_primary_and_release(tmp_path
             assert read_calls == ([] if fault == "seek" else [1])
             assert len(released) == 1
     assert path.read_bytes() == payload
+
+
+
+def test_owned_inverse_requires_actual_origin_epoch_actor_and_one_use(tmp_path):
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            prepared = transaction.prepare_owned_effect(transaction, source, destination, directory=True)
+            for unsupported in (None, object(), prepared):
+                with pytest.raises(module.LifecycleError, match="actual unused"):
+                    transaction.qualify_owned_inverse(unsupported, operation="restore-move")
+            transaction.replace_directory(source, destination)
+            origin = next(value for kind, value in reversed(transaction.current_binding_evidence)
+                          if kind == "owned-effect" and value.source == source)
+            original_transaction = origin.transaction
+            object.__setattr__(origin, "transaction", object())
+            try:
+                with pytest.raises(module.LifecycleError, match="actual unused"):
+                    transaction.qualify_owned_inverse(origin, operation="restore-move")
+            finally:
+                object.__setattr__(origin, "transaction", original_transaction)
+            actor = transaction._operation_owner
+            transaction._operation_owner = object()
+            with pytest.raises(module.LifecycleError, match="actual unused"):
+                transaction.qualify_owned_inverse(origin, operation="restore-move")
+            transaction._operation_owner = actor
+            assert not any(kind == "integrity-failure" for kind, _value in transaction.current_binding_evidence)
+            inverse = transaction.qualify_owned_inverse(origin, operation="restore-move")
+            with pytest.raises(module.LifecycleError, match="actual unused"):
+                transaction.qualify_owned_inverse(origin, operation="restore-move")
+            transaction.replace_directory(destination, source, inverse=inverse)
+            assert inverse.fulfilled and leaf.read_bytes() == b"original retained evidence"
+            with pytest.raises(module.LifecycleError, match="already settled"):
+                transaction.prepare_owned_effect(transaction, source, destination, directory=True, inverse=inverse)
+            assert not any(kind == "integrity-failure" for kind, _value in transaction.current_binding_evidence)
+            transaction.verify()
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+def test_owned_inverse_selected_descendant_and_destination_conflicts_refuse(tmp_path):
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    transaction = module.LifecycleTransaction(root)
+    with pytest.raises(module.LifecycleError):
+        with transaction:
+            token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            try:
+                transaction.replace_directory(source, destination)
+                origin = next(value for kind, value in reversed(transaction.current_binding_evidence)
+                              if kind == "owned-effect" and value.source == source)
+                selected = destination / leaf.relative_to(source)
+                selected.write_bytes(b"foreign selected child")
+                with pytest.raises(module.LifecycleError):
+                    transaction.qualify_owned_inverse(origin, operation="restore-move")
+                assert not source.exists() and selected.read_bytes() == b"foreign selected child"
+            finally:
+                module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+def test_owned_inverse_conserves_foreign_parent_obligation_after_reversal(tmp_path):
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    outside = root / "actual-shared-parent-sibling.bin"
+    outside.write_bytes(b"admitted shared parent sibling")
+    original = outside.read_bytes()
+    transaction = module.LifecycleTransaction(root)
+    with pytest.raises(module.LifecycleError):
+        with transaction:
+            token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            try:
+                transaction.observe_retained_inputs((module._capture_file_snapshot(outside, failure_id="TEST"),
+                    module._capture_owned_directory_snapshot(root, failure_id="TEST")))
+                transaction.replace_directory(source, destination)
+                outside.write_bytes(b"foreign sibling")
+                transaction.restore_owned_movement(destination, source)
+                assert leaf.read_bytes() == b"original retained evidence" and outside.read_bytes() == b"foreign sibling"
+                negatives = tuple(row for row in transaction.current_binding_evidence if row[0] == "integrity-failure")
+                assert negatives
+                outside.write_bytes(original)
+                with pytest.raises(module.LifecycleError):
+                    transaction.verify()
+                with pytest.raises(module.LifecycleError):
+                    module._atomic_write(outside, b"unauthorized forward")
+                assert outside.read_bytes() == original
+                assert all(any(current is row for current in transaction.current_binding_evidence) for row in negatives)
+            finally:
+                module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+def test_owned_file_inverse_carries_relation_through_native_temporary_promotion(tmp_path):
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            module._atomic_write(outside, b"owned new body")
+            transaction.restore_owned_file(outside, b"unaffected original proof")
+            assert outside.read_bytes() == b"unaffected original proof"
+            generated = outside.with_name("owned-generated.bin")
+            module._atomic_write(generated, b"")
+            transaction.restore_owned_file(generated, None)
+            assert not generated.exists()
+            transaction.verify()
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+
+def test_owned_inverse_fresh_epoch_is_invalidated_by_retained_admission(tmp_path):
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            transaction.replace_directory(source, destination)
+            origin = next(value for kind, value in reversed(transaction.current_binding_evidence)
+                          if kind == "owned-effect" and value.source == source)
+            inverse = transaction.qualify_owned_inverse(origin, operation="restore-move")
+            transaction.observe_retained_inputs((module._capture_file_snapshot(outside, failure_id="TEST"),))
+            assert not inverse.current_pair_is_bound()
+            with pytest.raises(module.LifecycleError, match="origin or epoch"):
+                transaction.replace_directory(destination, source, inverse=inverse)
+            assert destination.is_dir() and not source.exists()
+            assert not any(kind == "integrity-failure" for kind, _value in transaction.current_binding_evidence)
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+@pytest.mark.parametrize("conflict", ("occupied-destination", "parent-retarget"))
+def test_owned_inverse_preserves_actual_destination_and_parent_conflicts(tmp_path, conflict):
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    with pytest.raises(module.LifecycleError):
+        with module.LifecycleTransaction(root) as transaction:
+            token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            try:
+                transaction.replace_directory(source, destination)
+                origin = next(value for kind, value in reversed(transaction.current_binding_evidence)
+                              if kind == "owned-effect" and value.source == source)
+                if conflict == "occupied-destination":
+                    source.mkdir()
+                    foreign = source / "foreign.txt"
+                    foreign.write_bytes(b"foreign occupied destination")
+                    owned = destination / leaf.relative_to(source)
+                else:
+                    displaced = root / "foreign-relocated-parent"
+                    destination.parent.rename(displaced)
+                    destination.parent.mkdir()
+                    foreign = destination.parent / "foreign.txt"
+                    foreign.write_bytes(b"foreign replacement parent")
+                    owned = displaced / destination.name / leaf.relative_to(source)
+                with pytest.raises(module.LifecycleError):
+                    transaction.qualify_owned_inverse(origin, operation="restore-move")
+                assert foreign.read_bytes().startswith(b"foreign")
+                assert owned.read_bytes() == b"original retained evidence"
+            finally:
+                module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+def test_owned_inverse_checks_runtime_source_independently_after_payload_drift(tmp_path, monkeypatch):
+    module, runtime, alias, physical, root = _runtime_authority_fixture(tmp_path, monkeypatch, linked=False)
+    leaf = root / "selected.txt"
+    leaf.write_bytes(b"admitted original")
+    outside = root / "unselected.txt"
+    outside.write_bytes(b"admitted unrelated")
+    transaction = module.LifecycleTransaction(root)
+    with pytest.raises(module.LifecycleError):
+        with transaction:
+            token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            try:
+                transaction.observe_retained_inputs((module._capture_file_snapshot(outside, failure_id="TEST"),))
+                module._validator_module()
+                module._atomic_write(leaf, b"owned postimage")
+                outside.write_bytes(b"foreign payload mismatch first")
+                source = runtime / "scripts/validate-work-item-state.py"
+                source.write_bytes(source.read_bytes() + b"\n# synthetic source drift\n")
+                with pytest.raises(module.LifecycleError) as caught:
+                    transaction.restore_owned_file(leaf, b"admitted original")
+                assert transaction._source_admission_failure is caught.value
+                assert leaf.read_bytes() == b"owned postimage"
+                assert outside.read_bytes() == b"foreign payload mismatch first"
+            finally:
+                module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+
+def test_owned_file_inverse_native_refusal_settles_its_actual_temporary_creator(tmp_path, monkeypatch):
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    records = []
+    with module.LifecycleTransaction(root) as transaction:
+        token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+        try:
+            module._atomic_write(outside, b"owned current body")
+            create = module.LifecycleWriteTarget._new_creation
+            rename = module.LifecycleWriteTarget._windows_rename
+            sentinel = OSError("controlled inverse native promotion refusal")
+            def capture(owner, *args, **kwargs):
+                record = create(owner, *args, **kwargs)
+                if owner._inverse is not None:
+                    records.append(record)
+                return record
+            def refuse(owner, handle, leaf, **kwargs):
+                if owner._inverse is not None:
+                    raise sentinel
+                return rename(owner, handle, leaf, **kwargs)
+            with monkeypatch.context() as scoped:
+                scoped.setattr(module.LifecycleWriteTarget, "_new_creation", capture)
+                scoped.setattr(module.LifecycleWriteTarget, "_windows_rename", refuse)
+                with pytest.raises(module.LifecycleError) as failed:
+                    transaction.restore_owned_file(outside, b"unaffected original proof")
+                assert failed.value.__cause__ is sentinel
+            assert outside.read_bytes() == b"owned current body"
+            assert records and all(record.finished and record.release_complete for record in records)
+            assert all(not record.locator.exists() for record in records)
+            assert not list(outside.parent.glob("*.tmp"))
+            transaction.verify()
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+
+
+@pytest.mark.parametrize("producer", ("normalization-receipt", "v0-created-readme", "terminalization-receipt"))
+def test_public_conditional_owned_output_removal_uses_actual_native_inverse(tmp_path, monkeypatch, producer):
+    root = tmp_path / "repo"
+    hits = []
+    if producer == "normalization-receipt":
+        module, work_items, _old, new, source, _lineage, _physical, inventory, output = _identity_normalization_fixture(root)
+        before = {path: path.read_bytes() for path in work_items.rglob("*") if path.is_file()}
+        replay = module._normalization_replay
+        def fail_after_real_receipt(*args, **kwargs):
+            assert replay(*args, **kwargs) is True
+            assert output.exists()
+            raise RuntimeError("controlled failure after native normalization receipt publication")
+        monkeypatch.setattr(module, "_normalization_replay", fail_after_real_receipt)
+        invoke = lambda: module.normalize_current_identity(
+            root, "decision", source.relative_to(root).as_posix(), new, inventory, output)
+        expected_failure = "WI-IDENTITY-NORMALIZE-ROLLBACK"
+    elif producer == "v0-created-readme":
+        module = load_module()
+        slug, instant = "2026-08-01-native-readme-inverse", "2026-08-01T00:00:00Z"
+        source = root / "work-items/decisions" / (slug + ".md")
+        write(source, _legacy_v0_decision_record(status="superseded", identity_line="id: " + slug))
+        digest = hashlib.sha256(source.read_bytes()).hexdigest().upper()
+        _write_decision_v0_manifest(root, [{"path": source.name, "sha256": digest, "state": "admitted"}])
+        inventory = root / "incoming.json"
+        write(inventory, json.dumps({"reference": "decision:" + slug, "expectedSourceSha256": digest,
+            "archivedAt": instant, "rationale": "Superseded.", "evidence": "Synthetic native custody.", "incomingLinks": []}))
+        work_items, output = root / "work-items", root / "work-items/README.md"
+        assert not output.exists()
+        before = {path: path.read_bytes() for path in work_items.rglob("*") if path.is_file()}
+        refresh = module.refresh_readme
+        def fail_after_real_refresh(*args, **kwargs):
+            refresh(*args, **kwargs)
+            assert output.exists()
+            raise module.LifecycleError("WI-README-STALE", "controlled failure after native README publication")
+        monkeypatch.setattr(module, "refresh_readme", fail_after_real_refresh)
+        invoke = lambda: module.migrate_legacy(root, "decision:" + slug, incoming_links_inventory=inventory)
+        expected_failure = "WI-README-STALE"
+    else:
+        module = load_module()
+        work_items = root / "work-items"
+        source = work_items / "bugs/owned-terminal-output.md"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(_pre_v1_terminal_record("fixed", source.stem))
+        inventory, output = root / ".scratch/inventory.json", root / ".scratch/receipt.json"
+        _denied_terminalization_inventory(work_items, inventory)
+        before = {path: path.read_bytes() for path in work_items.rglob("*") if path.is_file()}
+        publish = module._atomic_write
+        def fail_after_real_receipt(path, data, **kwargs):
+            result = publish(path, data, **kwargs)
+            if path == output:
+                assert output.exists()
+                raise OSError("controlled failure after native terminalization receipt publication")
+            return result
+        monkeypatch.setattr(module, "_atomic_write", fail_after_real_receipt)
+        invoke = lambda: module.terminalize_v1_inventory(root, inventory,
+            terminal_at="2026-08-01T00:00:00Z", authorization_marker="operator-authorized-v1-terminalization", receipt_path=output)
+        expected_failure = "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+    remove = module._remove_lifecycle_file
+    def observe(path, *args, **kwargs):
+        if path == output:
+            transaction = module._CURRENT_LIFECYCLE_TRANSACTION.get()
+            inverse = kwargs["inverse"]
+            assert transaction is inverse.transaction and transaction._locked and inverse.current_pair_is_bound()
+            assert inverse.source == output and inverse.destination is None and not inverse.fulfilled
+            creator = inverse.inverse_origin.creator
+            assert creator.creator and creator.acquired and creator.release_complete
+            assert creator.native_result == (2 if module.os.name == "nt" else "exclusive-open")
+        result = remove(path, *args, **kwargs)
+        if path == output:
+            assert inverse.fulfilled and not output.exists()
+            assert output not in transaction._retained_observations
+            assert ("absent", output) in transaction.current_binding_evidence
+            hits.append(inverse)
+        return result
+    monkeypatch.setattr(module, "_remove_lifecycle_file", observe)
+    with pytest.raises(module.LifecycleError) as failed:
+        invoke()
+    assert failed.value.failure_id == expected_failure
+    assert len(hits) == 1 and not output.exists()
+    assert {path: path.read_bytes() for path in work_items.rglob("*") if path.is_file()} == before
+    assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+    assert module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get() is None
+
+
+# Root-admitted unchanged independent QA A-D assertions, ported to this existing test owner.
+def _r5_correction_error(e):
+    return {"kind":type(e).__name__,"failureId":getattr(e,"failure_id",None),"message":str(e)}
+
+def _r5_correction_attempt(call):
+    try:return {"returned":True,"value":str(call())},None
+    except BaseException as e:return {"returned":False,"error":_r5_correction_error(e)},e
+
+def _r5_correction_native(module,p):
+    s=p.lstat();return {"identity":module._lifecycle_file_identity(s),"size":s.st_size,"mtimeNs":s.st_mtime_ns,"ctimeNs":s.st_ctime_ns,"sha256":hashlib.sha256(p.read_bytes()).hexdigest()}
+
+def _r5_correction_negative(tx):
+    return [{"failure":_r5_correction_error(value[1]),"paths":[str(p.relative_to(tx.repository_root)) for p in value[2]]} for kind,value in tx.current_binding_evidence if kind=="integrity-failure"]
+
+def _r5_correction_retain(name,rows):
+    # Original QA assertions; the existing ProcessRunner retains actual stdout.
+    print(json.dumps({"probe": name, "actual": rows}, default=str), flush=True)
+
+
+def test_after_qualification_selected_refusal_cannot_become_clean_after_foreign_byte_reversal(tmp_path):
+    module,root,source,destination,leaf,outside=_relocation_observation_fixture(tmp_path)
+    tx=module.LifecycleTransaction(root);tx.__enter__();token=module._CURRENT_LIFECYCLE_TRANSACTION.set(tx)
+    rows={"source":str(module.__file__)}
+    first=None
+    try:
+        original=outside.read_bytes();post=b"owned current postimage"
+        module._atomic_write(outside,post)
+        origin=next(value for kind,value in reversed(tx.current_binding_evidence) if kind=="owned-effect" and value.destination==outside)
+        inverse=tx.qualify_owned_inverse(origin,operation="restore-file")
+        assert inverse.current_pair_is_bound() and inverse.inverse_origin is origin
+        rows['positiveQualified']=True;rows['retainedKindsBefore']={str(p.relative_to(root)):type(v).__name__ for p,v in tx._retained_observations.items()}
+        rows['nativePostimage']=_r5_correction_native(module,outside);map_ref=tx._retained_observations
+        outside.write_bytes(b"foreign selected mutation")
+        rows['foreignSelected']=_r5_correction_native(module,outside)
+        rows['nativeInverseAttempt'],first=_r5_correction_attempt(lambda:module._atomic_write(outside,original,inverse=inverse))
+        rows['negativeAfterAcquiredRefusal']=_r5_correction_negative(tx)
+        rows['inverseFulfilledAfterRefusal']=inverse.fulfilled
+        outside.write_bytes(post)
+        rows['foreignReversed']=_r5_correction_native(module,outside)
+        rows['sameRetainedMapAfterReversal']=tx._retained_observations is map_ref
+        rows['negativeAfterForeignReversal']=_r5_correction_negative(tx)
+        rows['defaultVerify'],_= _r5_correction_attempt(tx.verify)
+        new=root/'post-refusal-forward.bin'
+        rows['newForward'],_= _r5_correction_attempt(lambda:module._atomic_write(new,b"new forward after acquired selected failure"))
+        rows['newForwardExists']=new.exists()
+        rows['negativeAfterNewForward']=_r5_correction_negative(tx)
+    finally:
+        module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+        rows['finalTransactionExit'],_= _r5_correction_attempt(lambda:tx.__exit__(None,None,None))
+        rows['transactionSettled']=tx._file is None and not tx._locked
+        rows['contextCleared']=module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+        _r5_correction_retain('late-selected-refusal-observation.json',rows)
+    assert first is not None and getattr(first,'failure_id',None)=='WI-LIFECYCLE-EFFECT',rows
+    assert rows['nativePostimage']['identity']==rows['foreignReversed']['identity']
+    assert rows['nativePostimage']['sha256']==rows['foreignReversed']['sha256']
+    assert rows['negativeAfterAcquiredRefusal'] and rows['negativeAfterForeignReversal'],rows
+    assert not rows['defaultVerify']['returned'] and not rows['newForward']['returned'] and not rows['newForwardExists'],rows
+    assert not rows['finalTransactionExit']['returned'],rows
+    assert rows['transactionSettled'] and rows['contextCleared'],rows
+
+def test_known_present_owned_file_cannot_become_clean_through_absence_noop_and_same_identity_return(tmp_path):
+    module,root,source,destination,leaf,outside=_relocation_observation_fixture(tmp_path)
+    tx=module.LifecycleTransaction(root);tx.__enter__();token=module._CURRENT_LIFECYCLE_TRANSACTION.set(tx)
+    rows={"source":str(module.__file__)}
+    try:
+        absent=root/'valid-never-retained.bin'
+        assert absent not in tx._retained_observations and not absent.exists()
+        rows['validUnretainedAbsence'],_= _r5_correction_attempt(lambda:tx.restore_owned_file(absent,None))
+        assert rows['validUnretainedAbsence']['returned']
+        owned=outside.parent/'owned-created.bin';held=outside.parent/'foreign-moved-owned.bin'
+        module._atomic_write(owned,b"actual owned created body")
+        current=tx._retained_observations[owned]
+        origin=next(value for kind,value in reversed(tx.current_binding_evidence) if kind=="owned-effect" and value.destination==owned)
+        assert origin.before.get(owned) is None and origin.native_after.identity==current.identity
+        assert origin.creator.creator and origin.creator.acquired and origin.creator.release_complete
+        rows['nativeOwnedBefore']=_r5_correction_native(module,owned);rows['actualCreator']={'acquired':origin.creator.acquired,'released':origin.creator.release_complete,'nativeResult':origin.creator.native_result}
+        rows['retainedKindsBefore']={str(p.relative_to(root)):type(v).__name__ for p,v in tx._retained_observations.items()}
+        owned.rename(held)
+        assert not owned.exists() and module._lifecycle_file_identity(held.lstat())==current.identity
+        rows['admittedCaptureStillPresent']=tx._retained_observations[owned] is current
+        rows['absenceCompensation'],_=_r5_correction_attempt(lambda:tx.restore_owned_file(owned,None))
+        rows['negativeAfterAbsence']=_r5_correction_negative(tx)
+        assert held.exists() and not owned.exists()
+        held.rename(owned)
+        rows['sameIdentityReturned']=_r5_correction_native(module,owned)
+        rows['negativeAfterIdentityReturn']=_r5_correction_negative(tx)
+        rows['defaultVerify'],_=_r5_correction_attempt(tx.verify)
+        new=root/'post-absence-forward.bin'
+        rows['newForward'],_=_r5_correction_attempt(lambda:module._atomic_write(new,b"new forward after known missing owned file"))
+        rows['newForwardExists']=new.exists()
+        rows['negativeAfterNewForward']=_r5_correction_negative(tx)
+    finally:
+        module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+        rows['finalTransactionExit'],_=_r5_correction_attempt(lambda:tx.__exit__(None,None,None))
+        rows['transactionSettled']=tx._file is None and not tx._locked
+        rows['contextCleared']=module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+        _r5_correction_retain('known-present-absence-observation.json',rows)
+    assert rows['nativeOwnedBefore']['identity']==rows['sameIdentityReturned']['identity']
+    assert rows['nativeOwnedBefore']['sha256']==rows['sameIdentityReturned']['sha256']
+    assert not rows['absenceCompensation']['returned'] and rows['negativeAfterAbsence'],rows
+    assert rows['negativeAfterIdentityReturn'] and not rows['defaultVerify']['returned'],rows
+    assert not rows['newForward']['returned'] and not rows['newForwardExists'] and not rows['finalTransactionExit']['returned'],rows
+    assert rows['transactionSettled'] and rows['contextCleared'],rows
+
+
+def test_actual_parent_mode_change_requires_strict_inverse_qualification(tmp_path):
+    import stat
+    module,root,source,destination,leaf,outside=_relocation_observation_fixture(tmp_path)
+    tx=module.LifecycleTransaction(root);tx.__enter__();token=module._CURRENT_LIFECYCLE_TRANSACTION.set(tx)
+    parent=outside.parent; original_mode=parent.stat().st_mode
+    rows={"source":str(module.__file__),"originalMode":original_mode,"actualParentIdentity":module._lifecycle_file_identity(parent.lstat())}
+    changed=False; meaningful=False
+    try:
+        module._atomic_write(outside,b"owned current body for mode discriminator")
+        origin=tx._owned_file_origin(outside,b"unaffected original proof")
+        rows['parentRetainedAsMapRow']=parent in tx._retained_observations
+        assert not rows['parentRetainedAsMapRow']
+        rows['originParentMode']=origin.directories[parent].metadata.st_mode
+        rows['originParentIdentity']=module._lifecycle_file_identity(origin.directories[parent].metadata)
+        mode_attempt,mode_error=_r5_correction_attempt(lambda:os.chmod(parent,original_mode & ~stat.S_IWRITE))
+        rows['actualChmod']=mode_attempt
+        changed=mode_error is None
+        rows['currentMode']=parent.stat().st_mode
+        rows['currentParentIdentity']=module._lifecycle_file_identity(parent.lstat())
+        meaningful=rows['currentMode'] != rows['originParentMode']
+        rows['actualModeFieldChanged']=meaningful
+        if meaningful:
+            rows['qualification'],_=_r5_correction_attempt(lambda:tx.qualify_owned_inverse(origin,operation="restore-file"))
+            rows['negativeAfterQualification']=_r5_correction_negative(tx)
+            rows['defaultVerify'],_=_r5_correction_attempt(tx.verify)
+        else:
+            rows['runtimeStatus']='UNVERIFIED: Windows chmod did not change the st_mode field required by the accepted parent proof'
+    finally:
+        if changed:
+            rows['restoreActualParentMode'],_=_r5_correction_attempt(lambda:os.chmod(parent,original_mode))
+        module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+        rows['finalTransactionExit'],_=_r5_correction_attempt(lambda:tx.__exit__(None,None,None))
+        rows['transactionSettled']=tx._file is None and not tx._locked
+        rows['contextCleared']=module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+        _r5_correction_retain('parent-mode-observation.json',rows)
+    if not meaningful:
+        pytest.skip(rows['runtimeStatus'])
+    assert rows['originParentIdentity']==rows['currentParentIdentity']
+    assert not rows['qualification']['returned'],rows
+    assert rows['negativeAfterQualification'] and not rows['defaultVerify']['returned'],rows
+    assert not rows['finalTransactionExit']['returned'],rows
+    assert rows['transactionSettled'] and rows['contextCleared'],rows
+
+
+def test_conversion_foreign_target_refusal_does_not_skip_disjoint_original_directory_inverse(tmp_path,monkeypatch):
+    import dataclasses
+    module=load_module();root=tmp_path/"repo";slug="qa-conversion-independent-inverse"
+    source,before=_seed_legacy_backlog(root,slug,{"brief.md":b"preserve rollback source\n","notes/design.md":b"preserve recursive rollback source\n"})
+    source_id=module._lifecycle_file_identity(source.lstat())
+    leaf_ids={n:module._lifecycle_file_identity((source/n).lstat()) for n in before}
+    module.refresh_readme(root,allow_marker_bootstrap=True);readme=root/"work-items/README.md";readme_before=readme.read_bytes()
+    target=source.with_suffix('.md');held=root/'foreign-moved-owned-candidate.md';foreign=b"QA DISTINCT FOREIGN TARGET: preserve identity and bytes\n"
+    move=module.LifecycleTransaction.replace_directory;restore=module.LifecycleTransaction.restore_owned_movement
+    rows={'injectionCount':0,'sourceInverseCalls':[]};stages=[];transactions=[]
+    def capture_forward(tx,current,destination,*args,**kwargs):
+        result=move(tx,current,destination,*args,**kwargs)
+        if current==source:
+            assert destination.is_dir() and not source.exists()
+            stages.append(destination);transactions.append(tx)
+            assert module._lifecycle_file_identity(destination.lstat())==source_id
+        if destination==target and kwargs.get('directory') is False and kwargs.get('inverse') is None:
+            assert len(stages)==1 and module._CURRENT_LIFECYCLE_TRANSACTION.get() is tx and tx._locked
+            assert target.is_file()
+            rows['ownedCandidateIdentityBefore']=module._lifecycle_file_identity(target.lstat())
+            rows['ownedCandidateSha256']=hashlib.sha256(target.read_bytes()).hexdigest()
+            target.rename(held);target.write_bytes(foreign)
+            rows['foreignIdentityBefore']=module._lifecycle_file_identity(target.lstat())
+            assert rows['foreignIdentityBefore']!=rows['ownedCandidateIdentityBefore']
+            rows['injectionCount']+=1;assert rows['injectionCount']==1
+        return result
+    def observe_inverse(tx,current,destination):
+        if stages and current==stages[0] and destination==source:
+            rows['sourceInverseCalls'].append({'sameHeldTransaction':module._CURRENT_LIFECYCLE_TRANSACTION.get() is tx,'source':str(current.relative_to(root)),'destination':str(destination.relative_to(root))})
+        return restore(tx,current,destination)
+    monkeypatch.setattr(module.LifecycleTransaction,'replace_directory',capture_forward)
+    monkeypatch.setattr(module.LifecycleTransaction,'restore_owned_movement',observe_inverse)
+    observer=module.LifecycleDiagnosticObserver();caught=None
+    try:
+        module.convert_legacy_candidate(root,slug,b"status: candidate\nTask: candidate\nNext action: verify\n",inject_readme_failure=True,diagnostic_observer=observer)
+    except BaseException as e:caught=e
+    rows['raised']={'kind':type(caught).__name__,'failureId':getattr(caught,'failure_id',None),'message':str(caught)}
+    rows['diagnostic']=dataclasses.asdict(observer.snapshot) if observer.snapshot else None
+    rows['actualStage']=str(stages[0].relative_to(root)) if stages else None
+    rows['foreignTargetPreserved']=target.is_file() and target.read_bytes()==foreign
+    rows['foreignIdentityAfter']=module._lifecycle_file_identity(target.lstat()) if target.exists() else None
+    rows['movedOwnedCandidatePreserved']=held.exists() and hashlib.sha256(held.read_bytes()).hexdigest()==rows.get('ownedCandidateSha256')
+    rows['movedOwnedCandidateIdentity']=module._lifecycle_file_identity(held.lstat()) if held.exists() else None
+    rows['originalSourceRestored']=source.is_dir() and all((source/n).read_bytes()==b for n,b in before.items())
+    rows['stagedOriginalPreserved']=bool(stages) and stages[0].is_dir() and all((stages[0]/n).read_bytes()==b for n,b in before.items())
+    selected=source if source.exists() else (stages[0] if stages else None)
+    rows['selectedOriginalIdentity']=module._lifecycle_file_identity(selected.lstat()) if selected and selected.exists() else None
+    rows['selectedOriginalLeafIdentities']={n:module._lifecycle_file_identity((selected/n).lstat()) for n in before} if selected and selected.exists() else {}
+    rows['readmeExact']=readme.read_bytes()==readme_before
+    rows['negativeObligations']=[{'failureId':getattr(v[1],'failure_id',None),'paths':[str(p.relative_to(root)) for p in v[2]]} for tx in transactions for kind,v in tx.current_binding_evidence if kind=='integrity-failure']
+    rows['transactionSettled']=bool(transactions) and all(tx._file is None and not tx._locked for tx in transactions)
+    rows['contextsCleared']=module._CURRENT_LIFECYCLE_TRANSACTION.get() is None and module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get() is None
+    print(json.dumps(rows,default=str))
+    assert rows['injectionCount']==1 and rows['foreignTargetPreserved'] and rows['movedOwnedCandidatePreserved'],rows
+    assert rows['foreignIdentityBefore']==rows['foreignIdentityAfter']
+    assert rows['ownedCandidateIdentityBefore']==rows['movedOwnedCandidateIdentity']
+    assert rows['selectedOriginalIdentity']==source_id and rows['selectedOriginalLeafIdentities']==leaf_ids
+    assert getattr(caught,'failure_id',None)=='WI-README-STALE' and observer.snapshot.primaryFailureId=='WI-README-STALE',rows
+    assert observer.snapshot.rollback=='incomplete' and observer.snapshot.cleanupFailures,rows
+    assert rows['sourceInverseCalls'] and rows['originalSourceRestored'],rows
+    assert rows['readmeExact'] and rows['transactionSettled'] and rows['contextsCleared'],rows
+
+
+
+def test_conversion_selected_destination_conflict_preserves_original_stage_and_foreign_state(tmp_path, monkeypatch):
+    module = load_module()
+    root, slug = tmp_path / "repo", "conversion-selected-destination-conflict"
+    source, original = _seed_legacy_backlog(root, slug, {
+        "brief.md": b"original custody must remain staged\n", "nested/evidence.bin": b"exact nested original\n"})
+    original_identity = module._lifecycle_file_identity(source.lstat())
+    leaf_identities = {name: module._lifecycle_file_identity((source / name).lstat()) for name in original}
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    readme = root / "work-items/README.md"
+    readme_before = readme.read_bytes()
+    target, held = source.with_suffix(".md"), root / "foreign-moved-owned-candidate.md"
+    foreign_target, foreign_source = b"distinct foreign candidate target\n", b"distinct occupied source destination\n"
+    move, restore = module.LifecycleTransaction.replace_directory, module.LifecycleTransaction.restore_owned_movement
+    observed, stages, calls = {"hits": 0}, [], []
+    def substitute(transaction, current, destination, *args, **kwargs):
+        result = move(transaction, current, destination, *args, **kwargs)
+        if current == source:
+            stages.append(destination)
+        if destination == target and kwargs.get("inverse") is None:
+            assert len(stages) == 1 and transaction._locked
+            assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is transaction
+            target.rename(held)
+            target.write_bytes(foreign_target)
+            source.mkdir()
+            (source / "foreign.bin").write_bytes(foreign_source)
+            observed.update(hits=observed["hits"] + 1,
+                target_identity=module._lifecycle_file_identity(target.lstat()),
+                source_identity=module._lifecycle_file_identity(source.lstat()), transaction=transaction)
+        return result
+    def observe_restore(transaction, current, destination):
+        if stages and current == stages[0] and destination == source:
+            calls.append(transaction)
+        return restore(transaction, current, destination)
+    monkeypatch.setattr(module.LifecycleTransaction, "replace_directory", substitute)
+    monkeypatch.setattr(module.LifecycleTransaction, "restore_owned_movement", observe_restore)
+    observer = module.LifecycleDiagnosticObserver()
+    with pytest.raises(module.LifecycleError) as failure:
+        module.convert_legacy_candidate(root, slug,
+            b"status: candidate\nTask: candidate\nNext action: verify\n", inject_readme_failure=True,
+            diagnostic_observer=observer)
+    assert observed["hits"] == 1 and len(calls) == 1
+    assert failure.value.failure_id == observer.snapshot.primaryFailureId == "WI-README-STALE"
+    assert observer.snapshot.rollback == "incomplete"
+    assert (source / "foreign.bin").read_bytes() == foreign_source and target.read_bytes() == foreign_target
+    assert module._lifecycle_file_identity(source.lstat()) == observed["source_identity"]
+    assert module._lifecycle_file_identity(target.lstat()) == observed["target_identity"]
+    assert module._lifecycle_file_identity(stages[0].lstat()) == original_identity
+    assert {name: (stages[0] / name).read_bytes() for name in original} == original
+    assert {name: module._lifecycle_file_identity((stages[0] / name).lstat()) for name in original} == leaf_identities
+    assert held.is_file() and readme.read_bytes() == readme_before
+    negatives = [value for kind, value in observed["transaction"].current_binding_evidence if kind == "integrity-failure"]
+    assert any(source in value[2] for value in negatives)
+    assert any(row.phase == "rollback-action" and "restore staged original source" in row.diagnostic
+               for row in observer.snapshot.cleanupFailures)
+    assert not observed["transaction"]._locked and observed["transaction"]._file is None
+    assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is None and module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get() is None
+
+
+
+def test_owned_retirement_recheck_conserves_late_selected_failure_before_native_entry(tmp_path):
+    module, root, _source, _destination, _leaf, outside = _relocation_observation_fixture(tmp_path)
+    path = outside.with_name("created-for-retirement-recheck.bin")
+    body = b"actual owned retirement body"
+    transaction = module.LifecycleTransaction(root)
+    transaction.__enter__()
+    token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+    rows = {}
+    try:
+        module._atomic_write(path, body)
+        identity = module._lifecycle_file_identity(path.lstat())
+        origin = transaction._owned_file_origin(path, None)
+        inverse = transaction.qualify_owned_inverse(origin, operation="remove-created")
+        path.write_bytes(b"foreign same-ID body before native retirement entry")
+        rows["removal"], failure = _r5_correction_attempt(lambda: module._remove_lifecycle_file(
+            path, failure_id="TEST-RETAINED-RETIREMENT", inverse=inverse))
+        assert isinstance(failure, module.LifecycleError)
+        rows["negativeAfterRefusal"] = _r5_correction_negative(transaction)
+        path.write_bytes(body)
+        assert module._lifecycle_file_identity(path.lstat()) == identity
+        rows["verifyAfterSameIdentityByteReturn"], _ = _r5_correction_attempt(transaction.verify)
+        forward = root / "forbidden-post-retirement-forward.bin"
+        rows["newForward"], _ = _r5_correction_attempt(lambda: module._atomic_write(forward, b"must refuse"))
+        rows["newForwardExists"] = forward.exists()
+    finally:
+        module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+        rows["finalExit"], _ = _r5_correction_attempt(lambda: transaction.__exit__(None, None, None))
+        rows["settled"] = transaction._file is None and not transaction._locked
+        _r5_correction_retain("retirement-entry-conservation", rows)
+    assert rows["negativeAfterRefusal"] and not rows["verifyAfterSameIdentityByteReturn"]["returned"]
+    assert not rows["newForward"]["returned"] and not rows["newForwardExists"]
+    assert not rows["finalExit"]["returned"] and rows["settled"]
+
+
+# Three unchanged independent E/F/G semantic oracles; diagnostics use existing stdout ownership.
+def _r6_phase_negative(tx):
+    return [{"error": _r5_correction_error(value[1]),
+             "paths": [str(path.relative_to(tx.repository_root)) for path in value[2]]}
+            for kind, value in tx.current_binding_evidence if kind == "integrity-failure"]
+
+def _r6_phase_native(m,p):
+    s=p.lstat();return {'id':m._lifecycle_file_identity(s),'mode':s.st_mode,'size':s.st_size,'mtimeNs':s.st_mtime_ns,'ctimeNs':s.st_ctime_ns,'sha256':hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None}
+def _r6_phase_persist(n,row):
+    _r5_correction_retain(n, row)
+
+def _r6_phase_finish(m,tx,token,row,name):
+    m._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+    row['finalExit'],_=_r5_correction_attempt(lambda:tx.__exit__(None,None,None));row['settled']=tx._file is None and not tx._locked;row['contextCleared']=m._CURRENT_LIFECYCLE_TRANSACTION.get() is None;_r6_phase_persist(name,row)
+
+def test_inverse_destination_parent_failure_survives_same_parent_return(tmp_path):
+    m,root,source,destination,leaf,outside=_relocation_observation_fixture(tmp_path)
+    left=root/'left-original-parent';left.mkdir();source.rename(left/source.name);source=left/source.name;leaf=source/'nested/proof.bin';held=root/'foreign-held-original-parent'
+    tx=m.LifecycleTransaction(root);tx.__enter__();token=m._CURRENT_LIFECYCLE_TRANSACTION.set(tx);row={'actualModule':m.__file__}
+    try:
+        tx.replace_directory(source,destination)
+        origin=next(v for k,v in reversed(tx.current_binding_evidence) if k=='owned-effect' and v.source==source)
+        row['actualCompletedForward']=origin.native_after is not None;row['parentBefore']=_r6_phase_native(m,left)
+        row['retainedKindsBefore']={str(p.relative_to(root)):type(v).__name__ for p,v in tx._retained_observations.items()}
+        left.rename(held);row['destinationAbsentAfterParentMove']=not source.exists();row['sameParentAside']=_r6_phase_native(m,held)
+        row['qualification'],failure=_r5_correction_attempt(lambda:tx.qualify_owned_inverse(origin,operation='restore-move'))
+        row['negativeAfterAcquiredFailure']=_r6_phase_negative(tx)
+        held.rename(left);row['parentReturned']=_r6_phase_native(m,left);row['negativeAfterSameParentReturn']=_r6_phase_negative(tx)
+        row['defaultVerify'],_=_r5_correction_attempt(tx.verify)
+        new=root/'forbidden-after-parent-return.bin';row['newForward'],_=_r5_correction_attempt(lambda:m._atomic_write(new,b'forward after acquired destination-parent refusal'));row['newForwardExists']=new.exists()
+        row['originalSelectedBytesIntact']=(destination/'nested/proof.bin').read_bytes()==b'original retained evidence'
+    finally:_r6_phase_finish(m,tx,token,row,'inverse-destination-parent-observation.json')
+    assert failure is not None,row
+    assert row['parentBefore']['id']==row['sameParentAside']['id']==row['parentReturned']['id']
+    assert row['negativeAfterAcquiredFailure'] and row['negativeAfterSameParentReturn'],row
+    assert not row['defaultVerify']['returned'] and not row['newForward']['returned'] and not row['newForwardExists'],row
+    assert not row['finalExit']['returned'] and row['settled'] and row['contextCleared'],row
+
+def test_actual_late_native_owned_image_refusal_survives_same_identity_byte_return(tmp_path,monkeypatch):
+    m,root,source,destination,leaf,outside=_relocation_observation_fixture(tmp_path)
+    path=outside.with_name('actual-late-owned-image.bin');body=b'actual current native image';tx=m.LifecycleTransaction(root);tx.__enter__();token=m._CURRENT_LIFECYCLE_TRANSACTION.set(tx);row={'actualModule':m.__file__,'injectionCount':0};owners=[]
+    try:
+        m._atomic_write(path,body);origin=tx._owned_file_origin(path,None);inverse=tx.qualify_owned_inverse(origin,operation='remove-created');row['nativeBefore']=_r6_phase_native(m,path)
+        acquire=m.LifecycleWriteTarget._acquire_existing_parents;image=m.LifecycleWriteTarget.owned_image
+        def mutate_after_real_parent_acquire(owner,*args,**kwargs):
+            result=acquire(owner,*args,**kwargs)
+            if owner.path==path and owner._inverse is inverse:
+                assert m._CURRENT_LIFECYCLE_TRANSACTION.get() is tx and tx._locked and owner._open
+                assert row['injectionCount']==0
+                owners.append(owner);path.write_bytes(b'X'*len(body));row['injectionCount']+=1;row['nativeMutated']=_r6_phase_native(m,path)
+            return result
+        def observe_real_image(owner,*args,**kwargs):
+            result=image(owner,*args,**kwargs)
+            if owner.path==path and owner._inverse is inverse:
+                row['actualNativeImage']={'identity':result['identity'],'sha256':result['sha256'],'bodyHex':m._unb64(result['data']).hex()} if result else None
+            return result
+        with monkeypatch.context() as scoped:
+            scoped.setattr(m.LifecycleWriteTarget,'_acquire_existing_parents',mutate_after_real_parent_acquire);scoped.setattr(m.LifecycleWriteTarget,'owned_image',observe_real_image)
+            row['removal'],failure=_r5_correction_attempt(lambda:m._remove_lifecycle_file(path,failure_id='QA-LATE-OWNED-IMAGE',inverse=inverse))
+        row['negativeAfterAcquiredFailure']=_r6_phase_negative(tx);row['ownerClosedAfterFailure']=[not o._open and not o._directories for o in owners]
+        row['pathStillPresent']=path.exists();path.write_bytes(body);row['nativeReturned']=_r6_phase_native(m,path);row['negativeAfterByteReturn']=_r6_phase_negative(tx)
+        row['defaultVerify'],_=_r5_correction_attempt(tx.verify)
+        new=root/'forbidden-after-native-image.bin';row['newForward'],_=_r5_correction_attempt(lambda:m._atomic_write(new,b'new forward after actual native image mismatch'));row['newForwardExists']=new.exists()
+    finally:_r6_phase_finish(m,tx,token,row,'late-native-owned-image-observation.json')
+    assert row['injectionCount']==1 and failure is not None and str(failure)=='owned retirement native image changed',row
+    assert row['nativeBefore']['id']==row['nativeMutated']['id']==row['nativeReturned']['id']
+    assert row['actualNativeImage']['bodyHex']==(b'X'*len(body)).hex(),row
+    assert row['ownerClosedAfterFailure']==[True] and row['pathStillPresent'],row
+    assert row['negativeAfterAcquiredFailure'] and row['negativeAfterByteReturn'],row
+    assert not row['defaultVerify']['returned'] and not row['newForward']['returned'] and not row['newForwardExists'] and not row['finalExit']['returned'],row
+    assert row['settled'] and row['contextCleared'],row
+
+def test_consumed_inverse_refuses_invalid_repeat_without_minting_physical_failure(tmp_path):
+    m,root,source,destination,leaf,outside=_relocation_observation_fixture(tmp_path)
+    tx=m.LifecycleTransaction(root);tx.__enter__();token=m._CURRENT_LIFECYCLE_TRANSACTION.set(tx);row={'actualModule':m.__file__}
+    try:
+        original=outside.read_bytes();m._atomic_write(outside,b'actual owned postimage')
+        origin=tx._owned_file_origin(outside,original);inverse=tx.qualify_owned_inverse(origin,operation='restore-file');m._atomic_write(outside,original,inverse=inverse)
+        assert inverse.fulfilled and inverse.current_pair_is_bound();row['actuallyFulfilled']=True;row['currentBeforeInvalidRequest']=_r6_phase_native(m,outside)
+        outside.write_bytes(b'foreign drift before invalid consumed request')
+        row['invalidRepeat'],failure=_r5_correction_attempt(lambda:m._atomic_write(outside,original,inverse=inverse))
+        row['negativeAfterInvalidRequest']=_r6_phase_negative(tx);row['fulfilledRemains']=inverse.fulfilled
+        outside.write_bytes(original);row['sameObjectReturned']=_r6_phase_native(m,outside)
+        row['defaultVerify'],_=_r5_correction_attempt(tx.verify)
+        new=root/'valid-forward-after-api-refusal.bin';row['newForward'],_=_r5_correction_attempt(lambda:m._atomic_write(new,b'valid forward after invalid request only'));row['newForwardExists']=new.exists()
+    finally:_r6_phase_finish(m,tx,token,row,'consumed-proof-invalid-request-observation.json')
+    assert failure is not None and row['fulfilledRemains'],row
+    assert row['currentBeforeInvalidRequest']['id']==row['sameObjectReturned']['id']
+    assert row['negativeAfterInvalidRequest']==[],row
+    assert row['defaultVerify']['returned'] and row['newForward']['returned'] and row['newForwardExists'],row
+    assert row['finalExit']['returned'] and row['settled'] and row['contextCleared'],row

@@ -8,6 +8,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - **Supervised Luna is available for ordinary producer work.** Task-first routing now explicitly considers Luna/high for admitted exploration and engineering professions when useful-result time including verification and correction fits the task. Role authority, exact tool scope, native defaults, the mechanical corridor and protected review/recovery floors stay intact; observed pilot limits remain visible.
 
+- **Lifecycle rollback conserves physical failures and owned custody.** Actual admitted filesystem failures remain bound to the existing lifecycle owner across rollback and verification, while invalid or reused mutations stop before physical observation and create no false failure. Disjoint rollback proceeds only through qualified owned effects; original primary failures, outward results, cleanup failures and acquired-resource settlement stay distinct, and foreign or unowned state is preserved.
+
 ## 2026-10-15
 
 - **Publication consent batches keep mandatory scan checks.** Genuine answer batches are interpreted atomically at one reply owner, and fresh generic consent reaches the existing repository binding and authoritative unpublished-range scan in both public handlers. Quoted markers retain their original meaning; question text, conflicts and revocation do not grant authority. Required receipts, safety checks and human publication review remain intact.

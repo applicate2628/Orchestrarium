@@ -140,6 +140,7 @@ def _normalize_sha256_input(value: object) -> object:
 
 
 LIFECYCLE_WRITE_CLEANUP_PHASES = ("write-child-acquisition", "write-temp-cleanup", "write-target-release")
+LIFECYCLE_REPEATABLE_CLEANUP_PHASES = (*LIFECYCLE_WRITE_CLEANUP_PHASES, "rollback-action")
 
 LIFECYCLE_CLEANUP_PHASES = (
     "receipt-final",
@@ -149,7 +150,7 @@ LIFECYCLE_CLEANUP_PHASES = (
     "rollback-status:work-item:2026-08-11-pr600-review-fix",
     "rollback-status:work-item:2026-08-11-pr598-review-fix",
     "rollback-postcheck",
-    *LIFECYCLE_WRITE_CLEANUP_PHASES,
+    *LIFECYCLE_REPEATABLE_CLEANUP_PHASES,
     "transaction-release",
     "transaction-file-close",
     "transaction-verification",
@@ -181,6 +182,7 @@ class LifecycleOutcomeBundle:
     primary: BaseException | None
     cleanup_failures: tuple[LifecycleCleanupFailure, ...]
     rollback: str
+    outward_failure: BaseException | None = None
 
 
 @dataclass(frozen=True)
@@ -216,8 +218,9 @@ class LifecycleOutcomeComposer:
         self._result: object | None = None
         self._primary: BaseException | None = None
         self._cleanup: dict[str, LifecycleCleanupFailure] = {}
-        self._write_cleanup: dict[str, list[tuple[LifecycleCleanupFailure, BaseException | None]]] = {}
+        self._cleanup_occurrences: dict[str, list[tuple[LifecycleCleanupFailure, BaseException | None]]] = {}
         self._rollback = "not-needed"
+        self._outward_failure: BaseException | None = None
 
     def propose_result(self, result: object) -> None:
         self._result = result
@@ -237,8 +240,8 @@ class LifecycleOutcomeComposer:
     ) -> None:
         if phase not in LIFECYCLE_CLEANUP_PHASES:
             raise ValueError(f"unknown lifecycle cleanup phase: {phase}")
-        if phase in LIFECYCLE_WRITE_CLEANUP_PHASES:
-            raise ValueError(f"write-owned lifecycle cleanup phase: {phase}")
+        if phase in LIFECYCLE_REPEATABLE_CLEANUP_PHASES:
+            raise ValueError(f"occurrence-owned lifecycle cleanup phase: {phase}")
         if phase in self._cleanup:
             raise ValueError(f"lifecycle cleanup phase already recorded: {phase}")
         self._cleanup[phase] = LifecycleCleanupFailure(
@@ -253,15 +256,24 @@ class LifecycleOutcomeComposer:
                              diagnostic: object, cause: BaseException | None = None) -> None:
         if phase not in LIFECYCLE_WRITE_CLEANUP_PHASES:
             raise ValueError(f"unknown write cleanup phase: {phase}")
+        self._record_cleanup_occurrence(phase=phase, failure_id=failure_id, resource=resource,
+            diagnostic=diagnostic, cause=cause)
+
+    def record_rollback_action(self, *, failure_id: str, resource: str | None,
+                               diagnostic: object, cause: BaseException | None = None) -> None:
+        self._record_cleanup_occurrence(phase="rollback-action", failure_id=failure_id,
+            resource=resource, diagnostic=diagnostic, cause=cause)
+
+    def _record_cleanup_occurrence(self, *, phase, failure_id, resource, diagnostic, cause):
         record = LifecycleCleanupFailure(
             phase=phase, failure_id=failure_id, resource=resource,
             diagnostic=_lifecycle_sanitize_diagnostic(diagnostic),
             cause_type=type(cause).__name__ if cause is not None else None,
         )
-        self._write_cleanup.setdefault(phase, []).append((record, cause))
+        self._cleanup_occurrences.setdefault(phase, []).append((record, cause))
 
-    def _write_cleanup_entry(self, phase: str) -> LifecycleCleanupFailure:
-        occurrences = self._write_cleanup[phase]
+    def _cleanup_occurrence_entry(self, phase: str) -> LifecycleCleanupFailure:
+        occurrences = self._cleanup_occurrences[phase]
         pieces = []
         for index, (record, cause) in enumerate(occurrences, 1):
             codes = " ".join(f"{name}={getattr(cause, name)}" for name in ("errno", "winerror")
@@ -287,7 +299,7 @@ class LifecycleOutcomeComposer:
         types = dict.fromkeys(record.cause_type for record, _cause in occurrences if record.cause_type is not None)
         return LifecycleCleanupFailure(
             phase=phase, failure_id=occurrences[0][0].failure_id,
-            resource=occurrences[0][0].resource if len(resources) == 1 else f"{len(resources)} write resources",
+            resource=occurrences[0][0].resource if len(resources) == 1 else f"{len(resources)} {'rollback' if phase == 'rollback-action' else 'write'} resources",
             diagnostic=diagnostic, cause_type="|".join(types) if types else None,
         )
 
@@ -296,21 +308,40 @@ class LifecycleOutcomeComposer:
             raise ValueError(f"invalid rollback state: {rollback}")
         self._rollback = rollback
 
+    @property
+    def rollback_actions(self):
+        return tuple(self._cleanup_occurrences.get("rollback-action", ()))
+
+    def rollback_message(self, start=0):
+        return "; ".join(f"{record.diagnostic}: {cause}" if cause is not None else record.diagnostic
+                         for record, cause in self.rollback_actions[start:])
+
+    def designate_outward_failure(self, failure: BaseException) -> None:
+        if (self._primary is None or self._rollback != "incomplete" or not self.rollback_actions
+                or not isinstance(failure, LifecycleError)):
+            raise ValueError("outward failure lacks its primary and actual incomplete rollback")
+        if self._outward_failure is not None and self._outward_failure is not failure:
+            raise ValueError("outward failure is already designated")
+        self._outward_failure = failure
+
     def finalize(self) -> LifecycleOutcomeBundle:
         cleanup = tuple(
-            self._write_cleanup_entry(phase) if phase in self._write_cleanup else self._cleanup[phase]
+            self._cleanup_occurrence_entry(phase) if phase in self._cleanup_occurrences else self._cleanup[phase]
             for phase in LIFECYCLE_CLEANUP_PHASES
-            if phase in self._cleanup or phase in self._write_cleanup
+            if phase in self._cleanup or phase in self._cleanup_occurrences
         )
         return LifecycleOutcomeBundle(
             result=self._result,
             primary=self._primary,
             cleanup_failures=cleanup,
             rollback=self._rollback,
+            outward_failure=self._outward_failure,
         )
 
     @staticmethod
     def top_level(bundle: LifecycleOutcomeBundle) -> BaseException | None:
+        if bundle.outward_failure is not None:
+            return bundle.outward_failure
         if bundle.primary is not None:
             return bundle.primary
         if bundle.cleanup_failures:
@@ -342,12 +373,16 @@ def _lifecycle_diagnostic_bundle(
         primary_kind = "unexpected"
         primary_failure_id = None
         primary_type = type(primary).__name__
-    if primary is not None:
+    selected = LifecycleOutcomeComposer.top_level(bundle)
+    if bundle.outward_failure is not None:
+        top_level_kind = "typed-outward"
+        top_level_failure_id = selected.failure_id
+    elif selected is primary and primary is not None:
         top_level_kind = f"{primary_kind}-primary"
         top_level_failure_id = primary_failure_id
-    elif bundle.cleanup_failures:
+    elif selected is not None:
         top_level_kind = "cleanup-only"
-        top_level_failure_id = bundle.cleanup_failures[0].failure_id
+        top_level_failure_id = selected.failure_id
     else:
         top_level_kind = "result"
         top_level_failure_id = None
@@ -541,6 +576,19 @@ class _PreparedLifecycleEffect:
     _creation_observation_active: bool = field(default=False, init=False, repr=False)
     observation_owner: object = field(default=None, init=False, repr=False)
     progress_before: object = field(default=None, init=False, repr=False)
+    actor: object = field(default=None, init=False, repr=False, compare=False)
+    process: object = field(default=None, init=False, repr=False, compare=False)
+    thread: object = field(default=None, init=False, repr=False, compare=False)
+    native_after: object = field(default=None, init=False, repr=False, compare=False)
+    tree_before: tuple = field(default=(), init=False, repr=False, compare=False)
+    tree_after: tuple = field(default=(), init=False, repr=False, compare=False)
+    inverse: object = field(default=None, init=False, repr=False, compare=False)
+    inverse_origin: object = field(default=None, init=False, repr=False, compare=False)
+    inverse_claim: object = field(default=None, init=False, repr=False, compare=False)
+    selected_proof: tuple = field(default=(), init=False, repr=False, compare=False)
+    projection_evidence: object = field(default=None, init=False, repr=False, compare=False)
+    fulfilled: bool = field(default=False, init=False, repr=False, compare=False)
+    creator: object = field(default=None, init=False, repr=False, compare=False)
 
     def current_pair_is_bound(self) -> bool:
         tx = self.transaction
@@ -676,10 +724,19 @@ class LifecycleTransaction:
             fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
         self._locked = False
 
-    def verify(self, *, creation_owner=None) -> None:
+    def verify(self, *, creation_owner=None, inverse=None) -> None:
         try:
             self._assert_source_admission()
-            self._verify_observation_map(self._retained_observations,
+            self._verify_observation_map({path: value for path, value in self._retained_observations.items()
+                                         if self._is_runtime_source(path)})
+            if inverse is not None:
+                self._verify_owned_inverse(inverse, creation_owner=creation_owner)
+                return
+            for kind, value in self._binding_evidence:
+                if kind == "integrity-failure":
+                    raise value[1]
+            self._verify_observation_map({path: value for path, value in self._retained_observations.items()
+                                         if not self._is_runtime_source(path)},
                 **({"creation_owner": creation_owner} if creation_owner is not None else {}))
             self._assert_source_admission()
         except BaseException:
@@ -729,32 +786,420 @@ class LifecycleTransaction:
     def current_intent(self, path):
         for kind, value in self._binding_evidence:
             if kind == "intent" and value[1].path == path:
-                _verify_captured_file(value[1], "WI-LIFECYCLE-EFFECT")
+                self._verify_integrity_constraint(value[1],
+                    lambda: _verify_captured_file(value[1], "WI-LIFECYCLE-EFFECT"))
                 return json.loads(value[1].data), value[1], value[2]
             if kind == "absent" and value == path:
                 raise LifecycleError("WI-LIFECYCLE-EFFECT", "selected intent was consumed")
         return None
 
-    def current_observation(self, original):
+    def _associated_observation(self, original):
         for snapshot in self._retained_observations.values():
             identity = lambda value: (_lifecycle_file_identity(value.metadata) if isinstance(value, CapturedDirectorySnapshotV1) else value.identity)
             if identity(snapshot) == identity(original):
                 return snapshot
         if original.path in self._retained_observations:
             return self._retained_observations[original.path]
-        for kind, value in self._binding_evidence:
-            if kind == "absent" and value == original.path:
-                _verify_project_binding_evidence(((kind, value),), "WI-LIFECYCLE-EFFECT")
-                return None
+        if any(kind == "absent" and value == original.path for kind, value in self._binding_evidence):
+            return None
         return original
 
-    def prepare_owned_effect(self, owner, source, destination, *, data=None, directory=False, replace_existing=False):
+    def current_observation(self, original):
+        current = self._associated_observation(original)
+        if current is None:
+            absence = ("absent", original.path)
+            self._verify_integrity_constraint(absence,
+                lambda: _verify_project_binding_evidence((absence,), "WI-LIFECYCLE-EFFECT"))
+        return current
+
+    def _capture_effect_tree(self, path, *, creation_owner=None):
+        captures = []
+        pending = [path]
+        while pending:
+            directory = pending.pop()
+            snapshot = _capture_owned_directory_snapshot(directory, failure_id="WI-LIFECYCLE-EFFECT",
+                **({"creation_owner": creation_owner} if creation_owner is not None else {}))
+            captures.append(snapshot)
+            for name, metadata in snapshot.members:
+                child = directory / name
+                reparse = stat.S_ISLNK(metadata.st_mode) or bool(getattr(metadata, "st_file_attributes", 0)
+                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+                if reparse:
+                    continue  # The complete parent capture binds the untraversed entry.
+                if stat.S_ISDIR(metadata.st_mode):
+                    pending.append(child)
+                elif stat.S_ISREG(metadata.st_mode):
+                    prior = self._retained_observations.get(child)
+                    captures.append(_capture_file_snapshot(child, failure_id="WI-LIFECYCLE-EFFECT",
+                        maximum_bytes=max(1, metadata.st_size),
+                        require_single_link=isinstance(prior, CapturedFileSnapshot) and prior.require_single_link))
+        return tuple(captures)
+
+    def _verify_effect_tree(self, before, current, source, destination):
+        expected = {destination / value.path.relative_to(source): value for value in before}
+        if set(expected) != {value.path for value in current}:
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned selected tree namespace changed")
+        for actual in current:
+            original = expected[actual.path]
+            if isinstance(original, CapturedFileSnapshot) and isinstance(actual, CapturedFileSnapshot):
+                if (original.identity, original.length, original.data) != (actual.identity, actual.length, actual.data):
+                    raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned selected descendant changed")
+                _verify_captured_file(replace(actual, require_single_link=
+                    original.require_single_link or actual.require_single_link), "WI-LIFECYCLE-EFFECT")
+            elif isinstance(original, CapturedDirectorySnapshotV1) and isinstance(actual, CapturedDirectorySnapshotV1):
+                if (_lifecycle_file_identity(original.metadata) != _lifecycle_file_identity(actual.metadata)
+                        or original.metadata.st_mode != actual.metadata.st_mode
+                        or tuple((name, _lifecycle_file_snapshot_key(meta)) for name, meta in original.members)
+                        != tuple((name, _lifecycle_file_snapshot_key(meta)) for name, meta in actual.members)):
+                    raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned selected directory changed")
+            else:
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned selected tree kind changed")
+
+    def _failure_paths(self, constraint):
+        if type(constraint) is _PreparedLifecycleEffect and constraint.inverse_origin is not None:
+            failed = []
+            for snapshot in constraint.selected_proof:
+                try:
+                    if isinstance(snapshot, CapturedDirectorySnapshotV1):
+                        _verify_owned_directory_snapshot(snapshot, "WI-LIFECYCLE-EFFECT")
+                    else:
+                        _verify_captured_file(snapshot, "WI-LIFECYCLE-EFFECT")
+                except (LifecycleError, OSError) as failure:
+                    failed.extend(self._retain_integrity_failure(snapshot, failure))
+            for snapshot in constraint.directories.values():
+                try:
+                    self._verify_inverse_parent_capability(snapshot)
+                except (LifecycleError, OSError) as failure:
+                    failed.extend(self._retain_integrity_failure(snapshot, failure, paths=(snapshot.path,)))
+            absent = (constraint.source if constraint.fulfilled and constraint.destination is None
+                      else constraint.destination if not constraint.fulfilled and constraint.destination != constraint.source else None)
+            if absent is not None:
+                row = ("absent", absent)
+                try:
+                    _verify_project_binding_evidence((row,), "WI-LIFECYCLE-EFFECT")
+                except (LifecycleError, OSError) as failure:
+                    failed.extend(self._retain_integrity_failure(row, failure))
+            return tuple(dict.fromkeys(failed)) or (self.repository_root,)
+        if isinstance(constraint, CapturedFileSnapshot):
+            return (constraint.path,)
+        if isinstance(constraint, CapturedDirectorySnapshotV1):
+            current = _capture_owned_directory_snapshot(constraint.path, failure_id="WI-LIFECYCLE-EFFECT")
+            if (_lifecycle_file_identity(current.metadata) == _lifecycle_file_identity(constraint.metadata)
+                    and current.metadata.st_mode == constraint.metadata.st_mode):
+                old, new = dict(constraint.members), dict(current.members)
+                changed = tuple(constraint.path / name for name in old.keys() | new.keys()
+                    if name not in old or name not in new or
+                    _lifecycle_file_snapshot_key(old[name]) != _lifecycle_file_snapshot_key(new[name]))
+                if changed:
+                    return changed
+            return (constraint.path,)
+        kind, value = constraint
+        if kind in {"file", "intent"}:
+            return ((value if kind == "file" else value[1]).path,)
+        if kind == "membership":
+            path, names = value
+            return tuple(path / name for name in set(names) ^ {entry.name for entry in path.iterdir()}) or (path,)
+        if kind == "node":
+            path = value[0]
+            directory = self._retained_observations.get(path)
+            if isinstance(directory, CapturedDirectorySnapshotV1):
+                return self._failure_paths(directory)
+            membership = next((row for row in self._binding_evidence
+                               if row[0] == "membership" and row[1][0] == path), None)
+            return self._failure_paths(membership) if membership is not None else (path,)
+        if kind == "absent":
+            return (value,)
+        if kind == "chain":
+            return tuple(path for path, _identity in value.participants)
+        if kind == "archive":
+            # Decompose only through the inventory's actual constituent proofs.
+            failed = []
+            constraints = [("chain", chain) for _path, chain, _names in value.directories]
+            constraints += [("membership", (path, names)) for path, _chain, names in value.directories]
+            constraints += [("file", capture) for entity in value.entities for capture in entity.snapshots]
+            if value.archive_absent is not None:
+                constraints.append(("absent", value.archive_absent))
+            for part in constraints:
+                try:
+                    _verify_project_binding_evidence((part,), "WI-LIFECYCLE-EFFECT")
+                except (LifecycleError, OSError) as failure:
+                    paths = self._retain_integrity_failure(part, failure)
+                    failed.append((part, failure, paths))
+            if not failed:
+                return (self.repository_root,)
+            return tuple(path for _constraint, _failure, paths in failed for path in paths)
+        raise LifecycleError("WI-LIFECYCLE-EFFECT", "unclassifiable inverse evidence")
+
+    def _retain_integrity_failure(self, constraint, failure, *, paths=None):
+        self._validator_reuse = None
+        for kind, value in self._binding_evidence:
+            if kind == "integrity-failure" and value[1] is failure:
+                return value[2]  # One acquired failure crossing nested verifiers.
+        row = ("integrity-failure", (constraint, failure,
+            (self.repository_root,) if paths is None else tuple(paths)))
+        self._binding_evidence += (row,)
+        if paths is None:
+            try:
+                selected = self._failure_paths(constraint)
+            except (LifecycleError, OSError) as discriminator_failure:
+                self._retain_integrity_failure(constraint, discriminator_failure, paths=(self.repository_root,))
+            else:
+                replacement = ("integrity-failure", (constraint, failure, selected))
+                self._binding_evidence = tuple(replacement if value is row else value
+                                              for value in self._binding_evidence)
+                return selected
+        return row[1][2]
+
+    def _verify_integrity_constraint(self, constraint, verification, *, paths=None):
+        """Conserve an actual admitted filesystem refusal, never caller admission."""
+        try:
+            return verification()
+        except (LifecycleError, OSError) as failure:
+            if isinstance(constraint, CapturedFileSnapshot) and self._is_runtime_source(constraint.path):
+                self._retain_source_failure(failure)
+            else:
+                self._retain_integrity_failure(constraint, failure, paths=paths)
+            raise
+
+    def _retain_integrity_failures(self):
+        for snapshot in tuple(self._retained_observations.values()):
+            if self._is_runtime_source(snapshot.path):
+                continue  # Positively verified independently before examining payload.
+            try:
+                self._verify_observation_map({snapshot.path: snapshot})
+            except (LifecycleError, OSError) as failure:
+                self._retain_integrity_failure(snapshot, failure)
+        for row in self._binding_evidence:
+            if row[0] in {"owned-effect", "integrity-failure"}:
+                continue
+            try:
+                _verify_project_binding_evidence((row,), "WI-LIFECYCLE-EFFECT")
+            except (LifecycleError, OSError) as failure:
+                self._retain_integrity_failure(row, failure)
+
+    def _verify_inverse_parent_capability(self, snapshot, *, creation_owner=None):
+        _verify_captured_parent_chain(snapshot.parent_chain, "WI-LIFECYCLE-EFFECT")
+        actual = _capture_owned_directory_snapshot(snapshot.path, failure_id="WI-LIFECYCLE-EFFECT",
+            **({"creation_owner": creation_owner} if creation_owner is not None else {}))
+        if (_lifecycle_file_identity(actual.metadata) != _lifecycle_file_identity(snapshot.metadata)
+                or actual.metadata.st_mode != snapshot.metadata.st_mode):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "inverse parent capability changed")
+
+    def _admit_owned_inverse(self, inverse):
+        """Non-filesystem validation shared by mutation and verification-only use."""
+        if (type(inverse) is not _PreparedLifecycleEffect or inverse.transaction is not self
+                or type(inverse.inverse_origin) is not _PreparedLifecycleEffect
+                or not any(kind == "owned-effect" and value is inverse.inverse_origin
+                           for kind, value in self._binding_evidence)
+                or inverse.owner is not self or inverse.actor is not self._operation_owner
+                or inverse.process != os.getpid() or inverse.thread is not threading.current_thread()
+                or inverse.inverse_origin.inverse_claim is not inverse or not inverse.current_pair_is_bound()
+                or _CURRENT_LIFECYCLE_TRANSACTION.get() is not self):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned inverse origin or epoch is invalid")
+        if (not isinstance(inverse.source, Path) or not inverse.source.is_relative_to(self.repository_root)
+                or (inverse.destination is not None and (not isinstance(inverse.destination, Path)
+                    or not inverse.destination.is_relative_to(self.repository_root)))):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned inverse endpoints escape admitted repository")
+
+    def _admit_inverse_mutation(self, inverse):
+        # Independent authority remains first, including on an invalid request.
+        self._assert_source_admission()
+        self._verify_observation_map({path: value for path, value in self._retained_observations.items()
+                                     if self._is_runtime_source(path)})
+        self._admit_owned_inverse(inverse)
+        if inverse.fulfilled:
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned inverse has already settled")
+
+    def _observe_owned_inverse(self, inverse, *, creation_owner=None):
+        """One complete physical phase, with no nested integrity retention."""
+        for chain in inverse.parents.values():
+            _verify_captured_parent_chain(chain, "WI-LIFECYCLE-EFFECT")
+        for snapshot in inverse.selected_proof:
+            if isinstance(snapshot, CapturedDirectorySnapshotV1):
+                _verify_owned_directory_snapshot(snapshot, "WI-LIFECYCLE-EFFECT",
+                    **({"creation_owner": creation_owner} if creation_owner is not None else {}))
+            else:
+                _verify_captured_file(snapshot, "WI-LIFECYCLE-EFFECT")
+        if inverse.fulfilled:
+            if inverse.destination is None:
+                _verify_project_binding_evidence((("absent", inverse.source),), "WI-LIFECYCLE-EFFECT")
+        elif inverse.destination is not None and inverse.destination != inverse.source:
+            _verify_project_binding_evidence((("absent", inverse.destination),), "WI-LIFECYCLE-EFFECT")
+        parents = {path.parent: _capture_path_parent_chain(path, "WI-LIFECYCLE-EFFECT")
+                   for path in (inverse.source, inverse.destination) if path is not None}
+        for snapshot in inverse.directories.values():
+            self._verify_inverse_parent_capability(snapshot, creation_owner=creation_owner)
+        return parents
+
+    def _verify_owned_inverse(self, inverse, *, creation_owner=None):
+        self._admit_owned_inverse(inverse)
+        return self._verify_integrity_constraint(inverse,
+            lambda: self._observe_owned_inverse(inverse, creation_owner=creation_owner))
+
+    def qualify_owned_inverse(self, origin, *, operation):
+        self._assert_source_admission()
+        self._verify_observation_map({path: value for path, value in self._retained_observations.items()
+                                     if self._is_runtime_source(path)})
+        if (type(origin) is not _PreparedLifecycleEffect or origin.transaction is not self
+                or not any(kind == "owned-effect" and value is origin for kind, value in self._binding_evidence)
+                or origin.native_after is None or origin.inverse is not None or origin.inverse_origin is not None
+                or origin.inverse_claim is not None or origin.actor is not self._operation_owner
+                or origin.process != os.getpid() or origin.thread is not threading.current_thread()
+                or _CURRENT_LIFECYCLE_TRANSACTION.get() is not self):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "actual unused owned forward origin required")
+        current = self._associated_observation(origin.native_after)
+        if type(current) is not type(origin.native_after):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned current association is unavailable")
+        identity = lambda value: _lifecycle_file_identity(value.metadata) if isinstance(value, CapturedDirectorySnapshotV1) else value.identity
+        if identity(current) != identity(origin.native_after):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned current native identity changed")
+        if isinstance(current, CapturedFileSnapshot) and current.data != origin.native_after.data:
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned current body changed")
+        source, destination, data = current.path, None, None
+        if operation == "restore-move":
+            if origin.source is None or origin.destination is None:
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "origin is not a published movement")
+            destination = origin.source
+        elif operation == "restore-file":
+            prior = origin.before.get(origin.destination)
+            if origin.directory or prior is None or not isinstance(prior[1], CapturedFileSnapshot):
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "origin has no admitted prior file")
+            destination, data = current.path, prior[1].data
+        elif operation == "remove-created":
+            creator = origin.creator
+            if creator is None:
+                creator = next((value.creator for kind, value in self._binding_evidence
+                    if kind == "owned-effect" and isinstance(value.native_after, CapturedFileSnapshot)
+                    and value.native_after.identity == identity(current) and value.creator is not None), None)
+            if (origin.before.get(origin.destination) is not None or type(creator) is not _OwnedNativeCreation
+                    or creator.seal is not _NATIVE_CREATION_OWNER or not creator.acquired or not creator.creator
+                    or creator.identity != identity(current)):
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "origin did not create this image")
+        else:
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "unknown owned inverse meaning")
+        endpoints = tuple(path for path in (source, destination) if path is not None)
+        if any(not path.is_relative_to(self.repository_root) for path in endpoints):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned inverse endpoints escape admitted repository")
+        if isinstance(current, CapturedDirectorySnapshotV1):
+            proof = tuple(origin.tree_after)
+            if not proof or not any(value.path == current.path for value in proof):
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "owned directory lacks its admitted complete tree")
+            proof = tuple(current if value.path == current.path else value for value in proof)
+            proof = tuple(replace(value, require_single_link=value.require_single_link or (
+                isinstance(self._retained_observations.get(value.path), CapturedFileSnapshot)
+                and self._retained_observations[value.path].require_single_link))
+                if isinstance(value, CapturedFileSnapshot) else value for value in proof)
+        else:
+            current = replace(current, require_single_link=current.require_single_link or origin.native_after.require_single_link)
+            proof = (current,)
+        parent_proofs = {}
+        for parent in dict.fromkeys(path.parent for path in endpoints):
+            previous = origin.directories.get(parent)
+            if previous is None:
+                previous = self._retained_observations.get(parent)
+            if previous is None:
+                # A published directory movement can explain this current
+                # ancestor; never mint its former mode from a fresh capture.
+                expected = dict(current.parent_chain.participants).get(parent)
+                previous = next((snapshot for kind, effect in reversed(self._binding_evidence)
+                    if kind == "owned-effect" and effect.directory
+                    for snapshot in effect.tree_after
+                    if isinstance(snapshot, CapturedDirectorySnapshotV1) and snapshot.path == parent
+                    and _lifecycle_file_identity(snapshot.metadata) == expected), None)
+            if (not isinstance(previous, CapturedDirectorySnapshotV1)
+                    or previous.capture_binding != _directory_capture_binding(previous)):
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "inverse parent has no intact admitted capability proof")
+            parent_proofs[parent] = previous
+        # The old global obligations are observed before minting this fresh
+        # phase preparation. Their actual failures remain independently owned.
+        self._retain_integrity_failures()
+        for kind, value in self._binding_evidence:
+            if kind == "integrity-failure" and any(path == endpoint or path.is_relative_to(endpoint)
+                    or endpoint.is_relative_to(path) for path in value[2] for endpoint in endpoints):
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "integrity obligation conflicts with selected inverse")
+        inverse = _PreparedLifecycleEffect(self, self, source, destination, data, origin.directory,
+            MappingProxyType({}), MappingProxyType({}), self._binding_evidence,
+            MappingProxyType(dict(self._retained_observations)), self._retained_observations,
+            (), MappingProxyType({}), MappingProxyType(parent_proofs))
+        for name, value in (("actor", self._operation_owner), ("process", os.getpid()),
+                ("thread", threading.current_thread()), ("inverse_origin", origin), ("selected_proof", proof)):
+            object.__setattr__(inverse, name, value)
+        parents = self._verify_integrity_constraint(inverse, lambda: self._observe_owned_inverse(inverse))
+        object.__setattr__(inverse, "parents", MappingProxyType(parents))
+        object.__setattr__(origin, "inverse_claim", inverse)
+        return inverse
+
+    def _owned_file_origin(self, path, desired):
+        current = self._retained_observations.get(path)
+        for kind, origin in reversed(self._binding_evidence):
+            if (kind != "owned-effect" or origin.inverse is not None or origin.inverse_claim is not None
+                    or not isinstance(origin.native_after, CapturedFileSnapshot)):
+                continue
+            prior = origin.before.get(origin.destination)
+            if (isinstance(current, CapturedFileSnapshot) and origin.native_after.identity == current.identity
+                    and ((desired is None and prior is None)
+                         or (desired is not None and prior is not None and prior[1].data == desired))):
+                return origin
+        raise LifecycleError("WI-LIFECYCLE-EFFECT", "file restoration lacks its actual forward origin")
+
+    def restore_owned_file(self, path, before):
+        path = _lifecycle_unresolved_absolute(path)
+        if not path.is_relative_to(self.repository_root):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "file restoration escapes admitted repository")
+        current = self._retained_observations.get(path)
+        if current is None:
+            current = next((value if kind == "file" else value[1]
+                for kind, value in self._binding_evidence if kind in {"file", "intent"}
+                and (value if kind == "file" else value[1]).path == path), None)
+        if before is not None and isinstance(current, CapturedFileSnapshot) and current.data == before:
+            self._assert_source_admission()
+            self._verify_observation_map({p: value for p, value in self._retained_observations.items() if self._is_runtime_source(p)})
+            self._verify_integrity_constraint(current,
+                lambda: _verify_captured_file(current, "WI-LIFECYCLE-EFFECT"))
+            return  # An admitted exact current image is already restored; no mutation.
+        if before is None and not os.path.lexists(path):
+            self._assert_source_admission()
+            self._verify_observation_map({p: value for p, value in self._retained_observations.items() if self._is_runtime_source(p)})
+            if current is not None:
+                self._verify_integrity_constraint(current,
+                    lambda: _verify_captured_file(current, "WI-LIFECYCLE-EFFECT"))
+            absence = ("absent", path)
+            self._verify_integrity_constraint(absence,
+                lambda: _verify_project_binding_evidence((absence,), "WI-LIFECYCLE-EFFECT"))
+            return
+        origin = self._owned_file_origin(path, before)
+        inverse = self.qualify_owned_inverse(origin, operation="remove-created" if before is None else "restore-file")
+        if before is None:
+            _remove_lifecycle_file(path, failure_id="WI-LIFECYCLE-EFFECT", inverse=inverse)
+        else:
+            _atomic_write(path, before, inverse=inverse)
+
+    def restore_owned_movement(self, source, destination):
+        current = self._retained_observations.get(source)
+        for kind, origin in reversed(self._binding_evidence):
+            if (kind == "owned-effect" and origin.source == destination and origin.inverse is None
+                    and origin.inverse_claim is None and current is not None and origin.native_after is not None):
+                identity = lambda value: (_lifecycle_file_identity(value.metadata)
+                    if isinstance(value, CapturedDirectorySnapshotV1) else value.identity)
+                if type(current) is not type(origin.native_after) or identity(current) != identity(origin.native_after):
+                    continue
+                inverse = self.qualify_owned_inverse(origin, operation="restore-move")
+                return self.replace_directory(source, destination, directory=origin.directory,
+                    expected_identity=identity(current),
+                    expected_data=None if origin.directory else current.data, inverse=inverse)
+        raise LifecycleError("WI-LIFECYCLE-EFFECT", "movement restoration lacks actual owned origin")
+
+    def prepare_owned_effect(self, owner, source, destination, *, data=None, directory=False, replace_existing=False, inverse=None):
         """Prepare native observation changes, never domain admission."""
         if not self._locked:
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "native effect requires the held transaction")
         capture_owner = owner if isinstance(owner, LifecycleWriteTarget) else (
             self._active_relocation.source_owner if self._active_relocation is not None else None)
         capture_options = {"creation_owner": capture_owner} if capture_owner is not None else {}
+        if inverse is not None:
+            self._admit_inverse_mutation(inverse)
+        else:
+            self.verify(creation_owner=capture_owner)
         source = None if source is None else _lifecycle_unresolved_absolute(source)
         destination = None if destination is None else _lifecycle_unresolved_absolute(destination)
         paths = tuple(path for path in (source, destination) if path is not None)
@@ -762,6 +1207,21 @@ class LifecycleTransaction:
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "effect escapes admitted repository")
         if source in (self.repository_root, self.work_items_root):
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "effect cannot replace the selected root pair")
+        if inverse is not None:
+            if inverse.data is not None:
+                temporary_removal = (destination is None and data is None and source != inverse.destination
+                    and isinstance(owner, LifecycleWriteTarget) and any(record.locator == source
+                        and record.creator and record.acquired and record.identity is not None
+                        and record.operation_owner is inverse.actor and not record.release_complete
+                        for record in owner._creations))
+                if (not isinstance(owner, LifecycleWriteTarget) or owner.path != inverse.destination
+                        or (data != inverse.data and not temporary_removal) or directory
+                        or any(path.parent != inverse.destination.parent for path in paths)):
+                    raise LifecycleError("WI-LIFECYCLE-EFFECT", "nested file effect differs from admitted inverse")
+            elif (source, destination, directory) != (inverse.source, inverse.destination, inverse.directory):
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "native effect differs from admitted inverse")
+        if inverse is not None:
+            self._verify_owned_inverse(inverse, creation_owner=capture_owner)
         before = {}
         for path in paths:
             _lifecycle_reject_unreduced_reparse(path, failure_id="WI-LIFECYCLE-EFFECT", message="effect path is unsafe")
@@ -794,7 +1254,9 @@ class LifecycleTransaction:
         directories = {}
         selected_directories = list(self._retained_observations.values())
         for kind, value in self._binding_evidence:
-            if kind == "file":
+            if kind == "owned-effect":
+                selected_directories.extend(value.tree_after)
+            elif kind == "file":
                 selected_directories.append(value)
             elif kind == "archive":
                 selected_directories.extend(snapshot for entity in value.entities for snapshot in entity.snapshots)
@@ -815,10 +1277,16 @@ class LifecycleTransaction:
                 break
             dependent.update(ancestors)
         directories = {path: snapshot for path, snapshot in directories.items() if path in dependent}
+        if inverse is not None:
+            # These are complete real native captures. Violated old constraints
+            # have already been conserved in the same evidence relation.
+            directories = {path: _capture_owned_directory_snapshot(path, failure_id="WI-LIFECYCLE-EFFECT",
+                **capture_options) for path in directories}
         self._verify_observation_map({path: value for path, value in self._retained_observations.items()
-                                      if path in dependent or any(path.is_relative_to(p) for p in paths)}, **capture_options)
+                                      if (inverse is None and path in dependent) or any(path.is_relative_to(p) for p in paths)}, **capture_options)
         for snapshot in directories.values():
-            _verify_owned_directory_snapshot(snapshot, "WI-LIFECYCLE-EFFECT", **capture_options)
+            self._verify_integrity_constraint(snapshot,
+                lambda: _verify_owned_directory_snapshot(snapshot, "WI-LIFECYCLE-EFFECT", **capture_options))
         for path in {p.parent for p in paths} - directories.keys():
             directories[path] = _capture_owned_directory_snapshot(path, failure_id="WI-LIFECYCLE-EFFECT", **capture_options)
         for path, snapshot in directories.items():
@@ -829,8 +1297,19 @@ class LifecycleTransaction:
         affected = []
         def intersects(path):
             return path in dependent or any(path == p or path.is_relative_to(p) or p.parent == path for p in paths)
+        projection_evidence = []
         for row in self._binding_evidence:
             kind, value = row
+            if kind in {"owned-effect", "integrity-failure"}:
+                projection_evidence.append(row)
+                continue
+            if inverse is not None and kind == "node" and value[0] in directories:
+                row = (kind, _capture_structural_node(value[0], "WI-LIFECYCLE-EFFECT"))
+                value = row[1]
+            elif inverse is not None and kind == "membership" and value[0] in directories:
+                row = (kind, (value[0], tuple(sorted(name for name, _ in directories[value[0]].members))))
+                value = row[1]
+            projection_evidence.append(row)
             if kind == "archive":
                 selected = any(intersects(p) for p, _chain, _names in value.directories)
                 selected = selected or (value.archive_absent is not None and intersects(value.archive_absent))
@@ -853,15 +1332,23 @@ class LifecycleTransaction:
                             or getattr(owner, "_admitted_progress", None) != (meaning, data)):
                         raise LifecycleError("WI-LIFECYCLE-EFFECT", "selected intent needs its admitted meaning")
                 affected.append(row)
-        _verify_project_binding_evidence(tuple(affected), "WI-LIFECYCLE-EFFECT")
+        _verify_project_binding_evidence(tuple(affected) if inverse is None else tuple(
+            row for row in affected if row[0] != "archive"), "WI-LIFECYCLE-EFFECT")
         parents = {path.parent: _capture_path_parent_chain(path, "WI-LIFECYCLE-EFFECT") for path in paths}
         node_names = {value[0]: tuple(sorted(child.name for child in value[0].iterdir()))
                       for kind, value in affected if kind == "node" and value[0] in parents
                       and stat.S_ISDIR(value[0].lstat().st_mode)}
-        return _PreparedLifecycleEffect(self, owner, source, destination, data, directory,
+        prepared = _PreparedLifecycleEffect(self, owner, source, destination, data, directory,
             MappingProxyType(before), MappingProxyType(parents), self._binding_evidence,
             MappingProxyType(dict(self._retained_observations)), self._retained_observations,
             tuple(affected), MappingProxyType(node_names), MappingProxyType(directories))
+        for name, value in (("actor", self._operation_owner), ("process", os.getpid()),
+                ("thread", threading.current_thread()), ("inverse", inverse),
+                ("projection_evidence", tuple(projection_evidence))):
+            object.__setattr__(prepared, name, value)
+        if directory and source is not None:
+            object.__setattr__(prepared, "tree_before", self._capture_effect_tree(source, **capture_options))
+        return prepared
 
     def publish_owned_effect(self, prepared, *, native_identity=None, durability=False, creator_outcome=None,
                              compensation=None):
@@ -872,6 +1359,7 @@ class LifecycleTransaction:
         source, destination, data, directory = prepared.source, prepared.destination, prepared.data, prepared.directory
         before, parents = prepared.before, prepared.parents
         old_evidence, old_files, node_names = prepared.evidence, prepared.observations, prepared.node_names
+        projection_evidence = prepared.projection_evidence if prepared.projection_evidence is not None else old_evidence
         progress_placement = (isinstance(owner, LifecycleWriteTarget)
             and isinstance(owner._operation_owner, _PendingLegacyCompletionPlan)
             and self._active_relocation is not None
@@ -1055,6 +1543,8 @@ class LifecycleTransaction:
                 return candidate
             return value
         def rows(kind, value):
+            if kind in {"owned-effect", "integrity-failure"}:
+                return ((kind, value),)
             if kind == "file":
                 result = file(value)
                 return (("absent", value.path),) if result is None else ((kind, result),)
@@ -1128,7 +1618,7 @@ class LifecycleTransaction:
                 return ((kind, candidate), *extra)
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "unsupported evidence relation")
 
-        candidate_evidence = tuple(row for kind, value in old_evidence for row in rows(kind, value))
+        candidate_evidence = tuple(row for kind, value in projection_evidence for row in rows(kind, value))
         candidate_files = {}
         for old in old_files.values():
             current = file(old)
@@ -1139,7 +1629,9 @@ class LifecycleTransaction:
         if not restored and source is not None and source != destination:
             candidate_evidence += (("absent", source),)
         _verify_project_binding_evidence(tuple(row for row in candidate_evidence
-            if row not in old_evidence or (restored and row in prepared.affected_evidence)), "WI-LIFECYCLE-EFFECT")
+            if row[0] not in {"owned-effect", "integrity-failure"}
+            and (prepared.inverse is None or row[0] != "archive")
+            and (row not in old_evidence or (restored and row in prepared.affected_evidence))), "WI-LIFECYCLE-EFFECT")
         self._verify_observation_map({**directory_projection,
             **{path: value for path, value in candidate_files.items()
                if (restored and any(path.is_relative_to(endpoint) for endpoint in (source, destination)))
@@ -1149,12 +1641,39 @@ class LifecycleTransaction:
             # publication of a rejected candidate or a new preparation epoch.
             object.__setattr__(prepared, "reverse_from", (candidate_evidence, candidate_files))
             return
+        if not restored and compensation is None:
+            object.__setattr__(prepared, "native_after", actual)
+            creator = next((record for record in getattr(owner, "_creations", ())
+                if record.placement is prepared or record.preparation is prepared), None)
+            object.__setattr__(prepared, "creator", creator)
+            if directory and actual is not None:
+                tree = self._capture_effect_tree(actual.path, **capture_options)
+                if source is not None:
+                    self._verify_effect_tree(prepared.tree_before, tree, source, actual.path)
+                object.__setattr__(prepared, "tree_after", tree)
+            candidate_evidence += (("owned-effect", prepared),)
         if not restored:
             object.__setattr__(prepared, "forward_evidence", candidate_evidence)
             object.__setattr__(prepared, "forward_observations", candidate_files)
             object.__setattr__(prepared, "forward_observation_values", MappingProxyType(dict(candidate_files)))
         self._binding_evidence = candidate_evidence
         self._retained_observations = candidate_files
+        for kind, origin in old_evidence:
+            if kind == "owned-effect" and origin.directory and origin.tree_after:
+                projected_tree = tuple(value for previous in origin.tree_after if (value := file(previous)) is not None)
+                object.__setattr__(origin, "tree_after", projected_tree)
+                object.__setattr__(origin, "native_after", file(origin.native_after))
+        inverse = prepared.inverse
+        if inverse is not None:
+            # Advance only through this actually verified nested publication.
+            object.__setattr__(inverse, "forward_evidence", candidate_evidence)
+            object.__setattr__(inverse, "forward_observations", candidate_files)
+            object.__setattr__(inverse, "forward_observation_values", MappingProxyType(dict(candidate_files)))
+            final = ((inverse.destination is None and source == inverse.source and destination is None)
+                or (inverse.destination is not None and destination == inverse.destination))
+            if final:
+                object.__setattr__(inverse, "selected_proof", prepared.tree_after if directory else (() if actual is None else (actual,)))
+                object.__setattr__(inverse, "fulfilled", True)
         meaning = (owner._operation_owner if isinstance(owner, LifecycleWriteTarget)
                    else owner if isinstance(owner, _PendingLegacyCompletionPlan) else None)
         if isinstance(meaning, _PendingLegacyCompletionPlan) and actual is not None and destination == meaning.intent_path:
@@ -1215,13 +1734,38 @@ class LifecycleTransaction:
                 self._validator_reuse = None
                 if self._is_runtime_source(snapshot.path):
                     self._retain_source_failure(failure)
+                else:
+                    admitted = self._retained_observations.get(snapshot.path)
+                    if admitted is snapshot or (admitted is not None
+                            and _captured_observations_equivalent(admitted, snapshot)
+                            and (not isinstance(snapshot, CapturedFileSnapshot)
+                                 or snapshot.require_single_link == admitted.require_single_link)):
+                        if isinstance(failure, (LifecycleError, OSError)):
+                            self._retain_integrity_failure(admitted, failure)
                 raise
 
     def observe_retained_inputs(self, snapshots: Iterable[CapturedFileSnapshot | CapturedDirectorySnapshotV1]) -> None:
         for snapshot in snapshots:
+            if (isinstance(snapshot, CapturedFileSnapshot)
+                    and type(vars(snapshot).get("require_single_link")) is not bool):
+                raise LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY", "retained-input qualification is invalid")
             previous = self._retained_observations.get(snapshot.path)
+            if (isinstance(previous, CapturedFileSnapshot)
+                    and type(vars(previous).get("require_single_link")) is not bool):
+                raise LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY", "retained-input qualification is invalid")
             if previous is not None and not _captured_observations_equivalent(previous, snapshot):
                 raise LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY", "retained-input observation changed during selection")
+            if isinstance(snapshot, CapturedFileSnapshot):
+                required = snapshot.require_single_link or (previous is not None and previous.require_single_link)
+                if required != snapshot.require_single_link:
+                    snapshot = replace(snapshot, require_single_link=required)
+                self._assert_source_admission()
+                if previous is not None and snapshot.require_single_link and not previous.require_single_link:
+                    # A rejected new policy is not an old violation. Verify the
+                    # actual prior obligation first, while it is still admitted.
+                    self._verify_observation_map({previous.path: previous})
+                self._verify_observation_map({snapshot.path: snapshot})
+                self._assert_source_admission()
             self._retained_observations[snapshot.path] = snapshot
 
     def cleanup_intersects_unsettled(self, paths: tuple[Path, ...]) -> bool:
@@ -1235,17 +1779,30 @@ class LifecycleTransaction:
 
     def replace_directory(self, source: Path, destination: Path, *, directory: bool = True,
                           expected_identity=None, expected_data=None, progress_owner=None,
-                          progress_binding=None, progress_field="path", progress_before=None):
+                          progress_binding=None, progress_field="path", progress_before=None, inverse=None):
         """Move the declared native kind and settle its current-view publication."""
         kind = "directory" if directory else "file"
+        if inverse is not None:
+            self._admit_inverse_mutation(inverse)
+        else:
+            self.verify()
         if self.cleanup_intersects_unsettled((source, destination)):
             raise LifecycleError("WI-LIFECYCLE-RELOCATION", f"{kind} relocation intersects unsettled ownership")
-        self.verify()
         failure_id = "WI-LIFECYCLE-RELOCATION"
         source = _lifecycle_unresolved_absolute(source)
         destination = _lifecycle_unresolved_absolute(destination)
         if source == destination or destination.is_relative_to(source) or source.is_relative_to(destination):
             raise LifecycleError(failure_id, f"{kind} relocation overlaps its source")
+        if inverse is not None:
+            if (source, destination, directory) != (inverse.source, inverse.destination, inverse.directory):
+                raise LifecycleError(failure_id, "relocation differs from admitted inverse")
+            selected = next(value for value in inverse.selected_proof if value.path == source)
+            selected_identity = (_lifecycle_file_identity(selected.metadata)
+                if isinstance(selected, CapturedDirectorySnapshotV1) else selected.identity)
+            if ((expected_identity is not None and tuple(expected_identity) != selected_identity)
+                    or (expected_data is not None and (inverse.directory or expected_data != selected.data))):
+                raise LifecycleError(failure_id, "relocation arguments differ from admitted inverse proof")
+            self._verify_owned_inverse(inverse)
         _lifecycle_reject_unreduced_reparse(source, failure_id=failure_id, message="relocation source is unsafe")
         _lifecycle_reject_unreduced_reparse(destination, failure_id=failure_id, message="relocation destination is unsafe")
         source_chain = _capture_path_parent_chain(source, failure_id)
@@ -1257,7 +1814,7 @@ class LifecycleTransaction:
         identity = _lifecycle_file_identity(source_info)
         if expected_identity is not None and identity != tuple(expected_identity):
             raise LifecycleError(failure_id, "relocation differs from admitted source identity")
-        prepared = self.prepare_owned_effect(self, source, destination, directory=directory)
+        prepared = self.prepare_owned_effect(self, source, destination, directory=directory, inverse=inverse)
         object.__setattr__(prepared, "progress_before", progress_before)
         movement = prepared
         if not directory:
@@ -1279,8 +1836,8 @@ class LifecycleTransaction:
         writer = None
         try:
             if os.name == "nt" and expected_identity is not None:
-                source_owner = LifecycleWriteTarget(source, failure_id=failure_id, _operation_owner=self)
-                target_owner = LifecycleWriteTarget(destination, failure_id=failure_id, _operation_owner=self)
+                source_owner = LifecycleWriteTarget(source, failure_id=failure_id, _operation_owner=self, inverse=inverse)
+                target_owner = LifecycleWriteTarget(destination, failure_id=failure_id, _operation_owner=self, inverse=inverse)
                 source_owner._acquire_existing_parents()
                 target_owner._acquire_existing_parents()
                 handle = (source_owner._windows_child(source_owner._parent, source.name, directory=True, delete=True)
@@ -1948,7 +2505,7 @@ def _captured_observations_equivalent(previous, current) -> bool:
     if isinstance(previous, CapturedDirectorySnapshotV1) and isinstance(current, CapturedDirectorySnapshotV1):
         return _directory_capture_binding(previous) == _directory_capture_binding(current)
     if isinstance(previous, CapturedFileSnapshot) and isinstance(current, CapturedFileSnapshot):
-        return previous == current
+        return replace(previous, require_single_link=current.require_single_link) == current
     return False
 
 
@@ -4291,6 +4848,14 @@ def _verify_project_binding_evidence(evidence: tuple, failure_id: str) -> None:
                 message="root acquisition absence became unsafe")
             if os.path.lexists(value):
                 raise LifecycleError(failure_id, "root acquisition absence changed")
+        elif kind == "integrity-failure":
+            if not isinstance(value, tuple) or len(value) != 3 or not isinstance(value[1], BaseException):
+                raise LifecycleError(failure_id, "invalid retained integrity failure")
+            raise value[1]
+        elif kind == "owned-effect":
+            if (type(value) is not _PreparedLifecycleEffect or value.forward_evidence is None
+                    or value.transaction is None or value.process is None or value.thread is None):
+                raise LifecycleError(failure_id, "invalid completed native effect")
         elif kind == "membership":
             path, names = value
             try:
@@ -6484,7 +7049,7 @@ class _OwnedNativeCreation:
 class LifecycleWriteTarget:
     """One process-local ordinary-parent capability for a lifecycle file effect."""
 
-    def __init__(self, path: Path, *, failure_id: str, _operation_owner=None):
+    def __init__(self, path: Path, *, failure_id: str, _operation_owner=None, inverse=None):
         self.path = _lifecycle_unresolved_absolute(path)
         self.leaf = self.path.name
         self.failure_id = failure_id
@@ -6493,10 +7058,12 @@ class LifecycleWriteTarget:
         self._open = False
         self._native = None
         self._operation_owner = _operation_owner
+        self._inverse = inverse
         self._creations: list[_OwnedNativeCreation] = []
         self._creation_observation_active = False
         self._creation_process = None
         self._creation_thread = None
+        self._source_observation = None
 
     def _operation_transaction(self):
         """Resolve this actual binding without letting ambient state replace it."""
@@ -6531,6 +7098,27 @@ class LifecycleWriteTarget:
         if not active or (self._creation_process is not None and
                 (self._creation_process != os.getpid() or self._creation_thread is not threading.current_thread())):
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "creation observation lacks its synchronous owner")
+        removal = self._source_observation
+        if removal is not None and path == removal.source:
+            if (type(removal) is not _PreparedLifecycleEffect or removal.owner is not self
+                    or removal.transaction is not transaction or not transaction._locked
+                    or self._operation_owner is not transaction or removal.source_owner is not self
+                    or removal.destination is not None or not removal.directory or removal.handle is None
+                    or not removal.current_pair_is_bound()):
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "removal observation lacks its actual custodian")
+            self._verify_owned()
+            info = path.lstat()
+            expected = _lifecycle_file_identity(removal.before[path][0])
+            identity = self._identity(removal.handle)
+            _lifecycle_reject_unreduced_reparse(path, failure_id="WI-LIFECYCLE-EFFECT", message="removed directory path is unsafe")
+            parent_identity = _lifecycle_file_identity(path.parent.lstat())
+            if (not stat.S_ISDIR(info.st_mode) or identity != expected
+                    or _lifecycle_file_identity(info) != identity
+                    or not any(p == path.parent and i == parent_identity and self._identity(h) == i
+                               for p, h, i in self._directories)
+                    or (parent is not None and self._identity(parent) != parent_identity)):
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "removal observation native source or parent differs")
+            return removal
         if movement is not None and movement.directory and path in (movement.source, movement.destination):
             source_owner, target_owner = movement.source_owner, movement.target_owner
             if (movement.transaction is not transaction or not transaction._locked
@@ -6727,11 +7315,136 @@ class LifecycleWriteTarget:
 
     def _prepare_effect(self, source, destination, **relation):
         transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
-        return None if transaction is None else transaction.prepare_owned_effect(self, source, destination, **relation)
+        return None if transaction is None else transaction.prepare_owned_effect(self, source, destination, inverse=self._inverse, **relation)
 
     def _publish_effect(self, prepared, identity):
         if prepared is not None:
             prepared.transaction.publish_owned_effect(prepared, native_identity=identity)
+
+    @classmethod
+    def make_directories(cls, path, transaction, *, created=None, failure_id="WI-LIFECYCLE-EFFECT"):
+        """Publish structural directories under the explicit held domain owner.
+
+        Returned records retain actual creator identity after their handles close.
+        They license only the caller's explicit same-invocation empty rollback.
+        """
+        path = _lifecycle_unresolved_absolute(path)
+        if (not isinstance(transaction, LifecycleTransaction) or not transaction._locked
+                or _CURRENT_LIFECYCLE_TRANSACTION.get() is not transaction
+                or not path.is_relative_to(transaction.repository_root)):
+            raise LifecycleError(failure_id, "structural directory requires its held repository owner")
+        transaction.verify()
+        records = [] if created is None else created
+        first = len(records)
+        missing = []
+        cursor = path
+        while not os.path.lexists(cursor):
+            missing.append(cursor)
+            cursor = cursor.parent
+        for directory in reversed(missing):
+            owner = cls(directory, failure_id=failure_id, _operation_owner=transaction)
+            primary = None
+            record = None
+            try:
+                owner._acquire_existing_parents()
+                preparation = transaction.prepare_owned_effect(owner, None, directory, directory=True)
+                record = owner._new_creation(directory, preparation, owner._parent,
+                    directory=True, role="constructed-parent")
+                records.append(record)
+                if os.name == "nt":
+                    child = owner._windows_child(owner._parent, directory.name, directory=True,
+                        create=True, exclusive=True, delete=True, _creation=record)
+                else:
+                    # Preserve the existing mkdirat/openat contract; this does
+                    # not claim atomic creator exclusion across these calls.
+                    os.mkdir(directory.name, mode=0o777, dir_fd=owner._parent)
+                    record.creator, record.acquired, record.phase = True, True, "acquired"
+                    record.native_result = "mkdir-created"
+                    child = os.open(directory.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        dir_fd=owner._parent)
+                    record.handle, record.holder = child, "outer"
+                    os.set_inheritable(child, False)
+                record.identity = owner._identity(child)
+                owner._verify_owned()
+                owner._publish_effect(preparation, record.identity)
+                record.creation_published = True
+                record.phase = "retained"
+            except BaseException as exc:
+                primary = exc
+                if record is not None:
+                    if record.raw_failure is None:
+                        record.raw_failure = exc
+                    owner._select_creation_primary(record, exc)
+                raise
+            finally:
+                owner.__exit__(type(primary) if primary is not None else None, primary,
+                    primary.__traceback__ if primary is not None else None)
+        # Existing hierarchy is acquired as current structure, never adopted as
+        # a creator. All delete-capable creator handles are closed before this.
+        snapshot = _capture_owned_directory_snapshot(path, failure_id=failure_id)
+        transaction.observe_retained_inputs((snapshot,))
+        transaction.verify()
+        return tuple(records[first:])
+
+    @classmethod
+    def remove_created_directory(cls, record, transaction, *, failure_id="WI-LIFECYCLE-EFFECT"):
+        """Remove this invocation's published empty creator object, never a path substitute."""
+        if (type(record) is not _OwnedNativeCreation or record.seal is not _NATIVE_CREATION_OWNER
+                or not isinstance(transaction, LifecycleTransaction) or not transaction._locked
+                or _CURRENT_LIFECYCLE_TRANSACTION.get() is not transaction
+                or record.preparation is None or record.preparation.transaction is not transaction
+                or record.owner._operation_owner is not transaction
+                or not any(value is record for value in record.owner._creations)
+                or not record.directory or not record.creator or not record.acquired
+                or not record.creation_published or record.phase != "retained"
+                or not record.finished or not record.release_complete or record.identity is None):
+            raise LifecycleError(failure_id, "empty directory rollback lacks its actual creator record")
+        path = record.locator
+        snapshot = transaction._retained_observations.get(path)
+        if (not isinstance(snapshot, CapturedDirectorySnapshotV1)
+                or _lifecycle_file_identity(snapshot.metadata) != record.identity or snapshot.members):
+            raise LifecycleError(failure_id, "created directory has no matching empty current proof")
+        _verify_captured_parent_chain(record.scope, failure_id)
+        _verify_owned_directory_snapshot(snapshot, failure_id)
+        owner = cls(path, failure_id=failure_id, _operation_owner=transaction)
+        primary = None
+        handle = None
+        identity = record.identity
+        try:
+            owner._acquire_existing_parents()
+            removal = transaction.prepare_owned_effect(owner, path, None, directory=True)
+            if os.name == "nt":
+                handle = owner._windows_child(owner._parent, path.name, directory=True, delete=True)
+            else:
+                handle = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=owner._parent)
+            if owner._identity(handle) != identity:
+                raise LifecycleError(failure_id, "created directory now names a foreign object")
+            owner._verify_effect_source(removal, handle)
+            owner._verify_owned()
+            object.__setattr__(removal, "source_owner", owner)
+            object.__setattr__(removal, "handle", handle)
+            owner._source_observation = removal
+            _verify_owned_directory_snapshot(snapshot, failure_id, creation_owner=owner)
+            if os.name == "nt":
+                owner._windows_delete(handle)
+            else:
+                if _lifecycle_file_identity(os.stat(path.name, dir_fd=owner._parent,
+                        follow_symlinks=False)) != identity:
+                    raise LifecycleError(failure_id, "created directory identity changed before removal")
+                os.rmdir(path.name, dir_fd=owner._parent)
+        except BaseException as exc:
+            primary = exc
+            raise
+        finally:
+            try:
+                owner._source_observation = None
+                if handle is not None:
+                    owner._release_handle(handle, primary)
+            finally:
+                owner.__exit__(type(primary) if primary is not None else None, primary,
+                    primary.__traceback__ if primary is not None else None)
+        owner._publish_effect(removal, identity)
 
     def _receive_placement(self, record, data):
         """Receive this creator's actual promotion before domain progress or release."""
@@ -6813,13 +7526,32 @@ class LifecycleWriteTarget:
         self._verify_owned()
         return CapturedPathParentChain(tuple(ancestry))
 
+    def _admit_mutation(self):
+        transaction = self._operation_transaction()
+        if transaction is not None and self._inverse is not None:
+            transaction._admit_inverse_mutation(self._inverse)
+            if self.path not in (self._inverse.source, self._inverse.destination):
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "native target differs from admitted inverse")
+        return transaction
+
+    def _admit_write(self, data):
+        self._admit_mutation()
+        if self._inverse is not None and (self._inverse.directory
+                or self._inverse.destination != self.path or self._inverse.data is None
+                or not isinstance(data, bytes) or data != self._inverse.data):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "native write differs from admitted inverse meaning")
+
     def __enter__(self):
+        self._admit_mutation()
+        if self._inverse is not None and (self._inverse.directory
+                or self._inverse.destination != self.path or self._inverse.data is None):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "constructive target is not the admitted inverse write")
         if self._open or self._directories or any(record.holder == "uncertain" or record.phase in {"unsettled", "promoted"}
                 or (record.phase == "disposed" and not record.projection_complete) for record in self._creations):
             raise LifecycleError("WI-LIFECYCLE-WRITE-BOUNDARY", "native target has unsettled ownership")
         transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
         if transaction is not None:
-            transaction.verify()
+            transaction.verify(inverse=self._inverse)
         try:
             if not self.leaf or self.leaf in {".", ".."}:
                 raise OSError(errno.EINVAL, "destination has no simple leaf")
@@ -6955,7 +7687,7 @@ class LifecycleWriteTarget:
     def verify(self) -> None:
         transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
         if transaction is not None:
-            transaction.verify(creation_owner=self)
+            transaction.verify(creation_owner=self, inverse=self._inverse)
         if any(record.finished and (record.holder == "uncertain" or record.phase in {"unsettled", "promoted"}
                 or (record.phase == "disposed" and not record.projection_complete)) for record in self._creations):
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "native creator current evidence is unsettled")
@@ -7048,6 +7780,9 @@ class LifecycleWriteTarget:
         return b"".join(chunks)
 
     def quarantine(self, current: bytes) -> None:
+        self._admit_mutation()
+        if self._inverse is not None:
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "quarantine is not an admitted inverse meaning")
         leaf = f"{self.leaf}.conflict-{_sha256_bytes(current)[:16]}"
         existing = self.read(leaf)
         if existing is not None and existing != current:
@@ -7080,6 +7815,7 @@ class LifecycleWriteTarget:
             self._release_handle(handle, primary)
 
     def publish(self, data: bytes) -> None:
+        self._admit_write(data)
         self.verify()
         leaf = f".{self.leaf}.{uuid.uuid4().hex}.tmp"
         record = None
@@ -7169,6 +7905,7 @@ class LifecycleWriteTarget:
 
     def stage_create(self, data: bytes) -> dict:
         """Flush a create-only stage and retain its actual read-back identity."""
+        self._admit_write(data)
         self.verify()
         leaf = f".{self.leaf}.{uuid.uuid4().hex}.tmp"
         creation = self._prepare_effect(None, self.path.parent / leaf, data=data)
@@ -7196,6 +7933,7 @@ class LifecycleWriteTarget:
 
     def remove_owned(self, leaf: str, image: dict) -> None:
         """Delete only the exact native identity and bytes retained by this owner."""
+        self._admit_mutation()
         self._verify_owned()
         removal = self._prepare_effect(self.path.parent / leaf, None)
         handle = self._file(leaf, delete=True)
@@ -7223,6 +7961,7 @@ class LifecycleWriteTarget:
 
     def promote_create(self, image: dict) -> None:
         """Promote an observed stage without replacing any destination."""
+        self._admit_mutation()
         stage = Path(image["stagePath"])
         if stage.parent != self.path.parent:
             raise self._failure("create-only promotion", OSError("stage parent differs"))
@@ -7489,13 +8228,22 @@ class LifecycleWriteTarget:
         self._windows_status(nt.NtSetInformationFile(handle, c.byref(status), c.byref(value), 1, 13), "owned temporary disposition")
 
 
-def _admit_lifecycle_write_target(path: Path, *, failure_id: str, _operation_owner=None) -> LifecycleWriteTarget:
-    return LifecycleWriteTarget(path, failure_id=failure_id, _operation_owner=_operation_owner)
+def _admit_lifecycle_write_target(path: Path, *, failure_id: str, _operation_owner=None, inverse=None) -> LifecycleWriteTarget:
+    return LifecycleWriteTarget(path, failure_id=failure_id, _operation_owner=_operation_owner, inverse=inverse)
 
 
-def _atomic_write(path: Path, data: bytes, *, target: LifecycleWriteTarget | None = None) -> None:
+def _atomic_write(path: Path, data: bytes, *, target: LifecycleWriteTarget | None = None, inverse=None) -> None:
+    if inverse is not None:
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        if not isinstance(transaction, LifecycleTransaction):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "inverse write requires its held transaction")
+        transaction._admit_inverse_mutation(inverse)
+        if (inverse.directory or inverse.destination != _lifecycle_unresolved_absolute(path)
+                or inverse.data is None or not isinstance(data, bytes) or data != inverse.data
+                or (target is not None and target._inverse is not inverse)):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "write arguments differ from admitted inverse meaning")
     if target is None:
-        with _admit_lifecycle_write_target(path, failure_id="WI-LIFECYCLE-WRITE-BOUNDARY") as acquired:
+        with _admit_lifecycle_write_target(path, failure_id="WI-LIFECYCLE-WRITE-BOUNDARY", inverse=inverse) as acquired:
             acquired.publish(data)
     else:
         if type(target) is not LifecycleWriteTarget or target.path != _lifecycle_unresolved_absolute(path) or not target._open:
@@ -8241,11 +8989,18 @@ def _default_static_guide() -> str:
 def _static_guide(readme: Path, *, allow_marker_bootstrap: bool = False) -> str:
     if not readme.exists():
         return _default_static_guide()
-    text = _capture_file_snapshot(
+    snapshot = _capture_file_snapshot(
         readme,
         failure_id="WI-README-STALE",
         maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
-    ).data.decode("utf-8")
+    )
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is not None:
+        if (_lifecycle_unresolved_absolute(readme) != transaction.work_items_root / "README.md"
+                or not transaction._locked):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "README capture differs from its held root owner")
+        transaction.observe_retained_inputs((snapshot,))
+    text = snapshot.data.decode("utf-8")
     begin_count = text.count(README_BEGIN)
     end_count = text.count(README_END)
     if allow_marker_bootstrap and begin_count == 0 and end_count == 0:
@@ -8805,7 +9560,10 @@ def _candidate_with_legacy_appendices(
 
 
 def _restore_readme_snapshot(readme: Path, before: bytes | None) -> None:
-    if before is None:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is not None:
+        transaction.restore_owned_file(readme, before)
+    elif before is None:
         readme.unlink(missing_ok=True)
     else:
         _atomic_write(readme, before)
@@ -9118,19 +9876,37 @@ def convert_legacy_candidate(
             _finish_committed_legacy_cleanup(target.parent, transaction, cleanup_marker, transaction.name)
         except OSError as exc:
             raise _committed_cleanup_failure(target, transaction, exc) from exc
-    except BaseException:
+    except BaseException as primary:
+        composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+        composer.capture_primary(primary)
+        held = _CURRENT_LIFECYCLE_TRANSACTION.get()
         if not committed:
-            if target.exists() and not _lifecycle_cleanup_intersects_unsettled(target):
-                target.unlink()
-            if staged_source.exists() and not source.exists() and not _lifecycle_cleanup_intersects_unsettled(staged_source, source):
-                _replace_lifecycle_directory(staged_source, source)
-            _restore_readme_snapshot(readme, readme_before)
-            if staged_candidate.exists() and not _lifecycle_cleanup_intersects_unsettled(staged_candidate):
-                staged_candidate.unlink()
-            if not _lifecycle_cleanup_intersects_unsettled(cleanup_marker):
-                cleanup_marker.unlink(missing_ok=True)
-            if not _lifecycle_cleanup_intersects_unsettled(transaction):
-                transaction.rmdir()
+            incomplete = False
+            def attempt(label, action, *paths):
+                nonlocal incomplete
+                if held.cleanup_intersects_unsettled(paths):
+                    incomplete = True
+                    return
+                try:
+                    action()
+                except BaseException as cleanup:
+                    incomplete = True
+                    composer.record_rollback_action(
+                        failure_id=cleanup.failure_id if isinstance(cleanup, LifecycleError) else "WI-CATEGORY-MIGRATION-PAYLOAD",
+                        resource=paths[0].relative_to(root).as_posix() if paths else None,
+                        diagnostic=label, cause=cleanup)
+            attempt("remove owned candidate", lambda: held.restore_owned_file(target, None), target)
+            if os.path.lexists(staged_source):
+                attempt("restore staged original source",
+                    lambda: held.restore_owned_movement(staged_source, source), staged_source, source)
+            attempt("restore README", lambda: _restore_readme_snapshot(readme, readme_before), readme)
+            attempt("remove staged candidate", lambda: held.restore_owned_file(staged_candidate, None), staged_candidate)
+            attempt("remove owned cleanup marker", lambda: held.restore_owned_file(cleanup_marker, None), cleanup_marker)
+            # This final action depends on actual emptiness; rmdir cannot erase
+            # an original-bearing, foreign or unsettled stage.
+            attempt("remove empty conversion stage", transaction.rmdir, transaction)
+            if incomplete:
+                composer.set_rollback("incomplete")
         raise
     return target
 
@@ -9191,35 +9967,107 @@ def retire_legacy_backlog(
     target = month_dir / slug
     if target.exists():
         raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", f"archive target exists: {target}")
-    transaction = Path(tempfile.mkdtemp(prefix=f".{slug}.legacy-retire.", dir=source.parent))
-    staged_source = transaction / "source"
-    created_archive = not archive.exists()
-    created_month = not month_dir.exists()
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    original_source = _capture_owned_directory_snapshot(source, failure_id="WI-LEGACY-RETIREMENT-INVALID")
+    transaction.observe_retained_inputs((original_source,))
+    stage = source.parent / f".{slug}.legacy-retire.{uuid.uuid4().hex}"
+    staged_source = stage / "source"
+    stage_creations: list[_OwnedNativeCreation] = []
+    created_directories: list[_OwnedNativeCreation] = []
+    composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+    compensation_required = False
     try:
+        LifecycleWriteTarget.make_directories(stage, transaction, created=stage_creations)
+        if len(stage_creations) != 1 or stage_creations[0].locator != stage:
+            raise LifecycleError("WI-LEGACY-RETIREMENT-INVALID", "retirement stage was not created by this invocation")
         _replace_lifecycle_directory(source, staged_source)
         _atomic_write(staged_source / LEGACY_RETIREMENT_FILE, metadata_data)
-        month_dir.mkdir(parents=True, exist_ok=True)
+        LifecycleWriteTarget.make_directories(month_dir, _CURRENT_LIFECYCLE_TRANSACTION.get(), created=created_directories)
         _replace_lifecycle_directory(staged_source, target)
         if inject_readme_failure:
             raise LifecycleError("WI-README-STALE", "injected legacy retirement failure")
         refresh_readme(root)
         _legacy_retirement_entry(target, target / LEGACY_RETIREMENT_FILE)
-    except BaseException:
-        if target.exists() and not staged_source.exists() and not _lifecycle_cleanup_intersects_unsettled(target, staged_source):
-            _replace_lifecycle_directory(target, staged_source)
-        if not _lifecycle_cleanup_intersects_unsettled(staged_source / LEGACY_RETIREMENT_FILE):
-            (staged_source / LEGACY_RETIREMENT_FILE).unlink(missing_ok=True)
-        if staged_source.exists() and not source.exists() and not _lifecycle_cleanup_intersects_unsettled(staged_source, source):
-            _replace_lifecycle_directory(staged_source, source)
-        _restore_readme_snapshot(readme, readme_before)
-        if created_month and month_dir.is_dir() and not any(month_dir.iterdir()) and not _lifecycle_cleanup_intersects_unsettled(month_dir):
-            month_dir.rmdir()
-        if created_archive and archive.is_dir() and not any(archive.iterdir()) and not _lifecycle_cleanup_intersects_unsettled(archive):
-            archive.rmdir()
+    except BaseException as primary:
+        composer.capture_primary(primary)
+        compensation_required = any(record.creator and record.acquired
+                                    for record in (*stage_creations, *created_directories))
+        incomplete = False
+        action, resource = "restore original source custody", staged_source
+        if compensation_required:
+            try:
+                if _lifecycle_cleanup_intersects_unsettled(target, staged_source, source):
+                    incomplete = True
+                else:
+                    if target.exists() and not staged_source.exists():
+                        action, resource = "restore archive to actual stage", target
+                        transaction.restore_owned_movement(target, staged_source)
+                    if staged_source.exists():
+                        action, resource = "remove owned retirement metadata", staged_source / LEGACY_RETIREMENT_FILE
+                        transaction.restore_owned_file(resource, None)
+                        if source.exists():
+                            incomplete = True
+                            composer.record_rollback_action(failure_id="WI-LEGACY-RETIREMENT-INVALID",
+                                resource=staged_source.relative_to(root).as_posix(),
+                                diagnostic="original source restoration target is occupied; staged custody preserved")
+                        else:
+                            action, resource = "restore staged original source", staged_source
+                            transaction.restore_owned_movement(staged_source, source)
+            except BaseException as cleanup:
+                incomplete = True
+                composer.record_rollback_action(
+                    failure_id=cleanup.failure_id if isinstance(cleanup, LifecycleError) else "WI-LEGACY-RETIREMENT-INVALID",
+                    resource=resource.relative_to(root).as_posix(), diagnostic=action, cause=cleanup)
+            try:
+                if _lifecycle_cleanup_intersects_unsettled(readme):
+                    incomplete = True
+                else:
+                    _restore_readme_snapshot(readme, readme_before)
+            except BaseException as cleanup:
+                incomplete = True
+                composer.record_rollback_action(
+                    failure_id=cleanup.failure_id if isinstance(cleanup, LifecycleError) else "WI-README-STALE",
+                    resource=readme.relative_to(root).as_posix(), diagnostic="restore README", cause=cleanup)
+            current_source = transaction.current_observation(original_source)
+            if isinstance(current_source, CapturedDirectorySnapshotV1) and current_source.path == source:
+                for record in reversed(created_directories):
+                    if not record.creation_published:
+                        continue
+                    if _lifecycle_cleanup_intersects_unsettled(record.locator):
+                        incomplete = True
+                        continue
+                    try:
+                        LifecycleWriteTarget.remove_created_directory(record, transaction,
+                            failure_id="WI-LEGACY-RETIREMENT-INVALID")
+                    except BaseException as cleanup:
+                        incomplete = True
+                        composer.record_rollback_action(
+                            failure_id=cleanup.failure_id if isinstance(cleanup, LifecycleError) else "WI-LEGACY-RETIREMENT-INVALID",
+                            resource=record.locator.relative_to(root).as_posix(), diagnostic="remove created archive directory", cause=cleanup)
+            else:
+                incomplete = True
+            composer.set_rollback("incomplete" if incomplete else "completed")
         raise
     finally:
-        if not _lifecycle_cleanup_intersects_unsettled(transaction):
-            shutil.rmtree(transaction, ignore_errors=True)
+        for record in reversed(stage_creations):
+            if not record.creation_published:
+                continue  # An unpublished acquisition retains its native creator abort owner.
+            current_source = transaction.current_observation(original_source)
+            if (not isinstance(current_source, CapturedDirectorySnapshotV1)
+                    or current_source.path not in (source, target)
+                    or _lifecycle_cleanup_intersects_unsettled(stage, source, target)):
+                composer.set_rollback("incomplete")
+                continue  # Preserve original/uncertain custody; never recurse into the stage.
+            try:
+                _verify_owned_directory_snapshot(current_source, "WI-LEGACY-RETIREMENT-INVALID")
+                LifecycleWriteTarget.remove_created_directory(record, transaction,
+                    failure_id="WI-LEGACY-RETIREMENT-INVALID")
+            except BaseException as cleanup:
+                composer.record_rollback_action(
+                    failure_id=cleanup.failure_id if isinstance(cleanup, LifecycleError) else "WI-LEGACY-RETIREMENT-INVALID",
+                    resource=record.locator.relative_to(root).as_posix(), diagnostic="release empty native retirement stage", cause=cleanup)
+                if compensation_required:
+                    composer.set_rollback("incomplete")
     return target
 
 
@@ -11842,7 +12690,7 @@ def _close_item_directory(
     readme = work_items / "README.md"
     readme_existed = readme.is_file()
     readme_before = readme.read_bytes() if readme_existed else b""
-    created_dirs: list[Path] = []
+    created_dirs: list[_OwnedNativeCreation] = []
     touched_bugs: list[BugDispositionPlan] = []
     touched_links: list[dict] = []
     written_link_captures = {}
@@ -11874,7 +12722,7 @@ def _close_item_directory(
                 if captured_after.data != plan.after:
                     raise LifecycleError("WI-CLOSE-LINK-DRIFT", "URI bug postimage differs")
                 written_link_captures[plan.source] = captured_after
-            _mkdir_parents_tracked(plan.target.parent, created_dirs)
+            LifecycleWriteTarget.make_directories(plan.target.parent, transaction, created=created_dirs)
             movement = transaction.prepare_owned_effect(plan, plan.source, plan.target, data=plan.after)
             os.replace(plan.source, plan.target)
             transaction.publish_owned_effect(movement, native_identity=_lifecycle_file_identity(plan.target.lstat()))
@@ -11906,7 +12754,7 @@ def _close_item_directory(
         _verify_parent_archive_link_targets(link_plan, archived=False, failure_id="WI-CLOSE-LINK-DRIFT")
         _atomic_write(closure_path, archived_closure_data)
         _atomic_write(status_path, _terminalize_status(prior_status))
-        _mkdir_parents_tracked(target.parent, created_dirs)
+        LifecycleWriteTarget.make_directories(target.parent, _CURRENT_LIFECYCLE_TRANSACTION.get(), created=created_dirs)
         _replace_lifecycle_directory(active, target)
         item_moved = True
         if inject_readme_failure:
@@ -11951,15 +12799,25 @@ def _close_item_directory(
                 raise LifecycleError("WI-CLOSE-LINK-VERIFY", "URI consumer final image differs")
         _verify_parent_archive_link_targets(link_plan, archived=True, failure_id="WI-CLOSE-LINK-VERIFY")
     except BaseException as exc:
-        rollback_failures: list[str] = []
+        composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+        composer.capture_primary(exc)
+        held = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        first_rollback_action = len(composer.rollback_actions)
+        rollback_incomplete = False
 
         def attempt(label: str, action, *paths: Path) -> None:
+            nonlocal rollback_incomplete
             if _lifecycle_cleanup_intersects_unsettled(*paths):
+                rollback_incomplete = True
                 return
             try:
                 action()
             except BaseException as rollback_exc:
-                rollback_failures.append(f"{label}: {rollback_exc}")
+                rollback_incomplete = True
+                composer.record_rollback_action(
+                    failure_id=rollback_exc.failure_id if isinstance(rollback_exc, LifecycleError) else "WI-BUG-DISPOSITIONS-ROLLBACK",
+                    resource=paths[0].relative_to(root).as_posix() if paths else None,
+                    diagnostic=label, cause=rollback_exc)
 
         if receipt_path.exists():
             def remove_receipt():
@@ -11967,25 +12825,30 @@ def _close_item_directory(
                     if receipt_capture is None:
                         raise LifecycleError("WI-CLOSE-LINK-DRIFT", "owned URI receipt image unavailable")
                     _verify_captured_file(receipt_capture, "WI-CLOSE-LINK-DRIFT")
-                receipt_path.unlink()
+                held.restore_owned_file(receipt_path, None)
             attempt("remove receipt", remove_receipt, receipt_path)
         if item_moved and target.exists() and not active.exists():
-            attempt("restore active item", lambda: _replace_lifecycle_directory(target, active), target, active)
+            attempt("restore active item", lambda: held.restore_owned_movement(target, active), target, active)
         if active.is_dir():
             restored_closure = active / "closure.md"
             restored_status = active / "status.md"
             if prior_closure is None:
                 if restored_closure.exists():
-                    attempt("remove closure", restored_closure.unlink, restored_closure)
+                    attempt("remove closure", lambda: held.restore_owned_file(restored_closure, None), restored_closure)
             else:
                 attempt(
                     "restore closure",
-                    lambda: _atomic_write(restored_closure, prior_closure),
+                    lambda: held.restore_owned_file(restored_closure, prior_closure),
                     restored_closure,
                 )
-            attempt("restore status", lambda: _atomic_write(restored_status, prior_status), restored_status)
+            attempt("restore status", lambda: held.restore_owned_file(restored_status, prior_status), restored_status)
         elif not _lifecycle_cleanup_intersects_unsettled(active):
-            rollback_failures.append("restore active item: active directory is unavailable")
+            rollback_incomplete = True
+            composer.record_rollback_action(failure_id="WI-BUG-DISPOSITIONS-ROLLBACK",
+                resource=active.relative_to(root).as_posix(),
+                diagnostic="restore active item: active directory is unavailable")
+        else:
+            rollback_incomplete = True
         for plan in reversed(touched_bugs):
             assert plan.target is not None
             def restore_bug(plan=plan):
@@ -12008,13 +12871,10 @@ def _close_item_directory(
                     if _read_lifecycle_image(plan.source, plan.before, plan.after,
                                              failure_id=failure_id) is not None:
                         raise LifecycleError(failure_id, "bug rollback source is occupied")
-                    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
-                    inverse = transaction.prepare_owned_effect(plan, plan.target, plan.source, data=plan.after)
-                    os.replace(plan.target, plan.source)
+                    held.restore_owned_movement(plan.target, plan.source)
                     source_capture = _capture_file_snapshot(plan.source, failure_id=failure_id)
                     if source_capture.identity != target_capture.identity:
                         raise LifecycleError(failure_id, "restored bug identity differs")
-                    transaction.publish_owned_effect(inverse, native_identity=source_capture.identity)
                 else:
                     if source_image == plan.before:
                         return  # No published postimage, or already restored.
@@ -12026,7 +12886,7 @@ def _close_item_directory(
                 if source_capture.data != plan.after:
                     raise LifecycleError(failure_id, "bug rollback source changed")
                 _verify_captured_file(source_capture, failure_id)
-                _atomic_write(plan.source, plan.before)
+                held.restore_owned_file(plan.source, plan.before)
             attempt(f"restore bug {plan.bug_id}", restore_bug, plan.source, plan.target)
         for row in reversed(touched_links):
             def restore_link(row=row):
@@ -12037,40 +12897,38 @@ def _close_item_directory(
                         return
                     raise LifecycleError("WI-CLOSE-LINK-DRIFT", "owned URI image unavailable")
                 _verify_captured_file(capture, "WI-CLOSE-LINK-DRIFT")
-                _atomic_write(row["path"], row["before"])
+                held.restore_owned_file(row["path"], row["before"])
             attempt(f"restore URI consumer {row['pathRelative']}", restore_link, row["path"])
         if readme_existed:
-            attempt("restore README", lambda: _atomic_write(readme, readme_before), readme)
+            attempt("restore README", lambda: held.restore_owned_file(readme, readme_before), readme)
         elif readme.exists():
             def remove_generated_readme():
                 transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
                 expected = transaction._retained_observations.get(readme)
                 if not isinstance(expected, CapturedFileSnapshot):
                     raise LifecycleError("WI-BUG-DISPOSITIONS-ROLLBACK", "generated README has no retained native proof")
-                with _legacy_compensation_parent(readme) as owner:
-                    image = owner.owned_image()
-                    if image is None or image["identity"]["value"] != list(expected.identity) or _unb64(image["data"]) != expected.data:
-                        raise LifecycleError("WI-BUG-DISPOSITIONS-ROLLBACK", "generated README changed")
-                    owner.remove_owned(readme.name, image)
+                held.restore_owned_file(readme, None)
             attempt("remove generated README", remove_generated_readme, readme)
-        for directory in reversed(created_dirs):
+        for record in reversed(created_dirs):
+            directory = record.locator
             if _lifecycle_cleanup_intersects_unsettled(directory):
+                rollback_incomplete = True
                 continue
-            def remove_created_directory(directory=directory):
-                transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
-                original = transaction._retained_observations.get(directory)
-                if not isinstance(original, CapturedDirectorySnapshotV1):
-                    raise LifecycleError("WI-BUG-DISPOSITIONS-ROLLBACK", "created directory has no current native proof")
-                _verify_owned_directory_snapshot(original, "WI-BUG-DISPOSITIONS-ROLLBACK")
-                removal = transaction.prepare_owned_effect(transaction, directory, None, directory=True)
-                directory.rmdir()
-                transaction.publish_owned_effect(removal, native_identity=_lifecycle_file_identity(original.metadata))
+            if not record.creation_published:
+                continue  # The native creator already owns unpublished abort.
+            def remove_created_directory(record=record):
+                LifecycleWriteTarget.remove_created_directory(record, _CURRENT_LIFECYCLE_TRANSACTION.get(),
+                    failure_id="WI-BUG-DISPOSITIONS-ROLLBACK")
             attempt("remove created directory", remove_created_directory, directory)
-        if rollback_failures:
-            raise _bug_disposition_fail(
+        composer.set_rollback("incomplete" if rollback_incomplete else "completed")
+        if len(composer.rollback_actions) != first_rollback_action:
+            outward = _bug_disposition_fail(
                 "WI-BUG-DISPOSITIONS-ROLLBACK",
-                "bug disposition rollback failed: " + "; ".join(rollback_failures),
-            ) from exc
+                "bug disposition rollback failed: " + composer.rollback_message(first_rollback_action),
+            )
+            outward.__cause__ = exc
+            composer.designate_outward_failure(outward)
+            raise outward from exc
         raise
     _settle_scratch_dispositions(root, scratch_plan)
     return target
@@ -13627,31 +14485,31 @@ def _precompute_single_bug_readme_sha256(
     work_items = _work_items_root(root)
     repository = work_items.parent
     static_guide = _static_guide(work_items / "README.md")
-    with tempfile.TemporaryDirectory(prefix="single-bug-readme-") as directory:
-        shadow_root = Path(directory)
-        shadow_work_items = shadow_root / "work-items"
-        shutil.copytree(work_items, shadow_work_items, symlinks=True)
+    transaction_token = _CURRENT_LIFECYCLE_TRANSACTION.set(None)
+    composer_token = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.set(None)
+    try:
+        with tempfile.TemporaryDirectory(prefix="single-bug-readme-") as directory:
+            shadow_root = Path(directory)
+            shadow_work_items = shadow_root / "work-items"
+            shutil.copytree(work_items, shadow_work_items, symlinks=True)
 
-        def shadow(path: Path) -> Path:
-            return shadow_root / path.relative_to(repository)
+            def shadow(path: Path) -> Path:
+                return shadow_root / path.relative_to(repository)
 
-        for plan in links:
-            _atomic_write(shadow(plan["path"]), plan["after"])
-        shadow_source = shadow(source)
-        shadow_archive = shadow(archive)
-        _atomic_write(shadow_source, source_after)
-        shadow_archive.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(shadow_source, shadow_archive)
-        transaction_token = _CURRENT_LIFECYCLE_TRANSACTION.set(None)
-        composer_token = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.set(None)
-        try:
+            for plan in links:
+                _atomic_write(shadow(plan["path"]), plan["after"])
+            shadow_source = shadow(source)
+            shadow_archive = shadow(archive)
+            _atomic_write(shadow_source, source_after)
+            shadow_archive.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(shadow_source, shadow_archive)
             rendered = render_readme_bytes(
                 shadow_root, static_guide_override=static_guide
             )
-        finally:
-            _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(composer_token)
-            _CURRENT_LIFECYCLE_TRANSACTION.reset(transaction_token)
         return _sha256_bytes(rendered)
+    finally:
+        _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(composer_token)
+        _CURRENT_LIFECYCLE_TRANSACTION.reset(transaction_token)
 
 
 def _bug_supersession_receipt_payload(
@@ -13997,7 +14855,7 @@ def _apply_single_bug_transition(
         raise LifecycleError(rollback_id, f"injected {failpoint}2")
     if transaction is not None:
         transaction.verify()
-    archive.parent.mkdir(parents=True, exist_ok=True)
+    LifecycleWriteTarget.make_directories(archive.parent, transaction)
     _replace_lifecycle_directory(source, archive, directory=False)
     if inject_failure_at == f"{failpoint}3":
         raise LifecycleError(forward_id, f"injected {failpoint}3")
@@ -14576,7 +15434,7 @@ def _recover_single_bug_transition(
         source_before,
         source_after,
         failure_id=failure_id,
-    )
+    retain=True)
     source_exists = current_source is not None
     archive_exists = archive.is_file()
     if source_exists:
@@ -14591,7 +15449,7 @@ def _recover_single_bug_transition(
                 row["before"],
                 row["after"],
                 failure_id=failure_id,
-            ) not in {
+            retain=True) not in {
                 row["before"], row["after"]
             }:
                 raise LifecycleError(
@@ -14604,7 +15462,7 @@ def _recover_single_bug_transition(
             receipt_after,
             failure_id=failure_id,
             require_single_link=True,
-        )
+        retain=True)
         if current_receipt not in {receipt_before, receipt_after}:
             raise LifecycleError(
                 rollback_id,
@@ -14614,10 +15472,10 @@ def _recover_single_bug_transition(
             _atomic_write(row["path"], row["before"])
         _atomic_write(source, source_before)
         if receipt_before is None:
-            receipt.unlink(missing_ok=True)
+            _remove_lifecycle_file(receipt, failure_id=rollback_id, missing_ok=True)
         else:
             _atomic_write(receipt, receipt_before)
-        intent_path.unlink()
+        _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
         return None
     failure_id = forward_id
     if not archive_exists:
@@ -14625,13 +15483,13 @@ def _recover_single_bug_transition(
             forward_id,
             f"{label} commit identity is absent",
         )
-    if _read_lifecycle_image(archive, source_after, failure_id=failure_id) != source_after:
+    if _read_lifecycle_image(archive, source_after, failure_id=failure_id, retain=True) != source_after:
         raise LifecycleError(
             forward_id,
             f"{label} archive image differs",
         )
     for row in links:
-        if _read_lifecycle_image(row["path"], row["after"], failure_id=failure_id) != row["after"]:
+        if _read_lifecycle_image(row["path"], row["after"], failure_id=failure_id, retain=True) != row["after"]:
             raise LifecycleError(
                 forward_id,
                 f"{label} roll-forward link differs: {row['pathRelative']}",
@@ -14642,7 +15500,7 @@ def _recover_single_bug_transition(
         receipt_after,
         failure_id=failure_id,
         require_single_link=True,
-    )
+    retain=True)
     if current_receipt not in {receipt_before, receipt_after}:
         raise LifecycleError(
                 forward_id,
@@ -14678,7 +15536,7 @@ def _recover_single_bug_transition(
         raise LifecycleError(
             forward_id, f"injected {failpoint}6"
         )
-    intent_path.unlink()
+    _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
     if inject_failure_at == f"{failpoint}7":
         raise LifecycleError(
             forward_id, f"injected {failpoint}7"
@@ -14966,6 +15824,8 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
         captured = _read_transition_intent_envelope(root, path)
     payload, snapshot, families = captured
     _verify_captured_file(snapshot, "WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
+    if transaction is not None:
+        transaction.observe_retained_inputs((snapshot,))
     is_v1, is_v2, is_legacy_v2, is_bug_supersession, is_fixed_bug_archive, is_ledger_h1_relocation, is_successor_import, is_legacy_completion = families
     if is_legacy_completion:
         _legacy_validate_intent(root, payload)
@@ -15032,6 +15892,7 @@ def _read_lifecycle_image(
     *known_images: bytes | None,
     failure_id: str,
     require_single_link: bool = False,
+    retain: bool = False,
 ) -> bytes | None:
     """Capture an optional file within its known intent-image length envelope."""
     _lifecycle_reject_unreduced_reparse(
@@ -15046,10 +15907,66 @@ def _read_lifecycle_image(
     maximum_bytes = max(
         (len(image) for image in known_images if image is not None), default=0
     )
-    return _capture_file_snapshot(
+    snapshot = _capture_file_snapshot(
         path, failure_id=failure_id, maximum_bytes=maximum_bytes,
         require_single_link=require_single_link,
-    ).data
+    )
+    if retain and snapshot.data in known_images:
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        if transaction is not None:
+            transaction.observe_retained_inputs((snapshot,))
+    return snapshot.data
+
+
+def _remove_lifecycle_file(path: Path, *, failure_id: str, missing_ok: bool = False, inverse=None) -> None:
+    """Retire a domain-admitted image after one complete physical observation."""
+    path = _lifecycle_unresolved_absolute(path)
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if not isinstance(transaction, LifecycleTransaction) or not transaction._locked:
+        raise LifecycleError(failure_id, "owned retirement requires its held repository owner")
+    if inverse is not None:
+        transaction._admit_inverse_mutation(inverse)
+        if (path, None, False) != (inverse.source, inverse.destination, inverse.directory):
+            raise LifecycleError(failure_id, "owned retirement differs from admitted inverse")
+    else:
+        transaction.verify()
+    if not path.is_relative_to(transaction.repository_root):
+        raise LifecycleError(failure_id, "owned retirement escapes its held repository owner")
+    snapshot = transaction._retained_observations.get(path)
+    if snapshot is None:
+        snapshot = next((value if kind == "file" else value[1]
+            for kind, value in transaction.current_binding_evidence if kind in {"file", "intent"}
+            and (value if kind == "file" else value[1]).path == path), None)
+    if snapshot is None and missing_ok and not os.path.lexists(path):
+        absence = ("absent", path)
+        transaction._verify_integrity_constraint(absence,
+            lambda: _verify_project_binding_evidence((absence,), failure_id))
+        return
+    if not isinstance(snapshot, CapturedFileSnapshot):
+        raise LifecycleError(failure_id, "owned retirement lacks its admitted native image")
+    owner = LifecycleWriteTarget(path, failure_id=failure_id, _operation_owner=transaction, inverse=inverse)
+    primary = None
+    try:
+        def observe_image():
+            if inverse is not None:
+                transaction._observe_owned_inverse(inverse)
+            else:
+                _verify_captured_file(snapshot, failure_id)
+            owner._acquire_existing_parents()
+            image = owner.owned_image(maximum_bytes=max(1, snapshot.length))
+            if (image is None or image["identity"]["value"] != list(snapshot.identity)
+                    or _unb64(image["data"]) != snapshot.data):
+                raise LifecycleError(failure_id, "owned retirement native image changed")
+            return image
+        image = transaction._verify_integrity_constraint(
+            inverse if inverse is not None else snapshot, observe_image)
+        owner.remove_owned(path.name, image)
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        owner.__exit__(type(primary) if primary is not None else None, primary,
+            primary.__traceback__ if primary is not None else None)
 
 
 def _ledger_location_proof_object(
@@ -15917,42 +16834,42 @@ def _precompute_transition_readme_sha256(
 ) -> str:
     work_items = _work_items_root(root)
     static_guide = _static_guide(work_items / "README.md")
-    with tempfile.TemporaryDirectory(prefix="work-items-transition-readme-") as directory:
-        shadow_root = Path(directory)
-        shadow_work_items = shadow_root / "work-items"
-        shutil.copytree(work_items, shadow_work_items, symlinks=True)
+    transaction_token = _CURRENT_LIFECYCLE_TRANSACTION.set(None)
+    composer_token = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.set(None)
+    try:
+        with tempfile.TemporaryDirectory(prefix="work-items-transition-readme-") as directory:
+            shadow_root = Path(directory)
+            shadow_work_items = shadow_root / "work-items"
+            shutil.copytree(work_items, shadow_work_items, symlinks=True)
 
-        def shadow(path: Path) -> Path:
-            return shadow_work_items / path.relative_to(work_items)
+            def shadow(path: Path) -> Path:
+                return shadow_work_items / path.relative_to(work_items)
 
-        shadow_active = shadow(active)
-        shadow_archive = shadow(archive)
-        _atomic_write(shadow_active / "status.md", status_after)
-        _atomic_write(shadow_active / "closure.md", closure_after)
-        for plan in plans:
-            source = shadow(plan.source)
-            if plan.action == "terminalize":
-                assert plan.target is not None
-                target = shadow(plan.target)
-                _atomic_write(source, plan.after)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(source, target)
-        for row in links or []:
-            if row["path"] not in {plan.source for plan in plans if plan.action == "terminalize"}:
-                _atomic_write(shadow(row["path"]), row["after"])
-        shadow_archive.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(shadow_active, shadow_archive)
-        _atomic_write(shadow(successor), successor_data)
-        transaction_token = _CURRENT_LIFECYCLE_TRANSACTION.set(None)
-        composer_token = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.set(None)
-        try:
+            shadow_active = shadow(active)
+            shadow_archive = shadow(archive)
+            _atomic_write(shadow_active / "status.md", status_after)
+            _atomic_write(shadow_active / "closure.md", closure_after)
+            for plan in plans:
+                source = shadow(plan.source)
+                if plan.action == "terminalize":
+                    assert plan.target is not None
+                    target = shadow(plan.target)
+                    _atomic_write(source, plan.after)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(source, target)
+            for row in links or []:
+                if row["path"] not in {plan.source for plan in plans if plan.action == "terminalize"}:
+                    _atomic_write(shadow(row["path"]), row["after"])
+            shadow_archive.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(shadow_active, shadow_archive)
+            _atomic_write(shadow(successor), successor_data)
             rendered = render_readme_bytes(
                 shadow_root, static_guide_override=static_guide
             )
-        finally:
-            _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(composer_token)
-            _CURRENT_LIFECYCLE_TRANSACTION.reset(transaction_token)
         return _sha256_bytes(rendered)
+    finally:
+        _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(composer_token)
+        _CURRENT_LIFECYCLE_TRANSACTION.reset(transaction_token)
 
 
 def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) -> dict:
@@ -16110,7 +17027,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
     if active.is_dir():
         _verify_transition_uri_targets(root, intent, archived=False, failure_id=rollback_failure_id)
         for row in uri_images:
-            if _read_lifecycle_image(row["path"], row["before"], row["after"], failure_id=rollback_failure_id) not in {row["before"], row["after"]}:
+            if _read_lifecycle_image(row["path"], row["before"], row["after"], failure_id=rollback_failure_id, retain=True) not in {row["before"], row["after"]}:
                 raise LifecycleError(rollback_failure_id, "URI consumer rollback image differs")
         status = _require_lifecycle_mutation_path(
             root, active / "status.md",
@@ -16129,13 +17046,13 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
             status_before,
             status_after,
             failure_id=rollback_failure_id,
-        )
+        retain=True)
         current_closure = _read_lifecycle_image(
             closure,
             closure_before,
             closure_after,
             failure_id=rollback_failure_id,
-        )
+        retain=True)
         if current_status not in {status_before, status_after} or current_closure not in {closure_before, closure_after}:
             raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", "active before-image cannot be proven")
         for plan in plans:
@@ -16144,10 +17061,10 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
                 plan.before,
                 plan.after,
                 failure_id=rollback_failure_id,
-            )
+            retain=True)
             target_image = _read_lifecycle_image(
                 plan.target, plan.after, failure_id=rollback_failure_id,
-            ) if plan.target is not None else None
+            retain=True) if plan.target is not None else None
             if source_image is not None:
                 if target_image is not None or source_image not in {plan.before, plan.after}:
                     raise LifecycleError(rollback_failure_id, f"bug rollback locations differ: {plan.bug_id}")
@@ -16156,14 +17073,14 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
             if source_image == plan.before:
                 continue  # Exact restored/preserved bytes need no write.
             if target_image is not None:
-                plan.source.parent.mkdir(parents=True, exist_ok=True)
+                LifecycleWriteTarget.make_directories(plan.source.parent, _CURRENT_LIFECYCLE_TRANSACTION.get())
                 _replace_lifecycle_directory(plan.target, plan.source, directory=False)
             if _read_lifecycle_image(plan.source, plan.before, plan.after,
-                                     failure_id=rollback_failure_id) not in {plan.before, plan.after}:
+                                     failure_id=rollback_failure_id, retain=True) not in {plan.before, plan.after}:
                 raise LifecycleError(rollback_failure_id, f"bug rollback source changed: {plan.bug_id}")
             _atomic_write(plan.source, plan.before)
         for row in uri_images:
-            observed = _read_lifecycle_image(row["path"], row["before"], row["after"], failure_id=rollback_failure_id)
+            observed = _read_lifecycle_image(row["path"], row["before"], row["after"], failure_id=rollback_failure_id, retain=True)
             if observed not in {row["before"], row["after"]}:
                 raise LifecycleError(rollback_failure_id, "URI consumer changed before rollback")
             if observed == row["after"]:
@@ -16174,7 +17091,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
             bug_receipt_after,
             failure_id=rollback_failure_id,
             require_single_link=True,
-        )
+        retain=True)
         if current_bug_receipt not in {bug_receipt_before, bug_receipt_after}:
             raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", "bug receipt before-image differs")
         _atomic_write(status, status_before)
@@ -16182,14 +17099,14 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
             _require_lifecycle_mutation_path(
                 root, closure, failure_id="WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE"
             )
-            closure.unlink(missing_ok=True)
+            _remove_lifecycle_file(closure, failure_id=rollback_failure_id, missing_ok=True)
         else:
             _atomic_write(closure, closure_before)
         if bug_receipt_before is None:
             _require_lifecycle_mutation_path(
                 root, bug_receipt, failure_id="WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE"
             )
-            bug_receipt.unlink(missing_ok=True)
+            _remove_lifecycle_file(bug_receipt, failure_id=rollback_failure_id, missing_ok=True)
         else:
             _atomic_write(bug_receipt, bug_receipt_before)
         if successor.exists():
@@ -16197,13 +17114,13 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
                 successor,
                 successor_data,
                 failure_id=rollback_failure_id,
-            ) != successor_data:
+            retain=True) != successor_data:
                 raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", "unexpected successor bytes")
-            successor.unlink()
+            _remove_lifecycle_file(successor, failure_id=rollback_failure_id)
         _require_lifecycle_mutation_path(
             root, intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
         )
-        intent_path.unlink()
+        _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
         return None
     if not archive.is_dir():
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "intent has neither active nor archive identity")
@@ -16211,11 +17128,11 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         archive / "status.md",
         status_after,
         failure_id=forward_failure_id,
-    ) != status_after or _read_lifecycle_image(
+    retain=True) != status_after or _read_lifecycle_image(
         archive / "closure.md",
         closure_after,
         failure_id=forward_failure_id,
-    ) != closure_after:
+    retain=True) != closure_after:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "archive identity differs")
     archived_bug_receipt = archive / BUG_DISPOSITIONS_RECEIPT
     archived_bug_receipt = _require_lifecycle_mutation_path(
@@ -16227,7 +17144,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         bug_receipt_after,
         failure_id=forward_failure_id,
         require_single_link=True,
-    ) != bug_receipt_after:
+    retain=True) != bug_receipt_after:
         raise LifecycleError(
             "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
             "pre-archive bug receipt is missing or changed",
@@ -16238,15 +17155,15 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
     for plan in plans:
         if plan.source not in uri_selected:
             continue
-        source_image = _read_lifecycle_image(plan.source, plan.before, plan.after, failure_id=forward_failure_id)
-        target_image = _read_lifecycle_image(plan.target, plan.after, failure_id=forward_failure_id) if plan.target is not None else None
+        source_image = _read_lifecycle_image(plan.source, plan.before, plan.after, failure_id=forward_failure_id, retain=True)
+        target_image = _read_lifecycle_image(plan.target, plan.after, failure_id=forward_failure_id, retain=True) if plan.target is not None else None
         if plan.target is not None:
             if source_image is not None:
                 if target_image is not None or source_image not in {plan.before, plan.after}:
                     raise LifecycleError(forward_failure_id, "URI bug forward locations differ")
                 if source_image == plan.before:
                     _atomic_write(plan.source, plan.after)
-                plan.target.parent.mkdir(parents=True, exist_ok=True)
+                LifecycleWriteTarget.make_directories(plan.target.parent, _CURRENT_LIFECYCLE_TRANSACTION.get())
                 _replace_lifecycle_directory(plan.source, plan.target, directory=False)
             elif target_image != plan.after:
                 raise LifecycleError(forward_failure_id, "URI bug forward target differs")
@@ -16256,7 +17173,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
             if source_image == plan.before:
                 _atomic_write(plan.source, plan.after)
     for row in uri_images:
-        observed = _read_lifecycle_image(row["target"], row["before"], row["after"], failure_id=forward_failure_id)
+        observed = _read_lifecycle_image(row["target"], row["before"], row["after"], failure_id=forward_failure_id, retain=True)
         if observed not in {row["before"], row["after"]}:
             raise LifecycleError(forward_failure_id, "URI consumer forward image differs")
         if observed == row["before"]:
@@ -16266,7 +17183,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
             successor,
             successor_data,
             failure_id=forward_failure_id,
-        ) != successor_data:
+        retain=True) != successor_data:
             raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "successor bytes differ")
     else:
         _atomic_write(successor, successor_data)
@@ -16274,7 +17191,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "injected T4")
     _verify_transition_uri_targets(root, intent, archived=True, failure_id=forward_failure_id)
     for row in uri_images:
-        if _read_lifecycle_image(row["target"], row["after"], failure_id=forward_failure_id) != row["after"]:
+        if _read_lifecycle_image(row["target"], row["after"], failure_id=forward_failure_id, retain=True) != row["after"]:
             raise LifecycleError(forward_failure_id, "URI consumer readback differs")
     readme_sha = _safe_refresh_readme(root)
     if readme_sha != intent["finalReadmeSha256"]:
@@ -16293,7 +17210,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         receipt_bytes,
         failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
         require_single_link=True,
-    )
+    retain=True)
     if current_receipt not in {None, receipt_bytes}:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt differs")
     receipt_path = _require_lifecycle_mutation_path(
@@ -16311,7 +17228,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
     _require_lifecycle_mutation_path(
         root, intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
     )
-    intent_path.unlink(missing_ok=True)
+    _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
     if inject_failure_at in {"T8", "T9"}:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", f"injected {inject_failure_at}")
     return settlement
@@ -16374,6 +17291,7 @@ def archive_with_successor(
     inject_failure_at: str | None = None,
     allow_protected_uri_updates: bool = False,
 ) -> dict:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
     _validate_slug(successor_slug)
     expected_ledger_sha256 = _normalize_sha256_input(expected_ledger_sha256)
     expected_readme_sha256 = _normalize_sha256_input(expected_readme_sha256)
@@ -16598,7 +17516,7 @@ def archive_with_successor(
         if plan.action == "terminalize":
             _atomic_write(plan_source, plan.after)
             assert plan_target is not None
-            plan_target.parent.mkdir(parents=True, exist_ok=True)
+            LifecycleWriteTarget.make_directories(plan_target.parent, transaction)
             _replace_lifecycle_directory(plan_source, plan_target, directory=False)
     terminalized = {plan.source for plan in bug_plans if plan.action == "terminalize"}
     for row in link_plan["links"]:
@@ -16617,7 +17535,7 @@ def archive_with_successor(
     _transition_fsync_directory(bug_receipt_path.parent)
     if inject_failure_at == "T2":
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", "injected T2")
-    archive.parent.mkdir(parents=True, exist_ok=True)
+    LifecycleWriteTarget.make_directories(archive.parent, transaction)
     _replace_lifecycle_directory(active, archive)
     if inject_failure_at == "T3":
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", "injected T3")
@@ -17159,11 +18077,11 @@ def normalize_current_identity(
                 _atomic_write(path, before)
             if readme_before is None:
                 if readme.exists():
-                    readme.unlink()
+                    _restore_readme_snapshot(readme, None)
             else:
                 _atomic_write(readme, readme_before)
             if receipt.exists():
-                receipt.unlink()
+                _CURRENT_LIFECYCLE_TRANSACTION.get().restore_owned_file(receipt, None)
         except BaseException as rollback_exc:
             raise _normalization_fail(
                 "WI-IDENTITY-NORMALIZE-ROLLBACK", f"rollback failed: {rollback_exc}"
@@ -17540,7 +18458,7 @@ def _migrate_v0_decision(root: Path, reference: str, inventory: dict, source: Pa
                 raise ValueError("V0 manifest rollback preimage changed")
             if readme_before is None:
                 if readme_attempted and readme.exists():
-                    readme.unlink()
+                    _restore_readme_snapshot(readme, None)
             elif readme.read_bytes() != readme_before:
                 _atomic_write(readme, readme_before)
             if archive.is_file() and not source.exists() and archive.read_bytes() == source_before:
@@ -18591,13 +19509,13 @@ def _verify_captured_file(snapshot: CapturedFileSnapshot, failure_id: str, *, ac
         )
 
 
-def _capture_directory_snapshot(path: Path, *, failure_id: str) -> CapturedDirectorySnapshotV1:
+def _capture_directory_snapshot(path: Path, *, failure_id: str, inverse=None) -> CapturedDirectorySnapshotV1:
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
     if transaction is not None:
-        transaction.verify()
+        transaction.verify(inverse=inverse)
     snapshot = _capture_owned_directory_snapshot(path, failure_id=failure_id)
     if transaction is not None:
-        transaction.verify()
+        transaction.verify(inverse=inverse)
     return snapshot
 
 
@@ -18733,13 +19651,13 @@ def _capture_owned_directory_snapshot(path: Path, *, failure_id: str, creation_o
                     object.__setattr__(movement, "observation_owner", None)
 
 
-def _verify_captured_directory(snapshot: CapturedDirectorySnapshotV1, failure_id: str):
+def _verify_captured_directory(snapshot: CapturedDirectorySnapshotV1, failure_id: str, *, inverse=None):
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
     if transaction is not None:
-        transaction.verify()
+        transaction.verify(inverse=inverse)
     _verify_owned_directory_snapshot(snapshot, failure_id)
     if transaction is not None:
-        transaction.verify()
+        transaction.verify(inverse=inverse)
 
 
 def _verify_owned_directory_snapshot(snapshot: CapturedDirectorySnapshotV1, failure_id: str, *, creation_owner=None):
@@ -19726,8 +20644,8 @@ def terminalize_v1_inventory(
                 )
         if receipt.exists():
             try:
-                receipt.unlink()
-            except OSError as rollback_exc:
+                _CURRENT_LIFECYCLE_TRANSACTION.get().restore_owned_file(receipt, None)
+            except (OSError, LifecycleError) as rollback_exc:
                 rollback_failures.append(f"receipt: {rollback_exc}")
         if rollback_failures:
             raise _terminalization_fail(
@@ -25564,7 +26482,7 @@ def _ledger_h1_restore_before_receipt(
             "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
             "H1 rollback target base is not empty",
         ) from exc
-    intent_path.unlink(missing_ok=True)
+    _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
     _transition_fsync_directory(intent_path.parent)
 
 
@@ -25649,7 +26567,7 @@ def _recover_ledger_h1_artifact_set_relocation(
                     "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
                     "root-only H1 recovery target is not empty",
                 ) from exc
-        intent_path.unlink()
+        _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
         _transition_fsync_directory(intent_path.parent)
         return None
     if _ledger_h1_lexically_exists(receipt_path) and source_count:
@@ -25694,7 +26612,7 @@ def _recover_ledger_h1_artifact_set_relocation(
             "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
             "H1 recovery settlement cannot be proven",
         )
-    intent_path.unlink(missing_ok=True)
+    _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
     _transition_fsync_directory(intent_path.parent)
     return {
         "schemaVersion": 1,
@@ -25846,7 +26764,7 @@ def _relocate_ledger_h1_artifact_set_locked(
                 "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
                 "H1 relocation settlement cannot be proven",
             )
-        intent_path.unlink()
+        _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
         _transition_fsync_directory(intent_path.parent)
         return _ledger_h1_relocation_result(
             plan,
@@ -26819,7 +27737,7 @@ def _recover_successor_import(root: Path, intent_path: Path, intent: dict) -> di
             if stage_root.exists():
                 _remove_scratch_tree(stage_root)
             _successor_import_release_stage_parent(stage_root)
-            intent_path.unlink()
+            _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
             return settled
         source_here = source.is_dir()
         hold_here = hold.is_dir()
@@ -26860,7 +27778,7 @@ def _recover_successor_import(root: Path, intent_path: Path, intent: dict) -> di
         if stage_root.exists():
             _remove_scratch_tree(stage_root)
         _successor_import_release_stage_parent(stage_root)
-        intent_path.unlink()
+        _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
         _successor_import_source_bytes(source, plan, failure)
         return None
     except BaseException as exc:

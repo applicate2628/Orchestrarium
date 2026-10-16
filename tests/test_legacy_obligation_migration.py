@@ -1369,7 +1369,7 @@ def test_archive_with_successor_crash_matrix(tmp_path: Path, capsys) -> None:
         fresh = load_script(LIFECYCLE, f"transition_recovery_{boundary}")
         fixture["lifecycle"] = fresh
         if boundary in {"T0", "T1", "T2"}:
-            fresh._recover_all_transitions(fixture["root"])
+            fresh.recover_transition(fixture["root"], fixture["operationId"])
             assert fixture["item"].is_dir()
             assert not (fixture["root"] / "work-items" / "backlog" / f"{fixture['successorSlug']}.md").exists()
         result = run_transition(fixture)
@@ -2169,7 +2169,7 @@ def test_archive_with_successor_transfer_preserves_ledger_bytes_crash_recovery_a
         fresh = load_script(LIFECYCLE, f"transfer_recovery_{boundary}")
         fixture["lifecycle"] = fresh
         if boundary in {"T0", "T1", "T2"}:
-            fresh._recover_all_transitions(fixture["root"])
+            fresh.recover_transition(fixture["root"], fixture["operationId"])
             assert fixture["item"].is_dir()
         first = run_transfer(fixture)
         archive = (
