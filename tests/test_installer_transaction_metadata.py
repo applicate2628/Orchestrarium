@@ -23,6 +23,237 @@ SPEC.loader.exec_module(PI)
 
 
 class CopyMetadataTests(unittest.TestCase):
+    def native_observed_then_later_atime(self, *, restored=False, forward_result=True):
+        """Actual result, never an expected-value echo; intervention is synthetic."""
+        if os.name != "nt":
+            self.skipTest("same-handle native assignment receiving")
+        if restored:
+            os.utime(self.target, ns=(1_650_000_000_123_456_700, 1_650_000_000_223_456_700))
+        tx = PI._InstallTransaction([], enabled=False)
+        node = tx._capture_node(self.target)
+        with tx._copy_reference(self.target, node, metadata_only=True) as (descriptor, bound):
+            current = tx._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
+        desired = PI._CopyMetadataImage(
+            1_600_000_000_123_456_700 if restored else 1_650_000_000_123_456_700,
+            1_600_000_000_223_456_700 if restored else 1_650_000_000_223_456_700,
+            current.flags, current.xattrs)
+        participant = PI._CopyMetadataParticipant(node, desired if restored else current, current)
+        before = participant.before
+        real = PI._WindowsBoundNode.set_copy_times
+        observations, records = [], []
+        def operation(bound, atime, mtime):
+            result = real(bound, atime, mtime)
+            observed = bound.basic()
+            epoch = 116444736000000000
+            pair = ((observed.access-epoch)*100, (observed.write-epoch)*100)
+            self.assertEqual(pair, (atime//100*100, mtime//100*100))
+            observations.append(pair)
+            # Deliberately change only atime AFTER the full assignment observation.
+            real(bound, current.atime_ns, mtime)
+            return result if forward_result else None
+        def record(path, image):
+            records.append((tx._copy_current[path], participant.unknown))
+        with patch.object(PI._WindowsBoundNode, "set_copy_times", operation):
+            if forward_result:
+                value = tx._apply_copy_metadata(self.target, node, desired,
+                    stat.S_IMODE(node.python_identity[2]), record, participant, restored=restored)
+                self.assertEqual(value.stable(), desired.stable())
+                self.assertEqual(value.atime_ns, current.atime_ns)
+                self.assertIs(participant.current, value)
+                self.assertIs(participant.restored, value if restored else None)
+                self.assertFalse(participant.unknown)
+                self.assertEqual(len(records), 2)
+                self.assertTrue(all(unknown for _image, unknown in records))
+            else:
+                with self.assertRaisesRegex(ValueError, "unknown copy setter effect"):
+                    tx._apply_copy_metadata(self.target, node, desired,
+                        stat.S_IMODE(node.python_identity[2]), record, participant, restored=restored)
+                self.assertTrue(participant.unknown)
+                self.assertEqual(records, [])
+        self.assertEqual(len(observations), 1)
+        self.assertIs(participant.before, before)
+
+    def test_native_assignment_observation_accepts_later_atime_forward(self):
+        self.native_observed_then_later_atime()
+
+    def test_native_assignment_observation_accepts_later_atime_inverse(self):
+        self.native_observed_then_later_atime(restored=True)
+
+    def test_dropped_native_assignment_result_keeps_strict_full_image(self):
+        self.native_observed_then_later_atime(forward_result=False)
+
+    def test_native_assignment_observation_is_actual_for_zero_and_equal_inputs(self):
+        if os.name != "nt":
+            self.skipTest("native timestamp observation")
+        with PI._WindowsBoundNode(self.target, purpose="attributes") as bound:
+            for pair in ((0, 0), (0, 0), (1_650_000_000_123_456_773, 1_650_000_000_223_456_873)):
+                with self.subTest(pair=pair):
+                    result = bound.set_copy_times(*pair)
+                    self.assertIs(type(result), bound._api()[4])
+                    observed = bound.basic()
+                    self.assertEqual((result.access, result.write), (observed.access, observed.write))
+                    epoch = 116444736000000000
+                    self.assertEqual(((result.access-epoch)*100, (result.write-epoch)*100),
+                                     (pair[0]//100*100, pair[1]//100*100))
+
+    def test_partial_assignment_result_cannot_be_laundered_by_later_complete_pair(self):
+        if os.name != "nt":
+            self.skipTest("native timestamp observation")
+        current = PI._CopyMetadataImage(self.before.st_atime_ns, self.before.st_mtime_ns, None, None)
+        desired = replace(current, atime_ns=1_650_000_000_123_456_700, mtime_ns=1_650_000_000_223_456_700)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        real = PI._WindowsBoundNode.set_copy_times
+        def partial(bound, atime, mtime):
+            observed = real(bound, current.atime_ns, mtime)
+            real(bound, atime, mtime)  # A later complete image cannot repair the partial operation proof.
+            return observed
+        with patch.object(PI._WindowsBoundNode, "set_copy_times", partial):
+            with self.assertRaisesRegex(ValueError, "unknown copy setter effect"):
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        self.assertTrue(participant.unknown)
+        self.assertEqual(records, [])
+
+    def test_actual_current_assignment_observation_is_known_but_unmet(self):
+        if os.name != "nt":
+            self.skipTest("native timestamp observation")
+        current = PI._CopyMetadataImage(self.before.st_atime_ns, self.before.st_mtime_ns, None, None)
+        desired = replace(current, atime_ns=1_650_000_000_123_456_700, mtime_ns=1_650_000_000_223_456_700)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        with patch.object(PI._WindowsBoundNode, "set_copy_times", lambda bound, *_args: bound.basic()):
+            with self.assertRaisesRegex(ValueError, "copy metadata readback"):
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        self.assertFalse(participant.unknown)
+        self.assertEqual(len(records), 1)
+
+    def test_malformed_result_never_grants_later_atime_exemption(self):
+        if os.name != "nt":
+            self.skipTest("native timestamp observation")
+        real = PI._WindowsBoundNode.set_copy_times
+        for malformed in (0, True, (1_650_000_000_123_456_700, 1_650_000_000_223_456_700)):
+            with self.subTest(result=malformed):
+                os.utime(self.target, ns=(self.before.st_atime_ns, self.before.st_mtime_ns))
+                current = PI._CopyMetadataImage(self.before.st_atime_ns, self.before.st_mtime_ns, None, None)
+                desired = replace(current, atime_ns=1_650_000_000_123_456_700, mtime_ns=1_650_000_000_223_456_700)
+                tx, node, participant, records, record = self.diagnostic_case(current)
+                def operation(bound, atime, mtime):
+                    real(bound, atime, mtime)
+                    real(bound, current.atime_ns, mtime)
+                    return malformed
+                with patch.object(PI._WindowsBoundNode, "set_copy_times", operation):
+                    with self.assertRaisesRegex(ValueError, "copy timestamp observation"):
+                        tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+                self.assertTrue(participant.unknown)
+                self.assertEqual(records, [])
+
+    def test_native_assignment_observation_error_keeps_primary_and_known_prefix(self):
+        if os.name != "nt":
+            self.skipTest("native timestamp observation")
+        current = PI._CopyMetadataImage(self.before.st_atime_ns, self.before.st_mtime_ns, None, None)
+        desired = replace(current, atime_ns=1_650_000_000_123_456_700, mtime_ns=1_650_000_000_223_456_700)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        primary = OSError(errno.EIO, "native-observation-unavailable")
+        primary.__cause__ = ValueError("original-cause")
+        before_chain = primary.args, primary.__cause__
+        basic = PI._WindowsBoundNode.basic
+        inside = []
+        def observation(bound):
+            if sys._getframe(1).f_code.co_name == "set_copy_times":
+                inside.append(True)
+                if len(inside) == 2:
+                    raise primary
+            return basic(bound)
+        with patch.object(PI._WindowsBoundNode, "basic", observation):
+            with self.assertRaises(OSError) as caught:
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        self.assertIs(caught.exception, primary)
+        self.assertEqual((primary.args, primary.__cause__), before_chain)
+        self.assertEqual(len(records), 1)
+        self.assertFalse(participant.unknown)
+        self.assertEqual(PI._copy_setter_detail(primary).stage, "operation")
+        self.assertEqual(PI._copy_setter_operation_errors(primary), ())
+
+    def test_proved_assignment_rejects_later_old_mtime(self):
+        if os.name != "nt":
+            self.skipTest("native timestamp observation")
+        current = PI._CopyMetadataImage(self.before.st_atime_ns, self.before.st_mtime_ns, None, None)
+        desired = replace(current, atime_ns=1_650_000_000_123_456_700, mtime_ns=1_650_000_000_223_456_700)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        real = PI._WindowsBoundNode.set_copy_times
+        def changed(bound, atime, mtime):
+            observed = real(bound, atime, mtime)
+            real(bound, atime, current.mtime_ns)
+            return observed
+        with patch.object(PI._WindowsBoundNode, "set_copy_times", changed):
+            with self.assertRaisesRegex(ValueError, "unknown copy setter effect"):
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        self.assertTrue(participant.unknown)
+        self.assertEqual(records, [])
+
+    def public_copy_with_assignment_observation(self, *, inverse):
+        if os.name != "nt":
+            self.skipTest("native timestamp observation")
+        real = PI._WindowsBoundNode.set_copy_times
+        calls = []
+        def later(bound, atime, mtime):
+            observed = real(bound, atime, mtime)
+            real(bound, atime+1_000_000_000, mtime)  # Labeled later atime-only intervention.
+            calls.append((atime, mtime))
+            return observed
+        if not inverse:
+            self.source.write_bytes(b"changed synthetic payload")
+        tx = self.transaction()
+        checkpoint = RuntimeError("synthetic-after-copy")
+        with patch.object(PI._WindowsBoundNode, "set_copy_times", later):
+            if inverse:
+                with self.assertRaises(RuntimeError) as caught:
+                    with tx:
+                        self.owner(tx).copy_file(Path("target"), self.source)
+                        raise checkpoint
+                self.assertIs(caught.exception, checkpoint)
+                self.assertEqual(self.target.read_bytes(), b"same")
+                self.assertEqual(self.target.stat().st_mtime_ns, self.before.st_mtime_ns)
+                self.assertEqual(len(calls), 2)
+            else:
+                with tx:
+                    self.owner(tx).copy_file(Path("target"), self.source)
+                    tx.commit()
+                self.assertEqual(self.target.read_bytes(), b"changed synthetic payload")
+                self.assertEqual(self.target.stat().st_mtime_ns, self.source.stat().st_mtime_ns)
+                self.assertEqual(len(calls), 1)
+        self.assertFalse(tx._copy_metadata[self.target].unknown)
+        self.assert_clean()
+
+    def test_public_changed_copy_accepts_actual_observation_then_later_atime(self):
+        self.public_copy_with_assignment_observation(inverse=False)
+
+    def test_public_equal_copy_inverse_accepts_actual_observation_then_later_atime(self):
+        self.public_copy_with_assignment_observation(inverse=True)
+
+    @unittest.skipUnless(os.name != "nt" and os.utime in os.supports_fd,
+                         "requires actual POSIX descriptor timestamp receiving")
+    def test_descriptor_assignment_observation_accepts_later_atime(self):
+        current = PI._CopyMetadataImage(self.before.st_atime_ns, self.before.st_mtime_ns, None, None)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        with tx._copy_reference(self.target, node, metadata_only=True) as (descriptor, bound):
+            current = tx._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
+        desired = replace(current, atime_ns=1_650_000_000_123_456_700, mtime_ns=1_650_000_000_223_456_700)
+        reader = tx._read_copy_metadata
+        observed = []
+        def acquire(metadata, descriptor, bound, **kwargs):
+            actual = reader(metadata, descriptor, bound, **kwargs)
+            if sys._getframe(1).f_code.co_name == "operation":
+                observed.append(actual)
+                os.utime(descriptor, ns=(current.atime_ns, actual.mtime_ns))
+            return actual
+        with patch.object(tx, "_read_copy_metadata", acquire):
+            actual = tx._apply_copy_metadata(self.target, node, desired,
+                stat.S_IMODE(node.python_identity[2]), record, participant)
+        self.assertEqual(len(observed), 1)
+        self.assertEqual((observed[0].atime_ns, observed[0].mtime_ns), (desired.atime_ns, desired.mtime_ns))
+        self.assertEqual(actual.stable(), desired.stable())
+        self.assertEqual(actual.atime_ns, current.atime_ns)
+        self.assertFalse(participant.unknown)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="metadata-test-", dir=ROOT / ".scratch")
         self.addCleanup(self.temporary.cleanup)
@@ -451,7 +682,7 @@ class CopyMetadataTests(unittest.TestCase):
             participant = PI._CopyMetadataParticipant(None, None, None, target_text=f"PRIVATE_inverse_target_{index}")
             PI._CopySetterDiagnostic.attach(error, "timestamps", True, "comparison", index + 1,
                                            current, projected, identity, identity, actual, identity, participant=participant)
-            _paths, received = PI._InstallTransaction._settlement_failure(error, "snapshot", index,
+            _paths, received, _retained_errors = PI._InstallTransaction._settlement_failure(error, "snapshot", index,
                                                                          Path(f"member-{index:02}"), "E_MEMBER")
             members.extend(received)
             contexts.append(PI._copy_setter_detail(error))
@@ -657,15 +888,22 @@ class CopyMetadataTests(unittest.TestCase):
         desired = PI._CopyMetadataImage(300, 400, None, None)
         tx, node, participant, records, record = self.diagnostic_case(current)
         operation = OSError(errno.EIO, "operation-first")
+        operation.__cause__ = RuntimeError("kept-operation-cause")
+        operation.__context__ = ValueError("kept-operation-context")
+        operation_chain = (operation.args, operation.__cause__, operation.__context__, operation.__suppress_context__)
         primary = OSError(errno.EIO, "metadata-acquisition")
         primary.__cause__ = RuntimeError("kept-cause")
-        chain = (primary.args, primary.__cause__, primary.__context__)
+        chain = (primary.args, primary.__cause__, primary.__context__, primary.__suppress_context__)
         with patch.object(PI._WindowsBoundNode, "set_copy_times", side_effect=operation), \
                 patch.object(tx, "_read_copy_metadata", side_effect=[current, primary]):
             with self.assertRaises(OSError) as caught:
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         self.assertIs(caught.exception, primary)
-        self.assertEqual((primary.args, primary.__cause__, primary.__context__), chain)
+        self.assertEqual((primary.args, primary.__cause__, primary.__context__, primary.__suppress_context__), chain)
+        self.assertEqual((operation.args, operation.__cause__, operation.__context__, operation.__suppress_context__), operation_chain)
+        retained = PI._copy_setter_operation_errors(primary)
+        self.assertEqual(len(retained), 1)
+        self.assertIs(retained[0], operation)
         context = PI._copy_setter_detail(primary)
         self.assertEqual(context.stage, "metadata-acquisition")
         self.assertIsNone(context.metadata_current)
@@ -673,6 +911,274 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertIsNone(context.metadata_vs_current)
         self.assertTrue(participant.unknown)
         self.assertEqual(records, [])
+
+    def test_compound_identity_and_record_keep_actual_errors_and_completed_prefix(self):
+        current = PI._CopyMetadataImage(100, 200, None, None)
+        desired = PI._CopyMetadataImage(300, 400, None, None)
+        for stage in ("identity", "record"):
+            with self.subTest(stage=stage):
+                tx, node, participant, records, record = self.diagnostic_case(current)
+                operation = OSError(errno.EIO, "PRIVATE-earlier-operation")
+                operation.__cause__ = ValueError("PRIVATE-earlier-cause")
+                operation.__context__ = RuntimeError("PRIVATE-earlier-context")
+                later = OSError(errno.EIO, "later-" + stage)
+                later.__cause__ = ValueError("kept-later-cause")
+                later.__context__ = RuntimeError("kept-later-context")
+                earlier_chain = (operation.args, operation.__cause__, operation.__context__, operation.__suppress_context__)
+                later_chain = (later.args, later.__cause__, later.__context__, later.__suppress_context__)
+                if stage == "record":
+                    def record(path, value):
+                        records.append((path, value, participant.unknown))
+                        raise later
+                with patch.object(PI._WindowsBoundNode, "set_copy_times", side_effect=operation), \
+                        patch.object(tx, "_read_copy_metadata", side_effect=[current, desired]), \
+                        patch.object(tx, "_capture_node", side_effect=later if stage == "identity" else None,
+                                     return_value=node):
+                    with self.assertRaises(OSError) as caught:
+                        tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]),
+                                                record, participant)
+                self.assertIs(caught.exception, later)
+                retained = PI._copy_setter_operation_errors(later)
+                self.assertEqual(len(retained), 1)
+                self.assertIs(retained[0], operation)
+                self.assertEqual((later.args, later.__cause__, later.__context__, later.__suppress_context__), later_chain)
+                self.assertEqual((operation.args, operation.__cause__, operation.__context__, operation.__suppress_context__), earlier_chain)
+                self.assertTrue(participant.unknown)
+                self.assertIs(participant.current, current)
+                self.assertIsNone(participant.restored)
+                if stage == "identity":
+                    self.assertEqual(records, [])
+                    self.assertNotIn(self.target, tx._copy_current)
+                    self.assertEqual(PI._copy_setter_detail(later).stage, "identity-acquisition")
+                else:
+                    self.assertEqual(len(records), 1)
+                    self.assertTrue(records[0][2])
+                    self.assertIs(tx._copy_current[self.target], desired)
+                    self.assertIsNone(PI._copy_setter_detail(later))
+
+    def test_compound_required_errors_survive_unavailable_optional_diagnostic_and_public_transport(self):
+        class NonprimitiveInteger(int):
+            def __eq__(self, _other):
+                raise AssertionError("foreign optional equality")
+        current = PI._CopyMetadataImage(100, 200, NonprimitiveInteger(1), None)
+        desired = replace(current, atime_ns=300, mtime_ns=400)
+        tx, node, participant, records, record = self.diagnostic_case(current)
+        operation = OSError(errno.EIO, "PRIVATE-earlier-operation")
+        operation.__cause__ = ValueError("PRIVATE-earlier-cause")
+        later = OSError(errno.EIO, "later-metadata")
+        later.__cause__ = RuntimeError("kept-later-cause")
+        later.__context__ = ValueError("kept-later-context")
+        chain = (later.args, later.__cause__, later.__context__, later.__suppress_context__)
+        def action():
+            with patch.object(PI._WindowsBoundNode, "set_copy_times", side_effect=operation), \
+                    patch.object(tx, "_read_copy_metadata", side_effect=[current, later]):
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
+        result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], later)
+        self.assertEqual(PI._copy_setter_detail(later), ())
+        self.assertIs(PI._copy_setter_operation_errors(later)[0], operation)
+        self.assertEqual((later.args, later.__cause__, later.__context__, later.__suppress_context__), chain)
+        self.assertIn("copy-setter=unavailable", stderr)
+        self.assertIn("copy-setter-operation-errors=1", stderr)
+        self.assertNotIn("PRIVATE-earlier", stderr)
+        self.assertTrue(participant.unknown)
+        self.assertEqual(records, [])
+
+        wrapped = PI._InstallFailure("E_COMPOUND", "copy", later)
+        self.assertIs(wrapped.cause, later)
+        self.assertIs(PI._copy_setter_operation_errors(wrapped), PI._copy_setter_operation_errors(later))
+        _paths, members, retained_errors = tx._settlement_failure(wrapped, "snapshot", 2, self.target, "E_IGNORED")
+        self.assertEqual(len(members), 1)
+        self.assertIs(members[0].copy_setter_failure, wrapped)
+        self.assertIs(PI._copy_setter_operation_errors(members[0].copy_setter_failure)[0], operation)
+        aggregate = PI._InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "rollback", "public-primary", members=tuple(members))
+        def aggregate_action():
+            raise aggregate
+        result, stderr, escaped = self.through_install(aggregate_action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], aggregate)
+        self.assertIs(aggregate.members[0], members[0])
+        self.assertIn("cleanup-copy-setter-operation-errors=snapshot:2:E_COMPOUND:1", stderr)
+        self.assertNotIn("PRIVATE-earlier", stderr)
+        plain = replace(members[0], copy_setter_failure=None)
+        self.assertEqual(plain, members[0])
+        self.assertEqual(repr(plain), repr(members[0]))
+        _paths, forwarded, retained_errors = tx._settlement_failure(aggregate, "backup", 3, self.target, "E_IGNORED")
+        self.assertIs(forwarded[0], members[0])
+        _paths, ordinary, retained_errors = tx._settlement_failure(later, "snapshot", 4, self.target, "E_PLAIN")
+        self.assertIs(ordinary[0].copy_setter_failure, later)
+        _paths, unrelated, retained_errors = tx._settlement_failure(ValueError("ordinary"), "snapshot", 5, self.target, "E_PLAIN")
+        self.assertIsNone(unrelated[0].copy_setter_failure)
+
+    def test_composite_error_two_forwarding_hops_keep_whole_wrapper_and_members(self):
+        primary = OSError("PRIVATE-earlier-operation")
+        primary.__cause__ = ValueError("PRIVATE-earlier-cause")
+        primary.__context__ = RuntimeError("PRIVATE-earlier-context")
+        later = OSError("later-observation")
+        later.__cause__ = ValueError("later-existing-cause")
+        later.__context__ = RuntimeError("later-existing-context")
+        chains = [(error.args, error.__cause__, error.__context__, error.__suppress_context__)
+                  for error in (primary, later)]
+        PI._retain_copy_setter_operation_errors(later, (primary,))
+        PI._store_copy_setter_detail(later, ())
+        members = (PI._RollbackFailureMember("backup", 7, "synthetic-one", "E_CLOSE_ONE", "close-one"),
+                   PI._RollbackFailureMember("backup", 8, "synthetic-two", "E_CLOSE_TWO", "close-two"))
+        wrapper = PI._InstallFailure("E_COMPOUND", "native-close", later, members=members)
+        _paths, received, errors = PI._InstallTransaction._settlement_failure(
+            wrapper, "snapshot", 9, Path("synthetic-target"), "E_UNUSED")
+        self.assertIs(errors[0], wrapper)
+        unrelated = RuntimeError("unrelated-checkpoint")
+        aggregate = PI._InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "rollback", unrelated,
+                                        members=tuple(received), retained_errors=errors)
+        self.assertIs(PI._copy_setter_operation_errors(aggregate)[0], wrapper)
+        _paths, forwarded, errors = PI._InstallTransaction._settlement_failure(
+            aggregate, "backup", 10, Path("synthetic-target"), "E_UNUSED")
+        self.assertIs(errors[0], aggregate)
+        second = PI._InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "rollback", RuntimeError("second-checkpoint"),
+                                     members=tuple(forwarded), retained_errors=errors)
+        retained_aggregate = PI._copy_setter_operation_errors(second)[0]
+        self.assertIs(retained_aggregate, aggregate)
+        retained_wrapper = PI._copy_setter_operation_errors(retained_aggregate)[0]
+        self.assertIs(retained_wrapper, wrapper)
+        self.assertIs(retained_wrapper.cause, later)
+        self.assertIs(PI._copy_setter_operation_errors(retained_wrapper)[0], primary)
+        for received_error in (aggregate, second):
+            self.assertEqual(len(received_error.members), 2)
+            for actual, original in zip(received_error.members, members):
+                self.assertIs(actual, original)
+                self.assertIsNone(actual.copy_setter_failure)
+            def action():
+                raise received_error
+            result, stderr, escaped = self.through_install(action)
+            self.assertEqual(result, 1)
+            self.assertIs(escaped[0], received_error)
+            self.assertIn("copy-setter-operation-errors=1", stderr)
+            self.assertNotIn("PRIVATE", stderr)
+        for error, chain in zip((primary, later), chains):
+            self.assertEqual((error.args, error.__cause__, error.__context__, error.__suppress_context__), chain)
+
+    def test_settlement_empty_channels_and_member_normalization_do_not_invent_errors(self):
+        tx = PI._InstallTransaction([], enabled=False)
+        self.assertEqual(tx._settle_effects(), ([], [], ()))
+        self.assertEqual(tx._settle_scalars([]), ([], [], ()))
+        self.assertEqual(tx._settle_created(), ([], [], ()))
+        self.assertEqual(tx._settle_migrated(), ([], [], ()))
+        self.assertEqual(tx._commit_migrated(), ([], [], ()))
+        self.assertEqual(tx._settle_migration_retention(), ([], [], ()))
+        self.assertEqual(tx._settle_snapshots([]), ([], False, ()))
+        self.assertEqual(tx._remaining_recovery(), (None, [], [], ()))
+        ordinary = ValueError("ordinary")
+        _paths, ordinary_members, errors = tx._settlement_failure(ordinary, "snapshot", 0, Path("synthetic"), "E_ORDINARY")
+        self.assertEqual(errors, ())
+        self.assertIsNone(ordinary_members[0].copy_setter_failure)
+        self.assertEqual(PI._copy_setter_operation_errors(PI._InstallFailure("E_ORDINARY", "copy", ordinary)), ())
+        primary, later = OSError("PRIVATE-earlier"), ValueError("later")
+        PI._retain_copy_setter_operation_errors(later, (primary,))
+        member = PI._RollbackFailureMember("snapshot", 1, "synthetic", "E_COMPOUND", "later", copy_setter_failure=later)
+        aggregate = PI._InstallFailure("E_AGGREGATE", "rollback", "unrelated", members=(member,),
+                                        retained_errors=(later, later))
+        retained = PI._copy_setter_operation_errors(aggregate)
+        self.assertEqual(len(retained), 1)
+        self.assertIs(retained[0], later)
+        self.assertIs(aggregate.members[0], member)
+
+    def test_transaction_commit_and_rollback_receive_collected_composite_error(self):
+        for committed in (False, True):
+            with self.subTest(committed=committed):
+                primary, later = OSError("PRIVATE-earlier"), OSError("later-observation")
+                PI._retain_copy_setter_operation_errors(later, (primary,))
+                members = (PI._RollbackFailureMember("backup", 7, "synthetic-one", "E_ONE", "one"),
+                           PI._RollbackFailureMember("backup", 8, "synthetic-two", "E_TWO", "two"))
+                wrapper = PI._InstallFailure("E_COMPOUND", "native-close", later, members=members)
+                outer = RuntimeError("unrelated-checkpoint")
+                tx = self.transaction()
+                collector = "_commit_migrated" if committed else "_settle_effects"
+                with patch.object(tx, collector, return_value=([self.target], list(members), (wrapper,))):
+                    with self.assertRaises(PI._InstallFailure) as caught:
+                        with tx:
+                            if committed:
+                                tx.commit()
+                            raise outer
+                final = caught.exception
+                self.assertIs(final.cause, outer)
+                self.assertTrue(any(error is wrapper for error in PI._copy_setter_operation_errors(final)))
+                self.assertIs(wrapper.cause, later)
+                self.assertIs(PI._copy_setter_operation_errors(wrapper)[0], primary)
+                for member in members:
+                    self.assertTrue(any(actual is member for actual in final.members))
+                self.assertTrue(final.recovery_path.exists())
+                text = PI._installer_failure_text(final)
+                self.assertIn("copy-setter-operation-errors=1", text)
+                self.assertNotIn("PRIVATE", text)
+
+    def test_recovery_failure_returns_actual_composite_alongside_existing_members(self):
+        primary, later = OSError("PRIVATE-earlier"), OSError("later-observation")
+        PI._retain_copy_setter_operation_errors(later, (primary,))
+        members = (PI._RollbackFailureMember("backup", 7, "synthetic-one", "E_ONE", "one"),
+                   PI._RollbackFailureMember("backup", 8, "synthetic-two", "E_TWO", "two"))
+        wrapper = PI._InstallFailure("E_COMPOUND", "native-close", later, members=members)
+        outer = RuntimeError("final-cleanup-checkpoint")
+        tx = self.transaction()
+        with self.assertRaises(RuntimeError) as final:
+            with tx:
+                with patch.object(tx, "_point_matches", side_effect=wrapper):
+                    selected, unresolved, received, errors = tx._remaining_recovery()
+                self.assertIsNone(selected)
+                self.assertIn(tx._temporary, unresolved)
+                self.assertIs(errors[0], wrapper)
+                self.assertEqual(len(received), 2)
+                for actual, original in zip(received, members):
+                    self.assertIs(actual, original)
+                raise outer
+        self.assertIs(final.exception, outer)
+        self.assert_clean()
+
+    def test_required_error_carriage_is_ordered_identity_idempotent_and_bypasses_foreign_hooks(self):
+        hooks = []
+        class NativeDictionary(dict):
+            def __getitem__(self, key):
+                hooks.append("dictionary-read")
+                raise AssertionError("foreign dictionary")
+            def __setitem__(self, key, value):
+                hooks.append("dictionary-write")
+                raise AssertionError("foreign dictionary")
+        class ForeignError(OSError):
+            def __getattribute__(self, key):
+                if key in ("__dict__", "_copy_setter_operation_errors"):
+                    hooks.append("attribute-read")
+                    raise AssertionError("foreign attribute")
+                return super().__getattribute__(key)
+            def __setattr__(self, key, value):
+                if key == "_copy_setter_operation_errors":
+                    hooks.append("attribute-write")
+                    raise AssertionError("foreign attribute")
+                super().__setattr__(key, value)
+            def __eq__(self, _other):
+                hooks.append("error-equality")
+                raise AssertionError("foreign equality")
+            def __hash__(self):
+                hooks.append("error-hash")
+                raise AssertionError("foreign hash")
+            def __str__(self):
+                hooks.append("error-string")
+                raise AssertionError("foreign string")
+        first, second, later = ForeignError("PRIVATE-first"), ForeignError("PRIVATE-second"), ValueError("later")
+        BaseException.__dict__["__dict__"].__set__(later, NativeDictionary())
+        PI._retain_copy_setter_operation_errors(later, (first,))
+        PI._retain_copy_setter_operation_errors(later, (first, second, later, second))
+        retained = PI._copy_setter_operation_errors(later)
+        self.assertEqual(len(retained), 2)
+        self.assertIs(retained[0], first)
+        self.assertIs(retained[1], second)
+        wrapped = PI._InstallFailure("E_COMPOUND", "copy", later)
+        PI._retain_copy_setter_operation_errors(wrapped, retained)
+        self.assertIs(PI._copy_setter_operation_errors(wrapped), retained)
+        self.assertIn("copy-setter-operation-errors=2", PI._installer_failure_text(wrapped))
+        # Exercise carriage access on the foreign exception itself as well.
+        PI._retain_copy_setter_operation_errors(first, (second,))
+        self.assertIs(PI._copy_setter_operation_errors(first)[0], second)
+        self.assertEqual(hooks, [])
 
     def test_identity_acquisition_failure_reports_only_acquired_metadata(self):
         current = PI._CopyMetadataImage(100, 200, None, None)
@@ -688,6 +1194,7 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertEqual((primary.args, primary.__cause__, primary.__context__), chain)
         context = PI._copy_setter_detail(primary)
         self.assertEqual(context.stage, "identity-acquisition")
+        self.assertEqual(PI._copy_setter_operation_errors(primary), ())
         self.assertFalse(context.metadata_current)
         self.assertTrue(context.metadata_projected)
         self.assertIsNone(context.identity_old)
@@ -746,9 +1253,9 @@ class CopyMetadataTests(unittest.TestCase):
         receipts = []
         settlement = PI._InstallTransaction._settlement_failure
         def observe(*args, **kwargs):
-            paths, members = settlement(*args, **kwargs)
+            paths, members, retained_errors = settlement(*args, **kwargs)
             receipts.extend(members)
-            return paths, members
+            return paths, members, retained_errors
         count = 0
         def inverse(bound, atime, mtime):
             nonlocal count
@@ -788,9 +1295,9 @@ class CopyMetadataTests(unittest.TestCase):
         private = "PRIVATE-path-token-xattr-value"
         associated = ValueError(private)
         associated._copy_setter_diagnostic = {"unrecognized": private}
-        _paths, members = PI._InstallTransaction._settlement_failure(associated, "snapshot", 2, self.target, "E_CUSTOM_NEW_ID")
+        _paths, members, retained_errors = PI._InstallTransaction._settlement_failure(associated, "snapshot", 2, self.target, "E_CUSTOM_NEW_ID")
         child = PI._InstallFailure("E_CHILD", "child", "original", members=tuple(members))
-        _paths, forwarded = PI._InstallTransaction._settlement_failure(child, "backup", 5, self.source, "E_OTHER")
+        _paths, forwarded, retained_errors = PI._InstallTransaction._settlement_failure(child, "backup", 5, self.source, "E_OTHER")
         self.assertIs(forwarded[0], members[0])
         self.assertEqual(forwarded[0].cause, private)
         legacy_member = PI._RollbackFailureMember("snapshot", 2, str(self.target), "E_CUSTOM_NEW_ID", private)
@@ -832,6 +1339,7 @@ class CopyMetadataTests(unittest.TestCase):
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         self.assertIs(caught.exception, primary)
         self.assertIsNone(PI._copy_setter_detail(primary))
+        self.assertEqual(PI._copy_setter_operation_errors(primary), ())
         self.assertTrue(participant.unknown)
 
     def test_native_exception_storage_bypasses_mutating_foreign_carriage(self):
@@ -1217,7 +1725,7 @@ class RetentionAndAnchorTests(unittest.TestCase):
         self.assertFalse(self.source.exists())
         self.assertEqual(self.backup.stat().st_ino, self.inode)
         self.assertEqual((self.backup / "member").read_bytes(), b"original bytes")
-        self.assertEqual(transaction._remaining_recovery(), (None, [], []))
+        self.assertEqual(transaction._remaining_recovery(), (None, [], [], ()))
         self.assertFalse(list(self.root.glob("orchestrarium-install-transaction-*")))
 
     def test_persistent_retention_failure_restores_original_identity_and_backup_absence(self):
@@ -1532,7 +2040,7 @@ class CrossOwnerRetentionTests(unittest.TestCase):
         self.assertFalse(self.source.exists())
         self.assertEqual(self.backup.stat().st_ino, self.inode)
         self.assertEqual((self.backup / "member").read_bytes(), b"original")
-        self.assertEqual(transaction._remaining_recovery(), (None, [], []))
+        self.assertEqual(transaction._remaining_recovery(), (None, [], [], ()))
 
     def test_cross_owner_wrong_transaction_refuses_before_move(self):
         with self.assertRaisesRegex(ValueError, "transaction owner"):
@@ -1761,7 +2269,7 @@ class ExpectedImageAndTypedSettlementTests(unittest.TestCase):
         dispose = transaction._dispose_node
         def after_retirement(blocked=None, *, records=None):
             result = settle(blocked, records=records)
-            if records and all(row.kind == "directory" for row in records) and result == ([], []):
+            if records and all(row.kind == "directory" for row in records) and result == ([], [], ()):
                 self.assertEqual(transaction._expected[self.absent], {})
                 self.absent.write_bytes(b"foreign bytes must not be read")
                 identities.append(self.absent.stat().st_ino)
@@ -1909,7 +2417,7 @@ class ExpectedImageAndTypedSettlementTests(unittest.TestCase):
         endpoint = self.root / "unsafe"
         child = PI._InstallFailure("E_NATIVE_SETTLEMENT_DETAIL", "close", "actual close cause",
                                    unresolved_paths=(endpoint,))
-        paths, members = PI._InstallTransaction._settlement_failure(child, "created", 9, self.absent,
+        paths, members, retained_errors = PI._InstallTransaction._settlement_failure(child, "created", 9, self.absent,
                                                                   "E_ROLLBACK_CREATED_IDENTITY_CHANGED")
         self.assertIn(endpoint, paths)
         self.assertEqual((members[0].phase, members[0].ordinal, members[0].path, members[0].stable_id, members[0].cause),
@@ -1983,7 +2491,7 @@ class ExpectedImageAndTypedSettlementTests(unittest.TestCase):
                     self.assertIs(caught.exception, self.primary)
                     self.assertEqual(path.stat().st_ino, original)
                     self.assertEqual(path.read_bytes(), b"stock original")
-                self.assertEqual(transaction._remaining_recovery(), (None, [], []))
+                self.assertEqual(transaction._remaining_recovery(), (None, [], [], ()))
                 self.assertFalse(list(self.root.glob(".orchestrarium-migration-retention-*")))
 
 
@@ -2105,7 +2613,7 @@ class PointAndRecoverySelectionTests(unittest.TestCase):
         transaction.commit()
         sentinel_path = self.root / "secondary-endpoint"
         sentinel = PI._RollbackFailureMember("migration", 43, str(sentinel_path), "E_SECONDARY_NATIVE_CLOSE", "prior secondary")
-        with _synthetic_native_byte_lock(backup), patch.object(transaction, "_commit_migrated", return_value=([sentinel_path], [sentinel])):
+        with _synthetic_native_byte_lock(backup), patch.object(transaction, "_commit_migrated", return_value=([sentinel_path], [sentinel], ())):
             with self.assertRaises(PI._InstallFailure) as caught:
                 transaction.__exit__(RuntimeError, self.primary, None)
         self.assertIs(caught.exception.cause, self.primary)
@@ -2133,7 +2641,7 @@ class PointAndRecoverySelectionTests(unittest.TestCase):
         retained = transaction._effects[0].retained
         try:
             with _synthetic_native_byte_lock(backup):
-                selected, unresolved, failures = transaction._remaining_recovery()
+                selected, unresolved, failures, retained_errors = transaction._remaining_recovery()
             self.assertEqual(selected, retained)
             self.assertIn(backup, unresolved)
             self.assertTrue(any(member.path == str(backup) and "33" in member.cause for member in failures))
@@ -2160,7 +2668,7 @@ class PointAndRecoverySelectionTests(unittest.TestCase):
         original_record = transaction._slice_a_migrated[0]
         transaction._slice_a_migrated[0] = PI.replace(original_record, old_current=None)
         try:
-            selected, unresolved, failures = transaction._remaining_recovery()
+            selected, unresolved, failures, retained_errors = transaction._remaining_recovery()
             self.assertEqual(selected, transaction._slice_a_migrated[1].tombstone_path)
             self.assertIn(original_record.tombstone_path, unresolved)
             self.assertTrue(any(member.phase == "migration" and member.ordinal == 0 for member in failures))
@@ -2182,7 +2690,7 @@ class PointAndRecoverySelectionTests(unittest.TestCase):
         retained.write_bytes(b"original")
         foreign = retained.stat().st_ino
         try:
-            selected, unresolved, failures = transaction._remaining_recovery()
+            selected, unresolved, failures, retained_errors = transaction._remaining_recovery()
             self.assertIsNone(selected)
             self.assertIn(retained, unresolved)
             self.assertTrue(any(member.phase == "snapshot" and member.path == str(retained) for member in failures))
@@ -2215,7 +2723,7 @@ class BorrowedOpeningTests(unittest.TestCase):
                 transaction.transform_scalar(path, self.root / "missing-legacy", lambda _path: b"scalar payload", owner)
             transaction.commit()
         self.assertEqual(path.read_bytes(), b"scalar payload")
-        self.assertEqual(transaction._remaining_recovery(), (None, [], []))
+        self.assertEqual(transaction._remaining_recovery(), (None, [], [], ()))
 
     @PI.contextmanager
     def opening(self, name="file", payload=b"payload"):

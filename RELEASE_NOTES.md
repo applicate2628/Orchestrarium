@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-16
 
+- Ordinary installation validates the complete timestamp pair observed by the native setter separately from later access-time variation, avoiding false copy/rollback failures after a proved assignment. Partial effects, stable-metadata or identity drift and original errors remain guarded; absent assignment observations retain strict full-image validation.
+
 - Long genuine human approval replies now reach the existing publication checks reliably, while quoted examples and JSON-formatted data still grant no approval. Operators keep the same human-review and bound-scan workflow without shortening a valid reply.
 
 - A proved selected handoff of owned disposable material to trash can fulfill the agent's disposition duty without waiting for the human to empty it. Physical deletion remains pending where explicitly required; host refusals, valuable evidence, foreign state and live-resource duties retain their safeguards.

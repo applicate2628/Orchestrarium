@@ -281,8 +281,11 @@ class ProducerIntegrationTests(unittest.TestCase):
         if existing_backup:
             backup.mkdir(parents=True)
             (backup / "leaf").write_bytes(b"historical")
-        canonical = SimpleNamespace(name="skill", source=canonical_source,
-                                    source_digest=PI._tree_sha256(canonical_source), ignore_runtime_cache=False)
+        canonical = PI._CanonicalSkillPlan(
+            name="skill", source=canonical_source,
+            source_digest=PI._tree_sha256(canonical_source),
+            installed_digest=PI._tree_sha256(canonical_target),
+            accepted_prior=None, ignore_runtime_cache=False)
         canonical_plan = SimpleNamespace(skills=(canonical,))
         plan = (PI._SkillProjectionPlan("skill", canonical_target, canonical.source_digest,
                 "migrate", historical_digest, backup, PI._CreateOnlyMutablePath._identity(installed),
@@ -476,7 +479,7 @@ class ProducerIntegrationTests(unittest.TestCase):
             transaction.commit()
         self.assertEqual(PI._CreateOnlyMutablePath._identity(backup), backup_identity)
         self.assertTrue(PI._projection_resolves_to(installed, plan[0].canonical_target))
-        self.assertEqual(transaction._remaining_recovery(), (None, [], []))
+        self.assertEqual(transaction._remaining_recovery(), (None, [], [], ()))
         self.assert_clean()
 
     def test_existing_backup_inplace_content_drift_blocks_commit_disposal(self):
@@ -521,7 +524,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertEqual(result, ())
         self.assertEqual(PI._CreateOnlyMutablePath._identity(backup), backup_identity)
         self.assertTrue(PI._projection_resolves_to(installed, plan[0].canonical_target))
-        self.assertEqual(transaction._remaining_recovery(), (None, [], []))
+        self.assertEqual(transaction._remaining_recovery(), (None, [], [], ()))
         self.assert_clean()
 
     def test_readonly_contract_preserves_collision_row_beside_admitted_migration(self):
@@ -565,7 +568,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertEqual(original, PI._CreateOnlyMutablePath._identity(backup))
         self.assertEqual(b"historical", (backup / "leaf").read_bytes())
         self.assertTrue(PI._projection_resolves_to(installed, plan[0].canonical_target))
-        self.assertEqual(transaction._remaining_recovery(), (None, [], []))
+        self.assertEqual(transaction._remaining_recovery(), (None, [], [], ()))
         self.assert_clean()
 
     def receive_legacy_failure(self, existing_backup):
@@ -925,7 +928,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertEqual(original, PI._CreateOnlyMutablePath._identity(backup))
         self.assertEqual((backup / "leaf").read_bytes(), b"historical")
         self.assertTrue(PI._projection_resolves_to(installed, plan[0].canonical_target))
-        self.assertEqual(transaction._remaining_recovery(), (None, [], []))
+        self.assertEqual(transaction._remaining_recovery(), (None, [], [], ()))
         self.assert_clean()
 
 

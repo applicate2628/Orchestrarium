@@ -974,7 +974,9 @@ class _WindowsBoundNode:
                                 born.born_path if born is not None and not abandoned else None)
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "native-security-release",
                                           cause, members=(previous.members if previous is not None else ()) + (member,),
-                                          recovery_path=recovery) from primary
+                                          recovery_path=recovery,
+                                          retained_errors=tuple(error for error in (previous, cleanup)
+                                              if _copy_setter_operation_errors(error))) from primary
                 security.value = None
 
     @property
@@ -1032,8 +1034,8 @@ class _WindowsBoundNode:
         if not kernel.SetFileInformationByHandle(self.live_handle, 0, ctypes.byref(information), ctypes.sizeof(information)):
             raise ctypes.WinError(ctypes.get_last_error())
 
-    def set_copy_times(self, atime_ns: int, mtime_ns: int) -> None:
-        """Set supported copy timestamps on this held object, preserving other fields."""
+    def set_copy_times(self, atime_ns: int, mtime_ns: int):
+        """Set timestamps and return their actual same-operation native observation."""
         ctypes, _wintypes, kernel, *_rest = self._api()
         information = self.basic()
         epoch = 116444736000000000  # FILETIME's 1601 epoch, in 100 ns ticks.
@@ -1041,6 +1043,7 @@ class _WindowsBoundNode:
         information.write = mtime_ns // 100 + epoch
         if not kernel.SetFileInformationByHandle(self.live_handle, 0, ctypes.byref(information), ctypes.sizeof(information)):
             raise ctypes.WinError(ctypes.get_last_error())
+        return self.basic()
 
     def reparse_data(self) -> bytes:
         ctypes, wintypes, kernel, *_rest = self._api()
@@ -1434,6 +1437,45 @@ def _copy_setter_detail(error):
     return value if type(value) is _CopySetterDiagnostic else ()
 
 
+def _copy_setter_operation_errors(error) -> tuple[BaseException, ...]:
+    """Actual prior failures, independent of optional printable observations."""
+    attributes = _passive_owner_storage(BaseException, error)
+    if attributes is None:
+        return ()
+    errors = dict.get(attributes, "_copy_setter_operation_errors", ())
+    if type(errors) is not tuple or any(not isinstance(item, BaseException) for item in errors):
+        raise TypeError("invalid copy setter operation error carriage")
+    return errors
+
+
+def _merge_copy_setter_operation_errors(*groups, exclude=None) -> tuple[BaseException, ...]:
+    """Merge actual owner references in encounter order, using identity only."""
+    retained = ()
+    for errors in groups:
+        if type(errors) is not tuple or any(not isinstance(item, BaseException) for item in errors):
+            raise TypeError("invalid copy setter operation errors")
+        previous = retained
+        for item in errors:
+            if item is not exclude and not any(item is prior for prior in retained):
+                retained += (item,)
+        if not previous and len(retained) == len(errors) and all(item is prior for item, prior in zip(retained, errors)):
+            retained = errors
+    return retained
+
+
+def _retain_copy_setter_operation_errors(error, errors: tuple[BaseException, ...]) -> None:
+    """Extend the existing native carriage without dispatching foreign hooks."""
+    if type(errors) is not tuple or any(not isinstance(item, BaseException) for item in errors):
+        raise TypeError("invalid copy setter operation errors")
+    attributes = _passive_owner_storage(BaseException, error)
+    if attributes is None:
+        raise TypeError("unsupported copy setter operation error carriage")
+    retained = _merge_copy_setter_operation_errors(_copy_setter_operation_errors(error), errors, exclude=error)
+    dict.__setitem__(attributes, "_copy_setter_operation_errors", retained)
+    if dict.__getitem__(attributes, "_copy_setter_operation_errors") is not retained:
+        raise RuntimeError("copy setter operation error retention failed")
+
+
 def _installer_failure_text(error: BaseException) -> str:
     """The CLI alone adds safe details; original exception strings stay intact."""
     original = str(error)
@@ -1447,6 +1489,9 @@ def _installer_failure_text(error: BaseException) -> str:
         context = _copy_setter_detail(error)
         if context is not None:
             additions.append("copy-setter=" + render(context))
+        operation_errors = _copy_setter_operation_errors(error)
+        if operation_errors:
+            additions.append("copy-setter-operation-errors=" + str(len(operation_errors)))
         if issubclass(type(error), _InstallFailure):
             attributes = _passive_owner_storage(BaseException, error)
             members = None if attributes is None else dict.get(attributes, "members")
@@ -1458,6 +1503,14 @@ def _installer_failure_text(error: BaseException) -> str:
                 storage = _passive_owner_storage(_RollbackFailureMember, member)
                 if storage is None:
                     continue  # Unsupported association is not inferred from legacy text.
+                failure = dict.get(storage, "copy_setter_failure")
+                operation_errors = _copy_setter_operation_errors(failure)
+                if operation_errors:
+                    phase, ordinal, stable_id = (dict.__getitem__(storage, name) for name in ("phase", "ordinal", "stable_id"))
+                    if type(phase) is str and type(ordinal) is int and type(stable_id) is str:
+                        additions.append(f"cleanup-copy-setter-operation-errors={phase}:{ordinal}:{stable_id}:{len(operation_errors)}")
+                    else:
+                        additions.append("cleanup-copy-setter-operation-errors=unavailable")
                 context = dict.get(storage, "copy_setter_diagnostic")
                 if context is not None:
                     detail = render(context)
@@ -1479,6 +1532,7 @@ class _RollbackFailureMember:
     stable_id: str
     cause: str
     copy_setter_diagnostic: _CopySetterDiagnostic | tuple | None = field(default=None, compare=False, repr=False)
+    copy_setter_failure: BaseException | None = field(default=None, compare=False, repr=False)
 
 
 class _InstallFailure(RuntimeError):
@@ -1495,6 +1549,7 @@ class _InstallFailure(RuntimeError):
         members: tuple[_RollbackFailureMember, ...] = (),
         recovery_path: Path | None = None,
         unresolved_paths: tuple[Path, ...] = (),
+        retained_errors: tuple[BaseException, ...] = (),
     ) -> None:
         self.stable_id = stable_id
         self.context = context
@@ -1505,6 +1560,17 @@ class _InstallFailure(RuntimeError):
         diagnostic = _copy_setter_detail(cause)
         if diagnostic is not None:
             _store_copy_setter_detail(self, diagnostic)
+        member_errors = ()
+        for member in members:
+            if type(member) is _RollbackFailureMember:
+                storage = _passive_owner_storage(_RollbackFailureMember, member)
+                failure = None if storage is None else dict.get(storage, "copy_setter_failure")
+                if _copy_setter_operation_errors(failure):
+                    member_errors = _merge_copy_setter_operation_errors(member_errors, (failure,))
+        operation_errors = _merge_copy_setter_operation_errors(
+            _copy_setter_operation_errors(cause), member_errors, retained_errors)
+        if operation_errors:
+            _retain_copy_setter_operation_errors(self, operation_errors)
         details = [stable_id, f"context={context}"]
         if cause is not None:
             details.append(f"cause={cause}")
@@ -1703,27 +1769,31 @@ class _InstallTransaction:
             selected = tuple(self._effects[effect_start:])
             failures: list[_RollbackFailureMember] = []
             unresolved: list[Path] = []
+            retained_errors = ()
             if primary is None:
-                unresolved, failures = self._settle_effects(commit=True, effects=selected, defer_migrations=True)
+                unresolved, failures, retained_errors = self._settle_effects(commit=True, effects=selected, defer_migrations=True)
             else:
                 for ordinal, effect in enumerate(selected, effect_start):
                     if (effect.compensate_absent_publication and effect.published_state is None
                             and not effect.actual and effect.retained_state is not None):
-                        _unresolved, members = self._settle_effects(effects=(effect,))
+                        _unresolved, members, child_errors = self._settle_effects(effects=(effect,))
                         unresolved.extend(_unresolved)
                         failures.extend(members)
+                        retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
                     elif effect.retained_state is None and effect.published_state is None:
-                        _unresolved, members = self._settle_effects(commit=True, effects=(effect,))
+                        _unresolved, members, child_errors = self._settle_effects(commit=True, effects=(effect,))
                         unresolved.extend(_unresolved)
                         failures.extend(members)
+                        retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
                     else:
                         try:
                             self.assert_effect_current(effect)
                         except BaseException as currentness:
-                            _paths, members = self._settlement_failure(currentness, "snapshot", ordinal,
+                            _paths, members, child_errors = self._settlement_failure(currentness, "snapshot", ordinal,
                                 effect.path, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY")
                             unresolved.extend(_paths)
                             failures.extend(members)
+                            retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
                         failures.append(_RollbackFailureMember(
                             "snapshot", ordinal, str(effect.retained if effect.retained_state is not None else effect.path),
                             "E_ROLLBACK_SETTLEMENT_FAILED", "direct writer failed before completion; recovery preserved",
@@ -1731,11 +1801,12 @@ class _InstallTransaction:
                 protected = [path for effect in selected
                              if effect.actual or effect.retained_state is not None
                              for path in (effect.path, effect.retained)]
-                _unresolved, members = self._settle_created(
+                _unresolved, members, child_errors = self._settle_created(
                     protected + unresolved, records=tuple(self._slice_a_created[created_start:]),
                 )
                 unresolved.extend(_unresolved)
                 failures.extend(members)
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
             # A file migration keeps its explicitly deferred lifetime, even if
             # it borrowed storage created by this operation.
             directories = tuple(directory for directory, (_parent, _parent_id, directory_id, owner)
@@ -1745,9 +1816,10 @@ class _InstallTransaction:
                                              for record in self._slice_a_migrated if not record.settled)
                                 and not any(effect.retained.parent == directory and effect.retained_state is not None
                                             for effect in selected))
-            retention_paths, retention_members = self._settle_migration_retention(directories=directories, blocked=unresolved)
+            retention_paths, retention_members, retention_errors = self._settle_migration_retention(directories=directories, blocked=unresolved)
             unresolved.extend(retention_paths)
             failures.extend(retention_members)
+            retained_errors = _merge_copy_setter_operation_errors(retained_errors, retention_errors)
             if failures:
                 recovery = next((path for effect in selected
                                  for path in (effect.retained, effect.quarantine, effect.path)
@@ -1755,7 +1827,7 @@ class _InstallTransaction:
                                 next((directory for directory in directories if directory.exists()), None))
                 raise _InstallFailure(
                     "E_ROLLBACK_SETTLEMENT_FAILED", "direct", primary if primary is not None else failures[0].cause,
-                    members=tuple(failures), recovery_path=recovery, unresolved_paths=tuple(unresolved),
+                    members=tuple(failures), recovery_path=recovery, unresolved_paths=tuple(unresolved), retained_errors=retained_errors,
                 ) from primary
             if primary is not None:
                 raise primary.with_traceback(traceback)
@@ -1893,10 +1965,10 @@ class _InstallTransaction:
                     try:
                         current = _InstallTransaction._scalar_descriptor_node(path, descriptor, origin)
                     except OSError as read_error:
-                        paths, members = _InstallTransaction._settlement_failure(read_error, "snapshot", -1, path,
+                        paths, members, retained_errors = _InstallTransaction._settlement_failure(read_error, "snapshot", -1, path,
                             "E_ROLLBACK_RESTORE_FAILED", (path,))
                         raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "borrowed-content", read_error,
-                            members=tuple(members), unresolved_paths=tuple(paths)) from read_error
+                            members=tuple(members), unresolved_paths=tuple(paths), retained_errors=retained_errors) from read_error
                     if current != expected:
                         return False
                 else:
@@ -1970,16 +2042,17 @@ class _InstallTransaction:
     def _settlement_failure(exc: BaseException, phase: str, ordinal: int, path: Path,
                             stable_id: str, unsafe: tuple[Path, ...] = ()):
         """Forward typed child data intact; classify an ordinary error once."""
+        copy_setter_failure = exc if _copy_setter_operation_errors(exc) else None
         if isinstance(exc, _InstallFailure):
             members = (list(exc.members) if exc.members else
                         [_RollbackFailureMember(phase, ordinal, str(path), exc.stable_id, str(exc.cause),
-                                                _copy_setter_detail(exc))])
+                                                _copy_setter_detail(exc), copy_setter_failure)])
             paths = list(unsafe) + list(exc.unresolved_paths) + [Path(member.path) for member in members]
         else:
             members = [_RollbackFailureMember(phase, ordinal, str(path), stable_id, str(exc),
-                                               _copy_setter_detail(exc))]
+                                               _copy_setter_detail(exc), copy_setter_failure)]
             paths = list(unsafe)
-        return paths, members
+        return paths, members, (() if copy_setter_failure is None else (copy_setter_failure,))
 
     @staticmethod
     def _image_file_bytes(member: Path, node: _PhysicalNode | None, *,
@@ -2008,7 +2081,7 @@ class _InstallTransaction:
         return result
 
     @staticmethod
-    def _read_copy_metadata(metadata, descriptor, bound) -> _CopyMetadataImage:
+    def _read_copy_metadata(metadata, descriptor, bound, *, native_basic=None) -> _CopyMetadataImage:
         attributes = None
         if descriptor is not None and hasattr(os, "listxattr"):
             import errno
@@ -2022,7 +2095,7 @@ class _InstallTransaction:
             # A path-only xattr observation cannot establish this bound image.
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: bound xattr capability")
         if bound is not None:
-            basic = bound.basic()
+            basic = bound.basic() if native_basic is None else native_basic
             epoch = 116444736000000000
             atime, mtime = (basic.access - epoch) * 100, (basic.write - epoch) * 100
         else:
@@ -2236,13 +2309,26 @@ class _InstallTransaction:
                 if participant is not None:
                     participant.unknown = True
                 primary = None
+                operation_result = None
                 try:
-                    operation()
+                    operation_result = operation()
                 except BaseException as error:
                     primary = error
                 try:
-                    actual = self._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
+                    actual_metadata = os.fstat(descriptor)
+                    actual = self._read_copy_metadata(actual_metadata, descriptor, bound)
+                    assignment = None
+                    if sets_times and primary is None and operation_result is not None:
+                        if bound is not None and type(operation_result) is bound._api()[4]:  # Existing native BasicInfo.
+                            assignment = self._read_copy_metadata(actual_metadata, descriptor, bound,
+                                                                  native_basic=operation_result)
+                        elif bound is None and type(operation_result) is _CopyMetadataImage:
+                            assignment = operation_result  # Actual same-operation fd observation.
+                        else:
+                            primary = ValueError("E_MUTABLE_PATH_POSTCONDITION: copy timestamp observation")
                 except BaseException as error:
+                    if primary is not None:
+                        _retain_copy_setter_operation_errors(error, (primary,))
                     _CopySetterDiagnostic.attach(error, label, restored, "metadata-acquisition", operation_ordinal,
                         current, projected, node.python_identity, node.python_identity if identity is None else identity,
                         participant=participant)
@@ -2250,17 +2336,29 @@ class _InstallTransaction:
                 try:
                     actual_identity = self._capture_node(path, descriptor=descriptor, kind="file", data=node.data).python_identity
                 except BaseException as error:
+                    if primary is not None:
+                        _retain_copy_setter_operation_errors(error, (primary,))
                     _CopySetterDiagnostic.attach(error, label, restored, "identity-acquisition", operation_ordinal,
                         current, projected, node.python_identity, node.python_identity if identity is None else identity,
                         actual=actual, participant=participant)
                     raise
                 valid_identity = node.python_identity if identity is None else identity
-                # Time assignment constrains the complete image. Other effects
-                # constrain the whole stable tuple, never per-field mixtures.
-                actual_effect = actual if sets_times else actual.stable()
-                current_effect = current if sets_times else current.stable()
-                projected_effect = projected if sets_times else projected.stable()
-                if actual_effect not in (current_effect, projected_effect) or actual_identity not in (node.python_identity, valid_identity):
+                # A same-operation observation proves the assignment pair BEFORE
+                # this later read. Only proved projected assignment allows later
+                # atime variation; stable/restriction identity still cannot drift.
+                # Missing results/errors and legacy adapters keep full-image proof.
+                assignment_pair = None if assignment is None else (assignment.atime_ns, assignment.mtime_ns)
+                current_pair = current.atime_ns, current.mtime_ns
+                projected_pair = projected.atime_ns, projected.mtime_ns
+                assigned = assignment_pair == projected_pair
+                assignment_known = assignment_pair is None or assignment_pair in (current_pair, projected_pair)
+                stable_observation = not sets_times or assigned
+                actual_effect = actual.stable() if stable_observation else actual
+                current_effect = current.stable() if stable_observation else current
+                projected_effect = projected.stable() if stable_observation else projected
+                known_effect = (actual_effect == projected_effect if assigned else
+                                actual_effect in (current_effect, projected_effect))
+                if not assignment_known or not known_effect or actual_identity not in (node.python_identity, valid_identity):
                     if primary is not None:
                         _CopySetterDiagnostic.attach(primary, label, restored, "operation", operation_ordinal,
                             current, projected, node.python_identity, valid_identity, actual, actual_identity, participant=participant)
@@ -2273,7 +2371,12 @@ class _InstallTransaction:
                 current = actual
                 self._copy_current[path] = current
                 node = replace(node, python_identity=actual_identity)
-                record(path, node)
+                try:
+                    record(path, node)
+                except BaseException as error:
+                    if primary is not None:
+                        _retain_copy_setter_operation_errors(error, (primary,))
+                    raise
                 if participant is not None:
                     participant.current, participant.unknown = current, False
                     if restored:
@@ -2284,7 +2387,8 @@ class _InstallTransaction:
                     if isinstance(primary, OSError) and primary.errno in optional_operation_errnos:
                         return  # Known optional operation error; recording already succeeded.
                     raise primary
-                if actual_effect != projected_effect or actual_identity != valid_identity:
+                if (actual_effect != projected_effect or actual_identity != valid_identity
+                        or (assignment_pair is not None and not assigned)):
                     error = ValueError("E_MUTABLE_PATH_POSTCONDITION: copy metadata readback")
                     _CopySetterDiagnostic.attach(error, label, restored, "comparison", operation_ordinal,
                         diagnostic_current, projected, diagnostic_identity, valid_identity, actual, actual_identity, participant=participant)
@@ -2323,7 +2427,9 @@ class _InstallTransaction:
             else:
                 if os.utime not in os.supports_fd:
                     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: bound timestamp capability")
-                operation = lambda: os.utime(descriptor, ns=(desired.atime_ns, desired.mtime_ns))
+                def operation():
+                    os.utime(descriptor, ns=(desired.atime_ns, desired.mtime_ns))
+                    return self._read_copy_metadata(os.fstat(descriptor), descriptor, None)
             progress(operation, projected, label="timestamps", sets_times=True)
             requested_identity = self._chmod_identity(node.python_identity, mode)
             progress(lambda: self._chmod_owned(path, node.python_identity, mode, descriptor=descriptor),
@@ -2504,13 +2610,15 @@ class _InstallTransaction:
             try:
                 os.lseek(descriptor, 0, os.SEEK_SET)
             except OSError as reset:
-                paths, members = _InstallTransaction._settlement_failure(reset, "snapshot", -1, path,
+                paths, members, retained_errors = _InstallTransaction._settlement_failure(reset, "snapshot", -1, path,
                     "E_ROLLBACK_RESTORE_FAILED", (path,))
                 previous = primary if isinstance(primary, _InstallFailure) else None
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "descriptor-read-reset", primary or reset,
                     members=(previous.members if previous is not None else ()) + tuple(members),
                     unresolved_paths=(previous.unresolved_paths if previous is not None else ()) + tuple(paths),
-                    recovery_path=previous.recovery_path if previous is not None else None) from primary
+                    recovery_path=previous.recovery_path if previous is not None else None,
+                    retained_errors=_merge_copy_setter_operation_errors(retained_errors,
+                        (previous,) if _copy_setter_operation_errors(previous) else ())) from primary
 
     @staticmethod
     def _scalar_descriptor_node(path: Path, descriptor: int,
@@ -2554,13 +2662,15 @@ class _InstallTransaction:
             try:
                 os.close(descriptor)
             except OSError as cleanup:
-                paths, members = self._settlement_failure(cleanup, "snapshot", -1, storage,
+                paths, members, retained_errors = self._settlement_failure(cleanup, "snapshot", -1, storage,
                     "E_ROLLBACK_RESTORE_FAILED", (storage,))
                 previous = primary if isinstance(primary, _InstallFailure) else None
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close", primary or cleanup,
                                       members=(previous.members if previous is not None else ()) + tuple(members),
                                       unresolved_paths=(previous.unresolved_paths if previous is not None else ()) + tuple(paths),
-                                      recovery_path=entry["operation_backup"] if appended else None) from primary
+                                      recovery_path=entry["operation_backup"] if appended else None,
+                                      retained_errors=_merge_copy_setter_operation_errors(retained_errors,
+                                          (previous,) if _copy_setter_operation_errors(previous) else ())) from primary
         try:
             parent_path = storage.parent
             missing = []
@@ -2713,8 +2823,9 @@ class _InstallTransaction:
                    and not self._same_origin(origin, record.old_identity, record.old_native_proof)
                    for record in self._slice_a_migrated)
 
-    def _settle_scalars(self, blocked: list[Path]) -> tuple[list[Path], list[_RollbackFailureMember]]:
+    def _settle_scalars(self, blocked: list[Path]) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
         unresolved, failures = [], []
+        retained_errors = ()
         for ordinal, entry in reversed(tuple(enumerate(self._entries))):
             if entry["kind"] != "scalar" or entry["consumed"]:
                 continue
@@ -2756,11 +2867,12 @@ class _InstallTransaction:
             except BaseException as error:
                 protected = [path, entry["path"]] + [member for member, _node in entry["links"]]
                 unresolved.extend(protected)
-                child_paths, child_members = self._settlement_failure(
+                child_paths, child_members, child_errors = self._settlement_failure(
                     error, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
-        return unresolved, failures
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
+        return unresolved, failures, retained_errors
 
     def _current_role(self, record: _SliceAMigratedFileRecord, *, old: bool) -> _PhysicalNode:
         # A caller may retain the immutable acquisition record across writer
@@ -3591,10 +3703,10 @@ class _InstallTransaction:
                          and record.proof_key in effect.deferred_migrations
                          and not any(self._migration_dependencies(path) for path in
                                      (effect.retained, effect.quarantine, effect.prepared_path) if path is not None))
-        _unresolved, failures = self._settle_effects(commit=True, effects=selected)
+        _unresolved, failures, retained_errors = self._settle_effects(commit=True, effects=selected)
         if failures:
             raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "migration", failures[0].cause,
-                                  members=tuple(failures), unresolved_paths=tuple(_unresolved),
+                                  members=tuple(failures), unresolved_paths=tuple(_unresolved), retained_errors=retained_errors,
                                   recovery_path=next((effect.retained for effect in selected
                                                       if effect.retained_state), None))
         related = {effect.retained.parent for effect in selected + effects}
@@ -3605,17 +3717,18 @@ class _InstallTransaction:
                                         for effect in self._effects)
                             and not any(not item.settled and item.tombstone_path.parent == directory
                                         for item in self._slice_a_migrated))
-        _unresolved, failures = self._settle_migration_retention(directories=directories)
+        _unresolved, failures, retained_errors = self._settle_migration_retention(directories=directories)
         if failures:
             raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "migration", failures[0].cause,
-                                  members=tuple(failures), unresolved_paths=tuple(_unresolved))
+                                  members=tuple(failures), unresolved_paths=tuple(_unresolved), retained_errors=retained_errors)
 
     def _settle_effects(self, *, commit: bool = False,
                         effects: tuple[_DeclaredPathEffect, ...] | None = None,
                         defer_migrations: bool = False, blocked: list[Path] | None = None,
-                        ) -> tuple[list[Path], list[_RollbackFailureMember]]:
+                        ) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
         unresolved: list[Path] = []
         failures: list[_RollbackFailureMember] = []
+        retained_errors = ()
         selected = None if effects is None else {id(effect) for effect in effects}
         ordinals = [ordinal for ordinal, effect in enumerate(self._effects)
                     if not effect.settled and (selected is None or id(effect) in selected)]
@@ -3727,11 +3840,12 @@ class _InstallTransaction:
                 unresolved.append(effect.retained)
                 if effect.quarantine is not None:
                     unresolved.append(effect.quarantine)
-                child_paths, child_members = self._settlement_failure(
+                child_paths, child_members, child_errors = self._settlement_failure(
                     exc, "snapshot", ordinal, effect.path, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
-        return unresolved, failures
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
+        return unresolved, failures, retained_errors
 
     def _copy_snapshot(self, path: Path, backup: Path,
                        original: dict[Path, _PhysicalNode]) -> dict[Path, _PhysicalNode]:
@@ -3828,7 +3942,8 @@ class _InstallTransaction:
             if failure is not None:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "snapshot-acquisition", primary,
                                       members=failure.members, recovery_path=self._temporary,
-                                      unresolved_paths=failure.unresolved_paths) from primary
+                                      unresolved_paths=failure.unresolved_paths,
+                                      retained_errors=(failure,) if _copy_setter_operation_errors(failure) else ()) from primary
             raise
         return self
 
@@ -3938,11 +4053,11 @@ class _InstallTransaction:
             if entry["kind"] == "absent":
                 creators = self._absent_snapshot_created_directories(path, restored, blocked)
                 if creators:
-                    unresolved, failures = self._settle_created(list(blocked), records=creators)
+                    unresolved, failures, retained_errors = self._settle_created(list(blocked), records=creators)
                     if failures or unresolved:
                         raise _InstallFailure("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", "residual-creator",
                                               failures[0].cause if failures else "unresolved creator",
-                                              members=tuple(failures), unresolved_paths=tuple(unresolved))
+                                              members=tuple(failures), unresolved_paths=tuple(unresolved), retained_errors=retained_errors)
                     if self._expected[path] == restored and (self._image_matches(path, restored)):
                         self._restore_copy_metadata(path)
                         return
@@ -4074,9 +4189,10 @@ class _InstallTransaction:
 
     def _settle_migration_retention(self, *, only_empty: bool = False,
                                     directories: tuple[Path, ...] | None = None,
-                                    blocked: list[Path] | None = None) -> tuple[list[Path], list[_RollbackFailureMember]]:
+                                    blocked: list[Path] | None = None) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
         unresolved: list[Path] = []
         failures: list[_RollbackFailureMember] = []
+        retained_errors = ()
         for ordinal, (directory, (_parent, _parent_id, _directory_id, owner)) in enumerate(tuple(self._migration_retention.items())):
             if directories is not None and directory not in directories:
                 continue
@@ -4089,29 +4205,32 @@ class _InstallTransaction:
             except BaseException as exc:
                 if only_empty and not isinstance(exc, _InstallFailure):
                     continue  # Mandatory final settlement still reports pre-action uncertainty.
-                child_paths, child_members = self._settlement_failure(
+                child_paths, child_members, child_errors = self._settlement_failure(
                     exc, "backup", ordinal, directory, "E_ROLLBACK_SETTLEMENT_FAILED", (directory,))
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
                 continue
             try:
                 self._dispose_node(directory, _directory_id)
                 self._advance(directory, {})
                 del self._migration_retention[directory]
             except BaseException as exc:
-                child_paths, child_members = self._settlement_failure(
+                child_paths, child_members, child_errors = self._settlement_failure(
                     exc, "backup", ordinal, directory, "E_ROLLBACK_SETTLEMENT_FAILED", (directory,))
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
-        return unresolved, failures
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
+        return unresolved, failures, retained_errors
 
     def _settle_created(
         self,
         blocked: list[Path] | None = None,
         *, records: tuple[_SliceACreatedRecord, ...] | None = None,
-    ) -> tuple[list[Path], list[_RollbackFailureMember]]:
+    ) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
         unresolved: list[Path] = []
         failures: list[_RollbackFailureMember] = []
+        retained_errors = ()
         recorded = self._slice_a_created if records is None else records
         selected = None if records is None else {record.proof_key for record in records}
         if recorded and not self._slice_a_owners:
@@ -4125,7 +4244,7 @@ class _InstallTransaction:
                 )
             )
             unresolved.extend(record.leaf_path for record in recorded)
-            return unresolved, failures
+            return unresolved, failures, retained_errors
         for ordinal in range(len(self._slice_a_created) - 1, -1, -1):
             record = self._slice_a_created[ordinal]
             if selected is not None and record.proof_key not in selected:
@@ -4176,17 +4295,19 @@ class _InstallTransaction:
                     if str(exc).startswith("E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE")
                     else "E_ROLLBACK_CREATED_IDENTITY_CHANGED"
                 )
-                child_paths, child_members = self._settlement_failure(
+                child_paths, child_members, child_errors = self._settlement_failure(
                     exc, "created", ordinal, record.leaf_path, stable_id, (record.leaf_path,))
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
-        return unresolved, failures
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
+        return unresolved, failures, retained_errors
 
     def _settle_migrated(
         self, blocked: list[Path] | None = None,
-    ) -> tuple[list[Path], list[_RollbackFailureMember]]:
+    ) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
         unresolved: list[Path] = []
         failures: list[_RollbackFailureMember] = []
+        retained_errors = ()
         for ordinal in range(len(self._slice_a_migrated) - 1, -1, -1):
             record = self._slice_a_migrated[ordinal]
             if record.settled:
@@ -4208,17 +4329,19 @@ class _InstallTransaction:
                 self._advance(record.leaf_path, {record.leaf_path: self._current_role(record, old=True)})
                 self._advance(record.tombstone_path, {})
             except BaseException as exc:
-                child_paths, child_members = self._settlement_failure(
+                child_paths, child_members, child_errors = self._settlement_failure(
                     exc, "migration", ordinal, record.leaf_path, "E_ROLLBACK_CREATED_IDENTITY_CHANGED")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
                 unresolved.extend((record.leaf_path, record.tombstone_path,
                                    record.logical_leaf_path or record.leaf_path))
-        return unresolved, failures
+        return unresolved, failures, retained_errors
 
-    def _commit_migrated(self) -> tuple[list[Path], list[_RollbackFailureMember]]:
+    def _commit_migrated(self) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
         unresolved: list[Path] = []
         failures: list[_RollbackFailureMember] = []
+        retained_errors = ()
         for ordinal, record in enumerate(self._slice_a_migrated):
             if record.settled:
                 continue
@@ -4232,16 +4355,18 @@ class _InstallTransaction:
             except BaseException as exc:
                 unresolved.extend((record.leaf_path, record.tombstone_path,
                                    record.logical_leaf_path or record.leaf_path))
-                child_paths, child_members = self._settlement_failure(
+                child_paths, child_members, child_errors = self._settlement_failure(
                     exc, "migration", ordinal, record.leaf_path, "E_ROLLBACK_CREATED_IDENTITY_CHANGED")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
-        return unresolved, failures
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
+        return unresolved, failures, retained_errors
 
     def _settle_snapshots(
         self, unresolved: list[Path]
-    ) -> tuple[list[_RollbackFailureMember], bool]:
+    ) -> tuple[list[_RollbackFailureMember], bool, tuple[BaseException, ...]]:
         failures: list[_RollbackFailureMember] = []
+        retained_errors = ()
         retain_backup = False
         for ordinal, entry in enumerate(self._entries):
             if entry["kind"] == "scalar":
@@ -4263,12 +4388,13 @@ class _InstallTransaction:
             try:
                 self._restore_entry(entry, blocked=tuple(unresolved + [Path(member.path) for member in failures]))
             except BaseException as exc:
-                child_paths, child_members = self._settlement_failure(
+                child_paths, child_members, child_errors = self._settlement_failure(
                     exc, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED", (path,))
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
                 retain_backup = True
-        return failures, retain_backup
+        return failures, retain_backup, retained_errors
 
     def _discard_backup(self) -> _InstallFailure | None:
         if self._temporary is None:
@@ -4279,21 +4405,24 @@ class _InstallTransaction:
             if backup.exists() or backup.is_symlink():
                 raise OSError("backup path still exists")
         except BaseException as exc:
-            paths, members = self._settlement_failure(exc, "backup", 0, backup,
+            paths, members, retained_errors = self._settlement_failure(exc, "backup", 0, backup,
                 "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (backup,))
             return _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "backup", exc,
-                                   members=tuple(members), unresolved_paths=tuple(paths))
+                                   members=tuple(members), unresolved_paths=tuple(paths), retained_errors=retained_errors)
         return None
 
-    def _remaining_recovery(self) -> tuple[Path | None, list[Path], list[_RollbackFailureMember]]:
+    def _remaining_recovery(self) -> tuple[Path | None, list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
         """Select a verified beforeimage without losing unusable retained custody."""
         unresolved: list[Path] = []
         failures: list[_RollbackFailureMember] = []
+        retained_errors = ()
         def failed(exc, phase, ordinal, path):
-            paths, members = self._settlement_failure(exc, phase, ordinal, path,
+            nonlocal retained_errors
+            paths, members, child_errors = self._settlement_failure(exc, phase, ordinal, path,
                 "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", (path,))
             unresolved.extend(paths)
             failures.extend(members)
+            retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
         def usable(path, state, phase, ordinal):
             try:
                 if not state or not self._image_matches(path, state):
@@ -4313,11 +4442,11 @@ class _InstallTransaction:
             else:
                 for ordinal, (path, state) in enumerate(backups):
                     if usable(path, state, "backup", ordinal):
-                        return self._temporary, unresolved, failures
+                        return self._temporary, unresolved, failures, retained_errors
         for ordinal, effect in enumerate(self._effects):
             if not effect.settled and effect.before and effect.retained_state:
                 if usable(effect.retained, effect.retained_state, "snapshot", ordinal):
-                    return effect.retained, unresolved, failures
+                    return effect.retained, unresolved, failures, retained_errors
         for ordinal, record in enumerate(self._slice_a_migrated):
             if record.settled:
                 continue
@@ -4329,31 +4458,35 @@ class _InstallTransaction:
                 failed(exc, "migration", ordinal, record.tombstone_path)
                 continue
             if usable(record.tombstone_path, {record.tombstone_path: current}, "migration", ordinal):
-                return record.tombstone_path, unresolved, failures
-        return None, unresolved, failures
+                return record.tombstone_path, unresolved, failures, retained_errors
+        return None, unresolved, failures, retained_errors
 
     def __exit__(self, exc_type, exc, _traceback) -> bool:
         if not self.enabled:
             return False
         assert self._temporary is not None
         if self.committed:
-            migration_unresolved, migration_failures = self._commit_migrated()
-            _effect_unresolved, effect_failures = self._settle_effects(commit=True, blocked=migration_unresolved)
-            retention_unresolved, retention_failures = self._settle_migration_retention(blocked=migration_unresolved + _effect_unresolved)
+            migration_unresolved, migration_failures, migration_errors = self._commit_migrated()
+            _effect_unresolved, effect_failures, effect_errors = self._settle_effects(commit=True, blocked=migration_unresolved)
+            retention_unresolved, retention_failures, retention_errors = self._settle_migration_retention(blocked=migration_unresolved + _effect_unresolved)
             failures = effect_failures + migration_failures + retention_failures
+            retained_errors = _merge_copy_setter_operation_errors(migration_errors, effect_errors, retention_errors)
             unresolved = migration_unresolved + _effect_unresolved + retention_unresolved
             cleanup = None if failures else self._discard_backup()
             if cleanup is not None:
                 failures.extend(cleanup.members)
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors,
+                    (cleanup,) if _copy_setter_operation_errors(cleanup) else ())
                 unresolved.extend(cleanup.unresolved_paths)
             elif not failures:
                 self._temporary = None  # Its original custody was positively disposed.
             original = exc if exc is not None else (failures[0].cause if failures else None)
             recovery_path = None
             if failures:
-                recovery_path, recovery_unresolved, recovery_failures = self._remaining_recovery()
+                recovery_path, recovery_unresolved, recovery_failures, recovery_errors = self._remaining_recovery()
                 unresolved.extend(recovery_unresolved)
                 failures.extend(recovery_failures)
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors, recovery_errors)
             if failures:
                 members = tuple(failures)
                 raise _InstallFailure(
@@ -4362,12 +4495,13 @@ class _InstallTransaction:
                     original,
                     members=members,
                     recovery_path=recovery_path,
-                    unresolved_paths=tuple(unresolved),
+                    unresolved_paths=tuple(unresolved), retained_errors=retained_errors,
                 )
             if isinstance(exc, _InstallFailure) and exc.recovery_path != recovery_path:
                 raise _InstallFailure(exc.stable_id, exc.context, exc.cause,
                                       members=exc.members, recovery_path=recovery_path,
-                                      unresolved_paths=exc.unresolved_paths) from exc
+                                      unresolved_paths=exc.unresolved_paths,
+                                      retained_errors=(exc,) if _copy_setter_operation_errors(exc) else ()) from exc
             return False
 
         original: BaseException = exc or _InstallFailure(
@@ -4375,30 +4509,37 @@ class _InstallTransaction:
             "transaction",
             "enabled transaction exited without commit",
         )
-        unresolved, failures = self._settle_effects()
-        migrated_unresolved, migrated_failures = self._settle_migrated(unresolved)
+        unresolved, failures, retained_errors = self._settle_effects()
+        migrated_unresolved, migrated_failures, migrated_errors = self._settle_migrated(unresolved)
         unresolved.extend(migrated_unresolved)
         failures.extend(migrated_failures)
-        scalar_unresolved, scalar_failures = self._settle_scalars(unresolved)
+        retained_errors = _merge_copy_setter_operation_errors(retained_errors, migrated_errors)
+        scalar_unresolved, scalar_failures, scalar_errors = self._settle_scalars(unresolved)
         unresolved.extend(scalar_unresolved)
         failures.extend(scalar_failures)
-        retention_unresolved, retention_failures = self._settle_migration_retention(only_empty=True, blocked=unresolved)
+        retained_errors = _merge_copy_setter_operation_errors(retained_errors, scalar_errors)
+        retention_unresolved, retention_failures, retention_errors = self._settle_migration_retention(only_empty=True, blocked=unresolved)
         unresolved.extend(retention_unresolved)
         failures.extend(retention_failures)
+        retained_errors = _merge_copy_setter_operation_errors(retained_errors, retention_errors)
         directories = tuple(record for record in self._slice_a_created if record.kind == "directory")
         leaves = tuple(record for record in self._slice_a_created if record.kind != "directory")
-        created_unresolved, created_failures = self._settle_created(unresolved, records=leaves)
+        created_unresolved, created_failures, created_errors = self._settle_created(unresolved, records=leaves)
         unresolved.extend(created_unresolved)
         failures.extend(created_failures)
-        snapshot_failures, retain_backup = self._settle_snapshots(unresolved)
+        retained_errors = _merge_copy_setter_operation_errors(retained_errors, created_errors)
+        snapshot_failures, retain_backup, snapshot_errors = self._settle_snapshots(unresolved)
         failures.extend(snapshot_failures)
-        directory_unresolved, directory_failures = self._settle_created(
+        retained_errors = _merge_copy_setter_operation_errors(retained_errors, snapshot_errors)
+        directory_unresolved, directory_failures, directory_errors = self._settle_created(
             unresolved + [Path(member.path) for member in snapshot_failures], records=directories)
         unresolved.extend(directory_unresolved)
         failures.extend(directory_failures)
-        retention_unresolved, retention_failures = self._settle_migration_retention(blocked=unresolved)
+        retained_errors = _merge_copy_setter_operation_errors(retained_errors, directory_errors)
+        retention_unresolved, retention_failures, retention_errors = self._settle_migration_retention(blocked=unresolved)
         unresolved.extend(retention_unresolved)
         failures.extend(retention_failures)
+        retained_errors = _merge_copy_setter_operation_errors(retained_errors, retention_errors)
         recovery_path: Path | None = None
         if retain_backup:
             recovery_path = self._temporary
@@ -4406,14 +4547,17 @@ class _InstallTransaction:
             cleanup = self._discard_backup()
             if cleanup is not None:
                 failures.extend(cleanup.members)
+                retained_errors = _merge_copy_setter_operation_errors(retained_errors,
+                    (cleanup,) if _copy_setter_operation_errors(cleanup) else ())
                 unresolved.extend(cleanup.unresolved_paths)
                 recovery_path = self._temporary
             else:
                 self._temporary = None  # Its original custody was positively disposed.
         if failures:
-            recovery_path, recovery_unresolved, recovery_failures = self._remaining_recovery()
+            recovery_path, recovery_unresolved, recovery_failures, recovery_errors = self._remaining_recovery()
             unresolved.extend(recovery_unresolved)
             failures.extend(recovery_failures)
+            retained_errors = _merge_copy_setter_operation_errors(retained_errors, recovery_errors)
         else:
             recovery_path = None
         if failures:
@@ -4441,12 +4585,13 @@ class _InstallTransaction:
                 original,
                 members=ordered,
                 recovery_path=recovery_path,
-                unresolved_paths=tuple(unresolved),
+                unresolved_paths=tuple(unresolved), retained_errors=retained_errors,
             ) from original
         if isinstance(exc, _InstallFailure) and exc.recovery_path != recovery_path:
             raise _InstallFailure(exc.stable_id, exc.context, exc.cause,
                                   members=exc.members, recovery_path=recovery_path,
-                                  unresolved_paths=exc.unresolved_paths) from exc
+                                  unresolved_paths=exc.unresolved_paths,
+                                      retained_errors=(exc,) if _copy_setter_operation_errors(exc) else ()) from exc
         if exc is None:
             raise original
         return False
@@ -5076,11 +5221,11 @@ class _CreateOnlyMutablePath:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: prepared file drift")
                 self.transaction._dispose_image(path, state)
         except BaseException as cleanup:
-            paths, members = self.transaction._settlement_failure(cleanup, "backup", -1, path,
+            paths, members, retained_errors = self.transaction._settlement_failure(cleanup, "backup", -1, path,
                 "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (path,))
             raise _InstallFailure(
                 "E_ROLLBACK_SETTLEMENT_FAILED", "prepared", original or cleanup,
-                members=tuple(members), recovery_path=path, unresolved_paths=tuple(paths),
+                members=tuple(members), recovery_path=path, unresolved_paths=tuple(paths), retained_errors=retained_errors,
             ) from original
 
     def _replace_prepared(self, path: Path, prepared: Path, *, effect: _DeclaredPathEffect | None = None,
@@ -5264,12 +5409,12 @@ class _CreateOnlyMutablePath:
                 try:
                     self.rollback_migrated(record, replacement_may_be_absent=True)
                 except BaseException as settlement:
-                    paths, members = self.transaction._settlement_failure(settlement, "migration", -1,
+                    paths, members, retained_errors = self.transaction._settlement_failure(settlement, "migration", -1,
                         tombstone, "E_ROLLBACK_SETTLEMENT_FAILED", (tombstone,))
                     raise _InstallFailure(
                         "E_ROLLBACK_SETTLEMENT_FAILED", "migration", error,
                         members=tuple(members), recovery_path=retention or tombstone.parent,
-                        unresolved_paths=tuple(paths),
+                        unresolved_paths=tuple(paths), retained_errors=retained_errors,
                     ) from error
             raise
         finally:
@@ -5347,11 +5492,11 @@ class _CreateOnlyMutablePath:
             ):
                 self._rollback_identity_changed()
             if effect is not None:
-                _unresolved, failures = self.transaction._settle_effects(commit=True, effects=(effect,))
+                _unresolved, failures, retained_errors = self.transaction._settle_effects(commit=True, effects=(effect,))
                 if failures:
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "migration", failures[0].cause,
                                           members=tuple(failures), recovery_path=effect.retained,
-                                          unresolved_paths=tuple(_unresolved))
+                                          unresolved_paths=tuple(_unresolved), retained_errors=retained_errors)
             self.transaction._migration_settled(record, (effect,) if effect is not None else ())
         except (OSError, ValueError):
             self._rollback_identity_changed()
