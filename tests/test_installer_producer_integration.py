@@ -890,8 +890,10 @@ class ProducerIntegrationTests(unittest.TestCase):
             (path / "leaf").write_bytes(content)
         source_identity = PI._CreateOnlyMutablePath._identity(collision_installed)
         backup_identity = PI._CreateOnlyMutablePath._identity(collision_backup)
-        new_skill = SimpleNamespace(name="collision", source=collision_source,
-            source_digest=PI._tree_sha256(collision_source), ignore_runtime_cache=False)
+        new_skill = PI._CanonicalSkillPlan(
+            name="collision", source=collision_source,
+            source_digest=PI._tree_sha256(collision_source), installed_digest=None,
+            accepted_prior=None, ignore_runtime_cache=False)
         canonical = SimpleNamespace(skills=canonical.skills + (new_skill,))
         collision = PI._SkillProjectionPlan("collision", collision_target, new_skill.source_digest,
             "collision", PI._tree_sha256(collision_installed), collision_backup,
