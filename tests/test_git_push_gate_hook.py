@@ -1759,14 +1759,26 @@ def _load_gate_module(script: Path | GateTarget, mod_name: str):
             sys.path.remove(script_dir)
 
 
-def _heavy_preflight(module):
+def _heavy_preflight(
+    module,
+    *,
+    command: str = "git push origin main",
+    dialect: str = "posix",
+    transcript_path: str = "fixture-transcript.jsonl",
+    repository_workdir: str | None = None,
+    repository_workdir_source: str = "tool",
+):
     owner = module._a3_preflight
-    parsed = owner.parse_shell_command("git push origin main", "posix")
+    parsed = owner.parse_shell_command(command, dialect)
+    selected_workdir = (
+        str(REPO_ROOT.resolve())
+        if repository_workdir is None else repository_workdir
+    )
     return owner.validate_preflight_result(owner.PreflightResult(
         "DEFER", "PFP-HEAVY", "EVALUATE_HEAVY",
-        "git push origin main", "posix", "fixture-transcript.jsonl",
+        command, dialect, transcript_path,
         parsed, "found", owner.classify_generic_push(parsed), False, None,
-        str(REPO_ROOT.resolve()), "tool",
+        selected_workdir, repository_workdir_source,
     ))
 
 
@@ -4305,6 +4317,21 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                         module._a3_preflight.absolute_literal_root_context(parsed),
                         (executable, root),
                     )
+                    self.assertFalse(parsed.commands[0].trailing_linebreak_only)
+                terminal = module._a3_preflight.parse_shell_command(command + "\n", dialect)
+                with self.subTest(script=script, shape="literal-root-terminal-LF"):
+                    self.assertTrue(terminal.commands[0].trailing_linebreak_only)
+                    self.assertEqual(
+                        terminal.commands[0].boundary_before, "&" if dialect == "powershell" else "start"
+                    )
+                    self.assertEqual(
+                        module._a3_preflight.absolute_literal_root_context(terminal),
+                        (executable, root),
+                    )
+                    self.assertNotEqual(
+                        module._a3_preflight.classify_generic_push(terminal).status,
+                        "PGG-ADMISSIBLE",
+                    )
 
                 for invalid_argv in (
                     ("git", "-C", root, "push", "origin", "HEAD:refs/heads/feature"),
@@ -4559,15 +4586,36 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
             grant = module.ActivePrGrant(
                 "https://github.com/acme/project/pull/7", "acme", "project", 7
             )
-            reducer = module._PrGrantReducer("")
-            reducer.pending_numeric = (grant, None, 1)
-            reducer.last_genuine_user_position = 1
-            with self.subTest(script=script), mock.patch.object(
-                module, "_canonicalize_numeric_pr_grant", return_value=grant
-            ) as canonicalize:
-                state, recovered = reducer.finish()
-            self.assertEqual((state, recovered), ("malformed", None))
-            canonicalize.assert_not_called()
+            with pr_literal_command_workspace() as workspace:
+                root = workspace / "repository"
+                root.mkdir()
+                binary = workspace / "bin" / "git.exe"
+                binary.parent.mkdir()
+                binary.write_bytes(b"inert test identity; never execute\n")
+                tool_name = "PowerShell" if os.name == "nt" else "Bash"
+                dialect = "powershell" if tool_name == "PowerShell" else "posix"
+                argv = (
+                    str(binary.resolve(strict=True)), "-C",
+                    str(root.resolve(strict=True)), "push", "origin",
+                    "HEAD:refs/heads/feature",
+                )
+                command = (
+                    module._a3_preflight._serialize_powershell_literal(argv)
+                    if dialect == "powershell" else shlex.join(argv)
+                )
+                preflight = _heavy_preflight(
+                    module, command=command, dialect=dialect,
+                    repository_workdir="", repository_workdir_source="",
+                )
+                reducer = module._PrGrantReducer(preflight)
+                reducer.pending_numeric = (grant, None, 1)
+                reducer.last_genuine_user_position = 1
+                with self.subTest(script=script), mock.patch.object(
+                    module, "_canonicalize_numeric_pr_grant", return_value=grant
+                ) as canonicalize:
+                    state, recovered = reducer.finish()
+                self.assertEqual((state, recovered), ("malformed", None))
+                canonicalize.assert_not_called()
 
     def test_selected_root_excludes_forged_path_executables(self) -> None:
         for script, module in self._modules("selected_root_executable_exclusion"):
@@ -5596,7 +5644,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 raise OSError(ctypes.get_last_error(), "CloseHandle")
 
     @unittest.skipUnless(os.name == "nt", "native case-sensitive directory fixture requires Windows")
-    def test_case_sensitive_roots_and_case_only_reparse_alias_keep_identity(self) -> None:
+    def test_case_sensitive_distinct_selected_and_literal_roots_keep_identity_and_reject_alias(self) -> None:
         import _winapi
 
         with tempfile.TemporaryDirectory(prefix="publication-workdir-case-sensitive-") as directory:
@@ -5648,12 +5696,38 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     dialect_override = dialect if script == CANONICAL_HOOK else None
                     with mock.patch.object(
                         module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE", dialect_override
-                    ), mock.patch.object(module, "_resolve_executable") as resolve, self.assertRaises(
-                        module.PrRouteDenied
-                    ) as caught:
-                        module._prepare_pr_push(command, dialect, parsed, lower_canonical, "tool")
-                    self.assertEqual(caught.exception.failure_id, "PRG-WORKDIR-INVALID")
-                    resolve.assert_not_called()
+                    ), mock.patch.object(
+                        module,
+                        "_normalize_repository_workdir",
+                        wraps=module._normalize_repository_workdir,
+                    ) as normalize, mock.patch.object(
+                        module, "_resolve_executable",
+                        return_value=self.OWNED_GIT_IDENTITY,
+                    ) as resolve, mock.patch.object(
+                        module,
+                        "_bind_pr_literal_executable",
+                        wraps=module._bind_pr_literal_executable,
+                    ) as bind_literal, mock.patch.object(
+                        module,
+                        "_prove_repository_root",
+                        side_effect=lambda path, _git: path,
+                    ) as prove:
+                        prepared = module._prepare_pr_push(
+                            command, dialect, parsed, lower_canonical, "tool"
+                        )
+                    normalized_roots = [call.args[0] for call in normalize.call_args_list]
+                    self.assertEqual(
+                        normalized_roots[:2], [lower_canonical, upper_canonical]
+                    )
+                    self.assertEqual(prepared.repository_workdir, upper_canonical)
+                    resolve.assert_called_once_with("git", upper_canonical)
+                    bind_literal.assert_called_once()
+                    self.assertEqual(
+                        bind_literal.call_args.args[1], self.OWNED_GIT_IDENTITY
+                    )
+                    prove.assert_called_once_with(
+                        upper_canonical, self.OWNED_GIT_IDENTITY
+                    )
             finally:
                 alias.rmdir()
 
@@ -5748,7 +5822,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 module, "_canonicalize_numeric_pr_grant",
                 side_effect=AssertionError("stale numeric authorization resolved"),
             ) as resolver:
-                reducer = module._PrGrantReducer(str(REPO_ROOT))
+                reducer = module._PrGrantReducer(_heavy_preflight(module))
                 reducer.consume(numeric)
                 reducer.consume(empty)
                 self.assertEqual(reducer.finish(), ("malformed", None))
@@ -5757,7 +5831,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 resolver.assert_not_called()
 
         empty = question_reply("")
-        reducer = module._PrGrantReducer(str(REPO_ROOT))
+        reducer = module._PrGrantReducer(_heavy_preflight(module))
         reducer.consume(empty)
         self.assertEqual(reducer.finish(), ("absent", None))
         self.assertEqual((reducer.record_position, reducer.last_genuine_user_position), (1, 0))
@@ -5766,7 +5840,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             with self.subTest(grant=grant), mock.patch.object(
                 module, "_canonicalize_numeric_pr_grant", return_value=resolved,
             ):
-                reducer = module._PrGrantReducer(str(REPO_ROOT))
+                reducer = module._PrGrantReducer(_heavy_preflight(module))
                 reducer.consume(grant)
                 reducer.consume(empty)
                 state, retained = reducer.finish()
@@ -6348,7 +6422,9 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 self.assertIn("PRG-AUTH-MALFORMED", stdout)
                 self.assertEqual(observed, [])
 
-    def test_pr_literal_minus_c_recovers_dropped_tool_workdir_fail_closed(self) -> None:
+    def test_pr_literal_minus_c_accepts_absent_or_distinct_selected_workdir_and_rejects_bad_shape(
+        self,
+    ) -> None:
         entries = [user(self.GRANT), user("push now")]
         for script in HOOKS:
             exact = self._literal_command(
@@ -6382,11 +6458,19 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 )
                 self.assertIn("PRG-COMMAND-SHAPE", denied, command)
                 self.assertEqual(calls, [], command)
-            conflict, calls = self._run_module(
+            # Literal -C identifies R for Git and scan binding; a distinct,
+            # valid selected E is still validated independently.
+            distinct_e, calls = self._run_module(
                 script, entries, exact, tool_workdir=str(REPO_ROOT.parent)
             )
-            self.assertIn("PRG-WORKDIR-INVALID", conflict)
-            self.assertEqual(calls, [])
+            self.assertFalse(denies_text(distinct_e), distinct_e)
+            self.assertTrue(any(
+                argv[1:3] == ["pr", "view"] for argv in calls
+            ))
+            self.assertIn(
+                [self.OWNED_GIT_IDENTITY, "rev-parse", "--show-toplevel"],
+                calls,
+            )
 
     def test_legacy_approve_publication_precedes_pr_route(self) -> None:
         for script in HOOKS:
@@ -6539,8 +6623,11 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                      mock.patch.object(module, "TRANSCRIPT_HISTORY_LINE_BYTE_CAP", 64), \
                      mock.patch.object(module, "_canonicalize_numeric_pr_grant") as canonicalize, \
                      mock.patch.object(module, "_evaluate_active_pr_route") as active_route:
+                    preflight = _heavy_preflight(
+                        module, transcript_path=str(transcript_path)
+                    )
                     state, grant, status = module._stream_stable_pr_grant(
-                        str(transcript_path), str(REPO_ROOT.resolve())
+                        preflight
                     )
                 self.assertEqual((state, grant, status), ("absent", None, expected_status))
                 canonicalize.assert_not_called()
@@ -6705,8 +6792,11 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             with mock.patch.object(
                 module.os, "fstat", side_effect=(observed, changed, changed)
             ):
+                preflight = _heavy_preflight(
+                    module, transcript_path=str(transcript_path)
+                )
                 state, grant, status = module._stream_stable_pr_grant(
-                    str(transcript_path), str(REPO_ROOT.resolve())
+                    preflight
                 )
         self.assertEqual((state, grant, status), ("absent", None, "identity-drift"))
 
@@ -6758,8 +6848,11 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             with mock.patch.object(
                 module.Path, "open", autospec=True, side_effect=patched_open
             ):
+                preflight = _heavy_preflight(
+                    module, transcript_path=str(transcript_path)
+                )
                 state, grant, status = module._stream_stable_pr_grant(
-                    str(transcript_path), str(REPO_ROOT.resolve())
+                    preflight
                 )
         self.assertEqual(
             (state, grant, status), ("absent", None, "identity-drift")
@@ -7007,13 +7100,12 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             ),
         )
         for label, snapshots, expected, calls in cases:
+            preflight = _heavy_preflight(module, transcript_path="transcript.jsonl")
             with self.subTest(label=label), mock.patch.object(
                 module, "_stream_stable_pr_grant", side_effect=snapshots
             ) as stream:
                 self.assertEqual(
-                    module._recover_stable_pr_grant(
-                        "transcript.jsonl", str(REPO_ROOT.resolve())
-                    ),
+                    module._recover_stable_pr_grant(preflight),
                     expected,
                 )
                 self.assertEqual(stream.call_count, calls)
@@ -11149,10 +11241,17 @@ class TestFinitePrGrantRecovery(unittest.TestCase):
             self.assertTrue(stream.closed)
         self._owned_root.cleanup()
 
+    def _preflight(self):
+        return _heavy_preflight(
+            self.m,
+            transcript_path=str(self.p),
+            repository_workdir=str(self.root),
+        )
+
     def result(self, payload, recover=False):
         self.p.write_bytes(payload)
         fn = self.m._recover_stable_pr_grant if recover else self.m._stream_stable_pr_grant
-        return fn(str(self.p), str(self.root))
+        return fn(self._preflight())
 
     def instrument(self, *, initial=None, line=None, read=None, seek=None):
         real_open = Path.open
@@ -11311,7 +11410,7 @@ class TestFinitePrGrantRecovery(unittest.TestCase):
             with self.p.open('r+b') as f:
                 f.write(replacement)
         with self.instrument(seek=seek), mock.patch.object(self.m.os, 'fstat', return_value=meta), mock.patch.object(self.m.Path, 'stat', return_value=meta):
-            self.assertEqual(self.m._stream_stable_pr_grant(str(self.p), str(self.root)), ('absent', None, 'identity-drift'))
+            self.assertEqual(self.m._stream_stable_pr_grant(self._preflight()), ('absent', None, 'identity-drift'))
 
     def test_descriptor_and_path_identity_changes(self):
         self.p.write_bytes(self.raw(user(self.GRANT)))
@@ -11328,14 +11427,14 @@ class TestFinitePrGrantRecovery(unittest.TestCase):
                         stack.enter_context(mock.patch.object(self.m.os, 'fstat', side_effect=[original, changed(st_mtime_ns=original.st_mtime_ns + 1), original]))
                     if surface == 'path-after':
                         stack.enter_context(mock.patch.object(Path, 'stat', side_effect=[original, changed(st_ino=original.st_ino + 1)]))
-                    self.assertEqual(self.m._stream_stable_pr_grant(str(self.p), str(self.root)), ('absent', None, 'identity-drift'))
+                    self.assertEqual(self.m._stream_stable_pr_grant(self._preflight()), ('absent', None, 'identity-drift'))
 
     def test_nonregular_file_rejected_before_open(self):
         self.p.write_bytes(b'{}')
         observed = self.p.stat()
         meta = SimpleNamespace(st_mode=0)
         with mock.patch.object(Path, 'stat', return_value=meta), mock.patch.object(Path, 'open', side_effect=AssertionError('nonregular opened')):
-            self.assertEqual(self.m._stream_stable_pr_grant(str(self.p), str(self.root)), ('absent', None, 'unreadable'))
+            self.assertEqual(self.m._stream_stable_pr_grant(self._preflight()), ('absent', None, 'unreadable'))
 
     def test_read_io_error_and_finish_route_denial_remain_distinct(self):
 

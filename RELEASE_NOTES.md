@@ -4,7 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-17
 
-- Generic publication checks can use an absolute Git application and one explicit absolute repository root even when the valid execution directory differs, or is genuinely absent and unused. Invalid supplied execution metadata still refuses, the actual executable must match, and fresh complete scan, authority, human review and resource guarantees remain required. Existing pull-request and context-dependent lookup requirements are unchanged.
+- Generic and pull-request publication checks can use an absolute Git application and one explicit absolute repository root independently of the execution directory when their actual command and authority permit it. A valid execution directory may differ from the target; genuinely unused absence is allowed, while invalid supplied metadata still refuses. Pull-request routes retain their supported syntax, genuine authorization context, provider transport, target and binding checks. Actual executable agreement, fresh complete scans, one-use receiving, human review and creator-resource settlement remain required; context-dependent lookup is unchanged.
 
 - Publication scanning can receive a bounded, actually reviewed content exception through one trusted policy owner while still detecting every unapproved occurrence. Qualified results remain visibly distinct from clean scans, valid unchanged content decisions can support fresh scans, and changed or revoked used authority refuses credit. Human publication approval, complete range coverage and creator-resource settlement remain required; installing code does not create a content grant.
 

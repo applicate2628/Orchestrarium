@@ -1977,7 +1977,7 @@ def _assemble_command_records(
             boundary_after,
             False,
             _nesting_context(dialect, boundary_before, boundary_after),
-            boundary_before == "start" and boundary_after != "end"
+            bool(boundary_after)
             and all(character in "\r\n" for character in boundary_after),
             "exact",
             normalization_state,
@@ -2474,51 +2474,83 @@ def _has_static_posix_continuation_proof(parsed: ShellParseResult) -> bool:
 
 
 def absolute_literal_root_context(parsed: ShellParseResult) -> tuple[str, str] | None:
-    """Project only the existing canonical absolute A -C R push production."""
+    """Project literal A/R selection independently of route acceptance."""
     if type(parsed) is not ShellParseResult:
         return None
     identity = parsed.identity
     effective = parsed.effective_publications
     if (
-        identity.dialect != parsed.dialect or identity.input_kind != "SHELL_TEXT"
+        parsed.dialect not in {"posix", "powershell"}
+        or identity.dialect != parsed.dialect or identity.input_kind != "SHELL_TEXT"
         or identity.depth != 0 or identity.parent is not None
         or identity.wrapper_id is not None
         or parsed.candidates or parsed.children or parsed.wrapper_projections
         or parsed.normalizations or parsed.lexical.operations or parsed.lexical.removed_spans
         or len(parsed.commands) != 1 or len(parsed.pushes) != 1
-        or not _is_exact_direct_literal(parsed.raw_command, parsed)
+        or parsed.status != "SCG-PARSED" or not effective.exact_complete
+        or len(effective.records) != 1
         or effective.eligible_direct_generic != effective.records
     ):
         return None
     record = effective.records[0]
     command = parsed.commands[0]
     push = record.push
-    argv = parsed.strict_projection.argv
+    argv = command.tokens
     if (
-        record.identity != identity or push != parsed.pushes[0]
-        or push.command != command or argv != command.tokens
+        record.kind != "DIRECT" or record.certainty != "exact"
+        or record.identity != identity or push != parsed.pushes[0]
+        or push.command != command
         or command.environment_assignments or command.control_keywords
         or command.normalization_state != "literal"
-        or len(argv) != 6 or argv[1] != "-C" or argv[3] != "push"
+        or len(argv) < 4 or argv[1] != "-C" or argv[3] != "push"
+        or tuple(token.value for token in command.token_records) != argv
     ):
         return None
     executable, root = argv[0], argv[2]
     if any(not value or "\x00" in value or not Path(value).is_absolute()
            for value in (executable, root)):
         return None
-    expected_boundary = "start" if parsed.dialect == "posix" else "&"
-    expected_context = "top-level" if parsed.dialect == "posix" else "call-operator"
     if (
-        command.boundary_before != expected_boundary or command.boundary_after != "end"
-        or push.shell_context != expected_context or push.environment_assignments
+        command.boundary_before != "start" and not (
+            parsed.dialect == "powershell" and command.boundary_before == "&"
+            and push.shell_context == "call-operator"
+        )
+    ) or (
+        command.boundary_after != "end" and not command.trailing_linebreak_only
+    ) or (
+        push.shell_context not in {"top-level", "call-operator"}
+        or push.environment_assignments
         or push.executable != executable or command.arguments != argv[1:]
         or push.git_global_options != ("-C", root)
         or push.git_global_occurrences != (OptionOccurrence("-C", "required-value", "neutral", 1),)
-        or push.post_subcommand_tokens != argv[4:] or push.positionals != argv[4:]
-        or push.push_options or push.push_option_occurrences
+        or push.post_subcommand_tokens != argv[4:]
         or push.repository_context != "redirected"
     ):
         return None
+    if (
+        parsed.dialect == "powershell" and command.boundary_before == "start"
+        and command.token_records[0].states != ("ordinary",)
+    ):
+        return None
+    # Inspect the existing atoms, never reinterpret raw shell syntax. Quoting
+    # alone does not make an expansion-bearing token a literal selection.
+    for atom in parsed.lexical.atoms:
+        if atom.token_membership < 0:
+            continue
+        if atom.state == "single-quoted":
+            continue
+        if atom.state not in {"ordinary", "double-quoted"}:
+            return None
+        if any(character in "$`" for character in atom.value):
+            return None
+        if atom.state == "ordinary" and (
+            any(character in "*?[{" for character in atom.value)
+            or (
+                atom.source_span == command.token_records[atom.token_membership].source_spans[0]
+                and atom.value == ("~" if parsed.dialect == "posix" else "@")
+            )
+        ):
+            return None
     return executable, root
 
 def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
@@ -2540,7 +2572,14 @@ def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     if not isinstance(push.command, ExecutableCommand):
         return GenericPushDecision("PGG-PARSE-UNCERTAIN", None)
     literal_context = absolute_literal_root_context(parsed)
-    if push.command.control_keywords or (literal_context is None and (
+    canonical_literal_root = (
+        literal_context is not None
+        and _is_exact_direct_literal(parsed.raw_command, parsed)
+        and len(parsed.strict_projection.argv) == 6
+        and push.positionals == parsed.strict_projection.argv[4:]
+        and not push.push_options and not push.push_option_occurrences
+    )
+    if push.command.control_keywords or (not canonical_literal_root and (
         push.shell_context != "top-level"
         or push.command.boundary_before != "start"
         or (
@@ -2549,11 +2588,11 @@ def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
         )
     )):
         return GenericPushDecision("PGG-COMPOUND-CONTEXT", None)
-    if push.repository_context != "ambient" and literal_context is None:
+    if push.repository_context != "ambient" and not canonical_literal_root:
         return GenericPushDecision("PGG-REPOSITORY-REDIRECT", None)
     if push.environment_assignments:
         return GenericPushDecision("PGG-ENV-PREFIX", None)
-    if push.git_global_options and literal_context is None:
+    if push.git_global_options and not canonical_literal_root:
         return GenericPushDecision("PGG-GIT-GLOBAL-OPTION", None)
     if push.option_status in ("GPO-MISSING-VALUE", "GPO-AMBIGUOUS"):
         return GenericPushDecision("PGG-OPTION-ARITY", None)
@@ -3072,18 +3111,18 @@ def validate_preflight_result(result: object) -> PreflightResult:
     literal_absence = False
     if empty_workdir_pair and result.reason_id in {"PFP-CONSENT-GENERIC", "PFP-HEAVY"}:
         if (
-            result.current_turn_status != STATUS_FOUND or result.parsed is None
+            result.parsed is None
             or result.command != result.parsed.raw_command
             or result.dialect != result.parsed.dialect
             or absolute_literal_root_context(result.parsed) is None
             or result.generic_decision is None
-            or result.generic_decision.status != "PGG-ADMISSIBLE"
             or result.generic_decision != classify_generic_push(result.parsed)
-            or (result.reason_id == "PFP-HEAVY" and (
-                not result.push_instruction or result.simple_pr_approval
+            or (result.reason_id == "PFP-CONSENT-GENERIC" and (
+                result.current_turn_status != STATUS_FOUND
+                or result.generic_decision.status != "PGG-ADMISSIBLE"
             ))
         ):
-            raise ValueError("missing repository workdir lacks literal generic context")
+            raise ValueError("missing repository workdir lacks literal selection context")
         literal_absence = True
     for field, default in _PREFLIGHT_OPTIONAL_DEFAULTS.items():
         value = getattr(result, field)
@@ -3227,9 +3266,10 @@ def build_preflight(envelope: dict) -> PreflightResult:
         )
         literal_context = absolute_literal_root_context(parsed)
         allow_absent = (
-            status == STATUS_FOUND and literal_context is not None
-            and grammar.status == "PGG-ADMISSIBLE"
-            and (action == "generic" or (action == "neutral" and instruction))
+            literal_context is not None
+            and (action != "generic" or (
+                status == STATUS_FOUND and grammar.status == "PGG-ADMISSIBLE"
+            ))
         )
         repository_workdir, repository_workdir_source = _repository_workdir(
             envelope, tool_input, allow_absent=allow_absent

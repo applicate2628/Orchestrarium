@@ -1595,9 +1595,15 @@ def _parse_pr_grant(text: str) -> ActivePrGrant | None:
 
 
 def _canonicalize_numeric_pr_grant(
-    number: int, authorization_workdir: str
+    number: int, authorization_workdir: str, *, preflight: PreflightResult
 ) -> ActivePrGrant:
     repository_workdir = _normalize_repository_workdir(authorization_workdir)
+    _prepare_selected_repository_workdir(
+        absolute_literal_root_context(preflight.parsed)
+        if preflight.parsed is not None else None,
+        preflight.repository_workdir,
+        preflight.repository_workdir_source,
+    )
     git_exe = _resolve_executable("git", repository_workdir)
     gh_exe = _resolve_executable("gh", repository_workdir)
     if git_exe is None or gh_exe is None:
@@ -1637,7 +1643,7 @@ def _canonicalize_numeric_pr_grant(
 class _PrGrantReducer:
     """Reduce genuine-user PR grant state in original transcript order."""
 
-    envelope_repository_workdir: str
+    preflight: PreflightResult
     state: str = "absent"
     grant: ActivePrGrant | SimplePrIntent | None = None
     transcript_workdir: str | None = None
@@ -1715,28 +1721,29 @@ class _PrGrantReducer:
                 self.state, self.grant, self.pending_numeric = "malformed", None, None
                 return self.state, self.grant
             if (
-                type(self.envelope_repository_workdir) is not str
-                or not self.envelope_repository_workdir
+                type(self.preflight.repository_workdir) is not str
+                or not self.preflight.repository_workdir
             ):
                 self.state, self.grant, self.pending_numeric = "malformed", None, None
                 return self.state, self.grant
-            authorization_workdir = self.envelope_repository_workdir
+            authorization_workdir = self.preflight.repository_workdir
         self.grant = _canonicalize_numeric_pr_grant(
-            parsed_grant.number, authorization_workdir
+            parsed_grant.number, authorization_workdir, preflight=self.preflight
         )
         self.state, self.pending_numeric = "active", None
         return self.state, self.grant
 
 
 def _stream_stable_pr_grant(
-    transcript_path: str, envelope_repository_workdir: str
+    preflight: PreflightResult,
 ) -> tuple[str, ActivePrGrant | SimplePrIntent | None, str]:
     """Reduce exactly the opened descriptor's initial, identity-stable history."""
 
+    transcript_path = preflight.transcript_path
     if not transcript_path:
         return "absent", None, HISTORY_STATUS_ABSENT
     path = Path(transcript_path)
-    reducer = _PrGrantReducer(envelope_repository_workdir)
+    reducer = _PrGrantReducer(preflight)
     try:
         path_before = path.stat()
         if not stat.S_ISREG(path_before.st_mode):
@@ -1813,14 +1820,12 @@ def _stream_stable_pr_grant(
 
 
 def _recover_stable_pr_grant(
-    transcript_path: str, envelope_repository_workdir: str
+    preflight: PreflightResult,
 ) -> tuple[str, ActivePrGrant | SimplePrIntent | None, str]:
     """Retry only one complete reread after a discarded identity-drift snapshot."""
-    state, grant, status = _stream_stable_pr_grant(
-        transcript_path, envelope_repository_workdir
-    )
+    state, grant, status = _stream_stable_pr_grant(preflight)
     if status == HISTORY_STATUS_IDENTITY_DRIFT:
-        return _stream_stable_pr_grant(transcript_path, envelope_repository_workdir)
+        return _stream_stable_pr_grant(preflight)
     return state, grant, status
 
 
@@ -4196,6 +4201,37 @@ def _normalize_repository_workdir(repository_workdir: str) -> str:
     return str(selected)
 
 
+def _prepare_selected_repository_workdir(
+    literal_context: tuple[str, str] | None,
+    repository_workdir: str,
+    repository_workdir_source: str,
+) -> str | None:
+    """Qualify the selected E and preserve only P-proved literal absence."""
+    if (
+        type(repository_workdir) is not str
+        or type(repository_workdir_source) is not str
+    ):
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    if literal_context is not None and (
+        type(literal_context) is not tuple
+        or len(literal_context) != 2
+        or any(type(value) is not str for value in literal_context)
+        or any(not value or "\x00" in value for value in literal_context)
+        or not Path(literal_context[0]).is_absolute()
+        or not Path(literal_context[1]).is_absolute()
+    ):
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    if repository_workdir_source in {"tool", "envelope"}:
+        return _normalize_repository_workdir(repository_workdir)
+    if (
+        repository_workdir_source == ""
+        and repository_workdir == ""
+        and literal_context is not None
+    ):
+        return None
+    raise PrRouteDenied("PRG-WORKDIR-INVALID")
+
+
 def _prove_repository_root(repository_workdir: str, git_exe: str) -> str:
     selected = Path(repository_workdir)
     _, top_text = _run_text(
@@ -4686,16 +4722,22 @@ def _prepare_pr_push(
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
     dialect = _pr_command_dialect(dialect)
     literal = _parse_pr_literal_shape(parsed, dialect)
+    literal_context = absolute_literal_root_context(parsed)
+    selected_workdir = _prepare_selected_repository_workdir(
+        literal_context, repository_workdir, repository_workdir_source
+    )
     if literal.repository_root is None:
-        repository_workdir = _normalize_repository_workdir(repository_workdir)
+        if selected_workdir is None:
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = selected_workdir
     else:
         command_root = _normalize_repository_workdir(literal.repository_root)
-        if repository_workdir_source == "tool":
-            tool_root = _normalize_repository_workdir(repository_workdir)
-            if tool_root != command_root:
+        if literal_context is None:
+            if repository_workdir_source == "tool":
+                if selected_workdir != command_root:
+                    raise PrRouteDenied("PRG-WORKDIR-INVALID")
+            elif repository_workdir_source != "envelope":
                 raise PrRouteDenied("PRG-WORKDIR-INVALID")
-        elif repository_workdir_source != "envelope":
-            raise PrRouteDenied("PRG-WORKDIR-INVALID")
         repository_workdir = command_root
     git_exe = _resolve_executable("git", repository_workdir)
     if git_exe is None:
@@ -4782,20 +4824,27 @@ def _prepare_simple_pr_push(
     ):
         _raise_command_shape("simple", dialect, parsed, "command-context")
     global_options = tuple(push.git_global_options)
+    literal_context = absolute_literal_root_context(parsed)
+    selected_workdir = _prepare_selected_repository_workdir(
+        literal_context, repository_workdir, repository_workdir_source
+    )
     if global_options:
         if len(global_options) != 2 or global_options[0] != "-C":
             _raise_command_shape("simple", dialect, parsed, "git-global")
         command_root = _normalize_repository_workdir(global_options[1])
-        if repository_workdir_source == "tool":
-            if _normalize_repository_workdir(repository_workdir) != command_root:
+        if literal_context is None:
+            if repository_workdir_source == "tool":
+                if selected_workdir != command_root:
+                    raise PrRouteDenied("PRG-WORKDIR-INVALID")
+            elif repository_workdir_source != "envelope":
                 raise PrRouteDenied("PRG-WORKDIR-INVALID")
-        elif repository_workdir_source != "envelope":
-            raise PrRouteDenied("PRG-WORKDIR-INVALID")
         repository_workdir = command_root
     else:
         if push.repository_context != "ambient":
             _raise_command_shape("simple", dialect, parsed, "command-context")
-        repository_workdir = _normalize_repository_workdir(repository_workdir)
+        if selected_workdir is None:
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = selected_workdir
     remote, refspec = push.positionals
     if not REMOTE_NAME_REGEX.fullmatch(remote):
         _raise_command_shape("simple", dialect, parsed, "target")
@@ -5030,32 +5079,20 @@ def _complete_generic_publication(preflight: PreflightResult) -> bool:
             and preflight.push_instruction is True
         )
     )
-
-    if selected_source in {"tool", "envelope"}:
-        # A present E remains a selected input even when the command carries R.
-        # Validate the actual directory before candidate selection or Git use.
-        _normalize_repository_workdir(selected_workdir)
-    elif selected_source == "" and selected_workdir == "":
-        if not generic_push_path or literal_context is None:
-            raise PrRouteDenied("PRG-WORKDIR-INVALID")
-    else:
+    selected_workdir = _prepare_selected_repository_workdir(
+        literal_context, selected_workdir, selected_source
+    )
+    if selected_workdir is None and not generic_push_path:
         raise PrRouteDenied("PRG-WORKDIR-INVALID")
 
     literal_executable = None
     if literal_context is not None:
-        if (
-            type(literal_context) is not tuple
-            or len(literal_context) != 2
-            or any(type(value) is not str for value in literal_context)
-            or any(not value or "\x00" in value for value in literal_context)
-            or not Path(literal_context[0]).is_absolute()
-            or not Path(literal_context[1]).is_absolute()
-        ):
-            raise PrRouteDenied("PRG-WORKDIR-INVALID")
         literal_executable, raw_repository_root = literal_context
         repository_workdir = _normalize_repository_workdir(raw_repository_root)
     else:
-        repository_workdir = _normalize_repository_workdir(selected_workdir)
+        if selected_workdir is None:
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = selected_workdir
 
     git_exe = _resolve_executable("git", repository_workdir)
     if git_exe is None:
@@ -5077,9 +5114,7 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
     validate_preflight_result(preflight)
     if preflight.reason_id == "PFP-CONSENT-GENERIC":
         return _complete_generic_publication(preflight)
-    pr_state, pr_grant, history_status = _recover_stable_pr_grant(
-        preflight.transcript_path, preflight.repository_workdir
-    )
+    pr_state, pr_grant, history_status = _recover_stable_pr_grant(preflight)
     transcript_diagnostic = _with_transcript_read_status(
         preflight.transcript_diagnostic, history_status, "not-run"
     )
