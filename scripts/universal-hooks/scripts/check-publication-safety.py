@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 from collections import Counter
 from enum import Enum
 import hashlib
@@ -18,7 +19,7 @@ import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Iterator
 from urllib.parse import quote
 
 _GIT_EXECUTABLE = globals().get("__injected_git_executable__", "git")
@@ -231,12 +232,6 @@ _SIMPLE_RULES = (
     (False, re.compile(r"^\$\s+")),
     (False, re.compile(r"^>>>\s+")),
     (False, re.compile(r"\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]")),
-)
-_SIMPLE_PATTERNS = tuple(pattern for _binary_rule, pattern in _SIMPLE_RULES)
-_BINARY_SIMPLE_PATTERNS = tuple(
-    (index, pattern)
-    for index, (binary_rule, pattern) in enumerate(_SIMPLE_RULES, 1)
-    if binary_rule
 )
 _BINARY_ASCII_RUN = re.compile(rb"[\x09\x20-\x7e]+")
 _IDENTIFIER_PREFIX = re.compile(
@@ -451,6 +446,14 @@ def _refusal(failure_id: str, reason: str, *, phase: str | None = None) -> Refus
     return Refusal(failure_id, phase or _REFUSAL_PHASES.get(failure_id, "input"), reason)
 
 
+def _review_failure_reason(exc: BaseException) -> str | None:
+    message = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ""
+    for reason in ("review-policy", "review-evaluation", "review-receiving"):
+        if message == reason or message.startswith(reason + "-"):
+            return reason
+    return None
+
+
 @dataclass(frozen=True)
 class ObjectReadSuccess:
     requested_oid: str
@@ -634,6 +637,7 @@ class TreeEntry:
     kind: str
     name: bytes
     oid: str
+    mode: str = ""
 
 
 @dataclass(frozen=True)
@@ -685,6 +689,16 @@ class ScanOutcome:
     coverage: CoverageProof | None = None
     reap_certificate: ReaderReapCertificate | None = None
     history: HistoryProof | None = None
+    review: "ReviewedEvidence | None" = None
+
+
+@dataclass(frozen=True)
+class ReviewedEvidence:
+    snapshot_id: str
+    used_decisions: tuple[tuple[str, str], ...]
+    applied: int
+    applied_set: str
+    used_token: str
 
 
 def _run_git(
@@ -1346,6 +1360,615 @@ def _safe_locator(path: str, subject_kind: str) -> str:
     )
 
 
+@dataclass(frozen=True)
+class _TextObservation:
+    line: str
+    line_number: int
+    line_start: int
+    family: str | None
+    leaf_index: int
+    pattern: re.Pattern[str]
+    match: re.Match[str]
+
+    @property
+    def diagnostic_class(self) -> str:
+        return (
+            f"simple-{self.leaf_index + 1}"
+            if self.family is None else f"value-{self.family}"
+        )
+
+
+def _text_lines(text: str) -> Iterator[tuple[int, int, str]]:
+    """Keep original character coordinates across every splitlines separator."""
+    offset = 0
+    for number, segment in enumerate(text.splitlines(keepends=True), 1):
+        pieces = segment.splitlines()
+        yield number, offset, pieces[0] if pieces else ""
+        offset += len(segment)
+
+
+def _selected_text_lines(text: str, path: str, subject_kind: str) -> Iterator[tuple[int, int, str]]:
+    scanner = subject_kind != "commit-message" and path.replace("\\", "/") in _SCANNER_EXEMPT_PATHS
+    for number, offset, line in _text_lines(text):
+        if not scanner or not _intentional_scanner_line(line):
+            yield number, offset, line
+
+
+def _matching_starts(pattern: re.Pattern[str], line: str) -> Iterator[re.Match[str]]:
+    position = 0
+    while position <= len(line):
+        match = pattern.search(line, position)
+        if match is None:
+            return
+        if match.end() <= match.start():
+            raise RuntimeError("review-evaluation-zero-width")
+        yield match
+        position = match.start() + 1
+
+
+def _line_observations(
+    line: str,
+    line_number: int,
+    line_start: int,
+    subject_kind: str,
+    *,
+    binary: bool = False,
+) -> Iterator[_TextObservation]:
+    for index, (binary_rule, pattern) in enumerate(_SIMPLE_RULES):
+        if binary and not binary_rule:
+            continue
+        for match in _matching_starts(pattern, line):
+            yield _TextObservation(line, line_number, line_start, None, index, pattern, match)
+    for index, (family, pattern) in enumerate(_VALUE_RULES):
+        for match in _matching_starts(pattern, line):
+            if _is_callable_rhs(line, match):
+                continue
+            if binary:
+                if _is_public_key_token_match(line, family, match):
+                    continue
+            elif _is_annotated_public_token_match(line, family, match, subject_kind):
+                continue
+            yield _TextObservation(line, line_number, line_start, family, index, pattern, match)
+
+
+def _assignment_coordinates(observation: _TextObservation) -> tuple[int, ...] | None:
+    """Reconstruct only the actual regex assignment, without parsing a language."""
+    match, line = observation.match, observation.line
+    if observation.family is None:
+        return None
+    rhs_start, rhs_end = match.span("rhs_value")
+    separator_end = rhs_start
+    while separator_end > match.start() and line[separator_end - 1].isspace():
+        separator_end -= 1
+    separator_start = separator_end - 1
+    if separator_start < match.start() or line[separator_start] not in {":", "="}:
+        return None
+    identifier_end = separator_start
+    while identifier_end > match.start() and line[identifier_end - 1].isspace():
+        identifier_end -= 1
+    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    identifier_start = prefix.start() if prefix is not None else match.start()
+    if identifier_end <= identifier_start:
+        return None
+    return identifier_start, identifier_end, separator_start, separator_end, rhs_start, rhs_end
+
+
+def _observation_key(observation: _TextObservation) -> tuple:
+    assignment = _assignment_coordinates(observation)
+    if observation.family is None:
+        return ("simple", observation.leaf_index, observation.match.span())
+    if assignment is not None:
+        return ("value", observation.family, assignment)
+    # An unproved assignment must remain an independent unresolved observation.
+    return ("unproved", observation.leaf_index, observation.match.span())
+
+
+def _build_detector_catalog(digest: Callable[[str, object], str]) -> tuple[tuple[dict, ...], dict]:
+    definitions: list[dict] = []
+    leaf_lookup: dict[tuple[str, int], tuple[dict, str]] = {}
+    for index, (_binary, pattern) in enumerate(_SIMPLE_RULES):
+        leaf = {"pattern": pattern.pattern, "flags": pattern.flags}
+        leaf_id = "simple-" + digest("orchestrarium.publication-review.detector-leaf.v1", leaf)
+        definition = {
+            "schemaVersion": 1, "ruleId": leaf_id,
+            "normalFormId": "nf-simple-match-v1", "domain": "blob-text-v1",
+            "engine": "python-re-matching-starts-v1", "coordinate": "utf8-original-bytes-v1",
+            "equivalence": "exact-match-v1", "leaves": [{"leafId": leaf_id, **leaf}],
+            "exclusions": ["scanner-self-v1"],
+        }
+        detector = {"ruleId": leaf_id, "meaningSha256": digest("orchestrarium.publication-review.detector.v1", definition)}
+        definitions.append(definition)
+        leaf_lookup[("simple", index)] = (detector, leaf_id)
+    for family in sorted({family for family, _pattern in _VALUE_RULES}):
+        leaves: list[dict] = []
+        indices: list[tuple[int, str]] = []
+        for index, (actual_family, pattern) in enumerate(_VALUE_RULES):
+            if actual_family != family:
+                continue
+            leaf = {"pattern": pattern.pattern, "flags": pattern.flags}
+            leaf_id = "leaf-" + digest("orchestrarium.publication-review.detector-leaf.v1", leaf)
+            leaves.append({"leafId": leaf_id, **leaf})
+            indices.append((index, leaf_id))
+        definition = {
+            "schemaVersion": 1, "ruleId": f"value-{family}-v1",
+            "normalFormId": "nf-value-assignment-v1", "domain": "blob-text-v1",
+            "engine": "python-re-matching-starts-v1", "coordinate": "utf8-original-bytes-v1",
+            "equivalence": "exact-assignment-v1", "leaves": sorted(leaves, key=lambda row: row["leafId"]),
+            "exclusions": ["callable-rhs-v1", "public-token-v1", "scanner-self-v1"],
+        }
+        detector = {"ruleId": definition["ruleId"], "meaningSha256": digest("orchestrarium.publication-review.detector.v1", definition)}
+        definitions.append(definition)
+        for index, leaf_id in indices:
+            leaf_lookup[("value", index)] = (detector, leaf_id)
+    return tuple(sorted(definitions, key=lambda row: row["ruleId"])), leaf_lookup
+
+
+def _original_byte_boundaries(raw: bytes) -> tuple[str, tuple[int, ...]]:
+    text = raw.decode("utf-8", "strict")
+    if text.encode("utf-8", "strict") != raw:
+        raise ValueError("review-evaluation-byte-map")
+    boundaries = [0]
+    for scalar in text:
+        boundaries.append(boundaries[-1] + len(scalar.encode("utf-8", "strict")))
+    if boundaries[-1] != len(raw):
+        raise ValueError("review-evaluation-byte-map")
+    return text, tuple(boundaries)
+
+
+def _byte_region(raw: bytes, start: int, end: int) -> dict:
+    if type(start) is not int or type(end) is not int or not 0 <= start < end <= len(raw):
+        raise ValueError("review-evaluation-region")
+    return {"startByte": start, "endByteExclusive": end, "sha256": hashlib.sha256(raw[start:end]).hexdigest()}
+
+
+def _analyze_review_candidates(
+    raw: bytes,
+    path: str,
+    *,
+    subject_kind: str,
+    digest: Callable[[str, object], str],
+    canonical: Callable[[object], bytes],
+) -> tuple[dict, ...]:
+    text, boundaries = _original_byte_boundaries(raw)
+    _definitions, leaves = _build_detector_catalog(digest)
+    groups: dict[tuple, list[_TextObservation]] = {}
+    for line_number, line_start, line in _selected_text_lines(text, path, subject_kind):
+        for observation in _line_observations(line, line_number, line_start, subject_kind):
+            groups.setdefault((line_start, _observation_key(observation)), []).append(observation)
+    result: list[dict] = []
+    for observations in groups.values():
+        first = observations[0]
+        detector, _leaf_id = leaves[("simple" if first.family is None else "value", first.leaf_index)]
+
+        def region(start: int, end: int) -> dict:
+            return _byte_region(raw, boundaries[first.line_start + start], boundaries[first.line_start + end])
+
+        assignment = None
+        if first.family is None:
+            start, end = first.match.span()
+            normal_form = "nf-simple-match-v1"
+        else:
+            coordinates = _assignment_coordinates(first)
+            if coordinates is None:
+                # Detection remains visible; no missing witness can be credited.
+                result.append({"detector": detector, "candidate": None,
+                               "line": first.line_number, "detectorClass": first.diagnostic_class})
+                continue
+            identifier_start, identifier_end, separator_start, separator_end, start, end = coordinates
+            assignment = {"identifier": region(identifier_start, identifier_end),
+                          "delimiter": region(separator_start, separator_end), "rhs": region(start, end)}
+            normal_form = "nf-value-assignment-v1"
+        candidate_region = region(start, end)
+        contributors: list[dict] = []
+        for observation in observations:
+            _detector, leaf_id = leaves[("simple" if observation.family is None else "value", observation.leaf_index)]
+            contributor = {"leafId": leaf_id, "fullMatch": region(*observation.match.span())}
+            if contributor not in contributors:
+                contributors.append(contributor)
+        contributors.sort(key=lambda row: (row["leafId"], row["fullMatch"]["startByte"],
+                                          row["fullMatch"]["endByteExclusive"], row["fullMatch"]["sha256"]))
+        candidate = {"normalFormId": normal_form, **candidate_region,
+                     "assignment": assignment, "contributors": contributors}
+        candidate["occurrenceSha256"] = digest("orchestrarium.publication-review.occurrence.v1", {"detector": detector, **candidate})
+        result.append({"detector": detector, "candidate": candidate,
+                       "line": first.line_number, "detectorClass": first.diagnostic_class})
+    return tuple(sorted(result, key=lambda row: (
+        row["candidate"]["startByte"] if row["candidate"] is not None else -1,
+        row["candidate"]["endByteExclusive"] if row["candidate"] is not None else -1,
+        row["detector"]["ruleId"], canonical(row["candidate"]),
+    )))
+
+
+def _project_analyzed_review_candidate(
+    raw: bytes, detector: dict, review_region: dict, rows: tuple[dict, ...],
+) -> dict:
+    if not isinstance(review_region, dict) or set(review_region) != {"startByte", "endByteExclusive", "sha256"}:
+        raise ValueError("review-evaluation-region")
+    if _byte_region(raw, review_region["startByte"], review_region["endByteExclusive"]) != review_region:
+        raise ValueError("review-evaluation-region")
+    selected: list[dict] = []
+    for row in rows:
+        if row["detector"] != detector:
+            continue
+        candidate = row["candidate"]
+        if candidate is None:
+            raise ValueError("review-evaluation-unproved")
+        intervals = [(item["fullMatch"]["startByte"], item["fullMatch"]["endByteExclusive"])
+                     for item in candidate["contributors"]]
+        contained = all(review_region["startByte"] <= start < end <= review_region["endByteExclusive"]
+                        for start, end in intervals)
+        intersects = any(start < review_region["endByteExclusive"] and end > review_region["startByte"]
+                         for start, end in intervals)
+        if intersects and not contained:
+            raise ValueError("review-evaluation-straddling")
+        if contained:
+            selected.append(candidate)
+    if len(selected) != 1:
+        raise ValueError("review-evaluation-unique-candidate")
+    return selected[0]
+
+
+def _load_review_policy_module():
+    module_name = "_orchestrarium_publication_review_policy_v1"
+    injection_names = (
+        "__injected_review_policy_module__", "__injected_review_policy_snapshot__",
+        "__injected_review_repository_observation__", "__injected_review_execution__",
+    )
+    present = tuple(name in globals() for name in injection_names)
+    if any(present):
+        if not all(present):
+            raise RuntimeError("review-policy-injection")
+        module = globals()[injection_names[0]]
+        if (
+            globals()[injection_names[3]] != "gate-captured-v1"
+            or getattr(module, "__name__", None) != module_name
+            or getattr(module, "__file__", None) != "<closure>/publication_review_policy.py"
+            or sys.modules.get(module_name) is not module
+            or getattr(module, "POLICY_MODULE_CONTRACT_ID", None)
+            != "orchestrarium.publication-review-policy.module.v1"
+        ):
+            raise RuntimeError("review-policy-injection")
+        return module
+    if str(__file__).startswith("<closure>/"):
+        raise RuntimeError("review-policy-injection")
+    path = Path(__file__).resolve().with_name("publication_review_policy.py")
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        if (
+            getattr(existing, "__file__", None) != str(path)
+            or getattr(existing, "POLICY_MODULE_CONTRACT_ID", None)
+            != "orchestrarium.publication-review-policy.module.v1"
+        ):
+            raise RuntimeError("review-policy-module")
+        return existing
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("review-policy-module")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+        if getattr(module, "POLICY_MODULE_CONTRACT_ID", None) != "orchestrarium.publication-review-policy.module.v1":
+            raise RuntimeError("review-policy-module")
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+def detector_definitions(policy_module) -> dict[str, dict]:
+    definitions, _leaves = _build_detector_catalog(policy_module.H)
+    return {definition["ruleId"]: {
+        "detector": {"ruleId": definition["ruleId"], "meaningSha256": policy_module.H("orchestrarium.publication-review.detector.v1", definition)},
+        "definition": definition,
+    } for definition in definitions}
+
+
+def resolve_review_detector(diagnostic_class: str, *, policy_module) -> dict:
+    _definitions, leaves = _build_detector_catalog(policy_module.H)
+    for index in range(len(_SIMPLE_RULES)):
+        if diagnostic_class == f"simple-{index + 1}":
+            return leaves[("simple", index)][0]
+    for index, (family, _pattern) in enumerate(_VALUE_RULES):
+        if diagnostic_class == f"value-{family}":
+            return leaves[("value", index)][0]
+    raise ValueError("unknown-detector")
+
+
+def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, policy_module) -> dict:
+    if not isinstance(raw, bytes) or not isinstance(path, bytes) or not path or b"\0" in path:
+        return {"complete": False, "candidates": (), "unresolved": (),
+                "refusal": _refusal("PS-INPUT-REFUSAL", "review-evaluation")}
+    decoded_path = path.decode("utf-8", "surrogateescape")
+    try:
+        rows = _analyze_review_candidates(raw, decoded_path, subject_kind=subject_kind,
+            digest=policy_module.H, canonical=policy_module.C)
+    except UnicodeError:
+        return {"complete": True, "candidates": (), "unresolved": tuple(_content_hits(
+            raw.decode("utf-8", "replace"), decoded_path, lambda _line: (), subject_kind=subject_kind,
+        )), "refusal": None}
+    except (ValueError, RuntimeError):
+        return {"complete": False, "candidates": (), "unresolved": (),
+                "refusal": _refusal("PS-INPUT-REFUSAL", "review-evaluation")}
+    candidates = tuple(row for row in rows if row["candidate"] is not None)
+    unresolved = tuple(Finding(
+        "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
+        subject_kind, _safe_locator(decoded_path, subject_kind), row["line"], row["detectorClass"],
+    ) for row in rows if row["candidate"] is None)
+    return {"complete": True, "candidates": candidates, "unresolved": unresolved, "refusal": None}
+
+
+def project_review_candidate(raw: bytes, path: bytes, detector: dict, review_region: dict, *, policy_module) -> dict:
+    definitions = detector_definitions(policy_module)
+    if not isinstance(detector, dict) or definitions.get(detector.get("ruleId"), {}).get("detector") != detector:
+        return {"status": "unrepresented", "candidate": None, "reason": "unknown-detector"}
+    try:
+        _original_byte_boundaries(raw)
+    except (UnicodeError, ValueError):
+        return {"status": "unavailable", "candidate": None, "reason": "unproved-byte-map"}
+    analysis = analyze_review_candidates(raw, path, subject_kind="tracked-blob", policy_module=policy_module)
+    if not analysis["complete"] or analysis["refusal"] is not None:
+        return {"status": "unavailable", "candidate": None, "reason": "incomplete-evaluation"}
+    if analysis["unresolved"]:
+        return {"status": "unavailable", "candidate": None, "reason": "unproved-byte-map"}
+    try:
+        candidate = _project_analyzed_review_candidate(raw, detector, review_region, analysis["candidates"])
+    except (ValueError, KeyError, TypeError) as exc:
+        reason = {
+            "review-evaluation-region": "invalid-region",
+            "review-evaluation-straddling": "no-candidate",
+            "review-evaluation-unique-candidate": "multiple-candidates",
+        }.get(str(exc), "incomplete-evaluation")
+        if reason == "multiple-candidates":
+            count = sum(row["detector"] == detector and all(
+                review_region["startByte"] <= item["fullMatch"]["startByte"] < item["fullMatch"]["endByteExclusive"] <= review_region["endByteExclusive"]
+                for item in row["candidate"]["contributors"]
+            ) for row in analysis["candidates"])
+            reason = "no-candidate" if count == 0 else "multiple-candidates"
+        return {"status": "ambiguous" if reason == "multiple-candidates" else "unrepresented", "candidate": None, "reason": reason}
+    return {"status": "bound", "candidate": candidate, "reason": "none"}
+
+
+def _capture_review_repository(policy_module, selected_root: Path, deadline: float) -> tuple[dict, tuple]:
+    try:
+        plan = policy_module.repository_query_plan(selected_root)
+    except Exception as exc:
+        # Missing metadata grants no credit; it is not an ordinary-clean veto.
+        # Retain the actual failed acquisition beside the other caller outcomes.
+        return {"status": "unavailable", "repository": None, "diagnostic": "metadata-unavailable"}, (exc,)
+    rows = []
+    for query in plan.queries:
+        try:
+            result = _run_range_git(list(query.git_args), text=False, timeout=_remaining_seconds(deadline))
+        except BaseException as exc:
+            failure = (
+                "timeout" if isinstance(exc, (subprocess.TimeoutExpired, TimeoutError))
+                else "cancelled" if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError))
+                else "execution-error"
+            )
+            rows.append(policy_module.RepositoryQueryResultV1(
+                query.key, query.git_args, None,
+                getattr(exc, "stdout", None), getattr(exc, "stderr", None), False, None, failure,
+            ))
+            if not isinstance(exc, Exception):
+                raise
+            break
+        raw_complete = isinstance(result.stdout, bytes) and isinstance(result.stderr, bytes)
+        rows.append(policy_module.RepositoryQueryResultV1(
+            query.key, query.git_args, result.returncode, result.stdout, result.stderr,
+            raw_complete, True, None if raw_complete else "incomplete-capture",
+        ))
+        if not raw_complete or result.returncode != 0:
+            break
+    try:
+        observation = policy_module.repository_from_query_results(plan, tuple(rows))
+    except Exception as exc:
+        return {"status": "unavailable", "repository": None, "diagnostic": "metadata-unavailable"}, (*rows, exc)
+    return observation, tuple(rows)
+
+
+class ReviewEvaluation:
+    """One run's matching and application evidence; policy and Git IO stay outside."""
+
+    def __init__(self, *, policy_module, policy_read, repository_observation: dict, execution: str):
+        if execution not in {"standalone-v1", "gate-captured-v1"}:
+            raise RuntimeError("review-policy-execution")
+        decoded = policy_module.decode_policy_snapshot(policy_read.snapshot)
+        if decoded.snapshot_id != policy_read.snapshot_id or decoded.usable_records != policy_read.usable_records:
+            raise RuntimeError("review-policy-snapshot")
+        self.policy = policy_module
+        self.read = decoded
+        self.repository_observation = repository_observation
+        self.execution = execution
+        self.unresolved = 0
+        self._analysis: dict[tuple, dict] = {}
+        self._applications: list[tuple[dict, dict, dict, dict]] = []
+        self._applied_keys: set[tuple] = set()
+
+    @property
+    def repository(self) -> dict | None:
+        observation = self.repository_observation
+        if not isinstance(observation, dict) or set(observation) != {"status", "repository", "diagnostic"}:
+            raise RuntimeError("review-policy-repository")
+        if observation["status"] == "captured" and observation["diagnostic"] == "none" and isinstance(observation["repository"], dict):
+            return observation["repository"]
+        if observation in (
+            {"status": "not-requested", "repository": None, "diagnostic": "not-needed"},
+            {"status": "unavailable", "repository": None, "diagnostic": "metadata-unavailable"},
+            {"status": "unavailable", "repository": None, "diagnostic": "unprovable-native-identity"},
+        ):
+            return None
+        raise RuntimeError("review-policy-repository")
+
+    def _authority(self, raw: bytes, subject: dict, row: dict, analysis: dict) -> tuple[dict, dict] | None:
+        repository = self.repository
+        if repository is None:
+            return None
+        # Policy's pure origin boundary check is the only source of origin credit.
+        if not self.policy.origin_is_outside_repository(self.read.snapshot, repository):
+            return None
+        choices = []
+        for record in self.read.usable_records:
+            if record["repository"] != repository or subject["mode"] not in record["modes"]:
+                continue
+            if subject["mode"] == "range-blob-text":
+                scope = record["rangeScope"]
+                if scope is None or (scope["kind"] == "exact-commits" and subject["commitOid"] not in scope["commits"]):
+                    continue
+            for occurrence in record["occurrences"]:
+                if any(occurrence[key] != subject[key] for key in (
+                    "rawPathBase64", "blobOid", "blobSha256", "blobByteCount", "gitMode",
+                )) or occurrence["detector"] != row["detector"] or occurrence["candidate"] != row["candidate"]:
+                    continue
+                if any(_byte_region(raw, context["region"]["startByte"], context["region"]["endByteExclusive"]) != context["region"]
+                       for context in occurrence["contexts"]):
+                    continue
+                try:
+                    projected = _project_analyzed_review_candidate(raw, occurrence["detector"], occurrence["reviewRegion"], analysis["candidates"])
+                except (ValueError, TypeError, KeyError):
+                    continue
+                if projected != occurrence["candidate"]:
+                    continue
+                choices.append((record["id"], occurrence["id"], record["recordSha256"], record, occurrence))
+        if not choices:
+            return None
+        selected = min(choices, key=lambda choice: choice[:3])
+        return selected[3], selected[4]
+
+    def scan_text_subject(
+        self, raw: bytes, path: str, find_machine_paths, *, subject_kind: str,
+        mode: str, commit_oid: str | None, raw_path: bytes, blob_oid: str, git_mode: str,
+        machine_path_lines: frozenset[int] | None = None, display_locator: str | None = None,
+        staged_index: int | None = None,
+    ) -> list[Finding]:
+        if not self.read.usable_records or self.repository is None:
+            findings = _content_hits(raw.decode("utf-8", "replace"), path, find_machine_paths,
+                subject_kind=subject_kind, machine_path_lines=machine_path_lines,
+                display_locator=display_locator, staged_index=staged_index)
+            self.unresolved += len(findings)
+            return findings
+        key = (raw_path, blob_oid, git_mode, subject_kind, hashlib.sha256(raw).digest())
+        analysis = self._analysis.get(key)
+        if analysis is None:
+            analysis = analyze_review_candidates(raw, raw_path, subject_kind=subject_kind, policy_module=self.policy)
+            self._analysis[key] = analysis
+        if not analysis["complete"] or analysis["refusal"] is not None:
+            raise RuntimeError("review-evaluation")
+        repository = self.repository
+        subject = {
+            "repositorySha256": self.policy.H("orchestrarium.publication-review.repository.v1", repository) if repository is not None else "",
+            "mode": mode, "commitOid": commit_oid,
+            "rawPathBase64": base64.b64encode(raw_path).decode("ascii"), "blobOid": blob_oid,
+            "blobSha256": hashlib.sha256(raw).hexdigest(), "blobByteCount": len(raw), "gitMode": git_mode,
+        }
+        findings = [replace(finding, display_locator=display_locator, staged_index=staged_index)
+                    for finding in analysis["unresolved"]]
+        locator = _safe_locator(path, subject_kind)
+        for row in analysis["candidates"]:
+            selected = self._authority(raw, subject, row, analysis) if git_mode in {"100644", "100755"} else None
+            if selected is None:
+                findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, row["line"], row["detectorClass"], display_locator, staged_index))
+                continue
+            record, occurrence = selected
+            binding = {"decisionId": record["id"], "occurrenceId": occurrence["id"],
+                       "detector": occurrence["detector"], "reviewRegion": occurrence["reviewRegion"],
+                       "candidate": occurrence["candidate"], "contexts": occurrence["contexts"],
+                       "modes": record["modes"], "rangeScope": record["rangeScope"],
+                       "repositorySha256": subject["repositorySha256"]}
+            application = {"subject": subject, "occurrenceSha256": row["candidate"]["occurrenceSha256"],
+                           "bindingSha256": self.policy.H("orchestrarium.publication-review.binding.v1", binding),
+                           "decisionId": record["id"], "recordSha256": record["recordSha256"], "occurrenceId": occurrence["id"]}
+            applied_key = (self.policy.C(subject), self.policy.C(row["detector"]), self.policy.C(row["candidate"]))
+            if applied_key in self._applied_keys:
+                raise RuntimeError("review-evaluation-duplicate")
+            self._applied_keys.add(applied_key)
+            self._applications.append((subject, row["candidate"], row["detector"], application))
+        for number, _offset, line in _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind):
+            if (machine_path_lines is None or number in machine_path_lines) and find_machine_paths(line):
+                findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, number, "machine-path", display_locator, staged_index))
+        self.unresolved += len(findings)
+        return findings
+
+    def evidence(self) -> ReviewedEvidence | None:
+        if not self._applications:
+            return None
+        if self.unresolved:
+            raise RuntimeError("review-evaluation-unresolved")
+        applications = sorted(self._applications, key=lambda item: (
+            item[0]["mode"], item[0]["commitOid"] or "", base64.b64decode(item[0]["rawPathBase64"], validate=True),
+            item[0]["blobOid"], item[0]["gitMode"], item[1]["startByte"], item[1]["endByteExclusive"],
+            item[2]["ruleId"], self.policy.C(item[1]),
+        ))
+        digest = self.policy.applied_set_digest(
+            row for _subject, _candidate, _detector, row in applications
+        )
+        used = set()
+        for _subject, _candidate, _detector, row in applications:
+            used.add((row["decisionId"], row["recordSha256"]))
+        ordered_used = tuple(sorted(used))
+        token = base64.b64encode(self.policy.C([list(row) for row in ordered_used])).decode("ascii")
+        return ReviewedEvidence(self.read.snapshot_id, ordered_used, len(applications), digest, token)
+
+
+def _prepare_review_evaluation(selected_root: Path, deadline: float, *, need_repository: bool = True):
+    policy = _load_review_policy_module()
+    exchanges = []
+    captured = globals().get("__injected_review_execution__") == "gate-captured-v1"
+    if captured:
+        policy_read = policy.decode_policy_snapshot(globals()["__injected_review_policy_snapshot__"])
+        observation = globals()["__injected_review_repository_observation__"]
+        execution = "gate-captured-v1"
+    else:
+        policy_read = policy.read_policy_snapshot(policy.resolve_trusted_origin(), selected_root)
+        observation = {"status": "not-requested", "repository": None, "diagnostic": "not-needed"}
+        execution = "standalone-v1"
+        if policy_read.usable_records and need_repository:
+            observation, exchange = _capture_review_repository(policy, selected_root, deadline)
+            exchanges.append(exchange)
+    evaluation = ReviewEvaluation(policy_module=policy, policy_read=policy_read,
+                                  repository_observation=observation, execution=execution)
+    # Force validation even when lexical evaluation subsequently has no candidates.
+    evaluation.repository
+    return evaluation, exchanges
+
+
+def _finalize_review_evaluation(
+    outcome: ScanOutcome, evaluation: ReviewEvaluation, selected_root: Path,
+    deadline: float, selection_recheck: Callable[[], bool], exchanges: list,
+) -> ScanOutcome:
+    if outcome.kind != "clean":
+        return outcome
+    if evaluation.unresolved:
+        return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "review-evaluation"))
+    evidence = evaluation.evidence()
+    if evidence is None:
+        return outcome
+    if evaluation.execution == "standalone-v1":
+        if not selection_recheck():
+            return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "review-receiving"))
+        observation, exchange = _capture_review_repository(evaluation.policy, selected_root, deadline)
+        exchanges.append(exchange)
+        if observation["status"] != "captured":
+            return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "review-receiving"))
+        finalization = evaluation.policy.verify_used(
+            evaluation.read.snapshot, observation["repository"], [list(row) for row in evidence.used_decisions],
+        )
+        expected_repository = evaluation.policy.H("orchestrarium.publication-review.repository.v1", evaluation.repository)
+        if (
+            not isinstance(finalization, dict)
+            or set(finalization) != {"inputSnapshotId", "usedList", "currentSnapshotId", "repositorySha256", "status", "reason", "resourcesSettled"}
+            or finalization["status"] != "valid" or finalization["reason"] != "none"
+            or finalization["resourcesSettled"] is not True
+            or finalization["inputSnapshotId"] != evidence.snapshot_id
+            or finalization["usedList"] != [list(row) for row in evidence.used_decisions]
+            or finalization["repositorySha256"] != expected_repository
+            or not isinstance(finalization["currentSnapshotId"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", finalization["currentSnapshotId"]) is None
+        ):
+            return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "review-receiving"))
+    return replace(outcome, review=evidence)
+
+
 def _content_hits(
     text: str,
     path: str,
@@ -1358,63 +1981,26 @@ def _content_hits(
     staged_index: int | None = None,
 ) -> list[Finding]:
     findings: list[Finding] = []
-    normalized_path = path.replace("\\", "/")
-    scanner = (
-        subject_kind != "commit-message"
-        and normalized_path in _SCANNER_EXEMPT_PATHS
-    )
     locator = _safe_locator(path, subject_kind)
-    for line_number, line in enumerate(text.splitlines(), 1):
-        if max_findings is not None and len(findings) >= max_findings:
-            break
-        if scanner and _intentional_scanner_line(line):
-            continue
-        for index, pattern in enumerate(_SIMPLE_PATTERNS):
-            if pattern.search(line):
+    for line_number, line_start, line in _selected_text_lines(text, path, subject_kind):
+        seen: set[tuple] = set()
+        for observation in _line_observations(line, line_number, line_start, subject_kind):
+            key = _observation_key(observation)
+            if key in seen:
+                continue
+            seen.add(key)
+            if max_findings is None or len(findings) < max_findings:
                 findings.append(Finding(
                     "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
-                    subject_kind,
-                    locator,
-                    line_number,
-                    f"simple-{index + 1}",
-                    display_locator,
-                    staged_index,
+                    subject_kind, locator, line_number, observation.diagnostic_class,
+                    display_locator, staged_index,
                 ))
-                if max_findings is not None and len(findings) >= max_findings:
-                    break
-                break
-        else:
-            for family, pattern in _VALUE_RULES:
-                match = next(
-                    (
-                        candidate
-                        for candidate in pattern.finditer(line)
-                        if not _is_callable_rhs(line, candidate)
-                        and not _is_annotated_public_token_match(
-                            line, family, candidate, subject_kind
-                        )
-                    ),
-                    None,
-                )
-                if match is not None:
-                    findings.append(Finding(
-                        "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
-                        subject_kind,
-                        locator,
-                        line_number,
-                        f"value-{family}",
-                        display_locator,
-                        staged_index,
-                    ))
-                    if max_findings is not None and len(findings) >= max_findings:
-                        break
-                    break
-        if max_findings is not None and len(findings) >= max_findings:
-            continue
         if (
             (machine_path_lines is None or line_number in machine_path_lines)
             and find_machine_paths(line)
         ):
+            if max_findings is not None and len(findings) >= max_findings:
+                continue
             findings.append(Finding(
                 "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
                 subject_kind,
@@ -1512,45 +2098,23 @@ def _binary_content_hits(
     locator = _safe_locator(path, "history-blob")
     for line_number, raw_line in enumerate(raw.splitlines(), 1):
         for raw_run in _BINARY_ASCII_RUN.findall(raw_line):
-            if max_findings is not None and len(findings) >= max_findings:
-                return findings
             line = raw_run.decode("ascii")
-            for index, pattern in _BINARY_SIMPLE_PATTERNS:
-                if pattern.search(line):
+            seen: set[tuple] = set()
+            for observation in _line_observations(
+                line, line_number, 0, "history-blob", binary=True
+            ):
+                key = _observation_key(observation)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if max_findings is None or len(findings) < max_findings:
                     findings.append(Finding(
-                        "PS-FINDING-CONTENT",
-                        "history-blob",
-                        locator,
-                        line_number,
-                        f"simple-{index}",
+                        "PS-FINDING-CONTENT", "history-blob", locator,
+                        line_number, observation.diagnostic_class,
                     ))
-                    break
-            else:
-                value_finding = None
-                for family, pattern in _VALUE_RULES:
-                    match = next(
-                        (
-                            candidate
-                            for candidate in pattern.finditer(line)
-                            if not _is_callable_rhs(line, candidate)
-                            and not _is_public_key_token_match(line, family, candidate)
-                        ),
-                        None,
-                    )
-                    if match is not None:
-                        value_finding = Finding(
-                            "PS-FINDING-CONTENT",
-                            "history-blob",
-                            locator,
-                            line_number,
-                            f"value-{family}",
-                        )
-                        break
-                if value_finding is not None:
-                    findings.append(value_finding)
-            if max_findings is not None and len(findings) >= max_findings:
-                return findings
-            if find_machine_paths(line):
+            if find_machine_paths(line) and (
+                max_findings is None or len(findings) < max_findings
+            ):
                 findings.append(Finding(
                     "PS-FINDING-CONTENT",
                     "history-blob",
@@ -1629,7 +2193,7 @@ def _staged_blob_oid(revision: str) -> str:
     return value.decode("ascii")
 
 
-def _staged_index_entry(path: str) -> tuple[str, str]:
+def _staged_index_binding(path: str) -> tuple[str, str, bytes]:
     proc = _run_git(["ls-files", "--stage", "-z", "--", path], timeout=30)
     match = _STAGED_INDEX_ENTRY.fullmatch(proc.stdout)
     if (
@@ -1641,7 +2205,12 @@ def _staged_index_entry(path: str) -> tuple[str, str]:
     mode = match.group("mode").decode("ascii")
     if mode not in {"100644", "100755", "120000", "160000"}:
         raise RuntimeError("unsupported staged mode")
-    return mode, match.group("oid").decode("ascii")
+    return mode, match.group("oid").decode("ascii"), match.group("path")
+
+
+def _staged_index_entry(path: str) -> tuple[str, str]:
+    mode, oid, _raw_path = _staged_index_binding(path)
+    return mode, oid
 
 
 def _staged_post_image(oid: str) -> bytes:
@@ -1710,7 +2279,7 @@ def _staged_added_line_numbers(old_oid: str, new_oid: str) -> frozenset[int]:
     return frozenset(added)
 
 
-def _tracked_files() -> tuple[
+def _tracked_files(*, review_bindings: dict[str, tuple[str, str, bytes]] | None = None) -> tuple[
     list[str],
     dict[str, bytes],
     dict[str, frozenset[int] | None],
@@ -1730,7 +2299,10 @@ def _tracked_files() -> tuple[
     machine_path_lines: dict[str, frozenset[int] | None] = {}
     for entry in entries:
         path = entry.destination_path
-        new_mode, new_oid = _staged_index_entry(path)
+        binding = _staged_index_binding(path)
+        new_mode, new_oid, _raw_path = binding
+        if review_bindings is not None:
+            review_bindings[path] = binding
         if new_mode == "160000":
             blobs[path] = b""
             machine_path_lines[path] = frozenset()
@@ -3051,7 +3623,7 @@ def _parse_tree(
             kind = "gitlink"
         else:
             return _refusal("PS-MSG-FRAME", "tree-mode")
-        entries.append(TreeEntry(kind, name, raw_oid.hex()))
+        entries.append(TreeEntry(kind, name, raw_oid.hex(), mode.decode("ascii")))
         offset = oid_end
     return tuple(entries)
 
@@ -3215,6 +3787,8 @@ async def _acquire_history(
     find_machine_paths,
     coverage_recorder: CoverageRecorder,
     scan_deadline: float,
+    *,
+    review_evaluation: "ReviewEvaluation | None" = None,
 ) -> tuple[HistoryProof, CoverageProof, tuple[Finding, ...]] | Refusal:
     commit_set = set(selection.expected_oids)
     object_types: dict[str, str] = {}
@@ -3331,6 +3905,7 @@ async def _acquire_history(
     visited_tree_ids: set[str] = set()
     tree_visits = 0
     subjects: list[tuple[str, bytes, str]] = []
+    subject_modes: dict[tuple[str, bytes, str], str] = {}
     subject_set: set[tuple[str, bytes, str]] = set()
     for commit_oid in selection.expected_oids:
         guard = _tree_traversal_guard(
@@ -3398,6 +3973,7 @@ async def _acquire_history(
                         return _refusal("PS-MSG-COVERAGE", "duplicate-subject")
                     subject_set.add(subject)
                     subjects.append(subject)
+                    subject_modes[subject] = entry.mode
                     if len(subjects) > _MAX_SUBJECTS:
                         return _refusal("PS-MSG-LIMIT", "subject-count")
 
@@ -3411,6 +3987,12 @@ async def _acquire_history(
 
     binary_blobs = {oid for oid, raw in blob_contents.items() if _is_binary(raw)}
     text_blobs = set(blob_contents) - binary_blobs
+    subjects_by_path: dict[tuple[bytes, str], list[tuple[str, str]]] = {}
+    if review_evaluation is not None:
+        for commit_oid, raw_path, blob_oid in sorted(subjects):
+            subjects_by_path.setdefault((raw_path, blob_oid), []).append(
+                (commit_oid, subject_modes[(commit_oid, raw_path, blob_oid)])
+            )
     for path, blob_oid in sorted(blob_paths):
         decoded_path = path.decode("utf-8", "surrogateescape")
         _append_findings(
@@ -3427,6 +4009,16 @@ async def _acquire_history(
                 find_machine_paths,
                 max_findings=max(0, _MAX_FINDINGS - len(findings)),
             )
+        elif review_evaluation is not None:
+            content_findings = []
+            for commit_oid, git_mode in subjects_by_path[(path, blob_oid)]:
+                if asyncio.get_running_loop().time() >= scan_deadline:
+                    return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+                _append_findings(content_findings, review_evaluation.scan_text_subject(
+                    raw, decoded_path, find_machine_paths, subject_kind="history-blob",
+                    mode="range-blob-text", commit_oid=commit_oid, raw_path=path,
+                    blob_oid=blob_oid, git_mode=git_mode,
+                ))
         else:
             content_findings = _content_hits(
                 raw.decode("utf-8", "replace"),
@@ -3470,6 +4062,7 @@ async def _scan_range_async(
     coverage_observer: Callable[[CoverageEvent, str], None] | None = None,
     coverage_fault: CoverageFaultPort | None = None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
+    review_evaluation: "ReviewEvaluation | None" = None,
 ) -> ScanOutcome:
     wall_deadline = time.monotonic() + scan_timeout
     request = _range_request(remote, destination, source_revision)
@@ -3507,12 +4100,17 @@ async def _scan_range_async(
                 if remaining <= 0:
                     acquisition = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
                 else:
+                    review_arguments = (
+                        {"review_evaluation": review_evaluation}
+                        if review_evaluation is not None else {}
+                    )
                     acquisition = await _acquire_history(
                         selection,
                         reader,
                         find_machine_paths,
                         coverage_recorder,
                         loop.time() + remaining,
+                        **review_arguments,
                     )
                 if isinstance(acquisition, Refusal):
                     pending = ScanOutcome(
@@ -3526,10 +4124,14 @@ async def _scan_range_async(
                 refusal=_refusal("PS-MSG-READ", "cancelled"),
                 selection=selection,
             )
-        except Exception:
+        except Exception as exc:
             pending = ScanOutcome(
                 "refusal", "range",
-                refusal=_refusal("PS-MSG-READ", "unexpected"),
+                refusal=(
+                    _refusal("PS-INPUT-REFUSAL", reason)
+                    if (reason := _review_failure_reason(exc)) is not None
+                    else _refusal("PS-MSG-READ", "unexpected")
+                ),
                 selection=selection,
             )
 
@@ -3601,6 +4203,8 @@ def _scan_range(
     *,
     source_revision: str | None = None,
     tip_resolver: Callable[[float | None], str] | None = None,
+    review_evaluation: "ReviewEvaluation | None" = None,
+    scan_timeout: float = _SCAN_DEADLINE_SECONDS,
 ) -> ScanOutcome:
     try:
         return asyncio.run(_scan_range_async(
@@ -3609,6 +4213,8 @@ def _scan_range(
             find_machine_paths,
             source_revision=source_revision,
             tip_resolver=tip_resolver,
+            review_evaluation=review_evaluation,
+            scan_timeout=scan_timeout,
         ))
     except KeyboardInterrupt:
         return ScanOutcome(
@@ -3763,6 +4369,8 @@ def _scan_content_blobs(
     find_machine_paths,
     *,
     machine_path_lines_by_path: dict[str, frozenset[int] | None] | None = None,
+    review_evaluation: "ReviewEvaluation | None" = None,
+    review_bindings: dict[str, tuple[str, str, bytes]] | None = None,
 ) -> ScanOutcome:
     findings: list[Finding] = []
     subject_kind = "path-blob" if mode == "path" else "tracked-blob"
@@ -3786,18 +4394,28 @@ def _scan_content_blobs(
         raw = blobs[path]
         if _is_binary(raw):
             continue
+        content_arguments = {
+            "subject_kind": subject_kind,
+            "machine_path_lines": (
+                machine_path_lines_by_path[path]
+                if machine_path_lines_by_path is not None else None
+            ),
+            "display_locator": display_locator,
+            "staged_index": staged_index,
+        }
+        if review_evaluation is not None and review_bindings is not None:
+            git_mode, blob_oid, raw_path = review_bindings[path]
+            findings.extend(review_evaluation.scan_text_subject(
+                raw, path, find_machine_paths, **content_arguments,
+                mode="staged-blob-text", commit_oid=None, raw_path=raw_path,
+                blob_oid=blob_oid, git_mode=git_mode,
+            ))
+            continue
         findings.extend(_content_hits(
             raw.decode("utf-8", "replace"),
             path,
             find_machine_paths,
-            subject_kind=subject_kind,
-            machine_path_lines=(
-                machine_path_lines_by_path[path]
-                if machine_path_lines_by_path is not None
-                else None
-            ),
-            display_locator=display_locator,
-            staged_index=staged_index,
+            **content_arguments,
         ))
     return ScanOutcome(
         "findings" if findings else "clean",
@@ -3844,6 +4462,24 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
                     )
         lines.append("publication-safety scan found potential tracked-content leak markers")
         return "", "\n".join(lines), 1
+    review_suffix = ""
+    if outcome.review is not None:
+        review = outcome.review
+        if (
+            outcome.kind != "clean" or outcome.mode not in {"tracked", "range"}
+            or type(review.applied) is not int or review.applied <= 0
+            or not review.used_decisions
+            or tuple(sorted(set(review.used_decisions))) != review.used_decisions
+            or re.fullmatch(r"[0-9a-f]{64}", review.snapshot_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", review.applied_set) is None
+            or re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", review.used_token) is None
+        ):
+            return "", "publication-safety: refusing id=PS-INPUT-REFUSAL reason=review-policy phase=input", 2
+        review_suffix = (
+            f", policy-snapshot={review.snapshot_id}, used-decisions={review.used_token}, "
+            f"applied={review.applied}, applied-set={review.applied_set}, "
+            "unresolved=0, evaluation=complete)"
+        )
     if outcome.mode == "range":
         selection = outcome.selection
         coverage = outcome.coverage
@@ -3870,15 +4506,14 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
                 2,
             )
         try:
+            line = _serialize_range_receipt_v3(
+                history, selection.remote, selection.destination, selection.source,
+                selection.tip, object_format=selection.object_format,
+            )
+            if review_suffix:
+                line = line.replace("publication-safety: clean", "publication-safety: qualified", 1)[:-1] + review_suffix
             return (
-                _serialize_range_receipt_v3(
-                    history,
-                    selection.remote,
-                    selection.destination,
-                    selection.source,
-                    selection.tip,
-                    object_format=selection.object_format,
-                ),
+                line,
                 "",
                 0,
             )
@@ -3890,6 +4525,10 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
                 2,
             )
     count = outcome.file_count
+    if review_suffix:
+        if count <= 0:
+            return "", "publication-safety: refusing id=PS-INPUT-REFUSAL reason=review-policy phase=input", 2
+        return f"publication-safety: qualified (staged, examined={count}" + review_suffix, "", 0
     noun = "file" if count == 1 else "files"
     if count == 0 and outcome.mode == "tracked":
         return "publication-safety: clean (tracked, examined 0 files -- nothing staged)", "", 0
@@ -3918,26 +4557,67 @@ def main(argv: list[str] | None = None) -> int:
         find_machine_paths = _path_finder(script)
         if args.range:
             remote, dst = args.range
-            return _emit_outcome(_scan_range(
+            review_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+            review_evaluation, exchanges = _prepare_review_evaluation(repo_root, review_deadline)
+            outcome = _scan_range(
                 remote,
                 dst,
                 find_machine_paths,
                 source_revision=args.range_source,
+                review_evaluation=review_evaluation if review_evaluation.read.usable_records else None,
+                scan_timeout=_remaining_seconds(review_deadline),
+            )
+
+            def recheck_range() -> bool:
+                selection = outcome.selection
+                if selection is None:
+                    return False
+                return _confirm_tip(selection.tip, lambda timeout=None: _resolve_commit(
+                    selection.source, timeout, object_format=selection.object_format,
+                ), _remaining_seconds(review_deadline)) is None
+
+            return _emit_outcome(_finalize_review_evaluation(
+                outcome, review_evaluation, repo_root, review_deadline, recheck_range, exchanges,
             ))
         elif args.path or args.legacy_path:
             mode = "path"
             paths, blobs = _path_files(args.path or args.legacy_path)
             machine_path_lines_by_path = None
+            review_evaluation = None
+            review_bindings = None
         else:
             mode = "tracked"
-            paths, blobs, machine_path_lines_by_path = _tracked_files()
-        return _emit_outcome(_scan_content_blobs(
+            review_bindings = {}
+            paths, blobs, machine_path_lines_by_path = _tracked_files(review_bindings=review_bindings)
+            review_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+            need_repository = any(
+                not _is_binary(blobs[path]) and _content_hits(
+                    blobs[path].decode("utf-8", "replace"), path, lambda _line: (), max_findings=1,
+                ) for path in paths
+            )
+            review_evaluation, exchanges = _prepare_review_evaluation(
+                repo_root, review_deadline, need_repository=need_repository,
+            )
+        outcome = _scan_content_blobs(
             mode,
             paths,
             blobs,
             find_machine_paths,
             machine_path_lines_by_path=machine_path_lines_by_path,
-        ))
+            review_evaluation=(review_evaluation if review_evaluation is not None and review_evaluation.read.usable_records else None),
+            review_bindings=review_bindings,
+        )
+        if review_evaluation is not None:
+            def recheck_staged() -> bool:
+                current_bindings = {}
+                current_paths, current_blobs, current_lines = _tracked_files(review_bindings=current_bindings)
+                return (current_paths == paths and current_bindings == review_bindings
+                        and current_blobs == blobs and current_lines == machine_path_lines_by_path)
+
+            outcome = _finalize_review_evaluation(
+                outcome, review_evaluation, repo_root, review_deadline, recheck_staged, exchanges,
+            )
+        return _emit_outcome(outcome)
     except KeyboardInterrupt:
         print(
             "publication-safety: refusing id=PS-INPUT-REFUSAL "
@@ -3946,7 +4626,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     except RuntimeError as exc:
-        if exc.args == ("not inside a git repository",):
+        review_reason = _review_failure_reason(exc)
+        if review_reason is not None:
+            print(
+                "publication-safety: refusing id=PS-INPUT-REFUSAL "
+                f"phase=input reason={review_reason}", file=sys.stderr,
+            )
+        elif exc.args == ("not inside a git repository",):
             print(
                 "publication-safety: refusing id=PS-INPUT-REFUSAL "
                 "phase=input reason=not inside a git repository",

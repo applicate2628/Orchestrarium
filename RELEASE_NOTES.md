@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-17
 
+- Generic publication checks can use an absolute Git application and one explicit absolute repository root even when the valid execution directory differs, or is genuinely absent and unused. Invalid supplied execution metadata still refuses, the actual executable must match, and fresh complete scan, authority, human review and resource guarantees remain required. Existing pull-request and context-dependent lookup requirements are unchanged.
+
+- Publication scanning can receive a bounded, actually reviewed content exception through one trusted policy owner while still detecting every unapproved occurrence. Qualified results remain visibly distinct from clean scans, valid unchanged content decisions can support fresh scans, and changed or revoked used authority refuses credit. Human publication approval, complete range coverage and creator-resource settlement remain required; installing code does not create a content grant.
+
 - Lead keeps the admitted primary task active while dispatching compatible substantive side work, then continues ready primary actions without waiting. Shared rules, project initialization and reminders now give the same direction while preserving user pauses, reprioritization and resource guarantees.
 
 - Both pack validators now check the complete live common-skill set, including cleanup after subagents. Codex accepts required terminology in the operating-model addendum while retaining exact headings and independently reviewed content checks, so current rules no longer fail stale expectations.

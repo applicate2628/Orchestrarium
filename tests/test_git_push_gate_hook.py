@@ -4279,6 +4279,296 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
             self.assertEqual(caught.exception.failure_id, "PRG-COMMAND-SHAPE")
             normalize.assert_not_called()
 
+    def test_generic_classifier_admits_only_absolute_literal_root_commands(self) -> None:
+        with pr_literal_command_workspace() as workspace:
+            target = workspace / "target"
+            binary = workspace / "bin" / ("git.exe" if os.name == "nt" else "git")
+            target.mkdir()
+            binary.parent.mkdir()
+            root = str(target.resolve(strict=True))
+            executable = str(binary.resolve())
+            for script, module in self._modules("generic_literal_root_classifier"):
+                dialect = "powershell" if os.name == "nt" else "posix"
+                argv = (
+                    executable, "-C", root, "push", "origin",
+                    "HEAD:refs/heads/feature",
+                )
+                command = (
+                    module._a3_preflight._serialize_powershell_literal(argv)
+                    if dialect == "powershell" else shlex.join(argv)
+                )
+                parsed = module._a3_preflight.parse_shell_command(command, dialect)
+                decision = module._a3_preflight.classify_generic_push(parsed)
+                with self.subTest(script=script, shape="literal-root"):
+                    self.assertEqual(decision.status, "PGG-ADMISSIBLE")
+                    self.assertEqual(
+                        module._a3_preflight.absolute_literal_root_context(parsed),
+                        (executable, root),
+                    )
+
+                for invalid_argv in (
+                    ("git", "-C", root, "push", "origin", "HEAD:refs/heads/feature"),
+                    (
+                        executable, "-C", root, "-C", root, "push", "origin",
+                        "HEAD:refs/heads/feature",
+                    ),
+                ):
+                    invalid = (
+                        module._a3_preflight._serialize_powershell_literal(invalid_argv)
+                        if dialect == "powershell" else shlex.join(invalid_argv)
+                    )
+                    rejected = module._a3_preflight.classify_generic_push(
+                        module._a3_preflight.parse_shell_command(invalid, dialect)
+                    )
+                    with self.subTest(script=script, shape=invalid_argv[:4]):
+                        self.assertNotEqual(rejected.status, "PGG-ADMISSIBLE")
+
+    def test_preflight_preserves_true_absence_only_for_literal_root(self) -> None:
+        with pr_literal_command_workspace() as workspace:
+            target = workspace / "target"
+            execution = workspace / "execution"
+            binary = workspace / "bin" / ("git.exe" if os.name == "nt" else "git")
+            target.mkdir()
+            execution.mkdir()
+            binary.parent.mkdir()
+            root = str(target.resolve(strict=True))
+            execution_root = str(execution.resolve(strict=True))
+            executable = str(binary.resolve())
+            tool_name = "PowerShell" if os.name == "nt" else "Bash"
+            dialect = "powershell" if tool_name == "PowerShell" else "posix"
+            with synthetic_transcript([user("push the branch")]) as transcript_path:
+                for script, module in self._modules("literal_root_preflight_absence"):
+                    argv = (
+                        executable, "-C", root, "push", "origin",
+                        "HEAD:refs/heads/feature",
+                    )
+                    command = (
+                        module._a3_preflight._serialize_powershell_literal(argv)
+                        if dialect == "powershell" else shlex.join(argv)
+                    )
+                    absent = module._a3_preflight.build_preflight({
+                        "tool_name": tool_name,
+                        "tool_input": {"command": command},
+                        "transcript_path": str(transcript_path),
+                    })
+                    with self.subTest(script=script, context="absent"):
+                        self.assertIn(absent.reason_id, {"PFP-HEAVY", "PFP-CONSENT-GENERIC"})
+                        self.assertEqual(absent.generic_decision.status, "PGG-ADMISSIBLE")
+                        self.assertEqual(absent.repository_workdir, "")
+                        self.assertEqual(absent.repository_workdir_source, "")
+                        self.assertEqual(
+                            module._a3_preflight.validate_preflight_result(absent), absent
+                        )
+
+                    selected = module._a3_preflight.build_preflight({
+                        "tool_name": tool_name,
+                        "cwd": root,
+                        "tool_input": {"command": command, "workdir": execution_root},
+                        "transcript_path": str(transcript_path),
+                    })
+                    with self.subTest(script=script, context="distinct-tool-E"):
+                        self.assertEqual(selected.repository_workdir, execution_root)
+                        self.assertEqual(selected.repository_workdir_source, "tool")
+                        self.assertEqual(selected.generic_decision.status, "PGG-ADMISSIBLE")
+
+                    ambient = module._a3_preflight.build_preflight({
+                        "tool_name": tool_name,
+                        "tool_input": {"command": "git push origin HEAD:refs/heads/feature"},
+                        "transcript_path": str(transcript_path),
+                    })
+                    with self.subTest(script=script, context="absent-ambient"):
+                        self.assertEqual(ambient.reason_id, "PFP-DENY-KNOWN")
+                        self.assertEqual(ambient.failure_id, "PRG-WORKDIR-INVALID")
+
+    def test_generic_literal_root_uses_R_and_binds_the_actual_literal_file(self) -> None:
+        with pr_literal_command_workspace() as workspace:
+            target = workspace / "target"
+            execution = workspace / "execution"
+            binary = workspace / "bin" / ("git.exe" if os.name == "nt" else "git")
+            mismatch = workspace / "bin" / ("other.exe" if os.name == "nt" else "other")
+            target.mkdir()
+            execution.mkdir()
+            binary.parent.mkdir()
+            binary.write_bytes(b"synthetic inert git identity\n")
+            mismatch.write_bytes(b"different inert executable identity\n")
+            root = str(target.resolve(strict=True))
+            execution_root = str(execution.resolve(strict=True))
+            executable = str(binary.resolve(strict=True))
+            tool_name = "PowerShell" if os.name == "nt" else "Bash"
+            dialect = "powershell" if tool_name == "PowerShell" else "posix"
+            with synthetic_transcript([user("push the branch")]) as transcript_path:
+                for script, module in self._modules("generic_literal_root_completion"):
+                    argv = (
+                        executable, "-C", root, "push", "origin",
+                        "HEAD:refs/heads/feature",
+                    )
+                    command = (
+                        module._a3_preflight._serialize_powershell_literal(argv)
+                        if dialect == "powershell" else shlex.join(argv)
+                    )
+                    for selected_workdir, source in ((execution_root, "tool"), ("", "")):
+                        envelope = {
+                            "tool_name": tool_name,
+                            "tool_input": {"command": command},
+                            "transcript_path": str(transcript_path),
+                        }
+                        if source:
+                            envelope["tool_input"]["workdir"] = selected_workdir
+                        preflight = module._a3_preflight.build_preflight(envelope)
+                        with self.subTest(script=script, source=source or "absent"):
+                            self.assertEqual(preflight.generic_decision.status, "PGG-ADMISSIBLE")
+                            with mock.patch.object(
+                                module, "_resolve_executable", return_value=executable
+                            ) as resolve, mock.patch.object(
+                                module, "_prove_repository_root", side_effect=lambda path, _git: path
+                            ) as prove, mock.patch.object(
+                                module, "_resolve_generic_scan_binding", return_value=mock.sentinel.binding
+                            ) as bind, mock.patch.object(
+                                module, "_run_authoritative_scan"
+                            ) as scan:
+                                self.assertTrue(module._complete_generic_publication(preflight))
+                            resolve.assert_called_once_with("git", root)
+                            prove.assert_called_once_with(root, executable)
+                            bind.assert_called_once_with(
+                                "origin", "refs/heads/feature", "HEAD", root, executable
+                            )
+                            scan.assert_called_once_with(
+                                mock.sentinel.binding, root, executable
+                            )
+
+                    preflight = module._a3_preflight.build_preflight({
+                        "tool_name": tool_name,
+                        "tool_input": {"command": command, "workdir": execution_root},
+                        "transcript_path": str(transcript_path),
+                    })
+                    with self.subTest(script=script, context="mismatched-literal-file"):
+                        with mock.patch.object(
+                            module, "_resolve_executable", return_value=str(mismatch)
+                        ) as resolve, mock.patch.object(
+                            module, "_prove_repository_root"
+                        ) as prove, mock.patch.object(
+                            module, "_run_authoritative_scan"
+                        ) as scan:
+                            with self.assertRaises(module.PrRouteDenied) as caught:
+                                module._complete_generic_publication(preflight)
+                        self.assertEqual(caught.exception.failure_id, "PGG-EXECUTABLE-MISMATCH")
+                        resolve.assert_called_once_with("git", root)
+                        prove.assert_not_called()
+                        scan.assert_not_called()
+
+    def test_explicit_root_refuses_invalid_present_E_before_executable_selection(self) -> None:
+        with pr_literal_command_workspace() as workspace:
+            target = workspace / "target"
+            invalid_workdir = workspace / "not-a-directory"
+            binary = workspace / "bin" / ("git.exe" if os.name == "nt" else "git")
+            target.mkdir()
+            binary.parent.mkdir()
+            invalid_workdir.write_text("file, not a directory\n", encoding="utf-8")
+            root = str(target.resolve(strict=True))
+            executable = str(binary.resolve())
+            tool_name = "PowerShell" if os.name == "nt" else "Bash"
+            dialect = "powershell" if tool_name == "PowerShell" else "posix"
+            with synthetic_transcript([user("push the branch")]) as transcript_path:
+                for script, module in self._modules("literal_root_invalid_present_workdir"):
+                    argv = (
+                        executable, "-C", root, "push", "origin",
+                        "HEAD:refs/heads/feature",
+                    )
+                    command = (
+                        module._a3_preflight._serialize_powershell_literal(argv)
+                        if dialect == "powershell" else shlex.join(argv)
+                    )
+                    preflight = module._a3_preflight.build_preflight({
+                        "tool_name": tool_name,
+                        "tool_input": {"command": command, "workdir": str(invalid_workdir)},
+                        "transcript_path": str(transcript_path),
+                    })
+                    with self.subTest(script=script, route="generic"):
+                        with mock.patch.object(module, "_resolve_executable") as resolve:
+                            with self.assertRaises(module.PrRouteDenied) as caught:
+                                module._complete_generic_publication(preflight)
+                        self.assertEqual(caught.exception.failure_id, "PRG-WORKDIR-INVALID")
+                        resolve.assert_not_called()
+
+                    pr_tool_name = TestPrScopedPublicationGrant._tool_name(script)
+                    pr_dialect = "powershell" if pr_tool_name == "PowerShell" else "posix"
+                    pr_command = (
+                        module._a3_preflight._serialize_powershell_literal(argv)
+                        if pr_dialect == "powershell" else shlex.join(argv)
+                    )
+                    parsed = module._a3_preflight.parse_shell_command(pr_command, pr_dialect)
+                    with self.subTest(script=script, route="PR-tool-E"):
+                        with mock.patch.object(
+                            module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE",
+                            pr_dialect if script == CANONICAL_HOOK else None,
+                        ), mock.patch.object(module, "_resolve_executable") as resolve:
+                            with self.assertRaises(module.PrRouteDenied) as caught:
+                                module._prepare_pr_push(
+                                    pr_command, pr_dialect, parsed, str(invalid_workdir), "tool"
+                                )
+                        self.assertEqual(caught.exception.failure_id, "PRG-WORKDIR-INVALID")
+                        resolve.assert_not_called()
+
+    def test_public_entrypoint_denies_invalid_present_E_with_safe_reason(self) -> None:
+        for script in self.ALL_HOOKS:
+            with self.subTest(script=script):
+                with pr_literal_command_workspace() as workspace:
+                    root = workspace / "repository"
+                    root.mkdir()
+                    invalid_workdir = workspace / "not-a-directory"
+                    invalid_workdir.write_text("file, not a directory\n", encoding="utf-8")
+                    binary = workspace / "bin" / "git.exe"
+                    binary.parent.mkdir()
+                    binary.write_bytes(b"inert test identity; never execute\n")
+                    argv = (
+                        str(binary.resolve(strict=True)), "-C",
+                        str(root.resolve(strict=True)), "push", "origin",
+                        "HEAD:refs/heads/feature",
+                    )
+                    command = "& " + " ".join(
+                        "'" + argument.replace("'", "''") + "'" for argument in argv
+                    )
+                    with synthetic_transcript([user("push [approve-publication]")]) as transcript_path:
+                        envelope = {
+                            "tool_name": "PowerShell",
+                            "cwd": str(root.resolve(strict=True)),
+                            "tool_input": {
+                                "command": command,
+                                "workdir": str(invalid_workdir.resolve(strict=True)),
+                            },
+                            "transcript_path": str(transcript_path),
+                        }
+                        completed = subprocess.run(
+                            [sys.executable, str(script)],
+                            input=json.dumps(envelope, ensure_ascii=False),
+                            capture_output=True, text=True, encoding="utf-8",
+                        )
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    self.assertTrue(denies(completed), completed.stdout)
+                    payload = json.loads(completed.stdout)
+                    hook = payload["hookSpecificOutput"]
+                    self.assertEqual(hook["hookEventName"], "PreToolUse")
+                    self.assertEqual(hook["permissionDecision"], "deny")
+                    self.assertIn(
+                        "Use one explicit absolute repository root for the current push tool call.",
+                        hook["permissionDecisionReason"],
+                    )
+
+    def test_numeric_pr_grant_without_any_execution_context_does_not_fall_back_to_process_cwd(self) -> None:
+        for script, module in self._modules("numeric_pr_context_missing"):
+            grant = module.ActivePrGrant(
+                "https://github.com/acme/project/pull/7", "acme", "project", 7
+            )
+            reducer = module._PrGrantReducer("")
+            reducer.pending_numeric = (grant, None, 1)
+            reducer.last_genuine_user_position = 1
+            with self.subTest(script=script), mock.patch.object(
+                module, "_canonicalize_numeric_pr_grant", return_value=grant
+            ) as canonicalize:
+                state, recovered = reducer.finish()
+            self.assertEqual((state, recovered), ("malformed", None))
+            canonicalize.assert_not_called()
+
     def test_selected_root_excludes_forged_path_executables(self) -> None:
         for script, module in self._modules("selected_root_executable_exclusion"):
             with tempfile.TemporaryDirectory() as directory:
@@ -8798,9 +9088,16 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
             "b" * 64, interpreter,
             module.RootLocatorIdentity("gate.py", ".", "directory", (), None, ".", (), "gate.py", ()),
         )
+        payload = b""
+        captured_review = module.CapturedReviewPayload(
+            module.CapturedReviewModules(object(), object(), ()),
+            {}, "c" * 64,
+            {"status": "not-requested", "repository": None, "diagnostic": "not-needed"},
+            None, False, payload, hashlib.sha256(payload).hexdigest(),
+        )
         return module.PendingScanInvocation(
             "invocation", "attempt", binding, closure,
-            interpreter, tuple(argv), object(),
+            interpreter, tuple(argv), object(), captured_review,
         )
 
     def test_gate_owned_producer_provenance_contract_exists(self) -> None:
@@ -9030,6 +9327,12 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
                 (helpers / filename).write_bytes(
                     (REPO_ROOT / "scripts/process_supervision" / filename).read_bytes()
                 )
+            (scripts / "publication_review_policy.py").write_bytes(
+                CANONICAL_HOOK.with_name("publication_review_policy.py").read_bytes()
+            )
+            (scripts / "linked_runtime_subroots.py").write_bytes(
+                (REPO_ROOT / "scripts" / "linked_runtime_subroots.py").read_bytes()
+            )
             original_file = module.__file__
             try:
                 module.__file__ = str(gate)
@@ -9127,6 +9430,8 @@ class TestPublicationComponentRoot(unittest.TestCase):
                 ("hooks/check-machine-local-path.py", CANONICAL_HOOK.parent.parent / "hooks/check-machine-local-path.py"),
                 ("scripts/process_supervision/posix_process_group.py", REPO_ROOT / "scripts/process_supervision/posix_process_group.py"),
                 ("scripts/process_supervision/windows_job.py", REPO_ROOT / "scripts/process_supervision/windows_job.py"),
+                ("scripts/publication_review_policy.py", CANONICAL_HOOK.with_name("publication_review_policy.py")),
+                ("scripts/linked_runtime_subroots.py", REPO_ROOT / "scripts/linked_runtime_subroots.py"),
             )
             for relative, source in sources:
                 target = physical / relative
@@ -9163,9 +9468,39 @@ class TestPublicationComponentRoot(unittest.TestCase):
                         self.assertEqual(closure.root_locator.raw_target, os.readlink(alias) if selected == alias else None)
                         self.assertEqual(closure.root_locator.kind, "junction" if selected == alias and os.name == "nt" else "symlink" if selected == alias else "directory")
                         self.assertIs(module._recheck_source_closure(fds, closure), closure)
-                        payload = json.loads(module._closure_payload(closure))
-                        self.assertEqual(set(payload), {node.role for node in closure.nodes if node.role != "gate"})
-                        self.assertNotIn("root_locator", payload)
+                        captured_modules = module._load_captured_review_modules(closure)
+                        try:
+                            snapshot = {
+                                "schemaVersion": 1, "status": "absent", "origin": None,
+                                "rawBase64": None, "rawSha256": None, "diagnostic": "absent",
+                            }
+                            observation = {
+                                "status": "not-requested", "repository": None,
+                                "diagnostic": "not-needed",
+                            }
+                            snapshot_id = captured_modules.policy_module.H(
+                                "orchestrarium.publication-review.snapshot.v1", snapshot
+                            )
+                            payload = module._closure_payload(
+                                closure,
+                                {
+                                    "schemaVersion": 1,
+                                    "repositoryObservation": observation,
+                                    "snapshot": snapshot,
+                                    "snapshotId": snapshot_id,
+                                },
+                                captured_modules.policy_module.C,
+                            )
+                            payload_data = json.loads(payload.decode("ascii"))
+                            self.assertEqual(payload_data["payloadVersion"], 1)
+                            self.assertEqual(
+                                set(payload_data["sources"]),
+                                {node.role for node in closure.nodes if node.role != "gate"},
+                            )
+                            self.assertEqual(payload_data["review"]["snapshotId"], snapshot_id)
+                            self.assertNotIn("root_locator", payload_data)
+                        finally:
+                            module._release_captured_review_modules(captured_modules)
                     finally:
                         for fd in fds: os.close(fd)
             finally:
@@ -9297,12 +9632,27 @@ class TestPublicationComponentRoot(unittest.TestCase):
                 self.unlink_root(alias)
                 if old.exists(): self.unlink_root(old)
 
-    def test_incomplete_raw_packages_and_malformed_entrypoints_refuse(self):
+    def test_declared_source_layouts_and_incomplete_component_packages(self):
         module = _load_gate_module(CANONICAL_HOOK, "publication_incomplete_component")
-        for projection in HOOKS:
+        declared = (
+            (CANONICAL_HOOK, "universal", REPO_ROOT / "scripts"),
+            (
+                HOOKS[0],
+                "claude-source",
+                REPO_ROOT,
+            ),
+            (
+                HOOKS[1],
+                "codex-source",
+                REPO_ROOT,
+            ),
+        )
+        for projection, expected_layout, expected_root in declared:
             module.__file__ = str(projection)
-            with self.subTest(projection=projection), self.assertRaises((ValueError, OSError)):
-                module._capture_source_closure()
+            with self.subTest(projection=projection):
+                layout, selected_root = module._layout_for_gate(Path(module.__file__))
+                self.assertEqual(layout.name, expected_layout)
+                self.assertEqual(selected_root, expected_root)
         with self.component() as (module, root, physical):
             for invalid in (physical / "check-git-push-gate.py", physical / "scripts/other.py"):
                 module.__file__ = str(invalid)
@@ -9382,22 +9732,55 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
         import base64
 
         module = self._module("windows_job_bootstrap")
+        snapshot_id = "f" * 64
         source = {
             "hook_common": b"",
             "classifier": b"def find_machine_paths(*args, **kwargs): return []\n",
             "posix_helper": b"",
             "windows_job": b"WINDOWS_JOB_SENTINEL = True\n",
+            "linked_runtime_subroots": b"LINKED_SUBROOT_SENTINEL = True\n",
+            "publication_review_policy": (
+                b"POLICY_MODULE_CONTRACT_ID = 'orchestrarium.publication-review-policy.module.v1'\n"
+                b"POLICY_MODULE_KEY = '_orchestrarium_publication_review_policy_v1'\n"
+                b"POLICY_INJECTION_KEY = '__injected_review_policy_module__'\n"
+                + f"def H(domain, value): return '{snapshot_id}'\n".encode("ascii")
+            ),
             "scanner": (
+                b"import sys\n"
                 b"assert __injected_windows_job_module__.__name__ == "
                 b"'_orchestrarium_windows_job_v1'\n"
                 b"assert __injected_windows_job_module__.WINDOWS_JOB_SENTINEL\n"
+                b"assert __injected_review_policy_module__ is "
+                b"sys.modules['_orchestrarium_publication_review_policy_v1']\n"
+                b"assert __injected_review_policy_module__.POLICY_MODULE_CONTRACT_ID == "
+                b"'orchestrarium.publication-review-policy.module.v1'\n"
+                b"assert __injected_review_policy_snapshot__['status'] == 'absent'\n"
+                b"assert __injected_review_repository_observation__['status'] == 'not-requested'\n"
+                b"assert __injected_review_execution__ == 'gate-captured-v1'\n"
                 b"print('WINDOWS_JOB_INJECTED')\n"
             ),
         }
+        snapshot = {
+            "schemaVersion": 1, "status": "absent", "origin": None,
+            "rawBase64": None, "rawSha256": None, "diagnostic": "absent",
+        }
+        observation = {
+            "status": "not-requested", "repository": None,
+            "diagnostic": "not-needed",
+        }
         payload = json.dumps({
-            name: base64.b64encode(value).decode("ascii")
-            for name, value in source.items()
-        }).encode("ascii")
+            "payloadVersion": 1,
+            "sources": {
+                name: base64.b64encode(value).decode("ascii")
+                for name, value in source.items()
+            },
+            "review": {
+                "schemaVersion": 1,
+                "repositoryObservation": observation,
+                "snapshot": snapshot,
+                "snapshotId": snapshot_id,
+            },
+        }, sort_keys=True, separators=(",", ":")).encode("ascii")
         result = subprocess.run(
             [sys.executable, "-I", "-c", module._SCAN_BOOTSTRAP,
              "--gate-git-executable", sys.executable],
@@ -9416,12 +9799,32 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
             self.skipTest("git is required")
         module = self._module("posix_helper_bootstrap")
         fds, closure = module._capture_source_closure()
+        captured_modules = None
         try:
             self.assertEqual(
                 tuple(node.role for node in closure.nodes),
-                ("gate", "hook_common", "classifier", "posix_helper", "windows_job", "scanner"),
+                module.SOURCE_ROLE_ORDER,
             )
-            payload = module._closure_payload(closure)
+            captured_modules = module._load_captured_review_modules(closure)
+            snapshot = {
+                "schemaVersion": 1, "status": "absent", "origin": None,
+                "rawBase64": None, "rawSha256": None, "diagnostic": "absent",
+            }
+            observation = {
+                "status": "not-requested", "repository": None,
+                "diagnostic": "not-needed",
+            }
+            review = {
+                "schemaVersion": 1,
+                "repositoryObservation": observation,
+                "snapshot": snapshot,
+                "snapshotId": captured_modules.policy_module.H(
+                    "orchestrarium.publication-review.snapshot.v1", snapshot
+                ),
+            }
+            payload = module._closure_payload(
+                closure, review, captured_modules.policy_module.C
+            )
             with temporary_repository_workdir() as repository_workdir:
                 result = subprocess.run(
                     [
@@ -9441,6 +9844,8 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                     timeout=10.0,
                 )
         finally:
+            if captured_modules is not None:
+                module._release_captured_review_modules(captured_modules)
             for fd in fds:
                 os.close(fd)
 
@@ -9451,9 +9856,16 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
 
     def _pending(self, module, binding, argv):
         interpreter = module._interpreter_identity()
+        payload = b""
+        captured_review = module.CapturedReviewPayload(
+            module.CapturedReviewModules(object(), object(), ()),
+            {}, "a" * 64,
+            {"status": "not-requested", "repository": None, "diagnostic": "not-needed"},
+            None, False, payload, hashlib.sha256(payload).hexdigest(),
+        )
         return module.PendingScanInvocation(
             "invocation", "attempt", binding, self._closure(module),
-            interpreter, tuple(argv), object(),
+            interpreter, tuple(argv), object(), captured_review,
         )
 
     def test_r3_worker_start_failure_reaps_every_partial_start(self) -> None:
@@ -9517,6 +9929,35 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
 
     def test_r3_pending_result_correlation_denies_before_parse(self) -> None:
         module = self._module("pending_correlation")
+        fixtures = TestPublicationReviewedExceptionGateR2()
+        policy = fixtures._policy_module()
+        snapshot, snapshot_id = fixtures._synthetic_snapshot(policy)
+        repository = fixtures._synthetic_repository()
+        used_list, used_token, applied_set, repository_sha256 = (
+            fixtures._review_wire_fields(policy, repository)
+        )
+        payload_bytes = policy.C({"syntheticSwappedPendingFixture": 1})
+        captured_modules = module.CapturedReviewModules(policy, object(), ())
+        captured_review = module.CapturedReviewPayload(
+            captured_modules,
+            snapshot,
+            snapshot_id,
+            {"status": "captured", "repository": repository, "diagnostic": "none"},
+            repository, True, payload_bytes,
+            hashlib.sha256(payload_bytes).hexdigest(),
+        )
+        qualified = fixtures._qualified_range_line(
+            snapshot_id, used_token, applied_set
+        ).encode("ascii")
+        finalization = {
+            "inputSnapshotId": snapshot_id,
+            "usedList": used_list,
+            "currentSnapshotId": snapshot_id,
+            "repositorySha256": repository_sha256,
+            "status": "valid",
+            "reason": "none",
+            "resourcesSettled": True,
+        }
         binding = module.PushScanBinding(
             "generic", "origin", "refs/heads/main", "1" * 40, "1" * 40
         )
@@ -9524,36 +9965,41 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
         closure = dataclasses.replace(
             self._closure(module), interpreter_identity=interpreter_id
         )
-        valid = module.PublicationSafetyObservation(
-            "valid-v3",
-            module.RangeReceiptV3(
-                1, "a" * 64, 1, "b" * 64, 0, "c" * 64,
-                0, 0, 0, 0, "d" * 64, 0, "e" * 64,
-                "origin", "refs/heads/main", "1" * 40, "1" * 40,
-            ),
-        )
         fd = os.open(os.devnull, os.O_RDONLY)
-
         repository_workdir = str(REPO_ROOT.resolve())
         git_exe = str(Path(shutil.which("git") or "").resolve(strict=True))
+        original_pending = []
 
         def swapped_result(pending, _payload, _repository_workdir):
+            original_pending.append(pending)
+            settled = TestPublicationSafetyTrustedScanR5Proof()._pending_fixture(
+                module, "generic", captured_review=pending.captured_review
+            )
+            pending.child_identity = settled["pending"].child_identity
+            pending.supervisor = settled["pending"].supervisor
+            pending.settlement = settled["pending"].settlement
+            pending.state = settled["pending"].state
             wrong = module.PendingScanInvocation(
                 "swapped", pending.attempt_id, pending.binding, pending.closure,
                 pending.interpreter_identity, pending.exact_argv, object(),
+                pending.captured_review,
             )
             launched = module.LaunchedScanInvocation(
                 wrong, 999, object(), wrong.invocation_id, wrong.attempt_id,
                 wrong.binding, wrong.exact_argv, wrong.result_slot,
             )
             execution = module.TrustedExecutionRecord(
-                wrong, launched, wrong.result_slot, True, 0, b"ignored", b"",
+                wrong, launched, wrong.result_slot, True, 0, qualified, b"",
                 None, closure, interpreter_id, "trusted",
             )
             return launched, (execution,)
 
         with mock.patch.object(
             module, "_capture_source_closure", return_value=((fd,), closure)
+        ), mock.patch.object(
+            module, "_load_captured_review_modules", return_value=captured_modules
+        ), mock.patch.object(
+            module, "_capture_review_payload", return_value=captured_review
         ), mock.patch.object(
             module, "_interpreter_identity", return_value=interpreter_id
         ), mock.patch.object(
@@ -9563,12 +10009,19 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
         ), mock.patch.object(
             module, "_refresh_scan_binding", return_value=binding
         ), mock.patch.object(
-            module, "parse_publication_safety_observation", return_value=valid
-        ) as parser:
+            module, "parse_publication_safety_observation",
+            wraps=module.parse_publication_safety_observation,
+        ) as parser, mock.patch.object(
+            module, "_verify_used_review_currentness",
+            return_value=(finalization, used_list),
+        ) as finalizer:
             with self.assertRaises(module.PrRouteDenied) as caught:
                 module._run_authoritative_scan(binding, repository_workdir, git_exe)
         self.assertEqual(caught.exception.failure_id, "PGG-SCAN-CORRELATION")
         parser.assert_not_called()
+        finalizer.assert_not_called()
+        self.assertEqual(original_pending[0].state, module.PendingState.FAILED)
+        self.assertIsNone(original_pending[0].consumption_id)
 
         original = module.PendingScanInvocation(
             "invocation", "attempt", binding, closure, interpreter_id,
@@ -9592,71 +10045,51 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
             scanner_source,
             "R3-HELD-POSIX-HELPER",
         )
-
-        layouts = (
-            Path("source") / "scripts" / "universal-hooks" / "scripts",
-            Path("materialized-component") / "scripts",
-        )
-        sources = {
-            "gate": CANONICAL_HOOK.read_bytes(),
-            "scanner": (
-                REPO_ROOT / "scripts" / "universal-hooks" / "scripts" /
-                "check-publication-safety.py"
-            ).read_bytes(),
-            "common": (
-                REPO_ROOT / "scripts" / "universal-hooks" / "scripts" /
-                "hook_common.py"
-            ).read_bytes(),
+        source_paths = {
+            "gate": CANONICAL_HOOK,
+            "hook_common": CANONICAL_HOOK.with_name("hook_common.py"),
             "classifier": (
                 REPO_ROOT / "scripts" / "universal-hooks" / "hooks" /
                 "check-machine-local-path.py"
-            ).read_bytes(),
+            ),
             "posix_helper": (
                 REPO_ROOT / "scripts" / "process_supervision" /
                 "posix_process_group.py"
-            ).read_bytes(),
+            ),
             "windows_job": (
                 REPO_ROOT / "scripts" / "process_supervision" / "windows_job.py"
-            ).read_bytes(),
+            ),
+            "scanner": CANONICAL_HOOK.with_name("check-publication-safety.py"),
+            "publication_review_policy": CANONICAL_HOOK.with_name(
+                "publication_review_policy.py"
+            ),
+            "linked_runtime_subroots": REPO_ROOT / "scripts" / "linked_runtime_subroots.py",
         }
+        sources = {role: path.read_bytes() for role, path in source_paths.items()}
         original_file = module.__file__
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             try:
-                for layout in layouts:
-                    script_dir = root / layout
-                    hook_dir = script_dir.parent / "hooks"
-                    script_dir.mkdir(parents=True)
-                    hook_dir.mkdir(parents=True)
-                    gate = script_dir / "check-git-push-gate.py"
-                    scanner = script_dir / "check-publication-safety.py"
-                    common = script_dir / "hook_common.py"
-                    classifier = hook_dir / "check-machine-local-path.py"
-                    posix_helper = (
-                        script_dir.parents[1] / "process_supervision" /
-                        "posix_process_group.py"
-                        if layout.parts[0] == "source"
-                        else script_dir / "process_supervision" /
-                        "posix_process_group.py"
-                    )
-                    windows_job = posix_helper.with_name("windows_job.py")
-                    posix_helper.parent.mkdir(parents=True, exist_ok=True)
-                    gate.write_bytes(sources["gate"])
-                    scanner.write_bytes(sources["scanner"])
-                    common.write_bytes(sources["common"])
-                    classifier.write_bytes(sources["classifier"])
-                    posix_helper.write_bytes(sources["posix_helper"])
-                    windows_job.write_bytes(sources["windows_job"])
+                for layout in module.SOURCE_LAYOUTS:
+                    suffix_gate = root / layout.name / Path(*layout.gate_suffix)
+                    trust_root = suffix_gate.parent
+                    for _index in range(layout.trust_root_up):
+                        trust_root = trust_root.parent
+                    role_paths = {
+                        role: trust_root / relative
+                        for role, relative in layout.role_paths
+                    }
+                    for role, target in role_paths.items():
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(sources[role])
+                    gate = role_paths["gate"]
                     module.__file__ = str(gate)
                     fds, closure = module._capture_source_closure()
                     try:
-                        with self.subTest(layout=layout.as_posix(), phase="roles"):
+                        with self.subTest(layout=layout.name, phase="roles"):
                             self.assertEqual(
                                 tuple(node.role for node in closure.nodes),
-                                (
-                                    "gate", "hook_common", "classifier",
-                                    "posix_helper", "windows_job", "scanner",
-                                ),
+                                module.SOURCE_ROLE_ORDER,
                             )
                         self.assertEqual(
                             len(fds), len(closure.components) + len(closure.nodes) + 1,
@@ -9669,41 +10102,26 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                             trust_root,
                             ns=(root_stat.st_atime_ns, root_stat.st_mtime_ns + 1_000_000),
                         )
-                        with self.subTest(layout=layout.as_posix(), phase="component"):
+                        with self.subTest(layout=layout.name, phase="component"):
                             with self.assertRaises(ValueError):
                                 module._recheck_source_closure(fds, closure)
                     finally:
                         for fd in fds:
                             os.close(fd)
 
-                    role_paths = {
-                        "gate": gate,
-                        "hook_common": common,
-                        "classifier": classifier,
-                        "posix_helper": posix_helper,
-                        "windows_job": windows_job,
-                        "scanner": scanner,
-                    }
-                    role_sources = {
-                        "gate": sources["gate"],
-                        "hook_common": sources["common"],
-                        "classifier": sources["classifier"],
-                        "posix_helper": sources["posix_helper"],
-                        "windows_job": sources["windows_job"],
-                        "scanner": sources["scanner"],
-                    }
                     for role, target in role_paths.items():
-                        target.write_bytes(role_sources[role])
+                        role_source = sources[role]
+                        target.write_bytes(role_source)
                         fds, closure = module._capture_source_closure()
                         try:
                             try:
-                                target.write_bytes(role_sources[role] + b"\n# mutation\n")
+                                target.write_bytes(role_source + b"\n# mutation\n")
                             except PermissionError:
                                 mutation_blocked = True
                             else:
                                 mutation_blocked = False
                             with self.subTest(
-                                layout=layout.as_posix(), phase="node", role=role
+                                layout=layout.name, phase="node", role=role
                             ):
                                 if mutation_blocked:
                                     self.assertEqual(os.name, "nt")
@@ -9713,7 +10131,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                         finally:
                             for fd in fds:
                                 os.close(fd)
-                            target.write_bytes(role_sources[role])
+                            target.write_bytes(role_source)
 
                     fds, closure = module._capture_source_closure()
                     try:
@@ -10052,17 +10470,18 @@ class TestPublicationSafetyTrustedScanR4(unittest.TestCase):
         for field_name in (
             "invocation_id", "attempt_id", "binding", "closure",
             "interpreter_identity", "exact_argv", "result_slot",
+            "captured_review",
             "created_tick", "authorization_deadline",
         ):
             with self.subTest(identity_field=field_name), self.assertRaises(AttributeError):
                 setattr(pending, field_name, getattr(pending, field_name))
 
-    def test_r4_closure_declares_two_topologies_and_complete_components(self) -> None:
+    def test_r4_closure_declares_four_layouts_and_complete_components(self) -> None:
         module = self._module("closure")
-        self.assertEqual(len(module.SOURCE_LAYOUTS), 2, "R4-TOPOLOGY-CARDINALITY")
+        self.assertEqual(len(module.SOURCE_LAYOUTS), 4, "R4-TOPOLOGY-CARDINALITY")
         self.assertEqual(
             {layout.name for layout in module.SOURCE_LAYOUTS},
-            {"universal", "component"},
+            {"universal", "codex-source", "claude-source", "component"},
         )
         self.assertIn("bootstrap_digest", {field.name for field in dataclasses.fields(module.CanonicalSourceClosure)})
         self.assertIn("components", {field.name for field in dataclasses.fields(module.CanonicalSourceClosure)})
@@ -10095,7 +10514,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
     def test_r5_proof_inventory(self) -> None:
         required = {
             "test_r5_gate_certificate_retry_and_pending_participant_matrix",
-            "test_r5_two_topology_closure_and_actual_redaction_channels",
+            "test_r5_four_layout_closure_and_actual_redaction_channels",
         }
         self.assertEqual(required - set(dir(self.__class__)), set(), "R5-MISSING-PROBE")
 
@@ -10105,6 +10524,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
     def _pending_fixture(
         self, module, route: str, *, remote: str = "origin",
         destination: str = "refs/heads/main",
+        captured_review=None,
     ) -> dict[str, object]:
         binding = module.PushScanBinding(
             route, remote, destination, "1" * 40, "1" * 40
@@ -10122,7 +10542,8 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
         )
         pending = module.PendingScanInvocation(
             "invocation", "attempt", binding, closure, interpreter,
-            ("python", "-I"), object(), created_tick=time.monotonic(),
+            ("python", "-I"), object(), captured_review,
+            created_tick=time.monotonic(),
             authorization_deadline=time.monotonic() + 10,
         )
 
@@ -10182,8 +10603,10 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
         class Stream:
             def __init__(self):
                 self.close_calls = 0
+                self.closed = False
             def close(self):
                 self.close_calls += 1
+                self.closed = True
 
         class RetryProcess:
             def __init__(self):
@@ -10194,7 +10617,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                 self.wait_calls = 0
             def poll(self):
                 self.poll_calls += 1
-                if self.poll_calls >= 3:
+                if self.poll_calls >= 4:
                     self.returncode = 0
                 return self.returncode
             def terminate(self):
@@ -10464,61 +10887,44 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                         )
                     parser.assert_not_called()
 
-    def test_r5_two_topology_closure_and_actual_redaction_channels(self) -> None:
+    def test_r5_four_layout_closure_and_actual_redaction_channels(self) -> None:
         module = self._module("closure_redaction")
-        layouts = (
-            Path("source") / "scripts" / "universal-hooks" / "scripts",
-            Path("materialized-component") / "scripts",
-        )
-        sources = {
-            "gate": CANONICAL_HOOK.read_bytes(),
-            "scanner": (
-                REPO_ROOT / "scripts" / "universal-hooks" / "scripts" /
-                "check-publication-safety.py"
-            ).read_bytes(),
-            "hook_common": (
-                REPO_ROOT / "scripts" / "universal-hooks" / "scripts" /
-                "hook_common.py"
-            ).read_bytes(),
+        source_paths = {
+            "gate": CANONICAL_HOOK,
+            "hook_common": CANONICAL_HOOK.with_name("hook_common.py"),
             "classifier": (
                 REPO_ROOT / "scripts" / "universal-hooks" / "hooks" /
                 "check-machine-local-path.py"
-            ).read_bytes(),
+            ),
             "posix_helper": (
                 REPO_ROOT / "scripts" / "process_supervision" /
                 "posix_process_group.py"
-            ).read_bytes(),
+            ),
             "windows_job": (
                 REPO_ROOT / "scripts" / "process_supervision" / "windows_job.py"
-            ).read_bytes(),
+            ),
+            "scanner": CANONICAL_HOOK.with_name("check-publication-safety.py"),
+            "publication_review_policy": CANONICAL_HOOK.with_name(
+                "publication_review_policy.py"
+            ),
+            "linked_runtime_subroots": REPO_ROOT / "scripts" / "linked_runtime_subroots.py",
         }
+        sources = {role: path.read_bytes() for role, path in source_paths.items()}
         original_file = module.__file__
         scratch = REPO_ROOT / ".scratch"
         scratch.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="r5-closure-", dir=scratch) as td:
             root = Path(td)
             try:
-                for layout_index, layout in enumerate(layouts):
-                    script_dir = root / layout
-                    hook_dir = script_dir.parent / "hooks"
-                    script_dir.mkdir(parents=True)
-                    hook_dir.mkdir(parents=True)
+                for layout_index, layout in enumerate(module.SOURCE_LAYOUTS):
+                    suffix_gate = root / layout.name / Path(*layout.gate_suffix)
+                    trust_root = suffix_gate.parent
+                    for _index in range(layout.trust_root_up):
+                        trust_root = trust_root.parent
                     paths = {
-                        "gate": script_dir / "check-git-push-gate.py",
-                        "scanner": script_dir / "check-publication-safety.py",
-                        "hook_common": script_dir / "hook_common.py",
-                        "classifier": hook_dir / "check-machine-local-path.py",
-                        "posix_helper": (
-                            script_dir.parents[1] / "process_supervision" /
-                            "posix_process_group.py"
-                            if layout.parts[0] == "source"
-                            else script_dir / "process_supervision" /
-                            "posix_process_group.py"
-                        ),
+                        role: trust_root / relative
+                        for role, relative in layout.role_paths
                     }
-                    paths["windows_job"] = paths["posix_helper"].with_name(
-                        "windows_job.py"
-                    )
                     for role, path in paths.items():
                         path.parent.mkdir(parents=True, exist_ok=True)
                         path.write_bytes(sources[role])
@@ -10527,10 +10933,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                     try:
                         self.assertEqual(
                             tuple(node.role for node in closure.nodes),
-                            (
-                                "gate", "hook_common", "classifier",
-                                "posix_helper", "windows_job", "scanner",
-                            ),
+                            module.SOURCE_ROLE_ORDER,
                         )
                         for index, component in enumerate(closure.components):
                             components = list(closure.components)
@@ -10541,7 +10944,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                                 closure, components=tuple(components)
                             )
                             with self.subTest(
-                                layout=layout.as_posix(),
+                                layout=layout.name,
                                 participant="component",
                                 name=component.root_relative_name,
                             ), self.assertRaises(ValueError):
@@ -10567,7 +10970,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                                     closure, nodes=tuple(nodes)
                                 )
                                 with self.subTest(
-                                    layout=layout.as_posix(),
+                                    layout=layout.name,
                                     participant=node.role,
                                     field=field_name,
                                 ), self.assertRaises((ValueError, OSError)):
@@ -10596,7 +10999,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                         }
                         for name, mutated in extras.items():
                             with self.subTest(
-                                layout=layout.as_posix(), participant=name
+                                layout=layout.name, participant=name
                             ), self.assertRaises((ValueError, OSError)):
                                 module._recheck_source_closure(fds, mutated)
                     finally:
@@ -10993,6 +11396,1341 @@ class TestFinitePrGrantRecovery(unittest.TestCase):
                 self.assertEqual(simple_owner.call_count, int(state == 'simple'))
                 self.assertEqual(revoke.call_count, int(state == 'revoked'))
                 self.assertEqual(generic.call_count, int(state == 'absent'))
+
+class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
+    """Closed gate-side layout and qualified-wire contracts for R2."""
+
+    def _module(self):
+        return _load_gate_module(CANONICAL_HOOK, "publication_review_gate_r2")
+
+    def _load_contract_module(self, relative_path: str, label: str):
+        path = REPO_ROOT / Path(relative_path)
+        module_name = f"_publication_review_gate_r2_{label}_{secrets.token_hex(8)}"
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"R2 test contract module unavailable: {label}")
+        loaded = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = loaded
+        try:
+            spec.loader.exec_module(loaded)
+        finally:
+            if sys.modules.get(module_name) is loaded:
+                del sys.modules[module_name]
+        return loaded
+
+    def _policy_module(self):
+        return self._load_contract_module(
+            "scripts/universal-hooks/scripts/publication_review_policy.py",
+            "policy",
+        )
+
+    def _scanner_module(self):
+        return self._load_contract_module(
+            "scripts/universal-hooks/scripts/check-publication-safety.py",
+            "scanner",
+        )
+
+    @staticmethod
+    def _synthetic_repository() -> dict[str, object]:
+        import base64
+
+        if os.name == "nt":
+            encoding = "windows-utf16le"
+            encode_path = lambda value: value.encode("utf-16-le", errors="surrogatepass")
+            paths = {
+                "commonGit": r"C:\fixture\repo\.git",
+                "worktreeGit": r"C:\fixture\repo\.git\worktrees\selected",
+                "worktreeRoot": r"C:\fixture\repo",
+            }
+        else:
+            encoding = "posix-bytes"
+            encode_path = os.fsencode
+            paths = {
+                "commonGit": "/fixture/repo/.git",
+                "worktreeGit": "/fixture/repo/.git/worktrees/selected",
+                "worktreeRoot": "/fixture/repo",
+            }
+        return {
+            "kind": "native-worktree-v1",
+            "objectFormat": "sha1",
+            **{
+                name: {
+                    "pathEncoding": encoding,
+                    "pathBase64": base64.b64encode(encode_path(path)).decode("ascii"),
+                    "device": str(4 + index),
+                    "inode": str(5 + index),
+                }
+                for index, (name, path) in enumerate(paths.items())
+            },
+        }
+
+    @staticmethod
+    def _synthetic_snapshot(policy_module) -> tuple[dict[str, object], str]:
+        snapshot = {
+            "schemaVersion": 1,
+            "status": "absent",
+            "origin": None,
+            "rawBase64": None,
+            "rawSha256": None,
+            "diagnostic": "absent",
+        }
+        return snapshot, policy_module.H(policy_module.DOMAIN_SNAPSHOT, snapshot)
+
+    @staticmethod
+    def _review_wire_fields(policy_module, repository: dict[str, object]):
+        import base64
+
+        decision_id = "D1"
+        record_sha256 = policy_module.H(
+            policy_module.DOMAIN_RECORD, {"syntheticTestRecord": decision_id}
+        )
+        used_list = [[decision_id, record_sha256]]
+        used_token = base64.b64encode(policy_module.C(used_list)).decode("ascii")
+        repository_sha256 = policy_module.H(
+            policy_module.DOMAIN_REPOSITORY, repository
+        )
+        subject = {
+            "repositorySha256": repository_sha256,
+            "mode": "range",
+            "commitOid": "1" * 40,
+            "rawPathBase64": base64.b64encode(b"sample.txt").decode("ascii"),
+            "blobOid": "2" * 40,
+            "blobSha256": hashlib.sha256(b"abc").hexdigest(),
+            "blobByteCount": 3,
+            "gitMode": "100644",
+        }
+        application = {
+            "subject": subject,
+            "occurrenceSha256": policy_module.H(
+                policy_module.DOMAIN_OCCURRENCE,
+                {"syntheticTestOccurrence": decision_id},
+            ),
+            "bindingSha256": policy_module.H(
+                policy_module.DOMAIN_BINDING,
+                {
+                    "decisionId": decision_id,
+                    "occurrenceId": "O1",
+                    "repositorySha256": repository_sha256,
+                },
+            ),
+            "decisionId": decision_id,
+            "recordSha256": record_sha256,
+            "occurrenceId": "O1",
+        }
+        return (
+            used_list,
+            used_token,
+            policy_module.applied_set_digest([application]),
+            repository_sha256,
+        )
+
+    def _qualified_range_line(
+        self, snapshot_id: str, used_token: str, applied_set: str
+    ) -> str:
+        scanner = self._scanner_module()
+        history = scanner.HistoryProof(
+            commit_ids=("1" * 40,),
+            object_ids=("1" * 40, "2" * 40, "3" * 40),
+            blob_ids=("2" * 40,),
+            blob_bytes=3,
+            text_blobs=1,
+            binary_blobs=0,
+            subjects=(("1" * 40, b"sample commit", "subject"),),
+            paths=(("sample.txt", b"sample"),),
+            commit_set="a" * 64,
+            object_set="b" * 64,
+            blob_set="c" * 64,
+            subject_set="d" * 64,
+            path_set="e" * 64,
+        )
+        clean = scanner._serialize_range_receipt_v3(
+            history,
+            "origin",
+            "refs/heads/main",
+            "1" * 40,
+            "1" * 40,
+        )
+        self.assertTrue(clean.endswith(")"))
+        qualified = clean.replace(
+            "publication-safety: clean (range, receipt=v3,",
+            "publication-safety: qualified (range, receipt=v3,",
+            1,
+        )
+        return (
+            qualified[:-1]
+            + f", policy-snapshot={snapshot_id}, used-decisions={used_token}, "
+            + f"applied=1, applied-set={applied_set}, unresolved=0, evaluation=complete)\n"
+        )
+
+    def test_four_declared_layouts_select_exact_roots_and_eight_roles(self) -> None:
+        module = self._module()
+        expected = (
+            (
+                "universal",
+                Path("R/scripts/universal-hooks/scripts/check-git-push-gate.py"),
+                Path("R/scripts"),
+                (
+                    ("gate", "universal-hooks/scripts/check-git-push-gate.py"),
+                    ("hook_common", "universal-hooks/scripts/hook_common.py"),
+                    ("classifier", "universal-hooks/hooks/check-machine-local-path.py"),
+                    ("posix_helper", "process_supervision/posix_process_group.py"),
+                    ("windows_job", "process_supervision/windows_job.py"),
+                    ("scanner", "universal-hooks/scripts/check-publication-safety.py"),
+                    ("publication_review_policy", "universal-hooks/scripts/publication_review_policy.py"),
+                    ("linked_runtime_subroots", "linked_runtime_subroots.py"),
+                ),
+            ),
+            (
+                "codex-source",
+                Path("R/src.codex/skills/lead/scripts/check-git-push-gate.py"),
+                Path("R"),
+                (
+                    ("gate", "src.codex/skills/lead/scripts/check-git-push-gate.py"),
+                    ("hook_common", "src.codex/skills/lead/scripts/hook_common.py"),
+                    ("classifier", "src.codex/skills/lead/hooks/check-machine-local-path.py"),
+                    ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
+                    ("windows_job", "scripts/process_supervision/windows_job.py"),
+                    ("scanner", "src.codex/skills/lead/scripts/check-publication-safety.py"),
+                    ("publication_review_policy", "src.codex/skills/lead/scripts/publication_review_policy.py"),
+                    ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+                ),
+            ),
+            (
+                "claude-source",
+                Path("R/src.claude/agents/scripts/check-git-push-gate.py"),
+                Path("R"),
+                (
+                    ("gate", "src.claude/agents/scripts/check-git-push-gate.py"),
+                    ("hook_common", "src.claude/agents/scripts/hook_common.py"),
+                    ("classifier", "src.claude/agents/hooks/check-machine-local-path.py"),
+                    ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
+                    ("windows_job", "scripts/process_supervision/windows_job.py"),
+                    ("scanner", "src.claude/agents/scripts/check-publication-safety.py"),
+                    ("publication_review_policy", "src.claude/agents/scripts/publication_review_policy.py"),
+                    ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+                ),
+            ),
+            (
+                "component",
+                Path("R/scripts/check-git-push-gate.py"),
+                Path("R"),
+                (
+                    ("gate", "scripts/check-git-push-gate.py"),
+                    ("hook_common", "scripts/hook_common.py"),
+                    ("classifier", "hooks/check-machine-local-path.py"),
+                    ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
+                    ("windows_job", "scripts/process_supervision/windows_job.py"),
+                    ("scanner", "scripts/check-publication-safety.py"),
+                    ("publication_review_policy", "scripts/publication_review_policy.py"),
+                    ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+                ),
+            ),
+        )
+        for name, gate, expected_root, roles in expected:
+            with self.subTest(layout=name):
+                layout, root = module._layout_for_gate(gate)
+                self.assertEqual(name, layout.name)
+                self.assertEqual(expected_root, root)
+                self.assertEqual(roles, layout.role_paths)
+
+    def test_longest_exact_layout_match_refuses_ambiguity(self) -> None:
+        module = self._module()
+        original = module.SOURCE_LAYOUTS
+        selected = original[0]
+        duplicate = module.SourceLayout(
+            "duplicate", selected.gate_suffix, selected.trust_root_up,
+            selected.role_paths,
+        )
+        module.SOURCE_LAYOUTS = (*original, duplicate)
+        try:
+            with self.assertRaisesRegex(ValueError, "layout-ambiguous"):
+                module._layout_for_gate(
+                    Path("R/scripts/universal-hooks/scripts/check-git-push-gate.py")
+                )
+        finally:
+            module.SOURCE_LAYOUTS = original
+
+    def test_qualified_range_is_exact_and_reuses_v3_graph_validation(self) -> None:
+        module = self._module()
+        policy = self._policy_module()
+        snapshot, snapshot_id = self._synthetic_snapshot(policy)
+        repository = self._synthetic_repository()
+        _used_list, used_token, applied_set, _repository_sha256 = (
+            self._review_wire_fields(policy, repository)
+        )
+        line = self._qualified_range_line(snapshot_id, used_token, applied_set)
+        parsed = module.parse_publication_safety_observation(line)
+        self.assertEqual("qualified-v3", parsed.kind)
+        self.assertEqual((1, 3, 1, 3, 1, 0, 1, 1), (
+            parsed.receipt.commits,
+            parsed.receipt.objects,
+            parsed.receipt.blobs,
+            parsed.receipt.blob_bytes,
+            parsed.receipt.text,
+            parsed.receipt.binary,
+            parsed.receipt.subjects,
+            parsed.receipt.paths,
+        ))
+        self.assertEqual((snapshot_id, used_token, 1, applied_set), (
+            parsed.qualification.policy_snapshot_id,
+            parsed.qualification.used_decisions_b64,
+            parsed.qualification.applied,
+            parsed.qualification.applied_set,
+        ))
+        review_suffix = (
+            f", policy-snapshot={snapshot_id}, used-decisions={used_token}, "
+            f"applied=1, applied-set={applied_set}, unresolved=0, evaluation=complete"
+        )
+        self.assertEqual("valid-v3", module.parse_publication_safety_observation(
+            line.replace("publication-safety: qualified", "publication-safety: clean")
+              .replace(review_suffix, "")
+        ).kind)
+
+        observed_crlf = (
+            "publication-safety: qualified (range, receipt=v3, commits=2, "
+            "commit-set=17f8a309d3c9adc3a9f238406a1154dc62fd961574a3879424c2ad0736e58305, "
+            "messages=complete, objects=7, "
+            "object-set=938143e23e5f55758922c14c9a26696d7894ea1f3441c04d15c9dfbc58da1580, "
+            "blobs=2, "
+            "blob-set=e34c4117b9ebb4c489d61cbda9d0b2763d9b7240fc7f1daa1c0aa6206d6870d6, "
+            "blob-bytes=643, text=2, binary=0, subjects=3, "
+            "subject-set=b470dbf3a92cd7fde9d0dd1c8672d527a12c0a507e2c54325b6bd7706ad71110, "
+            "paths=2, "
+            "path-set=c22afb23d14ccbef9f72c2774c69b9fc273f7527cdaac0e5f0a8fcc9117fd796, "
+            "history=complete, remote=origin, dst=main, "
+            "src=37633bada34b0125476e18b0b04ab589382e55f7, "
+            "tip=37633bada34b0125476e18b0b04ab589382e55f7, "
+            "policy-snapshot=69da51db387f699dbcca0652b84f84f4e7fed1a5b7d0b8d3ac5e6ac090fe34dc, "
+            "used-decisions=W1sicWEtcHVibGljYXRpb24tcmV2aWV3ZWQtZml4dHVyZS0yMDI2MTAxNy1yMSIsImU3NWVjZTZlNTg1NDBiZjAxNzJkODYxMmE5MTZkOThkMDhlYzVhYjZhMWRiYWUzYmE3MmZmZGE0YTQwODk0NWUiXV0=, "
+            "applied=10, "
+            "applied-set=34797494265a28f311671814a249bce26250c2f8464a2040d57ebb28e6bc654c, "
+            "unresolved=0, evaluation=complete)\r\n"
+        )
+        self.assertEqual(1053, len(observed_crlf.encode("ascii")))
+        self.assertEqual(
+            "qualified-v3",
+            module.parse_publication_safety_observation(observed_crlf).kind,
+        )
+        self.assertEqual(
+            module.parse_publication_safety_observation(
+                observed_crlf.replace("\r\n", "\n")
+            ),
+            module.parse_publication_safety_observation(observed_crlf),
+        )
+
+        crlf = line.replace("\n", "\r\n")
+        self.assertEqual(parsed, module.parse_publication_safety_observation(crlf))
+
+        empty_graph = range_receipt_v3(
+            files=0, remote="origin", dst="refs/heads/main",
+            src="1" * 40, tip="1" * 40,
+        )
+        empty_qualified = (
+            empty_graph[:-1]
+            + f", policy-snapshot={snapshot_id}, used-decisions={used_token}, "
+            + f"applied=1, applied-set={applied_set}, unresolved=0, evaluation=complete)\n"
+        )
+        self.assertEqual(
+            "valid-v3", module.parse_publication_safety_observation(
+                empty_graph + "\n"
+            ).kind,
+        )
+        self.assertEqual(
+            "malformed", module.parse_publication_safety_observation(
+                empty_qualified
+            ).kind,
+        )
+
+        binary_only = range_receipt_v3(
+            files=1, remote="origin", dst="refs/heads/main",
+            src="1" * 40, tip="1" * 40,
+        ).replace("text=1, binary=0", "text=0, binary=1")
+        binary_qualified = (
+            binary_only[:-1]
+            + f", policy-snapshot={snapshot_id}, used-decisions={used_token}, "
+            + f"applied=1, applied-set={applied_set}, unresolved=0, evaluation=complete)\n"
+        )
+        self.assertEqual(
+            "valid-v3", module.parse_publication_safety_observation(
+                binary_only + "\n"
+            ).kind,
+        )
+        self.assertEqual(
+            "malformed", module.parse_publication_safety_observation(
+                binary_qualified
+            ).kind,
+        )
+
+        zero_bytes = line.replace("blob-bytes=3", "blob-bytes=0")
+        self.assertEqual("malformed", module.parse_publication_safety_observation(zero_bytes).kind)
+
+        malformed = (
+            line[:-1],
+            line.replace("\n", "\r"),
+            line.replace("\n", "\r\r\n"),
+            line + "\n",
+            line.replace("evaluation=complete", "unresolved=0, evaluation=complete"),
+            line.replace("text=1, binary=0", "text=0, binary=0"),
+            line.replace("used-decisions=" + used_token, "used-decisions=AA=A"),
+            line + "publication-safety: clean (range, receipt=v3)\n",
+        )
+        for candidate in malformed:
+            with self.subTest(candidate=candidate[:96]):
+                self.assertEqual(
+                    "malformed",
+                    module.parse_publication_safety_observation(candidate).kind,
+                )
+
+    def test_staged_qualified_spelling_is_typed_but_not_range_evidence(self) -> None:
+        module = self._module()
+        policy = self._policy_module()
+        snapshot, snapshot_id = self._synthetic_snapshot(policy)
+        repository = self._synthetic_repository()
+        _used_list, used_token, applied_set, _repository_sha256 = (
+            self._review_wire_fields(policy, repository)
+        )
+        line = (
+            "publication-safety: qualified (staged, examined=1, "
+            f"policy-snapshot={snapshot_id}, used-decisions={used_token}, "
+            f"applied=1, applied-set={applied_set}, unresolved=0, "
+            "evaluation=complete)\n"
+        )
+        parsed = module.parse_publication_safety_observation(line)
+        self.assertEqual("qualified-staged", parsed.kind)
+        self.assertIsNone(parsed.receipt)
+        self.assertEqual("malformed", module.parse_publication_safety_observation(
+            line.replace("examined=1", "examined=0")
+        ).kind)
+
+    def _qualified_pending_fixture(
+        self, *, qualification_snapshot_id=None, stderr=b""
+    ):
+        module = self._module()
+        policy = self._policy_module()
+        snapshot, snapshot_id = self._synthetic_snapshot(policy)
+        repository = self._synthetic_repository()
+        used_list, used_token, applied_set, repository_sha256 = (
+            self._review_wire_fields(policy, repository)
+        )
+        modules = module.CapturedReviewModules(policy, object(), ())
+        payload_bytes = policy.C({"syntheticGatePendingFixture": 1})
+        captured_review = module.CapturedReviewPayload(
+            modules,
+            snapshot,
+            snapshot_id,
+            {"status": "captured", "repository": repository, "diagnostic": "none"},
+            repository, True, payload_bytes,
+            hashlib.sha256(payload_bytes).hexdigest(),
+        )
+        row = TestPublicationSafetyTrustedScanR5Proof()._pending_fixture(
+            module, "generic", captured_review=captured_review
+        )
+        qualified = self._qualified_range_line(
+            qualification_snapshot_id or snapshot_id,
+            used_token,
+            applied_set,
+        )
+        row["record"] = dataclasses.replace(
+            row["record"], stdout=qualified.encode("ascii"), stderr=stderr
+        )
+        row["records"] = (row["record"],)
+        finalization = {
+            "inputSnapshotId": snapshot_id,
+            "usedList": used_list,
+            "currentSnapshotId": snapshot_id,
+            "repositorySha256": repository_sha256,
+            "status": "valid",
+            "reason": "none",
+            "resourcesSettled": True,
+        }
+        return module, row, finalization, used_list
+
+    def test_pending_owner_requires_final_used_authority_for_qualified_range(self) -> None:
+        fixture = self._qualified_pending_fixture
+
+        module, row, finalization, used_list = fixture()
+        finalize_review = mock.Mock(return_value=(finalization, used_list))
+        consumed = row["pending"].correlate_and_consume_once(
+            row["launched"], row["records"], row["closure"],
+            row["interpreter"], row["binding"], row["freshness"],
+            finalize_review=finalize_review,
+        )
+        self.assertEqual("qualified-v3", consumed.parsed_outcome.kind)
+        self.assertEqual(finalization, consumed.review_finalization)
+        finalize_review.assert_called_once_with(consumed.parsed_outcome.qualification)
+
+        module, row, _finalization, _used_list = fixture()
+        with self.assertRaises(module.PrRouteDenied):
+            row["pending"].correlate_and_consume_once(
+                row["launched"], row["records"], row["closure"],
+                row["interpreter"], row["binding"], row["freshness"],
+            )
+
+        module, row, finalization, used_list = fixture()
+        mismatched_used_list = [["D2", "b" * 64]]
+        finalize_review = mock.Mock(
+            return_value=(finalization, mismatched_used_list)
+        )
+        with self.assertRaises(module.PrRouteDenied):
+            row["pending"].correlate_and_consume_once(
+                row["launched"], row["records"], row["closure"],
+                row["interpreter"], row["binding"], row["freshness"],
+                finalize_review=finalize_review,
+            )
+        finalize_review.assert_called_once()
+
+        module, row, finalization, used_list = fixture()
+        malformed_result = mock.Mock(return_value=(finalization,))
+        with self.assertRaises(module.PrRouteDenied):
+            row["pending"].correlate_and_consume_once(
+                row["launched"], row["records"], row["closure"],
+                row["interpreter"], row["binding"], row["freshness"],
+                finalize_review=malformed_result,
+            )
+        self.assertEqual(row["pending"].state, module.PendingState.FAILED)
+        self.assertIsNone(row["pending"].consumption_id)
+
+        module, row, finalization, used_list = fixture(
+            qualification_snapshot_id="8" * 64
+        )
+        finalize_review = mock.Mock(return_value=(finalization, used_list))
+        with self.assertRaises(module.PrRouteDenied):
+            row["pending"].correlate_and_consume_once(
+                row["launched"], row["records"], row["closure"],
+                row["interpreter"], row["binding"], row["freshness"],
+                finalize_review=finalize_review,
+            )
+        finalize_review.assert_not_called()
+
+        module, row, finalization, used_list = fixture(stderr=b"extra diagnostic\n")
+        finalize_review = mock.Mock(return_value=(finalization, used_list))
+        with self.assertRaises(module.PrRouteDenied):
+            row["pending"].correlate_and_consume_once(
+                row["launched"], row["records"], row["closure"],
+                row["interpreter"], row["binding"], row["freshness"],
+                finalize_review=finalize_review,
+            )
+        finalize_review.assert_not_called()
+
+        module, row, finalization, used_list = fixture()
+        row["record"] = dataclasses.replace(
+            row["record"],
+            stdout=row["record"].stdout.replace(b"remote=origin", b"remote=other"),
+        )
+        row["records"] = (row["record"],)
+        finalize_review = mock.Mock(return_value=(finalization, used_list))
+        with self.assertRaises(module.PrRouteDenied) as caught:
+            row["pending"].correlate_and_consume_once(
+                row["launched"], row["records"], row["closure"],
+                row["interpreter"], row["binding"], row["freshness"],
+                finalize_review=finalize_review,
+            )
+        self.assertEqual(caught.exception.failure_id, "PGG-RANGE-BINDING")
+        finalize_review.assert_not_called()
+
+        module, row, finalization, used_list = fixture()
+        stale_finalization = dict(finalization, status="invalid", reason="repository-drift")
+        finalize_review = mock.Mock(
+            return_value=(stale_finalization, used_list)
+        )
+        with self.assertRaises(module.PrRouteDenied):
+            row["pending"].correlate_and_consume_once(
+                row["launched"], row["records"], row["closure"],
+                row["interpreter"], row["binding"], row["freshness"],
+                finalize_review=finalize_review,
+            )
+        self.assertEqual(row["pending"].state, module.PendingState.FAILED)
+        self.assertIsNone(row["pending"].consumption_id)
+
+    def test_authoritative_scan_correlates_raw_bytes_before_used_finalizer(self) -> None:
+        module = self._module()
+        fixtures = TestPublicationReviewedExceptionGateR2()
+        policy = fixtures._policy_module()
+        snapshot, snapshot_id = fixtures._synthetic_snapshot(policy)
+        repository = fixtures._synthetic_repository()
+        used_list, used_token, applied_set, repository_sha256 = (
+            fixtures._review_wire_fields(policy, repository)
+        )
+        captured_modules = module.CapturedReviewModules(policy, object(), ())
+        payload_bytes = policy.C({"syntheticCallerFixture": 1})
+        captured_review = module.CapturedReviewPayload(
+            captured_modules,
+            snapshot,
+            snapshot_id,
+            {"status": "captured", "repository": repository, "diagnostic": "none"},
+            repository, True, payload_bytes,
+            hashlib.sha256(payload_bytes).hexdigest(),
+        )
+        stdout = fixtures._qualified_range_line(
+            snapshot_id, used_token, applied_set
+        ).encode("ascii")
+        finalization = {
+            "inputSnapshotId": snapshot_id,
+            "usedList": used_list,
+            "currentSnapshotId": snapshot_id,
+            "repositorySha256": repository_sha256,
+            "status": "valid",
+            "reason": "none",
+            "resourcesSettled": True,
+        }
+        binding = module.PushScanBinding(
+            "generic", "origin", "refs/heads/main", "1" * 40, "1" * 40
+        )
+        closure = TestPublicationSafetyTrustedScanR3()._closure(module)
+        interpreter = closure.interpreter_identity
+        fd = os.open(os.devnull, os.O_RDONLY)
+        parse_events = []
+        finalizer_events = []
+        original_parser = module.parse_publication_safety_observation
+        qualifications = []
+
+        def record_parse(raw_text):
+            parse_events.append(raw_text)
+            parsed = original_parser(raw_text)
+            if parsed.kind == "qualified-v3":
+                qualifications.append(parsed.qualification)
+            return parsed
+
+        def record_finalization(actual_review, qualification, *_args):
+            finalizer_events.append(qualification)
+            self.assertIs(actual_review, captured_review)
+            self.assertTrue(qualifications)
+            self.assertEqual(qualification, qualifications[-1])
+            return finalization, used_list
+
+        def launch_correlated_child(pending, payload, _repository_workdir):
+            self.assertEqual(payload, payload_bytes)
+            settled = TestPublicationSafetyTrustedScanR5Proof()._pending_fixture(
+                module, "generic", captured_review=captured_review
+            )
+            settled_pending = settled["pending"]
+            pending.child_identity = settled_pending.child_identity
+            pending.supervisor = settled_pending.supervisor
+            pending.settlement = settled_pending.settlement
+            pending.state = settled_pending.state
+            launched = module.LaunchedScanInvocation(
+                pending,
+                pending.child_identity,
+                pending.supervisor,
+                pending.invocation_id,
+                pending.attempt_id,
+                pending.binding,
+                pending.exact_argv,
+                pending.result_slot,
+            )
+            execution = module.TrustedExecutionRecord(
+                pending,
+                launched,
+                pending.result_slot,
+                True,
+                0,
+                stdout,
+                b"",
+                pending.settlement,
+                closure,
+                interpreter,
+                "trusted",
+            )
+            return launched, (execution,)
+
+        try:
+            with mock.patch.object(
+                module, "_capture_source_closure", return_value=((fd,), closure)
+            ), mock.patch.object(
+                module, "_load_captured_review_modules", return_value=captured_modules
+            ), mock.patch.object(
+                module, "_capture_review_payload", return_value=captured_review
+            ), mock.patch.object(
+                module, "_interpreter_identity", return_value=interpreter
+            ), mock.patch.object(
+                module, "_recheck_source_closure", return_value=closure
+            ), mock.patch.object(
+                module, "_run_snapshot_child", side_effect=launch_correlated_child
+            ), mock.patch.object(
+                module, "_refresh_scan_binding", return_value=binding
+            ), mock.patch.object(
+                module, "parse_publication_safety_observation", side_effect=record_parse
+            ) as parser, mock.patch.object(
+                module, "_verify_used_review_currentness", side_effect=record_finalization
+            ) as finalizer:
+                consumed = module._run_authoritative_scan(
+                    binding, str(REPO_ROOT.resolve()), "synthetic-git"
+                )
+        finally:
+            try:
+                os.fstat(fd)
+            except OSError:
+                pass
+            else:
+                os.close(fd)
+
+        self.assertEqual(consumed.parsed_outcome.kind, "qualified-v3")
+        self.assertEqual(consumed.review_finalization, finalization)
+        self.assertEqual(consumed.execution.pending.state, module.PendingState.CONSUMED)
+        self.assertGreater(parser.call_count, 0)
+        self.assertEqual(len(finalizer_events), 1)
+        self.assertEqual(finalizer_events[0], qualifications[0])
+        self.assertEqual(finalizer.call_count, 1)
+
+    def test_v3_pending_does_not_finalize_review_or_reparse_replay(self) -> None:
+        module = self._module()
+        row = TestPublicationSafetyTrustedScanR5Proof()._pending_fixture(
+            module, "generic"
+        )
+        finalize_review = mock.Mock(side_effect=AssertionError("ordinary V3 finalized"))
+        with mock.patch.object(
+            module,
+            "parse_publication_safety_observation",
+            wraps=module.parse_publication_safety_observation,
+        ) as parser:
+            consumed = row["pending"].correlate_and_consume_once(
+                row["launched"], row["records"], row["closure"],
+                row["interpreter"], row["binding"], row["freshness"],
+                finalize_review=finalize_review,
+            )
+            self.assertEqual(consumed.parsed_outcome.kind, "valid-v3")
+            self.assertEqual(parser.call_count, 1)
+            with self.assertRaisesRegex(module.PrRouteDenied, "PGG-RECEIPT-USED"):
+                row["pending"].correlate_and_consume_once(
+                    row["launched"], row["records"], row["closure"],
+                    row["interpreter"], row["binding"], row["freshness"],
+                    finalize_review=finalize_review,
+                )
+            self.assertEqual(parser.call_count, 1)
+        finalize_review.assert_not_called()
+
+    def test_finalizer_baseexception_and_deadline_leave_pending_failed(self) -> None:
+        module, row, finalization, used_list = self._qualified_pending_fixture()
+        callback_error = KeyboardInterrupt("synthetic finalizer cancellation")
+        finalize_review = mock.Mock(side_effect=callback_error)
+        with self.assertRaises(KeyboardInterrupt) as caught:
+            row["pending"].correlate_and_consume_once(
+                row["launched"], row["records"], row["closure"],
+                row["interpreter"], row["binding"], row["freshness"],
+                finalize_review=finalize_review,
+            )
+        self.assertIs(caught.exception, callback_error)
+        self.assertEqual(row["pending"].state, module.PendingState.FAILED)
+        self.assertIsNone(row["pending"].consumption_id)
+
+        module, row, finalization, used_list = self._qualified_pending_fixture()
+        now = time.monotonic()
+        object.__setattr__(row["pending"], "authorization_deadline", now + 0.5)
+        finalize_review = mock.Mock(return_value=(finalization, used_list))
+        with mock.patch.object(module.time, "monotonic", side_effect=(now, now + 1.0)):
+            with self.assertRaisesRegex(module.PrRouteDenied, "PGG-SCAN-CORRELATION"):
+                row["pending"].correlate_and_consume_once(
+                    row["launched"], row["records"], row["closure"],
+                    row["interpreter"], row["binding"], row["freshness"],
+                    finalize_review=finalize_review,
+                )
+        finalize_review.assert_called_once()
+        self.assertEqual(row["pending"].state, module.PendingState.FAILED)
+        self.assertIsNone(row["pending"].consumption_id)
+
+    def test_process_owner_settles_child_when_reader_start_is_interrupted(self) -> None:
+        module = self._module()
+        children = []
+        real_popen = module.subprocess.Popen
+
+        def capture_popen(*args, **kwargs):
+            child = real_popen(*args, **kwargs)
+            children.append(child)
+            return child
+
+        def interrupt_start(_thread):
+            raise KeyboardInterrupt("controlled reader-start interruption")
+
+        try:
+            with mock.patch.object(module.subprocess, "Popen", side_effect=capture_popen), \
+                 mock.patch.object(
+                     module.threading.Thread, "start", autospec=True,
+                     side_effect=interrupt_start,
+                 ):
+                with self.assertRaisesRegex(KeyboardInterrupt, "reader-start") as caught:
+                    module._run_process(
+                        [sys.executable, "-c", "import time; time.sleep(30)"],
+                        5.0,
+                        os.getcwd(),
+                    )
+                self.assertEqual(len(children), 1)
+                child = children[0]
+                before_fixture_rescue = {
+                    "returncode": child.poll(),
+                    "stdoutClosed": child.stdout.closed,
+                    "stderrClosed": child.stderr.closed,
+                }
+                self.assertIsNotNone(before_fixture_rescue["returncode"])
+                self.assertTrue(before_fixture_rescue["stdoutClosed"])
+                self.assertTrue(before_fixture_rescue["stderrClosed"])
+                owner_outcome = getattr(
+                    caught.exception, "publication_gate_process_outcome", None
+                )
+                self.assertIsInstance(owner_outcome, dict)
+                self.assertTrue(owner_outcome["resourcesSettled"])
+        finally:
+            if children:
+                child = children[0]
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=5.0)
+                if child.stdout is not None and not child.stdout.closed:
+                    child.stdout.close()
+                if child.stderr is not None and not child.stderr.closed:
+                    child.stderr.close()
+
+        self.assertEqual(1, len(children))
+        self.assertIsNotNone(children[0].poll())
+        self.assertTrue(children[0].stdout.closed)
+        self.assertTrue(children[0].stderr.closed)
+
+    def test_source_node_and_interpreter_close_acquired_fds_on_cancellation(self) -> None:
+        module = self._module()
+        real_open_owned = module._open_owned_descriptor
+
+        with tempfile.TemporaryDirectory(prefix="gate-owned-fd-") as directory:
+            source = Path(directory) / "source.py"
+            source.write_bytes(b"synthetic source bytes\n")
+            for exception_type in (KeyboardInterrupt, SystemExit):
+                opened = []
+
+                def capture_open(open_descriptor, owned_fds):
+                    fd = real_open_owned(open_descriptor, owned_fds)
+                    opened.append(fd)
+                    return fd
+
+                with self.subTest(owner="source-node", exception=exception_type.__name__):
+                    try:
+                        with mock.patch.object(
+                            module, "_open_owned_descriptor", side_effect=capture_open
+                        ), mock.patch.object(
+                            module.os,
+                            "read",
+                            side_effect=exception_type("injected source read cancellation"),
+                        ):
+                            with self.assertRaises(exception_type):
+                                module._capture_source_node(source, "fixture")
+                        self.assertEqual(len(opened), 1)
+                        with self.assertRaises(OSError):
+                            os.fstat(opened[0])
+                    finally:
+                        for fd in opened:
+                            try:
+                                os.fstat(fd)
+                            except OSError:
+                                pass
+                            else:
+                                os.close(fd)
+
+            opened = []
+            interpreter_identity = module._interpreter_identity()
+
+            def capture_interpreter_open(open_descriptor, owned_fds):
+                fd = real_open_owned(open_descriptor, owned_fds)
+                opened.append(fd)
+                return fd
+
+            def cancel_identity(_metadata):
+                raise KeyboardInterrupt("injected interpreter identity cancellation")
+
+            try:
+                with mock.patch.object(
+                    module, "_open_owned_descriptor", side_effect=capture_interpreter_open
+                ), mock.patch.object(
+                    module, "_stat_identity", side_effect=cancel_identity
+                ):
+                    with self.assertRaisesRegex(KeyboardInterrupt, "interpreter identity"):
+                        module._capture_interpreter_handle(interpreter_identity)
+                self.assertEqual(len(opened), 1)
+                with self.assertRaises(OSError):
+                    os.fstat(opened[0])
+            finally:
+                for fd in opened:
+                    try:
+                        os.fstat(fd)
+                    except OSError:
+                        pass
+                    else:
+                        os.close(fd)
+
+    def test_component_capture_attempts_every_close_and_retains_primary(self) -> None:
+        module = self._module()
+        real_open_owned = module._open_owned_descriptor
+        real_directory_identity = module._directory_identity
+        real_close = os.close
+        with tempfile.TemporaryDirectory(prefix="gate-components-") as directory:
+            root = Path(directory)
+            (root / "sub").mkdir()
+            opened = []
+            close_attempts = []
+
+            def capture_open(open_descriptor, owned_fds):
+                fd = real_open_owned(open_descriptor, owned_fds)
+                opened.append(fd)
+                return fd
+
+            def interrupt_after_second_open(metadata):
+                if len(opened) == 2:
+                    raise SystemExit("injected component identity cancellation")
+                return real_directory_identity(metadata)
+
+            def fail_first_close(fd):
+                close_attempts.append(fd)
+                if len(close_attempts) == 1:
+                    raise OSError("injected close failure")
+                return real_close(fd)
+
+            try:
+                with mock.patch.object(
+                    module, "_open_owned_descriptor", side_effect=capture_open
+                ), mock.patch.object(
+                    module, "_directory_identity", side_effect=interrupt_after_second_open
+                ), mock.patch.object(os, "close", side_effect=fail_first_close):
+                    with self.assertRaisesRegex(SystemExit, "component identity") as caught:
+                        module._capture_path_components(
+                            root, (root / "sub" / "fixture.py",)
+                        )
+                    self.assertEqual(len(opened), 2)
+                    self.assertEqual(set(close_attempts), set(opened))
+                    failures = getattr(
+                        caught.exception,
+                        "publication_gate_descriptor_cleanup_failures",
+                        (),
+                    )
+                    self.assertEqual(len(failures), 1)
+                    failed_fd, failure = failures[0]
+                    self.assertIsInstance(failure, OSError)
+                    self.assertIn(failed_fd, opened)
+                    for fd in opened:
+                        if fd == failed_fd:
+                            os.fstat(fd)
+                        else:
+                            with self.assertRaises(OSError):
+                                os.fstat(fd)
+            finally:
+                for fd in opened:
+                    try:
+                        os.fstat(fd)
+                    except OSError:
+                        pass
+                    else:
+                        real_close(fd)
+
+    def test_closure_owner_closes_prior_nodes_when_interpreter_capture_cancels(self) -> None:
+        module = self._module()
+        real_interpreter_capture = module._capture_interpreter_handle
+        opened = []
+
+        def interrupt_after_interpreter(identity, *, owned_fds=None):
+            fd = real_interpreter_capture(identity, owned_fds=owned_fds)
+            opened.extend(tuple(owned_fds or ()))
+            raise KeyboardInterrupt("injected aggregate capture cancellation")
+
+        try:
+            with mock.patch.object(
+                module,
+                "_capture_interpreter_handle",
+                side_effect=interrupt_after_interpreter,
+            ):
+                with self.assertRaisesRegex(KeyboardInterrupt, "aggregate capture"):
+                    module._capture_source_closure()
+            self.assertGreater(len(opened), len(module.SOURCE_ROLE_ORDER))
+            for fd in opened:
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+        finally:
+            for fd in opened:
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    pass
+                else:
+                    os.close(fd)
+
+    @unittest.skipUnless(os.name == "nt", "Windows native handle ownership")
+    def test_windows_native_handle_transfer_cancellation_is_retained_as_uncertain(self) -> None:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        module = self._module()
+        with tempfile.TemporaryDirectory(prefix="gate-native-handle-") as directory:
+            source = Path(directory) / "source.py"
+            source.write_bytes(b"synthetic source bytes\n")
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            create = kernel.CreateFileW
+            create.argtypes = (
+                wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+            )
+            create.restype = wintypes.HANDLE
+            close = kernel.CloseHandle
+            close.argtypes = (wintypes.HANDLE,)
+            close.restype = wintypes.BOOL
+            opened_handles = []
+            close_calls = []
+
+            def observed_create(*args):
+                handle = create(*args)
+                opened_handles.append(handle)
+                return handle
+
+            observed_create.argtypes = create.argtypes
+            observed_create.restype = create.restype
+
+            class KernelProxy:
+                def __init__(self):
+                    self.CreateFileW = observed_create
+
+                def CloseHandle(self, handle):
+                    close_calls.append(int(handle))
+                    return close(handle)
+
+            proxy = KernelProxy()
+            cancellation = KeyboardInterrupt("controlled CRT handle transfer interruption")
+            with mock.patch.object(
+                ctypes, "WinDLL", return_value=proxy
+            ), mock.patch.object(
+                msvcrt, "open_osfhandle", side_effect=cancellation
+            ):
+                with self.assertRaises(KeyboardInterrupt) as caught:
+                    module._open_windows_path(source, directory=False, owned_fds=[])
+            close_attempted = set()
+            try:
+                self.assertEqual(len(opened_handles), 1)
+                self.assertEqual(close_calls, [])
+                self.assertEqual(
+                    getattr(
+                        caught.exception, "publication_gate_native_handle_outcome", None
+                    ),
+                    {
+                        "handle": int(opened_handles[0]),
+                        "ownership": "uncertain-during-crt-transfer",
+                        "closeAttempted": False,
+                    },
+                )
+                for handle in opened_handles:
+                    close_attempted.add(int(handle))
+                    self.assertTrue(close(handle))
+            finally:
+                # The injected open_osfhandle failed before consuming the actual
+                # handle; this fixture is the only owner authorized to rescue it.
+                for handle in opened_handles:
+                    if int(handle) not in close_attempted:
+                        close_attempted.add(int(handle))
+                        close(handle)
+
+    def _snapshot_child_pending(self, module, payload: bytes, argv: tuple[str, ...]):
+        captured_modules = module.CapturedReviewModules(object(), object(), ())
+        captured = module.CapturedReviewPayload(
+            captured_modules, {}, "c" * 64, {}, None, False,
+            payload, hashlib.sha256(payload).hexdigest(),
+        )
+        interpreter = module._interpreter_identity()
+        binding = module.PushScanBinding(
+            "generic", "origin", "refs/heads/main", "1" * 40, "1" * 40
+        )
+        return module.PendingScanInvocation(
+            "child-fixture", "child-attempt", binding, None, interpreter,
+            argv, object(), captured,
+        )
+
+    def _rescue_child_fixture(self, children) -> None:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5.0)
+            for stream in (child.stdin, child.stdout, child.stderr):
+                if stream is not None and not stream.closed:
+                    stream.close()
+
+    def test_snapshot_child_settles_state_and_constructor_failures_before_rescue(self) -> None:
+        for failure in ("non-prepared", "thread-constructor"):
+            module = self._module()
+            children = []
+            payload = b"synthetic bound child input\n"
+            pending = self._snapshot_child_pending(
+                module,
+                payload,
+                (sys.executable, "-c", "import time; time.sleep(30)"),
+            )
+            if failure == "non-prepared":
+                pending.state = module.PendingState.FAILED
+            original_popen = module.subprocess.Popen
+            cancellation = KeyboardInterrupt("controlled thread constructor interruption")
+
+            def capture_popen(*args, **kwargs):
+                child = original_popen(*args, **kwargs)
+                children.append(child)
+                return child
+
+            constructor = mock.patch.object(
+                module.threading, "Thread", side_effect=cancellation
+            ) if failure == "thread-constructor" else contextlib.nullcontext()
+            try:
+                with mock.patch.object(
+                    module.subprocess, "Popen", side_effect=capture_popen
+                ), constructor:
+                    expected = (
+                        KeyboardInterrupt
+                        if failure == "thread-constructor"
+                        else module.PrRouteDenied
+                    )
+                    with self.assertRaises(expected) as caught:
+                        module._run_snapshot_child(pending, payload, os.getcwd())
+
+                self.assertEqual(len(children), 1)
+                child = children[0]
+                outcome = getattr(caught.exception, "publication_gate_child_outcome", None)
+                self.assertIsInstance(outcome, dict)
+                self.assertIs(outcome["process"], child)
+                self.assertIs(outcome["supervisor"].process, child)
+                self.assertIsNotNone(child.poll())
+                self.assertTrue(all(
+                    stream is None or stream.closed
+                    for stream in (child.stdin, child.stdout, child.stderr)
+                ))
+                self.assertTrue(outcome["settlement"].complete)
+                self.assertEqual(pending.state, module.PendingState.FAILED)
+                if failure == "thread-constructor":
+                    self.assertIs(outcome["supervisor"], pending.supervisor)
+                    self.assertIs(caught.exception, cancellation)
+                else:
+                    self.assertIsNone(pending.supervisor)
+                    self.assertEqual(
+                        caught.exception.failure_id, "PGG-SCAN-CORRELATION"
+                    )
+            finally:
+                self._rescue_child_fixture(children)
+
+    def test_snapshot_child_observes_uncertain_worker_start_and_settles_before_rescue(self) -> None:
+        module = self._module()
+        children = []
+        payload = b"synthetic bound child input\n"
+        pending = self._snapshot_child_pending(
+            module,
+            payload,
+            (sys.executable, "-c", "import time; time.sleep(30)"),
+        )
+        original_popen = module.subprocess.Popen
+        original_start = module.threading.Thread.start
+        cancellation = KeyboardInterrupt("controlled post-start interruption")
+        start_calls = 0
+
+        def capture_popen(*args, **kwargs):
+            child = original_popen(*args, **kwargs)
+            children.append(child)
+            return child
+
+        def start_then_interrupt_on_reader(worker):
+            nonlocal start_calls
+            start_calls += 1
+            original_start(worker)
+            if start_calls == 2:
+                raise cancellation
+
+        try:
+            with mock.patch.object(
+                module.subprocess, "Popen", side_effect=capture_popen
+            ), mock.patch.object(
+                module.threading.Thread, "start", autospec=True,
+                side_effect=start_then_interrupt_on_reader,
+            ):
+                with self.assertRaises(KeyboardInterrupt) as caught:
+                    module._run_snapshot_child(pending, payload, os.getcwd())
+
+            self.assertIs(caught.exception, cancellation)
+            self.assertEqual(len(children), 1)
+            child = children[0]
+            outcome = getattr(caught.exception, "publication_gate_child_outcome", None)
+            self.assertIsInstance(outcome, dict)
+            self.assertIsNotNone(child.poll())
+            self.assertTrue(all(
+                stream is None or stream.closed
+                for stream in (child.stdin, child.stdout, child.stderr)
+            ))
+            settlement = outcome["settlement"]
+            self.assertTrue(settlement.complete)
+            workers = {row["name"]: row for row in outcome["workers"]}
+            self.assertEqual(workers["stdout"]["start"], "starting")
+            worker_rows = {
+                row.worker_identity: row for row in settlement.certificate.workers
+            }
+            self.assertEqual(
+                worker_rows[id(workers["stdout"]["worker"])].terminal, "joined"
+            )
+            self.assertFalse(settlement.execution_eligible)
+        finally:
+            self._rescue_child_fixture(children)
+
+    def test_snapshot_child_keeps_precreation_start_interruption_unobserved(self) -> None:
+        module = self._module()
+        children = []
+        payload = b"synthetic bound child input\n"
+        pending = self._snapshot_child_pending(
+            module,
+            payload,
+            (sys.executable, "-c", "import time; time.sleep(30)"),
+        )
+        original_popen = module.subprocess.Popen
+        cancellation = KeyboardInterrupt("controlled precreation worker-start interruption")
+        start_calls = 0
+
+        def capture_popen(*args, **kwargs):
+            child = original_popen(*args, **kwargs)
+            children.append(child)
+            return child
+
+        def interrupt_before_creation(_worker):
+            nonlocal start_calls
+            start_calls += 1
+            raise cancellation
+
+        try:
+            with mock.patch.object(
+                module.subprocess, "Popen", side_effect=capture_popen
+            ), mock.patch.object(
+                module.threading.Thread, "start", autospec=True,
+                side_effect=interrupt_before_creation,
+            ):
+                with self.assertRaises(KeyboardInterrupt) as caught:
+                    module._run_snapshot_child(pending, payload, os.getcwd())
+
+            self.assertIs(caught.exception, cancellation)
+            self.assertEqual(start_calls, 1)
+            self.assertEqual(len(children), 1)
+            child = children[0]
+            outcome = getattr(caught.exception, "publication_gate_child_outcome", None)
+            self.assertIsInstance(outcome, dict)
+            self.assertIs(outcome["process"], child)
+            self.assertIs(outcome["supervisor"], pending.supervisor)
+            self.assertIs(outcome["supervisor"].process, child)
+
+            worker = outcome["workers"][0]
+            self.assertEqual(worker["start"], "starting")
+            self.assertFalse(worker["worker"].is_alive())
+            self.assertIsNone(worker["worker"].ident)
+            self.assertIsNone(worker["worker"].native_id)
+            worker_row = outcome["settlement"].certificate.workers[0]
+            self.assertEqual(worker_row.worker_identity, id(worker["worker"]))
+            self.assertEqual(worker_row.start, "starting")
+            self.assertEqual(worker_row.terminal, "unobserved")
+            self.assertFalse(outcome["settlement"].complete)
+            self.assertEqual(
+                outcome["settlement"].state,
+                module.GateSettlementState.FAILED_UNSETTLED,
+            )
+            self.assertFalse(outcome["settlement"].execution_eligible)
+            self.assertIsNotNone(child.poll())
+            self.assertTrue(all(
+                stream is None or not stream.closed
+                for stream in (child.stdin, child.stdout, child.stderr)
+            ))
+            self.assertEqual(pending.state, module.PendingState.FAILED)
+        finally:
+            self._rescue_child_fixture(children)
+
+    def test_snapshot_child_timeout_settles_blocked_stdin_before_buffered_close(self) -> None:
+        module = self._module()
+        children = []
+        payload = b"x" * (16 * 1024 * 1024)
+        with tempfile.TemporaryDirectory(prefix="gate-child-ready-") as directory:
+            marker = Path(directory) / "ready"
+            child_code = (
+                "import os; from pathlib import Path; import time; "
+                "os.write(1, b'READY\\n'); "
+                f"Path({str(marker)!r}).write_text('ready', encoding='ascii'); "
+                "time.sleep(30)"
+            )
+            pending = self._snapshot_child_pending(
+                module,
+                payload,
+                (sys.executable, "-c", child_code),
+            )
+            original_popen = module.subprocess.Popen
+            failure_rows = []
+
+            def capture_popen(*args, **kwargs):
+                child = original_popen(*args, **kwargs)
+                children.append(child)
+                return child
+
+            def run_owner():
+                try:
+                    module._run_snapshot_child(pending, payload, os.getcwd())
+                except BaseException as exc:
+                    failure_rows.append(exc)
+
+            owner = threading.Thread(target=run_owner)
+            try:
+                with mock.patch.object(
+                    module.subprocess, "Popen", side_effect=capture_popen
+                ), mock.patch.object(module, "SCAN_TIMEOUT_SECONDS", 0.5):
+                    owner.start()
+                    marker_deadline = time.monotonic() + 5.0
+                    while not marker.exists() and time.monotonic() < marker_deadline:
+                        time.sleep(0.01)
+                    self.assertTrue(marker.exists(), "child did not reach its nonreading state")
+                    self.assertEqual(len(children), 1)
+                    child = children[0]
+                    pending_deadline = time.monotonic() + 2.0
+                    while (
+                        pending.supervisor is None
+                        or not pending.supervisor.workers
+                    ) and time.monotonic() < pending_deadline:
+                        time.sleep(0.01)
+                    self.assertIsNotNone(pending.supervisor)
+                    self.assertTrue(pending.supervisor.workers)
+                    feeder = pending.supervisor.workers[0].worker
+                    self.assertTrue(feeder.is_alive())
+                    time.sleep(0.1)
+                    self.assertTrue(feeder.is_alive())
+                    owner.join(timeout=8.0)
+                    before_fixture_rescue = {
+                        "ownerAlive": owner.is_alive(),
+                        "returncode": child.poll(),
+                        "streamsClosed": tuple(
+                            stream is None or stream.closed
+                            for stream in (child.stdin, child.stdout, child.stderr)
+                        ),
+                    }
+                    self.assertFalse(before_fixture_rescue["ownerAlive"])
+                    self.assertIsNotNone(before_fixture_rescue["returncode"])
+                    self.assertTrue(all(before_fixture_rescue["streamsClosed"]))
+                    self.assertEqual(len(failure_rows), 1)
+                    failure = failure_rows[0]
+                    outcome = getattr(failure, "publication_gate_child_outcome", None)
+                    if outcome is None:
+                        self.assertIsInstance(failure, module.PrRouteDenied)
+                        self.assertEqual(failure.failure_id, "PGG-SCAN-EXECUTION")
+                        self.assertIsNotNone(failure.__cause__)
+                        outcome = getattr(
+                            failure.__cause__, "publication_gate_child_outcome", None
+                        )
+                    self.assertIsInstance(outcome, dict)
+                    self.assertIs(outcome["process"], child)
+                    self.assertEqual(outcome["childIdentity"], child.pid)
+                    self.assertFalse(outcome["boundedCompletion"])
+                    self.assertEqual(outcome["stdout"], b"READY\n")
+                    self.assertEqual(outcome["stderr"], b"")
+                    self.assertTrue(outcome["settlement"].complete)
+                    settlement_workers = {
+                        row.worker_identity: row
+                        for row in outcome["settlement"].certificate.workers
+                    }
+                    self.assertEqual(len(outcome["workers"]), 3)
+                    for worker in outcome["workers"]:
+                        self.assertIn(
+                            settlement_workers[id(worker["worker"])].terminal,
+                            {"joined", "not-started"},
+                        )
+                    self.assertEqual(pending.state, module.PendingState.FAILED)
+            finally:
+                if owner.ident is not None and owner.is_alive():
+                    self._rescue_child_fixture(children)
+                    owner.join(timeout=5.0)
+                self._rescue_child_fixture(children)
+
 
 if __name__ == "__main__":
     unittest.main()

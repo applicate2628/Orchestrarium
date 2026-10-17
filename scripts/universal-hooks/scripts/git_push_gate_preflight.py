@@ -2473,6 +2473,54 @@ def _has_static_posix_continuation_proof(parsed: ShellParseResult) -> bool:
         return False
 
 
+def absolute_literal_root_context(parsed: ShellParseResult) -> tuple[str, str] | None:
+    """Project only the existing canonical absolute A -C R push production."""
+    if type(parsed) is not ShellParseResult:
+        return None
+    identity = parsed.identity
+    effective = parsed.effective_publications
+    if (
+        identity.dialect != parsed.dialect or identity.input_kind != "SHELL_TEXT"
+        or identity.depth != 0 or identity.parent is not None
+        or identity.wrapper_id is not None
+        or parsed.candidates or parsed.children or parsed.wrapper_projections
+        or parsed.normalizations or parsed.lexical.operations or parsed.lexical.removed_spans
+        or len(parsed.commands) != 1 or len(parsed.pushes) != 1
+        or not _is_exact_direct_literal(parsed.raw_command, parsed)
+        or effective.eligible_direct_generic != effective.records
+    ):
+        return None
+    record = effective.records[0]
+    command = parsed.commands[0]
+    push = record.push
+    argv = parsed.strict_projection.argv
+    if (
+        record.identity != identity or push != parsed.pushes[0]
+        or push.command != command or argv != command.tokens
+        or command.environment_assignments or command.control_keywords
+        or command.normalization_state != "literal"
+        or len(argv) != 6 or argv[1] != "-C" or argv[3] != "push"
+    ):
+        return None
+    executable, root = argv[0], argv[2]
+    if any(not value or "\x00" in value or not Path(value).is_absolute()
+           for value in (executable, root)):
+        return None
+    expected_boundary = "start" if parsed.dialect == "posix" else "&"
+    expected_context = "top-level" if parsed.dialect == "posix" else "call-operator"
+    if (
+        command.boundary_before != expected_boundary or command.boundary_after != "end"
+        or push.shell_context != expected_context or push.environment_assignments
+        or push.executable != executable or command.arguments != argv[1:]
+        or push.git_global_options != ("-C", root)
+        or push.git_global_occurrences != (OptionOccurrence("-C", "required-value", "neutral", 1),)
+        or push.post_subcommand_tokens != argv[4:] or push.positionals != argv[4:]
+        or push.push_options or push.push_option_occurrences
+        or push.repository_context != "redirected"
+    ):
+        return None
+    return executable, root
+
 def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     projection = parsed.effective_publications
     if not projection.exact_complete:
@@ -2491,19 +2539,21 @@ def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     push = projection.eligible_direct_generic[0].push
     if not isinstance(push.command, ExecutableCommand):
         return GenericPushDecision("PGG-PARSE-UNCERTAIN", None)
-    if push.command.control_keywords or push.shell_context != "top-level" or (
-        push.command.boundary_before != "start"
+    literal_context = absolute_literal_root_context(parsed)
+    if push.command.control_keywords or (literal_context is None and (
+        push.shell_context != "top-level"
+        or push.command.boundary_before != "start"
         or (
             push.command.boundary_after != "end"
             and not push.command.trailing_linebreak_only
         )
-    ):
+    )):
         return GenericPushDecision("PGG-COMPOUND-CONTEXT", None)
-    if push.repository_context != "ambient":
+    if push.repository_context != "ambient" and literal_context is None:
         return GenericPushDecision("PGG-REPOSITORY-REDIRECT", None)
     if push.environment_assignments:
         return GenericPushDecision("PGG-ENV-PREFIX", None)
-    if push.git_global_options:
+    if push.git_global_options and literal_context is None:
         return GenericPushDecision("PGG-GIT-GLOBAL-OPTION", None)
     if push.option_status in ("GPO-MISSING-VALUE", "GPO-AMBIGUOUS"):
         return GenericPushDecision("PGG-OPTION-ARITY", None)
@@ -2880,15 +2930,23 @@ def validate_transcript_diagnostic(
     return diagnostic
 
 
-def _repository_workdir(envelope: dict, tool_input: dict) -> tuple[str, str]:
-    explicit = "workdir" in tool_input
-    raw = tool_input["workdir"] if explicit else envelope.get("cwd")
+def _repository_workdir(
+    envelope: dict, tool_input: dict, *, allow_absent: bool = False,
+) -> tuple[str, str]:
+    if "workdir" in tool_input:
+        raw, source = tool_input["workdir"], "tool"
+    elif "cwd" in envelope:
+        raw, source = envelope["cwd"], "envelope"
+    elif allow_absent:
+        return "", ""
+    else:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
     if type(raw) is not str or not raw or "\x00" in raw:
         raise PrRouteDenied("PRG-WORKDIR-INVALID")
     candidate = Path(raw)
     if not candidate.is_absolute():
         raise PrRouteDenied("PRG-WORKDIR-INVALID")
-    return raw, "tool" if explicit else "envelope"
+    return raw, source
 
 
 def _validate_declared_value(value: object, annotation: object, path: str) -> None:
@@ -3008,9 +3066,30 @@ def validate_preflight_result(result: object) -> PreflightResult:
         expected_outcome, expected_continuation
     ):
         raise ValueError("preflight reason is inconsistent with its branch")
+    empty_workdir_pair = result.repository_workdir == "" and result.repository_workdir_source == ""
+    if (result.repository_workdir == "") != (result.repository_workdir_source == ""):
+        raise ValueError("partial repository workdir pair")
+    literal_absence = False
+    if empty_workdir_pair and result.reason_id in {"PFP-CONSENT-GENERIC", "PFP-HEAVY"}:
+        if (
+            result.current_turn_status != STATUS_FOUND or result.parsed is None
+            or result.command != result.parsed.raw_command
+            or result.dialect != result.parsed.dialect
+            or absolute_literal_root_context(result.parsed) is None
+            or result.generic_decision is None
+            or result.generic_decision.status != "PGG-ADMISSIBLE"
+            or result.generic_decision != classify_generic_push(result.parsed)
+            or (result.reason_id == "PFP-HEAVY" and (
+                not result.push_instruction or result.simple_pr_approval
+            ))
+        ):
+            raise ValueError("missing repository workdir lacks literal generic context")
+        literal_absence = True
     for field, default in _PREFLIGHT_OPTIONAL_DEFAULTS.items():
         value = getattr(result, field)
         if field in present_fields:
+            if literal_absence and field in {"repository_workdir", "repository_workdir_source"}:
+                continue
             if value == default or (type(value) is str and not value):
                 raise ValueError(f"missing branch field: {field}")
         elif value != default:
@@ -3146,8 +3225,14 @@ def build_preflight(envelope: dict) -> PreflightResult:
             _TRANSCRIPT_NOT_RUN,
             _TRANSCRIPT_NOT_RUN,
         )
+        literal_context = absolute_literal_root_context(parsed)
+        allow_absent = (
+            status == STATUS_FOUND and literal_context is not None
+            and grammar.status == "PGG-ADMISSIBLE"
+            and (action == "generic" or (action == "neutral" and instruction))
+        )
         repository_workdir, repository_workdir_source = _repository_workdir(
-            envelope, tool_input
+            envelope, tool_input, allow_absent=allow_absent
         )
         if action == "generic":
             return _result(

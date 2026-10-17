@@ -5,12 +5,13 @@ the human-review-before-push rule.
 WHAT THIS DENIES: a real non-dry `git push` without applicable genuine-user
 publication authority and one fresh gate-owned canonical range scan for the
 exact pending push. The gate derives the only scanner
-producer as one held gate plus a fixed five-module closure (`hook_common.py`, the
+producer as one held gate plus a fixed seven-module closure (`hook_common.py`, the
 machine-path classifier, the POSIX process-group helper, the Windows Job helper,
-and `check-publication-safety.py`), snapshots and
-executes those bytes directly with its current trusted interpreter, and binds
-the exactly correlated typed result to remote, destination, source, current
-HEAD, and receipt tip. Scanner-
+`check-publication-safety.py`, the reviewed-publication policy owner, and the
+linked-runtime-subroot helper), captures policy through those held bytes, executes
+the complete closure with its current trusted interpreter, and binds the exactly
+correlated typed result to remote, destination, source, current HEAD, and receipt
+tip. Scanner-
 looking transcript calls and outputs are untrusted diagnostics and never mint
 authorization.
 
@@ -340,6 +341,7 @@ WHAT THE GENERIC NON-PR ROUTE STILL DOES NOT COVER (disclosed, not silently assu
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import hashlib
 import os
@@ -352,10 +354,11 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 from urllib.parse import quote, unquote_to_bytes, urlsplit
 
 from hook_common import (
@@ -385,6 +388,7 @@ from git_push_gate_preflight import (
     validate_transcript_diagnostic,
     build_preflight_from_stdin,
     ShellParseResult,
+    absolute_literal_root_context,
     PrRouteDenied,
     resolve_command_dialect,
     parse_transcript_command,
@@ -574,6 +578,12 @@ class SourceLayout:
     role_paths: tuple[tuple[str, str], ...]
 
 
+SOURCE_ROLE_ORDER = (
+    "gate", "hook_common", "classifier", "posix_helper", "windows_job",
+    "scanner", "publication_review_policy", "linked_runtime_subroots",
+)
+
+
 SOURCE_LAYOUTS = (
     SourceLayout(
         "universal", ("scripts", "universal-hooks", "scripts", "check-git-push-gate.py"), 2,
@@ -584,6 +594,34 @@ SOURCE_LAYOUTS = (
             ("posix_helper", "process_supervision/posix_process_group.py"),
             ("windows_job", "process_supervision/windows_job.py"),
             ("scanner", "universal-hooks/scripts/check-publication-safety.py"),
+            ("publication_review_policy", "universal-hooks/scripts/publication_review_policy.py"),
+            ("linked_runtime_subroots", "linked_runtime_subroots.py"),
+        ),
+    ),
+    SourceLayout(
+        "codex-source", ("src.codex", "skills", "lead", "scripts", "check-git-push-gate.py"), 4,
+        (
+            ("gate", "src.codex/skills/lead/scripts/check-git-push-gate.py"),
+            ("hook_common", "src.codex/skills/lead/scripts/hook_common.py"),
+            ("classifier", "src.codex/skills/lead/hooks/check-machine-local-path.py"),
+            ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
+            ("windows_job", "scripts/process_supervision/windows_job.py"),
+            ("scanner", "src.codex/skills/lead/scripts/check-publication-safety.py"),
+            ("publication_review_policy", "src.codex/skills/lead/scripts/publication_review_policy.py"),
+            ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+        ),
+    ),
+    SourceLayout(
+        "claude-source", ("src.claude", "agents", "scripts", "check-git-push-gate.py"), 3,
+        (
+            ("gate", "src.claude/agents/scripts/check-git-push-gate.py"),
+            ("hook_common", "src.claude/agents/scripts/hook_common.py"),
+            ("classifier", "src.claude/agents/hooks/check-machine-local-path.py"),
+            ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
+            ("windows_job", "scripts/process_supervision/windows_job.py"),
+            ("scanner", "src.claude/agents/scripts/check-publication-safety.py"),
+            ("publication_review_policy", "src.claude/agents/scripts/publication_review_policy.py"),
+            ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
         ),
     ),
     SourceLayout(
@@ -595,6 +633,8 @@ SOURCE_LAYOUTS = (
             ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
             ("windows_job", "scripts/process_supervision/windows_job.py"),
             ("scanner", "scripts/check-publication-safety.py"),
+            ("publication_review_policy", "scripts/publication_review_policy.py"),
+            ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
         ),
     ),
 )
@@ -633,6 +673,37 @@ class CanonicalSourceClosure:
     root_locator: RootLocatorIdentity
 
 
+@dataclass(frozen=True)
+class CapturedReviewModules:
+    policy_module: object
+    linked_module: object
+    registered: tuple[tuple[str, object], ...]
+
+
+@dataclass(frozen=True)
+class CapturedReviewPayload:
+    modules: CapturedReviewModules
+    snapshot: object
+    snapshot_id: str
+    repository_observation: object
+    repository: object | None
+    origin_is_outside_repository: bool
+    payload_bytes: bytes
+    payload_sha256: str
+
+    @property
+    def policy_module(self) -> object:
+        return self.modules.policy_module
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(r"[0-9a-f]{64}", self.snapshot_id) is None:
+            raise ValueError("review-snapshot-id")
+        if type(self.payload_bytes) is not bytes:
+            raise ValueError("review-payload-bytes")
+        if hashlib.sha256(self.payload_bytes).hexdigest() != self.payload_sha256:
+            raise ValueError("review-payload-digest")
+
+
 class PendingState(str, Enum):
     PREPARED = "prepared"
     CHILD_OWNED = "child-owned"
@@ -652,6 +723,7 @@ class PendingScanInvocation:
     interpreter_identity: InterpreterIdentity
     exact_argv: tuple[str, ...]
     result_slot: object
+    captured_review: CapturedReviewPayload | None = None
     created_tick: float = field(default_factory=time.monotonic)
     authorization_deadline: float | None = None
     state: PendingState = field(init=False, default=PendingState.PREPARED)
@@ -669,6 +741,7 @@ class PendingScanInvocation:
         if getattr(self, "_identity_sealed", False) and name in {
             "invocation_id", "attempt_id", "binding", "closure",
             "interpreter_identity", "exact_argv", "result_slot",
+            "captured_review",
             "created_tick", "authorization_deadline",
         }:
             raise AttributeError("pending invocation identity is immutable")
@@ -696,6 +769,10 @@ class PendingScanInvocation:
         interpreter_after: InterpreterIdentity,
         binding_after: PushScanBinding,
         freshness_tick: float,
+        *,
+        finalize_review: Callable[
+            ["QualifiedPublicationEvidence"], tuple[dict, list[list[str]]]
+        ] | None = None,
     ) -> "ConsumedAuthoritativeEvidence":
         prefix = "PGG" if self.binding.route == "generic" else "PRG"
         with self._transition_lock:
@@ -751,6 +828,8 @@ class PendingScanInvocation:
             self.binding_fresh_tick = freshness_tick
             self.correlation_id = secrets.token_hex(16)
             self.state = PendingState.CORRELATED
+            review_finalization = None
+            review_used_list = None
             try:
                 if not execution.bounded_completion:
                     raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
@@ -766,7 +845,7 @@ class PendingScanInvocation:
                     raise PrRouteDenied(prefix + "-SCAN-REFUSAL")
                 if execution.exit_code != 0:
                     raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
-                if parsed.kind != "valid-v3" or parsed.receipt is None:
+                if parsed.kind not in ("valid-v3", "qualified-v3") or parsed.receipt is None:
                     mismatch = "PGG-RANGE-RECEIPT-VERSION" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
                     raise PrRouteDenied(mismatch)
                 receipt = parsed.receipt
@@ -782,13 +861,54 @@ class PendingScanInvocation:
                 ):
                     mismatch = "PGG-RANGE-TIP-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
                     raise PrRouteDenied(mismatch)
+                if parsed.kind == "qualified-v3":
+                    qualification = parsed.qualification
+                    captured_review = self.captured_review
+                    if (
+                        execution.stderr
+                        or qualification is None
+                        or captured_review is None
+                        or not captured_review.origin_is_outside_repository
+                        or qualification.policy_snapshot_id != captured_review.snapshot_id
+                        or not callable(finalize_review)
+                    ):
+                        raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+                    finalized = finalize_review(qualification)
+                    if type(finalized) is not tuple or len(finalized) != 2:
+                        raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+                    review_finalization, review_used_list = finalized
+                    finalization_keys = {
+                        "inputSnapshotId", "usedList", "currentSnapshotId",
+                        "repositorySha256", "status", "reason", "resourcesSettled",
+                    }
+                    if (
+                        type(review_finalization) is not dict
+                        or set(review_finalization) != finalization_keys
+                        or review_finalization.get("inputSnapshotId") != captured_review.snapshot_id
+                        or type(review_used_list) is not list
+                        or any(
+                            type(row) is not list
+                            or len(row) != 2
+                            or type(row[0]) is not str
+                            or type(row[1]) is not str
+                            for row in review_used_list
+                        )
+                        or review_finalization.get("usedList") != review_used_list
+                        or review_finalization.get("status") != "valid"
+                        or review_finalization.get("reason") != "none"
+                        or review_finalization.get("resourcesSettled") is not True
+                    ):
+                        raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+                if time.monotonic() > float(self.authorization_deadline):
+                    raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
             except BaseException:
                 self.state = PendingState.FAILED
                 raise
             self.consumption_id = secrets.token_hex(16)
             self.state = PendingState.CONSUMED
             return ConsumedAuthoritativeEvidence(
-                self.invocation_id, self.binding, parsed, self.consumption_id, execution
+                self.invocation_id, self.binding, parsed, self.consumption_id, execution,
+                review_finalization,
             )
 
 
@@ -916,9 +1036,18 @@ class RangeReceiptV3(NamedTuple):
     tip: str
 
 
+class QualifiedPublicationEvidence(NamedTuple):
+    policy_snapshot_id: str
+    used_decisions_b64: str
+    applied: int
+    applied_set: str
+    examined: int | None = None
+
+
 class PublicationSafetyObservation(NamedTuple):
     kind: str
     receipt: RangeReceiptV3 | None
+    qualification: QualifiedPublicationEvidence | None = None
 
 
 class UntrustedTranscriptScanObservation(NamedTuple):
@@ -935,6 +1064,7 @@ class ConsumedAuthoritativeEvidence(NamedTuple):
     parsed_outcome: PublicationSafetyObservation
     consumption_id: str
     execution: TrustedExecutionRecord | None = None
+    review_finalization: dict | None = None
 
 
 AuthoritativeScanObservation = ConsumedAuthoritativeEvidence
@@ -1101,6 +1231,40 @@ SCAN_CLEAN_RANGE_V3_REGEX = re.compile(
     rf"src=(?P<src>[A-Za-z0-9._~%-]+), tip=(?P<tip>{_LOWERCASE_OID_PATTERN})\)$",
     re.MULTILINE,
 )
+SCAN_QUALIFIED_STAGED_REGEX = re.compile(
+    r"\Apublication-safety: qualified \(staged, "
+    r"examined=(?P<examined>0|[1-9][0-9]*), "
+    r"policy-snapshot=(?P<policy_snapshot>[0-9a-f]{64}), "
+    r"used-decisions=(?P<used_decisions>[A-Za-z0-9+/]+={0,2}), "
+    r"applied=(?P<applied>[1-9][0-9]*), "
+    r"applied-set=(?P<applied_set>[0-9a-f]{64}), "
+    r"unresolved=0, evaluation=complete\)\n\Z"
+)
+SCAN_QUALIFIED_RANGE_V3_REGEX = re.compile(
+    r"\Apublication-safety: qualified \(range, receipt=v3, "
+    r"commits=(?P<commits>[1-9][0-9]*), "
+    r"commit-set=(?P<commit_set>[0-9a-f]{64}), messages=complete, "
+    r"objects=(?P<objects>[1-9][0-9]*), "
+    r"object-set=(?P<object_set>[0-9a-f]{64}), "
+    r"blobs=(?P<blobs>0|[1-9][0-9]*), "
+    r"blob-set=(?P<blob_set>[0-9a-f]{64}), "
+    r"blob-bytes=(?P<blob_bytes>0|[1-9][0-9]*), "
+    r"text=(?P<text>0|[1-9][0-9]*), "
+    r"binary=(?P<binary>0|[1-9][0-9]*), "
+    r"subjects=(?P<subjects>0|[1-9][0-9]*), "
+    r"subject-set=(?P<subject_set>[0-9a-f]{64}), "
+    r"paths=(?P<paths>0|[1-9][0-9]*), "
+    r"path-set=(?P<path_set>[0-9a-f]{64}), history=complete, "
+    r"remote=(?P<remote>[A-Za-z0-9._~%-]+), "
+    r"dst=(?P<dst>[A-Za-z0-9._~%-]+), "
+    r"src=(?P<src>[A-Za-z0-9._~%-]+), "
+    rf"tip=(?P<tip>{_LOWERCASE_OID_PATTERN}), "
+    r"policy-snapshot=(?P<policy_snapshot>[0-9a-f]{64}), "
+    r"used-decisions=(?P<used_decisions>[A-Za-z0-9+/]+={0,2}), "
+    r"applied=(?P<applied>[1-9][0-9]*), "
+    r"applied-set=(?P<applied_set>[0-9a-f]{64}), "
+    r"unresolved=0, evaluation=complete\)\n\Z"
+)
 SCAN_CLEAN_PATH_REGEX = re.compile(
     r"^publication-safety:\s*clean\s*\(\s*path\s*,\s*examined\s+\d+\s+files?[^\r\n]*\)\s*$",
     re.IGNORECASE | re.MULTILINE,
@@ -1124,10 +1288,76 @@ def _decode_canonical_receipt_token(token: str) -> str | None:
     return value
 
 
+def _valid_used_decisions_b64(value: str) -> bool:
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error):
+        return False
+    return bool(decoded) and base64.b64encode(decoded).decode("ascii") == value
+
+
 def parse_publication_safety_observation(text: str) -> PublicationSafetyObservation:
     text = text.replace("\r\n", "\n")
     if "\r" in text:
         return PublicationSafetyObservation("malformed", None)
+    if "publication-safety: qualified" in text:
+        staged = SCAN_QUALIFIED_STAGED_REGEX.fullmatch(text)
+        if staged is not None:
+            used_decisions = staged.group("used_decisions")
+            examined = int(staged.group("examined"))
+            if examined == 0 or not _valid_used_decisions_b64(used_decisions):
+                return PublicationSafetyObservation("malformed", None)
+            return PublicationSafetyObservation(
+                "qualified-staged", None,
+                QualifiedPublicationEvidence(
+                    staged.group("policy_snapshot"), used_decisions,
+                    int(staged.group("applied")), staged.group("applied_set"),
+                    examined,
+                ),
+            )
+
+        qualified = SCAN_QUALIFIED_RANGE_V3_REGEX.fullmatch(text)
+        if qualified is None:
+            return PublicationSafetyObservation("malformed", None)
+        used_decisions = qualified.group("used_decisions")
+        if not _valid_used_decisions_b64(used_decisions):
+            return PublicationSafetyObservation("malformed", None)
+        # Route the shared V3 graph/count/selection invariants through the
+        # existing parser. The qualified spelling changes disposition evidence,
+        # not the range receipt or its graph contract.
+        v3_text = (
+            "publication-safety: clean (range, receipt=v3, "
+            f"commits={qualified.group('commits')}, "
+            f"commit-set={qualified.group('commit_set')}, messages=complete, "
+            f"objects={qualified.group('objects')}, "
+            f"object-set={qualified.group('object_set')}, "
+            f"blobs={qualified.group('blobs')}, "
+            f"blob-set={qualified.group('blob_set')}, "
+            f"blob-bytes={qualified.group('blob_bytes')}, "
+            f"text={qualified.group('text')}, "
+            f"binary={qualified.group('binary')}, "
+            f"subjects={qualified.group('subjects')}, "
+            f"subject-set={qualified.group('subject_set')}, "
+            f"paths={qualified.group('paths')}, "
+            f"path-set={qualified.group('path_set')}, history=complete, "
+            f"remote={qualified.group('remote')}, "
+            f"dst={qualified.group('dst')}, "
+            f"src={qualified.group('src')}, "
+            f"tip={qualified.group('tip')})\n"
+        )
+        parsed_v3 = parse_publication_safety_observation(v3_text)
+        if parsed_v3.kind != "valid-v3" or parsed_v3.receipt is None:
+            return PublicationSafetyObservation("malformed", None)
+        if parsed_v3.receipt.text <= 0 or parsed_v3.receipt.blob_bytes <= 0:
+            return PublicationSafetyObservation("malformed", None)
+        return PublicationSafetyObservation(
+            "qualified-v3", parsed_v3.receipt,
+            QualifiedPublicationEvidence(
+                qualified.group("policy_snapshot"), used_decisions,
+                int(qualified.group("applied")), qualified.group("applied_set"),
+            ),
+        )
+
     v3_matches = list(SCAN_CLEAN_RANGE_V3_REGEX.finditer(text))
     clean_lines = [
         line for line in text.splitlines()
@@ -1482,6 +1712,12 @@ class _PrGrantReducer:
         parsed_grant, authorization_workdir, position = self.pending_numeric
         if authorization_workdir is None:
             if position != self.last_genuine_user_position:
+                self.state, self.grant, self.pending_numeric = "malformed", None, None
+                return self.state, self.grant
+            if (
+                type(self.envelope_repository_workdir) is not str
+                or not self.envelope_repository_workdir
+            ):
                 self.state, self.grant, self.pending_numeric = "malformed", None, None
                 return self.state, self.grant
             authorization_workdir = self.envelope_repository_workdir
@@ -1998,11 +2234,11 @@ def _parse_pr_literal_shape(
     )
 
 
-def _bind_pr_literal_executable(
-    literal: LiteralPushCommand, resolved_git: str
-) -> LiteralPushCommand:
+def _bind_literal_executable_identity(
+    literal_executable: str, resolved_git: str, failure_id: str,
+) -> None:
     try:
-        executable_path = Path(literal.executable).resolve(strict=True)
+        executable_path = Path(literal_executable).resolve(strict=True)
         resolved_path = Path(resolved_git).resolve(strict=True)
         same_identity = executable_path.is_file() and resolved_path.is_file() and os.path.samefile(
             executable_path, resolved_path
@@ -2010,7 +2246,15 @@ def _bind_pr_literal_executable(
     except Exception:
         same_identity = False
     if not same_identity:
-        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        raise PrRouteDenied(failure_id)
+
+
+def _bind_pr_literal_executable(
+    literal: LiteralPushCommand, resolved_git: str
+) -> LiteralPushCommand:
+    _bind_literal_executable_identity(
+        literal.executable, resolved_git, "PRG-COMMAND-SHAPE"
+    )
     return literal
 
 
@@ -2046,6 +2290,8 @@ def _run_process(
     stdout = bytearray()
     stderr = bytearray()
     overflow = threading.Event()
+    output_lock = threading.Lock()
+    reader_failures: list[BaseException] = []
 
     def drain(stream, destination: bytearray) -> None:
         try:
@@ -2053,48 +2299,258 @@ def _run_process(
                 chunk = stream.read(8192)
                 if not chunk:
                     return
-                if len(destination) + len(chunk) > PROCESS_OUTPUT_BYTE_CAP:
-                    overflow.set()
-                    return
-                destination.extend(chunk)
-        except OSError:
+                with output_lock:
+                    if len(destination) + len(chunk) > PROCESS_OUTPUT_BYTE_CAP:
+                        overflow.set()
+                        return
+                    destination.extend(chunk)
+        except BaseException as exc:
+            with output_lock:
+                reader_failures.append(exc)
             overflow.set()
 
-    assert process.stdout is not None and process.stderr is not None
-    readers = (
-        threading.Thread(target=drain, args=(process.stdout, stdout), daemon=True),
-        threading.Thread(target=drain, args=(process.stderr, stderr), daemon=True),
-    )
-    for reader in readers:
-        reader.start()
-
-    deadline = time.monotonic() + max(0.0, timeout)
+    started: list[threading.Thread] = []
+    primary_failure: BaseException | None = None
+    primary_traceback = None
+    cleanup_failures: list[BaseException] = []
     failed = False
-    while process.poll() is None:
-        if overflow.is_set() or time.monotonic() >= deadline:
-            failed = True
-            process.kill()
-            break
-        time.sleep(0.01)
-    try:
-        process.wait(timeout=1.0)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
+    if process.stdout is None or process.stderr is None:
+        primary_failure = RuntimeError("process output pipe unavailable")
+        primary_traceback = primary_failure.__traceback__
+        readers = ()
         failed = True
-    for reader in readers:
-        reader.join(timeout=1.0)
-    process.stdout.close()
-    process.stderr.close()
-    if failed or overflow.is_set() or any(reader.is_alive() for reader in readers):
+    else:
+        readers = (
+            threading.Thread(target=drain, args=(process.stdout, stdout), daemon=True),
+            threading.Thread(target=drain, args=(process.stderr, stderr), daemon=True),
+        )
+    deadline = time.monotonic() + max(0.0, timeout)
+    try:
+        for reader in readers:
+            reader.start()
+            started.append(reader)
+        while process.poll() is None:
+            if overflow.is_set() or time.monotonic() >= deadline:
+                failed = True
+                break
+            time.sleep(0.01)
+    except BaseException as exc:
+        primary_failure = exc
+        primary_traceback = exc.__traceback__
+        failed = True
+
+    termination_attempted = False
+    termination_succeeded = False
+
+    def request_termination() -> bool:
+        nonlocal termination_attempted, termination_succeeded
+        if termination_attempted:
+            return termination_succeeded
+        termination_attempted = True
+        try:
+            if process.poll() is not None:
+                termination_succeeded = True
+                return True
+            process.kill()
+            termination_succeeded = True
+            return True
+        except ProcessLookupError:
+            termination_succeeded = True
+            return True
+        except BaseException as exc:
+            cleanup_failures.append(exc)
+            try:
+                termination_succeeded = process.poll() is not None
+            except BaseException as observe_exc:
+                cleanup_failures.append(observe_exc)
+                termination_succeeded = False
+            return termination_succeeded
+
+    def wait_for_owned_child() -> None:
+        nonlocal failed, primary_failure, primary_traceback
+        if termination_attempted and not termination_succeeded:
+            return
+        try:
+            if termination_attempted:
+                process.wait()
+            else:
+                process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            failed = True
+            if request_termination():
+                try:
+                    process.wait()
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+        except BaseException as exc:
+            if primary_failure is None:
+                primary_failure = exc
+                primary_traceback = exc.__traceback__
+            if request_termination():
+                try:
+                    process.wait()
+                except BaseException as cleanup_exc:
+                    cleanup_failures.append(cleanup_exc)
+            else:
+                cleanup_failures.append(exc)
+
+    if failed or overflow.is_set():
+        request_termination()
+    wait_for_owned_child()
+
+    for reader in started:
+        try:
+            reader.join(timeout=1.0)
+        except BaseException as exc:
+            if primary_failure is None:
+                primary_failure = exc
+                primary_traceback = exc.__traceback__
+            cleanup_failures.append(exc)
+
+    live_readers: list[threading.Thread] = []
+    for reader in started:
+        try:
+            if reader.is_alive():
+                live_readers.append(reader)
+        except BaseException as exc:
+            if primary_failure is None:
+                primary_failure = exc
+                primary_traceback = exc.__traceback__
+            cleanup_failures.append(exc)
+
+    if live_readers:
+        failed = True
+        for stream in (process.stdout, process.stderr):
+            if stream is None:
+                continue
+            try:
+                if not stream.closed:
+                    stream.close()
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+        for reader in live_readers:
+            try:
+                reader.join(timeout=1.0)
+            except BaseException as exc:
+                if primary_failure is None:
+                    primary_failure = exc
+                    primary_traceback = exc.__traceback__
+                cleanup_failures.append(exc)
+
+    for stream in (process.stdout, process.stderr):
+        if stream is None:
+            continue
+        try:
+            if not stream.closed:
+                stream.close()
+        except BaseException as exc:
+            cleanup_failures.append(exc)
+
+    unsettled = False
+    try:
+        unsettled = (
+            process.returncode is None
+            or any(reader.is_alive() for reader in started)
+            or any(stream is not None and not stream.closed for stream in (
+                process.stdout, process.stderr
+            ))
+        )
+    except BaseException as exc:
+        cleanup_failures.append(exc)
+        unsettled = True
+
+    if unsettled:
+        cleanup_failures.append(RuntimeError("process resources remain unsettled"))
+
+    def retain_outcome(error: BaseException) -> None:
+        outcome = {
+            "returncode": process.returncode,
+            "stdout": bytes(stdout),
+            "stderr": bytes(stderr),
+            "complete": False,
+            "resourcesSettled": not unsettled,
+        }
+        try:
+            setattr(error, "publication_gate_process_outcome", outcome)
+            if unsettled:
+                setattr(error, "publication_gate_owned_process", process)
+                setattr(error, "publication_gate_owned_readers", tuple(started))
+                setattr(error, "publication_gate_owned_streams", (process.stdout, process.stderr))
+        except BaseException as capture_failure:
+            raise error from capture_failure
+
+    if primary_failure is not None:
+        retain_outcome(primary_failure)
+        if cleanup_failures:
+            raise primary_failure.with_traceback(primary_traceback) from cleanup_failures[0]
+        raise primary_failure.with_traceback(primary_traceback)
+    if cleanup_failures:
+        failure = RuntimeError("process cleanup failed")
+        retain_outcome(failure)
+        raise failure from cleanup_failures[0]
+    if unsettled:
+        raise RuntimeError("process resources remain unsettled")
+    if failed or overflow.is_set() or reader_failures:
         return None
     return ProcessResult(process.returncode, bytes(stdout), bytes(stderr))
 
 
-_SCAN_BOOTSTRAP = r'''import base64,builtins,json,sys,types
-bundle=json.loads(sys.stdin.buffer.read().decode("ascii"))
-sources={key:base64.b64decode(value,validate=True) for key,value in bundle.items()}
-allowed=set(sys.stdlib_module_names)|{"hook_common"}
+_SCAN_BOOTSTRAP = r'''import base64,builtins,hashlib,json,re,sys,types
+def no_duplicates(pairs):
+    result={}
+    for key,value in pairs:
+        if key in result: raise ValueError("duplicate payload member")
+        result[key]=value
+    return result
+def exact_object(value, keys, label):
+    if type(value) is not dict or set(value)!=set(keys):
+        raise ValueError(label)
+    return value
+bundle=json.loads(sys.stdin.buffer.read().decode("ascii"),object_pairs_hook=no_duplicates)
+exact_object(bundle,("payloadVersion","sources","review"),"payload shape")
+if type(bundle["payloadVersion"]) is not int or bundle["payloadVersion"]!=1:
+    raise ValueError("payload version")
+roles=("hook_common","classifier","posix_helper","windows_job","scanner","publication_review_policy","linked_runtime_subroots")
+encoded_sources=exact_object(bundle["sources"],roles,"source roles")
+sources={}
+for key,value in encoded_sources.items():
+    if type(value) is not str: raise ValueError("source encoding")
+    raw=base64.b64decode(value,validate=True)
+    if base64.b64encode(raw).decode("ascii")!=value: raise ValueError("source encoding")
+    sources[key]=raw
+review=exact_object(bundle["review"],("schemaVersion","repositoryObservation","snapshot","snapshotId"),"review shape")
+if type(review["schemaVersion"]) is not int or review["schemaVersion"]!=1:
+    raise ValueError("review version")
+if type(review["snapshotId"]) is not str or re.fullmatch(r"[0-9a-f]{64}",review["snapshotId"]) is None:
+    raise ValueError("snapshot id")
+snapshot=exact_object(review["snapshot"],("schemaVersion","status","origin","rawBase64","rawSha256","diagnostic"),"snapshot shape")
+if type(snapshot["schemaVersion"]) is not int or snapshot["schemaVersion"]!=1:
+    raise ValueError("snapshot version")
+if snapshot["status"]=="captured":
+    if snapshot["origin"] is None or type(snapshot["rawBase64"]) is not str or type(snapshot["rawSha256"]) is not str or snapshot["diagnostic"]!="none":
+        raise ValueError("captured snapshot shape")
+    raw_policy=base64.b64decode(snapshot["rawBase64"],validate=True)
+    if base64.b64encode(raw_policy).decode("ascii")!=snapshot["rawBase64"] or hashlib.sha256(raw_policy).hexdigest()!=snapshot["rawSha256"]:
+        raise ValueError("captured snapshot bytes")
+elif snapshot["status"] in ("absent","unavailable"):
+    if snapshot["rawBase64"] is not None or snapshot["rawSha256"] is not None or snapshot["diagnostic"] in (None,"none"):
+        raise ValueError("uncaptured snapshot shape")
+else:
+    raise ValueError("snapshot status")
+observation=exact_object(review["repositoryObservation"],("status","repository","diagnostic"),"repository observation shape")
+if observation["status"]=="captured":
+    repo=exact_object(observation["repository"],("kind","objectFormat","commonGit","worktreeGit","worktreeRoot"),"repository shape")
+    for name in ("commonGit","worktreeGit","worktreeRoot"):
+        exact_object(repo[name],("pathEncoding","pathBase64","device","inode"),"native directory shape")
+    if observation["diagnostic"]!="none": raise ValueError("repository observation diagnostic")
+elif observation["status"] in ("not-requested","unavailable"):
+    if observation["repository"] is not None: raise ValueError("unobserved repository")
+    expected_diagnostic="not-needed" if observation["status"]=="not-requested" else "metadata-unavailable"
+    if observation["diagnostic"]!=expected_diagnostic and not (observation["status"]=="unavailable" and observation["diagnostic"]=="unprovable-native-identity"):
+        raise ValueError("repository observation diagnostic")
+else:
+    raise ValueError("repository observation status")
+allowed=set(sys.stdlib_module_names)|{"hook_common","_orchestrarium_publication_review_policy_v1","_orchestrarium_linked_runtime_subroots_v1"}
 original_import=builtins.__import__
 def guarded_import(name,globals=None,locals=None,fromlist=(),level=0):
     if not level and name.split(".",1)[0] not in allowed:
@@ -2120,11 +2576,30 @@ windows_job=types.ModuleType(windows_job_name)
 windows_job.__file__="<closure>/process_supervision/windows_job.py"
 sys.modules[windows_job_name]=windows_job
 exec(compile(sources["windows_job"],windows_job.__file__,"exec"),windows_job.__dict__,windows_job.__dict__)
+linked_name="_orchestrarium_linked_runtime_subroots_v1"
+linked=types.ModuleType(linked_name)
+linked.__file__="<closure>/linked_runtime_subroots.py"
+sys.modules[linked_name]=linked
+exec(compile(sources["linked_runtime_subroots"],linked.__file__,"exec"),linked.__dict__,linked.__dict__)
+policy_name="_orchestrarium_publication_review_policy_v1"
+policy=types.ModuleType(policy_name)
+policy.__file__="<closure>/publication_review_policy.py"
+sys.modules[policy_name]=policy
+exec(compile(sources["publication_review_policy"],policy.__file__,"exec"),policy.__dict__,policy.__dict__)
+if sys.modules.get(linked_name) is not linked or linked.__name__!=linked_name or linked.__file__!="<closure>/linked_runtime_subroots.py":
+    raise RuntimeError("linked module identity")
+if sys.modules.get(policy_name) is not policy or policy.__name__!=policy_name or policy.__file__!="<closure>/publication_review_policy.py" or getattr(policy,"POLICY_MODULE_CONTRACT_ID",None)!="orchestrarium.publication-review-policy.module.v1":
+    raise RuntimeError("policy module identity")
+if getattr(policy,"POLICY_MODULE_KEY",None)!=policy_name or getattr(policy,"POLICY_INJECTION_KEY",None)!="__injected_review_policy_module__":
+    raise RuntimeError("policy injection contract")
+if policy.H("orchestrarium.publication-review.snapshot.v1",snapshot)!=review["snapshotId"]:
+    raise RuntimeError("snapshot id")
 if len(sys.argv)<3 or sys.argv[1]!="--gate-git-executable":
     raise RuntimeError("git executable contract")
 git_executable=sys.argv[2]
 scanner_path="<closure>/check-publication-safety.py"
-scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable,"__injected_posix_process_group_module__":posix_helper,"__injected_windows_job_module__":windows_job}
+scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable,"__injected_posix_process_group_module__":posix_helper,"__injected_windows_job_module__":windows_job,"__injected_review_policy_snapshot__":snapshot,"__injected_review_repository_observation__":observation,"__injected_review_execution__":"gate-captured-v1"}
+scanner[policy.POLICY_INJECTION_KEY]=policy
 sys.argv=[scanner_path,*sys.argv[3:]]
 exec(compile(sources["scanner"],scanner_path,"exec"),scanner,scanner)
 '''
@@ -2171,7 +2646,53 @@ def _interpreter_identity() -> TrustedInterpreterIdentity:
     return TrustedInterpreterIdentity(str(resolved), identity)
 
 
-def _open_windows_path(path: Path, *, directory: bool) -> int:
+def _close_owned_descriptors(fds: list[int]) -> tuple[tuple[int, BaseException], ...]:
+    failures: list[tuple[int, BaseException]] = []
+    for fd in reversed(tuple(dict.fromkeys(fds))):
+        try:
+            os.close(fd)
+        except BaseException as exc:
+            failures.append((fd, exc))
+        else:
+            while fd in fds:
+                fds.remove(fd)
+    return tuple(failures)
+
+
+def _raise_capture_primary(
+    primary: BaseException,
+    traceback,
+    cleanup_failures: tuple[tuple[int, BaseException], ...],
+) -> None:
+    if cleanup_failures:
+        try:
+            setattr(primary, "publication_gate_descriptor_cleanup_failures", cleanup_failures)
+        except BaseException as retain_error:
+            cleanup_failures = (*cleanup_failures, (-1, retain_error))
+        raise primary.with_traceback(traceback) from cleanup_failures[0][1]
+    raise primary.with_traceback(traceback)
+
+
+def _open_owned_descriptor(open_descriptor: Callable[[], int], owned_fds: list[int] | None) -> int:
+    descriptor: int | None = None
+    try:
+        descriptor = open_descriptor()
+        if owned_fds is not None and descriptor not in owned_fds:
+            owned_fds.append(descriptor)
+        return descriptor
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        failures: tuple[tuple[int, BaseException], ...] = ()
+        if descriptor is not None and (
+            owned_fds is None or descriptor not in owned_fds
+        ):
+            failures = _close_owned_descriptors([descriptor])
+        _raise_capture_primary(primary, traceback, failures)
+
+
+def _open_windows_path(
+    path: Path, *, directory: bool, owned_fds: list[int] | None = None,
+) -> int:
     import ctypes
     import msvcrt
     from ctypes import wintypes
@@ -2185,24 +2706,60 @@ def _open_windows_path(path: Path, *, directory: bool) -> int:
     desired_access = 0 if directory else 0x80000000
     share_mode = 0x00000001 | (0x00000002 | 0x00000004 if directory else 0)
     flags = 0x00200000 | (0x02000000 if directory else 0x00000080)
-    handle = create_file(str(path), desired_access, share_mode, None, 3, flags, None)
     invalid = ctypes.c_void_p(-1).value
-    if handle in (None, invalid):
-        raise OSError(ctypes.get_last_error(), "CreateFileW")
+    handle = None
+    descriptor: int | None = None
+    native_handle_owned = False
+    transfer_in_progress = False
     try:
-        return msvcrt.open_osfhandle(
+        handle = create_file(str(path), desired_access, share_mode, None, 3, flags, None)
+        if handle in (None, invalid):
+            raise OSError(ctypes.get_last_error(), "CreateFileW")
+        native_handle_owned = True
+        transfer_in_progress = True
+        descriptor = msvcrt.open_osfhandle(
             int(handle), os.O_RDONLY | getattr(os, "O_BINARY", 0)
         )
-    except Exception:
-        ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(handle)
-        raise
+        transfer_in_progress = False
+        native_handle_owned = False
+        if owned_fds is not None:
+            owned_fds.append(descriptor)
+        return descriptor
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        cleanup_failures: list[tuple[int, BaseException]] = []
+        if descriptor is not None and (
+            owned_fds is None or descriptor not in owned_fds
+        ):
+            cleanup_failures.extend(_close_owned_descriptors([descriptor]))
+        if transfer_in_progress and handle not in (None, invalid):
+            try:
+                setattr(primary, "publication_gate_native_handle_outcome", {
+                    "handle": int(handle),
+                    "ownership": "uncertain-during-crt-transfer",
+                    "closeAttempted": False,
+                })
+            except BaseException as retain_error:
+                cleanup_failures.append((int(handle), retain_error))
+        elif native_handle_owned:
+            try:
+                closed = ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(handle)
+                if not closed:
+                    cleanup_failures.append((int(handle), OSError(
+                        ctypes.get_last_error(), "CloseHandle"
+                    )))
+            except BaseException as cleanup_error:
+                cleanup_failures.append((int(handle), cleanup_error))
+        _raise_capture_primary(primary, traceback, tuple(cleanup_failures))
 
 
-def _open_windows_source(path: Path) -> int:
-    return _open_windows_path(path, directory=False)
+def _open_windows_source(path: Path, *, owned_fds: list[int] | None = None) -> int:
+    return _open_windows_path(path, directory=False, owned_fds=owned_fds)
 
 
-def _capture_directory(path: Path) -> tuple[int, tuple[int, ...]]:
+def _capture_directory(
+    path: Path, *, owned_fds: list[int] | None = None,
+) -> tuple[int, tuple[int, ...]]:
     path_identity = _directory_generation(path)
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
     if os.name == "posix":
@@ -2211,22 +2768,31 @@ def _capture_directory(path: Path) -> tuple[int, tuple[int, ...]]:
         if nofollow is None or directory_flag is None:
             raise ValueError("directory-open-unavailable")
         flags |= nofollow | directory_flag
-    fd = (
-        _open_windows_path(path, directory=True)
-        if os.name == "nt"
-        else os.open(path, flags)
+    fd = _open_owned_descriptor(
+        lambda: (
+            _open_windows_path(path, directory=True, owned_fds=owned_fds)
+            if os.name == "nt"
+            else os.open(path, flags)
+        ),
+        owned_fds,
     )
     try:
         opened_identity = _directory_identity(os.fstat(fd))
         if opened_identity != path_identity:
             raise ValueError("directory-open-identity")
         return fd, opened_identity
-    except Exception:
-        os.close(fd)
-        raise
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        failures = (
+            () if owned_fds is not None and fd in owned_fds
+            else _close_owned_descriptors([fd])
+        )
+        _raise_capture_primary(primary, traceback, failures)
 
 
-def _capture_source_node(path: Path, role: str) -> tuple[int, SourceNode]:
+def _capture_source_node(
+    path: Path, role: str, *, owned_fds: list[int] | None = None,
+) -> tuple[int, SourceNode]:
     path_identity = _regular_identity(path, single_link=True)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
     nofollow = getattr(os, "O_NOFOLLOW", None)
@@ -2234,7 +2800,14 @@ def _capture_source_node(path: Path, role: str) -> tuple[int, SourceNode]:
         if nofollow is None:
             raise ValueError("nofollow-unavailable")
         flags |= nofollow
-    fd = _open_windows_source(path) if os.name == "nt" else os.open(path, flags)
+    fd = _open_owned_descriptor(
+        lambda: (
+            _open_windows_source(path, owned_fds=owned_fds)
+            if os.name == "nt"
+            else os.open(path, flags)
+        ),
+        owned_fds,
+    )
     try:
         opened = os.fstat(fd)
         opened_identity = _stat_identity(opened)
@@ -2262,13 +2835,18 @@ def _capture_source_node(path: Path, role: str) -> tuple[int, SourceNode]:
             role, str(path), opened_identity,
             int(opened.st_nlink), len(source), hashlib.sha256(source).hexdigest(), source,
         )
-    except Exception:
-        os.close(fd)
-        raise
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        failures = (
+            () if owned_fds is not None and fd in owned_fds
+            else _close_owned_descriptors([fd])
+        )
+        _raise_capture_primary(primary, traceback, failures)
 
 
 def _capture_interpreter_handle(
     identity: InterpreterIdentity,
+    *, owned_fds: list[int] | None = None,
 ) -> int:
     path = Path(identity.absolute_resolved_path)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
@@ -2277,7 +2855,14 @@ def _capture_interpreter_handle(
         if nofollow is None:
             raise ValueError("nofollow-unavailable")
         flags |= nofollow
-    fd = _open_windows_source(path) if os.name == "nt" else os.open(path, flags)
+    fd = _open_owned_descriptor(
+        lambda: (
+            _open_windows_source(path, owned_fds=owned_fds)
+            if os.name == "nt"
+            else os.open(path, flags)
+        ),
+        owned_fds,
+    )
     try:
         opened = os.fstat(fd)
         opened_identity = _stat_identity(opened)
@@ -2288,22 +2873,31 @@ def _capture_interpreter_handle(
         ):
             raise ValueError("interpreter-open-identity")
         return fd
-    except Exception:
-        os.close(fd)
-        raise
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        failures = (
+            () if owned_fds is not None and fd in owned_fds
+            else _close_owned_descriptors([fd])
+        )
+        _raise_capture_primary(primary, traceback, failures)
 
 
 def _layout_for_gate(gate: Path) -> tuple[SourceLayout, Path]:
     parts = gate.parts
-    # The canonical source producer has a distinct helper placement. Select it
-    # before the materialized component shape, never by peer availability.
-    layout = next((
+    # Source packs overlap the generic component suffix. Pick the longest
+    # declared exact suffix, and refuse ties instead of resolving by table order.
+    matches = tuple(
         layout for layout in SOURCE_LAYOUTS
         if len(parts) >= len(layout.gate_suffix)
         and tuple(parts[-len(layout.gate_suffix):]) == layout.gate_suffix
-    ), None)
-    if layout is None:
+    )
+    if not matches:
         raise ValueError("layout")
+    longest = max(len(layout.gate_suffix) for layout in matches)
+    selected = tuple(layout for layout in matches if len(layout.gate_suffix) == longest)
+    if len(selected) != 1:
+        raise ValueError("layout-ambiguous")
+    layout = selected[0]
     trust_root = gate.parent
     for _index in range(layout.trust_root_up):
         trust_root = trust_root.parent
@@ -2361,15 +2955,15 @@ def _component_paths(trust_root: Path, paths: tuple[Path, ...]) -> tuple[tuple[s
 
 
 def _capture_path_components(
-    trust_root: Path, paths: tuple[Path, ...],
+    trust_root: Path, paths: tuple[Path, ...], *, owned_fds: list[int] | None = None,
 ) -> tuple[tuple[int, ...], tuple[PathComponentIdentity, ...]]:
-    fds: list[int] = []
+    fds = owned_fds if owned_fds is not None else []
     components: list[PathComponentIdentity] = []
     by_name: dict[str, int] = {}
     try:
         for name, path in _component_paths(trust_root, paths):
             if name == "." or os.name != "posix":
-                fd, identity = _capture_directory(path)
+                fd, identity = _capture_directory(path, owned_fds=fds)
             else:
                 parent_name, _separator, basename = name.rpartition("/")
                 parent_fd = by_name[parent_name or "."]
@@ -2378,25 +2972,24 @@ def _capture_path_components(
                     os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
                     | getattr(os, "O_NOFOLLOW") | getattr(os, "O_DIRECTORY")
                 )
-                fd = os.open(basename, flags, dir_fd=parent_fd)
-                try:
-                    identity = _directory_identity(os.fstat(fd))
-                    named_identity = _directory_identity(os.stat(
-                        basename, dir_fd=parent_fd, follow_symlinks=False
-                    ))
-                    if identity != expected_identity or named_identity != identity:
-                        raise ValueError("directory-open-identity")
-                except Exception:
-                    os.close(fd)
-                    raise
-            fds.append(fd)
+                fd = _open_owned_descriptor(
+                    lambda: os.open(basename, flags, dir_fd=parent_fd), fds
+                )
+                identity = _directory_identity(os.fstat(fd))
+                named_identity = _directory_identity(os.stat(
+                    basename, dir_fd=parent_fd, follow_symlinks=False
+                ))
+                if identity != expected_identity or named_identity != identity:
+                    raise ValueError("directory-open-identity")
             by_name[name] = fd
             components.append(PathComponentIdentity(name, "directory", identity))
         return tuple(fds), tuple(components)
-    except Exception:
-        for fd in fds:
-            os.close(fd)
-        raise
+    except BaseException as primary:
+        if owned_fds is not None:
+            raise
+        traceback = primary.__traceback__
+        cleanup_failures = _close_owned_descriptors(fds)
+        _raise_capture_primary(primary, traceback, cleanup_failures)
 
 
 def _capture_source_closure() -> tuple[tuple[int, ...], CanonicalSourceClosure]:
@@ -2410,16 +3003,14 @@ def _capture_source_closure() -> tuple[tuple[int, ...], CanonicalSourceClosure]:
     try:
         component_paths = tuple(path for _role, path in paths)
         component_fds, components = _capture_path_components(
-            trust_root_path, component_paths
+            trust_root_path, component_paths, owned_fds=fds
         )
-        fds.extend(component_fds)
         for role, path in paths:
-            fd, node = _capture_source_node(path, role)
-            fds.append(fd)
+            fd, node = _capture_source_node(path, role, owned_fds=fds)
             nodes.append(node)
         bootstrap_digest = hashlib.sha256(_SCAN_BOOTSTRAP.encode("utf-8")).hexdigest()
         interpreter_identity = _interpreter_identity()
-        fds.append(_capture_interpreter_handle(interpreter_identity))
+        _capture_interpreter_handle(interpreter_identity, owned_fds=fds)
         if (
             components[0].identity != locator.physical_root_identity
             or nodes[0].file_identity != locator.gate_identity
@@ -2445,10 +3036,10 @@ def _capture_source_closure() -> tuple[tuple[int, ...], CanonicalSourceClosure]:
             layout, trust_root, components, tuple(nodes), digest_owner.hexdigest(),
             gate_identity, bootstrap_digest, interpreter_identity, locator,
         )
-    except Exception:
-        for fd in fds:
-            os.close(fd)
-        raise
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        cleanup_failures = _close_owned_descriptors(fds)
+        _raise_capture_primary(primary, traceback, cleanup_failures)
 
 
 def _recheck_source_closure(
@@ -2546,15 +3137,357 @@ def _recheck_source_closure(
     return before
 
 
-def _closure_payload(closure: CanonicalSourceClosure) -> bytes:
-    return json.dumps(
-        {
-            node.role: base64.b64encode(node.source).decode("ascii")
-            for node in closure.nodes if node.role != "gate"
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("ascii")
+def _closure_payload(
+    closure: CanonicalSourceClosure,
+    review_document: object,
+    canonical_bytes: object,
+) -> bytes:
+    if tuple(node.role for node in closure.nodes) != SOURCE_ROLE_ORDER:
+        raise ValueError("source-role-closure")
+    if type(review_document) is not dict or set(review_document) != {
+        "schemaVersion", "repositoryObservation", "snapshot", "snapshotId",
+    }:
+        raise ValueError("review-payload-shape")
+    if type(review_document.get("schemaVersion")) is not int or review_document["schemaVersion"] != 1:
+        raise ValueError("review-payload-version")
+    if re.fullmatch(r"[0-9a-f]{64}", review_document.get("snapshotId", "")) is None:
+        raise ValueError("review-snapshot-id")
+    snapshot = review_document.get("snapshot")
+    if type(snapshot) is not dict or set(snapshot) != {
+        "schemaVersion", "status", "origin", "rawBase64", "rawSha256", "diagnostic",
+    }:
+        raise ValueError("review-snapshot-shape")
+    repository_observation = review_document.get("repositoryObservation")
+    if type(repository_observation) is not dict or set(repository_observation) != {
+        "status", "repository", "diagnostic",
+    }:
+        raise ValueError("review-repository-observation-shape")
+    sources = {
+        node.role: base64.b64encode(node.source).decode("ascii")
+        for node in closure.nodes if node.role != "gate"
+    }
+    if len(sources) != 7 or tuple(sources) != SOURCE_ROLE_ORDER[1:]:
+        raise ValueError("source-role-cardinality")
+    encoder = canonical_bytes
+    if not callable(encoder):
+        raise ValueError("policy-canonical-encoder")
+    payload = encoder({
+        "payloadVersion": 1,
+        "sources": sources,
+        "review": review_document,
+    })
+    if type(payload) is not bytes or not payload.isascii():
+        raise ValueError("canonical-payload-bytes")
+    return payload
+
+
+REPOSITORY_QUERY_ORDER = ("topLevel", "commonGit", "worktreeGit", "objectFormat")
+REPOSITORY_QUERY_SUFFIXES = {
+    "topLevel": ("--show-toplevel",),
+    "commonGit": ("--path-format=absolute", "--git-common-dir"),
+    "worktreeGit": ("--absolute-git-dir",),
+    "objectFormat": ("--show-object-format",),
+}
+
+
+def _capture_repository_observation(
+    policy_module: object,
+    selected_root: Path,
+    git_executable: str,
+) -> dict:
+    plan = policy_module.repository_query_plan(selected_root)
+    if (
+        type(plan) is not policy_module.RepositoryQueryPlanV1
+        or plan.root != selected_root
+    ):
+        raise ValueError("repository-query-plan")
+    queries = plan.queries
+    if type(queries) is not tuple or len(queries) != len(REPOSITORY_QUERY_ORDER):
+        raise ValueError("repository-query-cardinality")
+    prefix = ("--no-optional-locks", "-C", str(selected_root), "rev-parse")
+    results = []
+    deadline = time.monotonic() + ORACLE_TIMEOUT_SECONDS
+    for index, (query, key) in enumerate(zip(queries, REPOSITORY_QUERY_ORDER)):
+        expected_args = (*prefix, *REPOSITORY_QUERY_SUFFIXES[key])
+        if (
+            type(query) is not policy_module.RepositoryQueryV1
+            or query.key != key
+            or type(query.git_args) is not tuple
+            or query.git_args != expected_args
+        ):
+            raise ValueError("repository-query-contract")
+        timeout = max(0.0, deadline - time.monotonic())
+        try:
+            outcome = _run_process(
+                [git_executable, *query.git_args], timeout, str(plan.root)
+            )
+        except BaseException as primary:
+            process_outcome = getattr(
+                primary, "publication_gate_process_outcome", None
+            )
+            if type(process_outcome) is dict and set(process_outcome) == {
+                "returncode", "stdout", "stderr", "complete", "resourcesSettled",
+            }:
+                failure_kind = (
+                    "unsettled"
+                    if process_outcome["resourcesSettled"] is not True
+                    else "cancelled"
+                    if isinstance(primary, KeyboardInterrupt)
+                    else "execution-error"
+                )
+                results.append(policy_module.RepositoryQueryResultV1(
+                    key, query.git_args, process_outcome["returncode"],
+                    process_outcome["stdout"], process_outcome["stderr"],
+                    False, process_outcome["resourcesSettled"], failure_kind,
+                ))
+            try:
+                setattr(primary, "publication_review_query_plan", plan)
+                setattr(primary, "publication_review_query_results", tuple(results))
+                setattr(primary, "publication_review_query_index", index)
+            except BaseException as capture_failure:
+                raise primary from capture_failure
+            raise
+        if outcome is None:
+            result = policy_module.RepositoryQueryResultV1(
+                key, query.git_args, None, None, None,
+                False, True, "none-result",
+            )
+        else:
+            if (
+                type(outcome) is not ProcessResult
+                or type(outcome.returncode) is not int
+                or type(outcome.stdout) is not bytes
+                or type(outcome.stderr) is not bytes
+            ):
+                raise ValueError("repository-query-outcome")
+            result = policy_module.RepositoryQueryResultV1(
+                key, query.git_args, outcome.returncode, outcome.stdout,
+                outcome.stderr, True, True,
+                None if outcome.returncode == 0 else "execution-error",
+            )
+        results.append(result)
+    observation = policy_module.repository_from_query_results(plan, tuple(results))
+    if type(observation) is not dict or set(observation) != {
+        "status", "repository", "diagnostic",
+    }:
+        raise ValueError("repository-observation")
+    return observation
+
+
+def _capture_review_payload(
+    modules: CapturedReviewModules,
+    closure: CanonicalSourceClosure,
+    selected_root: Path,
+    git_executable: str,
+) -> CapturedReviewPayload:
+    policy_module = modules.policy_module
+    if (
+        sys.modules.get("_orchestrarium_publication_review_policy_v1")
+        is not policy_module
+        or getattr(policy_module, "POLICY_MODULE_CONTRACT_ID", None)
+        != "orchestrarium.publication-review-policy.module.v1"
+    ):
+        raise ValueError("policy-module-identity")
+    origin = policy_module.resolve_trusted_origin()
+    policy_read = policy_module.read_policy_snapshot(origin, selected_root)
+    if type(policy_read) is not policy_module.PolicyReadV1:
+        raise ValueError("policy-read-result")
+    snapshot = policy_read.snapshot
+    snapshot_id = policy_read.snapshot_id
+    if (
+        type(snapshot) is not dict
+        or type(policy_read.usable_records) is not tuple
+        or type(policy_read.issues) is not tuple
+        or policy_module.H(
+            "orchestrarium.publication-review.snapshot.v1", snapshot
+        ) != snapshot_id
+    ):
+        raise ValueError("policy-snapshot-result")
+
+    if policy_read.usable_records:
+        repository_observation = _capture_repository_observation(
+            policy_module, selected_root, git_executable
+        )
+    else:
+        repository_observation = {
+            "status": "not-requested",
+            "repository": None,
+            "diagnostic": "not-needed",
+        }
+    repository = repository_observation["repository"]
+    origin_is_outside = False
+    if repository_observation["status"] == "captured":
+        origin_is_outside = policy_module.origin_is_outside_repository(
+            snapshot, repository
+        )
+        if type(origin_is_outside) is not bool:
+            raise ValueError("policy-origin-exclusion")
+
+    review_document = {
+        "schemaVersion": 1,
+        "repositoryObservation": repository_observation,
+        "snapshot": snapshot,
+        "snapshotId": snapshot_id,
+    }
+    payload = _closure_payload(closure, review_document, policy_module.C)
+    return CapturedReviewPayload(
+        modules, snapshot, snapshot_id, repository_observation, repository,
+        origin_is_outside, payload, hashlib.sha256(payload).hexdigest(),
+    )
+
+
+def _decode_used_decisions(
+    policy_module: object,
+    encoded: str,
+    failure_id: str,
+) -> list[list[str]]:
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+        if base64.b64encode(raw).decode("ascii") != encoded:
+            raise ValueError("used-list base64")
+        value = _strict_json(raw.decode("ascii", errors="strict"), list, failure_id)
+    except PrRouteDenied:
+        raise
+    except Exception:
+        raise PrRouteDenied(failure_id) from None
+    if (
+        type(value) is not list
+        or not value
+        or any(
+            type(row) is not list
+            or len(row) != 2
+            or type(row[0]) is not str
+            or type(row[1]) is not str
+            for row in value
+        )
+    ):
+        raise PrRouteDenied(failure_id)
+    if policy_module.C(value) != raw:
+        raise PrRouteDenied(failure_id)
+    return value
+
+
+def _verify_used_review_currentness(
+    captured_review: CapturedReviewPayload,
+    qualification: QualifiedPublicationEvidence,
+    repository_workdir: str,
+    git_executable: str,
+    failure_id: str,
+) -> tuple[dict, list[list[str]]]:
+    policy_module = captured_review.policy_module
+    if (
+        captured_review.repository is None
+        or not captured_review.origin_is_outside_repository
+        or qualification.policy_snapshot_id != captured_review.snapshot_id
+    ):
+        raise PrRouteDenied(failure_id)
+    used_list = _decode_used_decisions(
+        policy_module, qualification.used_decisions_b64, failure_id
+    )
+    fresh_observation = _capture_repository_observation(
+        policy_module, Path(repository_workdir), git_executable
+    )
+    if fresh_observation["status"] != "captured":
+        raise PrRouteDenied(failure_id)
+    fresh_repository = fresh_observation["repository"]
+    if not policy_module.origin_is_outside_repository(
+        captured_review.snapshot, fresh_repository
+    ):
+        raise PrRouteDenied(failure_id)
+    finalization = policy_module.verify_used(
+        captured_review.snapshot, fresh_repository, used_list
+    )
+    finalization_keys = {
+        "inputSnapshotId", "usedList", "currentSnapshotId", "repositorySha256",
+        "status", "reason", "resourcesSettled",
+    }
+    if (
+        type(finalization) is not dict
+        or set(finalization) != finalization_keys
+        or finalization["inputSnapshotId"] != captured_review.snapshot_id
+        or finalization["usedList"] != used_list
+        or type(finalization["currentSnapshotId"]) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", finalization["currentSnapshotId"]) is None
+        or finalization["repositorySha256"]
+        != policy_module.H(
+            "orchestrarium.publication-review.repository.v1",
+            captured_review.repository,
+        )
+        or finalization["status"] != "valid"
+        or finalization["reason"] != "none"
+        or finalization["resourcesSettled"] is not True
+    ):
+        raise PrRouteDenied(failure_id)
+    return finalization, used_list
+
+
+def _release_captured_review_modules(modules: CapturedReviewModules) -> None:
+    failures = []
+    for name, module in reversed(modules.registered):
+        if sys.modules.get(name) is not module:
+            failures.append(name)
+            continue
+        del sys.modules[name]
+    if failures:
+        raise ValueError("captured-module-settlement")
+
+
+def _load_captured_review_modules(
+    closure: CanonicalSourceClosure,
+) -> CapturedReviewModules:
+    if tuple(node.role for node in closure.nodes) != SOURCE_ROLE_ORDER:
+        raise ValueError("source-role-closure")
+    source_by_role = {node.role: node.source for node in closure.nodes}
+    if set(source_by_role) != set(SOURCE_ROLE_ORDER):
+        raise ValueError("source-role-cardinality")
+    linked_name = "_orchestrarium_linked_runtime_subroots_v1"
+    policy_name = "_orchestrarium_publication_review_policy_v1"
+    if linked_name in sys.modules or policy_name in sys.modules:
+        raise ValueError("captured-module-slot")
+    registered: list[tuple[str, object]] = []
+    try:
+        linked = types.ModuleType(linked_name)
+        linked.__file__ = "<closure>/linked_runtime_subroots.py"
+        sys.modules[linked_name] = linked
+        registered.append((linked_name, linked))
+        exec(
+            compile(source_by_role["linked_runtime_subroots"], linked.__file__, "exec"),
+            linked.__dict__, linked.__dict__,
+        )
+        if sys.modules.get(linked_name) is not linked:
+            raise ValueError("linked-module-identity")
+
+        policy = types.ModuleType(policy_name)
+        policy.__file__ = "<closure>/publication_review_policy.py"
+        sys.modules[policy_name] = policy
+        registered.append((policy_name, policy))
+        exec(
+            compile(source_by_role["publication_review_policy"], policy.__file__, "exec"),
+            policy.__dict__, policy.__dict__,
+        )
+        if (
+            sys.modules.get(policy_name) is not policy
+            or getattr(policy, "POLICY_MODULE_CONTRACT_ID", None)
+            != "orchestrarium.publication-review-policy.module.v1"
+            or getattr(policy, "POLICY_MODULE_KEY", None) != policy_name
+            or getattr(policy, "POLICY_INJECTION_KEY", None)
+            != "__injected_review_policy_module__"
+        ):
+            raise ValueError("policy-module-identity")
+        return CapturedReviewModules(policy, linked, tuple(registered))
+    except BaseException as primary:
+        if registered:
+            try:
+                _release_captured_review_modules(
+                    CapturedReviewModules(
+                        sys.modules.get(policy_name),
+                        sys.modules.get(linked_name),
+                        tuple(registered),
+                    )
+                )
+            except BaseException as cleanup:
+                raise primary from cleanup
+        raise
 
 
 class GateSettlementState(str, Enum):
@@ -2595,6 +3528,8 @@ class GateSettlementCertificate:
         ticks = tuple(row.observed_at_monotonic_tick for row in self.streams + self.workers)
         return (
             self.observed_return_code is not None
+            and type(self.child_identity) is int
+            and self.child_identity > 0
             and 1 <= self.attempts_used <= SCAN_SETTLEMENT_MAX_ENTRIES
             and all(row.ownership != "owned" or row.closed_observed for row in self.streams)
             and all(row.terminal in {"not-started", "joined"} for row in self.workers)
@@ -2621,31 +3556,45 @@ class GateSettlement:
 class _OwnedWorker:
     worker: threading.Thread
     start: str = "not-started"
+    name: str = "worker"
 
 
 class ChildSupervisor:
     """Single immediate owner for a launched scanner child and its workers."""
 
     def __init__(
-        self, process, *, attempt_seconds: float = SCAN_SETTLEMENT_ATTEMPT_SECONDS,
+        self, process=None, *, attempt_seconds: float = SCAN_SETTLEMENT_ATTEMPT_SECONDS,
     ) -> None:
-        self.process = process
+        self.process = None
         self.supervisor_id = f"supervisor:{id(self)}"
-        self.child_identity = int(process.pid)
+        self.child_identity: int | None = None
         self.workers: list[_OwnedWorker] = []
         self._attempt_seconds = attempt_seconds
         self._attempts_used = 0
         self._operation_errors: list[str] = []
+        self._operation_failures: list[tuple[str, BaseException]] = []
         self._settlement: GateSettlement | None = None
+        if process is not None:
+            self.adopt_process(process)
 
-    def start_worker(self, worker: threading.Thread) -> None:
-        owned = _OwnedWorker(worker)
+    def _record_operation_failure(self, name: str, failure: BaseException) -> None:
+        self._operation_errors.append(name)
+        self._operation_failures.append((name, failure))
+
+    def adopt_process(self, process) -> None:
+        if self.process is not None:
+            raise RuntimeError("child supervisor already owns a process")
+        self.process = process
+        self.child_identity = int(process.pid)
+
+    def start_worker(self, worker: threading.Thread, *, name: str = "worker") -> None:
+        owned = _OwnedWorker(worker, "starting", name)
         self.workers.append(owned)
         try:
             worker.start()
             owned.start = "started"
-        except BaseException:
-            self._operation_errors.append("worker-start")
+        except BaseException as exc:
+            self._record_operation_failure("worker-start", exc)
             raise
 
     @property
@@ -2662,6 +3611,8 @@ class ChildSupervisor:
     def settle(self) -> GateSettlement:
         if self._settlement is not None and self._settlement.complete:
             return self._settlement
+        if self.process is None:
+            return GateSettlement(GateSettlementState.FAILED_UNSETTLED, None, False)
         if self._attempts_used >= SCAN_SETTLEMENT_MAX_ENTRIES:
             return self._settlement or GateSettlement(
                 GateSettlementState.FAILED_UNSETTLED, None, False
@@ -2669,75 +3620,133 @@ class ChildSupervisor:
         self._attempts_used += 1
         deadline = time.monotonic() + self._attempt_seconds
         process = self.process
-        return_code = None
+        return_code: int | None = None
         try:
             return_code = process.poll()
-        except BaseException:
-            self._operation_errors.append("poll")
-
-        stream_rows: list[GateTransportObservation] = []
-        stdin = process.stdin
-        if stdin is not None:
-            try:
-                stdin.close()
-                stream_rows.append(GateTransportObservation("stdin", "owned", True, None, time.monotonic()))
-            except BaseException:
-                self._operation_errors.append("stdin-close")
-                stream_rows.append(GateTransportObservation("stdin", "owned", False, "stdin-close", time.monotonic()))
-        else:
-            stream_rows.append(GateTransportObservation("stdin", "absent", True, None, time.monotonic()))
-
+        except BaseException as exc:
+            self._record_operation_failure("poll", exc)
         if return_code is None:
             try:
                 process.terminate()
-            except BaseException:
-                self._operation_errors.append("terminate")
+            except BaseException as exc:
+                self._record_operation_failure("terminate", exc)
             try:
                 return_code = process.wait(timeout=self._remaining(deadline))
-            except BaseException:
-                self._operation_errors.append("wait")
+            except BaseException as exc:
+                self._record_operation_failure("wait", exc)
+                try:
+                    return_code = process.poll()
+                except BaseException as poll_exc:
+                    self._record_operation_failure("post-wait-poll", poll_exc)
             if return_code is None:
                 try:
                     process.kill()
-                except BaseException:
-                    self._operation_errors.append("kill")
+                except BaseException as exc:
+                    self._record_operation_failure("kill", exc)
                 try:
                     return_code = process.wait(timeout=self._remaining(deadline))
-                except BaseException:
-                    self._operation_errors.append("kill-wait")
+                except BaseException as exc:
+                    self._record_operation_failure("kill-wait", exc)
+        try:
+            observed_return_code = process.poll()
+            if observed_return_code is not None:
+                return_code = observed_return_code
+        except BaseException as exc:
+            self._record_operation_failure("final-poll", exc)
 
-        for name, stream in (("stdout", process.stdout), ("stderr", process.stderr)):
+        worker_rows: list[GateWorkerObservation] = []
+        worker_terminals: dict[str, list[str]] = {}
+        for owned in self.workers:
+            worker = owned.worker
+            terminal = "unobserved"
+            if owned.start == "not-started":
+                terminal = "not-started"
+            elif owned.start in {"starting", "started"}:
+                try:
+                    alive = worker.is_alive()
+                except BaseException as exc:
+                    self._record_operation_failure("worker-observe", exc)
+                    alive = None
+                if alive is True:
+                    try:
+                        worker.join(timeout=self._remaining(deadline))
+                    except BaseException as exc:
+                        self._record_operation_failure("worker-join", exc)
+                    try:
+                        alive = worker.is_alive()
+                    except BaseException as exc:
+                        self._record_operation_failure("worker-observe", exc)
+                        alive = None
+                if alive is True:
+                    terminal = "live"
+                elif alive is False:
+                    if owned.start == "started":
+                        terminal = "joined"
+                    else:
+                        try:
+                            if worker.ident is None and worker.native_id is None:
+                                terminal = "unobserved"
+                            else:
+                                terminal = "joined"
+                        except BaseException as exc:
+                            self._record_operation_failure("worker-identity", exc)
+                            terminal = "unobserved"
+                elif owned.start == "starting":
+                    terminal = "unobserved"
+            worker_terminals.setdefault(owned.name, []).append(terminal)
+            worker_rows.append(GateWorkerObservation(id(worker), owned.start, terminal, time.monotonic()))
+
+        process_reaped = return_code is not None
+        workers_terminal = all(
+            row.terminal in {"not-started", "joined"} for row in worker_rows
+        )
+        stream_rows: list[GateTransportObservation] = []
+        stream_values: list[tuple[str, object | None]] = []
+        for name in ("stdin", "stdout", "stderr"):
+            try:
+                stream_values.append((name, getattr(process, name)))
+            except BaseException as exc:
+                self._record_operation_failure(name + "-observe", exc)
+                stream_values.append((name, None))
+        can_close_streams = process_reaped and workers_terminal
+        for name, stream in stream_values:
             if stream is None:
-                stream_rows.append(GateTransportObservation(name, "absent", True, None, time.monotonic()))
+                # A missing standard pipe is an actual observation, not an
+                # unowned participant invented by the supervisor.
+                stream_rows.append(GateTransportObservation(
+                    name, "absent", True, None, time.monotonic()
+                ))
+                continue
+            try:
+                already_closed = bool(stream.closed)
+            except BaseException as exc:
+                already_closed = False
+                self._record_operation_failure(name + "-observe", exc)
+            if already_closed:
+                stream_rows.append(GateTransportObservation(
+                    name, "owned", True, None, time.monotonic()
+                ))
+                continue
+            if not can_close_streams:
+                reason = "process-unreaped" if not process_reaped else "worker-unsettled"
+                stream_rows.append(GateTransportObservation(
+                    name, "owned", False, reason, time.monotonic()
+                ))
                 continue
             try:
                 stream.close()
-                stream_rows.append(GateTransportObservation(name, "owned", True, None, time.monotonic()))
-            except BaseException:
-                self._operation_errors.append(name + "-close")
-                stream_rows.append(GateTransportObservation(name, "owned", False, name + "-close", time.monotonic()))
+            except BaseException as exc:
+                self._record_operation_failure(name + "-close", exc)
+            try:
+                closed = bool(stream.closed)
+            except BaseException as exc:
+                closed = False
+                self._record_operation_failure(name + "-observe", exc)
+            stream_rows.append(GateTransportObservation(
+                name, "owned", closed, None if closed else name + "-close",
+                time.monotonic(),
+            ))
 
-        worker_rows: list[GateWorkerObservation] = []
-        for owned in self.workers:
-            worker = owned.worker
-            terminal = "not-started" if owned.start != "started" else "unobserved"
-            if owned.start == "started":
-                try:
-                    worker.join(timeout=self._remaining(deadline))
-                except BaseException:
-                    self._operation_errors.append("worker-join")
-                try:
-                    terminal = "live" if worker.is_alive() else "joined"
-                except BaseException:
-                    self._operation_errors.append("worker-observe")
-            worker_rows.append(GateWorkerObservation(id(worker), owned.start, terminal, time.monotonic()))
-
-        try:
-            observed = process.poll()
-            if observed is not None:
-                return_code = observed
-        except BaseException:
-            self._operation_errors.append("final-poll")
         participant_ticks = tuple(row.observed_at_monotonic_tick for row in stream_rows + worker_rows)
         verified = max(time.monotonic(), (max(participant_ticks) + 1e-9) if participant_ticks else 0.0)
         certificate = GateSettlementCertificate(
@@ -2756,30 +3765,71 @@ def _run_snapshot_child(
     pending: PendingScanInvocation, payload: bytes, repository_workdir: str,
 ) -> tuple[LaunchedScanInvocation, tuple[TrustedExecutionRecord, ...]]:
     prefix = "PGG" if pending.binding.route == "generic" else "PRG"
-    try:
-        process = subprocess.Popen(
-            list(pending.exact_argv), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, shell=False,
-            cwd=repository_workdir,
-        )
-    except OSError:
-        raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from None
-    supervisor = ChildSupervisor(process)
-    launched = LaunchedScanInvocation(
-        pending, process.pid, supervisor, pending.invocation_id,
-        pending.attempt_id, pending.binding, pending.exact_argv,
-        pending.result_slot,
-    )
-    with pending._transition_lock:
-        if pending.state is not PendingState.PREPARED:
-            pending.state = PendingState.FAILED
-            raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
-        pending.child_identity = process.pid
-        pending.supervisor = supervisor
-        pending.state = PendingState.CHILD_OWNED
+    captured_review = pending.captured_review
+    if (
+        captured_review is None
+        or type(payload) is not bytes
+        or payload != captured_review.payload_bytes
+        or hashlib.sha256(payload).hexdigest() != captured_review.payload_sha256
+    ):
+        raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+    supervisor = ChildSupervisor()
+    process = None
+    launched: LaunchedScanInvocation | None = None
+    settlement: GateSettlement | None = None
     output = {"stdout": bytearray(), "stderr": bytearray()}
     overflow = threading.Event()
-    lock = threading.Lock()
+    output_lock = threading.Lock()
+    reader_failures: list[BaseException] = []
+    feeder_failures: list[BaseException] = []
+    bounded = False
+    primary_failure: BaseException | None = None
+    primary_traceback = None
+    settlement_failures: list[BaseException] = []
+
+    def retain_child_outcome(primary: BaseException) -> None:
+        actual_streams = []
+        if process is not None:
+            for name in ("stdin", "stdout", "stderr"):
+                try:
+                    actual_streams.append(getattr(process, name, None))
+                except BaseException as exc:
+                    settlement_failures.append(exc)
+                    actual_streams.append(None)
+        actual_workers = tuple(
+            {"name": owned.name, "start": owned.start, "worker": owned.worker}
+            for owned in supervisor.workers
+        )
+        try:
+            actual_return_code = None if process is None else process.returncode
+        except BaseException as exc:
+            settlement_failures.append(exc)
+            actual_return_code = None
+        outcome = {
+            "childIdentity": supervisor.child_identity,
+            "returnCode": actual_return_code,
+            "stdout": bytes(output["stdout"]),
+            "stderr": bytes(output["stderr"]),
+            "boundedCompletion": bounded,
+            "settlement": settlement,
+            "readerFailures": tuple(reader_failures),
+            "feederFailures": tuple(feeder_failures),
+            "settlementFailures": tuple(settlement_failures),
+            "operationFailures": tuple(supervisor._operation_failures),
+            "workers": actual_workers,
+            "streams": tuple(actual_streams),
+            "process": process,
+            "supervisor": supervisor,
+        }
+        try:
+            setattr(primary, "publication_gate_child_outcome", outcome)
+        except BaseException as retain_error:
+            settlement_failures.append(retain_error)
+            outcome["settlementFailures"] = tuple(settlement_failures)
+            try:
+                setattr(primary, "publication_gate_child_outcome", outcome)
+            except BaseException:
+                pass
 
     def drain(name: str, stream) -> None:
         try:
@@ -2787,13 +3837,14 @@ def _run_snapshot_child(
                 chunk = stream.read(8192)
                 if not chunk:
                     return
-                with lock:
+                with output_lock:
                     total = len(output["stdout"]) + len(output["stderr"])
                     if total + len(chunk) > SCAN_OUTPUT_BYTE_CAP:
                         overflow.set()
                         return
                     output[name].extend(chunk)
-        except (OSError, ValueError):
+        except BaseException as exc:
+            reader_failures.append(exc)
             overflow.set()
 
     def feed() -> None:
@@ -2801,44 +3852,154 @@ def _run_snapshot_child(
             assert process.stdin is not None
             process.stdin.write(payload)
             process.stdin.close()
-        except (BrokenPipeError, OSError, ValueError):
-            pass
+        except BaseException as exc:
+            feeder_failures.append(exc)
 
-    assert process.stdout is not None and process.stderr is not None
-    workers = (
-        threading.Thread(target=feed),
-        threading.Thread(target=drain, args=("stdout", process.stdout)),
-        threading.Thread(target=drain, args=("stderr", process.stderr)),
-    )
-    bounded = False
-    setup_failure = False
     try:
-        for worker in workers:
-            supervisor.start_worker(worker)
+        process = subprocess.Popen(
+            list(pending.exact_argv), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, shell=False,
+            cwd=repository_workdir,
+        )
+        supervisor.adopt_process(process)
+        launched = LaunchedScanInvocation(
+            pending, process.pid, supervisor, pending.invocation_id,
+            pending.attempt_id, pending.binding, pending.exact_argv,
+            pending.result_slot,
+        )
+        with pending._transition_lock:
+            if pending.state is not PendingState.PREPARED:
+                pending.state = PendingState.FAILED
+                raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+            pending.child_identity = process.pid
+            pending.supervisor = supervisor
+            pending.state = PendingState.CHILD_OWNED
+        if process.stdout is None or process.stderr is None or process.stdin is None:
+            raise RuntimeError("scanner child pipe unavailable")
+        workers = (
+            ("stdin", lambda: threading.Thread(target=feed)),
+            ("stdout", lambda: threading.Thread(target=drain, args=("stdout", process.stdout))),
+            ("stderr", lambda: threading.Thread(target=drain, args=("stderr", process.stderr))),
+        )
+        for name, construct in workers:
+            worker = construct()
+            supervisor.start_worker(worker, name=name)
         deadline = time.monotonic() + SCAN_TIMEOUT_SECONDS
-        while (
-            process.poll() is None
-            and not overflow.is_set()
-            and time.monotonic() < deadline
-        ):
+        while True:
+            return_code = process.poll()
+            if return_code is not None:
+                bounded = not overflow.is_set()
+                break
+            if overflow.is_set() or time.monotonic() >= deadline:
+                break
             time.sleep(0.01)
-        bounded = process.poll() is not None and not overflow.is_set()
-    except Exception:
-        setup_failure = True
+    except BaseException as exc:
+        primary_failure = exc
+        primary_traceback = exc.__traceback__
     finally:
-        with pending._transition_lock:
-            if pending.state is PendingState.CHILD_OWNED:
-                pending.state = PendingState.SETTLING
-        settlement = supervisor.settle()
-        if not settlement.complete:
-            settlement = supervisor.settle()
-        with pending._transition_lock:
-            pending.settlement = settlement
-            pending.state = (
-                PendingState.SETTLED if settlement.complete else PendingState.FAILED
-            )
-    if setup_failure:
+        if process is not None:
+            if supervisor.process is None:
+                try:
+                    # The Popen object has already been acquired by this
+                    # invocation. If the first adoption was interrupted, bind
+                    # that exact object back to the same owner before any
+                    # settlement attempt; do not rely on a successful return
+                    # from the interrupted handoff.
+                    supervisor.process = process
+                    supervisor.child_identity = int(process.pid)
+                except BaseException as exc:
+                    settlement_failures.append(exc)
+            if supervisor.process is process and supervisor.child_identity is None:
+                try:
+                    supervisor.child_identity = int(process.pid)
+                except BaseException as exc:
+                    settlement_failures.append(exc)
+            try:
+                with pending._transition_lock:
+                    if pending.state is PendingState.CHILD_OWNED:
+                        pending.state = PendingState.SETTLING
+            except BaseException as exc:
+                settlement_failures.append(exc)
+            for _index in range(SCAN_SETTLEMENT_MAX_ENTRIES):
+                try:
+                    settlement = supervisor.settle()
+                except BaseException as exc:
+                    settlement_failures.append(exc)
+                    continue
+                if settlement.complete:
+                    break
+            try:
+                with pending._transition_lock:
+                    pending.settlement = settlement
+                    if pending.state in {PendingState.CHILD_OWNED, PendingState.SETTLING}:
+                        pending.state = (
+                            PendingState.SETTLED
+                            if (
+                                primary_failure is None
+                                and not reader_failures
+                                and not feeder_failures
+                                and not settlement_failures
+                                and isinstance(settlement, GateSettlement)
+                                and settlement.complete
+                                and settlement.execution_eligible
+                                and bounded
+                                and not overflow.is_set()
+                            )
+                            else PendingState.FAILED
+                        )
+            except BaseException as exc:
+                settlement_failures.append(exc)
+                try:
+                    with pending._transition_lock:
+                        pending.state = PendingState.FAILED
+                except BaseException as state_error:
+                    settlement_failures.append(state_error)
+        else:
+            try:
+                with pending._transition_lock:
+                    if pending.state is PendingState.PREPARED:
+                        pending.state = PendingState.FAILED
+            except BaseException as exc:
+                settlement_failures.append(exc)
+
+    if process is None:
+        if primary_failure is not None:
+            if isinstance(primary_failure, OSError):
+                raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from primary_failure
+            raise primary_failure.with_traceback(primary_traceback)
         raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
+
+    if primary_failure is None and reader_failures:
+        primary_failure = reader_failures[0]
+        primary_traceback = primary_failure.__traceback__
+    if primary_failure is None and feeder_failures:
+        primary_failure = feeder_failures[0]
+        primary_traceback = primary_failure.__traceback__
+    if primary_failure is None and settlement_failures:
+        primary_failure = settlement_failures[0]
+        primary_traceback = primary_failure.__traceback__
+
+    if primary_failure is None and (
+        not isinstance(settlement, GateSettlement)
+        or not settlement.complete
+        or not settlement.execution_eligible
+    ):
+        primary_failure = PrRouteDenied(prefix + "-SCAN-EXECUTION")
+        primary_traceback = primary_failure.__traceback__
+    if primary_failure is not None:
+        retain_child_outcome(primary_failure)
+        try:
+            setattr(primary_failure, "publication_gate_child_settlement_failures", tuple(settlement_failures))
+        except BaseException:
+            pass
+        if isinstance(primary_failure, PrRouteDenied):
+            raise primary_failure.with_traceback(primary_traceback)
+        if isinstance(primary_failure, Exception):
+            raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from primary_failure
+        raise primary_failure.with_traceback(primary_traceback)
+    if launched is None or not isinstance(settlement, GateSettlement):
+        raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+
     execution = TrustedExecutionRecord(
         pending, launched, pending.result_slot,
         bounded,
@@ -2877,30 +4038,38 @@ def _run_authoritative_scan(
 ) -> ConsumedAuthoritativeEvidence:
     prefix = "PGG" if binding.route == "generic" else "PRG"
     fds: tuple[int, ...] = ()
+    modules: CapturedReviewModules | None = None
+    primary_failure: BaseException | None = None
     try:
-        fds, closure_before = _capture_source_closure()
-        interpreter_before = _interpreter_identity()
-        if closure_before.interpreter_identity != interpreter_before:
-            raise ValueError("interpreter-capture")
-    except Exception:
-        for fd in fds:
-            os.close(fd)
-        raise PrRouteDenied(prefix + "-SCAN-PROVENANCE") from None
-    invocation_id = secrets.token_hex(32)
-    attempt_id = secrets.token_hex(16)
-    argv = (
-        interpreter_before.absolute_resolved_path, "-I", "-c", _SCAN_BOOTSTRAP,
-        "--gate-git-executable", git_exe,
-        "--range", binding.remote, binding.destination,
-        "--range-source", binding.source_oid,
-    )
-    pending = PendingScanInvocation(
-        invocation_id, attempt_id, binding, closure_before,
-        interpreter_before, argv, object(),
-    )
-    try:
+        try:
+            fds, closure_before = _capture_source_closure()
+            interpreter_before = _interpreter_identity()
+            if closure_before.interpreter_identity != interpreter_before:
+                raise ValueError("interpreter-capture")
+            modules = _load_captured_review_modules(closure_before)
+            captured_review = _capture_review_payload(
+                modules, closure_before, Path(repository_workdir), git_exe
+            )
+        except PrRouteDenied:
+            raise
+        except Exception as exc:
+            if hasattr(exc, "publication_review_query_results"):
+                raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from exc
+            raise PrRouteDenied(prefix + "-SCAN-PROVENANCE") from None
+        invocation_id = secrets.token_hex(32)
+        attempt_id = secrets.token_hex(16)
+        argv = (
+            interpreter_before.absolute_resolved_path, "-I", "-c", _SCAN_BOOTSTRAP,
+            "--gate-git-executable", git_exe,
+            "--range", binding.remote, binding.destination,
+            "--range-source", binding.source_oid,
+        )
+        pending = PendingScanInvocation(
+            invocation_id, attempt_id, binding, closure_before,
+            interpreter_before, argv, object(), captured_review,
+        )
         launched, records = _run_snapshot_child(
-            pending, _closure_payload(closure_before), repository_workdir
+            pending, captured_review.payload_bytes, repository_workdir
         )
         try:
             closure_after = _recheck_source_closure(fds, closure_before)
@@ -2930,13 +4099,59 @@ def _run_authoritative_scan(
             else 0.0
         )
         freshness_tick = max(time.monotonic(), certificate_tick + 1e-9)
+
+        def finalize_review(
+            qualification: QualifiedPublicationEvidence,
+        ) -> tuple[dict, list[list[str]]]:
+            return _verify_used_review_currentness(
+                captured_review,
+                qualification,
+                repository_workdir,
+                git_exe,
+                prefix + "-SCAN-REFUSAL",
+            )
+
         return pending.correlate_and_consume_once(
             launched, records, closure_after, interpreter_after,
             binding_after, freshness_tick,
+            finalize_review=finalize_review,
         )
+    except BaseException as exc:
+        primary_failure = exc
+        raise
     finally:
+        cleanup_failures: list[BaseException] = []
+        if modules is not None:
+            try:
+                _release_captured_review_modules(modules)
+            except BaseException as exc:
+                cleanup_failures.append(exc)
         for fd in fds:
-            os.close(fd)
+            try:
+                os.close(fd)
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+        if cleanup_failures:
+            if primary_failure is not None:
+                try:
+                    setattr(
+                        primary_failure,
+                        "publication_gate_finalization_cleanup_failures",
+                        tuple(cleanup_failures),
+                    )
+                except BaseException:
+                    pass
+                raise primary_failure from cleanup_failures[0]
+            failure = PrRouteDenied(prefix + "-SCAN-PROVENANCE")
+            try:
+                setattr(
+                    failure,
+                    "publication_gate_finalization_cleanup_failures",
+                    tuple(cleanup_failures),
+                )
+            except BaseException:
+                pass
+            raise failure from cleanup_failures[0]
 
 
 def _run_text(
@@ -3802,10 +5017,53 @@ def _complete_generic_publication(preflight: PreflightResult) -> bool:
     if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
         raise PrRouteDenied(grammar.status)
     remote, destination, source = grammar.binding
-    repository_workdir = _normalize_repository_workdir(preflight.repository_workdir)
+    literal_context = (
+        absolute_literal_root_context(preflight.parsed)
+        if preflight.parsed is not None else None
+    )
+    selected_workdir = preflight.repository_workdir
+    selected_source = preflight.repository_workdir_source
+    generic_push_path = (
+        preflight.reason_id == "PFP-CONSENT-GENERIC"
+        or (
+            preflight.reason_id == "PFP-HEAVY"
+            and preflight.push_instruction is True
+        )
+    )
+
+    if selected_source in {"tool", "envelope"}:
+        # A present E remains a selected input even when the command carries R.
+        # Validate the actual directory before candidate selection or Git use.
+        _normalize_repository_workdir(selected_workdir)
+    elif selected_source == "" and selected_workdir == "":
+        if not generic_push_path or literal_context is None:
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    else:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+
+    literal_executable = None
+    if literal_context is not None:
+        if (
+            type(literal_context) is not tuple
+            or len(literal_context) != 2
+            or any(type(value) is not str for value in literal_context)
+            or any(not value or "\x00" in value for value in literal_context)
+            or not Path(literal_context[0]).is_absolute()
+            or not Path(literal_context[1]).is_absolute()
+        ):
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        literal_executable, raw_repository_root = literal_context
+        repository_workdir = _normalize_repository_workdir(raw_repository_root)
+    else:
+        repository_workdir = _normalize_repository_workdir(selected_workdir)
+
     git_exe = _resolve_executable("git", repository_workdir)
     if git_exe is None:
         raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    if literal_executable is not None:
+        _bind_literal_executable_identity(
+            literal_executable, git_exe, "PGG-EXECUTABLE-MISMATCH"
+        )
     repository_workdir = _prove_repository_root(repository_workdir, git_exe)
     binding = _resolve_generic_scan_binding(
         remote, destination, source, repository_workdir, git_exe
@@ -3971,6 +5229,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         "PGG-REPOSITORY-REDIRECT": "Use the ambient repository without command-local repository redirection.",
         "PGG-ENV-PREFIX": "Run the push without an environment-assignment prefix.",
         "PGG-GIT-GLOBAL-OPTION": "Run the push without Git global options before the push subcommand.",
+        "PGG-EXECUTABLE-MISMATCH": "Use the same absolute Git executable in the command and the gate's selected executable for the explicit repository root.",
         "PGG-PUSH-OPTION": "Use only the documented output-only push options with scan-derived credit.",
         "PGG-REMOTE-CARDINALITY": "Name exactly one remote and one refspec.",
         "PGG-REFSPEC-CARDINALITY": "Name exactly one remote and one refspec.",

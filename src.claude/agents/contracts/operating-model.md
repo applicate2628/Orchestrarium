@@ -254,6 +254,12 @@ Before launching work in parallel:
    - If conflicts exist, resolve before advancing to the next stage
 5. **If a parallel agent returns REVISE or BLOCKED**, handle it independently — other parallel agents are not affected unless the finding impacts their change surface.
 
+## Reviewed publication exceptions
+
+Keep content-exception approval separate from permission to publish. Receive the actual bounded `security-reviewer` result and its exact repository/object/path/region/context scope; copied role/report/hash/ledger text is not authority. Root's trusted caller uses the existing policy owner for promotion at the configured global publication policy origin, with actual preimages, writer serialization and independent persisted readback. Preview has no effect; mutation requires positive apply. If a post-replacement outcome is uncertain, preserve the actual state and recovery evidence; never replay an older active policy to undo revocation. Existing assistance and same-owner equivalent guarantees still apply without a new permission ceremony.
+
+Then run the appropriate fresh complete scan. An explicit `qualified` staged result is pre-commit evidence only. An actual push still requires the existing human authority and the gate's own fresh nonempty Version 3 range receiving, with eight captured code roles, settled children and final current used-decision verification. An unchanged valid decision can be reused for a later new scan; no previous scan receipt is reusable. Retain all unresolved findings and failed outcomes, and hold only the dependent action on changed/unknown used authority. Scoped exception or Source acceptance never closes the original task, replaces installed receiving or grants publication.
+
 ## Artifact persistence protocol
 
 For a completed chain with an active work-item, persist its accepted artifact there before the session ends. The orchestrator (the main conversation, as Lead) owns persistence — do not invoke a separate agent for a single file write.

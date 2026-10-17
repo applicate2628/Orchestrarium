@@ -37,6 +37,7 @@ reference `find_machine_paths` and asserts this file has zero flaggable lines.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import ctypes
 import dataclasses
@@ -1821,7 +1822,10 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as td:
                     repo = self._init_range_repo(Path(td))
                     self._commit_file(repo, "b.txt", "clean content, nothing machine-local here")
-                    expected_blob_bytes = len((repo / "b.txt").read_bytes())
+                    expected_blob_bytes = len(subprocess.run(
+                        [_git(), "-C", str(repo), "cat-file", "blob", "HEAD:b.txt"],
+                        check=True, capture_output=True,
+                    ).stdout)
                     git = _git()
                     tip = subprocess.run(
                         [git, "-C", str(repo), "rev-parse", "HEAD"],
@@ -1987,9 +1991,12 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             repo = self._init_range_repo(Path(td))
             for name in ("a.txt", "b.txt"):
                 (repo / name).write_text("shared clean\n", encoding="utf-8")
-            expected_blob_bytes = len((repo / "a.txt").read_bytes())
             subprocess.run([_git(), "-C", str(repo), "add", "a.txt", "b.txt"], check=True)
             subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "shared clean blob"], check=True)
+            expected_blob_bytes = len(subprocess.run(
+                [_git(), "-C", str(repo), "cat-file", "blob", "HEAD:a.txt"],
+                check=True, capture_output=True,
+            ).stdout)
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
             self.assertEqual(rc, 0, err)
             self.assertIn("blobs=1", out)
@@ -2016,9 +2023,12 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             binary_fixture = repo / "binary.bin"
             text_fixture.write_text("clean text\n", encoding="utf-8")
             binary_fixture.write_bytes(b"\0\xff\x01")
-            expected_blob_bytes = len(text_fixture.read_bytes()) + len(binary_fixture.read_bytes())
             subprocess.run([_git(), "-C", str(repo), "add", "text.txt", "binary.bin"], check=True)
             subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "mixed blobs"], check=True)
+            expected_blob_bytes = sum(len(subprocess.run(
+                [_git(), "-C", str(repo), "cat-file", "blob", f"HEAD:{name}"],
+                check=True, capture_output=True,
+            ).stdout) for name in ("text.txt", "binary.bin"))
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
             self.assertEqual(rc, 0, err)
             self.assertIn("blobs=2", out)
@@ -5506,6 +5516,168 @@ class TestPublicationSafetyScannerEarlyRefusalCleanup(unittest.TestCase):
                     await reader.process.wait()
 
         asyncio.run(exercise())
+
+
+class TestReviewedCandidateProjection(unittest.TestCase):
+    """Detector identity and projection checks; no reviewer authority is minted."""
+
+    def _owners(self):
+        scanner = _load_canonical_scanner("_reviewed_candidate_projection")
+        return scanner, scanner._load_review_policy_module()
+
+    def test_every_engine_selected_start_includes_overlaps(self):
+        scanner = _load_canonical_scanner("_reviewed_matching_starts")
+        self.assertEqual(
+            [match.span() for match in scanner._matching_starts(re.compile("aa"), "aaa")],
+            [(0, 2), (1, 3)],
+        )
+        self.assertEqual(
+            [match.span() for match in scanner._matching_starts(re.compile("a+"), "aaa")],
+            [(0, 3), (1, 3), (2, 3)],
+        )
+        with self.assertRaisesRegex(RuntimeError, "zero-width"):
+            list(scanner._matching_starts(re.compile(""), "x"))
+
+    def test_same_line_candidates_and_independent_families_survive(self):
+        scanner = _load_canonical_scanner("_reviewed_complete_content")
+        text = _join("private", "_key", " private", "_key", " secret", "_key")
+        hits = scanner._content_hits(text, "sample.txt", lambda _line: ())
+        self.assertEqual([row.detector_class for row in hits], ["simple-10", "simple-10", "simple-11"])
+        capped = scanner._content_hits(text, "sample.txt", lambda _line: (), max_findings=1)
+        self.assertEqual(len(capped), 1)
+        visited = []
+        scanner._content_hits("\n".join((text, text, text)), "sample.txt",
+                              lambda line: visited.append(line), max_findings=1)
+        self.assertEqual(len(visited), 3)
+
+    def test_catalog_keeps_all_token_leaves_and_semantic_identity(self):
+        scanner, policy = self._owners()
+        definitions = scanner.detector_definitions(policy)
+        value = definitions["value-token-v1"]["definition"]
+        self.assertEqual(len(value["leaves"]), 2)
+        self.assertEqual(value["exclusions"], ["callable-rhs-v1", "public-token-v1", "scanner-self-v1"])
+        self.assertEqual(definitions, scanner.detector_definitions(policy))
+
+    def test_original_utf8_bom_and_line_separators_keep_byte_coordinates(self):
+        scanner, policy = self._owners()
+        text = _join(chr(0xfeff), chr(0x03b1), "\r\n", chr(0x2028), "private", "_key", "\r\n")
+        raw = text.encode("utf-8")
+        rows = scanner.analyze_review_candidates(raw, b"sample.txt", subject_kind="tracked-blob", policy_module=policy)["candidates"]
+        self.assertEqual(len(rows), 1)
+        candidate = rows[0]["candidate"]
+        start = raw.index(_join("private", "_key").encode("ascii"))
+        self.assertEqual(candidate["startByte"], start)
+        self.assertEqual(candidate["endByteExclusive"], start + 11)
+        self.assertEqual(candidate["sha256"], hashlib.sha256(raw[start:start + 11]).hexdigest())
+        invalid = scanner.analyze_review_candidates(b"\xff" + raw, b"sample.txt", subject_kind="tracked-blob", policy_module=policy)
+        self.assertEqual(invalid["candidates"], ())
+        self.assertTrue(invalid["unresolved"])
+
+    def test_equivalent_assignment_keeps_contributors_but_repeated_rhs_does_not_merge(self):
+        scanner, policy = self._owners()
+        rhs = "A1B2C3D4E5F6"
+        text = _join("Auth", "Token", " = '", rhs, "'; Auth", "Token", " = '", rhs, "'")
+        rows = scanner.analyze_review_candidates(text.encode("ascii"), b"sample.txt", subject_kind="tracked-blob", policy_module=policy)["candidates"]
+        token_rows = [row for row in rows if row["detector"]["ruleId"] == "value-token-v1"]
+        self.assertEqual(len(token_rows), 2)
+        self.assertTrue(all(len(row["candidate"]["contributors"]) == 2 for row in token_rows))
+        self.assertNotEqual(token_rows[0]["candidate"]["assignment"], token_rows[1]["candidate"]["assignment"])
+
+    def test_region_projects_one_complete_group_and_rejects_multiple_or_straddling(self):
+        scanner, policy = self._owners()
+        raw = _join("private", "_key private", "_key").encode("ascii")
+        rows = scanner.analyze_review_candidates(raw, b"sample.txt", subject_kind="tracked-blob", policy_module=policy)["candidates"]
+        detector = rows[0]["detector"]
+        region = scanner._byte_region(raw, 0, 11)
+        projected = scanner.project_review_candidate(raw, b"sample.txt", detector, region, policy_module=policy)
+        self.assertEqual(projected, {"status": "bound", "candidate": rows[0]["candidate"], "reason": "none"})
+        for start, end in ((0, len(raw)), (1, 11)):
+            with self.subTest(start=start, end=end):
+                result = scanner.project_review_candidate(
+                    raw, b"sample.txt", detector, scanner._byte_region(raw, start, end), policy_module=policy,
+                )
+                self.assertNotEqual(result["status"], "bound")
+
+    def test_qualified_wire_is_distinct_and_never_formats_zero_applications(self):
+        # Formatter evidence only: this constructed value grants no authority.
+        scanner, policy = self._owners()
+        used = (("D1", "a" * 64),)
+        evidence = scanner.ReviewedEvidence("b" * 64, used, 1, "c" * 64,
+                                           base64.b64encode(policy.C([list(row) for row in used])).decode("ascii"))
+        outcome = scanner.ScanOutcome("clean", "tracked", file_count=1, review=evidence)
+        stdout, stderr, status = scanner._format_outcome(outcome)
+        self.assertEqual((stderr, status), ("", 0))
+        self.assertTrue(stdout.startswith("publication-safety: qualified (staged, examined=1, policy-snapshot="))
+        self.assertTrue(stdout.endswith(", unresolved=0, evaluation=complete)"))
+        self.assertNotIn("publication-safety: clean", stdout)
+        empty = dataclasses.replace(outcome, review=dataclasses.replace(evidence, applied=0))
+        self.assertEqual(scanner._format_outcome(empty)[2], 2)
+
+    def test_absent_policy_does_not_request_repository_metadata(self):
+        scanner, policy = self._owners()
+        policy_read = policy.decode_policy_snapshot({
+            "schemaVersion": 1, "status": "absent", "origin": None,
+            "rawBase64": None, "rawSha256": None, "diagnostic": "absent",
+        })
+        with (
+            mock.patch.object(scanner, "_load_review_policy_module", return_value=policy),
+            mock.patch.object(policy, "resolve_trusted_origin", return_value=object()),
+            mock.patch.object(policy, "read_policy_snapshot", return_value=policy_read),
+            mock.patch.object(scanner, "_capture_review_repository", side_effect=AssertionError("metadata not needed")),
+        ):
+            evaluation, exchanges = scanner._prepare_review_evaluation(REPO_ROOT, time.monotonic() + 10)
+        self.assertIsNone(evaluation.repository)
+        self.assertEqual(exchanges, [])
+
+    def test_application_evidence_calls_single_digest_owner_with_all_ordered_rows(self):
+        # Pure evidence method fixture; no snapshot authority or policy is issued.
+        scanner, policy = self._owners()
+        evaluation = object.__new__(scanner.ReviewEvaluation)
+        evaluation.policy = policy
+        evaluation.read = SimpleNamespace(snapshot_id="b" * 64)
+        evaluation.unresolved = 0
+        evaluation._applications = []
+        self.assertIsNone(evaluation.evidence())
+        entries = []
+        for index in range(scanner._MAX_FINDINGS + 1):
+            subject = {"repositorySha256": "a" * 64, "mode": "range-blob-text",
+                       "commitOid": "1" * 40, "rawPathBase64": base64.b64encode(f"p{index:04d}".encode()).decode(),
+                       "blobOid": "2" * 40, "blobSha256": "c" * 64, "blobByteCount": 1, "gitMode": "100644"}
+            candidate = {"normalFormId": "nf-simple-match-v1", "startByte": 0, "endByteExclusive": 1,
+                         "sha256": "d" * 64, "assignment": None, "contributors": [], "occurrenceSha256": "e" * 64}
+            detector = {"ruleId": "fixture", "meaningSha256": "f" * 64}
+            row = {"subject": subject, "occurrenceSha256": candidate["occurrenceSha256"],
+                   "bindingSha256": "a" * 64, "decisionId": "D1", "recordSha256": "b" * 64,
+                   "occurrenceId": f"O{index}"}
+            entries.append((subject, candidate, detector, row))
+        evaluation._applications = list(reversed(entries))
+        expected_rows = [row for _subject, _candidate, _detector, row in entries]
+        expected_digest = policy.applied_set_digest(expected_rows)
+        original_owner = policy.applied_set_digest
+        acquired = []
+
+        def observe(rows):
+            self.assertNotIsInstance(rows, (list, tuple))
+            acquired.extend(rows)
+            return original_owner(acquired)
+
+        with mock.patch.object(policy, "applied_set_digest", side_effect=observe) as owner:
+            evidence = evaluation.evidence()
+        owner.assert_called_once()
+        self.assertEqual(acquired, expected_rows)
+        self.assertEqual(evidence.applied_set, expected_digest)
+        self.assertEqual(evidence.applied, scanner._MAX_FINDINGS + 1)
+        self.assertEqual(evidence.used_decisions, (("D1", "b" * 64),))
+        self.assertEqual(evidence.used_token, base64.b64encode(policy.C([["D1", "b" * 64]])).decode("ascii"))
+        evaluation.unresolved = 1
+        with self.assertRaisesRegex(RuntimeError, "unresolved"):
+            evaluation.evidence()
+
+    def test_partial_captured_injection_has_no_standalone_fallback(self):
+        scanner = _load_canonical_scanner("_reviewed_partial_injection")
+        with mock.patch.dict(scanner.__dict__, {"__injected_review_execution__": "gate-captured-v1"}):
+            with self.assertRaisesRegex(RuntimeError, "injection"):
+                scanner._load_review_policy_module()
 
 
 class TestThisTestFileIsGateSafe(unittest.TestCase):
