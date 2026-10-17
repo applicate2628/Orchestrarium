@@ -113,7 +113,7 @@ RUNTIME_HELPERS = (
     "validate-work-item-state.sh",
     "validate-provider-prompt-projections.py",
 )
-CODEX_RUNTIME_HELPERS = ("check-hook-health.py",)
+CODEX_RUNTIME_HELPERS = ("check-hook-health.py", "universal_hooks_manifest.py")
 TRANSPORT_PROJECTION_FILES = (
     "provider_prompt.py",
     "process_supervision/process_runner.py",
@@ -7016,8 +7016,8 @@ def _installer_mutation_paths(
     )
     if provider == "codex":
         paths.extend(
-            (
-                helper_target / "check-hook-health.py",
+            tuple(helper_target / helper for helper in CODEX_RUNTIME_HELPERS)
+            + (
                 codex_hook_inventory
                 if codex_hook_inventory is not None
                 else registration.parent / CODEX_HOOK_INVENTORY,
@@ -11396,11 +11396,15 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         + ", ".join(str(path) for path in missing_common_runtime[:16]),
                     )
                 if provider == "codex":
+                    runtime_paths = [
+                        helper_target / helper
+                        for helper in CODEX_RUNTIME_HELPERS
+                    ]
+                    if hooks_enabled:
+                        runtime_paths.append(codex_hook_inventory)
                     missing_runtime = [
                         path
-                        for path in ((helper_target / "check-hook-health.py",)
-                                     + ((codex_hook_inventory,)
-                                        if hooks_enabled else ()))
+                        for path in runtime_paths
                         if not path.is_file()
                     ]
                     if missing_runtime:

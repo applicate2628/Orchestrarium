@@ -12,6 +12,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Ordinary producer work can explicitly select Luna Extra high for deeper bounded reasoning when the expected reduction in mistakes and rework justifies extra time. High remains available for clear bounded work; defaults, protected review/critical/recovery membership and the named mechanical corridor stay unchanged. This adds a task-dependent choice without claiming an unmeasured speed benefit or promoting Max.
 
+- Installed hook-health checks now receive the canonical hook manifest through the existing shared Lead runtime materialization path. The documented installed command can resolve platform membership from its own installed files without requiring a checkout path, while missing manifest data still fails visibly.
+
 ## 2026-10-16
 
 - Ordinary installation validates the complete timestamp pair observed by the native setter separately from later access-time variation, avoiding false copy/rollback failures after a proved assignment. Partial effects, stable-metadata or identity drift and original errors remain guarded; absent assignment observations retain strict full-image validation.
