@@ -24,6 +24,12 @@
       "codexModel": "gpt-6-luna",
       "useCriteria": "Named mechanical roles require their exact caller contract. For policy-admitted ordinary exploration/engineering, prefer supervised Luna/high when expected time to a verified useful result, including verification, correction and supervision, favors it; retain profession and independent gates. Pilot evidence does not establish general speed or coding quality."
     },
+    "luna-xhigh": {
+      "modelTier": "mechanical",
+      "effort": "xhigh",
+      "codexModel": "gpt-6-luna",
+      "useCriteria": "Explicit supervised ordinary exploration/engineering for bounded tasks whose interacting constraints or multi-step reasoning justify extra effort by expected time to a verified useful result, including corrections and supervision. Retain profession, scope and independent gates. No default promotion, protected-task admission, forced High failure, universal local quality/speed claim or named-mechanical corridor change."
+    },
     "balanced-medium": {
       "modelTier": "balanced",
       "effort": "medium",
@@ -117,13 +123,13 @@
       "requiredModelTier": "balanced",
       "requiredEffort": "high",
       "mutationClass": "read-only",
-      "admissibleProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
+      "admissibleProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
     },
     "engineering": {
       "requiredModelTier": "balanced",
       "requiredEffort": "high",
       "mutationClass": "bounded-write",
-      "admissibleProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "admissibleProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "planning": {
       "requiredModelTier": "balanced",
@@ -171,15 +177,15 @@
     },
     "explorer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
     },
     "worker": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "analyst": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "planner": {
       "defaultProfile": "frontier-high",
@@ -211,11 +217,11 @@
     },
     "backend-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "platform-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "qa-engineer": {
       "defaultProfile": "frontier-high",
@@ -223,11 +229,11 @@
     },
     "knowledge-archivist": {
       "defaultProfile": "frontier-medium",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
     },
     "scientific-software-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     }
   },
   "skillOnlyRoles": {
@@ -237,7 +243,7 @@
     },
     "product-analyst": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
     },
     "ux-designer": {
       "defaultProfile": "frontier-high",
@@ -253,35 +259,35 @@
     },
     "frontend-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "qt-ui-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "model-view-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "data-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "toolchain-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "geometry-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "graphics-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "visualization-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "performance-reviewer": {
       "defaultProfile": "frontier-high",

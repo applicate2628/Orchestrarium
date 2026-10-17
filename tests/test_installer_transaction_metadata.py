@@ -294,6 +294,121 @@ class CopyMetadataTests(unittest.TestCase):
             result = PI.install("claude", ["--target", str(self.root)])
         return result, stderr.getvalue(), escaped
 
+    def test_public_failure_body_replaces_private_causes_paths_and_renderer_fallback(self):
+        primary = ValueError("PRIVATE_primary_payload /private/relative link-target")
+        members = tuple(PI._RollbackFailureMember("snapshot", index, f"PRIVATE_relative/member-{index}",
+            "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", f"PRIVATE_cleanup_payload_{index}",
+            participant=participant) for index, participant in enumerate(("effect", "snapshot")))
+        aggregate = PI._InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "rollback", primary,
+            members=members, recovery_path=self.root / "PRIVATE_original_beforeimage")
+        raw = str(aggregate)
+        def action():
+            raise aggregate
+        result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], aggregate)
+        self.assertIs(aggregate.cause, primary)
+        self.assertEqual(str(aggregate), raw)
+        self.assertEqual(aggregate.members, members)
+        self.assertTrue(stderr.startswith("FAIL: E_ROLLBACK_SETTLEMENT_FAILED | context=rollback | cause=operation-failed"))
+        self.assertIn("participant:effect;phase:snapshot;ordinal:0", stderr)
+        self.assertIn("participant:snapshot;phase:snapshot;ordinal:1", stderr)
+        self.assertIn("recovery-beforeimage=available", stderr)
+        self.assertNotIn("PRIVATE", stderr)
+        self.assertNotIn(str(self.root), stderr)
+        with patch.object(PI, "_copy_setter_operation_errors", side_effect=RuntimeError("PRIVATE_renderer_failure")):
+            text = PI._installer_failure_text(aggregate)
+        self.assertEqual(text, "E_ROLLBACK_SETTLEMENT_FAILED | context=rollback | cause=operation-failed | diagnostic=unavailable")
+        self.assertIs(aggregate.cause, primary)
+        self.assertEqual(str(aggregate), raw)
+
+    def test_prepared_cleanup_preserves_known_public_context_and_backup_domain(self):
+        tx = PI._InstallTransaction([], enabled=False)
+        owner = PI._CreateOnlyMutablePath(self.root, tx, dry_run=False)
+        primary = ValueError("PRIVATE_prepared_primary")
+        path = self.root / "PRIVATE_prepared_target"
+        path.write_bytes(b"private prepared bytes")
+        def action():
+            owner._settle_prepared(path, None, primary)
+        result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0].cause, primary)
+        self.assertEqual(escaped[0].context, "prepared")
+        self.assertIn("context=prepared", stderr)
+        self.assertTrue(all(member.participant == "backup" for member in escaped[0].members))
+        self.assertIn("participant:backup", stderr)
+        self.assertNotIn("PRIVATE", stderr)
+        self.assertNotIn(str(self.root), stderr)
+        unsupported = PI._InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "PRIVATE_context", primary)
+        self.assertIn("context=unavailable", PI._installer_failure_text(unsupported))
+
+    def test_actual_scalar_settlement_reports_scalar_participant(self):
+        tx = PI._InstallTransaction([self.target], enabled=True)
+        primary = RuntimeError("PRIVATE_scalar_primary")
+        with self.assertRaises(PI._InstallFailure) as caught:
+            with tx:
+                owner = PI._CreateOnlyMutablePath(self.root, tx, dry_run=False)
+                tx.transform_scalar(self.target, self.root / "unused-legacy", lambda _path: b"updated", owner)
+                self.target.write_bytes(b"unowned later mutation")
+                raise primary
+        error = caught.exception
+        self.assertIs(error.cause, primary)
+        scalar_members = [member for member in error.members if "scalar" in member.cause]
+        self.assertTrue(scalar_members)
+        self.assertTrue(all(member.participant == "scalar" for member in scalar_members))
+        def action():
+            raise error
+        result, stderr, escaped = self.through_install(action)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], error)
+        self.assertIn("participant:scalar", stderr)
+        self.assertNotIn("PRIVATE", stderr)
+        self.assertNotIn(str(self.root), stderr)
+
+    @unittest.skipUnless(os.name == "nt", "native security descriptor release")
+    def test_native_security_release_keeps_typed_custody_association(self):
+        import ctypes
+        source = self.root / "runtime-source"
+        source.mkdir()
+        (source / "body.py").write_bytes(b"authored")
+        tx = PI._InstallTransaction([], enabled=True)
+        cause = ValueError("PRIVATE_native_primary")
+        primary = PI._InstallFailure("E_HOOK_HEALTH_FAILED", "health", cause)
+        original = str(primary)
+        with self.assertRaises(PI._InstallFailure) as first:
+            with tx:
+                owner = PI._CreateOnlyMutablePath(self.root, tx, dry_run=False)
+                target = owner.create_tree(Path("runtime-target"), source, ignore_runtime_cache=True)
+                (target / "__pycache__").mkdir()
+                (target / "__pycache__/body.pyc").write_bytes(b"observed")
+                raise primary
+        self.assertIs(first.exception, primary)
+        actual_association = primary._installer_custody
+        convert, release = PI._WindowsBoundNode._security_bindings
+        releases, created = [], {}
+        def release_failure(pointer):
+            self.assertFalse(release(pointer))
+            releases.append(True)
+            ctypes.set_last_error(5)
+            return 1
+        def record(path, node):
+            created[path] = node
+            raise primary
+        creator = PI._InstallTransaction([], enabled=False)
+        with patch.object(PI._WindowsBoundNode, "_security_bindings", (convert, release_failure)):
+            with self.assertRaises(PI._InstallFailure) as caught:
+                creator._create_owned_directory(self.root / "native-subject", record, mode=0o700)
+        final = caught.exception
+        self.assertEqual(releases, [True])
+        self.assertIs(final.cause, cause)
+        self.assertIs(final.__cause__, primary)
+        self.assertIs(final._installer_custody, actual_association)
+        self.assertTrue(all(member.participant == "backup" for member in final.members))
+        self.assertEqual(str(primary), original)
+        self.assertEqual(PI._installer_failure_text(final).count("retained-current="), 1)
+        self.assertNotIn("PRIVATE", PI._installer_failure_text(final))
+        creator._dispose_image(self.root / "native-subject", created)
+
     def test_equal_bytes_different_mtime_is_effect_and_restores_original_times(self):
         primary = RuntimeError("later-checkpoint")
         transaction = self.transaction()
@@ -683,7 +798,7 @@ class CopyMetadataTests(unittest.TestCase):
             PI._CopySetterDiagnostic.attach(error, "timestamps", True, "comparison", index + 1,
                                            current, projected, identity, identity, actual, identity, participant=participant)
             _paths, received, _retained_errors = PI._InstallTransaction._settlement_failure(error, "snapshot", index,
-                                                                         Path(f"member-{index:02}"), "E_MEMBER")
+                                                                         Path(f"member-{index:02}"), "E_MEMBER", participant="snapshot")
             members.extend(received)
             contexts.append(PI._copy_setter_detail(error))
         aggregate = PI._InstallFailure("E_AGGREGATE", "rollback", primary, members=tuple(members),
@@ -710,10 +825,11 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIs(escaped[0], aggregate)
         self.assertEqual(str(aggregate), original)
-        self.assertTrue(stderr.startswith("FAIL: " + original + " | copy-setter="))
+        self.assertTrue(stderr.startswith("FAIL: unavailable | context=rollback | cause=operation-failed | copy-setter="))
         self.assertGreater(len(stderr), 2048)
         self.assertEqual(stderr.count("cleanup-copy-setter="), 32)
         self.assertEqual(stderr.count("target-path-sha256="), 33)
+        self.assertEqual(stderr.count("target-path-sha256:"), 33)
         self.assertNotIn("PRIVATE_", stderr)
         self.assertNotIn("detail-budget=exceeded", stderr)
         self.assertIn("flags[decimal-bitmask]=before:none,projected:0,observed:0", stderr)
@@ -722,7 +838,7 @@ class CopyMetadataTests(unittest.TestCase):
         for index, member in enumerate(members):
             self.assertIs(aggregate.members[index], member)
             self.assertEqual(member.cause, str(OSError(errno.EIO, f"PRIVATE_member_cause_{index}")))
-            marker = f"cleanup-copy-setter=snapshot:{index}:E_MEMBER:" + contexts[index + 1].render()
+            marker = f"cleanup-copy-setter=snapshot:{index}:unavailable:" + contexts[index + 1].render()
             positions.append(stderr.index(marker))
             self.assertIn(legacy[index + 1], stderr)
         self.assertEqual(positions, sorted(positions))
@@ -730,9 +846,14 @@ class CopyMetadataTests(unittest.TestCase):
         value_free = stderr
         for addition in additions:
             value_free = value_free.replace("; " + addition, "")
-        expected_legacy = "FAIL: " + original + " | copy-setter=" + legacy[0]
+        expected_legacy = "FAIL: unavailable | context=rollback | cause=operation-failed | copy-setter=" + legacy[0]
         for index, context in enumerate(legacy[1:]):
-            expected_legacy += f" | cleanup-copy-setter=snapshot:{index}:E_MEMBER:" + context
+            target_hash = hashlib.sha256(f"member-{index:02}".encode()).hexdigest()
+            expected_legacy += (f" | cleanup-detail=participant:snapshot;phase:snapshot;ordinal:{index};id:unavailable;reason:settlement-failed"
+                f";target-slot:managed-path;target-path-sha256:{target_hash}")
+            expected_legacy += f" | cleanup-copy-setter=snapshot:{index}:unavailable:" + context
+        expected_legacy += (" | recovery-beforeimage=available;target-slot:managed-recovery;target-path-sha256:"
+            + hashlib.sha256(b"synthetic-recovery").hexdigest())
         self.assertEqual(value_free, expected_legacy + "\n")
 
     def test_scalar_limits_and_foreign_optional_fields_preserve_legacy_and_other_components(self):
@@ -999,7 +1120,7 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIs(escaped[0], aggregate)
         self.assertIs(aggregate.members[0], members[0])
-        self.assertIn("cleanup-copy-setter-operation-errors=snapshot:2:E_COMPOUND:1", stderr)
+        self.assertIn("cleanup-copy-setter-operation-errors=snapshot:2:unavailable:1", stderr)
         self.assertNotIn("PRIVATE-earlier", stderr)
         plain = replace(members[0], copy_setter_failure=None)
         self.assertEqual(plain, members[0])
@@ -1309,7 +1430,7 @@ class CopyMetadataTests(unittest.TestCase):
         result, stderr, escaped = self.through_install(fail)
         self.assertEqual(result, 1)
         self.assertIs(escaped[0], child)
-        self.assertIn("cleanup-copy-setter=snapshot:2:E_CUSTOM_NEW_ID:unavailable", stderr)
+        self.assertIn("cleanup-copy-setter=snapshot:2:unavailable:unavailable", stderr)
         self.assertNotIn(private, stderr)
         missing = ValueError("associated detail missing")
         missing._copy_setter_diagnostic = None
@@ -1318,14 +1439,18 @@ class CopyMetadataTests(unittest.TestCase):
         result, stderr, escaped = self.through_install(missing_detail)
         self.assertEqual(result, 1)
         self.assertIs(escaped[0], missing)
-        self.assertEqual(stderr, "FAIL: associated detail missing | copy-setter=unavailable\n")
+        self.assertEqual(stderr, "FAIL: failure-id=unavailable | context=unavailable | cause=validation-failed | copy-setter=unavailable\n")
         for error in (ValueError("ordinary legacy failure"),
                       PI._InstallFailure("E_ORDINARY", "old", "primary", members=(PI._RollbackFailureMember("snapshot", 0, "ordinary", "E_OLD", private),))):
             def fail():
                 raise error
             result, stderr, _escaped = self.through_install(fail)
             self.assertEqual(result, 1)
-            self.assertEqual(stderr, f"FAIL: {error}\n")
+            if type(error) is ValueError:
+                self.assertEqual(stderr, "FAIL: failure-id=unavailable | context=unavailable | cause=validation-failed\n")
+            else:
+                self.assertTrue(stderr.startswith("FAIL: unavailable | context=unavailable | cause=operation-failed | cleanup-detail="))
+                self.assertNotIn(private, stderr)
 
     def test_unrelated_record_failure_stays_uninstrumented(self):
         current = PI._CopyMetadataImage(100, 200, None, None)
@@ -1416,7 +1541,7 @@ class CopyMetadataTests(unittest.TestCase):
             result, stderr, escaped = self.through_install(action)
             self.assertEqual(result, 1)
             self.assertIs(escaped[0], primary)
-            self.assertEqual(stderr, "FAIL: associated-original | copy-setter=unavailable\n")
+            self.assertEqual(stderr, "FAIL: failure-id=unavailable | context=unavailable | cause=validation-failed | copy-setter=unavailable\n")
         self.assertEqual(hooks, [])
         self.assertIn("operation=owner-extension", ordinary.render())
 

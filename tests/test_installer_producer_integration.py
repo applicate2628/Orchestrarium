@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import runpy
 from pathlib import Path
 import sys
 import subprocess
@@ -63,6 +64,356 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob("orchestrarium-install-transaction-*")))
         self.assertFalse(list(self.root.rglob(".orchestrarium-retained-*")))
         self.assertFalse(list(self.root.rglob(".orchestrarium-migration-retention-*")))
+
+    def test_runtime_reminder_cache_preserves_seals_and_rollback_custody(self):
+        """RC1-RC3: actual reminder imports, settled warm replacement and readback."""
+        inputs = ("hooks/check-parallel-mcp-momentum.py", "scripts/agents_mode_runtime.py", "scripts/hook_common.py")
+        cases = (("disabled", True, False, False, False),
+                 ("replacement", True, True, False, False),
+                 ("created-warm", False, True, True, False),
+                 ("commit-warm", True, True, True, True))
+        for name, existing, bytecode, warm, commit in cases:
+            with self.subTest(case=name):
+                capsule = self.root / name
+                capsule.mkdir()
+                source = capsule / "source"
+                anchor = capsule / "anchor"
+                anchor.mkdir()
+                parent = anchor / "canonical" / "skills"
+                target = parent / "lead"
+                for relative in inputs:
+                    member = source / relative
+                    member.parent.mkdir(parents=True, exist_ok=True)
+                    member.write_bytes((ROOT / "src.codex/skills/lead" / relative).read_bytes())
+                if existing:
+                    target.mkdir(parents=True)
+                    (target / "old").write_bytes(b"exact original")
+                original = PI._InstallTransaction._observe(target)
+                selected = [parent]
+                if name == "replacement":
+                    logical = capsule / "provider-skills"
+                    logical.symlink_to(parent, target_is_directory=True)
+                    alias = PI._InstallTransaction._capture_node(logical)
+                    selected.append(logical / "lead" / "old")
+                tx = self.transaction(selected)
+                primary = RuntimeError("PRIVATE_unrelated_primary")
+                observed = None
+                caught = None
+                try:
+                    with tx:
+                        owner = PI._CreateOnlyMutablePath(anchor, tx, dry_run=False)
+                        if existing:
+                            owner.replace_exact_tree(Path("canonical/skills/lead"),
+                                PI._tree_sha256(target, ignore_runtime_cache=True), source, ignore_runtime_cache=True)
+                        else:
+                            owner.create_tree(Path("canonical/skills/lead"), source, ignore_runtime_cache=True)
+                        effect = tx._effects[-1]
+                        sealed = dict(effect.actual)
+                        modules = {key: sys.modules.pop(key, None) for key in ("hook_common", "agents_mode_runtime")}
+                        old_path = list(sys.path)
+                        old_bytecode = sys.dont_write_bytecode
+                        try:
+                            sys.dont_write_bytecode = not bytecode
+                            with patch.object(sys, "stdin", io.StringIO('{"agent_id":"private-test-child"}')):
+                                with self.assertRaises(SystemExit) as done:
+                                    runpy.run_path(str(target / inputs[0]), run_name="__main__")
+                            self.assertEqual(done.exception.code, 0)
+                        finally:
+                            sys.dont_write_bytecode = old_bytecode
+                            sys.path[:] = old_path
+                            for key, previous in modules.items():
+                                sys.modules.pop(key, None)
+                                if previous is not None:
+                                    sys.modules[key] = previous
+                        caches = sorted(target.rglob("*.pyc"))
+                        self.assertEqual(bool(caches), bytecode)
+                        tx.assert_effect_current(effect)
+                        self.assertTrue(all(effect.actual[path] == node for path, node in sealed.items()))
+                        if warm:
+                            cache = caches[0]
+                            old_node = tx._capture_node(cache)
+                            temporary = cache.with_suffix(".pyc.temporary")
+                            temporary.write_bytes(b"untrusted settled warm bytes")
+                            os.replace(temporary, cache)
+                            self.assertFalse(tx._point_matches(cache, old_node, check_file_content=True))
+                            tx.assert_effect_current(effect)
+                        observed = tx._observe(target)
+                        if commit:
+                            tx.commit()
+                        else:
+                            raise primary
+                except BaseException as error:
+                    caught = error
+                self.assertIs(caught, None if commit else primary)
+                if commit:
+                    self.assertTrue(tx._image_matches(target, observed))
+                    self.assertIsNone(effect.quarantine_state)
+                else:
+                    self.assertTrue(tx._image_matches(target, original))
+                    if name == "replacement":
+                        self.assertTrue(tx._point_matches(logical, alias))
+                        self.assertEqual((logical / "lead" / "old").read_bytes(), b"exact original")
+                    if bytecode:
+                        self.assertTrue(effect.settled)
+                        self.assertTrue(tx._image_matches(effect.quarantine,
+                            tx._relocate(observed, target, effect.quarantine)))
+                        self.assertIsNone(tx._remaining_recovery()[0])
+                        self.assertIn("retained-current=", PI._installer_failure_text(primary))
+                        if not existing:
+                            self.assertFalse(target.exists())
+                            self.assertTrue(parent.is_dir())
+                            self.assertTrue(any(record.disposition == "custody-support" for record in tx._slice_a_created))
+                    else:
+                        self.assertFalse(list(parent.glob("*.after")))
+
+    def test_runtime_cache_does_not_authorize_generic_disposal_or_unknown_members(self):
+        (self.source / "body.py").write_bytes(b"authored")
+        tx = self.transaction([])
+        primary = RuntimeError("private failure")
+        with self.assertRaises(PI._InstallFailure):
+            with tx:
+                target = self.owner(tx).create_tree(Path("target/lead"), self.source, ignore_runtime_cache=True)
+                effect = tx._effects[-1]
+                cache = target / "__pycache__"
+                cache.mkdir()
+                (cache / "body.pyc").write_bytes(b"unproved cache bytes")
+                tx.assert_effect_current(effect)
+                with self.assertRaisesRegex(ValueError, "observed runtime disposal"):
+                    tx._dispose_image(target, effect.actual)
+                (cache / "operator-note.txt").write_bytes(b"preserve unknown")
+                raise primary
+        self.assertEqual((cache / "operator-note.txt").read_bytes(), b"preserve unknown")
+        self.assertEqual((target / "body.py").read_bytes(), b"authored")
+
+    def test_runtime_selection_preserves_sealed_and_unknown_member_refusals(self):
+        for name in ("disabled", "changed", "missing", "foreign-native", "sealed-cache", "temporary", "reparse"):
+            with self.subTest(case=name):
+                capsule = self.root / name
+                capsule.mkdir()
+                source = capsule / "source"
+                source.mkdir()
+                (source / "body.py").write_bytes(b"sealed bytes")
+                tx = self.transaction([])
+                sentinel = capsule / "outside"
+                sentinel.write_bytes(b"outside untouched")
+                with self.assertRaises(PI._InstallFailure):
+                    with tx:
+                        owner = PI._CreateOnlyMutablePath(capsule, tx, dry_run=False)
+                        target = owner.create_tree(Path("lead"), source, ignore_runtime_cache=name != "disabled")
+                        effect = tx._effects[-1]
+                        if name == "changed":
+                            (target / "body.py").write_bytes(b"changed bytes")
+                        elif name == "missing":
+                            (target / "body.py").unlink()
+                        elif name == "foreign-native":
+                            (target / "body.py").rename(capsule / "preserved-original")
+                            (target / "body.py").write_bytes(b"sealed bytes")
+                        elif name == "sealed-cache":
+                            cache = owner.create_file(Path("lead/__pycache__/sealed.pyc"), b"sealed cache")
+                            cache.write_bytes(b"changed cache")
+                        else:
+                            cache = target / "__pycache__"
+                            if name == "reparse":
+                                cache.symlink_to(source, target_is_directory=True)
+                            else:
+                                cache.mkdir()
+                                (cache / ("body.pyc.temporary" if name == "temporary" else "body.pyc")).write_bytes(b"unknown")
+                        with self.assertRaises(ValueError):
+                            tx.assert_effect_current(effect)
+                        raise RuntimeError("independent private primary")
+                self.assertEqual(sentinel.read_bytes(), b"outside untouched")
+
+    def test_custody_support_refuses_foreign_sibling_and_settles_disjoint_effect(self):
+        (self.source / "body.py").write_bytes(b"authored")
+        safe = self.target / "safe"
+        safe.write_bytes(b"safe original")
+        old_safe = PI._InstallTransaction._capture_node(safe)
+        tx = self.transaction([self.target / "created", safe])
+        with self.assertRaises(PI._InstallFailure) as caught:
+            with tx:
+                owner = self.owner(tx)
+                owner.replace_exact_file(Path("target/safe"), PI._file_sha256(safe), b"safe new")
+                target = owner.create_tree(Path("target/created/skills/lead"), self.source, ignore_runtime_cache=True)
+                cache = target / "__pycache__"
+                cache.mkdir()
+                (cache / "body.pyc").write_bytes(b"observed")
+                (target.parent / "foreign-note").write_bytes(b"preserve sibling")
+                raise RuntimeError("private primary")
+        self.assertTrue(tx._point_matches(safe, old_safe, check_file_content=True))
+        self.assertFalse(target.exists())
+        self.assertEqual((target.parent / "foreign-note").read_bytes(), b"preserve sibling")
+        self.assertTrue(any(member.phase == "created" for member in caught.exception.members))
+        self.assertTrue(tx._effects[-1].quarantine_state)
+
+    def test_settled_custody_reentry_rechecks_exact_retained_image(self):
+        (self.source / "body.py").write_bytes(b"authored")
+        tx = self.transaction([])
+        primary = RuntimeError("private unrelated primary")
+        with self.assertRaises(RuntimeError) as caught:
+            with tx:
+                target = self.owner(tx).create_tree(Path("target/created/lead"), self.source, ignore_runtime_cache=True)
+                cache = target / "__pycache__"
+                cache.mkdir()
+                (cache / "body.pyc").write_bytes(b"observed bytes")
+                raise primary
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(tx._settle_effects(), ([], [], ()))
+        effect = tx._effects[-1]
+        (effect.quarantine / "body.py").write_bytes(b"changed custody")
+        unresolved, failures, _errors = tx._settle_effects()
+        self.assertTrue(unresolved)
+        self.assertTrue(failures)
+        self.assertEqual((effect.quarantine / "body.py").read_bytes(), b"changed custody")
+
+    def test_runtime_custody_move_refuses_occupied_destination_and_post_acquisition_change(self):
+        for case in ("occupied", "changed-before-move"):
+            with self.subTest(case=case):
+                capsule = self.root / case
+                capsule.mkdir()
+                source = capsule / "source"
+                source.mkdir()
+                (source / "body.py").write_bytes(b"new authored")
+                target = capsule / "lead"
+                target.mkdir()
+                (target / "body.py").write_bytes(b"old original")
+                old = PI._InstallTransaction._observe(target)
+                tx = self.transaction([target])
+                primary = RuntimeError("private primary")
+                native_move = tx._native_publish_no_replace
+                injected = []
+                def move(source_path, destination, **kwargs):
+                    if source_path == target and destination.name.endswith(".after"):
+                        (source_path / "__pycache__/raced.pyc").write_bytes(b"unobserved race bytes")
+                        injected.append(True)
+                    return native_move(source_path, destination, **kwargs)
+                with self.assertRaises(PI._InstallFailure) as caught:
+                    with patch.object(tx, "_native_publish_no_replace",
+                                      side_effect=move if case == "changed-before-move" else native_move), tx:
+                        owner = PI._CreateOnlyMutablePath(capsule, tx, dry_run=False)
+                        owner.replace_exact_tree(Path("lead"), PI._tree_sha256(target), source, ignore_runtime_cache=True)
+                        effect = tx._effects[-1]
+                        cache = target / "__pycache__"
+                        cache.mkdir()
+                        (cache / "body.pyc").write_bytes(b"observed")
+                        tx.assert_effect_current(effect)
+                        if case == "occupied":
+                            destination = effect.retained.with_name(effect.retained.name + ".after")
+                            destination.write_bytes(b"foreign occupied destination")
+                        raise primary
+                self.assertIs(caught.exception.cause, primary)
+                self.assertTrue(tx._image_matches(effect.retained, tx._relocate(old, target, effect.retained)))
+                if case == "occupied":
+                    self.assertEqual(destination.read_bytes(), b"foreign occupied destination")
+                    self.assertEqual((target / "body.py").read_bytes(), b"new authored")
+                else:
+                    self.assertEqual(injected, [True])
+                    self.assertEqual((effect.quarantine / "__pycache__/raced.pyc").read_bytes(), b"unobserved race bytes")
+
+    def test_typed_recovery_rewrap_preserves_custody_and_exact_primary_fields(self):
+        for committed in (False, True):
+            with self.subTest(committed=committed):
+                capsule = self.root / ("committed-rewrap" if committed else "rollback-rewrap")
+                capsule.mkdir()
+                source = capsule / "source"
+                source.mkdir()
+                (source / "body.py").write_bytes(b"authored")
+                tx = self.transaction([])
+                cause = ValueError("PRIVATE_rewrap_cause")
+                member = PI._RollbackFailureMember("backup", 7, "PRIVATE_member_path",
+                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED", "PRIVATE_member_cause", participant="backup")
+                primary = PI._InstallFailure("E_HOOK_HEALTH_FAILED", "health", cause,
+                    members=(member,), recovery_path=capsule / "PRIVATE_obsolete_recovery")
+                original = str(primary)
+                with self.assertRaises(PI._InstallFailure) as caught:
+                    with tx:
+                        owner = PI._CreateOnlyMutablePath(capsule, tx, dry_run=False)
+                        target = owner.create_tree(Path("lead"), source, ignore_runtime_cache=True)
+                        (target / "__pycache__").mkdir()
+                        (target / "__pycache__/body.pyc").write_bytes(b"observed")
+                        if committed:
+                            self.assertEqual(tx._settle_effects(), ([], [], ()))
+                            tx.commit()
+                        raise primary
+                final = caught.exception
+                self.assertIsNot(final, primary)
+                self.assertIs(final.__cause__, primary)
+                self.assertIs(final.cause, cause)
+                self.assertIs(final.members, primary.members)
+                self.assertIs(final.members[0], member)
+                self.assertIsNone(final.recovery_path)
+                self.assertEqual(str(primary), original)
+                self.assertFalse(target.exists())
+                effect = tx._effects[-1]
+                self.assertTrue(tx._image_matches(effect.quarantine, effect.quarantine_state))
+                public = PI._installer_failure_text(final)
+                self.assertEqual(public.count("retained-current="), 1)
+                self.assertNotIn("PRIVATE", public)
+
+    def test_public_custody_currentness_keeps_prior_settlement_distinct_from_later_refusal(self):
+        (self.source / "body.py").write_bytes(b"authored")
+        for case in ("unchanged", "changed-custody", "changed-target"):
+            with self.subTest(case=case):
+                capsule = self.root / case
+                capsule.mkdir()
+                parent = capsule / "created/skills"
+                tx = self.transaction([parent])
+                primary = RuntimeError("PRIVATE_reentry_primary")
+                escaped = None
+                try:
+                    with tx:
+                        owner = PI._CreateOnlyMutablePath(capsule, tx, dry_run=False)
+                        target = owner.create_tree(Path("created/skills/lead"), self.source, ignore_runtime_cache=True)
+                        (target / "__pycache__").mkdir()
+                        (target / "__pycache__/body.pyc").write_bytes(b"observed")
+                        self.assertEqual(tx._settle_effects(), ([], [], ()))
+                        effect = tx._effects[-1]
+                        self.assertTrue(effect.settled)
+                        self.assertTrue(tx._image_matches(effect.quarantine, effect.quarantine_state))
+                        if case == "changed-custody":
+                            (effect.quarantine / "body.py").write_bytes(b"later changed custody")
+                        elif case == "changed-target":
+                            target.mkdir()
+                            (target / "foreign").write_bytes(b"later foreign target")
+                        raise primary
+                except BaseException as error:
+                    escaped = error
+                self.assertTrue(effect.settled)  # The actual earlier event remains recorded.
+                self.assertIs(escaped if case == "unchanged" else escaped.cause, primary)
+                stderr = io.StringIO()
+                with patch.object(PI, "_target", side_effect=escaped), contextlib.redirect_stderr(stderr):
+                    code = PI.install("claude", ["--target", str(capsule)])
+                public = stderr.getvalue()
+                self.assertEqual(code, 1)
+                self.assertIn("prior-settlement:complete", public)
+                if case == "unchanged":
+                    self.assertIn("current-verification:verified", public)
+                    self.assertIn("disposition:preserved;target-restoration:complete", public)
+                else:
+                    self.assertIn("current-verification:refused", public)
+                    self.assertNotIn("disposition:preserved", public)
+                    self.assertNotIn("target-restoration:complete", public)
+                    self.assertTrue(all(member.participant in {"created", "snapshot", "effect", "backup"}
+                                        for member in escaped.members))
+                self.assertNotIn("PRIVATE", public)
+                self.assertNotIn(str(capsule), public)
+
+    def test_actual_direct_effect_failures_have_effect_and_created_domains(self):
+        (self.source / "body.py").write_bytes(b"authored")
+        tx = PI._InstallTransaction([], enabled=False)
+        primary = RuntimeError("PRIVATE_direct_primary")
+        with self.assertRaises(PI._InstallFailure) as caught:
+            with tx.direct_operation():
+                target = self.owner(tx).create_tree(Path("target/lead"), self.source, ignore_runtime_cache=True)
+                (target / "body.py").write_bytes(b"foreign drift")
+                raise primary
+        self.assertIs(caught.exception.cause, primary)
+        effects = [member for member in caught.exception.members if member.phase == "snapshot"]
+        self.assertTrue(effects)
+        self.assertTrue(all(member.participant == "effect" for member in effects))
+        self.assertTrue(all(member.participant == "created" for member in caught.exception.members if member.phase == "created"))
+        public = PI._installer_failure_text(caught.exception)
+        self.assertIn("participant:effect", public)
+        self.assertNotIn("PRIVATE", public)
 
     def test_copy_wrapper_uses_parent_snapshot_and_restores_metadata(self):
         source = self.source / "leaf"

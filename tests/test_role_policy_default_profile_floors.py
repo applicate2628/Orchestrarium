@@ -846,7 +846,10 @@ def _supervised_luna_host() -> dict:
 
 
 @pytest.mark.parametrize("task", ("exploration", "engineering"))
-def test_supervised_luna_producers_use_ordinary_explicit_route_keep_defaults(task: str) -> None:
+@pytest.mark.parametrize("effort", ("high", "xhigh"))
+def test_supervised_luna_producers_use_ordinary_explicit_route_keep_defaults(
+    task: str, effort: str,
+) -> None:
     policy, _ = RESOLVER.load_role_policy(ROOT)
     host = _supervised_luna_host()
     scope = {"authority": "parent-dispatcher-only", "purpose": "supervised producer pilot"}
@@ -856,24 +859,24 @@ def test_supervised_luna_producers_use_ordinary_explicit_route_keep_defaults(tas
         )
         assert description["status"] == "available", role
         assert description["hostObservation"] == host
-        assert any(option["profile"] == "luna-high" and option["useCriteria"]
+        assert any(option["profile"] == f"luna-{effort}" and option["useCriteria"]
                    for option in description["options"]), role
         default = RESOLVER.resolve_ordinary_native_dispatch(
             description, caller_rationale="Preserve the existing omitted default.",
             approved_execution_scope=scope,
         )
         explicit = RESOLVER.resolve_ordinary_native_dispatch(
-            description, requested_model="gpt-6-luna", requested_effort="high",
+            description, requested_model="gpt-6-luna", requested_effort=effort,
             caller_rationale="Accepted bounded contract; supervise time to verified result.",
             approved_execution_scope=scope,
         )
         assert default["status"] == explicit["status"] == "resolved", role
         assert default["resolvedModel"] == "gpt-6.1-sol", role
         assert default["resolvedEffort"] == ("medium" if role == "knowledge-archivist" else "high")
-        assert explicit["resolvedProfile"] == "luna-high"
+        assert explicit["resolvedProfile"] == f"luna-{effort}"
         assert explicit["invocation"]["mode"] == "generic-explicit-profile"
         assert explicit["invocation"]["model"] == "gpt-6-luna"
-        assert explicit["invocation"]["reasoningEffort"] == "high"
+        assert explicit["invocation"]["reasoningEffort"] == effort
         assert explicit["invocation"]["forkTurns"] == "none"
         assert "agentType" not in explicit["invocation"]
         assert explicit["profession"] == default["profession"] == description["profession"]
@@ -888,30 +891,35 @@ def test_supervised_luna_producers_use_ordinary_explicit_route_keep_defaults(tas
             assert "agentType" not in default["invocation"]
 
 
-def test_supervised_luna_does_not_admit_protected_tasks_or_other_efforts() -> None:
+@pytest.mark.parametrize("effort", ("high", "xhigh"))
+def test_supervised_luna_does_not_admit_protected_tasks(effort: str) -> None:
     policy, _ = RESOLVER.load_role_policy(ROOT)
     scope = {"authority": "parent-dispatcher-only", "purpose": "protected task probe"}
     for task in ("planning", "review", "critical-design", "critical-security", "recovery"):
-        assert "luna-high" not in policy["taskClasses"][task]["admissibleProfiles"]
+        assert f"luna-{effort}" not in policy["taskClasses"][task]["admissibleProfiles"]
         for role in policy["taskRoleEligibility"][task]:
             description = RESOLVER.describe_ordinary_native_role_options(
                 role, task, _supervised_luna_host(), repo_root=ROOT,
             )
             decision = RESOLVER.resolve_ordinary_native_dispatch(
-                description, requested_model="gpt-6-luna", requested_effort="high",
+                description, requested_model="gpt-6-luna", requested_effort=effort,
                 caller_rationale="Confirm the producer pilot cannot cross protected gates.",
                 approved_execution_scope=scope,
             )
             assert decision["status"] == "denied", (task, role)
             assert decision["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
             assert decision["fallback"] == "none"
-    for effort in ("low", "medium", "xhigh", "max", "ultra"):
+
+
+def test_supervised_luna_does_not_admit_other_efforts() -> None:
+    scope = {"authority": "parent-dispatcher-only", "purpose": "unsupported effort probe"}
+    for effort in ("low", "medium", "max", "ultra"):
         description = RESOLVER.describe_ordinary_native_role_options(
             "backend-engineer", "engineering", _supervised_luna_host(), repo_root=ROOT,
         )
         decision = RESOLVER.resolve_ordinary_native_dispatch(
             description, requested_model="gpt-6-luna", requested_effort=effort,
-            caller_rationale="Ordinary pilot admits only the existing exact high profile.",
+            caller_rationale="Only the exact ordinary High and Extra high profiles are admitted.",
             approved_execution_scope=scope, user_approved_max=True,
         )
         assert decision["status"] == "denied", effort

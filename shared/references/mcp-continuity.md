@@ -68,10 +68,7 @@ Qualifying advisory paths emit one generic runtime-discovery checkpoint. Named
 tools in documentation are explicitly non-normative examples and never
 selection logic.
 
-Advisory paths influence the next model action and cannot prove obedience. In
-particular, the turn anchor tells the root conversation to answer a side question
-briefly and resume the next authorized concrete action in the same turn, but a
-synthetic payload test proves only delivery of that context, not model compliance.
+Advisory paths influence the next model action and cannot prove obedience. The turn anchor projects the shared **Primary-task continuity and side work** rule: brief inline answers, prompt eligible substantive side delegation and ready primary continuation without waiting for the side result. A synthetic payload test proves delivery of this context only. Both-pack receiving and an actual current-flow observation do not prove universal future model compliance; another provider's model-behavior trial is not mandatory.
 The Claude root-force denial is an action-level guard only for searches admitted by
 the shared classifier; it does not prove MCP success or cover tools outside its
 matcher. Installed-source identity and long-turn behavior require separate

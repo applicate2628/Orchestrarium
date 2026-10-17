@@ -750,6 +750,7 @@ class _PhysicalNode:
     data: str | None
     native_proof: _NativeNodeProof | None = None
     reparse_data: bytes | None = None
+    evidence_role: str = field(default="sealed", compare=False)
 
 
 class _WindowsBoundNode:
@@ -945,7 +946,7 @@ class _WindowsBoundNode:
                         except BaseException as cleanup:
                             raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "native-acquisition", primary,
                                                   members=(_RollbackFailureMember("backup", -1, str(path),
-                                                           "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup)),),
+                                                           "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
                                                   recovery_path=node.born_path) from primary
                     if not abandoned:
                         yield node
@@ -957,7 +958,7 @@ class _WindowsBoundNode:
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "native-acquisition", primary,
                                           members=(_RollbackFailureMember("backup", -1, str(path),
                                                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
-                                                   "creator abandonment pending or replaced"),), recovery_path=path) from primary
+                                                   "creator abandonment pending or replaced", participant="backup"),), recovery_path=path) from primary
         except BaseException as error:
             primary = error
             raise
@@ -969,12 +970,12 @@ class _WindowsBoundNode:
                     cause = (previous.cause if previous is not None and previous.cause is not None
                              else primary if primary is not None else cleanup)
                     member = _RollbackFailureMember("backup", -1, str(path),
-                              "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup))
+                              "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup")
                     recovery = (previous.recovery_path if previous is not None else
                                 born.born_path if born is not None and not abandoned else None)
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "native-security-release",
                                           cause, members=(previous.members if previous is not None else ()) + (member,),
-                                          recovery_path=recovery,
+                                          recovery_path=recovery, association_source=previous,
                                           retained_errors=tuple(error for error in (previous, cleanup)
                                               if _copy_setter_operation_errors(error))) from primary
                 security.value = None
@@ -1136,7 +1137,7 @@ class _WindowsBoundNode:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "native-close",
                                       primary if primary is not None else cleanup,
                                       members=(_RollbackFailureMember("backup", 0, str(self.path),
-                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup)),),
+                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
                                       recovery_path=self.path) from primary
             self.descriptor = None
         handle = self.handle
@@ -1146,7 +1147,7 @@ class _WindowsBoundNode:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "native-close",
                                       primary if primary is not None else cleanup,
                                       members=(_RollbackFailureMember("backup", 0, str(self.path),
-                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup)),),
+                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
                                       recovery_path=self.path) from primary
             self.handle = None
         return False
@@ -1174,6 +1175,8 @@ class _SliceACreatedRecord:
     reparse_data: bytes | None = None
     projection_data: str | None = None
     current_node: _PhysicalNode | None = None
+    disposition: str | None = None
+    custody_effect: Any | None = field(default=None, compare=False, repr=False)
 
     @property
     def proof_key(self) -> tuple[Any, ...]:
@@ -1478,8 +1481,33 @@ def _retain_copy_setter_operation_errors(error, errors: tuple[BaseException, ...
 
 def _installer_failure_text(error: BaseException) -> str:
     """The CLI alone adds safe details; original exception strings stay intact."""
-    original = str(error)
+    original = "failure-id=unavailable | context=unavailable | cause=operation-failed"
     try:
+        attributes = _passive_owner_storage(BaseException, error)
+        def stable(value):
+            return value if type(value) is str and value in SLICE_A_FAILURE_IDS else "unavailable"
+        def path_hash(value):
+            if type(value) is type(Path()):
+                value = str(value)
+            value = _CopySetterDiagnostic._bounded_target(value)
+            return "unavailable" if value is None else hashlib.sha256(str.encode(value, "utf-8", "surrogatepass")).hexdigest()
+        typed = type(error) is _InstallFailure
+        if typed and attributes is not None:
+            identity = stable(dict.get(attributes, "stable_id"))
+            context = dict.get(attributes, "context")
+            contexts = {"rollback", "backup", "migration", "transaction", "direct", "health", "inventory", "verify",
+                        "native-acquisition", "native-security-release", "native-close", "creator-capture", "borrowed-content",
+                        "copy-close", "scalar-parent-close", "descriptor-read-reset", "scalar-close", "scalar-acquisition",
+                        "file-copy", "file-acquisition", "file-close", "construction", "disposal-close", "snapshot-acquisition",
+                        "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared"}
+            context = context if type(context) is str and context in contexts else "unavailable"
+            cause = "identity-check-failed" if identity in {"E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY",
+                "E_ROLLBACK_CREATED_IDENTITY_CHANGED", "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE"} else "operation-failed"
+            original = f"{identity} | context={context} | cause={cause}"
+        else:
+            cause = "filesystem-operation-failed" if isinstance(error, OSError) else (
+                "validation-failed" if isinstance(error, ValueError) else "operation-failed")
+            original = "failure-id=unavailable | context=unavailable | cause=" + cause
         additions = []
         def render(context):
             try:
@@ -1492,36 +1520,69 @@ def _installer_failure_text(error: BaseException) -> str:
         operation_errors = _copy_setter_operation_errors(error)
         if operation_errors:
             additions.append("copy-setter-operation-errors=" + str(len(operation_errors)))
-        if issubclass(type(error), _InstallFailure):
-            attributes = _passive_owner_storage(BaseException, error)
+        if typed:
             members = None if attributes is None else dict.get(attributes, "members")
             if type(members) not in (tuple, list):
                 return " | ".join((original, *additions))
             for member in members:
                 if type(member) is not _RollbackFailureMember:
+                    additions.append("cleanup-detail=unavailable")
                     continue
                 storage = _passive_owner_storage(_RollbackFailureMember, member)
                 if storage is None:
+                    additions.append("cleanup-detail=unavailable")
                     continue  # Unsupported association is not inferred from legacy text.
                 failure = dict.get(storage, "copy_setter_failure")
+                phase, ordinal, stable_id = (dict.get(storage, name) for name in ("phase", "ordinal", "stable_id"))
+                phase = phase if type(phase) is str and phase in {"snapshot", "created", "migration", "backup"} else "unavailable"
+                ordinal = ordinal if type(ordinal) is int else "unavailable"
+                identity = stable(stable_id)
+                participant = dict.get(storage, "participant")
+                participant = participant if type(participant) is str and participant in {
+                    "effect", "snapshot", "created", "migration", "backup", "scalar"} else "unavailable"
+                reason = "identity-check-failed" if identity in {"E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY",
+                    "E_ROLLBACK_CREATED_IDENTITY_CHANGED", "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE"} else "settlement-failed"
+                additions.append(f"cleanup-detail=participant:{participant};phase:{phase};ordinal:{ordinal};id:{identity};reason:{reason}"
+                    + ";target-slot:managed-path;target-path-sha256:" + path_hash(dict.get(storage, "path")))
                 operation_errors = _copy_setter_operation_errors(failure)
                 if operation_errors:
-                    phase, ordinal, stable_id = (dict.__getitem__(storage, name) for name in ("phase", "ordinal", "stable_id"))
-                    if type(phase) is str and type(ordinal) is int and type(stable_id) is str:
-                        additions.append(f"cleanup-copy-setter-operation-errors={phase}:{ordinal}:{stable_id}:{len(operation_errors)}")
+                    if type(phase) is str and type(ordinal) is int:
+                        additions.append(f"cleanup-copy-setter-operation-errors={phase}:{ordinal}:{identity}:{len(operation_errors)}")
                     else:
                         additions.append("cleanup-copy-setter-operation-errors=unavailable")
                 context = dict.get(storage, "copy_setter_diagnostic")
                 if context is not None:
                     detail = render(context)
-                    phase, ordinal, stable_id = (dict.__getitem__(storage, name) for name in ("phase", "ordinal", "stable_id"))
-                    if (type(phase) is str and type(ordinal) is int and type(stable_id) is str):
-                        additions.append(f"cleanup-copy-setter={phase}:{ordinal}:{stable_id}:{detail}")
+                    if (type(phase) is str and type(ordinal) is int):
+                        additions.append(f"cleanup-copy-setter={phase}:{ordinal}:{identity}:{detail}")
                     else:
                         additions.append("cleanup-copy-setter=unavailable")
+            recovery = dict.get(attributes, "recovery_path")
+            if recovery is not None:
+                additions.append("recovery-beforeimage=available;target-slot:managed-recovery;target-path-sha256:" + path_hash(recovery))
+        custody = () if attributes is None else dict.get(attributes, "_installer_custody", ())
+        if type(custody) is tuple:
+            for row in custody:
+                if type(row) is not tuple or len(row) != 2 or type(row[0]) is not int or type(row[1]) is not _DeclaredPathEffect:
+                    additions.append("retained-current=unavailable")
+                    continue
+                ordinal, effect = row
+                storage = _passive_owner_storage(_DeclaredPathEffect, effect)
+                if storage is None:
+                    additions.append("retained-current=unavailable")
+                    continue
+                historical = "complete" if dict.get(storage, "settled") is True else "unsettled"
+                current = dict.get(storage, "custody_current_verified")
+                verification = "verified" if current is True else "refused" if current is False else "unavailable"
+                disposition = "preserved" if current is True else "unavailable"
+                restoration = "complete" if current is True and historical == "complete" else "unavailable"
+                namespace = ("retained-with-support" if dict.get(storage, "custody_support_retained") is True else "retained") if current is True else "unavailable"
+                additions.append(f"retained-current=effect:{ordinal};disposition:{disposition};target-restoration:{restoration};enclosing-namespace:{namespace}"
+                    + f";prior-settlement:{historical};current-verification:{verification}"
+                    + ";target-slot:managed-tree;target-path-sha256:" + path_hash(dict.get(storage, "quarantine")))
         return " | ".join((original, *additions))
     except BaseException:
-        return original
+        return original + " | diagnostic=unavailable"
 
 
 @dataclass(frozen=True)
@@ -1533,6 +1594,7 @@ class _RollbackFailureMember:
     cause: str
     copy_setter_diagnostic: _CopySetterDiagnostic | tuple | None = field(default=None, compare=False, repr=False)
     copy_setter_failure: BaseException | None = field(default=None, compare=False, repr=False)
+    participant: str = field(default="unavailable", compare=False, repr=False)
 
 
 class _InstallFailure(RuntimeError):
@@ -1550,6 +1612,7 @@ class _InstallFailure(RuntimeError):
         recovery_path: Path | None = None,
         unresolved_paths: tuple[Path, ...] = (),
         retained_errors: tuple[BaseException, ...] = (),
+        association_source: BaseException | None = None,
     ) -> None:
         self.stable_id = stable_id
         self.context = context
@@ -1560,6 +1623,13 @@ class _InstallFailure(RuntimeError):
         diagnostic = _copy_setter_detail(cause)
         if diagnostic is not None:
             _store_copy_setter_detail(self, diagnostic)
+        destination = _passive_owner_storage(BaseException, self)
+        for original in (cause, association_source):
+            source = _passive_owner_storage(BaseException, original)
+            if source is not None:
+                for name in ("_installer_custody", "_copy_setter_diagnostic"):
+                    if dict.__contains__(source, name):
+                        dict.__setitem__(destination, name, dict.__getitem__(source, name))
         member_errors = ()
         for member in members:
             if type(member) is _RollbackFailureMember:
@@ -1585,6 +1655,17 @@ class _InstallFailure(RuntimeError):
         if recovery_path is not None:
             details.append(f"recovery={recovery_path}")
         super().__init__(" | ".join(details))
+
+    def _with_recovery_path(self, recovery_path: Path | None) -> "_InstallFailure":
+        """Reconcile a locator while retaining this failure's owned evidence."""
+        source = _passive_owner_storage(BaseException, self)
+        if source is None:
+            raise TypeError("unavailable typed failure storage")
+        result = _InstallFailure(dict.__getitem__(source, "stable_id"), dict.__getitem__(source, "context"),
+            dict.__getitem__(source, "cause"), members=dict.__getitem__(source, "members"),
+            recovery_path=recovery_path, unresolved_paths=dict.__getitem__(source, "unresolved_paths"),
+            retained_errors=(self,) if _copy_setter_operation_errors(self) else (), association_source=self)
+        return result
 
 
 SLICE_A_FAILURE_IDS = frozenset(
@@ -1686,6 +1767,10 @@ class _DeclaredPathEffect:
     preserve_retained_on_commit: bool = False
     retained_owner: Any | None = None
     readonly_dependencies: tuple[_ReadOnlyPathDependency, ...] = ()
+    ignore_runtime_cache: bool = False
+    preserve_runtime_custody: bool = False
+    custody_support_retained: bool = False
+    custody_current_verified: bool | None = None
 
     @property
     def location(self) -> Path:
@@ -1790,14 +1875,14 @@ class _InstallTransaction:
                             self.assert_effect_current(effect)
                         except BaseException as currentness:
                             _paths, members, child_errors = self._settlement_failure(currentness, "snapshot", ordinal,
-                                effect.path, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY")
+                                effect.path, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", participant="effect")
                             unresolved.extend(_paths)
                             failures.extend(members)
                             retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
                         failures.append(_RollbackFailureMember(
                             "snapshot", ordinal, str(effect.retained if effect.retained_state is not None else effect.path),
                             "E_ROLLBACK_SETTLEMENT_FAILED", "direct writer failed before completion; recovery preserved",
-                        ))
+                         participant="effect"))
                 protected = [path for effect in selected
                              if effect.actual or effect.retained_state is not None
                              for path in (effect.path, effect.retained)]
@@ -1879,7 +1964,7 @@ class _InstallTransaction:
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "creator-capture", primary,
                                           members=(_RollbackFailureMember("backup", -1, str(path),
                                                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
-                                                   "unproved creator image preserved"),), recovery_path=path) from primary
+                                                   "unproved creator image preserved", participant="backup"),), recovery_path=path) from primary
             attributes = bound_node.basic().attributes
             metadata = path.lstat() if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT else bound_node.python_metadata()
             return captured(metadata, bound_node.proof, bound_node)
@@ -1894,7 +1979,7 @@ class _InstallTransaction:
         return captured(path.lstat(), native_proof)
 
     @staticmethod
-    def _observe(path: Path, *, before_read=None) -> dict[Path, _PhysicalNode]:
+    def _observe(path: Path, *, before_read=None, before_capture=None) -> dict[Path, _PhysicalNode]:
         """Capture full physical membership, identity and bytes without following links."""
         result: dict[Path, _PhysicalNode] = {}
         def visit(member: Path) -> None:
@@ -1902,6 +1987,8 @@ class _InstallTransaction:
                 before = member.lstat()
             except FileNotFoundError:
                 return
+            if before_capture is not None:
+                before_capture(member, before)
             value = _InstallTransaction._capture_node(member, before_read=before_read)
             if value.kind == "directory":
                 for child in sorted(member.iterdir()):
@@ -1966,7 +2053,7 @@ class _InstallTransaction:
                         current = _InstallTransaction._scalar_descriptor_node(path, descriptor, origin)
                     except OSError as read_error:
                         paths, members, retained_errors = _InstallTransaction._settlement_failure(read_error, "snapshot", -1, path,
-                            "E_ROLLBACK_RESTORE_FAILED", (path,))
+                            "E_ROLLBACK_RESTORE_FAILED", (path,), participant="scalar")
                         raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "borrowed-content", read_error,
                             members=tuple(members), unresolved_paths=tuple(paths), retained_errors=retained_errors) from read_error
                     if current != expected:
@@ -2040,17 +2127,17 @@ class _InstallTransaction:
 
     @staticmethod
     def _settlement_failure(exc: BaseException, phase: str, ordinal: int, path: Path,
-                            stable_id: str, unsafe: tuple[Path, ...] = ()):
+                            stable_id: str, unsafe: tuple[Path, ...] = (), *, participant: str | None = None):
         """Forward typed child data intact; classify an ordinary error once."""
         copy_setter_failure = exc if _copy_setter_operation_errors(exc) else None
         if isinstance(exc, _InstallFailure):
             members = (list(exc.members) if exc.members else
                         [_RollbackFailureMember(phase, ordinal, str(path), exc.stable_id, str(exc.cause),
-                                                _copy_setter_detail(exc), copy_setter_failure)])
+                                                 _copy_setter_detail(exc), copy_setter_failure, participant or "unavailable")])
             paths = list(unsafe) + list(exc.unresolved_paths) + [Path(member.path) for member in members]
         else:
             members = [_RollbackFailureMember(phase, ordinal, str(path), stable_id, str(exc),
-                                               _copy_setter_detail(exc), copy_setter_failure)]
+                                               _copy_setter_detail(exc), copy_setter_failure, participant or "unavailable")]
             paths = list(unsafe)
         return paths, members, (() if copy_setter_failure is None else (copy_setter_failure,))
 
@@ -2244,7 +2331,7 @@ class _InstallTransaction:
             except OSError as cleanup:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "copy-close", primary or cleanup,
                     members=(_RollbackFailureMember("backup", -1, str(path),
-                             "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup)),)) from primary
+                             "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),)) from primary
 
     def _acquire_copy_metadata(self, path, metadata, descriptor, bound):
         participant = self._copy_metadata.get(path)
@@ -2574,7 +2661,7 @@ class _InstallTransaction:
                     except OSError as cleanup:
                         raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-parent-close", primary or cleanup,
                             members=(_RollbackFailureMember("backup", -1, str(path),
-                                     "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup)),)) from primary
+                                     "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="scalar"),)) from primary
             reference = resources.enter_context(held_parent())
             actual = self._capture_node(path, descriptor=reference, kind="directory")
         if actual != expected:
@@ -2611,7 +2698,7 @@ class _InstallTransaction:
                 os.lseek(descriptor, 0, os.SEEK_SET)
             except OSError as reset:
                 paths, members, retained_errors = _InstallTransaction._settlement_failure(reset, "snapshot", -1, path,
-                    "E_ROLLBACK_RESTORE_FAILED", (path,))
+                    "E_ROLLBACK_RESTORE_FAILED", (path,), participant="backup")
                 previous = primary if isinstance(primary, _InstallFailure) else None
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "descriptor-read-reset", primary or reset,
                     members=(previous.members if previous is not None else ()) + tuple(members),
@@ -2663,7 +2750,7 @@ class _InstallTransaction:
                 os.close(descriptor)
             except OSError as cleanup:
                 paths, members, retained_errors = self._settlement_failure(cleanup, "snapshot", -1, storage,
-                    "E_ROLLBACK_RESTORE_FAILED", (storage,))
+                    "E_ROLLBACK_RESTORE_FAILED", (storage,), participant="scalar")
                 previous = primary if isinstance(primary, _InstallFailure) else None
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close", primary or cleanup,
                                       members=(previous.members if previous is not None else ()) + tuple(members),
@@ -2868,7 +2955,7 @@ class _InstallTransaction:
                 protected = [path, entry["path"]] + [member for member, _node in entry["links"]]
                 unresolved.extend(protected)
                 child_paths, child_members, child_errors = self._settlement_failure(
-                    error, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY")
+                    error, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", participant="scalar")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
@@ -3048,6 +3135,8 @@ class _InstallTransaction:
         owner.destination(path.relative_to(owner.anchor), allow_leaf_reparse=True)
 
     def assert_effect_current(self, effect: _DeclaredPathEffect) -> None:
+        if effect.preserve_runtime_custody:
+            effect.custody_current_verified = False
         self._assert_effect_endpoint(effect, effect.location)
         self._assert_effect_endpoint(effect, effect.retained)
         if effect.quarantine is not None:
@@ -3067,10 +3156,64 @@ class _InstallTransaction:
         root = effect.actual.get(effect.location)
         effect.owner.destination(effect.location.relative_to(effect.owner.anchor),
                                  allow_leaf_reparse=root is not None and root.kind in {"link", "reparse"})
+        self._reconcile_runtime_image(effect)
         if (not self._image_matches(effect.location, effect.actual)):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: replacement drift")
         if effect.retained_state is not None and (not self._image_matches(effect.retained, effect.retained_state)):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained image drift")
+        if effect.preserve_runtime_custody:
+            for record in self._slice_a_created:
+                if record.custody_effect is effect:
+                    owner = self._slice_a_owners.get(os.path.normcase(str(record.anchor_path)))
+                    if owner is None:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained creator owner")
+                    owner._assert_created_binding(record)
+                    if not self._image_matches(record.leaf_path, self._custody_image(record.leaf_path)):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained creator namespace")
+            effect.custody_current_verified = True
+
+    def _reconcile_runtime_image(self, effect: _DeclaredPathEffect) -> None:
+        """Recognize derived observations only on the selected published image."""
+        if (not effect.ignore_runtime_cache or effect.published_state is None
+                or effect.restored_state is not None or not effect.actual
+                or effect.actual.get(effect.location).kind != "directory"):
+            return
+        expected = effect.actual
+        # A cache filename never demotes a sealed member. Containers, including
+        # previously observed containers, retain their exact native witnesses.
+        for member, node in expected.items():
+            if node.evidence_role not in {"sealed", "runtime-observation"}:
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: invalid image role")
+            if (node.evidence_role == "sealed" or node.kind != "file") and not self._point_matches(
+                    member, node, check_file_content=node.kind == "file"):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: sealed replacement drift")
+        def admit(member, metadata):
+            previous = expected.get(member)
+            if previous is not None and (previous.evidence_role == "sealed" or previous.kind != "file"):
+                return  # Complete prior witnesses are checked before and after acquisition.
+            relative = member.relative_to(effect.location)
+            if _is_ordinary_runtime_cache_file(relative, metadata):
+                return
+            if (member.name == "__pycache__" and stat.S_ISDIR(metadata.st_mode)
+                    and not stat.S_ISLNK(metadata.st_mode) and not _is_reparse_metadata(metadata)):
+                return
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unknown runtime member")
+        current = self._observe(effect.location, before_capture=admit)
+        for member, node in current.items():
+            previous = expected.get(member)
+            if previous is not None and (previous.evidence_role == "sealed" or previous.kind != "file"):
+                if node != previous:
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: sealed observation drift")
+                current[member] = previous
+                continue
+            current[member] = replace(node, evidence_role="runtime-observation")
+        if any(member not in current for member, node in expected.items()
+               if node.evidence_role == "sealed" or node.kind != "file"):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: missing sealed runtime member")
+        if not self._image_matches(effect.location, current):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: runtime observation drift")
+        effect.actual = current
+        self._advance(effect.location, current, exclude=effect)
 
     def retained_replacement(self, effect: _DeclaredPathEffect,
                              before_move: dict[Path, _PhysicalNode]) -> None:
@@ -3338,7 +3481,7 @@ class _InstallTransaction:
                     os.close(descriptor)
                 except OSError as cleanup:
                     failures.append(_RollbackFailureMember("backup", len(failures), str(target),
-                                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup)))
+                                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"))
             if failures:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "file-copy",
                                       primary if primary is not None else failures[0].cause,
@@ -3356,7 +3499,7 @@ class _InstallTransaction:
             except BaseException as primary:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "file-acquisition", primary,
                                       members=(_RollbackFailureMember("backup", -1, str(target),
-                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", "unproved creator image preserved"),),
+                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", "unproved creator image preserved", participant="backup"),),
                                       recovery_path=target) from primary
             record(target, node)
         else:
@@ -3409,7 +3552,7 @@ class _InstallTransaction:
             except OSError as cleanup:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "file-close", primary or cleanup,
                                       members=(_RollbackFailureMember("backup", -1, str(path),
-                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup)),),
+                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
                                       recovery_path=path) from primary
 
     def _construct_exclusive_tree(
@@ -3531,7 +3674,7 @@ class _InstallTransaction:
                     failures.append(_RollbackFailureMember(
                         "backup", len(failures), str(target),
                         "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup),
-                    ))
+                     participant="backup"))
             if failures:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "construction",
                                       original or failures[0].cause, members=tuple(failures),
@@ -3656,10 +3799,12 @@ class _InstallTransaction:
                 except OSError as cleanup:
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "disposal-close", primary or cleanup,
                                           members=(_RollbackFailureMember("backup", -1, str(path),
-                                                   "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup)),),
+                                                   "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
                                           recovery_path=path) from primary
 
     def _dispose_image(self, path: Path, expected: dict[Path, _PhysicalNode]) -> None:
+        if any(node.evidence_role != "sealed" for node in expected.values()):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: observed runtime disposal")
         if self._migration_dependencies(path):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: pending migration recovery")
         if (not self._image_matches(path, expected)):
@@ -3731,7 +3876,8 @@ class _InstallTransaction:
         retained_errors = ()
         selected = None if effects is None else {id(effect) for effect in effects}
         ordinals = [ordinal for ordinal, effect in enumerate(self._effects)
-                    if not effect.settled and (selected is None or id(effect) in selected)]
+                    if (not effect.settled or effect.preserve_runtime_custody)
+                    and (selected is None or id(effect) in selected)]
         if commit:
             # A contained child's lifetime closes before its enclosing image.
             def containing(ordinal):
@@ -3749,6 +3895,8 @@ class _InstallTransaction:
                 continue
             try:
                 self.assert_effect_current(effect)
+                if effect.settled:
+                    continue  # Reentry verifies custody; it cannot transfer or remove it again.
                 if commit:
                     resources = tuple(path for path, state in
                                       ((effect.retained, effect.retained_state),
@@ -3767,8 +3915,22 @@ class _InstallTransaction:
                     effect.reservation_state = None
                     self._advance(effect.retained, {})
                 if not commit and not effect.before and effect.actual:
-                    detached = self._relocate(effect.actual, effect.location, effect.retained)
-                    self._publish_retained(effect.location, effect.retained, effect=effect)
+                    preserve = any(node.evidence_role == "runtime-observation" for node in effect.actual.values())
+                    destination = (effect.retained.with_name(effect.retained.name + ".after") if preserve else effect.retained)
+                    if preserve:
+                        effect.quarantine = destination
+                    detached = self._relocate(effect.actual, effect.location, destination)
+                    self._publish_retained(effect.location, destination, effect=effect)
+                    if preserve:
+                        effect.quarantine_state = detached
+                        effect.preserve_runtime_custody = True
+                        effect.actual = {}
+                        self._advance(effect.location, {})
+                        self._advance(destination, detached)
+                        effect.restored_state = {}
+                        self.assert_effect_current(effect)
+                        effect.settled = True
+                        continue
                     effect.retained_state = detached
                     self._advance(effect.retained, detached)
                     if (not self._image_matches(effect.retained, detached)):
@@ -3803,6 +3965,8 @@ class _InstallTransaction:
                 detached = effect.retained.with_name(effect.retained.name + ".after")
                 effect.quarantine = detached
                 if effect.actual:
+                    effect.preserve_runtime_custody = any(
+                        node.evidence_role == "runtime-observation" for node in effect.actual.values())
                     detached_expected = self._relocate(effect.actual, effect.location, detached)
                     self._publish_retained(effect.location, detached, effect=effect)
                     effect.quarantine_state = detached_expected
@@ -3818,6 +3982,7 @@ class _InstallTransaction:
                 retained_state = effect.retained_state
                 restored = self._publish_retained(effect.retained, effect.location, effect=effect)
                 effect.actual = dict(restored)
+                effect.restored_state = dict(restored)
                 self._advance(effect.location, effect.actual)
                 retained_present = not self._image_matches(effect.retained, {})
                 if not retained_present:
@@ -3830,18 +3995,24 @@ class _InstallTransaction:
                 self._advance(effect.retained, {})
                 effect.restored_state = dict(effect.actual)
                 if detached_expected:
-                    self._dispose_image(detached, detached_expected)
-                    effect.quarantine_state = None
-                    self._advance(detached, {})
+                    if effect.preserve_runtime_custody:
+                        if not self._image_matches(detached, detached_expected):
+                            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained current image drift")
+                    else:
+                        self._dispose_image(detached, detached_expected)
+                        effect.quarantine_state = None
+                        self._advance(detached, {})
                 effect.settled = True
             except BaseException as exc:
+                if effect.preserve_runtime_custody:
+                    effect.custody_current_verified = False
                 unresolved.append(effect.path)
                 unresolved.append(effect.location)
                 unresolved.append(effect.retained)
                 if effect.quarantine is not None:
                     unresolved.append(effect.quarantine)
                 child_paths, child_members, child_errors = self._settlement_failure(
-                    exc, "snapshot", ordinal, effect.path, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY")
+                    exc, "snapshot", ordinal, effect.path, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", participant="effect")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
@@ -4011,6 +4182,44 @@ class _InstallTransaction:
             owner._assert_created_binding(record)
         return records
 
+    def _custody_image(self, path: Path) -> dict[Path, _PhysicalNode]:
+        """Derive selected custody and its minimum support from existing proofs."""
+        result = {}
+        def include(member, node):
+            if member == path or path in member.parents:
+                if member in result and result[member] != node:
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: conflicting custody proof")
+                result[member] = node
+        for effect in self._effects:
+            if not effect.preserve_runtime_custody or not effect.quarantine_state or effect.quarantine is None:
+                continue
+            if not self._paths_overlap(path, effect.quarantine):
+                continue
+            self._assert_effect_endpoint(effect, effect.quarantine)
+            if not self._image_matches(effect.quarantine, effect.quarantine_state):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained current image drift")
+            for member, node in effect.quarantine_state.items():
+                include(member, node)
+            for parent in effect.quarantine.parents:
+                if parent == effect.owner.anchor or effect.owner.anchor not in parent.parents:
+                    break
+                if not (parent == path or path in parent.parents):
+                    continue
+                record = next((item for item in self._slice_a_created
+                               if item.leaf_path == parent and not item.consumed), None)
+                binding = self._migration_retention.get(parent)
+                node = (record.current_node if record is not None else binding[2] if binding is not None else
+                        next((image[parent] for image in self._original.values() if parent in image), None))
+                if node is None or node.kind != "directory" or not self._point_matches(parent, node):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: custody support drift")
+                if record is not None:
+                    owner = self._slice_a_owners.get(os.path.normcase(str(record.anchor_path)))
+                    if owner is None or owner.transaction is not self:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: custody support owner")
+                    owner._assert_created_binding(record)
+                include(parent, node)
+        return result
+
     def _restore_entry(self, entry: dict[str, object], *, blocked: tuple[Path, ...] = ()) -> None:
         path = entry["path"]
         assert isinstance(path, Path)
@@ -4047,7 +4256,10 @@ class _InstallTransaction:
                     if member == effect.path or effect.path in member.parents:
                         del restored[member]
                 restored.update(effect.restored_state)
+            restored.update(self._custody_image(path))
             if self._expected[path] == restored:
+                if not self._image_matches(path, restored):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: terminal namespace drift")
                 self._restore_copy_metadata(path)
                 return  # Identity-retaining effects already restored the exact old state.
             if entry["kind"] == "absent":
@@ -4154,7 +4366,7 @@ class _InstallTransaction:
             except BaseException as cleanup:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "retention-acquisition", primary,
                                       members=(_RollbackFailureMember("backup", -1, str(directory),
-                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup)),),
+                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
                                       recovery_path=directory) from primary
             raise
         return directory
@@ -4175,14 +4387,18 @@ class _InstallTransaction:
                      if not record.settled and record.tombstone_path.parent == directory}
         recorded.update(effect.retained for effect in self._effects
                         if effect.retained.parent == directory and effect.retained_state is not None)
+        recorded.update(effect.quarantine for effect in self._effects
+                        if effect.preserve_runtime_custody and effect.quarantine_state
+                        and effect.quarantine.parent == directory)
         if pending is not None and pending.tombstone_path.parent == directory:
             recorded.add(pending.tombstone_path)
         for member in directory.iterdir():
             if member not in recorded:
                 raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: foreign migration retention member")
-            effect = next((item for item in self._effects if item.retained == member), None)
+            effect = next((item for item in self._effects if member in (item.retained, item.quarantine)), None)
             if effect is not None:
-                if (not self._image_matches(member, effect.retained_state)):
+                state = effect.quarantine_state if member == effect.quarantine else effect.retained_state
+                if (not self._image_matches(member, state)):
                     raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: retained replacement")
             else:
                 owner._assert_regular(member, existing=True)
@@ -4200,13 +4416,18 @@ class _InstallTransaction:
                 if any(self._paths_overlap(directory, path) for path in (blocked or []) + unresolved):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retention dependency")
                 self.assert_migration_retention(directory, owner)
+                custody = self._custody_image(directory)
+                if custody:
+                    if not self._image_matches(directory, custody):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: custody container drift")
+                    continue  # Registered container remains bound support, never a deleted directory.
                 if only_empty and any(directory.iterdir()):
                     continue
             except BaseException as exc:
                 if only_empty and not isinstance(exc, _InstallFailure):
                     continue  # Mandatory final settlement still reports pre-action uncertainty.
                 child_paths, child_members, child_errors = self._settlement_failure(
-                    exc, "backup", ordinal, directory, "E_ROLLBACK_SETTLEMENT_FAILED", (directory,))
+                    exc, "backup", ordinal, directory, "E_ROLLBACK_SETTLEMENT_FAILED", (directory,), participant="backup")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
@@ -4217,7 +4438,7 @@ class _InstallTransaction:
                 del self._migration_retention[directory]
             except BaseException as exc:
                 child_paths, child_members, child_errors = self._settlement_failure(
-                    exc, "backup", ordinal, directory, "E_ROLLBACK_SETTLEMENT_FAILED", (directory,))
+                    exc, "backup", ordinal, directory, "E_ROLLBACK_SETTLEMENT_FAILED", (directory,), participant="backup")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
@@ -4241,7 +4462,7 @@ class _InstallTransaction:
                     "<owner>",
                     "E_ROLLBACK_CREATED_IDENTITY_CHANGED",
                     "created ledger has no mutable-path owner",
-                )
+                 participant="created")
             )
             unresolved.extend(record.leaf_path for record in recorded)
             return unresolved, failures, retained_errors
@@ -4252,6 +4473,31 @@ class _InstallTransaction:
             if record.consumed:
                 continue
             owner = self._slice_a_owners.get(os.path.normcase(str(record.anchor_path)))
+            custody_effect = next((effect for effect in self._effects
+                if effect.preserve_runtime_custody and effect.quarantine_state and effect.quarantine is not None
+                and (record.leaf_path == effect.quarantine or record.leaf_path in effect.quarantine.parents)), None)
+            if custody_effect is not None and not any(self._paths_overlap(record.leaf_path, unsafe)
+                                                     for unsafe in unresolved + (blocked or [])):
+                try:
+                    if owner is None or not custody_effect.settled:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unsettled custody creator")
+                    owner._assert_created_binding(record)
+                    desired = self._custody_image(record.leaf_path)
+                    if not desired or not self._image_matches(record.leaf_path, desired):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: custody creator namespace")
+                    self._slice_a_created[ordinal] = replace(record,
+                        disposition="custody-transfer" if record.leaf_path == custody_effect.quarantine else "custody-support",
+                        custody_effect=custody_effect)
+                    if record.leaf_path != custody_effect.quarantine:
+                        custody_effect.custody_support_retained = True
+                    continue
+                except BaseException as exc:
+                    child_paths, child_members, child_errors = self._settlement_failure(
+                        exc, "created", ordinal, record.leaf_path, "E_ROLLBACK_CREATED_IDENTITY_CHANGED", (record.leaf_path,), participant="created")
+                    unresolved.extend(child_paths)
+                    failures.extend(child_members)
+                    retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
+                    continue
             creation = next((effect for effect in self._effects
                              if effect.path == (record.logical_leaf_path or record.leaf_path)
                              and effect.owner is owner and not effect.before and effect.settled
@@ -4276,7 +4522,7 @@ class _InstallTransaction:
                         str(record.leaf_path),
                         "E_ROLLBACK_CREATED_IDENTITY_CHANGED",
                         "overlaps an unresolved created identity",
-                    )
+                     participant="created")
                 )
                 unresolved.append(record.leaf_path)
                 continue
@@ -4296,7 +4542,7 @@ class _InstallTransaction:
                     else "E_ROLLBACK_CREATED_IDENTITY_CHANGED"
                 )
                 child_paths, child_members, child_errors = self._settlement_failure(
-                    exc, "created", ordinal, record.leaf_path, stable_id, (record.leaf_path,))
+                    exc, "created", ordinal, record.leaf_path, stable_id, (record.leaf_path,), participant="created")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
@@ -4330,7 +4576,7 @@ class _InstallTransaction:
                 self._advance(record.tombstone_path, {})
             except BaseException as exc:
                 child_paths, child_members, child_errors = self._settlement_failure(
-                    exc, "migration", ordinal, record.leaf_path, "E_ROLLBACK_CREATED_IDENTITY_CHANGED")
+                    exc, "migration", ordinal, record.leaf_path, "E_ROLLBACK_CREATED_IDENTITY_CHANGED", participant="migration")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
@@ -4356,7 +4602,7 @@ class _InstallTransaction:
                 unresolved.extend((record.leaf_path, record.tombstone_path,
                                    record.logical_leaf_path or record.leaf_path))
                 child_paths, child_members, child_errors = self._settlement_failure(
-                    exc, "migration", ordinal, record.leaf_path, "E_ROLLBACK_CREATED_IDENTITY_CHANGED")
+                    exc, "migration", ordinal, record.leaf_path, "E_ROLLBACK_CREATED_IDENTITY_CHANGED", participant="migration")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
@@ -4381,7 +4627,7 @@ class _InstallTransaction:
                         str(path),
                         "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY",
                         "snapshot overlaps an unresolved created identity",
-                    )
+                     participant="snapshot")
                 )
                 retain_backup = True
                 continue
@@ -4389,7 +4635,7 @@ class _InstallTransaction:
                 self._restore_entry(entry, blocked=tuple(unresolved + [Path(member.path) for member in failures]))
             except BaseException as exc:
                 child_paths, child_members, child_errors = self._settlement_failure(
-                    exc, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED", (path,))
+                    exc, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED", (path,), participant="snapshot")
                 unresolved.extend(child_paths)
                 failures.extend(child_members)
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
@@ -4406,7 +4652,7 @@ class _InstallTransaction:
                 raise OSError("backup path still exists")
         except BaseException as exc:
             paths, members, retained_errors = self._settlement_failure(exc, "backup", 0, backup,
-                "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (backup,))
+                "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (backup,), participant="backup")
             return _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "backup", exc,
                                    members=tuple(members), unresolved_paths=tuple(paths), retained_errors=retained_errors)
         return None
@@ -4416,21 +4662,33 @@ class _InstallTransaction:
         unresolved: list[Path] = []
         failures: list[_RollbackFailureMember] = []
         retained_errors = ()
-        def failed(exc, phase, ordinal, path):
+        def failed(exc, phase, ordinal, path, participant):
             nonlocal retained_errors
             paths, members, child_errors = self._settlement_failure(exc, phase, ordinal, path,
-                "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", (path,))
+                "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", (path,), participant=participant)
             unresolved.extend(paths)
             failures.extend(members)
             retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
-        def usable(path, state, phase, ordinal):
+        def usable(path, state, phase, ordinal, participant):
             try:
                 if not state or not self._image_matches(path, state):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained recovery image")
                 return True
             except BaseException as exc:
-                failed(exc, phase, ordinal, path)
+                failed(exc, phase, ordinal, path, participant)
                 return False
+        for ordinal, effect in enumerate(self._effects):
+            if effect.preserve_runtime_custody and effect.quarantine_state and effect.quarantine is not None:
+                try:
+                    # Custody is a durable current-image outcome, never a beforeimage.
+                    self._custody_image(effect.quarantine)
+                    for record in self._slice_a_created:
+                        if record.custody_effect is effect and record.disposition == "custody-support":
+                            if not self._image_matches(record.leaf_path, self._custody_image(record.leaf_path)):
+                                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained support recovery drift")
+                except BaseException as exc:
+                    effect.custody_current_verified = False
+                    failed(exc, "snapshot", ordinal, effect.quarantine, "effect")
         backups = tuple((path, state) for path, state in self._backup_states.items() if state)
         if self._temporary is not None and backups:
             root = self._backup_root_state.get(self._temporary)
@@ -4438,14 +4696,14 @@ class _InstallTransaction:
                 if root is None or not self._point_matches(self._temporary, root):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained recovery root")
             except BaseException as exc:
-                failed(exc, "backup", 0, self._temporary)
+                failed(exc, "backup", 0, self._temporary, "backup")
             else:
                 for ordinal, (path, state) in enumerate(backups):
-                    if usable(path, state, "backup", ordinal):
+                    if usable(path, state, "backup", ordinal, "backup"):
                         return self._temporary, unresolved, failures, retained_errors
         for ordinal, effect in enumerate(self._effects):
             if not effect.settled and effect.before and effect.retained_state:
-                if usable(effect.retained, effect.retained_state, "snapshot", ordinal):
+                if usable(effect.retained, effect.retained_state, "snapshot", ordinal, "effect"):
                     return effect.retained, unresolved, failures, retained_errors
         for ordinal, record in enumerate(self._slice_a_migrated):
             if record.settled:
@@ -4455,9 +4713,9 @@ class _InstallTransaction:
                     continue  # No retained candidate from an unperformed migration.
                 current = self._current_role(record, old=True)
             except BaseException as exc:
-                failed(exc, "migration", ordinal, record.tombstone_path)
+                failed(exc, "migration", ordinal, record.tombstone_path, "migration")
                 continue
-            if usable(record.tombstone_path, {record.tombstone_path: current}, "migration", ordinal):
+            if usable(record.tombstone_path, {record.tombstone_path: current}, "migration", ordinal, "migration"):
                 return record.tombstone_path, unresolved, failures, retained_errors
         return None, unresolved, failures, retained_errors
 
@@ -4487,6 +4745,7 @@ class _InstallTransaction:
                 unresolved.extend(recovery_unresolved)
                 failures.extend(recovery_failures)
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, recovery_errors)
+            self._associate_custody(original, unresolved)
             if failures:
                 members = tuple(failures)
                 raise _InstallFailure(
@@ -4498,10 +4757,7 @@ class _InstallTransaction:
                     unresolved_paths=tuple(unresolved), retained_errors=retained_errors,
                 )
             if isinstance(exc, _InstallFailure) and exc.recovery_path != recovery_path:
-                raise _InstallFailure(exc.stable_id, exc.context, exc.cause,
-                                      members=exc.members, recovery_path=recovery_path,
-                                      unresolved_paths=exc.unresolved_paths,
-                                      retained_errors=(exc,) if _copy_setter_operation_errors(exc) else ()) from exc
+                raise exc._with_recovery_path(recovery_path) from exc
             return False
 
         original: BaseException = exc or _InstallFailure(
@@ -4560,6 +4816,7 @@ class _InstallTransaction:
             retained_errors = _merge_copy_setter_operation_errors(retained_errors, recovery_errors)
         else:
             recovery_path = None
+        self._associate_custody(original, unresolved)
         if failures:
             ordered = tuple(
                 sorted(
@@ -4588,13 +4845,23 @@ class _InstallTransaction:
                 unresolved_paths=tuple(unresolved), retained_errors=retained_errors,
             ) from original
         if isinstance(exc, _InstallFailure) and exc.recovery_path != recovery_path:
-            raise _InstallFailure(exc.stable_id, exc.context, exc.cause,
-                                  members=exc.members, recovery_path=recovery_path,
-                                  unresolved_paths=exc.unresolved_paths,
-                                      retained_errors=(exc,) if _copy_setter_operation_errors(exc) else ()) from exc
+            raise exc._with_recovery_path(recovery_path) from exc
         if exc is None:
             raise original
         return False
+
+    def _associate_custody(self, error: BaseException | None, unresolved: list[Path] | tuple[Path, ...] = ()) -> None:
+        """Keep actual process-local outcomes on the existing private error owner."""
+        for effect in self._effects:
+            if effect.preserve_runtime_custody and any(self._paths_overlap(endpoint, unsafe)
+                    for endpoint in (effect.location, effect.quarantine) if endpoint is not None
+                    for unsafe in unresolved):
+                effect.custody_current_verified = False
+        storage = _passive_owner_storage(BaseException, error)
+        if storage is not None:
+            dict.__setitem__(storage, "_installer_custody", tuple(
+                (ordinal, effect) for ordinal, effect in enumerate(self._effects)
+                if effect.preserve_runtime_custody and effect.quarantine_state))
 
 
 def _is_reparse_metadata(metadata: os.stat_result) -> bool:
@@ -5222,7 +5489,7 @@ class _CreateOnlyMutablePath:
                 self.transaction._dispose_image(path, state)
         except BaseException as cleanup:
             paths, members, retained_errors = self.transaction._settlement_failure(cleanup, "backup", -1, path,
-                "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (path,))
+                "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (path,), participant="backup")
             raise _InstallFailure(
                 "E_ROLLBACK_SETTLEMENT_FAILED", "prepared", original or cleanup,
                 members=tuple(members), recovery_path=path, unresolved_paths=tuple(paths), retained_errors=retained_errors,
@@ -5410,7 +5677,7 @@ class _CreateOnlyMutablePath:
                     self.rollback_migrated(record, replacement_may_be_absent=True)
                 except BaseException as settlement:
                     paths, members, retained_errors = self.transaction._settlement_failure(settlement, "migration", -1,
-                        tombstone, "E_ROLLBACK_SETTLEMENT_FAILED", (tombstone,))
+                        tombstone, "E_ROLLBACK_SETTLEMENT_FAILED", (tombstone,), participant="migration")
                     raise _InstallFailure(
                         "E_ROLLBACK_SETTLEMENT_FAILED", "migration", error,
                         members=tuple(members), recovery_path=retention or tombstone.parent,
@@ -5425,7 +5692,7 @@ class _CreateOnlyMutablePath:
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "migration-stage",
                                           original if original is not None else cleanup,
                                           members=(_RollbackFailureMember("backup", -1, str(temporary),
-                                                   "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup)),),
+                                                   "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
                                           recovery_path=temporary) from original
             current = next((item for item in self.transaction._slice_a_migrated
                             if record is not None and item.proof_key == record.proof_key), record)
@@ -5543,6 +5810,7 @@ class _CreateOnlyMutablePath:
         if current_digest is None:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid source tree")
         effect = self.transaction.arm_replacement(target, None, self)
+        effect.ignore_runtime_cache = ignore_runtime_cache
         def record_stage(path, node):
             effect.prepared_path = path
             effect.prepared_state = {path: node}
@@ -5600,6 +5868,7 @@ class _CreateOnlyMutablePath:
             self.transaction._advance(path, {path: node})
         staged = self.transaction._allocate_owned_directory(target.parent, f".{target.name}.", record_stage)
         effect = self.transaction.arm_replacement(target, staged, self)
+        effect.ignore_runtime_cache = ignore_runtime_cache
         effect.prepared_path = staged
         effect.prepared_state = prepared
         staged_state = None

@@ -117,6 +117,15 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
         self.assertEqual(context, policy.TURN_ANCHOR_CONTEXT)
         for marker in (
             "Root Lead",
+            "after compaction or a side question",
+            "keep the admitted primary outcome and next authorized action explicit",
+            "continue the next ready primary action in the same turn",
+            "continue ready primary work without waiting for the side result",
+            "Fast independent side completion is fine",
+            "preserve the side owner's resume point and hold only dependent actions",
+            "Explicit user stop, pause, cancel, or reprioritization wins",
+            "Native Goal PAUSED remains held for its user/native owner",
+            "Earlier progress is not completion",
             "Under the current default",
             "provider and leaf agents",
             "do not spawn or recursively launch wrappers",
@@ -154,16 +163,18 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
         context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
         scenarios = {
             "resume after compaction or a side question": (
-                "resume the current primary task after compaction or a side question",
-                "Side questions, status, and clarifications are commentary; then resume",
+                "after compaction or a side question, keep the admitted primary outcome",
+                "For brief side questions, status, and clarifications, answer briefly in commentary",
+                "continue the next ready primary action in the same turn",
+                "continue ready primary work without waiting for the side result",
             ),
             "terminal conditions remain exact": (
-                "Stop only when it is complete, the user pauses, cancels, or stops it",
-                "every remaining authorized action is concretely blocked",
+                "Stop only when complete, explicitly stopped",
+                "all remaining authorized work is concretely blocked",
             ),
             "one block does not freeze independent work": (
-                "pauses only dependent work",
-                "run useful independent ready work now",
+                "hold only dependent actions",
+                "useful independent ready work",
             ),
             "root-only useful delegation": (
                 "Delegate useful ready work by task to the matching specialist",

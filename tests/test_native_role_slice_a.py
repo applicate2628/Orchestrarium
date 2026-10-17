@@ -4453,7 +4453,12 @@ def test_lead_tree_rollback_ignores_cache_but_rejects_noncache_drift(
             (lead / "__pycache__" / "validator.pyc").write_bytes(b"cache")
             raise RuntimeError("forced post-lead failure")
 
-    assert not (anchor / ".agents").exists()
+    assert not lead.exists()
+    effect = transaction._effects[-1]
+    assert effect.settled and effect.preserve_runtime_custody
+    assert (effect.quarantine / "__pycache__" / "validator.pyc").read_bytes() == b"cache"
+    assert (anchor / ".agents" / "skills").is_dir()
+    assert any(record.disposition == "custody-support" for record in transaction._slice_a_created)
 
     transaction = installer._InstallTransaction([], enabled=False)
     owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)

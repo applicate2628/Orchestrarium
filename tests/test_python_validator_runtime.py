@@ -1243,6 +1243,52 @@ def test_shared_blueprint_checks_contract_without_whole_file_snapshot(
     assert result.errors == (1 if mutation == "required-heading" else 0)
 
 
+def test_codex_addendum_h2_inventory_accepts_terms_and_rejects_shape_drift(
+    tmp_path: Path,
+) -> None:
+    adapter = _load(VALIDATORS[0], "codex_addendum_h2_inventory")
+    runtime = adapter._ENGINE
+    layout = runtime.detect_layout(VALIDATORS[0], "codex", ROOT)
+    actions = tuple(
+        action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
+        if action[0] == "check_exact_h2_inventory"
+        and action[1] == "@ROOT/references-codex/subagent-operating-model.md"
+    )
+    assert len(actions) == 1
+    action = actions[0]
+    assert action[3:] == (
+        "## Codex-specific runtime notes",
+        "## Codex-side repository concretization",
+        "## Shared core now owns",
+        "## Terms and Abbreviations",
+    )
+    path_resolver = runtime.Validator(layout)
+    try:
+        source = path_resolver.path(action[1]).read_bytes()
+    finally:
+        path_resolver.close()
+    candidate = tmp_path / "codex-addendum.md"
+    redirected = (action[0], str(candidate), *action[2:])
+
+    def check(content: bytes) -> int:
+        candidate.write_bytes(content)
+        result = runtime.validate_pack(
+            script=VALIDATORS[0],
+            provider="codex",
+            actions=(redirected,),
+            maintainer_only_shared_reference_names=frozenset(),
+            utility_skills=frozenset(),
+            curated_role_skills=frozenset(),
+            root=ROOT,
+        )
+        assert result.checks == 1
+        return result.errors
+
+    assert check(source) == 0
+    assert check(source.replace(b"\n## Terms and Abbreviations\n", b"\n", 1)) == 1
+    assert check(source + b"\n## 1. Main rule for the lead\n") == 1
+
+
 @pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))
 def test_initializer_read_contract_accepts_in_memory_and_rejects_boundary_loss(
     tmp_path: Path, provider: str, validator: Path,
@@ -1293,7 +1339,7 @@ def test_initializer_read_contract_accepts_in_memory_and_rejects_boundary_loss(
 
 
 @pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))
-@pytest.mark.parametrize("surface", ("gui-body", "provider-addendum"))
+@pytest.mark.parametrize("surface", ("gui-body", "post-spawn-cleanup-body", "provider-addendum"))
 def test_current_provider_currency_pins_accept_source_and_reject_protected_drift(
     tmp_path: Path, provider: str, validator: Path, surface: str,
 ) -> None:
@@ -1304,12 +1350,14 @@ def test_current_provider_currency_pins_accept_source_and_reject_protected_drift
         action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
         if (surface == "gui-body" and action[0] == "check_common_skill_body_pin"
             and action[1] == "windows-gui-manual-testing")
+        or (surface == "post-spawn-cleanup-body" and action[0] == "check_common_skill_body_pin"
+            and action[1] == "post-spawn-cleanup")
         or (surface == "provider-addendum" and action[0] == "check_normalized_sha256"
             and action[1].endswith("/subagent-operating-model.md"))
     )
     assert len(actions) == 1
     action = actions[0]
-    file_index = 3 if surface == "gui-body" else 1
+    file_index = 3 if surface in {"gui-body", "post-spawn-cleanup-body"} else 1
     path_resolver = runtime.Validator(layout)
     try:
         data = path_resolver.path(action[file_index]).read_bytes()
@@ -1334,9 +1382,13 @@ def test_current_provider_currency_pins_accept_source_and_reject_protected_drift
 
     assert check(data).errors == 0
     clause = (b"found-by: windows-gui-manual-testing" if surface == "gui-body"
+              else b"A genuine host-policy refusal stops that operation"
+              if surface == "post-spawn-cleanup-body"
               else b"persistence limited to authorized install/configuration writes")
     assert clause in data
     assert check(data.replace(clause, b"[removed protected contract]")).errors == 1
+    if surface == "post-spawn-cleanup-body":
+        assert check(b"").errors == 1
     if surface == "provider-addendum":
         normalized = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
         assert check(normalized.replace(b"\n", b"\r\n")).errors == 0
@@ -1570,6 +1622,11 @@ def test_scoped_action_registry_keeps_source_only_maintainer_checks_out_of_insta
         for scope, actions in module.ACTIONS
         if scope in ("all", "installed")
         for action in actions
+    )
+    assert any(
+        action[:2] == ("check_common_skill_body_pin", "post-spawn-cleanup")
+        and action[3] == "@SKILLS/post-spawn-cleanup/SKILL.md"
+        for action in installed_actions
     )
     assert not any(
         module._is_source_only_maintainer_action(action)

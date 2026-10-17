@@ -2,6 +2,16 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-17
+
+- Lead keeps the admitted primary task active while dispatching compatible substantive side work, then continues ready primary actions without waiting. Shared rules, project initialization and reminders now give the same direction while preserving user pauses, reprioritization and resource guarantees.
+
+- Both pack validators now check the complete live common-skill set, including cleanup after subagents. Codex accepts required terminology in the operating-model addendum while retaining exact headings and independently reviewed content checks, so current rules no longer fail stale expectations.
+
+- Ordinary Python runtime bytecode no longer causes a false installer rollback for an unchanged authored tree. Cache-bearing replacement trees are preserved during rollback, and installer failures report safe identifiers and target hashes while keeping complete private causes and recovery custody.
+
+- Ordinary producer work can explicitly select Luna Extra high for deeper bounded reasoning when the expected reduction in mistakes and rework justifies extra time. High remains available for clear bounded work; defaults, protected review/critical/recovery membership and the named mechanical corridor stay unchanged. This adds a task-dependent choice without claiming an unmeasured speed benefit or promoting Max.
+
 ## 2026-10-16
 
 - Ordinary installation validates the complete timestamp pair observed by the native setter separately from later access-time variation, avoiding false copy/rollback failures after a proved assignment. Partial effects, stable-metadata or identity drift and original errors remain guarded; absent assignment observations retain strict full-image validation.

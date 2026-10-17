@@ -44,9 +44,9 @@ When the main conversation (holding the Lead role) needs to decide between roles
 
 ## Primary-task lock
 
-- Maintain exactly one primary in-progress task at a time.
-- Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
-- After handling a side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- Follow the shared **Primary-task continuity and side work** rule in AGENTS.md; retain the admitted primary outcome and next authorized action.
+- Answer brief questions inline. Promptly delegate eligible substantive admitted side work to matching non-spawning specialists under existing authority, capacity, full resource surfaces and gates; continue ready primary work in the same turn without waiting for the side result.
+- Defer conflicting side work with its owner/resume point or use already-authorized validated isolation; preserve manual modes and explicit user stop/pause/cancel/reprioritization and native Goal holds.
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
 - If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
 - When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away. For each unresolved blocked action, record the exact action, current blocking reason, concrete resume condition, and next step. After a relevant condition changes, and again before completion, reassess the affected action from current evidence; an old denial without that reassessment is not current blockage evidence, and reassessment grants no permission, bypass, retry, deletion, or other mutation authority.

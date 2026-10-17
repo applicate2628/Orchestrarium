@@ -1351,6 +1351,13 @@ _ALL_ACTIONS = (
     + _DECLARED_ACTIONS[41:42]
     + _DECLARED_ACTIONS[113:257]
     + _APAT_ACTIONS
+    + (
+        (
+            "check_common_skill_body_pin", "post-spawn-cleanup",
+            "afc6e1c2bccc547c2fbe4ee77a8d98e1ca546203662218817c6f8699bb6dc5ac",
+            "@SKILLS/post-spawn-cleanup/SKILL.md",
+        ),
+    )
 )
 
 

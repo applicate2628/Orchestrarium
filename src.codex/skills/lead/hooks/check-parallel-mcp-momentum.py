@@ -16,10 +16,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 ACTIVE_MODES = frozenset({"auto", "force"})
 REMINDER = (
-    "[parallel and MCP momentum] Root Lead: if the user has not paused or parked "
-    "new launches, recheck Ready before starting work; fill available capacity "
-    "with the maximum useful set of compatible independent ready lanes and "
-    "refill immediately as lanes settle. Do not invent work or calls. Discover "
+    "[parallel and MCP momentum] Root Lead: keep the admitted primary outcome and "
+    "next authorized action explicit. Promptly dispatch admitted substantive side "
+    "work only under existing authority, gates, capacity, and full resource surfaces "
+    "compatible with ready primary work; then continue the next ready primary action "
+    "in this turn without waiting for a side result. Fast side completion is fine. "
+    "On conflict, preserve the side owner's resume point and hold only dependent "
+    "actions. Explicit user stop, pause, cancel, or reprioritization wins; native Goal "
+    "PAUSED remains with its owner. Recheck Ready and refill useful compatible lanes "
+    "as they settle. Do not invent work or calls. Discover "
     "fresh task-fitting Model Context Protocol (MCP) tools before manual work "
     "where they improve quality; select exact available tools for each lane. "
     "Pass only needed tools and short context; keep leaves non-spawning. "

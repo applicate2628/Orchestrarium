@@ -138,9 +138,11 @@ FACT_ROUTING_FRAGMENTS = (
     "add `$planner` only when the user explicitly requests an execution plan",
 )
 SIDE_QUESTION_CONTINUITY_FRAGMENTS = (
-    "answer a side question briefly in commentary",
-    "next authorized primary-task action in the same turn",
-    "never end the turn with a final-only answer",
+    "answer brief questions in commentary",
+    "promptly delegate eligible substantive admitted side work",
+    "continue the next ready primary action in the same turn without waiting for its result",
+    "existing authority, capacity, full resource surfaces, gates",
+    "explicit user/manual/native holds",
 )
 HANDOFF_ACCEPTANCE_ECHO_FRAGMENTS = (
     "same accepted `Acceptance criteria` and `Named regression guard`",

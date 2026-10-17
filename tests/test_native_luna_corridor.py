@@ -1393,7 +1393,7 @@ def test_luna_facts_require_explicit_facts_only_consumption() -> None:
 
 
 def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> None:
-    """Named mechanical V1 stays exact while ordinary producers may select Luna/high."""
+    """Named mechanical V1 stays exact while ordinary producers may select Luna effort."""
 
     policy = _policy()
     resolved = _resolve(tmp_path)["rolePolicy"]
@@ -1446,6 +1446,27 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
         for name, profile in policy["profiles"].items()
         if profile["codexModel"] == "gpt-6-luna"
     }
+    assert luna_profiles == {"luna-high", "luna-xhigh"}
+    assert policy["profiles"]["luna-xhigh"] == {
+        "modelTier": "mechanical",
+        "effort": "xhigh",
+        "codexModel": "gpt-6-luna",
+        "useCriteria": policy["profiles"]["luna-xhigh"]["useCriteria"],
+    }
+    assert policy["profiles"]["luna-xhigh"]["useCriteria"]
+    assert {
+        task for task, record in policy["taskClasses"].items()
+        if "luna-xhigh" in record.get("admissibleProfiles", ())
+    } == {"exploration", "engineering"}
+    assert {
+        name for name, record in {**policy["roles"], **policy["skillOnlyRoles"]}.items()
+        if "luna-xhigh" in record["allowedProfiles"]
+    } == {
+        "explorer", "analyst", "product-analyst", "worker", "backend-engineer",
+        "platform-engineer", "scientific-software-engineer", "knowledge-archivist",
+        "frontend-engineer", "qt-ui-engineer", "model-view-engineer", "data-engineer",
+        "toolchain-engineer", "geometry-engineer", "graphics-engineer", "visualization-engineer",
+    }
     luna_consumers = {
         role_name
         for role_name, role in policy["roles"].items()
@@ -1459,7 +1480,7 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
     assert policy["roles"]["explorer"]["defaultProfile"] == "frontier-high"
     assert luna_profiles.intersection(
         policy["roles"]["explorer"]["allowedProfiles"]
-    ) == {"luna-high"}
+    ) == {"luna-high", "luna-xhigh"}
     assert "mechanical-scout" not in policy["taskRoleEligibility"]["review"]
     assert "mechanical-worker" not in policy["taskRoleEligibility"]["engineering"]
 

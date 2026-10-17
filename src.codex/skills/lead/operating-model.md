@@ -36,9 +36,9 @@ Apply the binding shared **Workflow economy (binding)** rule. This Codex project
 
 ## Primary-task lock
 
-- Maintain exactly one primary in-progress task at a time.
-- Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
-- After handling a side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- Follow the shared **Primary-task continuity and side work** rule in AGENTS.md; retain the admitted primary outcome and next authorized action.
+- Answer brief questions inline. Promptly delegate eligible substantive admitted side work to matching non-spawning specialists under existing authority, capacity, full resource surfaces and gates; continue ready primary work in the same turn without waiting for the side result.
+- Defer conflicting side work with its owner/resume point or use already-authorized validated isolation; preserve manual modes and explicit user stop/pause/cancel/reprioritization and native Goal holds.
 - After context compaction or resume from a summary, restore the active task, next unchecked step and open evidence gates from accepted recovery; continuation remains subject to user/persisted holds and, for an enrolled native Goal, the shared same-task/native-binding authority rule. Ordinary or unenrolled/no-Goal tasks retain their existing workflow.
 - If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
 - When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.

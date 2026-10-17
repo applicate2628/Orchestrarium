@@ -17,6 +17,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 
 | Block | Claude (`src.claude/agents/contracts/operating-model.md`) | Codex (`src.codex/skills/lead/operating-model.md`) | Notes |
 |-------|----------------------------------------------------------|-----------------------------------------------------|-------|
+| Primary-task lock | §"Primary-task lock" | §"Primary-task lock" | Both project the shared AGENTS.md **Primary-task continuity and side work** owner; brief inline questions, eligible substantive side delegation and no-wait ready primary continuation preserve existing authority, resource gates, holds and recovery. |
 | Isolation rule | §"Isolation rule" | §"Isolation rule" | Claude mentions Agent tool explicitly; Codex says "designated agent invocation mechanism" |
 | Research admission filter | §"Research admission filter" | §"Research admission filter" | Identical semantics, identical 8-item list + 3 gate owners |
 | Interaction types | §"Interaction types" table | §"Interaction types" table | Same 8 types; Claude has prose descriptions, Codex has compact table |
