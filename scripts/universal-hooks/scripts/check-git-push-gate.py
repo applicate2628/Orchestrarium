@@ -2963,12 +2963,22 @@ def _normalize_repository_workdir(repository_workdir: str) -> str:
     if type(repository_workdir) is not str or not repository_workdir:
         raise PrRouteDenied("PRG-WORKDIR-INVALID")
     try:
-        selected = Path(repository_workdir).resolve(strict=True)
-    except (OSError, RuntimeError):
+        candidate = Path(repository_workdir)
+        if not candidate.is_absolute():
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        selected = candidate.resolve(strict=True)
+        if (
+            not selected.is_dir()
+            or os.path.normcase(str(selected)) != os.path.normcase(repository_workdir)
+        ):
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        # Case folding may make a reparse alias look like the selected root.
+        # Require every lexical component to remain an ordinary directory.
+        for count in range(1, len(candidate.parts) + 1):
+            _directory_generation(Path(*candidate.parts[:count]))
+    except (OSError, RuntimeError, ValueError):
         raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
-    if not selected.is_dir() or str(selected) != repository_workdir:
-        raise PrRouteDenied("PRG-WORKDIR-INVALID")
-    return repository_workdir
+    return str(selected)
 
 
 def _prove_repository_root(repository_workdir: str, git_exe: str) -> str:

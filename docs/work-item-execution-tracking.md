@@ -598,15 +598,24 @@ instant selects `work-items/bugs/archive/YYYY-MM/`, not the bug slug's date or
 wall clock. The bug keeps its id, `fixed` status, and context; parent lifecycle
 and identity remain unchanged. The existing unique physical resolver admits active
 or archived parents, with readable-legacy and stamped-strict archive admission;
-missing, duplicate, backlog or invalid archived parents refuse. The owner inventories lifecycle references in text and structured
-records, leaves logical `bug:<slug>` references unchanged, and rewrites
-recognized mutable physical Markdown links to the archived path. Mandatory
-Markdown/JSON/JSONL records keep their codec and validation obligations. Known
-Portable Network Graphics (PNG), bitmap, and Portable Document Format (PDF)
-attachments and Word Office Open XML packages are identified by content or
-package identity and preserved opaquely, including their metadata
-and native navigation; they are not lifecycle-reference consumers. Names alone
-cannot exclude ordinary UTF-8 text. Unknown or unreadable consumers retain each
+missing, duplicate, backlog or invalid archived parents refuse. Incoming-link
+selection follows each file's actual work-item role before interpreting its bytes.
+Ordinary files under an owned active or archived item's `inputs/` remain opaque
+data regardless of encoding, filename, native format, or incidental logical,
+Markdown-like, or literal paths; their bytes are preserved. This role does not
+assert format validity or reference freedom. Exact retained-preimage claims and
+reserved custody keep their separate validation, and an invalid selected claim
+does not become an ordinary-data exemption. Current Markdown/JSON/JSONL records
+and other selected current text consumers keep their codec and reference
+obligations. The owner reads each leaf through its existing raw or
+acquired-history carrier and verifies its current identity and bytes before
+skipping interpretation. A failed read of the retained ledger is not proof that
+no claim exists; unrelated malformed legacy rows still do not become a global veto.
+Known Portable Network Graphics (PNG), bitmap, and Portable Document
+Format (PDF) attachments and Word Office Open XML packages retain the existing
+narrow content/package recognition; they are preserved without extracting
+metadata or native navigation. Names alone do not exclude ordinary text outside
+the owned input-data role. Unknown or unreadable current consumers retain each
 caller's strict or tolerant acquisition policy. Attachment identity asserts
 neither native validity nor reference freedom. An unsafe or immutable physical
 text consumer fails closed.
@@ -986,7 +995,7 @@ Use the existing `agent-run-ledger.py append --evidence-json` surface. Keep the 
 
 The public writer captures the unchanged payload and accepted report, validates the ordinary whole append candidate, and publishes the report through the existing digest store and exact historical-PASS association. Failed append reclaims only its unchanged owned residue. The incoming-link owner resolves only the matching declaration's selected association and per-record schema/unique decoded identity; unrelated malformed legacy rows or unrelated associations do not become additional vetoes. Admission is ineffective without the exact validated association. The stewardship report remains usable through its immutable snapshot after its original path is overwritten or removed.
 
-Only the exact declared payload or exact derived `provenance.snapshot` is excluded from link interpretation. That exclusion preserves bytes and purpose; it does not assert that no historical links exist, grant goal completion, close a review obligation, or waive a gate. Every other consumer retains the existing native-content recognition, strict UTF-8 and reference checks. Unknown unreadable live input still refuses strict inventory.
+Only the exact declared payload or exact derived `provenance.snapshot` is excluded because of historical admission. Ordinary data under its actual work-item `inputs/` role is independently left uninterpreted after the existing input carrier verifies that the leaf has not changed. A failed read of the retained ledger is not proof that no claim exists. Both paths preserve bytes and purpose; neither asserts that historical links are absent, grants goal completion, closes a review obligation, or waives a gate. Actual current consumers retain the existing native-content recognition, strict UTF-8 and reference checks. Unknown unreadable current input still refuses strict inventory.
 
 Mutating lifecycle calls capture the admission carrier, selected association, provenance snapshot and payload in their existing invocation-owned transaction. Existing verification boundaries recheck those observations before intent or later mutations. When that owner moves an ordinary directory, its transaction preserves each captured leaf's original native identity and bytes and proves the moved directory and rebased parent chains before publishing the new observation locations. Unrelated observations remain strict. A failed post-move proof compensates before returning; an unsafe inverse preserves the conflicting state and reports both failures. File and detached-shadow moves retain their existing paths. A standalone inventory grants no future mutation credit. Preview, apply and owning-item relocation use the same selector and retain their existing caller strictness. Positive version-1 retained-scratch release runs admission, receipt publication, settlement and replay in this transaction; omission of `--apply` still refuses before entering it.
 

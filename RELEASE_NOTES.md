@@ -14,6 +14,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Installed hook-health checks now receive the canonical hook manifest through the existing shared Lead runtime materialization path. The documented installed command can resolve platform membership from its own installed files without requiring a checkout path, while missing manifest data still fails visibly.
 
+- Incoming-link discovery now identifies actual work-item consumers before interpreting bytes. Ordinary data in an owned active or archived item's `inputs/` is not interpreted as reference text, regardless of encoding or incidental paths. Existing input readers still verify each file before its contents are skipped, and a failed retained-ledger read is not treated as proof that no claim exists. Selected retained claims, reserved custody, and genuine current text consumers keep their existing validation and failure behavior. Inventory migration now creates missing archive parents through the existing lifecycle creator owner before moving admitted records, so it does not mistake its own directory creation for unrelated drift. It retains actual creator records and can remove only same-invocation empty parents during compensation; pre-existing, foreign, and nonempty directories remain protected. Physical relocation now continues remaining rollback stages after a cancellation; it re-raises the original cancellation only when compensation succeeds, while cleanup uncertainty remains visible.
+
+- Publication hooks accept equivalent native Windows case and separator spellings of an absolute repository directory while retaining alias, traversal, tool/command conflict, consent and fresh-range evidence checks.
+
 ## 2026-10-16
 
 - Ordinary installation validates the complete timestamp pair observed by the native setter separately from later access-time variation, avoiding false copy/rollback failures after a proved assignment. Partial effects, stable-metadata or identity drift and original errors remain guarded; absent assignment observations retain strict full-image validation.

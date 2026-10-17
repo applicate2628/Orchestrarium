@@ -31,8 +31,16 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from types import MappingProxyType
+from types import MappingProxyType, ModuleType
 from typing import Iterable, Literal, Mapping
+
+
+_LIFECYCLE_MODULE_ORIGIN = sys.modules.get(__name__)
+if (
+    not isinstance(_LIFECYCLE_MODULE_ORIGIN, ModuleType)
+    or _LIFECYCLE_MODULE_ORIGIN.__dict__ is not globals()
+):
+    _LIFECYCLE_MODULE_ORIGIN = None
 
 
 README_BEGIN = "<!-- BEGIN GENERATED WORK-ITEMS STATUS -->"
@@ -9295,16 +9303,45 @@ def _capture_runtime_source(relative: Path, *, failure_id: str, authority=None):
 def _validator_module():
     path = Path(__file__).with_name("validate-work-item-state.py")
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+
+    def actual_lifecycle_owner():
+        owner = _LIFECYCLE_MODULE_ORIGIN
+        if not isinstance(owner, ModuleType) or owner.__dict__ is not globals():
+            raise LifecycleError("WI-VALIDATOR-LOAD", "executing lifecycle owner is unavailable")
+        return owner
+
+    def bind_actual_lifecycle_owner(validator, owner):
+        if not isinstance(validator, ModuleType):
+            raise LifecycleError("WI-VALIDATOR-LOAD", "validator loader did not return a module")
+        if "_LIFECYCLE_OWNER" not in validator.__dict__ or validator.__dict__["_LIFECYCLE_OWNER"] is not None:
+            raise LifecycleError("WI-VALIDATOR-LOAD", "validator lifecycle owner slot is unavailable")
+        validator.__dict__["_LIFECYCLE_OWNER"] = owner
+
+    def verify_cached_lifecycle_owner(validator, owner):
+        if (
+            not isinstance(validator, ModuleType)
+            or "_LIFECYCLE_OWNER" not in validator.__dict__
+            or validator.__dict__["_LIFECYCLE_OWNER"] is not owner
+        ):
+            raise LifecycleError("WI-VALIDATOR-LOAD", "cached validator owner differs from the executing lifecycle module")
+
     if transaction is not None:
         transaction.verify()
         if transaction._validator_reuse is not None:
+            try:
+                verify_cached_lifecycle_owner(transaction._validator_reuse, actual_lifecycle_owner())
+            except BaseException as failure:
+                transaction._retain_source_failure(failure)
+                raise
             return transaction._validator_reuse
     if transaction is None:
+        owner = actual_lifecycle_owner()
         spec = importlib.util.spec_from_file_location("work_item_state_validator", path)
         if spec is None or spec.loader is None:
             raise LifecycleError("WI-VALIDATOR-LOAD", f"cannot load validator: {path}")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        bind_actual_lifecycle_owner(module, owner)
         return module
     # Execute the native-acquired source, preserving the existing spec/name/file
     # context. V continues to own its schema path and dependency loaders.
@@ -9325,6 +9362,8 @@ def _validator_module():
         _verify_captured_file(source, "WI-VALIDATOR-LOAD")
         _verify_captured_file(schema, "WI-VALIDATOR-LOAD")
         transaction.observe_retained_inputs((source, schema))
+        owner = actual_lifecycle_owner()
+        bind_actual_lifecycle_owner(module, owner)
     except BaseException as failure:
         transaction._retain_source_failure(failure)
         raise
@@ -18316,8 +18355,31 @@ def _move_terminal_category(root: Path, reference: str, *,
                 raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE", f"{exc}; rollback incomplete: {'; '.join(failures)}") from exc
             raise
     else:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _replace_lifecycle_directory(source, target, directory=False)
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        created_directories: list[_OwnedNativeCreation] = []
+        try:
+            LifecycleWriteTarget.make_directories(
+                target.parent, transaction, created=created_directories,
+            )
+            _replace_lifecycle_directory(source, target, directory=False)
+        except BaseException as exc:
+            rollback_failures: list[str] = []
+            for record in reversed(created_directories):
+                if not record.creation_published:
+                    continue  # The native creator already settled its unpublished abort.
+                try:
+                    LifecycleWriteTarget.remove_created_directory(
+                        record, transaction,
+                        failure_id="WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE",
+                    )
+                except BaseException as rollback_exc:
+                    rollback_failures.append(f"directory {record.locator}: {rollback_exc}")
+            if rollback_failures:
+                raise LifecycleError(
+                    "WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE",
+                    f"category parent creation rollback failed: {exc}; " + "; ".join(rollback_failures),
+                ) from exc
+            raise
         try:
             refresh_readme(root)
         except LifecycleError as exc:
@@ -18864,7 +18926,8 @@ class _RetainedConsumerScanPreparation:
     def __init__(self, acquired_input=None) -> None:
         self._validator: object | None = None
         self.acquired_input = acquired_input
-        self._items: dict[Path, tuple[CapturedFileSnapshot, list[dict], list[dict[str, object]], tuple[str, ...]] | None] = {}
+        self._items: dict[Path, tuple[CapturedFileSnapshot, list[dict], list[dict[str, object]], tuple[str, ...]] | None | Exception] = {}
+        self._retained_claim_targets: dict[Path, frozenset[str] | None] = {}
 
     def validator(self):
         if self._validator is None:
@@ -18873,19 +18936,84 @@ class _RetainedConsumerScanPreparation:
 
     def item(self, item: Path):
         if item not in self._items:
-            # Missing/failed preparation remains nonauthorizing for this scan.
-            self._items[item] = None
             ledger_path = item / "agent-runs.jsonl"
-            if (ledger_path.exists() if self.acquired_input is None else _input_exists(ledger_path, self.acquired_input)):
-                validator = self.validator()
-                carrier = _capture_file_snapshot(ledger_path, failure_id="WI-CATEGORY-MIGRATION-INVENTORY",
-                                                 maximum_bytes=validator.MAX_LEDGER_EVENTS * validator.MAX_LEDGER_LINE_BYTES,
-                                                 acquired_input=self.acquired_input)
-                diagnostics: list[str] = []
-                metadata: list[dict[str, object]] = []
-                events = validator.load_jsonl(ledger_path, diagnostics, metadata, carrier.data)
-                self._items[item] = (carrier, events, metadata, tuple(diagnostics))
-        return self._items[item]
+            try:
+                if (ledger_path.exists() if self.acquired_input is None else _input_exists(ledger_path, self.acquired_input)):
+                    validator = self.validator()
+                    carrier = _capture_file_snapshot(ledger_path, failure_id="WI-CATEGORY-MIGRATION-INVENTORY",
+                                                     maximum_bytes=validator.MAX_LEDGER_EVENTS * validator.MAX_LEDGER_LINE_BYTES,
+                                                     acquired_input=self.acquired_input)
+                    diagnostics: list[str] = []
+                    metadata: list[dict[str, object]] = []
+                    events = validator.load_jsonl(ledger_path, diagnostics, metadata, carrier.data)
+                    self._items[item] = (carrier, events, metadata, tuple(diagnostics))
+                else:
+                    # A cached None means acquisition proved the ledger absent.
+                    self._items[item] = None
+            except Exception as exc:
+                # Preserve failed acquisition distinctly from an absent ledger.
+                # A later leaf in this invocation must not turn that failure into NoClaim.
+                self._items[item] = exc
+                raise
+        prepared = self._items[item]
+        if isinstance(prepared, Exception):
+            raise prepared
+        return prepared
+
+    def retained_claim_targets(self, item: Path) -> frozenset[str] | None:
+        """Recognize addressed claims; the validator remains the admission authority."""
+        if item not in self._retained_claim_targets:
+            self._retained_claim_targets[item] = None
+            prepared = self.item(item)
+            if prepared is None:
+                self._retained_claim_targets[item] = frozenset()
+            else:
+                _carrier, events, _metadata, _diagnostics = prepared
+                targets: set[str] = set()
+                for event in events:
+                    evidence = event.get("evidence")
+                    if not isinstance(evidence, list):
+                        continue
+                    for entry in evidence:
+                        if not isinstance(entry, dict) or not isinstance(entry.get("result"), str):
+                            continue
+                        try:
+                            profile = json.loads(entry["result"])
+                        except (TypeError, ValueError):
+                            continue
+                        if not isinstance(profile, dict) or profile.get("kind") != "retained-preimage":
+                            continue
+                        ref = entry.get("ref")
+                        if isinstance(ref, str):
+                            targets.add(ref)
+                        provenance = profile.get("provenance")
+                        if isinstance(provenance, dict) and isinstance(provenance.get("snapshot"), str):
+                            targets.add(provenance["snapshot"])
+                self._retained_claim_targets[item] = frozenset(targets)
+        return self._retained_claim_targets[item]
+
+
+def _owned_work_item_input_location(
+    consumer_rel: str, consumer_resolved: Path, work_items: Path, work_items_resolved: Path,
+) -> tuple[Path, str] | None:
+    """Resolve only canonical active/archive item input leaves to their owner."""
+    try:
+        resolved_rel = consumer_resolved.relative_to(work_items_resolved).as_posix()
+    except ValueError:
+        return None
+    if resolved_rel != consumer_rel:
+        return None
+    parts = Path(consumer_rel).parts
+    if len(parts) >= 4 and parts[0] == "active" and parts[2] == "inputs":
+        owner_parts = parts[:2]
+    elif (len(parts) >= 5 and parts[0] == "archive" and parts[3] == "inputs"
+          and re.fullmatch(r"[0-9]{4}-(?:0[1-9]|1[0-2])", parts[1]) and parts[1][:4] != "0000"):
+        owner_parts = parts[:3]
+    else:
+        return None
+    owner = work_items.joinpath(*owner_parts)
+    relative = Path(*parts[len(owner_parts):]).as_posix()
+    return owner, relative
 
 
 def _retained_preimage_consumer(
@@ -19003,6 +19131,7 @@ def _incoming_link_result(
         )
 
     preparation = _RetainedConsumerScanPreparation(acquired_input)
+    work_items_resolved = _input_resolve(work_items, acquired_input)
 
     for consumer in sorted(path for path in _input_descendants(work_items, acquired_input) if _input_is_file(path, acquired_input)):
         if consumer.name in {"README.md", "index.md"}:
@@ -19013,10 +19142,25 @@ def _incoming_link_result(
         consumer_rel = consumer.relative_to(work_items).as_posix()
         if mutable_consumers_only and "archive" in Path(consumer_rel).parts:
             continue
+        ordinary_input_without_claim = False
+        input_location = _owned_work_item_input_location(
+            consumer_rel, consumer_resolved, work_items, work_items_resolved,
+        )
+        if input_location is not None:
+            input_item, input_ref = input_location
+            try:
+                claim_targets = preparation.retained_claim_targets(input_item)
+            except (OSError, ValueError, LifecycleError,
+                    preparation.validator().load_lifecycle_owner().LifecycleError):
+                claim_targets = None
+            if claim_targets is not None and input_ref not in claim_targets:
+                ordinary_input_without_claim = True
         if _retained_preimage_consumer(consumer, work_items, scan_preparation=preparation):
             continue
         try:
             consumer_bytes = _input_bytes(consumer, acquired_input)
+            if ordinary_input_without_claim:
+                continue
             if consumer.suffix.lower() not in {".md", ".json", ".jsonl"} and _incoming_attachment_kind(consumer_bytes) is not None:
                 continue
             text = consumer_bytes.decode("utf-8")
@@ -21001,7 +21145,10 @@ def apply_migration_inventory(
         readme_before = readme.read_bytes() if readme.is_file() else None
         written_consumers: list[dict] = []
         moved: list[dict] = []
-        created_directories: set[Path] = set()
+        created_directories: list[_OwnedNativeCreation] = []
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        if transaction is None:
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "inventory migration requires its held lifecycle owner")
         try:
             for consumer in consumers:
                 if consumer["consumer"].read_bytes() != consumer["before"]:
@@ -21024,14 +21171,9 @@ def apply_migration_inventory(
                         "WI-CATEGORY-MIGRATION-PAYLOAD",
                         f"payload changed after preflight: {plan['reference']}",
                     )
-                cursor = plan["target"].parent
-                transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
-                if transaction is not None:
-                    transaction.verify()
-                while cursor != work_items and not cursor.exists():
-                    created_directories.add(cursor)
-                    cursor = cursor.parent
-                plan["target"].parent.mkdir(parents=True, exist_ok=True)
+                LifecycleWriteTarget.make_directories(
+                    plan["target"].parent, transaction, created=created_directories,
+                )
                 _replace_lifecycle_directory(plan["source"], plan["target"], directory=False)
                 moved.append(plan)
             readme_hash: str | None = None
@@ -21095,45 +21237,48 @@ def apply_migration_inventory(
                 ),
             )
             return len(plans), readme_hash
-        except Exception as exc:
+        except BaseException as exc:
             rollback_failures: list[str] = []
             for plan in reversed(moved):
                 try:
                     if plan["target"].exists() and not plan["source"].exists():
                         plan["source"].parent.mkdir(parents=True, exist_ok=True)
                         _replace_lifecycle_directory(plan["target"], plan["source"], directory=False)
-                except Exception as rollback_exc:
+                except BaseException as rollback_exc:
                     rollback_failures.append(
                         f"{plan['reference']}: {rollback_exc}"
                     )
             for consumer in reversed(written_consumers):
                 try:
                     _atomic_write(consumer["consumer"], consumer["before"])
-                except Exception as rollback_exc:
+                except BaseException as rollback_exc:
                     rollback_failures.append(
                         f"{consumer['consumerRelative']}: {rollback_exc}"
                     )
             try:
                 _restore_readme_snapshot(readme, readme_before)
-            except Exception as rollback_exc:
+            except BaseException as rollback_exc:
                 rollback_failures.append(f"README: {rollback_exc}")
             try:
                 _atomic_write(receipt_path, receipt_before)
-            except Exception as rollback_exc:
+            except BaseException as rollback_exc:
                 rollback_failures.append(f"receipt: {rollback_exc}")
-            for directory in sorted(
-                created_directories, key=lambda path: len(path.parts), reverse=True
-            ):
+            for record in reversed(created_directories):
+                if not record.creation_published:
+                    continue  # The native creator already settled its unpublished abort.
                 try:
-                    if directory.is_dir() and not any(directory.iterdir()):
-                        directory.rmdir()
-                except OSError as rollback_exc:
-                    rollback_failures.append(f"directory {directory}: {rollback_exc}")
+                    LifecycleWriteTarget.remove_created_directory(
+                        record, transaction, failure_id="WI-CATEGORY-MIGRATION-INVENTORY",
+                    )
+                except BaseException as rollback_exc:
+                    rollback_failures.append(f"directory {record.locator}: {rollback_exc}")
             if rollback_failures:
                 raise LifecycleError(
                     "WI-CATEGORY-MIGRATION-INVENTORY",
                     "physical-relocation rollback failed: " + "; ".join(rollback_failures),
                 ) from exc
+            if not isinstance(exc, Exception):
+                raise
             if isinstance(exc, LifecycleError):
                 raise
             raise LifecycleError(
@@ -21141,14 +21286,38 @@ def apply_migration_inventory(
                 f"physical-relocation transaction failed: {exc}",
             ) from exc
     planned = _preflight_inventory_rows(root, inventory)
+    created_directories: list[_OwnedNativeCreation] = []
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is None:
+        raise LifecycleError("WI-LIFECYCLE-EFFECT", "inventory migration requires its held lifecycle owner")
     for _row, source, target, pending in planned:
         if not pending:
             continue
-        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
-        if transaction is not None:
-            transaction.verify()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        (_replace_lifecycle_directory(source, target) if source.is_dir() else _replace_lifecycle_directory(source, target, directory=False))
+        transaction.verify()
+        created_before = len(created_directories)
+        try:
+            LifecycleWriteTarget.make_directories(
+                target.parent, transaction, created=created_directories,
+            )
+            (_replace_lifecycle_directory(source, target) if source.is_dir()
+             else _replace_lifecycle_directory(source, target, directory=False))
+        except BaseException as exc:
+            rollback_failures: list[str] = []
+            for record in reversed(created_directories[created_before:]):
+                if not record.creation_published:
+                    continue  # The native creator already settled its unpublished abort.
+                try:
+                    LifecycleWriteTarget.remove_created_directory(
+                        record, transaction, failure_id="WI-CATEGORY-MIGRATION-INVENTORY",
+                    )
+                except BaseException as rollback_exc:
+                    rollback_failures.append(f"directory {record.locator}: {rollback_exc}")
+            if rollback_failures:
+                raise LifecycleError(
+                    "WI-CATEGORY-MIGRATION-INVENTORY",
+                    f"migration parent creation rollback failed: {exc}; " + "; ".join(rollback_failures),
+                ) from exc
+            raise
     readme_hash: str | None = None
     if render_readme:
         readme_hash = refresh_readme(root, allow_marker_bootstrap=True)

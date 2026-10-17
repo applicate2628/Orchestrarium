@@ -99,6 +99,35 @@ def seed(root, relative, payload):
     return source, consumer
 
 
+@pytest.mark.parametrize("payload", (
+    pytest.param(b"\x00\xffordinary binary input\x00", id="binary"),
+    pytest.param(
+        b"work-item:a-close-target\n[target](../status.md#source)\n"
+        b"work-items/active/a-close-target/status.md\n",
+        id="utf8-incidental-references",
+    ),
+    pytest.param(b"", id="empty"),
+))
+def test_owned_input_data_has_no_incoming_reference_authority(module, tmp_path, payload):
+    item = tmp_path / "work-items" / "active" / "a-close-target"
+    source = item / "status.md"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"status: active\n")
+    consumer = item / "inputs" / "source.dat"
+    consumer.parent.mkdir()
+    consumer.write_bytes(payload)
+    before = consumer.read_bytes()
+
+    assert module._incoming_link_result(
+        tmp_path,
+        {source},
+        "work-item:a-close-target",
+        literal_path_references=("work-items/active/a-close-target/status.md",),
+        strict_consumer_reads=True,
+    ) == {"result": "clear", "references": []}
+    assert consumer.read_bytes() == before
+
+
 @pytest.mark.parametrize("name,options", ALL_CONFIGURATIONS)
 @pytest.mark.parametrize("kind,payload", ATTACHMENTS)
 @pytest.mark.parametrize("relative", ("active/other/nested/renamed.asset", "archive/2026-01/old/renamed.bin"))

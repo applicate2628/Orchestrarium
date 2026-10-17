@@ -80,6 +80,12 @@ def test_runtime_source_authority_declared_global_load_and_reuse(tmp_path, monke
         try:
             validator = module._validator_module()
             assert module._validator_module() is validator
+            assert validator._LIFECYCLE_OWNER is module
+            assert validator.load_lifecycle_owner() is module
+            assert validator._LIFECYCLE_OWNER.CapturedFileSnapshot is module.CapturedFileSnapshot
+            assert validator._LIFECYCLE_OWNER.LifecycleError is module.LifecycleError
+            assert validator._LIFECYCLE_OWNER._CURRENT_LIFECYCLE_TRANSACTION is module._CURRENT_LIFECYCLE_TRANSACTION
+            assert validator._LIFECYCLE_OWNER._DIRECTORY_CAPTURE_OWNER is module._DIRECTORY_CAPTURE_OWNER
             assert validator.__file__ == str(runtime / "scripts/validate-work-item-state.py")
             assert tx._runtime_source_authority is not None
             snapshot = module._capture_runtime_source(Path("scripts/mutate-work-item.py"), failure_id="TEST")
@@ -95,6 +101,158 @@ def test_runtime_source_authority_declared_global_load_and_reuse(tmp_path, monke
         finally:
             module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
     assert tx._validator_reuse is None and tx._runtime_source_authority is not None
+
+
+def test_validator_factory_binds_actual_registered_owner_for_aliases(tmp_path: Path):
+    aliases = ("mutate_work_item_owner_alias_r3_a", "mutate_work_item_owner_alias_r3_b")
+    standalone_name = "validator_owner_standalone_r3"
+    owner_name = "work_item_lifecycle_owner_for_validation"
+    names = (*aliases, standalone_name, owner_name)
+    missing = object()
+    saved = {name: sys.modules.get(name, missing) for name in names}
+
+    def load_alias(name: str):
+        spec = importlib.util.spec_from_file_location(name, SCRIPT)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    try:
+        first, second = (load_alias(name) for name in aliases)
+        first_validator = first._validator_module()
+        second_validator = second._validator_module()
+        for owner, validator in ((first, first_validator), (second, second_validator)):
+            assert sys.modules[owner.__name__] is owner
+            assert validator._LIFECYCLE_OWNER is owner
+            assert validator.load_lifecycle_owner() is owner
+            assert validator._LIFECYCLE_OWNER.CapturedFileSnapshot is owner.CapturedFileSnapshot
+            assert validator._LIFECYCLE_OWNER.LifecycleError is owner.LifecycleError
+            assert validator._LIFECYCLE_OWNER._CURRENT_LIFECYCLE_TRANSACTION is owner._CURRENT_LIFECYCLE_TRANSACTION
+            assert validator._LIFECYCLE_OWNER._DIRECTORY_CAPTURE_OWNER is owner._DIRECTORY_CAPTURE_OWNER
+        assert first_validator is not second_validator
+        assert first_validator._LIFECYCLE_OWNER is not second_validator._LIFECYCLE_OWNER
+        assert first._CURRENT_LIFECYCLE_TRANSACTION is not second._CURRENT_LIFECYCLE_TRANSACTION
+        assert first._DIRECTORY_CAPTURE_OWNER is not second._DIRECTORY_CAPTURE_OWNER
+
+        spec = importlib.util.spec_from_file_location(standalone_name, STATE_VALIDATOR)
+        assert spec and spec.loader
+        standalone = importlib.util.module_from_spec(spec)
+        sys.modules[standalone_name] = standalone
+        spec.loader.exec_module(standalone)
+        assert standalone._LIFECYCLE_OWNER is None
+        standalone_owner = standalone.load_lifecycle_owner()
+        assert standalone._LIFECYCLE_OWNER is standalone_owner
+        assert standalone_owner.__name__ == owner_name
+        assert standalone_owner is not first and standalone_owner is not second
+        assert standalone_owner._CURRENT_LIFECYCLE_TRANSACTION is not first._CURRENT_LIFECYCLE_TRANSACTION
+        assert standalone_owner._CURRENT_LIFECYCLE_TRANSACTION is not second._CURRENT_LIFECYCLE_TRANSACTION
+    finally:
+        for name, previous in saved.items():
+            if previous is missing:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [pytest.param(None, id="missing"), pytest.param(sys, id="foreign-module"), pytest.param(object(), id="lookalike")],
+)
+def test_validator_factory_refuses_unqualified_lifecycle_origin(tmp_path, monkeypatch, origin):
+    module, _runtime, _alias, _physical, subject = _runtime_authority_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "_LIFECYCLE_MODULE_ORIGIN", origin, raising=False)
+    transaction = module.LifecycleTransaction(subject)
+    with pytest.raises(module.LifecycleError) as closing:
+        with transaction:
+            token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            try:
+                with pytest.raises(module.LifecycleError) as refused:
+                    module._validator_module()
+                assert refused.value.failure_id == "WI-VALIDATOR-LOAD"
+                assert transaction._source_admission_failure is refused.value
+                assert transaction._validator_reuse is None
+            finally:
+                module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+    assert closing.value.failure_id == "WI-VALIDATOR-LOAD"
+    assert transaction._source_admission_failure is closing.value
+    assert transaction._validator_reuse is None
+
+
+def test_standalone_validator_owners_survive_registration_replacement_and_removal(tmp_path, monkeypatch):
+    _module, runtime, _alias, _physical, subject = _runtime_authority_fixture(tmp_path, monkeypatch)
+    validator_path = runtime / "scripts" / "validate-work-item-state.py"
+    v1_name = "validator_owner_standalone_lifetime_r3_a"
+    v2_name = "validator_owner_standalone_lifetime_r3_b"
+    owner_name = "work_item_lifecycle_owner_for_validation"
+    names = (v1_name, v2_name, owner_name)
+    missing = object()
+    saved = {name: sys.modules.get(name, missing) for name in names}
+
+    def load_standalone_validator(name: str):
+        spec = importlib.util.spec_from_file_location(name, validator_path)
+        assert spec and spec.loader
+        validator = importlib.util.module_from_spec(spec)
+        sys.modules[name] = validator
+        spec.loader.exec_module(validator)
+        return validator
+
+    try:
+        sys.modules.pop(owner_name, None)
+        v1 = load_standalone_validator(v1_name)
+        owner_a = v1.load_lifecycle_owner()
+        assert sys.modules[owner_name] is owner_a
+        transaction = owner_a.LifecycleTransaction(subject)
+        with transaction:
+            token = owner_a._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            try:
+                validator_a_transaction = owner_a._validator_module()
+                assert validator_a_transaction._LIFECYCLE_OWNER is owner_a
+                assert owner_a._validator_module() is validator_a_transaction
+
+                v2 = load_standalone_validator(v2_name)
+                owner_b = v2.load_lifecycle_owner()
+                assert owner_b is not owner_a
+                assert sys.modules[owner_name] is owner_b
+                assert v1.load_lifecycle_owner() is owner_a
+                assert v2.load_lifecycle_owner() is owner_b
+                assert owner_a._validator_module() is validator_a_transaction
+            finally:
+                owner_a._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+        assert transaction._validator_reuse is None
+        assert v1.load_lifecycle_owner() is owner_a
+
+        validator_a_replaced = owner_a._validator_module()
+        validator_b_replaced = owner_b._validator_module()
+        assert validator_a_replaced._LIFECYCLE_OWNER is owner_a
+        assert validator_b_replaced._LIFECYCLE_OWNER is owner_b
+        assert validator_a_replaced._LIFECYCLE_OWNER.CapturedFileSnapshot is owner_a.CapturedFileSnapshot
+        assert validator_a_replaced._LIFECYCLE_OWNER.LifecycleError is owner_a.LifecycleError
+        assert validator_a_replaced._LIFECYCLE_OWNER._CURRENT_LIFECYCLE_TRANSACTION is owner_a._CURRENT_LIFECYCLE_TRANSACTION
+        assert validator_a_replaced._LIFECYCLE_OWNER._DIRECTORY_CAPTURE_OWNER is owner_a._DIRECTORY_CAPTURE_OWNER
+        assert validator_b_replaced._LIFECYCLE_OWNER.CapturedFileSnapshot is owner_b.CapturedFileSnapshot
+        assert validator_b_replaced._LIFECYCLE_OWNER.LifecycleError is owner_b.LifecycleError
+        assert validator_b_replaced._LIFECYCLE_OWNER._CURRENT_LIFECYCLE_TRANSACTION is owner_b._CURRENT_LIFECYCLE_TRANSACTION
+        assert validator_b_replaced._LIFECYCLE_OWNER._DIRECTORY_CAPTURE_OWNER is owner_b._DIRECTORY_CAPTURE_OWNER
+
+        sys.modules.pop(owner_name)
+        validator_a_removed = owner_a._validator_module()
+        validator_b_removed = owner_b._validator_module()
+        assert validator_a_removed._LIFECYCLE_OWNER is owner_a
+        assert validator_b_removed._LIFECYCLE_OWNER is owner_b
+        assert v1.load_lifecycle_owner() is owner_a
+        assert v2.load_lifecycle_owner() is owner_b
+        assert owner_a.LifecycleError is not owner_b.LifecycleError
+        assert owner_a.CapturedFileSnapshot is not owner_b.CapturedFileSnapshot
+        assert owner_a._CURRENT_LIFECYCLE_TRANSACTION is not owner_b._CURRENT_LIFECYCLE_TRANSACTION
+        assert owner_a._DIRECTORY_CAPTURE_OWNER is not owner_b._DIRECTORY_CAPTURE_OWNER
+    finally:
+        for name, previous in saved.items():
+            if previous is missing:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
 
 
 @pytest.mark.parametrize("fault", ("imitation", "filename", "missing-home", "relative-home", "missing-helper", "linked-leaf"))
@@ -189,7 +347,7 @@ def test_runtime_source_authority_schema_failure_clears_cache(tmp_path, monkeypa
     assert closing.value is first.value and tx._file is None and not tx._locked
 
 
-def test_runtime_source_failure_keeps_subject_domain_and_owned_compensation(tmp_path, monkeypatch):
+def test_runtime_source_failure_keeps_owned_compensation(tmp_path, monkeypatch):
     module, runtime, alias, physical, subject = _runtime_authority_fixture(tmp_path, monkeypatch)
     tx = module.LifecycleTransaction(subject)
     composer = module.LifecycleOutcomeComposer()
@@ -199,32 +357,30 @@ def test_runtime_source_failure_keeps_subject_domain_and_owned_compensation(tmp_
             token = module._CURRENT_LIFECYCLE_TRANSACTION.set(tx)
             try:
                 module._validator_module()
-                leaf = subject / "status.md"
-                leaf.write_bytes(b"before")
-                snapshot = module._capture_file_snapshot(leaf, failure_id="TEST")
-                tx.observe_retained_inputs((snapshot,))
-                leaf.write_bytes(b"after")
-                with pytest.raises(module.LifecycleError):
-                    tx.verify()
-                assert tx._source_admission_failure is None
-                leaf.write_bytes(b"before")
-                tx.verify()
                 with module.LifecycleWriteTarget(subject / "owned.md", failure_id="TEST") as target:
                     module._atomic_write(target.path, b"owned", target=target)
                     image = target.owned_image()
+                    owned_identity = module._lifecycle_file_identity(target.path.lstat())
+                    assert image["identity"]["value"] == list(owned_identity)
+                    owned_bytes = target.path.read_bytes()
                     alias.unlink()
                     replacement = tmp_path / "replacement"
                     shutil.copytree(physical, replacement)
                     alias.symlink_to(replacement, target_is_directory=True)
                     with pytest.raises(module.LifecycleError) as first:
                         tx.verify()
+                    assert tx._source_admission_failure is first.value
                     def nested(root):
                         pytest.fail("nested body ran after source refusal")
                     with pytest.raises(module.LifecycleError) as repeated:
                         module._lifecycle_participant(nested)(subject)
                     assert repeated.value is first.value
-                    target.remove_owned(target.leaf, image)
-                    assert not target.path.exists()
+                    with pytest.raises(module.LifecycleError) as removal:
+                        target.remove_owned(target.leaf, image)
+                    assert removal.value is first.value
+                    assert tx._source_admission_failure is first.value
+                    assert target.path.read_bytes() == owned_bytes
+                    assert module._lifecycle_file_identity(target.path.lstat()) == owned_identity
             finally:
                 module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
         bundle = composer.finalize()
@@ -1892,6 +2048,132 @@ def test_retained_preimage_observation_drift_refuses_before_intent(tmp_path: Pat
         assert not (root / "work-items" / "bugs" / "archive").exists()
 
 
+def test_invalid_retained_claim_in_inputs_is_still_scanned_as_a_consumer(tmp_path: Path):
+    module, root, bug, _status, item, payload, before, _report, profile = retained_preimage_fixture(
+        tmp_path, text_payload=True,
+    )
+    appended = retained_preimage_append(item, profile)
+    assert appended.returncode == 0, appended.stdout + appended.stderr
+
+    payload.write_bytes(before + b" selected payload drift")
+    result = module._incoming_link_result(
+        root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True,
+    )
+    assert result == {
+        "result": "unmapped",
+        "references": [
+            {"consumer": "active/fixed-bug-parent/status.md", "kind": "logical", "value": f"bug:{bug.stem}"},
+            {
+                "consumer": "active/fixed-bug-parent/status.md",
+                "kind": "physical",
+                "value": f"../../bugs/{bug.name}#proof",
+            },
+            {
+                "consumer": payload.relative_to(root / "work-items").as_posix(),
+                "kind": "physical",
+                "value": os.path.relpath(bug, payload.parent).replace(os.sep, "/"),
+            },
+        ],
+    }
+    assert payload.read_bytes() == before + b" selected payload drift"
+
+
+def test_failed_ledger_preparation_never_becomes_no_claim(tmp_path: Path):
+    module, root, bug, _status, item, payload, before, _report, profile = retained_preimage_fixture(tmp_path)
+    appended = retained_preimage_append(item, profile)
+    assert appended.returncode == 0, appended.stdout + appended.stderr
+    changed = before + b" failed selected scan preparation"
+    payload.write_bytes(changed)
+
+    with pytest.raises(module.LifecycleError) as baseline:
+        module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)
+    assert baseline.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+    assert "cannot classify live incoming-link consumer" in str(baseline.value)
+
+    original_capture = module._capture_file_snapshot
+    failures = []
+
+    def fail_one_selected_ledger_capture(path, *args, **kwargs):
+        if path == item / "agent-runs.jsonl" and not failures:
+            failures.append(path)
+            raise module.LifecycleError("TEST-SELECTED-LEDGER-CAPTURE", "Synthetic selected ledger capture failure")
+        return original_capture(path, *args, **kwargs)
+
+    with patch.object(module, "_capture_file_snapshot", side_effect=fail_one_selected_ledger_capture):
+        with pytest.raises(module.LifecycleError) as injected:
+            module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)
+    assert injected.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+    assert "cannot classify live incoming-link consumer" in str(injected.value)
+    assert failures == [item / "agent-runs.jsonl"]
+    assert payload.read_bytes() == changed
+
+
+def test_acquired_input_role_exclusion_keeps_per_leaf_currentness(tmp_path: Path):
+    def acquired_fixture(base: Path):
+        module = load_module()
+        validator = module._validator_module()
+        root = base / "repo"
+        seed_active(module, root, "data-owner")
+        item = root / "work-items" / "active" / "data-owner"
+        payload = item / "inputs" / "source.dat"
+        payload.parent.mkdir(parents=True)
+        payload.write_bytes(b"original ordinary data\n")
+        owned = item / "unused-target.md"
+        files = [module._capture_file_snapshot(path, failure_id="TEST-CAPTURE")
+                 for path in root.rglob("*") if path.is_file()]
+        directories = [module._capture_directory_snapshot(path, failure_id="TEST-CAPTURE")
+                       for path in [root] + [path for path in root.rglob("*") if path.is_dir()]]
+        native = module.AcquiredWorkItemInputV1(
+            root,
+            [module.CapturedInputAssociationV1(snapshot, snapshot) for snapshot in files],
+            [module.CapturedInputAssociationV1(snapshot, snapshot) for snapshot in directories],
+        )
+        criteria = validator.HistoricalLedgerCriteriaV1("synthetic-criteria", "synthetic-acquisition", False, "current")
+        binding = validator.CapturedWorkItemHistoryBindingV1(
+            root, item.name, item.relative_to(root).as_posix(), item.relative_to(root).as_posix(),
+            (item / "agent-runs.jsonl").relative_to(root).as_posix(), criteria, (), (), {}, native,
+        )
+        port = validator._CapturedHistoryPath(binding, root)
+        return module, root, payload, owned, port
+
+    def scan(module, root, payload, owned, port):
+        return module._incoming_link_result(
+            root, {owned}, "work-item:unused-target", strict_consumer_reads=True, acquired_input=port,
+        )
+
+    module, root, payload, owned, port = acquired_fixture(tmp_path / "unchanged")
+    assert scan(module, root, payload, owned, port) == {"result": "clear", "references": []}
+
+    module, root, payload, owned, port = acquired_fixture(tmp_path / "before-entry")
+    payload.write_bytes(b"changed before scan\n")
+    with pytest.raises(module.LifecycleError) as before_entry:
+        scan(module, root, payload, owned, port)
+    assert before_entry.value.failure_id == "WI-LEGACY-COMPLETION-DRIFT"
+
+    module, root, payload, owned, port = acquired_fixture(tmp_path / "after-entry")
+    original_selector = module._owned_work_item_input_location
+    injected_paths = []
+
+    def drift_after_role_selection(consumer_rel, *args):
+        location = original_selector(consumer_rel, *args)
+        if consumer_rel == payload.relative_to(root / "work-items").as_posix():
+            payload.write_bytes(b"changed after role selection\n")
+            injected_paths.append(consumer_rel)
+        return location
+
+    with patch.object(module, "_owned_work_item_input_location", side_effect=drift_after_role_selection):
+        with pytest.raises(module.LifecycleError) as after_entry:
+            scan(module, root, payload, owned, port)
+    assert after_entry.value.failure_id == "WI-LEGACY-COMPLETION-DRIFT"
+    assert injected_paths == ["active/data-owner/inputs/source.dat"]
+    with pytest.raises(module.LifecycleError) as direct_read:
+        port.file_snapshot(payload)
+    assert direct_read.value.failure_id == "WI-LEGACY-COMPLETION-DRIFT"
+    with pytest.raises(module.LifecycleError) as next_invocation:
+        scan(module, root, payload, owned, port)
+    assert next_invocation.value.failure_id == "WI-LEGACY-COMPLETION-DRIFT"
+
+
 def test_retained_preimage_relocated_archive_and_live_neighbor_stay_strict(tmp_path: Path):
     module, root, bug, _status, item, payload, before, report, profile = retained_preimage_fixture(tmp_path)
     assert retained_preimage_append(item, profile).returncode == 0
@@ -1904,8 +2186,11 @@ def test_retained_preimage_relocated_archive_and_live_neighbor_stay_strict(tmp_p
     assert relocated.read_bytes() == before
     neighbor = archive / "inputs" / "unadmitted-neighbor"
     neighbor.write_bytes(b"unknown\x82")
-    with pytest.raises(module.LifecycleError, match="cannot classify live incoming-link consumer"):
-        module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)
+    full = module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True)
+    assert full["result"] == "unmapped"
+    assert all(row["consumer"] != neighbor.relative_to(root / "work-items").as_posix()
+               for row in full["references"])
+    assert neighbor.read_bytes() == b"unknown\x82"
     assert module._incoming_link_result(root, {bug}, f"bug:{bug.stem}", strict_consumer_reads=True,
                                        mutable_consumers_only=True)["result"] == "unmapped"
     assert relocated.read_bytes() == before
@@ -7491,6 +7776,80 @@ def test_inventory_cli_exact_three_command_contract(tmp_path: Path) -> None:
     assert readme.count("<!-- END GENERATED WORK-ITEMS STATUS -->") == 1
 
 
+def test_inventory_migration_partial_parent_creation_rolls_back_owned_directories(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    work_items = root / "work-items"
+    source = work_items / "bugs" / "terminal-bug.md"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(
+        _terminal_record(
+            "bug",
+            "2026-08-01T00:00:00Z",
+            status_override="fixed",
+        ).encode()
+    )
+    consumer = work_items / "decisions" / "consumer.md"
+    write(consumer, "status: proposed\nRelated: bug:terminal-bug\n")
+    readme = work_items / "README.md"
+    write(readme, "# Legacy work-items guide\n\nHuman-owned migration context.\n")
+    inventory = root / ".scratch" / "work-items-lifecycle-v1" / "migration-inventory.json"
+    audited = run_cli("audit", "--root", str(work_items), "--output", str(inventory))
+    assert audited.returncode == 0, audited.stdout
+    payload = json.loads(inventory.read_bytes())
+    assert len(payload["rows"]) == 1
+
+    archive_parent = work_items / "bugs" / "archive"
+    month_parent = archive_parent / "2026-08"
+    target = month_parent / source.name
+    source_before = source.read_bytes()
+    consumer_before = consumer.read_bytes()
+    readme_before = readme.read_bytes()
+    inventory_before = inventory.read_bytes()
+    injected = module.LifecycleError(
+        "TEST-STRUCTURAL-PARENT-PUBLISH", "controlled second-parent publication refusal",
+    )
+    original_publish = module.LifecycleWriteTarget._publish_effect
+    original_remove = module.LifecycleWriteTarget.remove_created_directory
+    published_records = []
+    failed_records = []
+    removed_records = []
+
+    def fail_second_parent(owner, prepared, identity):
+        if prepared.directory and prepared.source is None and prepared.destination == month_parent:
+            failed_records.append(owner._creations[-1])
+            raise injected
+        result = original_publish(owner, prepared, identity)
+        if prepared.directory and prepared.source is None and prepared.destination == archive_parent:
+            published_records.append(owner._creations[-1])
+        return result
+
+    def remove_actual_creator(record, transaction, *, failure_id="WI-LIFECYCLE-EFFECT"):
+        removed_records.append(record)
+        return original_remove(record, transaction, failure_id=failure_id)
+
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_publish_effect", fail_second_parent)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "remove_created_directory", remove_actual_creator)
+    with pytest.raises(module.LifecycleError) as failed:
+        module.apply_migration_inventory(root, inventory, render_readme=True, byte_check=True)
+
+    assert failed.value is injected
+    assert len(published_records) == len(failed_records) == 1
+    assert removed_records == published_records
+    aborted = failed_records[0]
+    assert aborted.creator and aborted.finished and aborted.release_complete
+    assert not aborted.creation_published and aborted.primary is injected
+    assert aborted.phase == "disposed"
+    assert not archive_parent.exists() and not month_parent.exists() and not target.exists()
+    assert tuple(path.name for path in source.parent.iterdir()) == (source.name,)
+    assert source.read_bytes() == source_before
+    assert consumer.read_bytes() == consumer_before
+    assert readme.read_bytes() == readme_before
+    assert inventory.read_bytes() == inventory_before
+
+
 def test_inventory_preflight_denial_moves_no_selected_record(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     work_items = root / "work-items"
@@ -10960,6 +11319,210 @@ def test_exact_physical_relocation_is_admitted_then_moved_atomically(
     assert evidence["sourceAfterSha256"] == hashlib.sha256(consumer_after).hexdigest()
     assert evidence["targetBeforeSha256"] == hashlib.sha256(terminalized_target).hexdigest()
     assert evidence["targetAfterSha256"] == hashlib.sha256(final_target.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("failure_kind", ("ordinary", "cancellation"))
+def test_physical_relocation_parent_creation_rolls_back_before_move(
+    tmp_path: Path, monkeypatch, failure_kind: str,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    inventory, receipt, consumer, source, _payload = _physical_relocation_inventory(root)
+    module.terminalize_v1_inventory(
+        root,
+        inventory,
+        terminal_at="2026-08-01T00:00:00Z",
+        authorization_marker="operator-authorized-v1-terminalization",
+        receipt_path=receipt,
+    )
+    work_items = root / "work-items"
+    archive_parent = source.parent / "archive"
+    month_parent = archive_parent / "2026-08"
+    target = month_parent / source.name
+    readme = work_items / "README.md"
+    source_before = source.read_bytes()
+    consumer_before = consumer.read_bytes()
+    receipt_before = receipt.read_bytes()
+    inventory_before = inventory.read_bytes()
+    readme_before = readme.read_bytes() if readme.is_file() else None
+    injected = (
+        module.LifecycleError(
+            "TEST-PHYSICAL-PARENT-PUBLISH", "controlled second-parent ordinary failure",
+        )
+        if failure_kind == "ordinary"
+        else KeyboardInterrupt("controlled second-parent cancellation")
+    )
+    original_publish = module.LifecycleWriteTarget._publish_effect
+    original_remove = module.LifecycleWriteTarget.remove_created_directory
+    published_records = []
+    failed_records = []
+    removed_records = []
+    removed_identities = []
+
+    def fail_second_parent(owner, prepared, identity):
+        if (
+            prepared.directory
+            and prepared.source is None
+            and prepared.destination == month_parent
+        ):
+            failed_records.append(owner._creations[-1])
+            raise injected
+        result = original_publish(owner, prepared, identity)
+        if (
+            prepared.directory
+            and prepared.source is None
+            and prepared.destination == archive_parent
+        ):
+            published_records.append(owner._creations[-1])
+        return result
+
+    def remove_actual_creator(record, transaction, *, failure_id="WI-LIFECYCLE-EFFECT"):
+        removed_records.append(record)
+        removed_identities.append(module._lifecycle_file_identity(record.locator.lstat()))
+        return original_remove(record, transaction, failure_id=failure_id)
+
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_publish_effect", fail_second_parent)
+    monkeypatch.setattr(
+        module.LifecycleWriteTarget, "remove_created_directory", remove_actual_creator,
+    )
+    with pytest.raises(type(injected)) as failed:
+        module.apply_migration_inventory(
+            root, inventory, render_readme=True, byte_check=True,
+        )
+
+    assert failed.value is injected
+    assert len(published_records) == len(failed_records) == 1
+    assert removed_records == published_records
+    published = published_records[0]
+    assert published.creator and published.finished and published.release_complete
+    assert removed_identities == [published.identity]
+    aborted = failed_records[0]
+    assert aborted.creator and aborted.finished and aborted.release_complete
+    assert not aborted.creation_published and aborted.primary is injected
+    assert aborted.phase == "disposed"
+    assert not archive_parent.exists() and not month_parent.exists() and not target.exists()
+    assert source.read_bytes() == source_before
+    assert consumer.read_bytes() == consumer_before
+    assert receipt.read_bytes() == receipt_before
+    assert inventory.read_bytes() == inventory_before
+    if readme_before is None:
+        assert not readme.exists()
+    else:
+        assert readme.read_bytes() == readme_before
+
+
+def test_physical_relocation_cleanup_baseexception_continues_and_preserves_nonempty_state(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    inventory, receipt, consumer, source, _payload = _physical_relocation_inventory(root)
+    module.terminalize_v1_inventory(
+        root,
+        inventory,
+        terminal_at="2026-08-01T00:00:00Z",
+        authorization_marker="operator-authorized-v1-terminalization",
+        receipt_path=receipt,
+    )
+    work_items = root / "work-items"
+    archive_parent = source.parent / "archive"
+    month_parent = archive_parent / "2026-08"
+    final_target = month_parent / source.name
+    readme = work_items / "README.md"
+    source_before = source.read_bytes()
+    consumer_before = consumer.read_bytes()
+    receipt_before = receipt.read_bytes()
+    inventory_before = inventory.read_bytes()
+    readme_before = readme.read_bytes() if readme.is_file() else None
+    primary = module.LifecycleError(
+        "TEST-PHYSICAL-PRIMARY", "controlled failure after physical move",
+    )
+    class CleanupAbort(BaseException):
+        pass
+
+    cleanup_interrupt = CleanupAbort("controlled cancellation during move reversal")
+    original_refresh = module.refresh_readme
+    original_replace = module._replace_lifecycle_directory
+    original_atomic_write = module._atomic_write
+    original_restore_readme = module._restore_readme_snapshot
+    original_remove = module.LifecycleWriteTarget.remove_created_directory
+    cleanup_stages = []
+    removal_attempts = []
+    removal_refusals = []
+    foreign = archive_parent / "foreign.keep"
+
+    def fail_after_move(*_args, **_kwargs):
+        raise primary
+
+    def cancel_reverse(source_path, destination, *args, **kwargs):
+        if source_path == final_target and destination == source:
+            cleanup_stages.append("move-reversal")
+            raise cleanup_interrupt
+        return original_replace(source_path, destination, *args, **kwargs)
+
+    def observe_atomic_write(path, data, *args, **kwargs):
+        if path == consumer and data == consumer_before:
+            cleanup_stages.append("consumer-restore")
+        if path == receipt and data == receipt_before:
+            cleanup_stages.append("receipt-restore")
+        return original_atomic_write(path, data, *args, **kwargs)
+
+    def observe_readme_restore(*args, **kwargs):
+        cleanup_stages.append("readme-restore")
+        return original_restore_readme(*args, **kwargs)
+
+    def preserve_actual_creator(record, transaction, *, failure_id="WI-LIFECYCLE-EFFECT"):
+        cleanup_stages.append("directory-rollback")
+        removal_attempts.append(record)
+        if not foreign.exists():
+            foreign.write_bytes(b"unowned cleanup-time content\n")
+        try:
+            return original_remove(record, transaction, failure_id=failure_id)
+        except BaseException as exc:
+            removal_refusals.append(exc)
+            raise
+
+    monkeypatch.setattr(module, "refresh_readme", fail_after_move)
+    monkeypatch.setattr(module, "_replace_lifecycle_directory", cancel_reverse)
+    monkeypatch.setattr(module, "_atomic_write", observe_atomic_write)
+    monkeypatch.setattr(module, "_restore_readme_snapshot", observe_readme_restore)
+    monkeypatch.setattr(
+        module.LifecycleWriteTarget, "remove_created_directory", preserve_actual_creator,
+    )
+
+    with pytest.raises(module.LifecycleError) as failed:
+        module.apply_migration_inventory(
+            root, inventory, render_readme=True, byte_check=True,
+        )
+
+    assert failed.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+    assert failed.value.__cause__ is primary
+    assert str(cleanup_interrupt) in str(failed.value)
+    assert cleanup_stages == [
+        "move-reversal",
+        "consumer-restore",
+        "readme-restore",
+        "receipt-restore",
+        "directory-rollback",
+        "directory-rollback",
+    ]
+    assert len(removal_attempts) == 2 and len(removal_refusals) == 2
+    assert all(isinstance(exc, module.LifecycleError) for exc in removal_refusals)
+    assert consumer.read_bytes() == consumer_before
+    assert receipt.read_bytes() == receipt_before
+    assert inventory.read_bytes() == inventory_before
+    if readme_before is None:
+        assert not readme.exists()
+    else:
+        assert readme.read_bytes() == readme_before
+    assert not source.exists() and final_target.read_bytes() == source_before
+    assert foreign.read_bytes() == b"unowned cleanup-time content\n"
+    assert archive_parent.is_dir() and month_parent.is_dir()
+    assert all(record.creator and record.finished and record.release_complete for record in removal_attempts)
+    assert all(
+        module._lifecycle_file_identity(record.locator.lstat()) == record.identity
+        for record in removal_attempts
+    )
 
 
 def test_physical_relocation_preserves_fragment_and_query_suffix_atomically(
@@ -15648,11 +16211,21 @@ def test_transaction_compensation_refuses_restored_descendant_byte_drift(tmp_pat
         assert caught.value.__cause__ is primary
         assert len(rejected) == len(reverse_checks) == 1
         assert transaction._retained_observations is before
-        assert transaction.current_binding_evidence is evidence_before
+        assert transaction.current_binding_evidence[:len(evidence_before)] == evidence_before
+        assert len(transaction.current_binding_evidence) == len(evidence_before) + 1
+        kind, (constraint, integrity_failure, failed_paths) = transaction.current_binding_evidence[-1]
+        assert kind == "integrity-failure"
+        assert constraint is snapshot
+        assert integrity_failure.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+        assert "captured file path identity or content changed" in str(integrity_failure)
+        assert failed_paths == (leaf,)
         assert transaction._retained_observations[leaf] is snapshot
         assert leaf.read_bytes() == b"unowned changed retained evidence"
         assert source.is_dir() and not destination.exists()
         assert len(transaction._unsettled_relocations) == 1
+        with pytest.raises(module.LifecycleError) as sticky:
+            transaction.verify()
+        assert sticky.value is integrity_failure
     finally:
         with pytest.raises(module.LifecycleError):
             transaction.__exit__(None, None, None)

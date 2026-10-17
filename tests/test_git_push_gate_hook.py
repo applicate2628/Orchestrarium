@@ -4177,10 +4177,11 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         git_exe = str(Path(shutil.which("git") or "").resolve(strict=True))
         for script, module in self._modules("repository_workdir_proof"):
             with self.subTest(script=script):
-                self.assertEqual(
-                    module._validate_repository_workdir(str(REPO_ROOT.resolve()), git_exe),
-                    str(REPO_ROOT.resolve()),
-                )
+                with temporary_repository_workdir() as repository_workdir:
+                    self.assertEqual(
+                        module._validate_repository_workdir(repository_workdir, git_exe),
+                        repository_workdir,
+                    )
                 with tempfile.TemporaryDirectory() as directory, self.assertRaises(
                     module.PrRouteDenied
                 ) as caught:
@@ -4188,6 +4189,27 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                 self.assertEqual(caught.exception.failure_id, "PRG-WORKDIR-INVALID")
                 with self.assertRaises(module.PrRouteDenied):
                     module._normalize_repository_workdir(str(Path(__file__)))
+
+    def test_repository_workdir_normalizer_accepts_native_spellings(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="publication-workdir-") as directory:
+            root = Path(directory) / "Repository"
+            root.mkdir()
+            canonical = str(root.resolve(strict=True))
+            spellings = [canonical]
+            if os.name == "nt":
+                spellings.extend((canonical.replace("\\", "/"), canonical.swapcase()))
+            traversal = str(root / ".." / root.name)
+
+            for script, module in self._modules("repository_workdir_native_spellings"):
+                for spelling in dict.fromkeys(spellings):
+                    with self.subTest(script=script, spelling=spelling):
+                        self.assertEqual(
+                            module._normalize_repository_workdir(spelling), canonical
+                        )
+                with self.subTest(script=script, spelling=traversal):
+                    with self.assertRaises(module.PrRouteDenied) as caught:
+                        module._normalize_repository_workdir(traversal)
+                    self.assertEqual(caught.exception.failure_id, "PRG-WORKDIR-INVALID")
 
     def test_active_pr_route_threads_selected_workdir_to_oracle_and_scanner(self) -> None:
         git_exe = str(Path(shutil.which("git") or "").resolve(strict=True))
@@ -5208,6 +5230,142 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 sidecar_snapshots.append(json.loads(sidecar.read_text(encoding="utf-8")))
         self.assertEqual(rc, 0)
         return stdout.getvalue(), observed
+
+    def test_pr_prepare_accepts_equivalent_tool_workdir_spelling(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="publication-workdir-agreement-") as directory:
+            root = Path(directory) / "Repository"
+            root.mkdir()
+            canonical = str(root.resolve(strict=True))
+            spellings = [canonical]
+            if os.name == "nt":
+                spellings.extend((canonical.replace("\\", "/"), canonical.swapcase()))
+
+            for script in (CANONICAL_HOOK, *HOOKS):
+                module = _load_gate_module(script, f"workdir_agreement_{script.parent.parent.name}")
+                dialect = "powershell" if self._tool_name(script) == "PowerShell" else "posix"
+                command = self._literal_command(script, repository_root=canonical)
+                parsed = module._a3_preflight.parse_shell_command(command, dialect)
+                for tool_workdir in dict.fromkeys(spellings):
+                    with self.subTest(script=script, tool_workdir=tool_workdir):
+                        dialect_override = dialect if script == CANONICAL_HOOK else None
+                        with mock.patch.object(
+                            module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE", dialect_override
+                        ), mock.patch.object(
+                            module, "_resolve_executable", return_value=self.OWNED_GIT_IDENTITY
+                        ) as resolve, mock.patch.object(
+                            module, "_bind_pr_literal_executable", side_effect=lambda literal, _git: literal
+                        ), mock.patch.object(
+                            module, "_prove_repository_root", side_effect=lambda path, _git: path
+                        ) as prove:
+                            prepared = module._prepare_pr_push(
+                                command, dialect, parsed, tool_workdir, "tool"
+                            )
+                        self.assertEqual(prepared.repository_workdir, canonical)
+                        resolve.assert_called_once_with("git", canonical)
+                        prove.assert_called_once_with(canonical, self.OWNED_GIT_IDENTITY)
+
+    @staticmethod
+    def _enable_case_sensitive_directory(path: Path) -> int:
+        import ctypes
+
+        class CaseSensitiveInfo(ctypes.Structure):
+            _fields_ = [("Flags", ctypes.c_uint32)]
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        create = kernel.CreateFileW
+        create.argtypes = [
+            ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
+            ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+        ]
+        create.restype = ctypes.c_void_p
+        set_info = kernel.SetFileInformationByHandle
+        set_info.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+        set_info.restype = ctypes.c_int
+        get_info = kernel.GetFileInformationByHandleEx
+        get_info.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+        get_info.restype = ctypes.c_int
+        close = kernel.CloseHandle
+        close.argtypes = [ctypes.c_void_p]
+        close.restype = ctypes.c_int
+
+        handle = create(
+            str(path), 0x80 | 0x100, 1 | 2 | 4, None, 3, 0x02000000, None
+        )
+        if handle == ctypes.c_void_p(-1).value:
+            raise OSError(ctypes.get_last_error(), "CreateFileW")
+        try:
+            requested = CaseSensitiveInfo(1)
+            if not set_info(handle, 23, ctypes.byref(requested), ctypes.sizeof(requested)):
+                raise OSError(ctypes.get_last_error(), "SetFileInformationByHandle")
+            observed = CaseSensitiveInfo()
+            if not get_info(handle, 23, ctypes.byref(observed), ctypes.sizeof(observed)):
+                raise OSError(ctypes.get_last_error(), "GetFileInformationByHandleEx")
+            return int(observed.Flags)
+        finally:
+            if not close(handle):
+                raise OSError(ctypes.get_last_error(), "CloseHandle")
+
+    @unittest.skipUnless(os.name == "nt", "native case-sensitive directory fixture requires Windows")
+    def test_case_sensitive_roots_and_case_only_reparse_alias_keep_identity(self) -> None:
+        import _winapi
+
+        with tempfile.TemporaryDirectory(prefix="publication-workdir-case-sensitive-") as directory:
+            parent = Path(directory) / "case-sensitive"
+            parent.mkdir()
+            try:
+                flags = self._enable_case_sensitive_directory(parent)
+            except (AttributeError, OSError) as exc:
+                detail = getattr(exc, "winerror", None) or getattr(exc, "errno", None)
+                self.skipTest(f"native case-sensitive directory setup unavailable ({detail})")
+            if not flags & 1:
+                self.skipTest("filesystem did not retain the case-sensitive directory flag")
+
+            upper = parent / "Root"
+            lower = parent / "root"
+            try:
+                upper.mkdir()
+                lower.mkdir()
+            except FileExistsError:
+                self.skipTest("filesystem does not distinguish case-only directory names")
+            upper_identity = (upper.lstat().st_dev, upper.lstat().st_ino)
+            lower_identity = (lower.lstat().st_dev, lower.lstat().st_ino)
+            if upper_identity == lower_identity:
+                self.skipTest("case-only paths resolved to one directory identity")
+
+            alias_target = parent / "Target"
+            alias = parent / "target"
+            alias_target.mkdir()
+            _winapi.CreateJunction(str(alias_target), str(alias))
+            try:
+                for script in (CANONICAL_HOOK, *HOOKS):
+                    module = _load_gate_module(script, f"workdir_case_sensitive_{script.parent.parent.name}")
+                    upper_canonical = str(upper.resolve(strict=True))
+                    lower_canonical = str(lower.resolve(strict=True))
+                    self.assertEqual(
+                        module._normalize_repository_workdir(str(upper)), upper_canonical
+                    )
+                    self.assertEqual(
+                        module._normalize_repository_workdir(str(lower)), lower_canonical
+                    )
+                    self.assertNotEqual(upper_canonical, lower_canonical)
+                    with self.assertRaises(module.PrRouteDenied) as caught:
+                        module._normalize_repository_workdir(str(alias))
+                    self.assertEqual(caught.exception.failure_id, "PRG-WORKDIR-INVALID")
+
+                    dialect = "powershell" if self._tool_name(script) == "PowerShell" else "posix"
+                    command = self._literal_command(script, repository_root=upper_canonical)
+                    parsed = module._a3_preflight.parse_shell_command(command, dialect)
+                    dialect_override = dialect if script == CANONICAL_HOOK else None
+                    with mock.patch.object(
+                        module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE", dialect_override
+                    ), mock.patch.object(module, "_resolve_executable") as resolve, self.assertRaises(
+                        module.PrRouteDenied
+                    ) as caught:
+                        module._prepare_pr_push(command, dialect, parsed, lower_canonical, "tool")
+                    self.assertEqual(caught.exception.failure_id, "PRG-WORKDIR-INVALID")
+                    resolve.assert_not_called()
+            finally:
+                alias.rmdir()
 
     def test_pr_grant_accepts_number_shorthand_and_binds_canonical_identity(self) -> None:
         grant = "[approve-pr-publication:v1 pr=3]"
