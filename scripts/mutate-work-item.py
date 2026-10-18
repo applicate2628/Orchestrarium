@@ -5452,7 +5452,7 @@ def _immutable_decision_fields(
     return MappingProxyType(dict(fields))
 
 
-def _validate_current_decision_v1(text: str, slug: str) -> CurrentDecisionRecord:
+def _parse_decision_v1_record(text: str, slug: str) -> CurrentDecisionRecord:
     lines = text.splitlines()
     heading_index = next(
         (index for index, line in enumerate(lines) if line.startswith("#")),
@@ -5547,18 +5547,13 @@ def _validate_current_decision_v1(text: str, slug: str) -> CurrentDecisionRecord
             "WI-DECISION-IDENTITY-MISMATCH",
             f"decision:{slug} date does not match its filename prefix",
         )
-    if fields["status"] not in CATEGORIES["decision"].current_statuses:
-        raise LifecycleError(
-            "WI-DECISION-SCHEMA-INVALID",
-            f"decision:{slug} has unsupported current status '{fields['status']}'",
-        )
     raw_lines = text.splitlines(keepends=True)
     body_offset = len("".join(raw_lines[:heading_index]).encode("utf-8"))
     return CurrentDecisionRecord(
         format=DECISION_FORMAT_V1,
         fields=_immutable_decision_fields(fields),
         raw_status=fields["status"],
-        admitted_current_status=fields["status"],
+        admitted_current_status=(fields["status"] if fields["status"] in CATEGORIES["decision"].current_statuses else None),
         body_offset=body_offset,
         legacy_read_only=False,
     )
@@ -5915,18 +5910,16 @@ def _validate_current_decision_h1(
     )
 
 
-def _validate_current_decision_record(
-    path: Path,
+def _parse_decision_record_text(
+    text: str,
     slug: str,
     *,
     v0_cutover_date: str | None = None,
     h1_cutover_date: str | None = None,
-    acquired_input=None,
 ) -> CurrentDecisionRecord:
-    text = _read_current_decision_text(path, slug, acquired_input=acquired_input)
     selected = _current_decision_format(text, slug)
     if selected == DECISION_FORMAT_V1:
-        return _validate_current_decision_v1(text, slug)
+        return _parse_decision_v1_record(text, slug)
     if selected == DECISION_FORMAT_V0:
         return _validate_current_decision_v0(
             text,
@@ -5938,6 +5931,26 @@ def _validate_current_decision_record(
         slug,
         h1_cutover_date=h1_cutover_date,
     )
+
+
+def _validate_current_decision_record(
+    path: Path,
+    slug: str,
+    *,
+    v0_cutover_date: str | None = None,
+    h1_cutover_date: str | None = None,
+    acquired_input=None,
+) -> CurrentDecisionRecord:
+    text = _read_current_decision_text(path, slug, acquired_input=acquired_input)
+    record = _parse_decision_record_text(
+        text, slug, v0_cutover_date=v0_cutover_date, h1_cutover_date=h1_cutover_date,
+    )
+    if record.format == DECISION_FORMAT_V1 and record.admitted_current_status is None:
+        raise LifecycleError(
+            "WI-DECISION-SCHEMA-INVALID",
+            f"decision:{slug} has unsupported current status '{record.raw_status}'",
+        )
+    return record
 
 
 class _DecisionCompatibilityManifestDuplicateKey(ValueError):
@@ -12100,19 +12113,27 @@ def _close_link_authority(root: Path, path: Path, before: bytes,
     if kind == "active-document" and _incoming_attachment_kind(before) is not None:
         raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"affected consumer has opaque content: {label}")
     try:
-        fields = _parse_fields(before.decode("utf-8"))
+        text = before.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"consumer must be UTF-8: {label}") from exc
     if kind == "registry":
         assert category is not None
         if _category_locations(root, category, path.stem) != [path]:
             raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"consumer has no unique current owner: {label}")
+        if category.name == "decision":
+            decision = _parse_decision_record_text(text, path.stem)
+            if decision.legacy_read_only:
+                raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"decision consumer format is read-only: {label}")
+            status = decision.raw_status
+        else:
+            fields = _parse_fields(text)
+            status = fields.get("status")
         if category.name == "bug":
-            if not _bug_disposition_before_status_eligible("preserve-current", fields.get("status")):
+            if not _bug_disposition_before_status_eligible("preserve-current", status):
                 raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"bug consumer has no admitted status: {label}")
             protected |= (schema_version == 2 and image is None
                           and fields.get("context") in BUG_DISPOSITION_PLACEHOLDER_CONTEXTS)
-        elif fields.get("status") not in category.current_statuses:
+        elif status not in category.current_statuses | category.terminal_statuses:
             raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"consumer has no admitted current status: {label}")
     elif kind == "active-document":
         _close_link_active_owner_evidence(root, path, before, owner_relative)
@@ -12711,9 +12732,22 @@ def _close_item_directory(
     )
     _preflight_readme(root)
     closure_path = active / "closure.md"
-    prior_closure = closure_path.read_bytes() if closure_path.exists() else None
+    held = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    prior_closure = None
+    if closure_path.exists():
+        closure_capture = _capture_file_snapshot(
+            closure_path, failure_id="WI-CLOSE-LINK-DRIFT",
+            maximum_bytes=max(1, closure_path.lstat().st_size),
+        )
+        held.observe_retained_inputs((closure_capture,))
+        prior_closure = closure_capture.data
     status_path = active / "status.md"
-    prior_status = status_path.read_bytes()
+    status_capture = _capture_file_snapshot(
+        status_path, failure_id="WI-CLOSE-LINK-DRIFT",
+        maximum_bytes=max(1, status_path.lstat().st_size),
+    )
+    held.observe_retained_inputs((status_capture,))
+    prior_status = status_capture.data
     target = work_items / "archive" / month / slug
     link_plan = _plan_parent_archive_links(
         root, active, target, bug_plans=bug_plans, bug_manifest=manifest_preview,
@@ -28212,7 +28246,8 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--terminal-instant", required=True)
             command.add_argument("--allow-protected-uri-updates", action="store_true")
             command.add_argument("--legacy-evidence-file")
-            command.add_argument("--apply", action="store_true")
+            command.add_argument("--apply", action="store_true",
+                                 help="Apply the legacy-evidence close route only; ordinary close applies without this flag")
             command.add_argument("--inject-failure-at", choices=("after-promotion", "after-source-remove", "after-board"))
         else:
             command.add_argument("--successor-slug", required=True)

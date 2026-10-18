@@ -114,7 +114,11 @@ A terminal decision may move from `work-items/decisions/` only through the
 lifecycle owner to `work-items/decisions/archive/YYYY-MM/`, after its explicit
 terminal status, `Terminal-at` strict UTC instant, rationale, and evidence are
 present. Missing historical fields are a human-data decision, not permission
-to infer timestamps or rewrite history.
+to infer timestamps or rewrite history. These retirement requirements do not govern
+[same-target incoming-link upkeep](work-item-execution-tracking.md#close-with-current-bug-dispositions)
+in a structurally admitted mutable current record, including one with a
+category-known terminal status: that operation preserves the decision status
+and physical location. Read-only `V0`/`H1` decision formats remain protected.
 
 ## Terms and Abbreviations
 
@@ -129,3 +133,5 @@ to infer timestamps or rewrite history.
   `supersedes:` / `superseded-by:` edge.
 - **Acceptance gate**: the `$architecture-reviewer` review that promotes a
   decision from `proposed` to `accepted`.
+- **V0 / H1**: existing read-only historical decision-format identifiers.
+- **href**: the destination text of a link.

@@ -2433,6 +2433,115 @@ def test_ordinary_close_updates_standalone_incoming_evidence_links(tmp_path: Pat
     assert receipt["linkMaintenance"]["consumers"][0]["authority"] == "current-metadata"
 
 
+def test_close_updates_mutable_terminal_registry_consumers(tmp_path: Path) -> None:
+    module = load_module()
+    root, slug = tmp_path / "repo", "2026-10-18-pao-target"
+    instant = "2026-10-18T00:00:00Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    payload = b"# proof\nImmutable referenced result.\n"
+    (active / "evidence.md").write_bytes(payload)
+    prior_slug, successor_slug = "2026-10-18-prior", "2026-10-18-successor"
+    decision = root / "work-items" / "decisions" / f"{prior_slug}.md"
+    successor = decision.with_name(f"{successor_slug}.md")
+    lesson = root / "work-items" / "lessons" / "2026-10-18-lesson.md"
+    href = f"../active/{slug}/evidence.md"
+    write(decision, _current_decision_record(prior_slug, status="superseded", body=f"[Proof]({href}?view=1#proof)\n").replace(
+        "- superseded-by: none", f"- superseded-by: {successor_slug}"))
+    write(successor, _current_decision_record(successor_slug, status="accepted", body=f"[Proof]({href})\n").replace(
+        "- supersedes: none", f"- supersedes: {prior_slug}"))
+    write(lesson, f"- id: {lesson.stem}\n- status: dropped\n- source: fixture\n- category: workflow\n\n# Lesson\n[Proof]({href}#proof)\n")
+    before = {path: path.read_bytes() for path in (decision, successor, lesson)}
+    write_empty_bug_dispositions(root, slug, instant)
+    module.refresh_readme(root)
+    closure_file = root / "closure-input.md"
+    write(closure_file, closure(instant))
+    result = subprocess.run(
+        [sys.executable, "-B", str(SCRIPT), "close", "--root", str(root), "--slug", slug,
+         "--closure-file", str(closure_file), "--terminal-instant", instant],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    archived = root / "work-items" / "archive" / "2026-10" / slug
+    assert archived.is_dir() and not active.exists()
+    assert (archived / "evidence.md").read_bytes() == payload
+    relocated = href.replace("../active/", "../archive/2026-10/", 1)
+    for path, data in before.items():
+        assert path.read_bytes() == data.replace(href.encode(), relocated.encode())
+        assert (path.parent / relocated).resolve() == archived / "evidence.md"
+    receipt = json.loads((archived / module.BUG_DISPOSITIONS_RECEIPT).read_bytes())
+    rows = receipt["linkMaintenance"]["consumers"]
+    assert {row["source"] for row in rows} == {path.relative_to(root / "work-items").as_posix() for path in before}
+    assert all(row["source"] == row["target"] and row["authority"] == "current-metadata" for row in rows)
+    for row in rows:
+        path = root / "work-items" / row["source"]
+        assert row["beforeSha256"].lower() == hashlib.sha256(before[path]).hexdigest()
+        assert row["afterSha256"].lower() == hashlib.sha256(path.read_bytes()).hexdigest()
+    module.check_readme(root)
+    assert module.close_item(root, slug, closure_file.read_bytes(), instant) == archived
+
+
+@pytest.mark.parametrize("decision_format", ["v0", "h1"])
+def test_close_refuses_authentic_read_only_decision_consumers(tmp_path: Path, decision_format: str) -> None:
+    module = load_module()
+    root, slug = tmp_path / "repo", "2026-10-18-readonly-target"
+    instant = "2026-10-18T00:00:00Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    write(active / "evidence.md", "Referenced payload.\n")
+    decision_slug = "2026-08-01-frozen"
+    decision = root / "work-items" / "decisions" / f"{decision_slug}.md"
+    body = f"[Proof](../active/{slug}/evidence.md)\n"
+    if decision_format == "v0":
+        write(decision, _legacy_v0_decision_record(status="superseded", identity_line=f"id: {decision_slug}", body=body))
+        manifest_writer, preflight = _write_decision_v0_manifest, module._preflight_current_decision_v0
+    else:
+        write(decision, _legacy_h1_decision_record(status="accepted", body="status: dropped\n\n" + body))
+        manifest_writer, preflight = _write_decision_h1_manifest, module._preflight_current_decision_h1
+    manifest = manifest_writer(root, [{"path": decision.name, "sha256": hashlib.sha256(decision.read_bytes()).hexdigest().upper(), "state": "admitted"}])
+    record = preflight(root)[decision.name]
+    assert record.legacy_read_only is True
+    assert record.raw_status == ("superseded" if decision_format == "v0" else "accepted")
+    assert record.admitted_current_status == (None if decision_format == "v0" else "accepted")
+    write_empty_bug_dispositions(root, slug, instant)
+    module.refresh_readme(root)
+    closure_file = root / "closure-input.md"
+    write(closure_file, closure(instant))
+    preserved = {path: path.read_bytes() for path in (root / "work-items").rglob("*") if path.is_file()}
+    result = subprocess.run(
+        [sys.executable, "-B", str(SCRIPT), "close", "--root", str(root), "--slug", slug,
+         "--closure-file", str(closure_file), "--terminal-instant", instant],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode != 0
+    assert "WI-CLOSE-LINK-AUTHORITY" in result.stdout + result.stderr
+    assert "read-only" in result.stdout + result.stderr
+    assert active.is_dir() and not (active / "closure.md").exists()
+    assert not (root / "work-items" / "archive" / "2026-10" / slug).exists()
+    assert {path: path.read_bytes() for path in preserved} == preserved
+    assert manifest.read_bytes() == preserved[manifest]
+
+
+@pytest.mark.parametrize("status", ["accepted", "superseded", "unknown-state"])
+def test_decision_structural_parse_keeps_current_validator_policy(tmp_path: Path, status: str) -> None:
+    module = load_module()
+    slug = "2026-10-18-parse-policy"
+    text = _current_decision_record(slug, status=status)
+    path = tmp_path / f"{slug}.md"
+    write(path, text)
+    before = path.read_bytes()
+    if status == "accepted":
+        assert module._validate_current_decision_record(path, slug).admitted_current_status == status
+    else:
+        with pytest.raises(module.LifecycleError) as failure:
+            module._validate_current_decision_record(path, slug)
+        assert failure.value.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    parsed = module._parse_decision_record_text(before.decode("utf-8"), slug)
+    assert parsed.raw_status == status and parsed.legacy_read_only is False
+    assert parsed.admitted_current_status == (status if status == "accepted" else None)
+    assert path.read_bytes() == before
+
+
 def test_close_updates_owned_ordinary_documents_and_replays_after_owner_advances(tmp_path: Path) -> None:
     module = load_module()
     root = tmp_path / "repo"
@@ -2731,20 +2840,28 @@ def test_close_uri_rollback_restores_owned_bytes_or_preserves_concurrent_authori
     assert (root / "work-items" / "README.md").read_bytes() == readme_before
 
 
-def test_close_uri_preflight_drift_refuses_without_overwriting_consumer(tmp_path: Path) -> None:
+@pytest.mark.parametrize("consumer_kind", ["bug", "decision-format"])
+def test_close_uri_preflight_drift_refuses_without_overwriting_consumer(tmp_path: Path, consumer_kind: str) -> None:
     module = load_module()
     root, slug = tmp_path / "repo", "preflight-link-drift"
     instant = "2026-10-08T11:14:59Z"
     seed_active(module, root, slug)
     active = root / "work-items" / "active" / slug
     write(active / "evidence.md", "Original target.\n")
-    bug = seed_context_bug(root, "standalone", "2026-10-08-preflight-link")
-    before = bug.read_bytes() + f"[Proof](../active/{slug}/evidence.md)\n".encode()
+    href = f"[Proof](../active/{slug}/evidence.md)\n"
+    if consumer_kind == "bug":
+        bug = seed_context_bug(root, "standalone", "2026-10-08-preflight-link")
+        before = bug.read_bytes() + href.encode()
+        changed = before + b"Concurrent current authoring.\n"
+    else:
+        bug = root / "work-items" / "decisions" / "2026-10-08-preflight-link.md"
+        before = _current_decision_record(bug.stem, status="accepted", body=href).encode()
+        changed = _legacy_v0_decision_record(status="accepted", identity_line=f"id: {bug.stem}", body=href + "Concurrent format authoring.\n").encode()
+        bug.parent.mkdir(parents=True, exist_ok=True)
     bug.write_bytes(before)
     write_empty_bug_dispositions(root, slug, instant)
     module.refresh_readme(root)
     original = module._close_link_authority
-    changed = before + b"Concurrent current authoring.\n"
     def classify_then_change(*args):
         authority = original(*args)
         bug.write_bytes(changed)
@@ -2752,9 +2869,107 @@ def test_close_uri_preflight_drift_refuses_without_overwriting_consumer(tmp_path
     module._close_link_authority = classify_then_change
     with pytest.raises(module.LifecycleError) as failure:
         module.close_item(root, slug, closure(instant).encode(), instant)
-    assert failure.value.failure_id == "WI-CLOSE-LINK-DRIFT"
+    assert failure.value.failure_id == "WI-CLOSE-LINK-DRIFT", f"{failure.value!r}; cause={failure.value.__cause__!r}"
     assert bug.read_bytes() == changed and active.is_dir()
     assert not (root / "work-items" / "archive" / "2026-10" / slug).exists()
+
+
+def test_close_existing_closure_prewrite_drift_verifies_unchanged_native_preimages(tmp_path: Path) -> None:
+    module = load_module()
+    root, slug = tmp_path / "repo", "existing-closure-link-drift"
+    instant = "2026-10-18T00:00:00Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    write(active / "evidence.md", "Original retained target.\n")
+    write(active / "closure.md", closure(instant))
+    bug = seed_context_bug(root, "standalone", "2026-10-18-existing-closure-link")
+    before = bug.read_bytes() + f"[Proof](../active/{slug}/evidence.md)\n".encode()
+    bug.write_bytes(before)
+    changed = before + b"Concurrent consumer authoring.\n"
+    write_empty_bug_dispositions(root, slug, instant)
+    module.refresh_readme(root)
+    paths = (active / "status.md", active / "closure.md", active / "evidence.md",
+             root / "work-items" / "README.md")
+    preimages = {path: (path.read_bytes(), module._lifecycle_file_identity(path.lstat())) for path in paths}
+    classify = module._close_link_authority
+    qualify = module.LifecycleTransaction.qualify_owned_inverse
+    write_atomic = module._atomic_write
+    retained, inverses, writes = {}, [], []
+
+    def classify_then_change(*args):
+        authority = classify(*args)
+        held = module._CURRENT_LIFECYCLE_TRANSACTION.get()
+        for path in paths[:2]:
+            retained[path] = held._retained_observations.get(path)
+        bug.write_bytes(changed)
+        return authority
+
+    def record_inverse(held, origin, **kwargs):
+        inverses.append(origin)
+        return qualify(held, origin, **kwargs)
+
+    def record_write(path, data):
+        writes.append(path)
+        return write_atomic(path, data)
+
+    module._close_link_authority = classify_then_change
+    module.LifecycleTransaction.qualify_owned_inverse = record_inverse
+    module._atomic_write = record_write
+    with pytest.raises(module.LifecycleError) as failure:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    assert failure.value.failure_id == "WI-CLOSE-LINK-DRIFT"
+    assert not inverses and not writes
+    for path in paths[:2]:
+        assert isinstance(retained[path], module.CapturedFileSnapshot)
+        assert (retained[path].data, retained[path].identity) == preimages[path]
+    for path, preimage in preimages.items():
+        assert (path.read_bytes(), module._lifecycle_file_identity(path.lstat())) == preimage
+    assert bug.read_bytes() == changed and active.is_dir()
+    assert not (root / "work-items" / "archive" / "2026-10" / slug).exists()
+
+
+def test_close_uri_target_drift_preserves_actual_target_and_restores_consumer(tmp_path: Path) -> None:
+    module = load_module()
+    root, slug = tmp_path / "repo", "2026-10-18-target-drift"
+    instant = "2026-10-18T00:00:00Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    evidence = active / "evidence.md"
+    write(evidence, "Original target.\n")
+    decision = root / "work-items" / "decisions" / "2026-10-18-target-consumer.md"
+    write(decision, _current_decision_record(decision.stem, status="accepted", body=f"[Proof](../active/{slug}/evidence.md)\n"))
+    before = decision.read_bytes()
+    write_empty_bug_dispositions(root, slug, instant)
+    module.refresh_readme(root)
+    status_before, readme_before = (active / "status.md").read_bytes(), (root / "work-items" / "README.md").read_bytes()
+    original = module._verify_parent_archive_link_targets
+    injected = []
+    changed = b"Concurrent target authoring.\n"
+
+    def change_target_then_verify(plan, *, archived, failure_id):
+        if not archived and not injected:
+            evidence.write_bytes(changed)
+            injected.append(True)
+        return original(plan, archived=archived, failure_id=failure_id)
+
+    module._verify_parent_archive_link_targets = change_target_then_verify
+    with pytest.raises(module.LifecycleError) as failure:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    assert injected and failure.value.failure_id == "WI-CLOSE-LINK-DRIFT", f"{failure.value!r}; cause={failure.value.__cause__!r}"
+    assert evidence.read_bytes() == changed and decision.read_bytes() == before
+    assert active.is_dir() and (active / "status.md").read_bytes() == status_before
+    assert (root / "work-items" / "README.md").read_bytes() == readme_before
+    assert not (active / "closure.md").exists()
+    assert not (root / "work-items" / "archive" / "2026-10" / slug).exists()
+
+
+def test_close_link_uri_delta_refuses_non_href_authoring() -> None:
+    module = load_module()
+    before = b"status: accepted\n[Proof](../active/target/evidence.md#proof)\n"
+    after = before.replace(b"active/", b"archive/2026-10/").replace(b"accepted", b"superseded")
+    with pytest.raises(module.LifecycleError) as failure:
+        module._close_link_uri_changes(before, after)
+    assert failure.value.failure_id == "WI-CLOSE-LINK-VERIFY"
 
 
 def test_close_v2_unselected_placeholder_requires_public_positive_uri_flag(tmp_path: Path) -> None:

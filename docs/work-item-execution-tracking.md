@@ -531,8 +531,27 @@ and `Residual risk` fields. `Closed` MUST exactly equal the requested
 `--terminal-instant` and use strict UTC `YYYY-MM-DDTHH:MM:SSZ`.
 
 ```powershell
-python scripts/mutate-work-item.py --root . close --slug <active-slug> --closure-file <closure.md-input> --terminal-instant <strict-UTC>
+python scripts/mutate-work-item.py close --root . --slug <active-slug> --closure-file <closure.md-input> --terminal-instant <strict-UTC>
 ```
+
+Ordinary directory `close` is the positive operation and omits `--apply`. That
+flag belongs only to the separate `--legacy-evidence-file` close route, not an
+extra confirmation for ordinary close.
+
+Incoming-link upkeep changes only captured hrefs that still name the same
+target at its archive location. The lifecycle owner first admits the captured
+record format, physical-current membership and mutability; category-known
+current or terminal semantic states can then receive this href-only upkeep.
+Status, identity, context, supersession meaning, other bytes and link fragments
+stay unchanged: no semantic transition, retirement or invented `Terminal-at`
+follows. Current-state validation and lifecycle-audit diagnostics are unchanged.
+Read-only decision-format `V0`/`H1` records remain protected: if a physical href
+needs rewriting, close refuses before effects rather than skipping that
+consumer or changing its frozen bytes. Captured-byte/currentness checks, exact
+target binding, existing positive authority for protected links, receipts,
+replay, rollback and resource guarantees remain unchanged. A `current-metadata`
+receipt records in-place address upkeep, not semantic acceptance or a later
+write grant.
 
 Version 1 remains exact-context-only. Its `bugs` array enumerates every current
 bug whose parsed `context` equals the closing slug. A `terminalize` row contains
@@ -1040,6 +1059,8 @@ Root consumes the completed tool frame and verifies item/selection/strictness/di
 - `SHA-256`: Secure Hash Algorithm with a 256-bit byte-content digest.
 - `UTC`: Coordinated Universal Time; historical identity-record timestamps end in `Z`.
 - `V1` / `V2`: Version 1 / Version 2 of the execution-ledger event schema.
+- Decision-format `V0` / `H1`: existing read-only historical decision identifiers, distinct from the ledger schema.
+- `href`: the destination text of a link.
 - `C1`–`C5`: existing closure-relation checks for target order and eligibility, unique discharge, closing authority, and protected waivers.
 - `stale running agent`: a ledger event still marked `running` after the configured age threshold.
 - `status.md`: human-readable task-memory recovery summary.

@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-18
+
+- Ordinary close can maintain same-target incoming links in admitted mutable current records with known terminal semantic states, without changing their status or inventing archival history. Read-only historical decision formats still refuse link writes; exact-target, currentness, protected-link authority, receipt and rollback guarantees remain in force.
+
 ## 2026-10-17
 
 - Generic and pull-request publication checks can use an absolute Git application and one explicit absolute repository root independently of the execution directory when their actual command and authority permit it. A valid execution directory may differ from the target; genuinely unused absence is allowed, while invalid supplied metadata still refuses. Pull-request routes retain their supported syntax, genuine authorization context, provider transport, target and binding checks. Actual executable agreement, fresh complete scans, one-use receiving, human review and creator-resource settlement remain required; context-dependent lookup is unchanged.
