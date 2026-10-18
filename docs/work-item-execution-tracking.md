@@ -1022,6 +1022,17 @@ If inverse compensation cannot be verified, the transaction retains the actual m
 
 Downgrade is not generally safe: an older reader may refuse opaque bytes or treat UTF-8 historical links as live. Use a capable lifecycle owner; recovery restores capable code, never rewrites, moves or deletes the retained payload to bypass classification.
 
+## Record one archived missing-artifact disposition
+
+The validator's sole store, `work-items/legacy-ledger-historical-dispositions/`, holds create-only Version 2 evidence for one missing artifact referenced by an immutable archived execution ledger; it is outside the work-item lifecycle categories. Keep the record with its archived reference. Do not treat it as scratch, move it into or edit the archive, or reconstruct approval from status prose. The existing writer is `python .\scripts\mutate-work-item.py write-historical-artifact-disposition --root . --disposition-file <disposition.json>`; invocation writes immediately, with no dry-run or `--apply` mode, and an exact repeat replays the existing record. The writer and sole storage path are in [mutate-work-item.py](../scripts/mutate-work-item.py#L27024) and [validate-work-item-state.py](../scripts/validate-work-item-state.py#L7448).
+
+Each record binds the archived work-item and archive identity, complete ledger SHA-256, raw ledger line ordinal and SHA-256, event SHA-256 and run ID, missing repository-relative artifact path, and artifact revision SHA-256. Its state is one of:
+
+- `content-recovered`: includes the original artifact bytes, whose digest must equal the archived artifact revision.
+- `irrecoverable-approved`: includes the complete search receipt and the exact approval identity, time, and statement digest.
+
+Version 1 records remain nonauthorizing. Version 2 can let the archive validator accept only the exact missing artifact bound to its archived PASS row; it does not create a PASS, close a work item, or independently discharge a review. See the [V2 validator](../scripts/validate-work-item-state.py#L7516) and [archived reader](../scripts/validate-work-item-state.py#L7654).
+
 ## Operator Rules
 
 - Do not trust a subagent report without a matching ledger event and independent verification evidence.
