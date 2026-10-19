@@ -7156,7 +7156,7 @@ def _transfer_authority_sha256(
 
 
 def _transfer_receipts(
-    root: Path, errors: list[str]
+    root: Path, errors: list[str], *, ledger_resource_budget=None
 ) -> dict[str, tuple[Path, dict, Path]]:
     receipts: dict[str, tuple[Path, dict, Path]] = {}
     for path in _transfer_receipt_candidates(root, errors):
@@ -7442,7 +7442,7 @@ def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_b
         fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: successor has no repository root")
         return ()
     source_slug, operation_id = relation
-    receipts = _transfer_receipts(root, errors)
+    receipts = _transfer_receipts(root, errors, ledger_resource_budget=ledger_resource_budget)
     entry = receipts.get(operation_id)
     if entry is None:
         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: successor receipt is absent: {operation_id}")
@@ -7500,7 +7500,7 @@ def validate_obligation_transfer_ownership(root: Path, *, ledger_resource_budget
 
     root = Path(root).resolve()
     errors: list[str] = []
-    receipts = _transfer_receipts(root, errors)
+    receipts = _transfer_receipts(root, errors, ledger_resource_budget=ledger_resource_budget)
     rows_by_operation: dict[str, dict[str, dict]] = {}
     children: dict[tuple[str, str], list[str]] = {}
     origins: dict[str, list[str]] = {}

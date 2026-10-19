@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-19
 
+- Transfer receipt validation now carries the caller's ledger budget through successor activation; existing receipt capacity and refusal behavior remain unchanged.
+
 - Managed execution budgets now follow the actual ledger history and admitted upcoming writes instead of treating the diagnostic default as a task lifetime quota. The same bounded allowance reaches recording and lifecycle receivers; complete history and real unresolved obligations remain intact. One recording owner writes each actual launch/terminal pair, while recovery uses the existing compact obligation view.
 
 - Installer failure summaries now distinguish primary and cleanup causes using safe type categories, owned identifiers and native error codes. Invalid optional data leaves independently available details visible; exception messages and private paths stay out of the new public fields.
