@@ -4194,22 +4194,28 @@ def test_import_active_successor_preflight_keeps_valid_source_status_as_evidence
     assert tree_file_bytes(root / "work-items") == before
 
 
-def test_import_active_successor_preflight_projects_planned_consumer_bytes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("opaque", (False, True))
+def test_import_active_successor_preflight_projects_planned_consumer_bytes(tmp_path: Path, opaque: bool) -> None:
     root = tmp_path / "case"
     fixture = _active_successor_preflight_fixture(root)
     module = fixture["module"]
     work_items = root / "work-items"
-    consumer = work_items / "backlog" / "consumer.md"
+    relative = "active/side/design.md" if opaque else "backlog/consumer.md"
+    if opaque:
+        write(work_items / "active/side/status.md", quick_status())
+    consumer = work_items / relative
+    href = f"{'../../' if opaque else '../'}active/{fixture['old']}/status.md#work-item:{fixture['old']}"
     write(consumer, (
-        f"status: candidate\n[Current](../active/{fixture['old']}/status.md)\n"
-        f"Relation: work-item:{fixture['old']}\n"
+        f"status: candidate\n[Current]({href})\n"
     ))
+    if opaque:
+        consumer.write_bytes(b"\xef\xbb\xbf\xc3\xa9\x97\r\n" + consumer.read_bytes() + b"\x81")
     fixture["dispositions"]["references"] = [{
-        "consumer": "backlog/consumer.md", "kind": "physical",
-        "value": f"../active/{fixture['old']}/status.md",
+        "consumer": relative, "kind": "physical",
+        "value": href,
         "target": f"work-items/active/{fixture['new']}/status.md",
     }, {
-        "consumer": "backlog/consumer.md", "kind": "logical",
+        "consumer": relative, "kind": "logical",
         "value": f"work-item:{fixture['old']}", "meaning": "current-successor",
     }]
     before = tree_file_bytes(work_items)
@@ -4218,6 +4224,9 @@ def test_import_active_successor_preflight_projects_planned_consumer_bytes(tmp_p
         fixture["dispositions"], "front-import-links",
     )
     after_consumer = base64.b64decode(plan["links"][0]["afterBase64"])
+    new_href = (f"../{fixture['new']}/status.md" if opaque else f"../active/{fixture['new']}/status.md") + f"#work-item:{fixture['old']}"
+    assert after_consumer == consumer.read_bytes().replace(href.encode(), new_href.encode()).replace(
+        f"work-item:{fixture['old']}".encode(), f"work-item:{fixture['new']}".encode())
     with tempfile.TemporaryDirectory() as directory:
         shadow_root = Path(directory)
         shadow_work_items = shadow_root / "work-items"
@@ -4226,15 +4235,15 @@ def test_import_active_successor_preflight_projects_planned_consumer_bytes(tmp_p
         shadow_status = shadow_work_items / "active" / fixture["new"] / "status.md"
         shadow_status.parent.mkdir(parents=True)
         shadow_status.write_bytes(fixture["status"])
-        (shadow_work_items / "backlog" / "consumer.md").write_bytes(after_consumer)
+        (shadow_work_items / relative).write_bytes(after_consumer)
         expected = module.render_readme_bytes(
             shadow_root, static_guide_override=module._static_guide(work_items / "README.md"),
         )
     assert plan["readme"]["afterBytes"] == expected
+    canonical_relative = "active/side/status.md" if opaque else relative
+    canonical_bytes = (work_items / canonical_relative).read_bytes() if opaque else after_consumer
     assert next(row for row in plan["canonicalInputs"]
-                if row["path"] == "work-items/backlog/consumer.md")["sha256"] == (
-                    hashlib.sha256(after_consumer).hexdigest()
-                )
+                if row["path"] == "work-items/" + canonical_relative)["sha256"] == hashlib.sha256(canonical_bytes).hexdigest()
     assert tree_file_bytes(work_items) == before
 
 
@@ -5613,8 +5622,9 @@ def test_supersede_current_bug_excludes_unreadable_archived_consumers_from_stric
         ).exists(), failure_kind
 
 
+@pytest.mark.parametrize("opaque", (False, True))
 def test_supersede_current_bug_archives_links_and_readme_in_one_recoverable_intent(
-    tmp_path: Path,
+    tmp_path: Path, opaque: bool,
 ) -> None:
     module = load_module()
     root = tmp_path / "repo"
@@ -5623,17 +5633,21 @@ def test_supersede_current_bug_archives_links_and_readme_in_one_recoverable_inte
     terminal_instant = "2026-09-10T08:02:00Z"
     source = seed_context_bug(root, "source-owner", slug)
     source_before = source.read_bytes()
-    consumer = root / "work-items" / "active" / "consumer" / "status.md"
+    consumer = root / "work-items" / "active" / "consumer" / ("design.md" if opaque else "status.md")
     old_href = f"../../bugs/{slug}.md"
     successor_reference = "external-bug-registry#bug:accepted-successor"
     consumer_before = (
         quick_status("Track the source bug.")
         + f"\nRelated: bug:{slug}\n[physical]({old_href})\n"
     ).encode("utf-8")
+    if opaque:
+        consumer_before = b"\xef\xbb\xbf\xc3\xa9\x97\r\n" + consumer_before + b"\x81"
     consumer_after = consumer_before.replace(
         f"bug:{slug}".encode("utf-8"), successor_reference.encode("utf-8")
     ).replace(old_href.encode("utf-8"), successor_reference.encode("utf-8"))
     consumer.parent.mkdir(parents=True)
+    if opaque:
+        (consumer.parent / "status.md").write_text(quick_status(), encoding="utf-8")
     consumer.write_bytes(consumer_before)
     successor = root / "receiving-registry" / "accepted-successor.md"
     successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
@@ -11473,14 +11487,19 @@ def _physical_relocation_inventory(root: Path) -> tuple[Path, Path, Path, Path, 
     return inventory, receipt, consumer, target, payload
 
 
+@pytest.mark.parametrize("opaque", (False, True))
 def test_exact_physical_relocation_is_admitted_then_moved_atomically(
-    tmp_path: Path,
+    tmp_path: Path, opaque: bool,
 ) -> None:
     module = load_module()
     root = tmp_path / "repo"
     inventory, receipt, consumer, current_target, payload = _physical_relocation_inventory(root)
     work_items = root / "work-items"
     row = payload["rows"][0]
+    if opaque:
+        consumer.write_bytes(b"\xef\xbb\xbf\xc3\xa9\x97\r\n" + consumer.read_bytes() + b"\x81")
+        row["incomingLinks"]["physicalRelocation"]["sourceSha256"] = hashlib.sha256(consumer.read_bytes()).hexdigest()
+        inventory.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     consumer_before = consumer.read_bytes()
     target_before = current_target.read_bytes()
 
@@ -17381,7 +17400,7 @@ def test_legacy_parent_archive_repairs_descendant_uris_and_compensates_conflict(
     assert module.migrate_legacy(root, f"work-item:{parent}", incoming_links_inventory=inventory) == archived
 
 
-def _parent_successor_link_fixture(tmp_path: Path):
+def _parent_successor_link_fixture(tmp_path: Path, *, opaque=False):
     spec = importlib.util.spec_from_file_location("parent_transition_fixtures", SCRIPT.parent.parent / "tests" / "test_legacy_obligation_migration.py")
     helpers = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helpers)
@@ -17391,14 +17410,21 @@ def _parent_successor_link_fixture(tmp_path: Path):
     bug = seed_context_bug(tmp_path, "standalone", "parent-uri-consumer")
     before = bug.read_bytes() + f"[evidence](../active/{item.name}/evidence.md#case)\n[status](../active/{item.name}/status.md)\n[closure](../active/{item.name}/closure.md)\n".encode()
     bug.write_bytes(before)
+    if opaque:
+        bug.unlink()
+        write(tmp_path / "work-items/active/side/status.md", quick_status())
+        bug = tmp_path / "work-items/active/side/design.md"
+        before = b"\xef\xbb\xbf\xc3\xa9\x97\r\n" + before.replace(b"../active/", b"../../active/") + b"\x81"
+        bug.write_bytes(before)
     module.refresh_readme(tmp_path)
     fixture["readmeSha"] = hashlib.sha256((tmp_path / "work-items" / "README.md").read_bytes()).hexdigest()
     fixture.update(consumer=bug, consumerBefore=before, evidenceBefore=(item / "evidence.md").read_bytes())
     return fixture, helpers
 
 
-def test_parent_successor_uri_restart_binds_original_targets_and_preserves_duty(tmp_path: Path) -> None:
-    fixture, helpers = _parent_successor_link_fixture(tmp_path)
+@pytest.mark.parametrize("opaque", (False, True))
+def test_parent_successor_uri_restart_binds_original_targets_and_preserves_duty(tmp_path: Path, opaque: bool) -> None:
+    fixture, helpers = _parent_successor_link_fixture(tmp_path, opaque=opaque)
     module = fixture["lifecycle"]
     with pytest.raises(module.LifecycleError):
         helpers.run_transfer(fixture, inject="T3")

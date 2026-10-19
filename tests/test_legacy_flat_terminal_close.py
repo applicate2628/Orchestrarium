@@ -331,6 +331,52 @@ class LegacyFlatTerminalTests(unittest.TestCase):
         self.assertNotEqual((archive / "lifecycle-transition-receipt.json").read_bytes(),
                             (archive / "bug-dispositions-receipt.json").read_bytes())
 
+    def exercise_incoming_byte_images(self, opaque=True):
+        """Public synthetic oracle; return actual wire keys for baseline comparison."""
+        document = self.root / "work-items/design.md"
+        first = f"backlog/{self.slug}.md?rev=1#work-items/backlog/{self.slug}.md".encode()
+        second = f"./backlog/{self.slug}.md#other".encode()
+        body = (b"\xef\xbb\xbfmultibyte \xc3\xa9 " + (b"\x97" if opaque else b"prose") + b"\r\n"
+                + b"[First](" + first + b") [Repeat](" + first + b")\r\n"
+                + b"[Second](" + second + b")\r\n"
+                + f"Literal work-items/backlog/{self.slug}.md\r\n".encode()
+                + (b"\x81" if opaque else b"tail"))
+        document.write_bytes(body)
+        _evidence, arguments = self.legacy_request()
+        before = self.canonical_images()
+        for invocation in (arguments, [*arguments, "--apply"], [*arguments, "--apply"]):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                result = m.main(invocation)
+            self.assertEqual(result, 0, output.getvalue())
+            if invocation is arguments:
+                self.assertEqual(self.canonical_images(), before)
+        archive = self.root / "work-items/archive/2026-10" / self.slug
+        target = f"archive/2026-10/{self.slug}/legacy-source/{self.slug}.md".encode()
+        expected = body.replace(first, target + f"?rev=1#work-items/backlog/{self.slug}.md".encode()).replace(second, target + b"#other")
+        expected = expected.replace(f"work-items/backlog/{self.slug}.md".encode(), b"work-items/" + target)
+        self.assertEqual(document.read_bytes(), expected)
+        action = json.loads((archive / m.LEGACY_COMPLETION_RECEIPT).read_bytes())
+        row = next(row for row in action["links"]["consumers"] if row["path"] == "work-items/design.md")
+        self.assertEqual(m._unb64(row["before"]), body)
+        self.assertEqual(m._unb64(row["after"]), expected)
+        self.assertEqual(row["beforeSha256"], digest(body))
+        self.assertEqual(row["afterSha256"], digest(expected))
+        wire = m._migration_receipt_bytes(action)
+        self.assertEqual(json.loads(wire.decode("utf-8")), action)
+        self.assertFalse(any(0xD800 <= ord(character) <= 0xDFFF for character in wire.decode("utf-8")))
+        self.assertEqual(m.resolve_category(self.root, f"work-item:{self.slug}"), archive)
+        observation = m.observe_work_item_terminal(self.root, f"work-item:{self.slug}")
+        observation.verify()
+        m.check_readme(self.root)
+        return {"action": sorted(action), "links": sorted(action["links"]),
+                "inventory": sorted(action["links"]["inventory"]),
+                "referenceRows": sorted({tuple(sorted(row)) for row in action["links"]["inventory"]["references"]}),
+                "consumerRows": sorted({tuple(sorted(row)) for row in action["links"]["consumers"]})}
+
+    def test_public_opaque_markdown_dryrun_apply_replay_and_receiving(self):
+        self.exercise_incoming_byte_images()
+
     def test_public_cli_fresh_process_readers_and_historical_replay(self):
         evidence, arguments = self.legacy_request()
         # Genuine new public helper frame, no inherited native objects.

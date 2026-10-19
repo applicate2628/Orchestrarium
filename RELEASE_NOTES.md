@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-19
+
+- Incoming-link maintenance can inspect and update Markdown navigation while preserving undecodable prose bytes, byte-order marks and original line endings. The shared byte image also drives durable receiving and inverse checks. Unknown local targets, unrepresentable affected links, and detected unsupported or malformed containers still stop the operation; metadata schemas, attachment exemptions and lifecycle authority remain unchanged. Receipts keep their existing shape, but helpers verifying these new byte images must retain the revised reader until dependent pending or settled operations no longer need it.
+
 ## 2026-10-18
 
 - Ordinary close can maintain same-target incoming links in admitted mutable current records with known terminal semantic states, without changing their status or inventing archival history. Read-only historical decision formats still refuse link writes; exact-target, currentness, protected-link authority, receipt and rollback guarantees remain in force.

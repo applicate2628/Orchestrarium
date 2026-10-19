@@ -99,6 +99,120 @@ def seed(root, relative, payload):
     return source, consumer
 
 
+def test_opaque_markdown_body_keeps_real_incoming_navigation(module, tmp_path):
+    payload = b"\xef\xbb\xbfmultibyte \xc3\xa9 opaque \x97\r\n[\xff](../bugs/owned-record.md?rev=1#proof)\r\n\x81"
+    source, consumer = seed(tmp_path, "notes/consumer.md", payload)
+    for strict in (False, True):
+        result = module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=strict)
+        assert result == {"result": "unmapped", "references": [{
+            "consumer": "notes/consumer.md", "kind": "physical",
+            "value": "../bugs/owned-record.md?rev=1#proof",
+        }]}
+    assert consumer.read_bytes() == payload
+
+
+@pytest.mark.parametrize("strict", (False, True))
+@pytest.mark.parametrize("payload,expected", (
+    (b"opaque\xff\0 prose\n" + REFERENCE.encode(), "logical-only"),
+    (b"opaque\xff\0 prose only", "clear"),
+    (b"[x](../bugs/\xff.md)", "semantic"),
+    (b"[x](../bugs/owned-record.md#\xff)", "semantic"),
+    (b"[x](../bugs/unrelated.md#\xff)", "clear"),
+    (b"[x](https://example.invalid/\xff)", "clear"),
+    (b"[x](../bugs/owned-record.md\0)", "semantic"),
+    (REFERENCE.encode("utf-16"), "representation"),
+    (REFERENCE.encode("utf-32"), "representation"),
+))
+def test_navigation_semantics_hold_only_the_dependent_case(module, tmp_path, strict, payload, expected):
+    source, consumer = seed(tmp_path, "notes/navigation.md", payload)
+    if expected in {"semantic", "representation"}:
+        with pytest.raises(module.LifecycleError) as refused:
+            module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=strict)
+        assert refused.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+        assert "notes/navigation.md" in str(refused.value)
+        assert ("unrepresentable incoming" if expected == "semantic" else "unsupported marked") in str(refused.value)
+        if expected == "semantic":
+            assert "character offset" in str(refused.value)
+        assert not any(0xD800 <= ord(c) <= 0xDFFF for c in str(refused.value))
+    else:
+        assert module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=strict)["result"] == expected
+    assert consumer.read_bytes() == payload
+
+
+@pytest.mark.parametrize("prefix,malformed", ((b"", False), (b"PREFX", False), (b"", True)))
+@pytest.mark.parametrize("strict", (False, True))
+def test_renamed_zip_identity_is_not_ordinary_markdown(module, tmp_path, prefix, malformed, strict):
+    stream = io.BytesIO()
+    content = b"\x97 [x](../bugs/owned-record.md)".ljust(49, b" ")
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr(zipfile.ZipInfo("notes.txt", (2020, 1, 1, 0, 0, 0)), content)
+    raw = stream.getvalue()
+    assert len(raw) == 165
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        assert archive.testzip() is None
+    corrupted = raw.replace(b"../bugs/owned-record.md", b"../bugs/renamed-owned-record.md")
+    with zipfile.ZipFile(io.BytesIO(corrupted)) as archive:
+        assert archive.testzip() == "notes.txt"
+    payload = prefix + (raw[:60] if malformed else raw)
+    source, consumer = seed(tmp_path, "notes/renamed.md", payload)
+    observed = module._incoming_attachment_kind(payload)
+    assert observed.identity == "zip" and observed.admitted is None
+    assert (observed.cause is not None) == malformed
+    with pytest.raises(module.LifecycleError, match="malformed zip" if malformed else "unsupported zip"):
+        module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=strict)
+    assert consumer.read_bytes() == payload
+
+
+def test_image_spans_inverse_and_conflicts(module):
+    raw = b"\xef\xbb\xbf\xc3\xa9\x97\r\n[a](old) [b](long-old) [c](old)\r\n\x81"
+    image = module._IncomingConsumerImage(raw)
+    links = list(module._markdown_local_links(image.view))
+    edits = [(link.href_start, link.href_end, new) for link, new in zip(links, ("much-longer", "x", "middle"))]
+    after = image.edit([*edits, edits[0]])
+    assert after == raw.replace(b"(old)", b"(much-longer)", 1).replace(b"(long-old)", b"(x)").replace(b"(old)", b"(middle)")
+    inverse_image = module._IncomingConsumerImage(after)
+    inverse_links = list(module._markdown_local_links(inverse_image.view))
+    assert inverse_image.edit([(link.href_start, link.href_end, old.href)
+                               for link, old in zip(inverse_links, links)]) == raw
+    with pytest.raises(module.LifecycleError, match="conflicting"):
+        image.edit([edits[0], (edits[0][0], edits[0][1], "conflict")])
+
+
+@pytest.mark.parametrize("rollback", (False, True))
+def test_active_document_bytes_follow_public_close_and_rollback(module, tmp_path, monkeypatch, rollback):
+    from test_mutate_work_item import seed_active, write_empty_bug_dispositions, closure, tree_file_bytes
+    root = tmp_path / "repo"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, "closing")
+    seed_active(module, root, "side")
+    target = root / "work-items/active/closing/evidence.md"
+    target.write_bytes(b"Useful result\n")
+    consumer = root / "work-items/active/side/design.md"
+    href = b"../closing/evidence.md?rev=1#proof"
+    before = b"\xef\xbb\xbf\xc3\xa9\x97\r\n[one](" + href + b") [two](" + href + b")\r\n\x81"
+    consumer.write_bytes(before)
+    write_empty_bug_dispositions(root, "closing", instant)
+    module.refresh_readme(root)
+    canonical = tree_file_bytes(root / "work-items")
+    if rollback:
+        def fail_after_uri_write(_root):
+            assert consumer.read_bytes() != before
+            raise module.LifecycleError("WI-README-STALE", "synthetic failure after owned URI write")
+        monkeypatch.setattr(module, "refresh_readme", fail_after_uri_write)
+        with pytest.raises(module.LifecycleError, match="synthetic failure"):
+            module.close_item(root, "closing", closure(instant).encode(), instant)
+        assert tree_file_bytes(root / "work-items") == canonical
+    else:
+        archive = module.close_item(root, "closing", closure(instant).encode(), instant)
+        expected = before.replace(href, b"../../archive/2026-10/closing/evidence.md?rev=1#proof")
+        assert consumer.read_bytes() == expected
+        assert module.resolve_category(root, "work-item:closing") == archive
+        assert module.close_item(root, "closing", closure(instant).encode(), instant) == archive
+        assert len(module._close_link_uri_changes(before, expected)) == 2
+        with pytest.raises(module.LifecycleError, match="non-URI"):
+            module._close_link_uri_changes(before, expected.replace(b"\x97", b"\x96"))
+
+
 @pytest.mark.parametrize("payload", (
     pytest.param(b"\x00\xffordinary binary input\x00", id="binary"),
     pytest.param(
@@ -234,10 +348,20 @@ def test_read_errors_preserve_failure_cause_and_tolerant_policy(module, tmp_path
 def test_mandatory_record_codec_beats_native_signature(module, tmp_path, suffix, payload):
     """Break caught: native signature suppresses a mandatory record's codec failure."""
     source, consumer = seed(tmp_path, "active/other/record" + suffix, payload)
+    if suffix.lower() == ".md" and payload == b"\xff" + REFERENCE.encode():
+        assert module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=True) == {
+            "result": "logical-only", "references": [{
+                "consumer": "active/other/record" + suffix, "kind": "logical", "value": REFERENCE,
+            }],
+        }
+        return
     with pytest.raises(module.LifecycleError) as refused:
         module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=True)
     assert refused.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
-    assert isinstance(refused.value.__cause__, UnicodeDecodeError)
+    if suffix.lower() == ".md":
+        assert "unsupported" in str(refused.value)
+    else:
+        assert isinstance(refused.value.__cause__, UnicodeDecodeError)
     assert consumer.read_bytes() == payload
 
 
@@ -312,7 +436,7 @@ def test_unsupported_container_identity_keeps_acquisition_policy(module, tmp_pat
     data[central + 6:central + 8] = (64).to_bytes(2, "little")
     payload = bytes(data)
     source, consumer = seed(tmp_path, "active/other/unsupported.bin", payload)
-    assert module._incoming_attachment_kind(payload) is None
+    assert module._incoming_attachment_kind(payload).admitted is None
     if options.get("strict_consumer_reads"):
         with pytest.raises(module.LifecycleError) as refused:
             module._incoming_link_result(tmp_path, {source}, REFERENCE, **options)
@@ -323,3 +447,213 @@ def test_unsupported_container_identity_keeps_acquisition_policy(module, tmp_pat
             "result": "clear", "references": [],
         }
     assert consumer.read_bytes() == payload
+
+
+@pytest.mark.parametrize("opaque", (False, True))
+def test_archive_composes_selected_literal_inside_href_suffix(module, tmp_path, opaque):
+    source = tmp_path / "work-items/backlog/old-item.md"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"original task\n")
+    consumer = tmp_path / "work-items/notes/consumer.md"
+    consumer.parent.mkdir()
+    href = "../backlog/old-item.md#work-items/backlog/old-item.md"
+    before = (b"\x97\r\n" if opaque else b"prose\r\n") + f"[link]({href})".encode()
+    consumer.write_bytes(before)
+    archive = tmp_path / "work-items/archive/2026-10/old-item.md"
+    rows = [{"consumer": "notes/consumer.md", "kind": "physical", "value": value}
+            for value in (href, "work-items/backlog/old-item.md")]
+    plans = module._physical_archive_link_plans(
+        tmp_path, source, archive, rows, failure_id="WI-LEGACY-COMPLETION-LINKS")
+    assert plans[0]["before"] == before
+    assert plans[0]["after"] == before.replace(b"backlog/old-item.md", b"archive/2026-10/old-item.md")
+    assert consumer.read_bytes() == before
+
+
+@pytest.mark.parametrize("opaque", (False, True))
+def test_successor_composes_selected_logical_inside_href_suffix(module, tmp_path, monkeypatch, opaque):
+    work_items = tmp_path / "work-items"
+    source = work_items / "active/old-item"
+    source.mkdir(parents=True)
+    consumer = work_items / "notes/consumer.md"
+    consumer.parent.mkdir()
+    href = "../active/old-item/status.md#work-item:old-item"
+    before = (b"\x97\r\n" if opaque else b"prose\r\n") + f"[link]({href})".encode()
+    consumer.write_bytes(before)
+    supplied = [
+        {"consumer": "notes/consumer.md", "kind": "physical", "value": href,
+         "target": "work-items/active/new-item/status.md"},
+        {"consumer": "notes/consumer.md", "kind": "logical", "value": "work-item:old-item",
+         "meaning": "current-successor"},
+    ]
+    observed = [{key: row[key] for key in ("consumer", "kind", "value")} for row in supplied]
+    monkeypatch.setattr(module, "_incoming_link_result", lambda *args, **kwargs: {"references": observed})
+    plans = module._successor_import_links(tmp_path, work_items, source, "new-item", [], {"references": supplied})
+    after = module._unb64(plans[0]["afterBase64"])
+    assert after == before.replace(b"old-item", b"new-item")
+    assert plans[0]["references"] == sorted(supplied, key=lambda row: (row["kind"], row["value"]))
+    assert consumer.read_bytes() == before
+
+
+def test_bug_successor_keeps_full_href_then_global_literal_policy(module, tmp_path):
+    source, consumer = seed(tmp_path, "notes/consumer.md", b"unused")
+    before = b"\x97 [x](../bugs/owned-record.md#bug:owned-record) bug:owned-record\r\n"
+    assert module._bug_successor_link_after(
+        consumer, source, before, REFERENCE, "bug:successor") == b"\x97 [x](bug:successor) bug:successor\r\n"
+
+
+@pytest.mark.parametrize("unselected", (b"plain", b"opaque\x97", b"nul\0"))
+def test_v1_exact_tuple_ignores_unselected_label_semantics(module, tmp_path, unselected):
+    source = tmp_path / "work-items/bugs/owned-record.md"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"target bytes\n")
+    target = tmp_path / "work-items/bugs/archive/2026-10/owned-record.md"
+    consumer = tmp_path / "work-items/bugs/archive/2026-01/consumer.md"
+    consumer.parent.mkdir(parents=True)
+    href = "../../../bugs/owned-record.md"
+    before = b"[selected](" + href.encode() + b") [" + unselected + b"](" + href.encode() + b")\r\n"
+    consumer.write_bytes(before)
+    admission = {"source": "bugs/archive/2026-01/consumer.md", "label": "selected", "href": href,
+                 "expectedIdentity": REFERENCE, "sourceSha256": hashlib.sha256(before).hexdigest(),
+                 "targetSha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                 "receipt": ".scratch/physical-receipt.json"}
+    planned = {"source": source, "target": target, "reference": REFERENCE,
+               "targetRelative": target.relative_to(tmp_path / "work-items").as_posix(),
+               "beforeSha256": admission["targetSha256"], "afterSha256": admission["targetSha256"], "incomingLinks": {
+                   "result": "physical-relocation", "references": [{"consumer": admission["source"],
+                       "kind": "physical", "value": href}], "physicalRelocation": admission}}
+    instant = "2026-10-19T10:00:00Z"
+    receipt = tmp_path / ".scratch/physical-receipt.json"
+    pending = module._expected_physical_relocation_receipt(
+        tmp_path, REFERENCE, admission, source, target, admission["targetSha256"], instant, settled=False)
+    plans, links = module._plan_v1_link_relocations(tmp_path, [planned], instant, receipt)
+    new_href = "../2026-10/owned-record.md"
+    expected = before.replace(href.encode(), new_href.encode(), 1)
+    assert plans[0]["after"] == expected
+    assert links[0] == pending
+    target.parent.mkdir(parents=True)
+    target.write_bytes(source.read_bytes())
+    consumer.write_bytes(expected)
+    settled = module._expected_physical_relocation_receipt(
+        tmp_path, REFERENCE, admission, source, target, admission["targetSha256"], instant, settled=True)
+    assert settled["sourceBeforeSha256"] == admission["sourceSha256"]
+    assert settled["sourceAfterSha256"] == hashlib.sha256(expected).hexdigest()
+    if unselected == b"plain":
+        for label, raw, reason in (
+            ("missing", before, "missing or duplicated"),
+            ("selected", before + b"[selected](" + href.encode() + b")", "missing or duplicated"),
+            ("selected\0", before.replace(b"[selected]", b"[selected\0]"), "selected label at character offset"),
+        ):
+            consumer.write_bytes(raw)
+            invalid = {**admission, "label": label, "sourceSha256": hashlib.sha256(raw).hexdigest()}
+            incoming = {**planned["incomingLinks"], "physicalRelocation": invalid}
+            for invoke in (
+                lambda: module._expected_physical_relocation_receipt(
+                    tmp_path, REFERENCE, invalid, source, target, admission["targetSha256"], instant, settled=False),
+                lambda: module._plan_v1_link_relocations(tmp_path, [{**planned, "incomingLinks": incoming}], instant, receipt),
+            ):
+                with pytest.raises(module.LifecycleError) as refused:
+                    invoke()
+                assert refused.value.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+                assert reason in str(refused.value)
+            assert consumer.read_bytes() == raw
+
+
+@pytest.mark.parametrize("relative,strict_metadata,marked", (
+    ("bugs/unrelated.md", True, False), ("active/side/status.md", True, False),
+    ("active/side/design.md", False, False), ("active/side/nested/status.md", False, False),
+    ("active/side/design.md", False, True),
+))
+def test_uri_intent_representation_follows_consumer_role(module, tmp_path, relative, strict_metadata, marked):
+    import json
+    (tmp_path / "work-items").mkdir()
+    source = "active/closing"
+    archive = "archive/2026-10/closing"
+    consumer = tmp_path / "work-items" / relative
+    old = module._relative_link(consumer.parent, tmp_path / "work-items" / source / "evidence.md")
+    new = module._relative_link(consumer.parent, tmp_path / "work-items" / archive / "evidence.md")
+    before = b"opaque \x97\n[x](" + old.encode() + b")\n"
+    after = before.replace(old.encode(), new.encode())
+    if marked:
+        before, after = (f"[x]({href})\n".encode("utf-16") for href in (old, new))
+    hashes = {"beforeSha256": hashlib.sha256(before).hexdigest(), "afterSha256": hashlib.sha256(after).hexdigest()}
+    maintenance = {"version": 1, "source": source, "target": archive, "allowProtectedUriUpdates": False,
+        "consumers": [{"source": relative, "target": relative, **hashes, "authority": "current-metadata",
+                       "uriChanges": [{"from": old, "to": new}]}]}
+    intent = {"slug": "closing", "terminalInstant": "2026-10-19T10:00:00Z", "bugs": [],
+        "activePath": "work-items/" + source, "archivePath": "work-items/" + archive,
+        "statusBefore": module._b64(b"status before"), "statusAfter": module._b64(b"status after"),
+        "closureBefore": None, "closureAfter": module._b64(b"closure"),
+        "bugReceiptAfter": module._b64(json.dumps({"bugs": [], "linkMaintenance": maintenance}).encode()),
+        "uriConsumers": {"version": 1, "allowProtectedUriUpdates": False, "rows": [{
+            "source": "work-items/" + relative, "target": "work-items/" + relative,
+            "before": module._b64(before), "after": module._b64(after), **hashes}]},
+        "uriTargetBindings": {"version": 1, "rows": [{"source": "work-items/" + source + "/evidence.md",
+            "target": "work-items/" + archive + "/evidence.md", "kind": "file",
+            "beforeSha256": "a" * 64, "afterSha256": "a" * 64}]}}
+    if strict_metadata or marked:
+        with pytest.raises(module.LifecycleError) as refused:
+            module._transition_parent_uri_images(tmp_path, intent)
+        assert refused.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+        assert relative in str(refused.value)
+        assert ("unsupported marked" if marked else "metadata is not strict UTF-8") in str(refused.value)
+    else:
+        images = module._transition_parent_uri_images(tmp_path, intent)
+        assert images == [{"path": consumer, "target": consumer, "before": before, "after": after}]
+
+
+def test_successor_scan_error_keeps_owner_and_visible_safe_cause(module, tmp_path, monkeypatch):
+    def refuse(*args, **kwargs):
+        raise module.LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY",
+            "incoming consumer notes/consumer.md: unrepresentable incoming local target at character offset 8")
+    monkeypatch.setattr(module, "_incoming_link_result", refuse)
+    with pytest.raises(module.LifecycleError) as refused:
+        module._successor_import_links(tmp_path, tmp_path / "work-items", tmp_path / "work-items/active/old", "new", [], {})
+    assert refused.value.failure_id == "WI-SUCCESSOR-LINK-UNMAPPED"
+    assert "notes/consumer.md" in str(refused.value) and "local target at character offset 8" in str(refused.value)
+    assert refused.value.__cause__.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+    assert module._project_current_bug_supersession_cli_failure(refused.value) == (
+        "WI-SUCCESSOR-LINK-UNMAPPED: current bug supersession rejected")
+
+
+def test_direct_image_failure_owners_keep_safe_representation_cause(module, tmp_path):
+    source, consumer = seed(tmp_path, "active/side/design.md", REFERENCE.encode("utf-16"))
+    raw = consumer.read_bytes()
+    operations = [
+        ("WI-CATEGORY-MIGRATION-INVENTORY", lambda: module._bug_successor_link_after(
+            consumer, source, raw, REFERENCE, "bug:successor")),
+        ("WI-CLOSE-LINK-INVENTORY", lambda: module._physical_archive_link_plans(
+            tmp_path, source, tmp_path / "work-items/bugs/archive/2026-10/owned-record.md",
+            [{"consumer": "active/side/design.md", "kind": "physical", "value": "../../bugs/owned-record.md"}],
+            failure_id="WI-CLOSE-LINK-INVENTORY")),
+        ("WI-CLOSE-LINK-AUTHORITY", lambda: module._close_link_authority(tmp_path, consumer, raw, None, False, 1)),
+        ("WI-CLOSE-LINK-VERIFY", lambda: module._close_link_uri_changes(raw, raw)),
+    ]
+    for owner, invoke in operations:
+        with pytest.raises(module.LifecycleError) as refused:
+            invoke()
+        assert refused.value.failure_id == owner
+        assert "unsupported marked" in str(refused.value) and "utf16-le BOM" in str(refused.value)
+        assert not any(0xD800 <= ord(c) <= 0xDFFF for c in str(refused.value))
+        assert refused.value.__cause__ is not None
+    assert consumer.read_bytes() == raw
+
+
+def test_public_fixed_bug_failure_keeps_inventory_id_cause_and_bytes(module, tmp_path, capsys):
+    from test_mutate_work_item import seed_fixed_bug_with_active_parent, tree_file_bytes
+    root = tmp_path / "repo"
+    slug = "diagnostic-owned"
+    seed_fixed_bug_with_active_parent(module, root, slug)
+    consumer = root / "work-items/active/fixed-bug-parent/design.md"
+    consumer.write_bytes(b"[selected](../../bugs/\xff.md)\r\n")
+    before = tree_file_bytes(root / "work-items")
+    result = module.main(["archive-fixed-bug", "--root", str(root), "--slug", slug,
+        "--terminal-instant", "2026-10-19T10:00:00Z", "--resolution", "Accepted synthetic fix.",
+        "--evidence", "Synthetic current proof.", "--apply"])
+    output = capsys.readouterr()
+    assert result == 1
+    assert "WI-CATEGORY-MIGRATION-INVENTORY:" in output.out
+    assert "active/fixed-bug-parent/design.md" in output.out
+    assert "unrepresentable incoming local target at character offset" in output.out
+    assert "Traceback" not in output.out + output.err
+    assert not any(0xD800 <= ord(c) <= 0xDFFF for c in output.out + output.err)
+    assert tree_file_bytes(root / "work-items") == before

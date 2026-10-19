@@ -4139,14 +4139,19 @@ def _validate_legacy_historical_links(root, archive, reference, links, custody, 
                 or _sha256_bytes(before) != row["beforeSha256"] or _sha256_bytes(after) != row["afterSha256"]):
             reject()
         try:
-            images[row["path"]] = (before.decode("utf-8"), after.decode("utf-8"))
-        except UnicodeError:
+            suffix = PurePosixPath(row["path"]).suffix
+            images[row["path"]] = (_IncomingConsumerImage(before, suffix).view,
+                                   _IncomingConsumerImage(after, suffix).view)
+        except (UnicodeError, LifecycleError) as exc:
+            if isinstance(exc, LifecycleError):
+                raise LifecycleError(failure, f"historical incoming consumer {row['path']}: {exc}") from exc
             reject()
     if set(images) != physical:
         reject()
     by_original = {root / cell["originalPath"]: cell for cell in custody}
     consumer_targets = {root / "work-items" / row["source"]: root / "work-items" / row["target"]
                         for row in bug_results if row.get("target") is not None}
+    href_obligations, literal_changes = [], {}
     for row in references:
         consumer = root / "work-items" / row["consumer"]
         if row["kind"] == "logical":
@@ -4157,15 +4162,17 @@ def _validate_legacy_historical_links(root, archive, reference, links, custody, 
             continue
         before, after = images[consumer.relative_to(root).as_posix()]
         current_consumer = consumer_targets.get(consumer, consumer)
-        parts = _local_markdown_href_parts(row["value"])
+        try:
+            parts = _local_markdown_href_parts(row["value"])
+        except LifecycleError as exc:
+            raise LifecycleError(failure, f"historical incoming consumer {row['consumer']}: {exc}") from exc
         if parts is not None and any(link.href == row["value"] for link in _markdown_local_links(before)):
             original = Path(os.path.abspath(consumer.parent / parts[0]))
             cell = by_original.get(original)
             if cell is None:
                 reject()
             expected = os.path.relpath(archive / cell["preservedPath"], current_consumer.parent).replace(os.sep, "/") + parts[1]
-            if not any(link.href == expected for link in _markdown_local_links(after)):
-                reject()
+            href_obligations.append((row["consumer"], after, expected))
         else:
             # The existing inventory also admits exact literal locators. Bind
             # their original/custody association without an old OS-path lookup.
@@ -4177,8 +4184,14 @@ def _validate_legacy_historical_links(root, archive, reference, links, custody, 
             if len(candidates) != 1 or _incoming_literal_pattern(locator).search(before) is None:
                 reject()
             expected = (archive / candidates[0]["preservedPath"]).relative_to(root).as_posix()
+            literal_changes.setdefault(row["consumer"], []).append((_incoming_literal_pattern(locator), expected))
             if _incoming_literal_pattern(expected).search(after) is None:
                 reject()
+    for consumer, after, expected in href_obligations:
+        for pattern, replacement in literal_changes.get(consumer, ()):
+            expected = pattern.sub(replacement, expected)
+        if not any(link.href == expected for link in _markdown_local_links(after)):
+            reject()
 
 
 @functools.partial(_lifecycle_participant, input_role="repository-root")
@@ -12043,7 +12056,10 @@ def _prepare_bug_dispositions(
 
 def _close_link_uri_changes(before: bytes, after: bytes) -> list[dict[str, str]]:
     """Assert a URI-only delta using the existing closed Markdown spans."""
-    old, new = before.decode("utf-8"), after.decode("utf-8")
+    try:
+        old, new = _IncomingConsumerImage(before).view, _IncomingConsumerImage(after).view
+    except LifecycleError as exc:
+        raise LifecycleError("WI-CLOSE-LINK-VERIFY", f"URI consumer representation differs: {exc}") from exc
     old_links, new_links = list(_markdown_local_links(old)), list(_markdown_local_links(new))
     def outside_hrefs(text: str, links: list[MarkdownLocalLink]) -> str:
         for link in reversed(links):
@@ -12054,8 +12070,13 @@ def _close_link_uri_changes(before: bytes, after: bytes) -> list[dict[str, str]]
     old_fields, new_fields = _parse_fields(old), _parse_fields(new)
     if any(old_fields.get(key) != new_fields.get(key) for key in ("id", "context", "status")):
         raise LifecycleError("WI-CLOSE-LINK-VERIFY", "link upkeep changed record identity or lifecycle fields")
-    return [{"from": left.href, "to": right.href} for left, right in zip(old_links, new_links)
-            if left.href != right.href]
+    try:
+        return [{"from": _IncomingConsumerImage.semantic(left.href, purpose="URI before"),
+                 "to": _IncomingConsumerImage.semantic(right.href, purpose="URI after")}
+                for left, right in zip(old_links, new_links)
+                if left.href != right.href]
+    except LifecycleError as exc:
+        raise LifecycleError("WI-CLOSE-LINK-VERIFY", f"URI consumer navigation differs: {exc}") from exc
 
 
 def _close_link_consumer_descriptor(relative: str) -> tuple[str, str, Category | None] | None:
@@ -12110,10 +12131,13 @@ def _close_link_authority(root: Path, path: Path, before: bytes,
     if descriptor is None:
         raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"affected consumer has no admitted metadata owner: {label}")
     kind, owner_relative, category = descriptor
-    if kind == "active-document" and _incoming_attachment_kind(before) is not None:
+    if kind == "active-document" and _incoming_attachment_kind(before).admitted is not None:
         raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"affected consumer has opaque content: {label}")
     try:
-        text = before.decode("utf-8")
+        text = (_IncomingConsumerImage(before, path.suffix).view if kind == "active-document"
+                else before.decode("utf-8"))
+    except LifecycleError as exc:
+        raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"consumer representation differs: {label}: {exc}") from exc
     except UnicodeDecodeError as exc:
         raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"consumer must be UTF-8: {label}") from exc
     if kind == "registry":
@@ -14465,21 +14489,24 @@ def _bug_successor_link_after(
     successor_reference: str,
 ) -> bytes:
     try:
-        text = before.decode("utf-8")
+        image = _IncomingConsumerImage(before, consumer.suffix)
+        text = image.view
+        replacements = [
+            (link.href_start, link.href_end, successor_reference)
+            for link in _markdown_local_links(text)
+            if _markdown_href_resolves(consumer.parent, link.href, source)
+        ]
+        after = image.edit(replacements)
+        image = _IncomingConsumerImage(after, consumer.suffix)
+        return image.edit(image.literal_edits(source_reference, successor_reference))
+    except LifecycleError as exc:
+        raise LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY",
+                             f"bug successor link consumer {consumer}: {exc}") from exc
     except UnicodeError as exc:
         raise LifecycleError(
             "WI-CATEGORY-MIGRATION-INVENTORY",
             f"bug successor link consumer is not UTF-8: {consumer}",
         ) from exc
-    replacements = [
-        (link.href_start, link.href_end)
-        for link in _markdown_local_links(text)
-        if _markdown_href_resolves(consumer.parent, link.href, source)
-    ]
-    for start, end in reversed(replacements):
-        text = text[:start] + successor_reference + text[end:]
-    text = text.replace(source_reference, successor_reference)
-    return text.encode("utf-8")
 
 
 def _prepare_bug_supersession_links(
@@ -15010,12 +15037,18 @@ def _physical_archive_link_plans(
             raise LifecycleError(failure_id, f"consumer image changed: {relative}")
         final_consumer = (image.target or image.source) if image is not None else consumer
         try:
-            text = (image.after if image is not None else snapshot.data).decode("utf-8")
+            navigation = _IncomingConsumerImage(image.after if image is not None else snapshot.data, consumer.suffix)
+            text = navigation.view
+        except LifecycleError as exc:
+            raise LifecycleError(failure_id, f"incoming consumer {relative}: {exc}") from exc
         except UnicodeError as exc:
             raise LifecycleError(failure_id, f"consumer is not UTF-8: {relative}") from exc
         replacements: list[tuple[int, int, str]] = []
         for link in _markdown_local_links(text):
-            parts = _local_markdown_href_parts(link.href)
+            try:
+                parts = _local_markdown_href_parts(link.href)
+            except LifecycleError as exc:
+                raise LifecycleError(failure_id, f"incoming consumer {relative}: {exc}") from exc
             if parts is None:
                 continue
             candidate = consumer.parent / parts[0]
@@ -15049,11 +15082,14 @@ def _physical_archive_link_plans(
             if image is not None and relative not in referenced_paths:
                 continue
             raise LifecycleError(failure_id, f"physical link has no safe rewrite: {relative}")
-        for start, end, href in reversed(replacements):
-            text = text[:start] + href + text[end:]
-        for pattern, replacement in literal_changes:
-            text = pattern.sub(lambda _match: replacement, text)
-        after = text.encode("utf-8")
+        try:
+            after = navigation.edit(replacements)
+            for pattern, replacement in literal_changes:
+                navigation = _IncomingConsumerImage(after, consumer.suffix)
+                after = navigation.edit((match.start(), match.end(), replacement)
+                                        for match in pattern.finditer(navigation.view))
+        except LifecycleError as exc:
+            raise LifecycleError(failure_id, f"incoming consumer {relative}: {exc}") from exc
         plans.append({
             "path": consumer,
             "pathRelative": consumer.relative_to(repository).as_posix(),
@@ -15687,10 +15723,6 @@ def _transition_parent_uri_images(root: Path, intent: dict) -> list[dict]:
         before, after = _unb64(row["before"]), _unb64(row["after"])
         if before is None or after is None:
             reject()
-        try:
-            before.decode("utf-8", errors="strict"); after.decode("utf-8", errors="strict")
-        except UnicodeError:
-            reject()
         if (source in images or source != target or _sha256_bytes(before) != row["beforeSha256"]
             or _sha256_bytes(after) != row["afterSha256"]):
             reject()
@@ -15709,6 +15741,21 @@ def _transition_parent_uri_images(root: Path, intent: dict) -> list[dict]:
                 reject()
         else:
             image = images.get(source)
+            descriptor = _close_link_consumer_descriptor(key)
+            if descriptor is None:
+                reject()
+            if image is not None:
+                kind, owner_relative, _category = descriptor
+                owner_status = _work_items_root(root) / owner_relative / "status.md"
+                try:
+                    for data in (image["before"], image["after"]):
+                        if kind == "active-document" and source != owner_status:
+                            _IncomingConsumerImage(data, source.suffix)
+                        else:
+                            data.decode("utf-8", errors="strict")
+                except (UnicodeError, LifecycleError) as exc:
+                    reason = str(exc) if isinstance(exc, LifecycleError) else "metadata is not strict UTF-8"
+                    raise LifecycleError(failure, f"parent URI consumer {key}: {reason}") from exc
             if (image is None or image["target"] != target or _sha256_bytes(image["before"]) != row["beforeSha256"]
                 or _sha256_bytes(image["after"]) != row["afterSha256"]
                 or _close_link_uri_changes(image["before"], image["after"]) != row["uriChanges"]):
@@ -18922,6 +18969,7 @@ def _local_markdown_href_parts(href: str) -> tuple[str, str] | None:
     filesystem_identity = href[:split_at]
     if not filesystem_identity:
         return None
+    _IncomingConsumerImage.semantic(filesystem_identity, purpose="local target")
     return filesystem_identity, href[split_at:]
 
 
@@ -18930,29 +18978,100 @@ def _markdown_href_resolves(base: Path, href: str, expected: Path) -> bool:
     return parts is not None and (base / parts[0]).resolve() == expected.resolve()
 
 
-def _incoming_attachment_kind(data: bytes) -> str | None:
-    """Identify admitted opaque formats; never validate or project native content."""
+@dataclass(frozen=True)
+class _IncomingFormat:
+    identity: str | None
+    admitted: str | None = None
+    cause: Exception | None = None
+
+
+def _incoming_attachment_kind(data: bytes) -> _IncomingFormat:
+    """Observe format identity separately from the existing opaque admission."""
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "png"
+        return _IncomingFormat("png", "png")
     if (
         data.startswith(b"BM") and len(data) >= 18
         and int.from_bytes(data[14:18], "little") in {12, 40, 52, 56, 64, 108, 124}
     ):
-        return "bitmap"
+        return _IncomingFormat("bitmap", "bitmap")
     if re.match(rb"%PDF-[12]\.[0-9](?:\s|$)", data):
-        return "pdf"
-    if data.startswith(b"PK\x03\x04"):
-        import io
-        import zipfile
-
+        return _IncomingFormat("pdf", "pdf")
+    import io
+    import zipfile
+    local_header = data.startswith(b"PK\x03\x04")
+    if local_header or zipfile.is_zipfile(io.BytesIO(data)):
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as package:
                 names = set(package.namelist())
-        except (zipfile.BadZipFile, UnicodeError, NotImplementedError):
-            return None
-        if {"[Content_Types].xml", "_rels/.rels", "word/document.xml"} <= names:
-            return "word-ooxml"
-    return None
+        except (zipfile.BadZipFile, UnicodeError, NotImplementedError) as exc:
+            return _IncomingFormat("zip", cause=exc)
+        if local_header and {"[Content_Types].xml", "_rels/.rels", "word/document.xml"} <= names:
+            return _IncomingFormat("word-ooxml", "word-ooxml")
+        return _IncomingFormat("zip")
+    return _IncomingFormat(None)
+
+
+class _IncomingConsumerImage:
+    """Authoritative bytes and their reversible private navigation coordinates."""
+
+    def __init__(self, raw: bytes, suffix: str = ".md") -> None:
+        self.raw = raw
+        try:
+            self.view = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            if suffix.lower() != ".md":
+                raise
+            import codecs
+            for signature, identity in ((codecs.BOM_UTF32_LE, "utf32-le"), (codecs.BOM_UTF32_BE, "utf32-be"),
+                                        (codecs.BOM_UTF16_LE, "utf16-le"), (codecs.BOM_UTF16_BE, "utf16-be")):
+                if raw.startswith(signature):
+                    raise LifecycleError("WI-INCOMING-LINK-REPRESENTATION",
+                                         f"unsupported marked Unicode incoming consumer ({identity} BOM)")
+            observed = _incoming_attachment_kind(raw)
+            if observed.identity is not None:
+                state = "malformed" if observed.cause is not None else "unsupported"
+                raise LifecycleError("WI-INCOMING-LINK-REPRESENTATION",
+                                     f"{state} {observed.identity} incoming Markdown container") from observed.cause
+            self.view = raw.decode("utf-8", errors="surrogateescape")
+        if self._bytes(self.view) != raw:
+            raise LifecycleError("WI-INCOMING-LINK-REPRESENTATION", "incoming image is not reversible")
+
+    @staticmethod
+    def _bytes(view: str) -> bytes:
+        return view.encode("utf-8", errors="surrogateescape")
+
+    @staticmethod
+    def semantic(value: str, *, purpose: str) -> str:
+        for offset, character in enumerate(value):
+            if character == "\0" or 0xD800 <= ord(character) <= 0xDFFF:
+                raise LifecycleError("WI-INCOMING-LINK-SEMANTIC",
+                                     f"unrepresentable incoming {purpose} at character offset {offset}")
+        return value
+
+    def literal_edits(self, old: str, new: str) -> list[tuple[int, int, str]]:
+        return [(match.start(), match.end(), new) for match in re.finditer(re.escape(old), self.view)]
+
+    def edit(self, edits: Iterable[tuple[int, int, str]]) -> bytes:
+        selected = sorted(set(edits))
+        end_previous = 0
+        inverse = []
+        delta = 0
+        for start, end, replacement in selected:
+            self.semantic(replacement, purpose="replacement")
+            if not 0 <= start <= end <= len(self.view) or start < end_previous:
+                raise LifecycleError("WI-INCOMING-LINK-REPRESENTATION", "conflicting incoming navigation spans")
+            inverse.append((start + delta, start + delta + len(replacement), self.view[start:end]))
+            delta += len(replacement) - (end - start)
+            end_previous = end
+        result = self.view
+        for start, end, replacement in reversed(selected):
+            result = result[:start] + replacement + result[end:]
+        restored = result
+        for start, end, replacement in reversed(inverse):
+            restored = restored[:start] + replacement + restored[end:]
+        if self._bytes(restored) != self.raw:
+            raise LifecycleError("WI-INCOMING-LINK-REPRESENTATION", "incoming navigation inverse differs")
+        return self._bytes(result)
 
 
 class _RetainedConsumerScanPreparation:
@@ -19195,9 +19314,11 @@ def _incoming_link_result(
             consumer_bytes = _input_bytes(consumer, acquired_input)
             if ordinary_input_without_claim:
                 continue
-            if consumer.suffix.lower() not in {".md", ".json", ".jsonl"} and _incoming_attachment_kind(consumer_bytes) is not None:
+            if consumer.suffix.lower() not in {".md", ".json", ".jsonl"} and _incoming_attachment_kind(consumer_bytes).admitted is not None:
                 continue
-            text = consumer_bytes.decode("utf-8")
+            text = _IncomingConsumerImage(consumer_bytes, consumer.suffix).view
+        except LifecycleError as exc:
+            raise LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY", f"incoming consumer {consumer_rel}: {exc}") from exc
         except (OSError, UnicodeError) as exc:
             if strict_consumer_reads:
                 raise LifecycleError(
@@ -19212,18 +19333,19 @@ def _incoming_link_result(
         if scan_markdown_links:
             for link in _markdown_local_links(text):
                 raw = link.href
-                href_parts = _local_markdown_href_parts(raw)
+                try:
+                    href_parts = _local_markdown_href_parts(raw)
+                except LifecycleError as exc:
+                    raise LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY", f"incoming consumer {consumer_rel}: {exc}") from exc
                 if href_parts is None:
                     continue
                 candidate = _input_resolve(consumer.parent / href_parts[0], acquired_input)
                 if belongs_to_owned(candidate):
-                    physical.append(
-                        {
-                            "consumer": consumer_rel,
-                            "kind": "physical",
-                            "value": raw,
-                        }
-                    )
+                    try:
+                        value = _IncomingConsumerImage.semantic(raw, purpose="affected href")
+                    except LifecycleError as exc:
+                        raise LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY", f"incoming consumer {consumer_rel}: {exc}") from exc
+                    physical.append({"consumer": consumer_rel, "kind": "physical", "value": value})
         for literal_path, literal_pattern in literal_patterns:
             if literal_pattern.search(text):
                 physical.append(
@@ -20144,7 +20266,10 @@ def _plan_v1_link_relocations(
                 f"physical-link target hash changed: {item['reference']}"
             )
         try:
-            text = before.decode("utf-8")
+            image = _IncomingConsumerImage(before, consumer.suffix)
+            text = image.view
+        except LifecycleError as exc:
+            raise _terminalization_fail(f"physical-link consumer {consumer_relative}: {exc}") from exc
         except UnicodeError as exc:
             raise _terminalization_fail(
                 f"physical-link consumer is not UTF-8 Markdown: {consumer_relative}"
@@ -20159,7 +20284,11 @@ def _plan_v1_link_relocations(
             raise _terminalization_fail(
                 f"physical Markdown tuple is missing or duplicated: {consumer_relative}"
             )
-        href_parts = _local_markdown_href_parts(admission["href"])
+        try:
+            image.semantic(matches[0].label, purpose="selected label")
+            href_parts = _local_markdown_href_parts(admission["href"])
+        except LifecycleError as exc:
+            raise _terminalization_fail(f"physical-link consumer {consumer_relative}: {exc}") from exc
         if href_parts is None or not _markdown_href_resolves(
             consumer.parent, admission["href"], item["source"]
         ):
@@ -20172,12 +20301,10 @@ def _plan_v1_link_relocations(
             raise _terminalization_fail(
                 f"relocated href does not resolve to target: {consumer_relative}"
             )
-        after_text = (
-            text[:matches[0].href_start]
-            + new_href
-            + text[matches[0].href_end:]
-        )
-        after = after_text.encode("utf-8")
+        try:
+            after = image.edit([(matches[0].href_start, matches[0].href_end, new_href)])
+        except LifecycleError as exc:
+            raise _terminalization_fail(f"physical-link consumer {consumer_relative}: {exc}") from exc
         after_sha256 = hashlib.sha256(after).hexdigest()
         consumer_plans.append(
             {
@@ -20228,7 +20355,10 @@ def _expected_physical_relocation_receipt(
         raise _terminalization_fail(
             f"physical-link consumer is missing: {consumer_relative}"
         )
-    href_parts = _local_markdown_href_parts(admission["href"])
+    try:
+        href_parts = _local_markdown_href_parts(admission["href"])
+    except LifecycleError as exc:
+        raise _terminalization_fail(f"physical-link consumer {consumer_relative}: {exc}") from exc
     if href_parts is None:
         raise _terminalization_fail(
             f"physical Markdown href is not local: {consumer_relative}"
@@ -20238,31 +20368,40 @@ def _expected_physical_relocation_receipt(
     resolved_target = target if settled else source
     try:
         current = consumer.read_bytes()
-        text = current.decode("utf-8")
+        image = _IncomingConsumerImage(current, consumer.suffix)
+        text = image.view
+    except LifecycleError as exc:
+        raise _terminalization_fail(f"physical-link consumer {consumer_relative}: {exc}") from exc
     except (OSError, UnicodeError) as exc:
         raise _terminalization_fail(
             f"physical-link consumer is not UTF-8 Markdown: {consumer_relative}"
         ) from exc
-    matches = [
-        link
-        for link in _markdown_local_links(text)
-        if link.label == admission["label"]
-        and link.href == current_href
-        and _markdown_href_resolves(consumer.parent, link.href, resolved_target)
-    ]
+    try:
+        matches = [
+            link
+            for link in _markdown_local_links(text)
+            if link.label == admission["label"]
+            and link.href == current_href
+            and _markdown_href_resolves(consumer.parent, link.href, resolved_target)
+        ]
+    except LifecycleError as exc:
+        raise _terminalization_fail(f"physical-link consumer {consumer_relative}: {exc}") from exc
     if len(matches) != 1:
         raise _terminalization_fail(
             f"physical Markdown tuple is missing or duplicated: {consumer_relative}"
         )
+    try:
+        image.semantic(matches[0].label, purpose="selected label")
+    except LifecycleError as exc:
+        raise _terminalization_fail(f"physical-link consumer {consumer_relative}: {exc}") from exc
     if settled:
         link = matches[0]
-        source_before = hashlib.sha256(
-            (
-                text[:link.href_start]
-                + admission["href"]
-                + text[link.href_end:]
-            ).encode("utf-8")
-        ).hexdigest()
+        try:
+            source_before = hashlib.sha256(image.edit([
+                (link.href_start, link.href_end, admission["href"])
+            ])).hexdigest()
+        except LifecycleError as exc:
+            raise _terminalization_fail(f"physical-link consumer {consumer_relative}: {exc}") from exc
         source_after: str | None = hashlib.sha256(current).hexdigest()
         target_after: str | None = hashlib.sha256(target.read_bytes()).hexdigest()
     else:
@@ -20484,20 +20623,25 @@ def _terminalization_replay(
             raise _terminalization_fail("terminalization receipt repeats a physical link")
         seen_link_rows.add(key)
         try:
-            text = consumer.read_text(encoding="utf-8")
+            text = _IncomingConsumerImage(consumer.read_bytes(), consumer.suffix).view
+        except LifecycleError as exc:
+            raise _terminalization_fail(f"terminalized link consumer {link.get('source')}: {exc}") from exc
         except (OSError, UnicodeError) as exc:
             raise _terminalization_fail(
                 f"terminalized link consumer is unreadable: {link.get('source')}"
             ) from exc
         expected_href = old_href if pending else new_href
         expected_target = old_target if pending else new_target
-        resolved_matches = [
-            link
-            for link in _markdown_local_links(text)
-            if link.label == label
-            and link.href == expected_href
-            and _markdown_href_resolves(consumer.parent, link.href, expected_target)
-        ]
+        try:
+            resolved_matches = [
+                link
+                for link in _markdown_local_links(text)
+                if link.label == label
+                and link.href == expected_href
+                and _markdown_href_resolves(consumer.parent, link.href, expected_target)
+            ]
+        except LifecycleError as exc:
+            raise _terminalization_fail(f"terminalized link consumer {link.get('source')}: {exc}") from exc
         if len(resolved_matches) != 1:
             raise _terminalization_fail(
                 f"terminalized Markdown href is missing: {link.get('source')}"
@@ -27298,7 +27442,7 @@ def _successor_import_links(
             root, [source], reference, strict_consumer_reads=True,
         )["references"]
     except LifecycleError as exc:
-        raise LifecycleError(failure, "incoming-link scan could not classify consumers") from exc
+        raise LifecycleError(failure, f"incoming-link scan could not classify consumers: {exc}") from exc
     supplied = dispositions.get("references")
     if not isinstance(supplied, list) or any(not isinstance(row, dict) for row in supplied):
         raise LifecycleError(failure, "incoming references require an exact disposition list")
@@ -27338,7 +27482,10 @@ def _successor_import_links(
             require_single_link=True,
         ).data
         try:
-            text = before.decode("utf-8")
+            image = _IncomingConsumerImage(before, consumer.suffix)
+            text = image.view
+        except LifecycleError as exc:
+            raise LifecycleError(failure, f"incoming consumer {consumer_name}: {exc}") from exc
         except UnicodeError as exc:
             raise LifecycleError(failure, "incoming consumer is not UTF-8") from exc
         replacements: list[tuple[int, int, str]] = []
@@ -27356,19 +27503,24 @@ def _successor_import_links(
             if len(matches) != 1:
                 raise LifecycleError(failure, "physical reference occurrence is ambiguous")
             target = work_items.parent.joinpath(*PurePosixPath(row["target"]).parts)
-            suffix = _local_markdown_href_parts(row["value"])
+            try:
+                suffix = _local_markdown_href_parts(row["value"])
+            except LifecycleError as exc:
+                raise LifecycleError(failure, f"incoming consumer {consumer_name}: {exc}") from exc
             if suffix is None:
                 raise LifecycleError(failure, "physical reference is not local")
             new_href = _relative_link(consumer.parent, target) + suffix[1]
             replacements.append((matches[0].href_start, matches[0].href_end, new_href))
-        for start, end, new_href in sorted(replacements, reverse=True):
-            text = text[:start] + new_href + text[end:]
-        if any(
-            row["kind"] == "logical" and row["meaning"] == "current-successor"
-            for row in supplied if row["consumer"] == consumer_name
-        ):
-            text = text.replace(reference, f"work-item:{new}", 1)
-        after = text.encode("utf-8")
+        try:
+            after = image.edit(replacements)
+            if any(
+                row["kind"] == "logical" and row["meaning"] == "current-successor"
+                for row in supplied if row["consumer"] == consumer_name
+            ):
+                image = _IncomingConsumerImage(after, consumer.suffix)
+                after = image.edit(image.literal_edits(reference, f"work-item:{new}")[:1])
+        except LifecycleError as exc:
+            raise LifecycleError(failure, f"incoming consumer {consumer_name}: {exc}") from exc
         plans.append({
             "consumer": f"work-items/{consumer_name}",
             "beforeSha256": _sha256_bytes(before),
