@@ -185,6 +185,7 @@ def test_active_document_bytes_follow_public_close_and_rollback(module, tmp_path
     instant = "2026-10-08T11:14:59Z"
     seed_active(module, root, "closing")
     seed_active(module, root, "side")
+    (root / "work-items/active/side/status.md").write_bytes(b"status: active\r\n")
     target = root / "work-items/active/closing/evidence.md"
     target.write_bytes(b"Useful result\n")
     consumer = root / "work-items/active/side/design.md"
@@ -195,7 +196,7 @@ def test_active_document_bytes_follow_public_close_and_rollback(module, tmp_path
     module.refresh_readme(root)
     canonical = tree_file_bytes(root / "work-items")
     if rollback:
-        def fail_after_uri_write(_root):
+        def fail_after_uri_write(_root, **_kwargs):
             assert consumer.read_bytes() != before
             raise module.LifecycleError("WI-README-STALE", "synthetic failure after owned URI write")
         monkeypatch.setattr(module, "refresh_readme", fail_after_uri_write)
@@ -211,6 +212,207 @@ def test_active_document_bytes_follow_public_close_and_rollback(module, tmp_path
         assert len(module._close_link_uri_changes(before, expected)) == 2
         with pytest.raises(module.LifecycleError, match="non-URI"):
             module._close_link_uri_changes(before, expected.replace(b"\x97", b"\x96"))
+
+
+@pytest.mark.parametrize(
+    "foreign_status",
+    (
+        b"status: active\r\n",
+        b"status: blocked\r\n",
+        b"status: active\r\ntemplate: staged\r\ntask: partial only\r\n",
+    ),
+)
+def test_public_close_uses_foreign_owner_current_membership_only(
+    module, tmp_path, foreign_status
+):
+    from test_mutate_work_item import seed_active, write_empty_bug_dispositions, closure
+
+    root = tmp_path / "repo"
+    instant = "2026-10-08T11:14:59Z"
+    selected_slug, owner_slug = "closing", "other-owner"
+    seed_active(module, root, selected_slug)
+    seed_active(module, root, owner_slug)
+    owner_status = root / "work-items/active" / owner_slug / "status.md"
+    owner_status.write_bytes(foreign_status)
+    evidence = root / "work-items/active" / selected_slug / "evidence.md"
+    evidence.write_bytes(b"Useful result\n")
+    consumer = root / "work-items/active" / owner_slug / "notes.md"
+    href = b"../closing/evidence.md?rev=1#proof"
+    before = b"\xef\xbb\xbf\xc3\xa9\x97\r\n[one](" + href + b") [two](" + href + b")\r\n\x81"
+    consumer.write_bytes(before)
+    write_empty_bug_dispositions(root, selected_slug, instant)
+    module.refresh_readme(root)
+
+    archive = module.close_item(root, selected_slug, closure(instant).encode(), instant)
+
+    expected = before.replace(
+        href, b"../../archive/2026-10/closing/evidence.md?rev=1#proof"
+    )
+    assert consumer.read_bytes() == expected
+    assert owner_status.read_bytes() == foreign_status
+    assert module.resolve_category(root, f"work-item:{selected_slug}") == archive
+    assert len(module._close_link_uri_changes(before, expected)) == 2
+
+
+def test_public_close_can_rewrite_the_active_owner_status_consumer(module, tmp_path):
+    from test_mutate_work_item import seed_active, write_empty_bug_dispositions, closure
+
+    root = tmp_path / "repo"
+    instant = "2026-10-08T11:14:59Z"
+    selected_slug, owner_slug = "closing", "different-owner"
+    seed_active(module, root, selected_slug)
+    seed_active(module, root, owner_slug)
+    status = root / "work-items/active" / owner_slug / "status.md"
+    href = b"../closing/evidence.md?rev=1#proof"
+    before = b"status: blocked\r\n[reference](" + href + b")\r\n"
+    status.write_bytes(before)
+    (root / "work-items/active" / selected_slug / "evidence.md").write_bytes(b"Useful result\n")
+    write_empty_bug_dispositions(root, selected_slug, instant)
+    module.refresh_readme(root)
+
+    module.close_item(root, selected_slug, closure(instant).encode(), instant)
+
+    expected = before.replace(
+        href, b"../../archive/2026-10/closing/evidence.md?rev=1#proof"
+    )
+    assert status.read_bytes() == expected
+    assert b"status: blocked\r\n" in status.read_bytes()
+
+
+@pytest.mark.parametrize(
+    "status_bytes, expected_failure",
+    (
+        (None, "WI-CATEGORY-STATUS-INVALID"),
+        (b"", "WI-CATEGORY-STATUS-INVALID"),
+        (b"status: paused\n", "WI-CATEGORY-STATUS-INVALID"),
+        (b"status: candidate\n", "WI-CATEGORY-STATUS-INVALID"),
+        (b"status: completed\n", "WI-CATEGORY-TERMINAL-IN-CURRENT"),
+        (b"\xff", "WI-CATEGORY-STATUS-INVALID"),
+    ),
+)
+def test_active_owner_link_evidence_refuses_unreadable_or_noncurrent_status(
+    module, tmp_path, status_bytes, expected_failure
+):
+    from test_mutate_work_item import seed_active
+
+    root = tmp_path / "repo"
+    owner_slug = "consumer-owner"
+    seed_active(module, root, owner_slug)
+    status = root / "work-items/active" / owner_slug / "status.md"
+    if status_bytes is None:
+        status.unlink()
+    else:
+        status.write_bytes(status_bytes)
+    consumer = root / "work-items/active" / owner_slug / "notes.md"
+    before = b"[reference](../other/evidence.md)\n"
+
+    with pytest.raises(module.LifecycleError) as refused:
+        module._close_link_active_owner_evidence(
+            root, consumer, before, f"active/{owner_slug}"
+        )
+
+    assert refused.value.failure_id == expected_failure
+
+
+
+def test_public_close_reports_owner_membership_failure_with_both_relative_paths(
+    module, tmp_path
+):
+    from test_mutate_work_item import (
+        seed_active, write_empty_bug_dispositions, closure, tree_file_bytes,
+    )
+
+    root=tmp_path/"repo"
+    instant="2026-10-08T11:14:59Z"
+    selected_slug, owner_slug="closing", "2026-10-19-diagnostic-owner"
+    seed_active(module,root,selected_slug)
+    seed_active(module,root,owner_slug)
+    owner=root/"work-items/active"/owner_slug
+    consumer=owner/"AUDIT.md"
+    consumer.write_bytes(b"Audit evidence\n[reference](../closing/evidence.md)\n")
+    (root/"work-items/active"/selected_slug/"evidence.md").write_bytes(b"Verified target\n")
+    write_empty_bug_dispositions(root,selected_slug,instant)
+    module.refresh_readme(root)
+    status=owner/"status.md"
+    status.write_bytes(b"status: paused\n")
+    before=tree_file_bytes(root/"work-items")
+
+    with pytest.raises(module.LifecycleError) as refused:
+        module.close_item(root,selected_slug,closure(instant).encode(),instant)
+
+    message=str(refused.value)
+    assert refused.value.failure_id=="WI-CATEGORY-STATUS-INVALID"
+    assert f"work-items/active/{owner_slug}/AUDIT.md" in message
+    assert f"work-items/active/{owner_slug}/status.md" in message
+    assert "rejected status 'paused'" in message
+    assert "active work-item has invalid status 'paused'" in message
+    assert f"work-items/active/{owner_slug}" in message
+    assert str(root) not in message
+    assert refused.value.args==(message,)
+    assert refused.value.__cause__ is None
+    assert tree_file_bytes(root/"work-items")==before
+
+
+def test_active_owner_link_evidence_reports_non_utf8_with_both_relative_paths(
+    module, tmp_path
+):
+    from test_mutate_work_item import seed_active, tree_file_bytes
+
+    root=tmp_path/"repo"
+    owner_slug="2026-10-19-diagnostic-owner"
+    seed_active(module,root,owner_slug)
+    owner=root/"work-items/active"/owner_slug
+    status=owner/"status.md"
+    consumer=owner/"AUDIT.md"
+    before=b"[reference](../other/evidence.md)\n"
+    consumer.write_bytes(before)
+    status.write_bytes(b"\xff")
+    tree_before=tree_file_bytes(root/"work-items")
+
+    with pytest.raises(module.LifecycleError) as refused:
+        module._close_link_active_owner_evidence(
+            root,consumer,before,f"active/{owner_slug}"
+        )
+
+    message=str(refused.value)
+    assert refused.value.failure_id=="WI-CATEGORY-STATUS-INVALID"
+    assert f"work-items/active/{owner_slug}/AUDIT.md" in message
+    assert f"work-items/active/{owner_slug}/status.md" in message
+    assert "status must be UTF-8" in message
+    assert "invalid start byte" in message
+    assert str(root) not in message
+    assert isinstance(refused.value.__cause__,UnicodeDecodeError)
+    assert refused.value.__cause__.reason=="invalid start byte"
+    assert tree_file_bytes(root/"work-items")==tree_before
+
+
+def test_current_foreign_membership_does_not_admit_invalid_selected_lifecycle(
+    module, tmp_path
+):
+    from test_mutate_work_item import (
+        seed_active, write_empty_bug_dispositions, closure, tree_file_bytes,
+    )
+
+    root = tmp_path / "repo"
+    instant = "2026-10-08T11:14:59Z"
+    seed_active(module, root, "closing")
+    seed_active(module, root, "foreign")
+    selected_status = root / "work-items/active/closing/status.md"
+    selected_status.write_bytes(b"status: active\n")
+    foreign_status = root / "work-items/active/foreign/status.md"
+    foreign_status.write_bytes(b"status: blocked\n")
+    (root / "work-items/active/closing/evidence.md").write_bytes(b"Useful result\n")
+    consumer = root / "work-items/active/foreign/notes.md"
+    consumer.write_bytes(b"[reference](../closing/evidence.md)\n")
+    write_empty_bug_dispositions(root, "closing", instant)
+    module.refresh_readme(root)
+    before = tree_file_bytes(root / "work-items")
+
+    with pytest.raises(module.LifecycleError):
+        module.close_item(root, "closing", closure(instant).encode(), instant)
+
+    assert tree_file_bytes(root / "work-items") == before
+    assert foreign_status.read_bytes() == b"status: blocked\n"
 
 
 @pytest.mark.parametrize("payload", (

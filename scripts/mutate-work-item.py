@@ -623,8 +623,20 @@ class LifecycleTransaction:
     def work_items_root(self) -> Path:
         return self.repository_root / "work-items"
 
-    def __init__(self, root: Path, *, input_role: str = "caller-root", original_root: Path | None = None, binding_evidence: tuple | None = None, ledger_resource_budget=None):
+    def __init__(self, root: Path, *, input_role: str = "caller-root", original_root: Path | None = None, binding_evidence: tuple | None = None, ledger_resource_budget=None,
+                 transition_resource_budget=None, transition_output_ceiling=None, transition_read_admission=None,
+                 _transition_resource_inputs=None):
         self.ledger_resource_budget = _validator_module()._ledger_resource_budget(ledger_resource_budget)
+        inputs = (_transition_resource_inputs if _transition_resource_inputs is not None else
+            select_transition_resource_inputs(root, input_role=input_role, read_admission=transition_read_admission,
+                acquisition_ceiling=transition_resource_budget, output_ceiling=transition_output_ceiling))
+        if type(inputs) is not TransitionResourceInputsV1:
+            raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "transition admission has no owner inputs")
+        inputs.verify()
+        self.transition_resource_inputs = inputs
+        self.transition_resource_budget = inputs.acquisition
+        self.transition_output_ceiling = inputs.output_ceiling
+        self._transition_output_reservation = None
         _lifecycle_reject_unreduced_reparse(
             root,
             failure_id="WI-LIFECYCLE-LOCK-IDENTITY",
@@ -636,9 +648,11 @@ class LifecycleTransaction:
         evidence = [] if binding_evidence is None else list(binding_evidence)
         self.repository_root, _work_items = _resolve_project_root_identity(
             root, input_role=input_role, binding_evidence_out=evidence, ledger_resource_budget=self.ledger_resource_budget,
+            transition_resource_budget=self.transition_resource_budget,
         )
         if Path(self.original_root).resolve() not in (self.repository_root, _work_items):
             raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "original lifecycle root differs from acquired scope")
+        evidence.extend(row for row in inputs.absence_evidence if row not in evidence)
         self._binding_evidence = tuple(evidence)
         self._admission_evidence = tuple((kind, (_legacy_freeze(value[0]), value[1], value[2]))
                                          if kind == "intent" else (kind, value)
@@ -650,7 +664,9 @@ class LifecycleTransaction:
         self._file = None
         self._identity: tuple[int, int] | None = None
         self._locked = False
-        self._retained_observations: dict[Path, CapturedFileSnapshot | CapturedDirectorySnapshotV1] = {}
+        self._retained_observations: dict[Path, CapturedFileSnapshot | CapturedDirectorySnapshotV1] = {
+            snapshot.path: snapshot for snapshot in inputs.inventories
+        }
         self._validator_reuse = None
         self._runtime_source_authority = _declared_runtime_source_authority()
         self._source_admission_failure: BaseException | None = None
@@ -1697,7 +1713,7 @@ class LifecycleTransaction:
         intent = json.loads(snapshot.data)
         if plan.prepared_progress != snapshot.data:
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "durable progress differs from driver admission")
-        image, _parents = _legacy_owned_image(snapshot.path)
+        image, _parents = _legacy_owned_image(snapshot.path, maximum_bytes=snapshot.length)
         if image is None or _unb64(image["data"]) != snapshot.data:
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "durable native progress changed")
         object.__setattr__(plan, "intent", intent)
@@ -2115,8 +2131,20 @@ def _lifecycle_participant(function, *, input_role: str = "caller-root", subject
     @functools.wraps(function)
     def wrapper(root: Path, *args, **kwargs):
         ledger_resource_budget = kwargs.get("ledger_resource_budget")
+        transition_resource_budget = kwargs.pop("transition_resource_budget", None)
+        transition_output_ceiling = kwargs.pop("transition_output_ceiling", None)
+        transition_read_admission = kwargs.pop("transition_read_admission", None)
         current_budget_owner = _CURRENT_LIFECYCLE_TRANSACTION.get()
         if current_budget_owner is not None:
+            for supplied, held in ((transition_resource_budget, current_budget_owner.transition_resource_budget),
+                                   (transition_output_ceiling, current_budget_owner.transition_output_ceiling)):
+                if supplied is not None and _transition_resource_budget(supplied) != held:
+                    raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "nested operation changed held transition resources")
+            if transition_read_admission is not None and transition_read_admission != current_budget_owner.transition_resource_inputs.read_admission:
+                raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "nested operation changed held transition admission")
+            transition_resource_budget = current_budget_owner.transition_resource_budget
+            transition_output_ceiling = current_budget_owner.transition_output_ceiling
+            transition_read_admission = current_budget_owner.transition_resource_inputs.read_admission
             if ledger_resource_budget is not None:
                 observed = _validator_module()._ledger_resource_budget(ledger_resource_budget)
                 held = current_budget_owner.ledger_resource_budget
@@ -2127,6 +2155,11 @@ def _lifecycle_participant(function, *, input_role: str = "caller-root", subject
             ledger_resource_budget = _validator_module()._ledger_resource_budget(ledger_resource_budget)
         if "ledger_resource_budget" in signature.parameters:
             kwargs["ledger_resource_budget"] = ledger_resource_budget
+        for name, value in (("transition_resource_budget", transition_resource_budget),
+                            ("transition_output_ceiling", transition_output_ceiling),
+                            ("transition_read_admission", transition_read_admission)):
+            if name in signature.parameters:
+                kwargs[name] = value
         role = kwargs.pop("_input_role", input_role)
         if role not in ("caller-root", "repository-root", "work-items-root"):
             raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "unknown participant input role")
@@ -2188,16 +2221,29 @@ def _lifecycle_participant(function, *, input_role: str = "caller-root", subject
             )
             subject, prepared = prepare_subject(root, args, kwargs)
             kwargs.update(prepared)
+            inputs = select_transition_resource_inputs(root, input_role=role, selection=subject,
+                read_admission=transition_read_admission, acquisition_ceiling=transition_resource_budget,
+                output_ceiling=transition_output_ceiling)
+            transition_resource_budget = inputs.acquisition
+            transition_output_ceiling = inputs.output_ceiling
             evidence = list(binding_evidence)
             repository, _work_items = _resolve_project_root_identity(
-                root, input_role=role, binding_evidence_out=evidence, **subject, ledger_resource_budget=ledger_resource_budget
+                root, input_role=role, binding_evidence_out=evidence, **subject, ledger_resource_budget=ledger_resource_budget,
+                transition_resource_budget=transition_resource_budget
             )
             transaction = LifecycleTransaction(repository, input_role="repository-root",
-                original_root=original_root, binding_evidence=tuple(evidence), ledger_resource_budget=ledger_resource_budget)
+                original_root=original_root, binding_evidence=tuple(evidence), ledger_resource_budget=ledger_resource_budget,
+                transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling,
+                _transition_resource_inputs=inputs)
             transaction.__enter__()
             entered = True
             transaction_token = _CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
             try:
+                for name, value in (("transition_resource_budget", transaction.transition_resource_budget),
+                                    ("transition_output_ceiling", transaction.transition_output_ceiling),
+                                    ("transition_read_admission", None)):
+                    if name in signature.parameters:
+                        kwargs[name] = value
                 composer.propose_result(function(transaction.repository_root, *args, **kwargs))
             except BaseException as exc:
                 composer.capture_primary(exc)
@@ -2436,6 +2482,275 @@ TRANSITION_INTENT_INVENTORY_MAX_ENTRIES = 1024
 TRANSITION_INTENT_FILE_BYTE_CAP = 256 * 1024
 TRANSITION_INTENT_INVENTORY_BYTE_CAP = 8 * 1024 * 1024
 LEDGER_LOCATION_PROOF_BYTE_CAP = 4 * 1024 * 1024
+
+@dataclass(frozen=True)
+class TransitionResourceBudgetV1:
+    """Finite UTF-8 bytes/member counts; never serialized as an authority grant."""
+    max_intent_bytes: int
+    max_inventory_bytes: int
+    max_inventory_entries: int
+
+
+def resolve_transition_resource_budget(max_intent_bytes=None, max_inventory_bytes=None,
+                                       max_inventory_entries=None, *, demand=None, managed=False):
+    values = (max_intent_bytes, max_inventory_bytes, max_inventory_entries)
+    if all(value is None for value in values):
+        if managed:
+            if demand is None:
+                raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "managed admission requires actual selected demand")
+            values = (demand.max_intent_bytes, demand.max_inventory_bytes, demand.max_inventory_entries)
+        else:
+            values = (TRANSITION_INTENT_FILE_BYTE_CAP, TRANSITION_INTENT_INVENTORY_BYTE_CAP,
+                      TRANSITION_INTENT_INVENTORY_MAX_ENTRIES)
+    if any(type(value) is not int or value < 0 for value in values) or values[0] > values[1]:
+        raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "transition resources require a complete coherent nonnegative integer tuple")
+    budget = TransitionResourceBudgetV1(*values)
+    if demand is not None and any(required > admitted for required, admitted in zip(
+            (demand.max_intent_bytes, demand.max_inventory_bytes, demand.max_inventory_entries), values)):
+        raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE",
+            "selected transition demand exceeds the supplied intent/inventory bytes or member ceiling")
+    return budget
+
+
+def _transition_resource_budget(value=None):
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if value is None:
+        if transaction is not None:
+            return transaction.transition_resource_budget
+        return resolve_transition_resource_budget()
+    try:
+        return resolve_transition_resource_budget(value.max_intent_bytes,
+            value.max_inventory_bytes, value.max_inventory_entries)
+    except AttributeError as exc:
+        raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "invalid transition resource input") from exc
+
+
+@dataclass(frozen=True)
+class TransitionResourceInputsV1:
+    acquisition: TransitionResourceBudgetV1
+    output_ceiling: TransitionResourceBudgetV1 | None
+    inventories: tuple
+    absence_evidence: tuple
+    read_admission: str
+    acquired_input: object = None
+
+    def verify(self):
+        current = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        if current is not None and current.transition_resource_inputs is self:
+            current.verify()
+            return
+        if self.acquired_input is not None:
+            _call_acquired_input(self.acquired_input, "verify")
+        else:
+            for snapshot in self.inventories:
+                _verify_owned_directory_snapshot(snapshot, "WI-LIFECYCLE-RESOURCE-DRIFT")
+        _verify_project_binding_evidence(self.absence_evidence, "WI-LIFECYCLE-RESOURCE-DRIFT")
+
+
+def _project_root_candidates(root, input_role):
+    """The root resolver and pre-content supplier share one role grammar."""
+    if input_role not in ("caller-root", "repository-root", "work-items-root"):
+        raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "unknown project root input role")
+    _lifecycle_reject_unreduced_reparse(Path(root), failure_id="WI-LIFECYCLE-LOCK-IDENTITY",
+        message="project root or parent contains a link or reparse point")
+    resolved = Path(root).resolve()
+    if input_role == "work-items-root":
+        if resolved.parent / "work-items" != resolved:
+            raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "invalid work-items-root protocol role")
+        return (resolved.parent,)
+    if input_role == "repository-root":
+        return (resolved,)
+    return (resolved, resolved.parent) if resolved.parent / "work-items" == resolved else (resolved,)
+
+
+def select_transition_resource_inputs(root, *, input_role="caller-root", selection=None,
+        read_admission=None, acquisition_ceiling=None, output_ceiling=None, acquired_input=None):
+    """Select finite read demand from native metadata, before any pending JSON read.
+
+    Only the genuine caller selects selected-native. Metadata supplies demand;
+    neither file content nor an output reservation supplies read permission.
+    """
+    if read_admission not in (None, "explicit", "selected-native"):
+        raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "unknown transition read admission")
+    current = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if current is not None:
+        if _lifecycle_unresolved_absolute(root) not in (current.repository_root, current.work_items_root):
+            raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "transition admission differs from held root")
+        for supplied, held in ((acquisition_ceiling, current.transition_resource_budget),
+                               (output_ceiling, current.transition_output_ceiling)):
+            if supplied is not None and _transition_resource_budget(supplied) != held:
+                raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "nested operation changed transition resources")
+        if read_admission is not None and read_admission != current.transition_resource_inputs.read_admission:
+            raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "nested operation changed transition admission")
+        return current.transition_resource_inputs
+    if selection is not None and (not isinstance(selection, dict) or
+            set(selection) - {"selected_locator", "selected_reference", "selected_transition"} or
+            sum(value is not None for value in selection.values()) > 1):
+        raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "invalid transition resource selection")
+    if read_admission == "explicit" and acquisition_ceiling is None:
+        raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "explicit transition admission requires all three numeric controls")
+    ceiling = _transition_resource_budget(acquisition_ceiling) if acquisition_ceiling is not None else None
+    output = _transition_resource_budget(output_ceiling) if output_ceiling is not None else None
+    if read_admission != "selected-native" and ceiling is None:
+        ceiling = resolve_transition_resource_budget()
+    inventories, absence = [], []
+    maximum = total = count = 0
+    for repository in _project_root_candidates(root, input_role):
+        directory = repository / ".scratch/work-items-lifecycle-transitions"
+        if acquired_input is not None:
+            if not _input_exists(directory, acquired_input):
+                continue
+            # Captured inputs already carry complete native directory custody.
+            _call_acquired_input(acquired_input, "verify")
+            associations = getattr(acquired_input, "directories", {})
+            association = associations.get(directory)
+            snapshot = getattr(association, "original", None)
+            owner_input = getattr(acquired_input, "owner_input", acquired_input)
+            issuer = _history_input_issuer(owner_input, "AcquiredWorkItemInputV1")
+            if not isinstance(snapshot, issuer.CapturedDirectorySnapshotV1):
+                raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "native metadata census is unavailable in this captured input")
+        else:
+            if _observe_project_path_at(directory, "directory", absence,
+                    "WI-LIFECYCLE-TRANSITION-INTENT-INVALID") is None:
+                continue
+            remaining = None if ceiling is None else ceiling.max_inventory_entries - count
+            snapshot = _capture_owned_directory_snapshot(directory,
+                failure_id="WI-LIFECYCLE-RESOURCE-INCOMPLETE", maximum_entries=remaining)
+        inventories.append(snapshot)
+        for name, metadata in snapshot.members:
+            count += 1
+            if (stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0) &
+                    getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)):
+                raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition inventory member is unsafe")
+            if not os.path.normcase(name).endswith(os.path.normcase(".json")):
+                continue
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition intent is not an owned regular file")
+            maximum = max(maximum, metadata.st_size)
+            total += metadata.st_size
+            if ceiling is not None:
+                resolve_transition_resource_budget(ceiling.max_intent_bytes, ceiling.max_inventory_bytes,
+                    ceiling.max_inventory_entries, demand=TransitionResourceBudgetV1(maximum, total, count))
+    demand = TransitionResourceBudgetV1(maximum, total, count)
+    if read_admission == "selected-native":
+        if ceiling is not None:
+            resolve_transition_resource_budget(ceiling.max_intent_bytes, ceiling.max_inventory_bytes,
+                ceiling.max_inventory_entries, demand=demand)
+        budget = resolve_transition_resource_budget(demand=demand, managed=True)
+    else:
+        budget = resolve_transition_resource_budget(ceiling.max_intent_bytes, ceiling.max_inventory_bytes,
+            ceiling.max_inventory_entries, demand=demand)
+    result = TransitionResourceInputsV1(budget, output, tuple(inventories), tuple(absence),
+        "selected-native" if read_admission == "selected-native" else "explicit" if acquisition_ceiling is not None else "diagnostic", acquired_input)
+    result.verify()
+    return result
+
+
+def add_transition_resource_arguments(parser, *, suppress_defaults=False):
+    default = argparse.SUPPRESS if suppress_defaults else None
+    parser.add_argument("--transition-read-admission", choices=("selected-native",), default=default,
+        help="positively admit exact finite native pending-intent demand before reading JSON")
+    for prefix, help_text in (("transition", "input acquisition ceiling"),
+                              ("transition-output", "optional hard output reservation ceiling")):
+        for suffix in ("intent-bytes", "inventory-bytes", "inventory-entries"):
+            parser.add_argument("--" + prefix + "-max-" + suffix, type=int, default=default,
+                help=help_text + "; provide all three dimensions")
+
+
+def _transition_cli_budget(args, *, output=False):
+    prefix = "transition_output" if output else "transition"
+    values = tuple(getattr(args, prefix + "_max_" + suffix, None)
+        for suffix in ("intent_bytes", "inventory_bytes", "inventory_entries"))
+    return None if all(value is None for value in values) else resolve_transition_resource_budget(*values)
+
+
+def _transition_fixed_output_publications(transaction, reservation):
+    for kind, effect in transaction.current_binding_evidence:
+        if (kind == "owned-effect" and effect.transaction is transaction
+                and effect.destination == reservation[0] and effect.actor is reservation[4]
+                and all(effect is not previous for previous_kind, previous in reservation[3]
+                        if previous_kind == "owned-effect")
+                and isinstance(effect.native_after, CapturedFileSnapshot)
+                and _sha256_bytes(effect.native_after.data) == reservation[1]):
+            yield effect
+
+
+def _transition_owned_output_budget(path):
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is None:
+        return None
+    plan = transaction._operation_owner
+    if isinstance(plan, _PendingLegacyCompletionPlan) and path == plan.intent_path:
+        snapshot = transaction._retained_observations.get(path)
+        if (isinstance(snapshot, CapturedFileSnapshot) and getattr(plan, "native_progress", None) is snapshot):
+            _verify_captured_file(snapshot, "WI-LIFECYCLE-RESOURCE-DRIFT")
+            return plan.resource_budget
+    reservation = transaction._transition_output_reservation
+    if reservation is not None and reservation[0] == path:
+        snapshot = transaction._retained_observations.get(path)
+        publication = next((effect for effect in _transition_fixed_output_publications(transaction, reservation)
+            if isinstance(snapshot, CapturedFileSnapshot)
+            and effect.native_after.identity == snapshot.identity
+            and effect.native_after.data == snapshot.data), None)
+        if publication is not None:
+            _verify_captured_file(snapshot, "WI-LIFECYCLE-RESOURCE-DRIFT")
+            return reservation[2]
+    return None
+
+
+def _transition_intent_read_limit(path, transition_resource_budget=None):
+    owned = _transition_owned_output_budget(path)
+    return (owned if owned is not None else _transition_resource_budget(transition_resource_budget)).max_intent_bytes
+
+
+def _transition_selected_inventory(transaction):
+    directory = transaction.repository_root / ".scratch/work-items-lifecycle-transitions"
+    current = transaction._retained_observations.get(directory)
+    if current is None:
+        current = next((snapshot for snapshot in transaction.transition_resource_inputs.inventories
+                        if snapshot.path == directory), None)
+    if current is None:
+        if os.path.lexists(directory):
+            raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "transition namespace lacks admitted native custody")
+        return ()
+    if not isinstance(current, CapturedDirectorySnapshotV1):
+        raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "transition namespace observation kind changed")
+    _verify_owned_directory_snapshot(current, "WI-LIFECYCLE-RESOURCE-DRIFT")
+    return (current,)
+
+
+def _transition_reserve_fixed_output(path, data):
+    """Existing fixed-image families reserve their exact, immutable output once."""
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is None:
+        raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "transition output requires its held transaction")
+    prior = transaction._transition_output_reservation
+    if prior is not None:
+        if prior[0] == path and prior[1] == _sha256_bytes(data) and prior[4] is transaction._operation_owner:
+            return prior[2]
+        publications = tuple(_transition_fixed_output_publications(transaction, prior))
+        settled = any(kind == "owned-effect" and effect.transaction is transaction
+            and effect.actor is prior[4] and effect.source == prior[0] and effect.destination is None
+            and effect.before.get(prior[0]) is not None
+            and any(effect.before[prior[0]][1] == publication.native_after for publication in publications)
+            for kind, effect in transaction.current_binding_evidence)
+        if os.path.lexists(prior[0]) or not settled:
+            raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "prior reserved transition output is unsettled")
+    inventory = _transition_selected_inventory(transaction)
+    other = [(directory.path / name, info) for directory in inventory for name, info in directory.members
+             if directory.path / name != path]
+    total = sum(info.st_size for leaf, info in other if os.path.normcase(leaf.name).endswith(os.path.normcase(".json")))
+    # Atomic publication may retain the old target and one actual creator stage.
+    demand = resolve_transition_resource_budget(len(data), total + len(data), len(other) + 2)
+    ceiling = transaction.transition_output_ceiling
+    if ceiling is not None:
+        resolve_transition_resource_budget(ceiling.max_intent_bytes, ceiling.max_inventory_bytes,
+            ceiling.max_inventory_entries, demand=demand)
+    transaction._transition_output_reservation = (
+        path, _sha256_bytes(data), demand, transaction.current_binding_evidence, transaction._operation_owner
+    )
+    return demand
+
 BUG_SUPERSESSION_OWNER = "mutate-work-item:current-bug-supersession-v1"
 BUG_SUPERSESSION_KIND = "current-bug-supersession-v1"
 BUG_SUCCESSOR_BINDING_FIELDS = {
@@ -2648,12 +2963,12 @@ def _legacy_completion_recognized(item):
     return False
 
 
-def _observe_work_item_terminal(root, item, *, ledger_resource_budget=None):
+def _observe_work_item_terminal(root, item, *, ledger_resource_budget=None, transition_resource_budget=None):
     reference = f"work-item:{item.name}"
     try:
-        port = acquire_settled_work_item_history(root, reference, ledger_resource_budget=ledger_resource_budget)
+        port = acquire_settled_work_item_history(root, reference, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         validator = _validator_module()
-        history = validator.observe_captured_work_item_history(validator.bind_settled_work_item_history(port), ledger_resource_budget=ledger_resource_budget)
+        history = validator.observe_captured_work_item_history(validator.bind_settled_work_item_history(port), ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget(transition_resource_budget))
         port.verify()
         if not history.acquisition_complete or history.diagnostics or (
             history.obligations is not None and (history.obligations.open_revise or history.obligations.open_launches)):
@@ -2670,8 +2985,8 @@ def _observe_work_item_terminal(root, item, *, ledger_resource_budget=None):
             None, None, (), (), None, (f"WI-LEGACY-COMPLETION-CUSTODY: malformed acquired record: {exc}",), None)
 
 
-def _require_legacy_terminal(root, item, *, ledger_resource_budget=None):
-    observed = _observe_work_item_terminal(root, item, ledger_resource_budget=ledger_resource_budget)
+def _require_legacy_terminal(root, item, *, ledger_resource_budget=None, transition_resource_budget=None):
+    observed = _observe_work_item_terminal(root, item, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     if not observed.acquisition_complete:
         raise LifecycleError("WI-LEGACY-COMPLETION-ACQUISITION", "; ".join(observed.diagnostics))
     observed.verify()
@@ -2711,6 +3026,133 @@ class PreparedWorkItemTerminal:
 _PENDING_LEGACY_PLAN_OWNER = object()
 
 
+@dataclass(frozen=True)
+class TransitionResourceDemandV1(TransitionResourceBudgetV1):
+    semantic_sha256: str
+
+
+def _legacy_intent_resource_demand(root, intent, *, selected_inventory, acquired_input=None):
+    """Count the complete finite serializer envelope of this prepared operation.
+
+    This shape is accounting only. Its placeholders never reach a native writer,
+    schema receiver or durable intent. Existing payload strings are referenced,
+    including every repeated occurrence, rather than decoded/copied for sizing.
+    """
+    if os.name != "nt":
+        raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE-UNSUPPORTED",
+            "native creator-bound flat close is unavailable on this host")
+    archive = root / intent["archivePath"]
+    stage = root / ".scratch/work-items/legacy-flat-terminal" / intent["operationId"] / "archive"
+    # Actual GetFileInformationByHandleEx layout: uint64 volume, 128-bit FileId.
+    native_max = ((1 << 64) - 1, (1 << 128) - 1)
+    def string_size(value):
+        return len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+    def largest(values):
+        return max(values, key=string_size)
+    def alternatives(path, *, temporary=False):
+        paths = {Path(path)}
+        if Path(path).is_relative_to(stage):
+            paths.add(archive / Path(path).relative_to(stage))
+        if Path(path).is_relative_to(archive):
+            paths.add(stage / Path(path).relative_to(archive))
+        if temporary:
+            paths.update(path.with_name(f".{path.name}.{'f' * 32}.tmp") for path in tuple(paths))
+        return paths
+    def parents(paths, originals=(), *, directory=False):
+        original_max = list(native_max)
+        for parent in originals:
+            original_max = [max(a, b) for a, b in zip(original_max, parent["identity"])]
+        choices = [list(originals)]
+        for path in paths:
+            chain = tuple(reversed(path.parents)) + ((path,) if directory else ())
+            choices.append([{"path": str(parent), "identity": original_max} for parent in chain])
+        # Compare at the actual field depth. Extra rows add indentation too;
+        # measuring a chain alone could select the wrong maximum.
+        return max(choices, key=lambda value: sum(len(part.encode("utf-8")) for part in
+            json.JSONEncoder(ensure_ascii=False, indent=2, sort_keys=True).iterencode(
+                {"capturedBindings": [{"parentChain": value}]})))
+    def image(data, original=None):
+        if original is None:
+            return {"identity": {"kind": "native-windows-file", "value": list(native_max)},
+                    "sha256": "F" * 64, "data": data}
+        result = dict(original)
+        result["identity"] = dict(original["identity"])
+        result["identity"]["value"] = [max(a, b) for a, b in zip(native_max, original["identity"]["value"])]
+        return result
+    bindings = []
+    bound_images = set()
+    bound_receipt = False
+    directory_paths = set()
+    for original in intent["capturedBindings"]:
+        row = dict(original)
+        paths = alternatives(Path(row["path"]), temporary=row["nodeKind"] == "file")
+        row["path"] = largest(str(path) for path in paths)
+        row["parentChain"] = parents(paths, original["parentChain"], directory=row["nodeKind"] == "directory")
+        if row["nodeKind"] == "directory":
+            directory_paths.add(Path(original["path"]))
+        else:
+            row["image"] = image(row["image"]["data"], row["image"])
+            if row.get("receipt"):
+                bound_receipt = True
+            index = row.get("imageIndex")
+            if index is not None:
+                bound_images.add(index)
+                prepared = intent["preparedImages"][index]
+                if prepared["disposition"] != "archive":
+                    source = root / prepared["source"]
+                    hold = source.with_name(f".{source.name}.{intent['operationId']}.{index}.hold")
+                    row["holdPath"] = largest((row.get("holdPath"), str(hold)))
+                    if prepared["after"] is not None:
+                        destination = root / prepared["destination"]
+                        temporary = destination.with_name(f".{destination.name}.{'f' * 32}.tmp")
+                        row["postStage"] = largest((row.get("postStage"), str(temporary)))
+                        row["postImage"] = image(prepared["after"], row.get("postImage"))
+        bindings.append(row)
+    required_directories = set()
+    def directory_slots(path):
+        for candidate in (path, *path.parents):
+            if candidate.is_relative_to(root):
+                required_directories.add(candidate)
+    for index, prepared in enumerate(intent["preparedImages"]):
+        destination = root / prepared["destination"]
+        if prepared["disposition"] == "archive":
+            physical_paths = alternatives(destination, temporary=True)
+            for path in physical_paths:
+                directory_slots(path.parent)
+            if index not in bound_images:
+                bindings.append({"path": largest(str(path) for path in physical_paths),
+                    "nodeKind": "file", "role": "actually-created", "imageIndex": index,
+                    "image": image(prepared["after"]), "parentChain": parents(physical_paths)})
+        elif prepared["after"] is not None:
+            directory_slots(destination.parent)
+    directory_slots(archive.parent)
+    for path in sorted(required_directories - directory_paths):
+        paths = alternatives(path)
+        bindings.append({"path": largest(str(value) for value in paths), "nodeKind": "directory",
+            "role": "actually-created", "identity": {"kind": "native-windows-file", "value": list(native_max)},
+            "parentChain": parents(paths, directory=True)})
+    if not bound_receipt:
+        paths = alternatives(archive / LEGACY_COMPLETION_RECEIPT, temporary=True)
+        bindings.append({"path": largest(str(path) for path in paths), "nodeKind": "file",
+            "role": "actually-created", "receipt": True,
+            "image": image(intent["plannedReceiptBytes"]), "parentChain": parents(paths)})
+    shape = dict(intent)
+    shape["capturedBindings"] = bindings
+    encoder = json.JSONEncoder(ensure_ascii=False, indent=2, sort_keys=True)
+    def encoded_size(value):
+        return 1 + sum(len(chunk.encode("utf-8")) for chunk in encoder.iterencode(value))
+    peak = max(encoded_size(intent), encoded_size(shape))
+    path = root / ".scratch/work-items-lifecycle-transitions" / f"{intent['operationId']}.json"
+    other = [(directory.path / name, info) for directory in selected_inventory
+             for name, info in directory.members if directory.path / name != path]
+    other_bytes = sum(info.st_size for leaf, info in other
+        if os.path.normcase(leaf.name).endswith(os.path.normcase(".json")))
+    semantic = _migration_receipt_bytes({key: value for key, value in intent.items() if key != "capturedBindings"})
+    # JSON byte accounting excludes .tmp payloads, but every directory entry
+    # counts: the selected target and one actual atomic writer stage can coexist.
+    return TransitionResourceDemandV1(peak, other_bytes + peak, len(other) + 2, _sha256_bytes(semantic))
+
+
 @dataclass(frozen=True, init=False)
 class _PendingLegacyCompletionPlan:
     owner: object
@@ -2726,6 +3168,8 @@ class _PendingLegacyCompletionPlan:
     native_progress: object
     original_bindings: tuple
     prepared_progress: bytes
+    resource_budget: TransitionResourceBudgetV1
+    initial_progress: bytes
 
     def received_progress(self):
         self.transaction.verify()
@@ -2739,11 +3183,11 @@ class _PendingLegacyCompletionPlan:
                 or self.native_progress != snapshot or self.durable != snapshot
                 or _migration_receipt_bytes(self.intent) != snapshot.data):
             raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "intent receiving is partial or stale")
-        image, _parents = _legacy_owned_image(self.intent_path)
+        image, _parents = _legacy_owned_image(self.intent_path, maximum_bytes=snapshot.length)
         if image != self.durable_image or _unb64(image["data"]) != snapshot.data:
             raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "current native intent differs from receiving")
         current = self.transaction.current_intent(self.intent_path)
-        if current is not None and (current[1] != snapshot or current[2] != image):
+        if current is not None and (current[0] != intent or current[1] != snapshot):
             raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "intent binding and current map disagree")
         return intent, snapshot, image
 
@@ -2852,7 +3296,7 @@ class _PendingLegacyCompletionPlan:
         self.received_progress()
 
     @classmethod
-    def admit(cls, root, intent_path, intent):
+    def reserve(cls, root, intent_path, intent, *, selected_inventory, existing_intent_snapshot=None):
         transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
         if transaction is None:
             raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "operation requires its held transaction")
@@ -2860,21 +3304,60 @@ class _PendingLegacyCompletionPlan:
         _legacy_validate_intent(root, intent)
         if root != transaction.repository_root or intent_path != _transition_intent_path(root, intent["operationId"], ledger_resource_budget=transaction.ledger_resource_budget):
             raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "operation root or intent path differs")
+        previous = transaction._operation_owner
+        if isinstance(previous, cls) and (previous.intent_path == intent_path or os.path.lexists(previous.intent_path)):
+            raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "operation already reserved or prior operation remains unsettled")
+        initial = _migration_receipt_bytes(intent)
+        if existing_intent_snapshot is not None:
+            _verify_captured_file(existing_intent_snapshot, "WI-LIFECYCLE-RESOURCE-DRIFT")
+            if (existing_intent_snapshot.path != intent_path or existing_intent_snapshot.data != initial
+                    or transaction._retained_observations.get(intent_path) != existing_intent_snapshot):
+                raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "recovery reservation lacks its actual acquired snapshot")
+        elif os.path.lexists(intent_path):
+            raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "new reservation requires observed selected intent absence")
+        demand = _legacy_intent_resource_demand(root, intent, selected_inventory=selected_inventory)
+        semantic = _migration_receipt_bytes({key: value for key, value in intent.items() if key != "capturedBindings"})
+        if demand.semantic_sha256 != _sha256_bytes(semantic) or len(initial) > demand.max_intent_bytes:
+            raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "resource demand differs from actual prepared semantics")
+        ceiling = transaction.transition_output_ceiling
+        if ceiling is not None:
+            resolve_transition_resource_budget(ceiling.max_intent_bytes, ceiling.max_inventory_bytes,
+                ceiling.max_inventory_entries, demand=demand)
+        budget = resolve_transition_resource_budget(demand=demand, managed=True)
         plan = object.__new__(cls)
         values = {"owner": _PENDING_LEGACY_PLAN_OWNER, "transaction": transaction, "root": root,
                   "intent_path": intent_path, "semantic_bytes": _migration_receipt_bytes(
                       {key: value for key, value in intent.items() if key != "capturedBindings"}),
                   "original_bindings": tuple(_migration_receipt_bytes(row) for row in intent["capturedBindings"]),
-                  "completed": None, "completed_board": None}
+                  "completed": None, "completed_board": None,
+                  "resource_budget": budget, "initial_progress": initial}
         for key, value in values.items():
             object.__setattr__(plan, key, value)
         object.__setattr__(plan, "prepared_progress", _migration_receipt_bytes(intent))
-        plan.retain_progress(intent)
         transaction.bind_operation(plan)
+        return plan
+
+    @classmethod
+    def admit(cls, root, intent_path, intent, *, selected_inventory=None, existing_intent_snapshot=None):
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        if transaction is None:
+            raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "operation requires its held transaction")
+        if existing_intent_snapshot is None:
+            existing_intent_snapshot = transaction._retained_observations.get(intent_path)
+        if not isinstance(existing_intent_snapshot, CapturedFileSnapshot):
+            raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "recovery requires actual bounded intent acquisition")
+        selected_inventory = (_transition_selected_inventory(transaction) if selected_inventory is None else selected_inventory)
+        plan = cls.reserve(root, intent_path, intent, selected_inventory=selected_inventory,
+                           existing_intent_snapshot=existing_intent_snapshot)
+        plan.retain_progress(intent)
         return plan
 
     def check_progress(self, intent):
         self.transaction.verify()
+        data = _migration_receipt_bytes(intent)
+        if (self.transaction._operation_owner is not self or len(data) > self.resource_budget.max_intent_bytes
+                or not hasattr(self, "durable") and data != self.initial_progress):
+            raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "progress differs from its immutable pre-effect reservation")
         _legacy_validate_intent(self.root, intent)
         if _migration_receipt_bytes({key: value for key, value in intent.items() if key != "capturedBindings"}) != self.semantic_bytes:
             raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "admitted operation semantics changed")
@@ -2895,7 +3378,8 @@ class _PendingLegacyCompletionPlan:
                 # never used to adopt an unrecorded creator or replace a current proof.
                 observed = (_capture_owned_directory_snapshot(path, failure_id="WI-LEGACY-COMPLETION-PENDING")
                             if row["nodeKind"] == "directory" else
-                            _capture_file_snapshot(path, failure_id="WI-LEGACY-COMPLETION-PENDING"))
+                            _capture_file_snapshot(path, failure_id="WI-LEGACY-COMPLETION-PENDING",
+                                maximum_bytes=len(_unb64(row["image"]["data"]))))
             if observed is None:
                 raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "new binding has no retained native producer")
             if row["nodeKind"] == "directory":
@@ -2925,10 +3409,14 @@ class _PendingLegacyCompletionPlan:
     def retain_progress(self, intent):
         if _migration_receipt_bytes({key: value for key, value in intent.items() if key != "capturedBindings"}) != self.semantic_bytes:
             raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "admitted operation semantics changed")
-        snapshot = _capture_file_snapshot(self.intent_path, failure_id="WI-LEGACY-COMPLETION-NATIVE")
+        snapshot = self.transaction._retained_observations.get(self.intent_path)
+        if (not isinstance(snapshot, CapturedFileSnapshot)
+                or snapshot.length > self.resource_budget.max_intent_bytes):
+            raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "durable progress lacks its admitted current-map snapshot")
+        _verify_captured_file(snapshot, "WI-LEGACY-COMPLETION-NATIVE")
         if snapshot.data != _migration_receipt_bytes(intent):
             raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "own durable progress differs")
-        image, _parents = _legacy_owned_image(self.intent_path)
+        image, _parents = _legacy_owned_image(self.intent_path, maximum_bytes=snapshot.length)
         _verify_captured_file(snapshot, "WI-LEGACY-COMPLETION-NATIVE")
         if image is None or _unb64(image["data"]) != snapshot.data:
             raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "own durable native image differs")
@@ -2959,7 +3447,7 @@ class _PendingLegacyCompletionPlan:
         if receipt is None:
             raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "completed receipt binding is absent")
         _legacy_check_parents(receipt["parentChain"])
-        if _legacy_owned_image(Path(receipt["path"]))[0] != receipt["image"]:
+        if _legacy_owned_image(Path(receipt["path"]), maximum_bytes=len(_unb64(receipt["image"]["data"])))[0] != receipt["image"]:
             raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "completed receipt native image changed")
         for snapshot in self.completed.origin._current_files:
             current = self.transaction.current_observation(snapshot)
@@ -2975,7 +3463,8 @@ class _PendingLegacyCompletionPlan:
         if (self.owner is not _PENDING_LEGACY_PLAN_OWNER or self.transaction is not _CURRENT_LIFECYCLE_TRANSACTION.get()
                 or self.intent_path != _transition_intent_path(root, operation, ledger_resource_budget=self.transaction.ledger_resource_budget)):
             raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "private pending plan is not bound to this actual transaction")
-        snapshot = _capture_file_snapshot(self.intent_path, failure_id="WI-LEGACY-COMPLETION-NATIVE")
+        snapshot = _capture_file_snapshot(self.intent_path, failure_id="WI-LEGACY-COMPLETION-NATIVE",
+            maximum_bytes=self.resource_budget.max_intent_bytes)
         if snapshot.data != _migration_receipt_bytes(self.intent) or receipt_data != _unb64(self.intent["plannedReceiptBytes"]):
             raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "private pending plan differs from its exact durable/current records")
         _legacy_validate_intent(root, self.intent)
@@ -3086,7 +3575,7 @@ def _capture_legacy_evidence(root, slug, evidence_data, *, ledger_resource_budge
                                              _sha256_bytes(snapshot.data)) for path, snapshot in selected.items()),
         tuple(history["absentPaths"]),
         {proof.path.relative_to(root).as_posix(): tuple(name for name, _ in proof.members) for proof in proofs}, live)
-    observed = validator.observe_captured_work_item_history(binding, ledger_resource_budget=ledger_resource_budget)
+    observed = validator.observe_captured_work_item_history(binding, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
     if not observed.acquisition_complete or observed.diagnostics or (observed.obligations is not None
             and (observed.obligations.open_revise or observed.obligations.open_launches)):
         raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "; ".join(observed.diagnostics) or "original history is unresolved")
@@ -3094,24 +3583,24 @@ def _capture_legacy_evidence(root, slug, evidence_data, *, ledger_resource_budge
     return request, source, bug_manifest, live, observed
 
 
-def _legacy_local_image(path):
+def _legacy_local_image(path, *, maximum_bytes):
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
     if transaction is not None:
         transaction.verify()
-    image = _legacy_owned_image(path)
+    image = _legacy_owned_image(path, maximum_bytes=maximum_bytes)
     if transaction is not None:
         transaction.verify()
         if image[0] is not None:
-            transaction.observe_retained_inputs((_capture_file_snapshot(path, failure_id="WI-LEGACY-COMPLETION-NATIVE"),))
+            transaction.observe_retained_inputs((_capture_file_snapshot(path, failure_id="WI-LEGACY-COMPLETION-NATIVE", maximum_bytes=maximum_bytes),))
     return image
 
 
-def _legacy_owned_image(path):
+def _legacy_owned_image(path, *, maximum_bytes):
     target = LifecycleWriteTarget(path, failure_id="WI-LEGACY-COMPLETION-NATIVE")
     primary = None
     try:
         target._acquire_existing_parents()
-        image = target.owned_image()
+        image = target.owned_image(maximum_bytes=maximum_bytes)
         target._verify_owned()
         parents = [{"path": str(parent), "identity": list(identity)} for parent, _handle, identity in target._directories]
         return image, parents
@@ -3191,12 +3680,12 @@ def _legacy_compensation_parent(path):
                        primary.__traceback__ if primary is not None else None)
 
 
-def _legacy_save_intent(path, intent, *, _plan=None, _target=None):
+def _legacy_save_intent(path, intent, *, _plan=None, _target=None, transition_resource_budget=None):
     data = _migration_receipt_bytes(intent)
-    if len(data) > TRANSITION_INTENT_FILE_BYTE_CAP:
-        raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "bound intent exceeds the existing owner byte cap")
-    if _plan is not None:
-        _plan.check_progress(intent)
+    if (not isinstance(_plan, _PendingLegacyCompletionPlan) or _plan.intent_path != path
+            or _plan.transaction is not _CURRENT_LIFECYCLE_TRANSACTION.get()):
+        raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "legacy intent needs its actual pre-effect reservation")
+    _plan.check_progress(intent)
     with (contextlib.nullcontext(_target) if _target is not None else
           _admit_lifecycle_write_target(path, failure_id="WI-LEGACY-COMPLETION-NATIVE", _operation_owner=_plan)) as target:
         if target.path != path or target._operation_owner is not _plan:
@@ -3231,6 +3720,7 @@ def _legacy_validate_intent(root, intent):
     if not isinstance(images, list) or not isinstance(intent["capturedBindings"], list):
         raise LifecycleError(failure, "legacy image/native binding selection differs")
     binding_keys = set()
+    acquired_envelope_bytes = len(_migration_receipt_bytes(intent))
     for bound in intent["capturedBindings"]:
         if (not isinstance(bound, dict) or bound.get("nodeKind") not in {"file", "directory"}
                 or bound.get("role") not in {"source", "preexisting", "actually-created"}
@@ -3247,9 +3737,9 @@ def _legacy_validate_intent(root, intent):
         if bound["nodeKind"] == "directory":
             _initial_v0_identity(bound["identity"])
         else:
-            _initial_v0_image(bound["image"])
+            _initial_v0_image(bound["image"], maximum_bytes=acquired_envelope_bytes)
             if bound.get("postImage") is not None:
-                _initial_v0_image(bound["postImage"])
+                _initial_v0_image(bound["postImage"], maximum_bytes=acquired_envelope_bytes)
             index = bound.get("imageIndex")
             if index is not None and (type(index) is not int or index < 0 or index >= len(images)):
                 raise LifecycleError(failure, "native image association differs")
@@ -3331,7 +3821,7 @@ def _legacy_verify_owned_postimages(root, intent):
         if after is None and (row["disposition"] != "source" or expected is not None):
             raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "final absence lacks its explicit source-removal contract")
         _legacy_check_parents(bound["parentChain"])
-        observed, _ = _legacy_owned_image(root / row["destination"])
+        observed, _ = _legacy_owned_image(root / row["destination"], maximum_bytes=len(_unb64(row["after"]) or b""))
         if observed != expected:
             raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "final exact native postimage differs")
 
@@ -3344,13 +3834,13 @@ def _legacy_verify_complete(root, intent_path, intent, action, *, _plan=None, le
     if receipt is None or Path(receipt["path"]) != archive / LEGACY_COMPLETION_RECEIPT:
         raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "final action has no required native binding")
     _legacy_check_parents(receipt["parentChain"])
-    observed, _ = _legacy_local_image(Path(receipt["path"]))
+    observed, _ = _legacy_local_image(Path(receipt["path"]), maximum_bytes=len(_unb64(receipt["image"]["data"])))
     if observed != receipt["image"] or _unb64(receipt["image"]["data"]) != _unb64(intent["plannedReceiptBytes"]):
         raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "final action native image differs")
     pending_plan = _plan if _plan is not None else _PendingLegacyCompletionPlan.admit(root, intent_path, intent)
     port = acquire_settled_work_item_history(root, f"work-item:{intent['workItem']}", _pending_plan=pending_plan, ledger_resource_budget=ledger_resource_budget)
     validator = _validator_module()
-    history = validator.observe_captured_work_item_history(validator.bind_settled_work_item_history(port), ledger_resource_budget=ledger_resource_budget)
+    history = validator.observe_captured_work_item_history(validator.bind_settled_work_item_history(port), ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
     port.verify()
     if not history.acquisition_complete or history.diagnostics or (history.obligations is not None
             and (history.obligations.open_revise or history.obligations.open_launches)):
@@ -3398,7 +3888,7 @@ def _legacy_verify_recoverable_originals(root, intent):
             f".{source.name}.{intent['operationId']}.{index}.hold")
         original = hold if os.path.lexists(hold) else source
         _legacy_check_parents(bound["parentChain"])
-        if _legacy_owned_image(original)[0] != bound["image"]:
+        if _legacy_owned_image(original, maximum_bytes=len(_unb64(bound["image"]["data"])))[0] != bound["image"]:
             raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "indeterminate finalization: original input is unavailable or changed")
 
 
@@ -3443,7 +3933,7 @@ def _legacy_settle_completed_resources(plan):
             transaction.publish_owned_effect(effect, native_identity=identity)
     _verify_captured_file(plan.durable, "WI-LEGACY-COMPLETION-NATIVE")
     with _legacy_compensation_parent(intent_path) as owner:
-        image = owner.owned_image()
+        image = owner.owned_image(maximum_bytes=plan.durable.length)
         if image != plan.durable_image:
             raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "intent changed before owned removal")
         owner.remove_owned(intent_path.name, image)
@@ -3493,7 +3983,7 @@ def _recover_legacy_completion(root, intent_path, intent, *, inject_failure_at=N
             if bound is None:
                 directory(physical.parent)
                 with LifecycleWriteTarget(physical, failure_id="WI-LEGACY-COMPLETION-NATIVE") as owner:
-                    if owner.owned_image() is not None:
+                    if owner.owned_image(maximum_bytes=0) is not None:
                         raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "unbound prepared leaf exists")
                     created = owner.stage_create(after)
                     bindings.append({"path": created["stagePath"], "nodeKind": "file", "role": "actually-created",
@@ -3509,7 +3999,7 @@ def _recover_legacy_completion(root, intent_path, intent, *, inject_failure_at=N
                     bindings = intent["capturedBindings"]; bound = file_binding(index)
                 else:
                     raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "missing relocation source has no progress receiving")
-            current, _parents = _legacy_local_image(physical)
+            current, _parents = _legacy_local_image(physical, maximum_bytes=len(after))
             if current != bound["image"]:
                 raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "prepared archive leaf changed")
     if not archive.exists():
@@ -3532,14 +4022,14 @@ def _recover_legacy_completion(root, intent_path, intent, *, inject_failure_at=N
             raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "effect has no original native binding")
         _legacy_check_parents(bound["parentChain"])
         hold = source.with_name(f".{source.name}.{intent['operationId']}.{index}.hold") if source else None
-        current, _ = _legacy_local_image(source) if source else (None, ())
         if hold is not None and not hold.exists():
+            current, _ = _legacy_local_image(source, maximum_bytes=len(before))
             if current != bound["image"]:
                 raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "original effect input was replaced")
             intent = _plan.advance_relocation(source, hold, bound["image"], binding=bound, field="holdPath")
             bindings = intent["capturedBindings"]; bound = file_binding(index)
         elif hold is not None:
-            held, _ = _legacy_local_image(hold)
+            held, _ = _legacy_local_image(hold, maximum_bytes=len(before))
             if held != bound["image"]:
                 raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "held original input was replaced")
         if after is not None:
@@ -3547,7 +4037,7 @@ def _recover_legacy_completion(root, intent_path, intent, *, inject_failure_at=N
             if post is None:
                 directory(dest.parent)
                 with LifecycleWriteTarget(dest, failure_id="WI-LEGACY-COMPLETION-NATIVE") as owner:
-                    if owner.owned_image() is not None:
+                    if owner.owned_image(maximum_bytes=0) is not None:
                         raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "foreign effect destination is occupied")
                     created = owner.stage_create(after)
                     bound["postStage"] = created["stagePath"]; bound["postImage"] = {k: created[k] for k in ("identity", "sha256", "data")}
@@ -3555,7 +4045,7 @@ def _recover_legacy_completion(root, intent_path, intent, *, inject_failure_at=N
             elif not dest.exists() and bound.get("postStage"):
                 intent = _plan.advance_relocation(Path(bound["postStage"]), dest, post, binding=bound, field="postStage")
                 bindings = intent["capturedBindings"]; bound = file_binding(index)
-            observed, _ = _legacy_local_image(dest)
+            observed, _ = _legacy_local_image(dest, maximum_bytes=len(after))
             if observed != bound["postImage"]:
                 raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "created effect postimage was replaced")
         elif os.path.lexists(dest):
@@ -3569,7 +4059,7 @@ def _recover_legacy_completion(root, intent_path, intent, *, inject_failure_at=N
     bound_receipt = next((row for row in bindings if row.get("receipt")), None)
     if bound_receipt is None:
         with LifecycleWriteTarget(receipt_path, failure_id="WI-LEGACY-COMPLETION-NATIVE") as owner:
-            if owner.owned_image() is not None:
+            if owner.owned_image(maximum_bytes=0) is not None:
                 raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "unknown action receipt exists")
             created = owner.stage_create(receipt_data)
             bound_receipt = {"path": created["stagePath"], "nodeKind": "file", "role": "actually-created", "receipt": True,
@@ -3579,7 +4069,7 @@ def _recover_legacy_completion(root, intent_path, intent, *, inject_failure_at=N
     elif Path(bound_receipt["path"]) != receipt_path:
         intent = _plan.advance_relocation(Path(bound_receipt["path"]), receipt_path, bound_receipt["image"], binding=bound_receipt)
         bindings = intent["capturedBindings"]; bound_receipt = next(row for row in bindings if row.get("receipt"))
-    observed, _ = _legacy_local_image(receipt_path)
+    observed, _ = _legacy_local_image(receipt_path, maximum_bytes=len(receipt_data))
     if observed != bound_receipt["image"]:
         raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "created action receipt changed")
     _legacy_verify_complete(root, intent_path, intent, action, _plan=_plan, ledger_resource_budget=ledger_resource_budget)
@@ -3607,19 +4097,19 @@ def _compensate_legacy_completion(root, intent_path, intent, *, _plan=None):
         _legacy_check_parents(bound["parentChain"])
         if row["disposition"] == "archive":
             path = Path(bound["path"])
-            if path.exists() and _legacy_owned_image(path)[0] != bound["image"]:
+            if path.exists() and _legacy_owned_image(path, maximum_bytes=len(_unb64(bound["image"]["data"])))[0] != bound["image"]:
                 raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "foreign archive replacement preserved")
         else:
             source = root / row["source"]
             hold = Path(bound["holdPath"]) if bound.get("holdPath") else source.with_name(
                 f".{source.name}.{intent['operationId']}.{index}.hold")
             if hold.exists():
-                if _legacy_owned_image(hold)[0] != bound["image"]:
+                if _legacy_owned_image(hold, maximum_bytes=len(_unb64(bound["image"]["data"])))[0] != bound["image"]:
                     raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "original native hold differs")
-                current = _legacy_owned_image(root / row["destination"])[0]
+                current = _legacy_owned_image(root / row["destination"], maximum_bytes=len(_unb64(row["after"]) or b""))[0]
                 if current is not None and current != bound.get("postImage"):
                     raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "foreign effect replacement preserved")
-            elif _legacy_owned_image(source)[0] != bound["image"]:
+            elif _legacy_owned_image(source, maximum_bytes=len(_unb64(bound["image"]["data"])))[0] != bound["image"]:
                 raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "foreign source replacement preserved")
     receipt = next((row for row in bindings if row.get("receipt")), None)
     if receipt is not None:
@@ -3656,7 +4146,7 @@ def _compensate_legacy_completion(root, intent_path, intent, *, _plan=None):
                 _plan.transaction.replace_directory(hold, source, directory=False,
                     expected_identity=bound["image"]["identity"]["value"], expected_data=_unb64(bound["image"]["data"]))
         else:
-            current, _ = _legacy_owned_image(source)
+            current, _ = _legacy_owned_image(source, maximum_bytes=len(_unb64(bound["image"]["data"])))
             if current != bound["image"]:
                 raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "original source state is not recoverable")
     for bound in reversed(bindings):
@@ -3674,14 +4164,19 @@ def _compensate_legacy_completion(root, intent_path, intent, *, _plan=None):
             transaction.publish_owned_effect(effect, native_identity=identity)
     _verify_captured_file(_plan.durable, "WI-LEGACY-COMPLETION-NATIVE")
     with _legacy_compensation_parent(intent_path) as owner:
-        if owner.owned_image() != _plan.durable_image:
+        if owner.owned_image(maximum_bytes=_plan.durable.length) != _plan.durable_image:
             raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "intent changed before compensation settlement")
         owner.remove_owned(intent_path.name, _plan.durable_image)
     _transition_fsync_directory(intent_path.parent)
 
 
-def _apply_legacy_completion(root, path, intent, *, inject_failure_at=None, ledger_resource_budget=None):
-    plan = _PendingLegacyCompletionPlan.admit(root, path, intent)
+def _apply_legacy_completion(root, path, intent, *, _plan=None, inject_failure_at=None, ledger_resource_budget=None,
+                             transition_resource_budget=None, transition_output_ceiling=None):
+    plan = _plan if _plan is not None else _PendingLegacyCompletionPlan.admit(root, path, intent)
+    if (plan.transaction is not _CURRENT_LIFECYCLE_TRANSACTION.get() or plan.intent_path != path
+            or plan.transaction._operation_owner is not plan):
+        raise LifecycleError("WI-LEGACY-COMPLETION-PENDING", "apply differs from its actual reserved operation")
+    plan.received_progress()
     try:
         return _recover_legacy_completion(root, path, intent, inject_failure_at=inject_failure_at, _plan=plan, ledger_resource_budget=ledger_resource_budget)
     except BaseException as primary:
@@ -3847,7 +4342,7 @@ def _close_legacy_flat(root, slug, closure_data, instant, evidence_data, *, appl
     bindings = []
     for index, row in enumerate(rows):
         if row["source"]:
-            image, parents = _legacy_local_image(root / row["source"])
+            image, parents = _legacy_local_image(root / row["source"], maximum_bytes=len(_unb64(row["before"])))
             if image is None or _unb64(image["data"]) != _unb64(row["before"]):
                 raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "effect preimage drifted")
             bindings.append({"path": str(root / row["source"]), "nodeKind": "file", "role": "source" if row["disposition"] == "source" else "preexisting",
@@ -3871,8 +4366,12 @@ def _close_legacy_flat(root, slug, closure_data, instant, evidence_data, *, appl
     if apply:
         if os.name != "nt":
             raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE-UNSUPPORTED", "native creator-bound flat close is unavailable on this host")
-        _legacy_save_intent(intent_path, intent)
-        _apply_legacy_completion(root, intent_path, intent, inject_failure_at=inject_failure_at, ledger_resource_budget=ledger_resource_budget)
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        plan = _PendingLegacyCompletionPlan.reserve(root, intent_path, intent,
+            selected_inventory=_transition_selected_inventory(transaction))
+        _legacy_save_intent(intent_path, intent, _plan=plan)
+        _apply_legacy_completion(root, intent_path, intent, _plan=plan,
+            inject_failure_at=inject_failure_at, ledger_resource_budget=ledger_resource_budget)
     return archive
 
 
@@ -4038,9 +4537,14 @@ class SettledWorkItemHistoryInputV1:
         return snapshot
 
     def current_native_metadata(self, path):
-        snapshot = self.file_snapshot(path)
-        metadata = snapshot.path.lstat()
-        _verify_captured_file(snapshot, "WI-LEGACY-COMPLETION-DRIFT")
+        if self.origin_entry(path) is None:
+            raise FileNotFoundError(str(path))
+        try:
+            snapshot = self.file_snapshot(path)
+            metadata = snapshot.path.lstat()
+            _verify_captured_file(snapshot, "WI-LEGACY-COMPLETION-DRIFT")
+        except OSError as exc:
+            raise LifecycleError("WI-LEGACY-COMPLETION-DRIFT", "selected current metadata is no longer available") from exc
         return metadata
 
     def current_capture(self, snapshot):
@@ -4975,7 +5479,7 @@ def _project_identity_children_at(path: Path, evidence: list, failure_id: str) -
     return children
 
 
-def _read_project_namespace_identity_at(work_items: Path, *, failure_id: str, ledger_resource_budget=None) -> tuple[tuple[Path, ...], tuple]:
+def _read_project_namespace_identity_at(work_items: Path, *, failure_id: str, ledger_resource_budget=None, transition_resource_budget=None) -> tuple[tuple[Path, ...], tuple]:
     topology = _read_project_topology_at(work_items, root_failure_id=failure_id)
     evidence = []
     subjects = []
@@ -4997,7 +5501,7 @@ def _read_project_namespace_identity_at(work_items: Path, *, failure_id: str, le
                 slugs.add(child.name)
     slugs.update(path.name for path, _kind, reference, _leaves in archive_rows if reference is not None)
     for slug in sorted(slugs):
-        subjects.extend(_category_locations_at(work_items, work_item, slug, archive_rows=archive_rows, binding_evidence=evidence, ledger_resource_budget=ledger_resource_budget))
+        subjects.extend(_category_locations_at(work_items, work_item, slug, archive_rows=archive_rows, binding_evidence=evidence, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget))
     for category in CATEGORIES.values():
         if category.current_kind != "flat":
             continue
@@ -5011,7 +5515,7 @@ def _read_project_namespace_identity_at(work_items: Path, *, failure_id: str, le
                 flat_slugs.update(path.stem for path in _project_identity_children_at(month, evidence, failure_id)
                                   if path.suffix == ".md")
         for slug in sorted(flat_slugs):
-            subjects.extend(_category_locations_at(work_items, category, slug, binding_evidence=evidence, ledger_resource_budget=ledger_resource_budget))
+            subjects.extend(_category_locations_at(work_items, category, slug, binding_evidence=evidence, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget))
     for subject in subjects:
         _lifecycle_reject_unreduced_reparse(subject, failure_id=failure_id,
             message="root acquisition logical subject is unsafe")
@@ -5055,7 +5559,7 @@ def _read_projection_root_binding_at(repository: Path, locator: tuple[str, str],
     return target[0], tuple(evidence)
 
 
-def _read_selected_reference_at(work_items: Path, selected_reference: tuple[str, str], failure_id: str, *, ledger_resource_budget=None) -> tuple[bool, tuple]:
+def _read_selected_reference_at(work_items: Path, selected_reference: tuple[str, str], failure_id: str, *, ledger_resource_budget=None, transition_resource_budget=None) -> tuple[bool, tuple]:
     category_name, slug = selected_reference
     category = CATEGORIES.get(category_name)
     if category is None:
@@ -5065,10 +5569,10 @@ def _read_selected_reference_at(work_items: Path, selected_reference: tuple[str,
     if category.current_kind == "work-item":
         rows, _directories, _absent, observed = _archive_entity_rows_at(work_items)
         evidence.extend(observed)
-        locations = _category_locations_at(work_items, category, slug, archive_rows=rows, binding_evidence=evidence, ledger_resource_budget=ledger_resource_budget)
+        locations = _category_locations_at(work_items, category, slug, archive_rows=rows, binding_evidence=evidence, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         legacy = _legacy_backlog_source_at(work_items, slug, binding_evidence=evidence)
     else:
-        locations = _category_locations_at(work_items, category, slug, binding_evidence=evidence, ledger_resource_budget=ledger_resource_budget)
+        locations = _category_locations_at(work_items, category, slug, binding_evidence=evidence, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         legacy = None
     return bool(locations or legacy is not None), tuple(evidence)
 
@@ -5081,7 +5585,7 @@ def _resolve_project_root_identity(
     binding_evidence_out: list | None = None,
     acquisition_purpose: str = "bound-acquisition",
     acquired_input=None, ledger_resource_budget=None,
-) -> tuple[Path, Path]:
+transition_resource_budget=None) -> tuple[Path, Path]:
     """Acquire raw semantic identity once; normalize proved roles without guessing."""
     if acquisition_purpose not in ("bound-acquisition", "topology-observation"):
         raise LifecycleError(failure_id, "unknown project root acquisition purpose")
@@ -5129,9 +5633,7 @@ def _resolve_project_root_identity(
             raise LifecycleError(failure_id, "caller project root differs from held scope")
         current.verify()
         return current.repository_root, current.work_items_root
-    repositories = [resolved]
-    if resolved.parent / "work-items" == resolved:
-        repositories.append(resolved.parent)
+    repositories = _project_root_candidates(root, input_role)
     if len(repositories) == 1 and not selected:
         return resolved, resolved / "work-items"
     bindings = []
@@ -5141,18 +5643,18 @@ def _resolve_project_root_identity(
             target, observed = _read_projection_root_binding_at(repository, selected_locator, failure_id=failure_id, ledger_resource_budget=ledger_resource_budget)
             matched = target is not None
         elif selected_reference is not None:
-            matched, observed = _read_selected_reference_at(repository / "work-items", selected_reference, failure_id, ledger_resource_budget=ledger_resource_budget)
+            matched, observed = _read_selected_reference_at(repository / "work-items", selected_reference, failure_id, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         elif selected_transition is not None:
-            matched, observed = _read_selected_transition_at(repository, selected_transition, ledger_resource_budget=ledger_resource_budget)
+            matched, observed = _read_selected_transition_at(repository, selected_transition, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         else:
-            subjects, observed = _read_project_namespace_identity_at(repository / "work-items", failure_id=failure_id, ledger_resource_budget=ledger_resource_budget)
+            subjects, observed = _read_project_namespace_identity_at(repository / "work-items", failure_id=failure_id, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
             matched = bool(subjects)
         evidence.extend(observed)
         if matched:
             bindings.append(repository)
     if selected and not bindings:
         for repository in repositories:
-            subjects, observed = _read_project_namespace_identity_at(repository / "work-items", failure_id=failure_id, ledger_resource_budget=ledger_resource_budget)
+            subjects, observed = _read_project_namespace_identity_at(repository / "work-items", failure_id=failure_id, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
             evidence.extend(observed)
             if subjects or len(repositories) == 1:
                 bindings.append(repository)
@@ -5167,7 +5669,7 @@ def _resolve_project_root_identity(
 
 
 def project_root_identity(root: Path, *, input_role: str = "caller-root",
-    known_work_items_root: Path | None = None, ledger_resource_budget=None,) -> tuple[Path, Path, tuple]:
+    known_work_items_root: Path | None = None, ledger_resource_budget=None,transition_resource_budget=None, transition_output_ceiling=None, transition_read_admission=None) -> tuple[Path, Path, tuple]:
     """Readonly base identity using caller-owned scope equations, never a rebase."""
     failure_id = "WI-LIFECYCLE-LOCK-IDENTITY"
     if input_role not in ("caller-root", "repository-root", "work-items-root"):
@@ -5206,10 +5708,23 @@ def project_root_identity(root: Path, *, input_role: str = "caller-root",
                 if not stat.S_ISDIR(info.st_mode):
                     raise LifecycleError(failure_id, "selected work-items scope is not a directory")
                 evidence.append(("chain", _capture_path_parent_chain(canonical_selected / ".project-identity-observation", failure_id)))
+    transition_inputs = None
+    if _CURRENT_LIFECYCLE_TRANSACTION.get() is not None or transition_read_admission is not None:
+        transition_inputs = select_transition_resource_inputs(root, input_role=role,
+            read_admission=transition_read_admission, acquisition_ceiling=transition_resource_budget,
+            output_ceiling=transition_output_ceiling, acquired_input=None)
+        transition_resource_budget = transition_inputs.acquisition
+    else:
+        transition_resource_budget = _transition_resource_budget(transition_resource_budget)
+        if transition_output_ceiling is not None:
+            _transition_resource_budget(transition_output_ceiling)
     repository, work_items = _resolve_project_root_identity(original, input_role=role,
-        failure_id=failure_id, binding_evidence_out=evidence, ledger_resource_budget=ledger_resource_budget)
+        failure_id=failure_id, binding_evidence_out=evidence, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     _verify_project_binding_evidence(tuple(evidence), failure_id)
-    return repository, work_items, tuple(evidence)
+    _transition_result = repository, work_items, tuple(evidence)
+    if transition_inputs is not None:
+        transition_inputs.verify()
+    return _transition_result
 
 
 def _read_project_topology_at(work_items: Path, *, root_failure_id: str = ROOT_CONTRACT_FAILURE,
@@ -5319,11 +5834,11 @@ def _read_project_topology_at(work_items: Path, *, root_failure_id: str = ROOT_C
 def _resolve_project_topology(root: Path, *, root_failure_id: str = ROOT_CONTRACT_FAILURE,
     input_role: str = "caller-root",
     acquired_input=None, ledger_resource_budget=None,
-) -> ProjectTopology:
+transition_resource_budget=None) -> ProjectTopology:
     purpose = ("topology-observation" if input_role == "caller-root"
         and _CURRENT_LIFECYCLE_TRANSACTION.get() is None else "bound-acquisition")
     _repository, work_items = _resolve_project_root_identity(root, input_role=input_role,
-        failure_id=root_failure_id, acquisition_purpose=purpose, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
+        failure_id=root_failure_id, acquisition_purpose=purpose, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     return _read_project_topology_at(work_items, root_failure_id=root_failure_id,
         acquisition_purpose=purpose, original_root=Path(root), acquired_input=acquired_input)
 
@@ -5334,8 +5849,8 @@ def _work_items_root(
     root_failure_id: str = ROOT_CONTRACT_FAILURE,
     input_role: str = "caller-root",
     acquired_input=None, ledger_resource_budget=None,
-) -> Path:
-    return _resolve_project_topology(root, root_failure_id=root_failure_id, input_role=input_role, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget).work_items
+transition_resource_budget=None) -> Path:
+    return _resolve_project_topology(root, root_failure_id=root_failure_id, input_role=input_role, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget).work_items
 
 
 def is_valid_slug(slug: str) -> bool:
@@ -6385,7 +6900,7 @@ def _initial_v0_digest(value: object) -> bool:
     return type(value) is str and re.fullmatch(r"[0-9A-F]{64}", value) is not None
 
 
-def _initial_v0_image(value: object, *, stage: bool = False) -> bytes:
+def _initial_v0_image(value: object, *, stage: bool = False, maximum_bytes: int = _INITIAL_V0_MAX_BYTES) -> bytes:
     _initial_v0_keys(value, {"identity", "sha256", "data"} | ({"stagePath"} if stage else set()))
     _initial_v0_identity(value["identity"])
     if stage:
@@ -6396,7 +6911,7 @@ def _initial_v0_image(value: object, *, stage: bool = False) -> bytes:
         data = _unb64(value["data"])
     except LifecycleError as exc:
         raise _initial_v0_fail("RECOVERY-INVALID", "operation byte image is not strict base64") from exc
-    if len(data) > _INITIAL_V0_MAX_BYTES or _sha256_bytes(data).upper() != value["sha256"] or _b64(data) != value["data"]:
+    if len(data) > maximum_bytes or _sha256_bytes(data).upper() != value["sha256"] or _b64(data) != value["data"]:
         raise _initial_v0_fail("RECOVERY-INVALID", "operation byte image hash differs")
     return data
 
@@ -8025,13 +8540,14 @@ class LifecycleWriteTarget:
         self._admit_mutation()
         self._verify_owned()
         removal = self._prepare_effect(self.path.parent / leaf, None)
+        expected = _unb64(image["data"])
         handle = self._file(leaf, delete=True)
         primary = None
         try:
             expected_kind = "native-windows-file" if os.name == "nt" else "stat"
             if (image["identity"]["kind"] != expected_kind
                 or list(self._identity(handle)) != image["identity"]["value"]
-                or self._read_handle(handle, 4 * 1024 * 1024) != _unb64(image["data"])):
+                or self._read_handle(handle, len(expected)) != expected):
                 raise self._failure("owned removal", OSError("child ownership changed"))
             self._verify_owned()
             self._verify_effect_source(removal, handle)
@@ -8054,7 +8570,8 @@ class LifecycleWriteTarget:
         stage = Path(image["stagePath"])
         if stage.parent != self.path.parent:
             raise self._failure("create-only promotion", OSError("stage parent differs"))
-        current = self.owned_image(stage.name)
+        expected = _unb64(image["data"])
+        current = self.owned_image(stage.name, maximum_bytes=len(expected))
         if current is None or current != {key: image[key] for key in ("identity", "sha256", "data")}:
             raise self._failure("create-only promotion", OSError("stage ownership changed"))
         handle = None
@@ -8064,7 +8581,7 @@ class LifecycleWriteTarget:
             promotion = self._prepare_effect(stage, self.path, data=_unb64(image["data"]))
             if list(self._identity(handle)) != image["identity"]["value"]:
                 raise OSError("stage identity changed")
-            if self._read_handle(handle, 4 * 1024 * 1024) != _unb64(image["data"]):
+            if self._read_handle(handle, len(expected)) != expected:
                 raise OSError("stage bytes changed before promotion")
             self.verify()
             self._verify_effect_source(promotion, handle)
@@ -8082,7 +8599,7 @@ class LifecycleWriteTarget:
             if handle is not None:
                 self._release_handle(handle, primary)
         self._publish_effect(promotion, image["identity"]["value"])
-        if self.owned_image() != current:
+        if self.owned_image(maximum_bytes=len(expected)) != current:
             raise LifecycleError("WI-ATOMIC-BYTE-CHECK", "create-only publication readback differs")
 
     def _identity(self, handle):
@@ -8433,17 +8950,30 @@ def _archive_entity_inventory_at(work_items: Path) -> ArchiveEntityInventory:
     return inventory
 
 
-def _archive_entity_inventory(root: Path, *, ledger_resource_budget=None) -> ArchiveEntityInventory:
-    return _archive_entity_inventory_at(_work_items_root(root, ledger_resource_budget=ledger_resource_budget))
+def _archive_entity_inventory(root: Path, *, ledger_resource_budget=None, transition_resource_budget=None) -> ArchiveEntityInventory:
+    return _archive_entity_inventory_at(_work_items_root(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget))
 
 
-def archive_entity_inventory(root: Path, *, input_role: str = "caller-root", ledger_resource_budget=None) -> ArchiveEntityInventory:
+def archive_entity_inventory(root: Path, *, input_role: str = "caller-root", ledger_resource_budget=None, transition_resource_budget=None, transition_output_ceiling=None, transition_read_admission=None) -> ArchiveEntityInventory:
     """Acquire the physical archive model without a writer transaction."""
+    transition_inputs = None
+    if _CURRENT_LIFECYCLE_TRANSACTION.get() is not None or transition_read_admission is not None:
+        transition_inputs = select_transition_resource_inputs(root, input_role=input_role,
+            read_admission=transition_read_admission, acquisition_ceiling=transition_resource_budget,
+            output_ceiling=transition_output_ceiling, acquired_input=None)
+        transition_resource_budget = transition_inputs.acquisition
+    else:
+        transition_resource_budget = _transition_resource_budget(transition_resource_budget)
+        if transition_output_ceiling is not None:
+            _transition_resource_budget(transition_output_ceiling)
     _repository, work_items = _resolve_project_root_identity(
         root, input_role=input_role, failure_id=ROOT_CONTRACT_FAILURE, ledger_resource_budget=ledger_resource_budget
-    )
+    , transition_resource_budget=transition_resource_budget)
     _read_project_topology_at(work_items)
-    return _archive_entity_inventory_at(work_items)
+    _transition_result = _archive_entity_inventory_at(work_items)
+    if transition_inputs is not None:
+        transition_inputs.verify()
+    return _transition_result
 
 
 def _archived_work_item_candidates(
@@ -8474,7 +9004,7 @@ def _reject_unbound_archive_selection(inventory: ArchiveEntityInventory, *, slug
 
 def _category_locations_at(work_items: Path, category: Category, slug: str, *,
     archive_inventory: ArchiveEntityInventory | None = None, archive_rows: tuple | None = None,
-    binding_evidence: list | None = None, ledger_resource_budget=None,) -> list[Path]:
+    binding_evidence: list | None = None, ledger_resource_budget=None,transition_resource_budget=None) -> list[Path]:
     if archive_inventory is not None and archive_rows is not None:
         raise TypeError("archive inventory and structural rows are mutually exclusive")
     locations = []
@@ -8496,7 +9026,7 @@ def _category_locations_at(work_items: Path, category: Category, slug: str, *,
             if reference == f"work-item:{slug}":
                 _observe_project_path_at(path, "directory", evidence, failure_id)
                 if _legacy_completion_recognized(path):
-                    _require_legacy_terminal(work_items.parent, path, ledger_resource_budget=ledger_resource_budget)
+                    _require_legacy_terminal(work_items.parent, path, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
                 locations.append(path)
     else:
         current = work_items / category.current_root / f"{slug}.md"
@@ -8514,8 +9044,8 @@ def _category_locations_at(work_items: Path, category: Category, slug: str, *,
     return locations
 
 
-def _category_locations(root: Path, category: Category, slug: str, *, ledger_resource_budget=None) -> list[Path]:
-    return _category_locations_at(_work_items_root(root, ledger_resource_budget=ledger_resource_budget), category, slug, ledger_resource_budget=ledger_resource_budget)
+def _category_locations(root: Path, category: Category, slug: str, *, ledger_resource_budget=None, transition_resource_budget=None) -> list[Path]:
+    return _category_locations_at(_work_items_root(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget), category, slug, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
 
 
 @functools.partial(_lifecycle_participant, subject_parameters=('category-reference', 'reference'))
@@ -8523,9 +9053,9 @@ def resolve_category(root: Path, reference: str, *, _prepared_category=None, led
     return _resolve_category_read_model(root, reference, prepared_category=_prepared_category, ledger_resource_budget=ledger_resource_budget)
 
 
-def _resolve_category_read_model(root: Path, reference: str, *, prepared_category=None, ledger_resource_budget=None) -> Path:
+def _resolve_category_read_model(root: Path, reference: str, *, prepared_category=None, ledger_resource_budget=None, transition_resource_budget=None) -> Path:
     category, slug = _canonical_category(reference) if prepared_category is None else prepared_category
-    locations = _category_locations(root, category, slug, ledger_resource_budget=ledger_resource_budget)
+    locations = _category_locations(root, category, slug, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     if len(locations) > 1:
         raise LifecycleError(
             "WI-CATEGORY-DUAL-LOCATION",
@@ -8634,7 +9164,7 @@ def _project_current_readme_status(
     return entry
 
 
-def _status_entry(root: Path, item: Path, *, diagnostic_status: bool = False, ledger_resource_budget=None) -> ReadmeEntry:
+def _status_entry(root: Path, item: Path, *, diagnostic_status: bool = False, ledger_resource_budget=None, transition_resource_budget=None) -> ReadmeEntry:
     status_path = item / "status.md"
     if not status_path.is_file():
         raise LifecycleError("WI-CATEGORY-STATUS-MISSING", f"missing status.md: {item}")
@@ -8668,12 +9198,12 @@ def _status_entry(root: Path, item: Path, *, diagnostic_status: bool = False, le
             continue
         related_slug = related_values[0]
         _validate_slug(related_slug)
-        related = _resolve_category_read_model(root, f"{category}:{related_slug}", ledger_resource_budget=ledger_resource_budget)
+        related = _resolve_category_read_model(root, f"{category}:{related_slug}", ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         entry.source_paths.append(related)
         progressive.append(
-            f"[{field_name}]({_relative_link(_work_items_root(root, ledger_resource_budget=ledger_resource_budget), related)})"
+            f"[{field_name}]({_relative_link(_work_items_root(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget), related)})"
         )
-    progressive.append(f"[work item]({_relative_link(_work_items_root(root, ledger_resource_budget=ledger_resource_budget), status_path)})")
+    progressive.append(f"[work item]({_relative_link(_work_items_root(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget), status_path)})")
     suffix = " → ".join(progressive)
     entry.detail = " — ".join(part for part in (entry.detail, suffix) if part)
     return entry
@@ -8825,9 +9355,9 @@ def _legacy_retirement_entry(item: Path, metadata: Path,
 def _archived_work_item_entry(item: Path,
     *,
     acquired_input=None, ledger_resource_budget=None,
-) -> ReadmeEntry:
+transition_resource_budget=None) -> ReadmeEntry:
     if acquired_input is None and _legacy_completion_recognized(item):
-        observation = _require_legacy_terminal(item.parent.parent.parent.parent, item, ledger_resource_budget=ledger_resource_budget)
+        observation = _require_legacy_terminal(item.parent.parent.parent.parent, item, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         port = observation.acquired_input
         closure_data = next(snapshot.data for snapshot in port._current_files if snapshot.path == item / "closure.md")
         return _legacy_terminal_entry(item, port.metadata, closure_data)
@@ -8913,9 +9443,9 @@ def collect_readme_entries(root: Path, *, ledger_resource_budget=None) -> list[R
 
 
 def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInventory | None = None,
-                            prepared_terminal=None, ledger_resource_budget=None,) -> list[ReadmeEntry]:
-    work_items = _work_items_root(root, ledger_resource_budget=ledger_resource_budget)
-    inventory = archive_inventory if archive_inventory is not None else _archive_entity_inventory(root, ledger_resource_budget=ledger_resource_budget)
+                            prepared_terminal=None, ledger_resource_budget=None,transition_resource_budget=None) -> list[ReadmeEntry]:
+    work_items = _work_items_root(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+    inventory = archive_inventory if archive_inventory is not None else _archive_entity_inventory(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     entries: list[ReadmeEntry] = []
 
     backlog = work_items / "backlog"
@@ -8944,7 +9474,7 @@ def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInven
     active = work_items / "active"
     if active.is_dir():
         for item in sorted(path for path in active.iterdir() if path.is_dir()):
-            entries.append(_status_entry(root, item, diagnostic_status=True, ledger_resource_budget=ledger_resource_budget))
+            entries.append(_status_entry(root, item, diagnostic_status=True, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget))
 
     roadmaps = work_items / "roadmaps"
     if roadmaps.is_dir():
@@ -8973,7 +9503,7 @@ def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInven
         if prepared_terminal is not None and entity.path == prepared_terminal.archive:
             continue
         if entity.kind in {"work-item", "invalid-work-item"}:
-            entries.append(_archived_work_item_entry(entity.path, ledger_resource_budget=ledger_resource_budget))
+            entries.append(_archived_work_item_entry(entity.path, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget))
         elif entity.kind == "archive-metadata":
             relative = _relative_link(work_items, entity.path)
             entries.append(ReadmeEntry("Archive metadata", f"archive-observation:{relative}", relative,
@@ -9012,11 +9542,23 @@ def _input_digest(entries: Iterable[ReadmeEntry], work_items: Path, *, prepared_
             inputs[logical_path] = path
     digest = hashlib.sha256()
     for logical_path, path in sorted(inputs.items()):
-        data = (prepared_terminal.images[path] if prepared_terminal is not None and path in prepared_terminal.images else _capture_file_snapshot(
-            path,
-            failure_id="WI-README-STALE",
-            maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
-        ).data)
+        if prepared_terminal is not None and path in prepared_terminal.images:
+            data = prepared_terminal.images[path]
+        else:
+            parent_chain = _capture_path_parent_chain(path, "WI-README-STALE")
+            try:
+                admitted = path.lstat()
+                snapshot = _capture_file_snapshot(
+                    path, failure_id="WI-README-STALE", maximum_bytes=admitted.st_size)
+                if (snapshot.identity != _lifecycle_file_identity(admitted)
+                        or snapshot.length != admitted.st_size
+                        or snapshot.parent_chain.participants != parent_chain.participants
+                        or _lifecycle_file_snapshot_key(path.lstat()) != _lifecycle_file_snapshot_key(admitted)):
+                    raise LifecycleError("WI-README-STALE", "selected input changed after byte admission")
+                _verify_captured_parent_chain(parent_chain, "WI-README-STALE")
+            except OSError as exc:
+                raise LifecycleError("WI-README-STALE", "selected input metadata cannot be captured") from exc
+            data = snapshot.data
         encoded = logical_path.encode("utf-8")
         digest.update(len(encoded).to_bytes(8, "big"))
         digest.update(encoded)
@@ -9118,14 +9660,14 @@ def _render_readme_bytes(
     archive_inventory_out: list[dict] | None = None,
     archive_inventory_witness_out: list[ArchiveEntityInventory] | None = None,
     prepared_terminal=None, ledger_resource_budget=None,
-) -> bytes:
+transition_resource_budget=None) -> bytes:
     if prepared_terminal is not None:
         if type(prepared_terminal) is not PreparedWorkItemTerminal:
             raise LifecycleError("WI-LEGACY-COMPLETION-PREPARED", "unsupported prepared terminal type")
         prepared_terminal.verify(root)
-    work_items = _work_items_root(root, ledger_resource_budget=ledger_resource_budget)
-    inventory = _archive_entity_inventory(root, ledger_resource_budget=ledger_resource_budget)
-    entries = _collect_readme_entries(root, archive_inventory=inventory, prepared_terminal=prepared_terminal, ledger_resource_budget=ledger_resource_budget)
+    work_items = _work_items_root(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+    inventory = _archive_entity_inventory(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+    entries = _collect_readme_entries(root, archive_inventory=inventory, prepared_terminal=prepared_terminal, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     canonical_timestamp = _canonical_timestamp(entries, prepared_terminal=prepared_terminal)
     input_digest = _input_digest(entries, work_items, prepared_terminal=prepared_terminal)
     if input_digest_out is not None:
@@ -9184,9 +9726,19 @@ def _render_readme_bytes(
     return rendered
 
 
-def observe_readme(root: Path, *, ledger_resource_budget=None) -> dict:
+def observe_readme(root: Path, *, ledger_resource_budget=None, transition_resource_budget=None, transition_output_ceiling=None, transition_read_admission=None) -> dict:
     """Observe acquired README/input hashes without entering a writer transaction."""
-    readme = _work_items_root(root, ledger_resource_budget=ledger_resource_budget) / "README.md"
+    transition_inputs = None
+    if _CURRENT_LIFECYCLE_TRANSACTION.get() is not None or transition_read_admission is not None:
+        transition_inputs = select_transition_resource_inputs(root, input_role="caller-root",
+            read_admission=transition_read_admission, acquisition_ceiling=transition_resource_budget,
+            output_ceiling=transition_output_ceiling, acquired_input=None)
+        transition_resource_budget = transition_inputs.acquisition
+    else:
+        transition_resource_budget = _transition_resource_budget(transition_resource_budget)
+        if transition_output_ceiling is not None:
+            _transition_resource_budget(transition_output_ceiling)
+    readme = _work_items_root(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget) / "README.md"
     snapshot = None
     try:
         readme.lstat()
@@ -9200,14 +9752,14 @@ def observe_readme(root: Path, *, ledger_resource_budget=None) -> dict:
     inventories: list[dict] = []
     witnesses: list[ArchiveEntityInventory] = []
     expected = _render_readme_bytes(root, input_digest_out=digests, archive_inventory_out=inventories,
-                                  archive_inventory_witness_out=witnesses, ledger_resource_budget=ledger_resource_budget)
+                                  archive_inventory_witness_out=witnesses, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     if snapshot is not None:
         _verify_captured_file(snapshot, "WI-README-STALE")
     elif _ledger_location_lexically_exists(readme):
         raise LifecycleError("WI-README-STALE", "README appeared during observation")
     repeated_digests: list[str] = []
     repeated_inventories: list[dict] = []
-    repeated = _render_readme_bytes(root, input_digest_out=repeated_digests, archive_inventory_out=repeated_inventories, ledger_resource_budget=ledger_resource_budget)
+    repeated = _render_readme_bytes(root, input_digest_out=repeated_digests, archive_inventory_out=repeated_inventories, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     witnesses[0].verify()
     if repeated != expected or digests != repeated_digests or inventories != repeated_inventories:
         raise LifecycleError("WI-README-STALE", "README inputs drifted during observation")
@@ -9215,10 +9767,13 @@ def observe_readme(root: Path, *, ledger_resource_budget=None) -> dict:
         _verify_captured_file(snapshot, "WI-README-STALE")
     elif _ledger_location_lexically_exists(readme):
         raise LifecycleError("WI-README-STALE", "README appeared during repeated observation")
-    return {"matches": snapshot is not None and snapshot.data == expected,
+    _transition_result = {"matches": snapshot is not None and snapshot.data == expected,
             "observedSha256": _sha256_bytes(snapshot.data) if snapshot is not None else None,
             "expectedSha256": _sha256_bytes(expected), "inputDigest": digests[0],
             "archiveInventory": inventories[0]}
+    if transition_inputs is not None:
+        transition_inputs.verify()
+    return _transition_result
 
 
 def refresh_readme(root: Path, *, allow_marker_bootstrap: bool = False,
@@ -10231,7 +10786,7 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
             _atomic_write(temp / "agent-runs.jsonl", admission_ledger)
             errors = _validator_module().validate_work_item(
                 temp, strict_revise=transfer_relation is None, ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=_transition_resource_budget())
             if errors:
                 raise LifecycleError("WI-LEDGER-BOOTSTRAP-INVALID", "; ".join(errors))
         _replace_lifecycle_directory(temp, target)
@@ -11575,7 +12130,7 @@ def _validate_item_before_close(item: Path, *, ledger_resource_budget=None) -> N
         errors = validator.validate_work_item(
             item,
             validate_status_file=not v1_staged, ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=_transition_resource_budget())
         if v1_staged:
             _validate_active_status_bytes(status_text.encode("utf-8"))
     else:
@@ -12167,7 +12722,30 @@ def _close_link_active_owner_evidence(root: Path, path: Path, before: bytes,
     status = _capture_file_snapshot(owner / "status.md", failure_id="WI-CATEGORY-STATUS-INVALID")
     if path == status.path and before != status.data:
         raise LifecycleError("WI-CLOSE-LINK-DRIFT", "status consumer differs from owner capture")
-    _validate_active_status_bytes(status.data)
+    consumer_relative = f"work-items/{path.relative_to(work_items).as_posix()}"
+    status_relative = f"work-items/{status.path.relative_to(work_items).as_posix()}"
+    try:
+        status_text = status.data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        cause = (
+            f"status must be UTF-8: {exc.encoding} decode failed at byte range "
+            f"{exc.start}:{exc.end} ({exc.reason})"
+        )
+        raise LifecycleError(
+            "WI-CATEGORY-STATUS-INVALID",
+            f"incoming consumer {consumer_relative}; owner status {status_relative}: {cause}",
+        ) from exc
+    fields = _parse_fields(status_text)
+    membership_error = _current_readme_status_error(fields, "active", status.path)
+    if membership_error is not None:
+        cause = str(membership_error).replace(
+            str(status.path.parent), f"work-items/{owner_relative}"
+        )
+        membership_error.args = (
+            f"incoming consumer {consumer_relative}; owner status {status_relative}; "
+            f"rejected status {fields.get('status', '')!r}; cause={cause}",
+        )
+        raise membership_error
     evidence.append(("file", status))
     return tuple(evidence)
 
@@ -13283,7 +13861,7 @@ def audit_categories(root: Path, *, ledger_resource_budget=None) -> tuple[str, .
 def _validate_obligation_transfer_ownership(root: Path, *, ledger_resource_budget=None) -> None:
     transfer_errors = _validator_module().validate_obligation_transfer_ownership(
         Path(root).resolve(), ledger_resource_budget=ledger_resource_budget
-    )
+    , transition_resource_budget=_transition_resource_budget())
     if transfer_errors:
         failure_id = transfer_errors[0].split(":", 1)[0]
         if failure_id not in {
@@ -13435,7 +14013,7 @@ def _retain_historical_pass_custody(
         errors = validator.validate_work_item(
             item, strict_revise=False, historical_pass_custody_blobs=candidates,
             selected_ledger_bytes=raw, ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=_transition_resource_budget())
         if errors:
             failure_id = errors[0].split(":", 1)[0] if errors[0].startswith("WI-LEDGER-CUSTODY-") else stale
             raise LifecycleError(failure_id, "; ".join(errors))
@@ -13983,44 +14561,46 @@ BUG_SUPERSESSION_INVENTORY_LINK_FIELDS = {
 
 def _bounded_transition_intent_inventory(
     directory: Path, *, failure_id: str, unreadable: str,
-    acquired_input=None,
+    acquired_input=None, transition_resource_budget=None,
 ) -> list[Path]:
-    """Inventory transition intents within finite count and byte budgets."""
-    candidates: list[Path] = []
-    total_bytes = 0
+    """Complete input census; W applies only to actually bound native output."""
+    budget = _transition_resource_budget(transition_resource_budget)
+    candidates = []
+    input_count = input_bytes = total_count = total_bytes = 0
+    output_budget = None
     json_suffix = os.path.normcase(".json")
     try:
         with _input_directory_inventory(directory, acquired_input) as entries:
-            for entry_count, path in enumerate(entries, start=1):
-                if entry_count > TRANSITION_INTENT_INVENTORY_MAX_ENTRIES:
-                    raise LifecycleError(
-                        failure_id, "transition intent inventory limit exceeded"
-                    )
+            for path in entries:
+                total_count += 1
+                owned = _transition_owned_output_budget(path) if acquired_input is None else None
+                if owned is None:
+                    input_count += 1
+                    if input_count > budget.max_inventory_entries:
+                        raise LifecycleError(failure_id, "transition intent inventory limit exceeded")
+                else:
+                    if output_budget is not None and output_budget != owned:
+                        raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "inventory contains incompatible output owners")
+                    output_budget = owned
                 if not os.path.normcase(path.name).endswith(json_suffix):
                     continue
                 metadata = _input_metadata(path, acquired_input)
-                if (
-                    not stat.S_ISREG(metadata.st_mode)
-                    or stat.S_ISLNK(metadata.st_mode)
-                    or metadata.st_nlink != 1
-                    or bool(
-                        getattr(metadata, "st_file_attributes", 0)
-                        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-                    )
-                ):
-                    raise LifecycleError(
-                        failure_id, "transition intent is not an owned regular file"
-                    )
-                if metadata.st_size > TRANSITION_INTENT_FILE_BYTE_CAP:
-                    raise LifecycleError(
-                        failure_id, "transition intent byte limit exceeded"
-                    )
+                if (not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode)
+                        or metadata.st_nlink != 1 or getattr(metadata, "st_file_attributes", 0)
+                        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)):
+                    raise LifecycleError(failure_id, "transition intent is not an owned regular file")
+                limit = budget if owned is None else owned
+                if metadata.st_size > limit.max_intent_bytes:
+                    raise LifecycleError(failure_id, "transition intent byte limit exceeded")
                 total_bytes += metadata.st_size
-                if total_bytes > TRANSITION_INTENT_INVENTORY_BYTE_CAP:
-                    raise LifecycleError(
-                        failure_id, "transition intent cumulative byte limit exceeded"
-                    )
+                if owned is None:
+                    input_bytes += metadata.st_size
+                    if input_bytes > budget.max_inventory_bytes:
+                        raise LifecycleError(failure_id, "transition intent cumulative byte limit exceeded")
                 candidates.append(path)
+        if output_budget is not None and (total_bytes > output_budget.max_inventory_bytes
+                or total_count > output_budget.max_inventory_entries):
+            raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "composite inventory exceeds the selected output reservation")
     except LifecycleError:
         raise
     except OSError as exc:
@@ -14144,7 +14724,7 @@ def _inspect_transfer_obligations(root: Path, item: Path, *, ledger_resource_bud
         strict_revise=False,
         validate_status_file=not v1_staged,
         obligation_state_out=states, ledger_resource_budget=ledger_resource_budget
-    )
+    , transition_resource_budget=_transition_resource_budget())
     if v1_staged:
         _validate_active_status_bytes(status_text.encode("utf-8"))
     if errors:
@@ -14995,6 +15575,7 @@ def _apply_single_bug_transition(
     for row in links:
         if _read_lifecycle_image(row["path"], row["before"], failure_id=rollback_id) != row["before"]:
             raise LifecycleError(rollback_id, f"bug link drifted: {row['pathRelative']}")
+    _transition_reserve_fixed_output(intent_path, _migration_receipt_bytes(intent))
     _atomic_write(intent_path, _migration_receipt_bytes(intent))
     _transition_fsync_directory(intent_path.parent)
     if inject_failure_at == f"{failpoint}0":
@@ -15889,12 +16470,12 @@ def _verify_transition_uri_targets(root: Path, intent: dict, *, archived: bool, 
                 raise LifecycleError(failure_id, "URI file target bytes differ")
 
 
-def _read_transition_intent_envelope(root: Path, path: Path, *, ledger_resource_budget=None) -> tuple:
+def _read_transition_intent_envelope(root: Path, path: Path, *, ledger_resource_budget=None, transition_resource_budget=None) -> tuple:
     try:
         snapshot = _capture_file_snapshot(
             path,
             failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-            maximum_bytes=TRANSITION_INTENT_FILE_BYTE_CAP,
+            maximum_bytes=_transition_intent_read_limit(path, transition_resource_budget),
             require_single_link=True,
         )
         payload = json.loads(snapshot.data.decode("utf-8", errors="strict"))
@@ -15981,23 +16562,23 @@ def _read_transition_intent_envelope(root: Path, path: Path, *, ledger_resource_
     return payload, snapshot, (is_v1, is_v2, is_legacy_v2, is_bug_supersession, is_fixed_bug_archive, is_ledger_h1_relocation, is_successor_import, is_legacy_completion)
 
 
-def _read_selected_transition_at(repository: Path, operation_id: str, *, ledger_resource_budget=None) -> tuple[bool, tuple]:
+def _read_selected_transition_at(repository: Path, operation_id: str, *, ledger_resource_budget=None, transition_resource_budget=None) -> tuple[bool, tuple]:
     path = _transition_intent_path(repository, operation_id, ledger_resource_budget=ledger_resource_budget)
     evidence = []
     if _observe_project_path_at(path, "file", evidence, "WI-LIFECYCLE-TRANSITION-INTENT-INVALID") is None:
         return False, tuple(evidence)
-    captured = _read_transition_intent_envelope(repository, path, ledger_resource_budget=ledger_resource_budget)
+    captured = _read_transition_intent_envelope(repository, path, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     evidence.append(("intent", captured))
     return True, tuple(evidence)
 
 
-def _load_transition_intent(root: Path, path: Path, *, ledger_resource_budget=None) -> dict:
+def _load_transition_intent(root: Path, path: Path, *, ledger_resource_budget=None, transition_resource_budget=None) -> dict:
     captured = None
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
     if transaction is not None:
         captured = transaction.current_intent(path)
     if captured is None:
-        captured = _read_transition_intent_envelope(root, path, ledger_resource_budget=ledger_resource_budget)
+        captured = _read_transition_intent_envelope(root, path, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     payload, snapshot, families = captured
     _verify_captured_file(snapshot, "WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
     if transaction is not None:
@@ -16353,9 +16934,9 @@ def _validate_ledger_location_intent(
     slug: str,
     logical_work_item: str,
     acquired_input=None, ledger_resource_budget=None,
-) -> None:
+transition_resource_budget=None) -> None:
     try:
-        loaded = _load_transition_intent(root, path, ledger_resource_budget=ledger_resource_budget)
+        loaded = _load_transition_intent(root, path, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     except (LifecycleError, TypeError, ValueError) as exc:
         if isinstance(exc, LifecycleError):
             raise
@@ -16421,7 +17002,7 @@ def _matching_ledger_location_intents(
     slug: str,
     logical_work_item: str,
     acquired_input=None, ledger_resource_budget=None,
-) -> list[tuple[dict, Path, bytes]]:
+transition_resource_budget=None) -> list[tuple[dict, Path, bytes]]:
     transition_root = repository / ".scratch" / "work-items-lifecycle-transitions"
     if not _ledger_location_lexically_exists(transition_root, acquired_input=acquired_input):
         return []
@@ -16440,21 +17021,27 @@ def _matching_ledger_location_intents(
         transition_root,
         failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
         unreadable="transition staging root is unreadable",
-     acquired_input=acquired_input)
-    loaded_bytes = 0
+     acquired_input=acquired_input, transition_resource_budget=transition_resource_budget)
+    loaded_bytes = input_bytes = 0
+    output_budget = None
+    budget = _transition_resource_budget(transition_resource_budget)
     for path in candidates:
         payload, raw = _ledger_location_proof_object(
             path,
             failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
             unreadable="transition intent is unreadable",
-            maximum_bytes=TRANSITION_INTENT_FILE_BYTE_CAP,
+            maximum_bytes=_transition_intent_read_limit(path, transition_resource_budget),
          acquired_input=acquired_input)
         loaded_bytes += len(raw)
-        if loaded_bytes > TRANSITION_INTENT_INVENTORY_BYTE_CAP:
-            raise LifecycleError(
-                "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-                "transition intent cumulative byte limit exceeded",
-            )
+        owned = _transition_owned_output_budget(path) if acquired_input is None else None
+        if owned is None:
+            input_bytes += len(raw)
+            if input_bytes > budget.max_inventory_bytes:
+                raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition intent cumulative byte limit exceeded")
+        else:
+            output_budget = owned
+        if output_budget is not None and loaded_bytes > output_budget.max_inventory_bytes:
+            raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "captured intent inventory exceeds output reservation")
         if payload.get("slug") != slug:
             continue
         _validate_ledger_location_intent(
@@ -16463,7 +17050,7 @@ def _matching_ledger_location_intents(
             payload,
             slug=slug,
             logical_work_item=logical_work_item,
-         acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
+         acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         matches.append((payload, path, raw))
     if len(matches) > 1:
         raise LifecycleError(
@@ -16715,7 +17302,7 @@ def resolve_work_item_ledger_location(
     root: Path, *, logical_work_item: str, logical_ledger_path: str,
     input_role: str = "caller-root",
     acquired_input=None, ledger_resource_budget=None,
-) -> WorkItemLedgerLocationV1:
+transition_resource_budget=None, transition_output_ceiling=None, transition_read_admission=None) -> WorkItemLedgerLocationV1:
     logical_parts = PurePosixPath(logical_work_item).parts
     if (
         len(logical_parts) != 3
@@ -16728,8 +17315,18 @@ def resolve_work_item_ledger_location(
         )
     slug = logical_parts[2]
     _validate_slug(slug)
+    transition_inputs = None
+    if _CURRENT_LIFECYCLE_TRANSACTION.get() is not None or transition_read_admission is not None:
+        transition_inputs = select_transition_resource_inputs(root, input_role=input_role,
+            read_admission=transition_read_admission, acquisition_ceiling=transition_resource_budget,
+            output_ceiling=transition_output_ceiling, acquired_input=acquired_input)
+        transition_resource_budget = transition_inputs.acquisition
+    else:
+        transition_resource_budget = _transition_resource_budget(transition_resource_budget)
+        if transition_output_ceiling is not None:
+            _transition_resource_budget(transition_output_ceiling)
     repository, work_items = _resolve_project_root_identity(root, input_role=input_role,
-        selected_reference=("work-item", slug), acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
+        selected_reference=("work-item", slug), acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     root = repository
     active = work_items / "active" / slug
     backlog = work_items / "backlog" / f"{slug}.md"
@@ -16761,7 +17358,7 @@ def resolve_work_item_ledger_location(
         repository,
         slug=slug,
         logical_work_item=logical_work_item,
-     acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
+     acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     intent, intent_path, intent_raw = intents[0] if intents else (None, None, None)
     if active_exists:
         _input_reject_reparse(
@@ -16784,7 +17381,7 @@ def resolve_work_item_ledger_location(
                 "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
                 "active intent ledger digest differs",
             )
-        return WorkItemLedgerLocationV1(
+        _transition_result = WorkItemLedgerLocationV1(
             logical_work_item,
             logical_ledger_path,
             logical_work_item,
@@ -16795,6 +17392,9 @@ def resolve_work_item_ledger_location(
             intent_path.relative_to(repository).as_posix() if intent_path else None,
             _sha256_bytes(intent_raw) if intent_raw is not None else None,
         )
+        if transition_inputs is not None:
+            transition_inputs.verify()
+        return _transition_result
     if len(archives) != 1:
         raise LifecycleError(
             "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE",
@@ -16829,7 +17429,7 @@ def resolve_work_item_ledger_location(
                 "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
                 "settlement and durable intent disagree",
             )
-        return WorkItemLedgerLocationV1(
+        _transition_result = WorkItemLedgerLocationV1(
             logical_work_item,
             logical_ledger_path,
             physical_work_item,
@@ -16840,6 +17440,9 @@ def resolve_work_item_ledger_location(
             receipt_path.relative_to(repository).as_posix(),
             _sha256_bytes(receipt_raw),
         )
+        if transition_inputs is not None:
+            transition_inputs.verify()
+        return _transition_result
     if intent is None or intent_path is None or intent_raw is None:
         raise LifecycleError(
             "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE",
@@ -16876,7 +17479,7 @@ def resolve_work_item_ledger_location(
             "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
             "moved intent after-images or ledger digest differ",
         )
-    return WorkItemLedgerLocationV1(
+    _transition_result = WorkItemLedgerLocationV1(
         logical_work_item,
         logical_ledger_path,
         physical_work_item,
@@ -16887,6 +17490,9 @@ def resolve_work_item_ledger_location(
         intent_path.relative_to(repository).as_posix(),
         _sha256_bytes(intent_raw),
     )
+    if transition_inputs is not None:
+        transition_inputs.verify()
+    return _transition_result
 
 
 def _transition_bug_plans(root: Path, intent: dict, *, ledger_resource_budget=None) -> tuple[BugDispositionPlan, ...]:
@@ -17154,7 +17760,7 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None, 
     if payload.get("schemaVersion") == 2:
         coverage_errors = _validator_module().validate_transfer_receipt_obligation_coverage(
             Path(root).resolve(), payload, archive, ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=_transition_resource_budget())
         if coverage_errors:
             raise LifecycleError(
                 "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
@@ -17666,8 +18272,7 @@ def archive_with_successor(
     intent.update(_parent_archive_uri_intent_fields(root, link_plan))
     _transition_parent_uri_images(root, intent, ledger_resource_budget=ledger_resource_budget)
     intent_bytes = _migration_receipt_bytes(intent)
-    if len(intent_bytes) > TRANSITION_INTENT_FILE_BYTE_CAP:
-        raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition intent exceeds its byte limit")
+    _transition_reserve_fixed_output(intent_path, intent_bytes)
     intent_path = _require_lifecycle_mutation_path(
         root, intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
     )
@@ -19890,7 +20495,7 @@ def _capture_directory_snapshot(path: Path, *, failure_id: str, inverse=None) ->
     return snapshot
 
 
-def _capture_owned_directory_snapshot(path: Path, *, failure_id: str, creation_owner=None) -> CapturedDirectorySnapshotV1:
+def _capture_owned_directory_snapshot(path: Path, *, failure_id: str, creation_owner=None, maximum_entries=None) -> CapturedDirectorySnapshotV1:
     """Capture complete member/native identities using existing parent handles.
 
     This bypasses constructive __enter__. Reader acquisitions are closed here;
@@ -19953,7 +20558,12 @@ def _capture_owned_directory_snapshot(path: Path, *, failure_id: str, creation_o
 
         def inventory():
             with os.scandir(path) as stream:
-                entries = sorted(stream, key=lambda entry: entry.name.encode("utf-8"))
+                entries = []
+                for entry in stream:
+                    if maximum_entries is not None and len(entries) >= maximum_entries:
+                        raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "transition inventory member ceiling exceeded")
+                    entries.append(entry)
+                entries.sort(key=lambda entry: entry.name.encode("utf-8"))
             rows = []
             for entry in entries:
                 # Windows DirEntry's cached stat has zero native file identity;
@@ -20036,6 +20646,7 @@ def _verify_owned_directory_snapshot(snapshot: CapturedDirectorySnapshotV1, fail
         raise LifecycleError(failure_id, "directory observation was not minted intact by the native owner")
     _verify_captured_parent_chain(snapshot.parent_chain, failure_id)
     current = _capture_owned_directory_snapshot(snapshot.path, failure_id=failure_id,
+        maximum_entries=len(snapshot.members),
         **({"creation_owner": creation_owner} if creation_owner is not None else {}))
     if (_lifecycle_file_snapshot_key(current.metadata) != _lifecycle_file_snapshot_key(snapshot.metadata)
             or tuple((name, _lifecycle_file_snapshot_key(meta)) for name, meta in current.members)
@@ -23313,7 +23924,7 @@ def _projection_candidate_errors(entry: dict, manifests: dict[str, bytes], regis
         entry["_item"], validate_status_file=False,
         projection_manifest_blobs=manifests,
         projection_registry_bytes=registry_bytes, ledger_resource_budget=ledger_resource_budget
-    )
+    , transition_resource_budget=_transition_resource_budget())
 
 
 def _projection_group_ids(operation_id: str, count: int) -> list[str]:
@@ -23775,7 +24386,7 @@ def _preflight_legacy_ledger_settlement(
         projection_manifest_blobs=manifests,
         projection_registry_bytes=registry_candidate,
         obligation_state_out=obligations, ledger_resource_budget=ledger_resource_budget
-    )
+    , transition_resource_budget=_transition_resource_budget())
     _raise_legacy_settlement_validation(errors)
     if len(obligations) != 1:
         _legacy_settlement_fail(
@@ -23952,7 +24563,7 @@ def _legacy_settlement_validate_after_image(
             projection_manifest_blobs=manifests,
             projection_registry_bytes=registry_candidate,
             obligation_state_out=obligations, ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=_transition_resource_budget())
         _raise_legacy_settlement_validation(errors)
         if len(obligations) != 1:
             _legacy_settlement_fail(
@@ -24517,7 +25128,7 @@ def recover_mixed_current_ledger(
                 validate_status_file=False, obligation_state_out=obligations,
                 authority_state_out=authority,
                 historical_pass_custody_blobs=evidence_blobs or None, ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=_transition_resource_budget())
             if validation_errors or len(obligations) != 1 or len(authority) != 1:
                 if not stage_preexisting and not writer.remove_exact_mixed_owned_file(
                     stage_path, candidate, stage_identity
@@ -24528,7 +25139,7 @@ def recover_mixed_current_ledger(
             open_launches = [row.run_id for row in obligations[0].open_launches]
             before_axes = {}
             if request["schemaVersion"] == 2:
-                before_context = validator._ordinary_raw_v2_effective_context(item, str(ledger), original, evidence_blobs or None, ledger_resource_budget=ledger_resource_budget)
+                before_context = validator._ordinary_raw_v2_effective_context(item, str(ledger), original, evidence_blobs or None, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
                 before_errors: list[str] = []
                 _active, before_validity, before_revise, before_launches = validator._reduce_effective_current_state(
                     before_context.rows, item, before_errors, None, context=before_context
@@ -24624,7 +25235,7 @@ def recover_mixed_current_ledger(
                 if current != candidate:
                     later_errors = validator.validate_work_item(
                         item, selected_ledger_bytes=current, strict_revise=False, validate_status_file=False, ledger_resource_budget=ledger_resource_budget
-                    )
+                    , transition_resource_budget=_transition_resource_budget())
                     if later_errors:
                         if not stage_preexisting:
                             writer.remove_exact_mixed_owned_file(stage_path, candidate, stage_identity)
@@ -24673,7 +25284,7 @@ def recover_mixed_current_ledger(
                                 owned_evidence.append((owned["snapshot"], data, writer._noncanonical_file_identity(info)))
                 if evidence_blobs:
                     final_errors = validator.validate_work_item(item, ledger_path=stage_path, strict_revise=False,
-                                                               validate_status_file=False, ledger_resource_budget=ledger_resource_budget)
+                                                               validate_status_file=False, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
                     if final_errors:
                         _mixed_recovery_fail("CANDIDATE", "; ".join(final_errors))
                 published_path, history_created, history_identity = writer.publish_mixed_current_history_blob(
@@ -25222,7 +25833,7 @@ def _sealed_prefix_candidate_contexts(
     contexts = validator._load_effective_ledger_group(
         repository,
         compatibility_artifacts=artifacts, ledger_resource_budget=ledger_resource_budget
-    )
+    , transition_resource_budget=_transition_resource_budget())
     if set(contexts) != set(ledger_bytes_by_path):
         failure_ids = {
             failure
@@ -26425,7 +27036,7 @@ def resolve_ledger_h1_artifact_set_location(
     *,
     input_role: str = "caller-root",
     acquired_input=None, ledger_resource_budget=None,
-) -> LedgerH1ArtifactSetLocationV1 | None:
+transition_resource_budget=None, transition_output_ceiling=None, transition_read_admission=None) -> LedgerH1ArtifactSetLocationV1 | None:
     """Resolve one complete root set or one exact settled archived set."""
 
     unresolved = _lifecycle_unresolved_absolute(Path(root))
@@ -26434,11 +27045,24 @@ def resolve_ledger_h1_artifact_set_location(
         failure_id="WI-LEDGER-COMPAT-SET-TOPOLOGY",
         message="H1 repository root contains a link or reparse point",
      acquired_input=acquired_input)
+    transition_inputs = None
+    if _CURRENT_LIFECYCLE_TRANSACTION.get() is not None or transition_read_admission is not None:
+        transition_inputs = select_transition_resource_inputs(root, input_role=input_role,
+            read_admission=transition_read_admission, acquisition_ceiling=transition_resource_budget,
+            output_ceiling=transition_output_ceiling, acquired_input=acquired_input)
+        transition_resource_budget = transition_inputs.acquisition
+    else:
+        transition_resource_budget = _transition_resource_budget(transition_resource_budget)
+        if transition_output_ceiling is not None:
+            _transition_resource_budget(transition_output_ceiling)
     repository, work_items = _resolve_project_root_identity(
         unresolved, input_role=input_role, failure_id="WI-LEDGER-COMPAT-SET-TOPOLOGY",
-     acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
+     acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     if not _input_is_dir(work_items, acquired_input) or _input_has_reparse(work_items, acquired_input):
-        return None
+        _transition_result = None
+        if transition_inputs is not None:
+            transition_inputs.verify()
+        return _transition_result
     root_presence = tuple(
         _ledger_h1_lexically_exists(work_items / name, acquired_input=acquired_input)
         for name, _kind in LEDGER_H1_RELOCATION_MEMBERS
@@ -26453,20 +27077,26 @@ def resolve_ledger_h1_artifact_set_location(
         _ledger_h1_relocation_fail("more than one archived H1 artifact set exists")
     if root_observed and all(root_presence):
         members = _ledger_h1_members_at_base(repository, work_items, acquired_input=acquired_input)
-        return LedgerH1ArtifactSetLocationV1(
+        _transition_result = LedgerH1ArtifactSetLocationV1(
             "work-items",
             "root",
             _ledger_h1_artifact_set_digest(members),
             None,
             None,
         )
+        if transition_inputs is not None:
+            transition_inputs.verify()
+        return _transition_result
     if not archive_bases:
-        return None
+        _transition_result = None
+        if transition_inputs is not None:
+            transition_inputs.verify()
+        return _transition_result
     base = archive_bases[0]
     if not _input_is_dir(base, acquired_input):
         _ledger_h1_relocation_fail("archived H1 artifact base is not a directory")
     try:
-        _archived_work_item_entry(base.parent, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
+        _archived_work_item_entry(base.parent, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     except LifecycleError as exc:
         raise LifecycleError(
             "WI-LEDGER-COMPAT-SET-TOPOLOGY",
@@ -26484,13 +27114,16 @@ def resolve_ledger_h1_artifact_set_location(
         artifact_set_sha256_v1,
         artifact_set_sha256_v2,
     )
-    return LedgerH1ArtifactSetLocationV1(
+    _transition_result = LedgerH1ArtifactSetLocationV1(
         base.relative_to(repository).as_posix(),
         "settled-archive",
         artifact_set_sha256_v2,
         str(receipt["operationId"]),
         receipt_path.relative_to(repository).as_posix(),
     )
+    if transition_inputs is not None:
+        transition_inputs.verify()
+    return _transition_result
 
 
 def _ledger_h1_root_contract_after(
@@ -27144,6 +27777,7 @@ def _relocate_ledger_h1_artifact_set_locked(
             "H1 relocation intent still exists after recovery",
         )
     intent_path.parent.mkdir(parents=True, exist_ok=True)
+    _transition_reserve_fixed_output(intent_path, _migration_receipt_bytes(intent))
     _atomic_write(intent_path, _migration_receipt_bytes(intent))
     _transition_fsync_directory(intent_path.parent)
     receipt_committed = False
@@ -27750,7 +28384,7 @@ def preflight_import_active_successor(
     archived_ledger = archive_map["agent-runs.jsonl"]
     if (not ledger or not ledger.endswith(b"\n") or not archived_ledger.startswith(ledger)):
         raise LifecycleError("WI-SUCCESSOR-LEDGER-DIVERGENCE", "source ledger is not an exact archived prefix")
-    errors, _events, _runtime = _validator_module().validate_archived_ledger_obligations(archive, ledger_resource_budget=ledger_resource_budget)
+    errors, _events, _runtime = _validator_module().validate_archived_ledger_obligations(archive, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
     if errors:
         raise LifecycleError("WI-SUCCESSOR-LEDGER-DIVERGENCE", "; ".join(errors))
     bindings = []
@@ -28316,8 +28950,7 @@ def apply_import_active_successor(
         "plan": plan, "statusData": _b64(status_data), "images": images,
     }
     intent_bytes = _migration_receipt_bytes(intent)
-    if len(intent_bytes) > TRANSITION_INTENT_FILE_BYTE_CAP:
-        raise LifecycleError("WI-SUCCESSOR-IMPORT-DRIFT", "preflight plan exceeds intent byte limit")
+    _transition_reserve_fixed_output(intent_path, intent_bytes)
     intent_path = _require_lifecycle_mutation_path(
         repository, intent_path, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY",
     )
@@ -28728,8 +29361,10 @@ def build_parser() -> argparse.ArgumentParser:
     trial.add_argument("--fixture", required=True)
     resource_owner = _validator_module()
     resource_owner.add_ledger_resource_arguments(parser)
+    add_transition_resource_arguments(parser)
     for command_parser in sub.choices.values():
         resource_owner.add_ledger_resource_arguments(command_parser, suppress_defaults=True)
+        add_transition_resource_arguments(command_parser, suppress_defaults=True)
     return parser
 
 
@@ -28782,7 +29417,10 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     try:
         ledger_resource_budget = _validator_module().resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes)
-    except ValueError as exc:
+        transition_resource_budget = _transition_cli_budget(args)
+        transition_output_ceiling = _transition_cli_budget(args, output=True)
+        transition_read_admission = args.transition_read_admission
+    except (ValueError, LifecycleError) as exc:
         parser.error(str(exc))
     root = Path(args.root)
     lifecycle_diagnostic_observer = None
@@ -28790,7 +29428,7 @@ def main(argv: list[str]) -> int:
         if args.command == "admit-current-decision-v0":
             result = admit_current_decision_v0(root, policy_decision=args.policy_decision, cutover_date=args.cutover_date,
                 expected_baseline_sha256=args.expected_baseline_sha256, expected_policy_sha256=args.expected_policy_sha256,
-                operation_id=args.operation_id, receipt=args.receipt, apply=args.apply, ledger_resource_budget=ledger_resource_budget)
+                operation_id=args.operation_id, receipt=args.receipt, apply=args.apply, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         elif args.command == "retain-pass-artifact":
             result = retain_historical_pass_custody(
@@ -28805,7 +29443,7 @@ def main(argv: list[str]) -> int:
                 args.slug,
                 _read_arg_file(args.file),
                 inject_readme_failure=bool(args.inject_readme_failure), ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(result)
         elif args.command == "convert-legacy-candidate":
             result = convert_legacy_candidate(
@@ -28813,7 +29451,7 @@ def main(argv: list[str]) -> int:
                 args.slug,
                 _read_arg_file(args.file),
                 inject_readme_failure=bool(args.inject_readme_failure), ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(result)
         elif args.command == "retire-legacy-backlog":
             result = retire_legacy_backlog(
@@ -28822,7 +29460,7 @@ def main(argv: list[str]) -> int:
                 _read_arg_file(args.disposition_file),
                 args.terminal_instant,
                 inject_readme_failure=bool(args.inject_readme_failure), ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(result)
         elif args.command == "start":
             result = start_item(
@@ -28830,7 +29468,7 @@ def main(argv: list[str]) -> int:
                 args.slug,
                 _read_arg_file(args.status_file),
                 inject_readme_failure=bool(args.inject_readme_failure), ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(result)
         elif args.command == "update":
             result = update_status(
@@ -28838,7 +29476,7 @@ def main(argv: list[str]) -> int:
                 args.slug,
                 _read_arg_file(args.status_file),
                 inject_readme_failure=bool(args.inject_readme_failure), ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(result)
         elif args.command == "close":
             result = close_item(
@@ -28851,7 +29489,7 @@ def main(argv: list[str]) -> int:
                 legacy_evidence_data=_read_arg_file(args.legacy_evidence_file) if args.legacy_evidence_file else None,
                 apply=bool(args.apply),
                 inject_failure_at=args.inject_failure_at, ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(result)
         elif args.command == "reopen":
             result = reopen_item(
@@ -28860,7 +29498,7 @@ def main(argv: list[str]) -> int:
                 args.successor_slug,
                 _read_arg_file(args.status_file),
                 inject_readme_failure=bool(args.inject_readme_failure), ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(result)
         elif args.command == "refresh":
             archive_inventories: list[dict] = []
@@ -28874,29 +29512,29 @@ def main(argv: list[str]) -> int:
                     root,
                     args.expected_readme_sha256,
                     archive_inventory_out=archive_inventories, ledger_resource_budget=ledger_resource_budget
-                )
+                , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             else:
                 if args.expected_readme_sha256:
                     raise LifecycleError(
                         "WI-README-REPAIR-TARGET-MISMATCH",
                         "--expected-readme-sha256 requires --reset-static-guide",
                     )
-                readme_hash = refresh_readme(root, archive_inventory_out=archive_inventories, ledger_resource_budget=ledger_resource_budget)
+                readme_hash = refresh_readme(root, archive_inventory_out=archive_inventories, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             for row in archive_inventories[0]["unbound"]:
                 print(f"INFO WI-ARCHIVE-ENTITY-UNBOUND: {row['path']}")
             print(f"README-SHA256: {readme_hash}")
         elif args.command == "resolve":
             if args.reference:
-                print(resolve_category(root, args.reference, ledger_resource_budget=ledger_resource_budget))
+                print(resolve_category(root, args.reference, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission))
             else:
-                print(f"WI-LEGACY-READ-COMPAT {resolve_legacy_path(root, args.legacy_path, ledger_resource_budget=ledger_resource_budget)}")
+                print(f"WI-LEGACY-READ-COMPAT {resolve_legacy_path(root, args.legacy_path, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)}")
         elif args.command == "recover-transition":
             if not args.apply:
                 raise LifecycleError(
                     "WI-LIFECYCLE-TRANSITION-RECOVERY-REQUIRED",
                     "recover-transition requires explicit --apply",
                 )
-            recovered = recover_transition(root, args.operation_id, ledger_resource_budget=ledger_resource_budget)
+            recovered = recover_transition(root, args.operation_id, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             outcome = "rolled-back" if recovered is None else "settled"
             print(
                 "RECOVER-TRANSITION: "
@@ -28905,15 +29543,15 @@ def main(argv: list[str]) -> int:
             print("next=audit")
         elif args.command == "audit":
             if args.output:
-                inventory = write_migration_inventory(root, Path(args.output), ledger_resource_budget=ledger_resource_budget)
+                inventory = write_migration_inventory(root, Path(args.output), ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
                 print(f"migration_rows={len(inventory['rows'])}")
             elif args.verify_migration:
                 rows = verify_migration_inventory(
                     root, Path(args.verify_migration), ledger_resource_budget=ledger_resource_budget
-                )
+                , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
                 print(f"migration_rows={rows}")
             else:
-                for legacy_path in audit(root, ledger_resource_budget=ledger_resource_budget):
+                for legacy_path in audit(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission):
                     print(f"{LEGACY_READ_CLASSIFICATION} {legacy_path}")
             print("AUDIT: PASS")
         elif args.command == "migrate":
@@ -28933,7 +29571,7 @@ def main(argv: list[str]) -> int:
                     Path(args.inventory),
                     render_readme=args.render_readme,
                     byte_check=args.byte_check, ledger_resource_budget=ledger_resource_budget
-                )
+                , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
                 print("MIGRATION: PASS")
                 print(f"migration_rows={rows}")
                 print("readme_byte_check=PASS")
@@ -28955,7 +29593,7 @@ def main(argv: list[str]) -> int:
                         else None
                     ),
                     allow_protected_uri_updates=args.allow_protected_uri_updates, ledger_resource_budget=ledger_resource_budget
-                )
+                , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
         elif args.command == "terminalize-v1":
             rows, replay = terminalize_v1_inventory(
                 root,
@@ -28963,7 +29601,7 @@ def main(argv: list[str]) -> int:
                 terminal_at=args.terminal_at,
                 authorization_marker=args.authorization_marker,
                 receipt_path=Path(args.receipt), ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             if replay:
                 print(f"TERMINALIZE-V1: PASS rows={rows} replay=true")
             else:
@@ -28986,7 +29624,7 @@ def main(argv: list[str]) -> int:
                 render_readme=args.render_readme,
                 byte_check=args.byte_check,
                 diagnostic_observer=lifecycle_diagnostic_observer, ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(
                 "PARTIAL-MIGRATION-RECOVERY: PASS "
                 f"receipt_sha256={result.receipt_sha256} "
@@ -29005,7 +29643,7 @@ def main(argv: list[str]) -> int:
                     args.source,
                     args.target_slug,
                     Path(args.inventory), ledger_resource_budget=ledger_resource_budget
-                )
+                , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
                 print(f"NORMALIZE-CURRENT-IDENTITY: INVENTORY rows={len(inventory['rows'])}")
             else:
                 if not args.receipt:
@@ -29021,7 +29659,7 @@ def main(argv: list[str]) -> int:
                     Path(args.inventory),
                     Path(args.receipt),
                     inject_failure_at=args.inject_failure_at, ledger_resource_budget=ledger_resource_budget
-                )
+                , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
                 print(
                     "NORMALIZE-CURRENT-IDENTITY: PASS "
                     f"target={target} replay={'true' if replay else 'false'}"
@@ -29037,7 +29675,7 @@ def main(argv: list[str]) -> int:
                 args.recorded_at,
                 normalization_kind=args.normalization_kind,
                 inject_failure=args.inject_failure, ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(
                 "WI-LEDGER-MIGRATION-COMMITTED "
                 f"operation={result['operationId']} after={result['afterLedgerSha256']}"
@@ -29051,7 +29689,7 @@ def main(argv: list[str]) -> int:
                 args.expected_ledger_sha256,
                 args.operation_id,
                 args.recorded_at, ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(
                 "WI-LEDGER-MIGRATION-REVOKED "
                 f"operation={result['operationId']} after={result['afterLedgerSha256']}"
@@ -29204,7 +29842,7 @@ def main(argv: list[str]) -> int:
                 ),
                 inject_failure_at=args.inject_failure_at,
                 allow_protected_uri_updates=args.allow_protected_uri_updates, ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(
                 "WI-LIFECYCLE-TRANSITION-COMMITTED "
                 f"operation={result['operationId']} readme={result['readmeSha256']}"
@@ -29221,7 +29859,7 @@ def main(argv: list[str]) -> int:
                 args.expected_readme_sha256,
                 args.operation_id,
                 inject_failure_at=args.inject_failure_at, ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(
                 "WI-BUG-SUPERSESSION-COMMITTED "
                 f"operation={result['operationId']} readme={result['readmeSha256']}"
@@ -29233,7 +29871,7 @@ def main(argv: list[str]) -> int:
                 )
             result = archive_fixed_bug(
                 root, args.slug, args.terminal_instant, args.resolution, args.evidence, ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(
                 "WI-FIXED-BUG-ARCHIVE-COMMITTED "
                 f"operation={result['operationId']} readme={result['readmeSha256']}"
@@ -29271,13 +29909,13 @@ def main(argv: list[str]) -> int:
                     root, args.predecessor_slug, args.successor_slug,
                     _read_arg_file(args.status_file), dispositions,
                     args.operation_id, args.preflight_digest, ledger_resource_budget=ledger_resource_budget
-                )
+                , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
                 print(json.dumps(result, sort_keys=True))
                 return 0
             result = preflight_import_active_successor(
                 root, args.predecessor_slug, args.successor_slug,
                 _read_arg_file(args.status_file), dispositions, args.operation_id, ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             wire = {
                 key: value for key, value in result.items() if key != "canonicalBytes"
             }
@@ -29287,7 +29925,7 @@ def main(argv: list[str]) -> int:
                 }
             print(json.dumps(wire, sort_keys=True))
         elif args.command == "trial":
-            first, second = run_trial(root, Path(args.fixture), ledger_resource_budget=ledger_resource_budget)
+            first, second = run_trial(root, Path(args.fixture), ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print("TRIAL: PASS")
             print("items=5")
             print(f"sections={'|'.join(README_SECTIONS)}")

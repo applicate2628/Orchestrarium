@@ -882,7 +882,7 @@ class _CapturedHistoryPath:
         except (OSError, RuntimeError, ValueError, TypeError) as exc:
             # A missing metadata leaf is an actual proved absence used by the
             # owner's optional-location probes, not a failed required read.
-            if not (operation == "metadata" and isinstance(exc, FileNotFoundError)):
+            if not (operation in {"metadata", "current_native_metadata"} and isinstance(exc, FileNotFoundError)):
                 locator = self.binding.repository_root if path is None else path
                 cause = (operation, locator.relative_to(self.binding.repository_root).as_posix(),
                          getattr(exc, "failure_id", "WI-LEGACY-COMPLETION-HISTORY"), str(exc))
@@ -3893,22 +3893,22 @@ _LEDGER_H1_REGISTRY = "work-items/legacy-ledger-projections.jsonl"
 _LEDGER_H1_RECEIPT_DIR = "work-items/legacy-ledger-projection-receipts"
 
 
-def _ledger_h1_live_participants_exist(root: Path, *, ledger_resource_budget=None) -> bool:
+def _ledger_h1_live_participants_exist(root: Path, *, ledger_resource_budget=None, transition_resource_budget=None) -> bool:
     """Detect an exact root/archive set or one invalid observed topology."""
 
     try:
-        return _resolve_ledger_h1_artifact_set_location(root, ledger_resource_budget=ledger_resource_budget) is not None
+        return _resolve_ledger_h1_artifact_set_location(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget) is not None
     except _LedgerH1AcquisitionError:
         return True
 
 
-def _resolve_ledger_h1_artifact_set_location(root: Path, *, ledger_resource_budget=None):
+def _resolve_ledger_h1_artifact_set_location(root: Path, *, ledger_resource_budget=None, transition_resource_budget=None):
     lifecycle = load_lifecycle_owner()
     try:
         return lifecycle.resolve_ledger_h1_artifact_set_location(
             root.path if isinstance(root, _CapturedHistoryPath) else root, input_role="repository-root",
             **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}), ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=transition_resource_budget)
     except lifecycle.LifecycleError as exc:
         raise _LedgerH1AcquisitionError(
             exc.failure_id,
@@ -4331,7 +4331,7 @@ def validate_invalid_current_disposition_candidate(
     *,
     ledger_manifest_bytes: bytes | None = None,
     expected_ledger_sha256: str | None = None, ledger_resource_budget=None,
-) -> tuple[str, ...]:
+transition_resource_budget=None) -> tuple[str, ...]:
     """Validate one H1 suffix or ordinary raw-V2 append/replay without authority."""
 
     errors: list[str] = []
@@ -4348,7 +4348,7 @@ def validate_invalid_current_disposition_candidate(
             not isinstance(expected_ledger_sha256, str)
             or SHA256_RE.fullmatch(expected_ledger_sha256) is None
             or root is None
-            or _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget)
+            or _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         ):
             fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: ordinary raw V2 binding is invalid")
             return tuple(errors)
@@ -4891,6 +4891,7 @@ def _ledger_h1_candidate_group(
     root: Path, artifacts: LedgerCompatibilityArtifactSetV1,
     historical_pass_custody_blobs_by_item: Mapping[Path, Mapping[str, bytes]] | None = None,
     *, ledger_acquisition_complete_by_path: dict[str, list[bool]] | None = None, ledger_resource_budget=None,
+    transition_resource_budget=None,
 ) -> Mapping[str, LedgerValidationContextV1]:
     failures: list[str] = []
     diagnostics: list[str] = []
@@ -4964,7 +4965,7 @@ def _ledger_h1_candidate_group(
                     logical_ledger_path=path,
                     input_role="repository-root",
                     **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}), ledger_resource_budget=ledger_resource_budget
-                )
+                , transition_resource_budget=transition_resource_budget)
             except lifecycle.LifecycleError as exc:
                 reject(
                     "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",
@@ -5189,10 +5190,10 @@ def _ledger_h1_acquisition_failure_context(
 
 def _load_live_ledger_h1_metadata(
     root: Path, ledger_resource_budget=None,
-) -> LedgerCompatibilityArtifactSetV1 | None:
+*, transition_resource_budget=None) -> LedgerCompatibilityArtifactSetV1 | None:
     """Acquire the exact H1 artifact namespace and metadata, not member leaves."""
 
-    location = _resolve_ledger_h1_artifact_set_location(root, ledger_resource_budget=ledger_resource_budget)
+    location = _resolve_ledger_h1_artifact_set_location(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     if location is None:
         return None
     physical_base = root.joinpath(*PurePosixPath(location.physical_base).parts)
@@ -5316,9 +5317,9 @@ def _load_live_ledger_h1_artifacts(
     selected_ledger_path: Path | None = None,
     selected_ledger_bytes: bytes | None = None,
     metadata_artifacts: LedgerCompatibilityArtifactSetV1 | None = None, ledger_resource_budget=None,
-) -> LedgerCompatibilityArtifactSetV1 | None:
+transition_resource_budget=None) -> LedgerCompatibilityArtifactSetV1 | None:
     """Acquire participant contents only for selected/full-group validation."""
-    metadata = metadata_artifacts or _load_live_ledger_h1_metadata(root, ledger_resource_budget=ledger_resource_budget)
+    metadata = metadata_artifacts or _load_live_ledger_h1_metadata(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     if metadata is None:
         return None
     try:
@@ -5353,7 +5354,7 @@ def _load_live_ledger_h1_artifacts(
                     logical_ledger_path=ledger_relative,
                     input_role="repository-root",
                     **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}), ledger_resource_budget=ledger_resource_budget
-                )
+                , transition_resource_budget=transition_resource_budget)
             except lifecycle.LifecycleError as exc:
                 raise _LedgerH1AcquisitionError(
                     exc.failure_id, ledger_relative
@@ -5397,12 +5398,13 @@ def _load_effective_ledger_group(
     compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
     historical_pass_custody_blobs_by_item: Mapping[Path, Mapping[str, bytes]] | None = None,
     ledger_acquisition_complete_by_path: dict[str, list[bool]] | None = None, ledger_resource_budget=None,
+    transition_resource_budget=None,
 ) -> Mapping[str, LedgerValidationContextV1]:
     """Load and validate one receipt-bound two-ledger group without caching."""
 
     if compatibility_artifacts is None:
         try:
-            compatibility_artifacts = _load_live_ledger_h1_artifacts(root, ledger_resource_budget=ledger_resource_budget)
+            compatibility_artifacts = _load_live_ledger_h1_artifacts(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         except _LedgerH1AcquisitionError as exc:
             context = _ledger_h1_acquisition_failure_context(exc)
             return MappingProxyType({exc.logical_ledger_path: context})
@@ -5410,7 +5412,7 @@ def _load_effective_ledger_group(
             return MappingProxyType({})
     return _ledger_h1_candidate_group(
         root if isinstance(root, _CapturedHistoryPath) else Path(root), compatibility_artifacts, historical_pass_custody_blobs_by_item,
-        ledger_acquisition_complete_by_path=ledger_acquisition_complete_by_path, ledger_resource_budget=ledger_resource_budget
+        ledger_acquisition_complete_by_path=ledger_acquisition_complete_by_path, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget
     )
 
 
@@ -5469,6 +5471,7 @@ def _resolve_ledger_h1_selected(
     selected_ledger_absent: bool = False,
     ledger_acquisition_complete_out: list[bool] | None = None,
     required_ledger_acquisition_by_path: dict[str, list[bool]] | None = None, ledger_resource_budget=None,
+    transition_resource_budget=None,
 ) -> _LedgerH1SelectedV1:
     """One metadata-first selection composition for validator and reader."""
     target_errors: list[str] = []
@@ -5484,11 +5487,11 @@ def _resolve_ledger_h1_selected(
     try:
         metadata = compatibility_artifacts
         if metadata is None:
-            metadata = _load_live_ledger_h1_metadata(root, ledger_resource_budget=ledger_resource_budget)
+            metadata = _load_live_ledger_h1_metadata(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     except _LedgerH1AcquisitionError as exc:
         return _LedgerH1SelectedV1("invalid", None, _ledger_h1_acquisition_failure_context(exc))
     if metadata is None:
-        if _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget):
+        if _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget):
             failure = _LedgerH1AcquisitionError("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE", selected_ledger_path)
             return _LedgerH1SelectedV1("invalid", None, _ledger_h1_acquisition_failure_context(failure))
         return _LedgerH1SelectedV1("ordinary-nonmember", None, None)
@@ -5513,7 +5516,7 @@ def _resolve_ledger_h1_selected(
             artifacts = _load_live_ledger_h1_artifacts(
                 root, selected_ledger_path=item / "agent-runs.jsonl",
                 selected_ledger_bytes=selected_ledger_bytes, metadata_artifacts=metadata, ledger_resource_budget=ledger_resource_budget
-            )
+            , transition_resource_budget=transition_resource_budget)
     except _LedgerH1AcquisitionError as exc:
         return _LedgerH1SelectedV1("invalid", partition, _ledger_h1_acquisition_failure_context(exc))
     if artifacts is None:
@@ -5530,7 +5533,7 @@ def _resolve_ledger_h1_selected(
             {item: historical_pass_custody_blobs}
             if historical_pass_custody_blobs is not None else None
         ),
-        ledger_acquisition_complete_by_path=acquisition_by_path, ledger_resource_budget=ledger_resource_budget
+        ledger_acquisition_complete_by_path=acquisition_by_path, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget
     )
     if required_ledger_acquisition_by_path is not None:
         required_ledger_acquisition_by_path.update(acquisition_by_path)
@@ -5917,6 +5920,7 @@ def _ordinary_raw_v2_effective_context(
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
     *, h1_partition: _LedgerH1PartitionV1 | None = None,
     ledger_acquisition_complete_out: list[bool] | None = None, ledger_resource_budget=None,
+    transition_resource_budget=None,
 ) -> LedgerValidationContextV1:
     """Reconstruct inactive raw rows; metadata exclusion conveys no H1 authority."""
 
@@ -5928,14 +5932,14 @@ def _ordinary_raw_v2_effective_context(
         return _ledger_h1_selection_failure(
             selected_ledger_path, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: partition input is invalid",
         )
-    if h1_partition is None and root is not None and _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget):
+    if h1_partition is None and root is not None and _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget):
         target = _projection_target_identity(item, selected, diagnostics)
         if target is None:
             return _ledger_h1_selection_failure(
                 selected_ledger_path, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: raw target identity is invalid",
             )
         try:
-            metadata_artifacts = _load_live_ledger_h1_metadata(root, ledger_resource_budget=ledger_resource_budget)
+            metadata_artifacts = _load_live_ledger_h1_metadata(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         except _LedgerH1AcquisitionError as exc:
             return _ledger_h1_acquisition_failure_context(exc)
         if metadata_artifacts is None:
@@ -5989,6 +5993,7 @@ def load_effective_ledger_view(
     selected_ledger_bytes: bytes | None = None,
     selected_ledger_absent: bool = False,
     ledger_acquisition_complete_out: list[bool] | None = None, ledger_resource_budget=None,
+    transition_resource_budget=None,
 ) -> LedgerValidationContextV1:
     """Read the selected item; unrelated H1 contents are not ordinary admission."""
     root = root if isinstance(root, _CapturedHistoryPath) else Path(root)
@@ -6007,14 +6012,14 @@ def load_effective_ledger_view(
             selected_ledger_path, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected ledger identity is invalid",
         )
     partition = None
-    if compatibility_artifacts is not None or _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget):
+    if compatibility_artifacts is not None or _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget):
         resolution = _resolve_ledger_h1_selected(
             root, item, selected_ledger_path, compatibility_artifacts=compatibility_artifacts,
             historical_pass_custody_blobs=historical_pass_custody_blobs,
             selected_ledger_bytes=selected_ledger_bytes,
             selected_ledger_absent=selected_ledger_absent,
             ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=transition_resource_budget)
         if resolution.classification != "ordinary-nonmember":
             assert resolution.context is not None
             return resolution.context
@@ -6038,7 +6043,7 @@ def load_effective_ledger_view(
         item, selected_ledger_path, raw, historical_pass_custody_blobs,
         h1_partition=partition,
         ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
-    )
+    , transition_resource_budget=transition_resource_budget)
 
 
 def _is_link_or_reparse(path: Path) -> bool:
@@ -7212,7 +7217,7 @@ def validate_transfer_receipt_obligation_coverage(
     root: Path,
     receipt: Mapping[str, object],
     archive: Path, ledger_resource_budget=None,
-) -> list[str]:
+*, transition_resource_budget=None) -> list[str]:
     """Bind one settled transfer receipt to the archive's canonical open state."""
 
     errors: list[str] = []
@@ -7222,7 +7227,7 @@ def validate_transfer_receipt_obligation_coverage(
         strict_revise=False,
         validate_status_file=False,
         obligation_state_out=states, ledger_resource_budget=ledger_resource_budget
-    )
+    , transition_resource_budget=transition_resource_budget)
     if source_errors or len(states) != 1:
         errors.extend(source_errors)
         fail(
@@ -7328,7 +7333,7 @@ def _resolve_transferred_obligation(
     obligation: dict,
     errors: list[str],
     visiting: frozenset[str], ledger_resource_budget=None,
-) -> LedgerProjectionRowV1 | None:
+*, transition_resource_budget=None) -> LedgerProjectionRowV1 | None:
     if operation_id in visiting:
         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer cycle at {operation_id}")
         return None
@@ -7360,7 +7365,7 @@ def _resolve_transferred_obligation(
             return None
         inherited = _resolve_transferred_obligation(
             root, receipts, predecessor, matches[0], errors, visiting | {operation_id}, ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=transition_resource_budget)
         if inherited is None:
             return None
         binding = (
@@ -7387,7 +7392,7 @@ def _resolve_transferred_obligation(
         strict_revise=False,
         validate_status_file=False,
         obligation_state_out=states, ledger_resource_budget=ledger_resource_budget
-    )
+    , transition_resource_budget=transition_resource_budget)
     if validation_errors or len(states) != 1:
         errors.extend(validation_errors)
         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: source obligation state is invalid: {operation_id}")
@@ -7421,7 +7426,7 @@ def _resolve_transferred_obligation(
     )
 
 
-def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_budget=None) -> tuple[LedgerProjectionRowV1, ...]:
+def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_budget=None, transition_resource_budget=None) -> tuple[LedgerProjectionRowV1, ...]:
     relation = _transfer_status_relation(item, errors)
     if relation is None:
         return ()
@@ -7469,7 +7474,7 @@ def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_b
         seen_run_ids.add(run_id)
         resolved = _resolve_transferred_obligation(
             root, receipts, operation_id, obligation, errors, frozenset(), ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=transition_resource_budget)
         if resolved is not None:
             result.append(LedgerProjectionRowV1(
                 dict(resolved.event),
@@ -7483,7 +7488,7 @@ def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_b
     return tuple(result)
 
 
-def validate_obligation_transfer_ownership(root: Path, *, ledger_resource_budget=None) -> list[str]:
+def validate_obligation_transfer_ownership(root: Path, *, ledger_resource_budget=None, transition_resource_budget=None) -> list[str]:
     """Audit every transferred obligation as one non-branching ownership chain."""
 
     root = Path(root).resolve()
@@ -7494,7 +7499,7 @@ def validate_obligation_transfer_ownership(root: Path, *, ledger_resource_budget
     origins: dict[str, list[str]] = {}
     for operation_id, (_receipt_path, receipt, archive) in receipts.items():
         errors.extend(
-            validate_transfer_receipt_obligation_coverage(root, receipt, archive, ledger_resource_budget=ledger_resource_budget)
+            validate_transfer_receipt_obligation_coverage(root, receipt, archive, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         )
         operation_rows: dict[str, dict] = {}
         for row in receipt.get("obligations", []):
@@ -7551,7 +7556,7 @@ def validate_obligation_transfer_ownership(root: Path, *, ledger_resource_budget
                 break
             if _resolve_transferred_obligation(
                 root, receipts, operation_id, row, errors, frozenset(), ledger_resource_budget=ledger_resource_budget
-            ) is None:
+            , transition_resource_budget=transition_resource_budget) is None:
                 break
             next_operations = children.get((operation_id, obligation_id), [])
             if len(next_operations) > 1:
@@ -7578,7 +7583,7 @@ def validate_obligation_transfer_ownership(root: Path, *, ledger_resource_budget
                     terminal_errors = validate_work_item(
                         locations[0], strict_revise=False, validate_status_file=False,
                         obligation_state_out=state, ledger_resource_budget=ledger_resource_budget
-                    )
+                    , transition_resource_budget=transition_resource_budget)
                     errors.extend(terminal_errors)
                     if len(state) != 1 or any(
                         open_row.obligation_id == obligation_id
@@ -7922,6 +7927,7 @@ def validate_archived_ledger_obligations(
     authority_state_out: list[dict[int, LedgerAuthorityV1]] | None = None,
     ledger_acquisition_complete_out: list[bool] | None = None,
     required_ledger_acquisition_by_path: dict[str, list[bool]] | None = None, ledger_resource_budget=None,
+    transition_resource_budget=None,
 ) -> tuple[list[str], list[dict], list[dict]]:
     """Validate one immutable monthly archive through the normal projection owners.
 
@@ -7949,7 +7955,7 @@ def validate_archived_ledger_obligations(
             selected_ledger_bytes=ledger_bytes,
             ledger_acquisition_complete_out=ledger_acquisition_complete_out,
             required_ledger_acquisition_by_path=required_ledger_acquisition_by_path, ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=transition_resource_budget)
         if resolution.classification == "invalid":
             # Retain the raw loader's bounded-acquisition semantics without
             # reducing a failed applicable group as an ordinary raw archive.
@@ -8199,7 +8205,7 @@ def validate_archived_ledger_obligations(
 def observe_captured_work_item_history(
     binding: CapturedWorkItemHistoryBindingV1,
     telemetry: dict[str, int] | None = None, ledger_resource_budget=None,
-) -> CapturedWorkItemHistoryObservationV1:
+*, transition_resource_budget=None) -> CapturedWorkItemHistoryObservationV1:
     """Acquire original criteria/history and use the existing obligation owners.
 
     The owner of accepted criteria supplies the evidenced original requirement,
@@ -8234,13 +8240,13 @@ def observe_captured_work_item_history(
                     item, telemetry, obligation_state_out=states,
                     authority_state_out=masks, ledger_acquisition_complete_out=complete,
                     required_ledger_acquisition_by_path=required_ledger_acquisition_by_path, ledger_resource_budget=ledger_resource_budget
-                )
+                , transition_resource_budget=transition_resource_budget)
             else:
                 errors = validate_work_item(
                     item, strict_revise=True, telemetry=telemetry, validate_status_file=False,
                     selected_ledger_bytes=raw, obligation_state_out=states,
                     authority_state_out=masks, ledger_acquisition_complete_out=complete, ledger_resource_budget=ledger_resource_budget
-                )
+                , transition_resource_budget=transition_resource_budget)
             if complete != [True] or not states:
                 fail(errors, "WI-LEGACY-COMPLETION-HISTORY: selected owner acquisition/reduction unavailable")
             if states and (states[-1].open_revise or states[-1].open_launches or states[-1].unresolved_history):
@@ -8770,6 +8776,7 @@ def validate_work_item(
     selected_ledger_bytes: bytes | None = None,
     *, ledger_acquisition_complete_out: list[bool] | None = None,
     selected_ledger_absent: bool = False, ledger_resource_budget=None,
+    transition_resource_budget=None,
 ) -> list[str]:
     """ledger_path: candidate-validation seam — validate THIS file instead of the live
     ledger (the atomic-write flow validates its temp candidate before os.replace).
@@ -8809,7 +8816,7 @@ def validate_work_item(
     root = repo_root_for(item)
     live_compatibility_observed = bool(
         root is not None
-        and _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget)
+        and _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     )
     effective_compatibility_artifacts = compatibility_artifacts
     validated_h1_partition: tuple[
@@ -8837,7 +8844,7 @@ def validate_work_item(
             selected_ledger_bytes=selected_ledger_bytes,
             selected_ledger_absent=selected_ledger_absent,
             ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=transition_resource_budget)
         if resolution.classification == "invalid":
             assert resolution.context is not None
             errors.extend(resolution.context.observation.diagnostics)
@@ -8868,7 +8875,7 @@ def validate_work_item(
             selected_ledger_bytes=selected_ledger_bytes,
             selected_ledger_absent=selected_ledger_absent,
             ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=transition_resource_budget)
         errors.extend(context.observation.diagnostics)
         if telemetry is not None and context.observation.disposition_notices:
             key = "ledger-compat-suffix-disposed-nonauthorizing"
@@ -9006,7 +9013,7 @@ def validate_work_item(
     _, v3_errors = reduce_v3_events(events)
     errors.extend(v3_errors)
     validate_scratch_ownership(native_effective_events, item, errors)
-    inherited_rows = _inherited_transfer_rows(item, errors, ledger_resource_budget=ledger_resource_budget)
+    inherited_rows = _inherited_transfer_rows(item, errors, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     effective_rows = inherited_rows + native_effective_rows
     effective_events = _row_events(effective_rows)
     root_relative = (
@@ -9162,7 +9169,7 @@ def _serialize_obligations(state: WorkItemObligationStateV1) -> dict[str, object
 
 def _obligations_observation(
     item: Path, ledger_path: Path | None, strict: bool, telemetry: dict[str, int], ledger_resource_budget=None,
-) -> dict[str, object]:
+*, transition_resource_budget=None) -> dict[str, object]:
     selected = ledger_path or (item / "agent-runs.jsonl")
     root = repo_root_for(item)
     ledger_identity = (
@@ -9195,7 +9202,7 @@ def _obligations_observation(
             obligation_state_out=states, selected_ledger_bytes=captured,
             selected_ledger_absent=selected_absent,
             ledger_acquisition_complete_out=acquisition_complete, ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=transition_resource_budget)
         if acquisition_complete == [True] and states:
             payload["obligations"] = _serialize_obligations(states[-1])
         elif not errors:
@@ -9215,29 +9222,44 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--telemetry", action="store_true", help="Print closure rule-fire counters")
     parser.add_argument("--obligations-json", action="store_true", help="Emit a captured selected-ledger obligation observation as JSON")
     add_ledger_resource_arguments(parser)
+    lifecycle = load_lifecycle_owner()
+    lifecycle.add_transition_resource_arguments(parser)
     args = parser.parse_args(argv)
     try:
         ledger_resource_budget = resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes)
-    except ValueError as exc:
+        transition_resource_budget = lifecycle._transition_cli_budget(args)
+        transition_output_ceiling = lifecycle._transition_cli_budget(args, output=True)
+    except (ValueError, lifecycle.LifecycleError) as exc:
         parser.error(str(exc))
 
     item = Path(args.work_item).resolve()
+    repository = repo_root_for(item)
+    transition_inputs = None
+    if repository is not None:
+        transition_inputs = lifecycle.select_transition_resource_inputs(repository, input_role="repository-root",
+            read_admission=args.transition_read_admission, acquisition_ceiling=transition_resource_budget,
+            output_ceiling=transition_output_ceiling)
+        transition_resource_budget = transition_inputs.acquisition
     telemetry: dict[str, int] = {}
     if args.obligations_json:
         observation = _obligations_observation(
             item, Path(args.ledger_path).resolve() if args.ledger_path else None,
             not args.no_strict_revise, telemetry, ledger_resource_budget=ledger_resource_budget
-        )
+        , transition_resource_budget=transition_resource_budget)
         if args.telemetry:
             observation["telemetry"] = dict(sorted(telemetry.items()))
         print(json.dumps(observation, ensure_ascii=True))
+        if transition_inputs is not None:
+            transition_inputs.verify()
         return 0 if observation["result"] == "PASS" else 1
     errors = validate_work_item(
         item,
         ledger_path=Path(args.ledger_path).resolve() if args.ledger_path else None,
         strict_revise=not args.no_strict_revise,
         telemetry=telemetry, ledger_resource_budget=ledger_resource_budget
-    )
+    , transition_resource_budget=transition_resource_budget)
+    if transition_inputs is not None:
+        transition_inputs.verify()
     if args.telemetry and telemetry:
         counters = ", ".join(f"{k}={v}" for k, v in sorted(telemetry.items()))
         print(f"TELEMETRY: {counters}")

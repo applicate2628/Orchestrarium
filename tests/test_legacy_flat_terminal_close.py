@@ -266,39 +266,37 @@ class LegacyFlatTerminalTests(unittest.TestCase):
         return request.read_bytes(), arguments
 
     def test_pending_progress_accepts_both_directory_parent_wire_forms_and_refuses_drift(self):
-        _evidence, arguments = self.legacy_request()
-        validate = m._legacy_validate_intent
-        captured = []
-        def retain_intent(root, intent):
-            validate(root, intent)
-            captured.append(json.loads(m._migration_receipt_bytes(intent)))
-        m._legacy_validate_intent = retain_intent
-        try:
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(m.main(arguments), 0)
-        finally:
-            m._legacy_validate_intent = validate
-        intent = captured[-1]
-        intent_path = m._transition_intent_path(self.root, intent["operationId"])
-        m._legacy_save_intent(intent_path, intent)
-        with m.LifecycleTransaction(self.root) as transaction:
+        evidence, _arguments = self.legacy_request()
+        with self.assertRaisesRegex(m.LifecycleError, "interruption after promotion"):
+            m.close_item(self.root, self.slug, self.closure, self.instant,
+                legacy_evidence_data=evidence, apply=True, inject_failure_at="after-promotion",
+                transition_read_admission="selected-native")
+        intent_path = m._transition_intent_path(self.root, "flat-terminal-001")
+        with m.LifecycleTransaction(self.root, transition_read_admission="selected-native") as transaction:
             token = m._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
             try:
+                intent = m._load_transition_intent(self.root, intent_path)
                 plan = m._PendingLegacyCompletionPlan.admit(self.root, intent_path, intent)
                 plan.check_progress(intent)
                 ancestors = json.loads(m._migration_receipt_bytes(intent))
+                inclusive = json.loads(m._migration_receipt_bytes(intent))
                 for row in ancestors["capturedBindings"]:
                     if row["nodeKind"] == "directory":
-                        self.assertEqual(row["parentChain"][-1],
-                            {"path": row["path"], "identity": row["identity"]["value"]})
-                        row["parentChain"] = row["parentChain"][:-1]
+                        own = {"path": row["path"], "identity": row["identity"]["value"]}
+                        if row["parentChain"][-1] == own:
+                            row["parentChain"] = row["parentChain"][:-1]
+                for row, ancestor in zip(inclusive["capturedBindings"], ancestors["capturedBindings"]):
+                    if row["nodeKind"] == "directory":
+                        row["parentChain"] = ancestor["parentChain"] + [
+                            {"path": row["path"], "identity": row["identity"]["value"]}]
                 plan.check_progress(ancestors)
+                plan.check_progress(inclusive)
                 different = json.loads(m._migration_receipt_bytes(ancestors))
                 directory = next(row for row in different["capturedBindings"] if row["nodeKind"] == "directory")
                 directory["parentChain"][-1]["identity"][1] += 1
                 with self.assertRaisesRegex(m.LifecycleError, "producer parent proof differs"):
                     plan.check_progress(different)
-                different = json.loads(m._migration_receipt_bytes(intent))
+                different = json.loads(m._migration_receipt_bytes(inclusive))
                 directory = next(row for row in different["capturedBindings"] if row["nodeKind"] == "directory")
                 directory["parentChain"][-1]["identity"][1] += 1
                 with self.assertRaisesRegex(m.LifecycleError, "directory identity and captured ancestry disagree"):
@@ -453,8 +451,8 @@ print('FRESH_PUBLIC_READERS_OK')
         intent_path = m._transition_intent_path(self.root, "flat-terminal-001")
         save, remove, unlink = m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned, Path.unlink
         fired = []
-        def saved(path, intent):
-            result = save(path, intent)
+        def saved(path, intent, **kwargs):
+            result = save(path, intent, **kwargs)
             source = next((b for b in intent["capturedBindings"] if b.get("imageIndex") is not None
                 and intent["preparedImages"][b["imageIndex"]]["disposition"] == "source"), None)
             if not fired and cut == "saved-null" and source is not None and "holdPath" in source and source["holdPath"] is None:
@@ -512,17 +510,17 @@ print('FRESH_PUBLIC_READERS_OK')
         before = namespace()
         missing = self.root / "missing-parent/deeper/leaf.bin"
         with self.assertRaisesRegex(m.LifecycleError, "existing-parent acquisition failed"):
-            m._legacy_local_image(missing)
+            m._legacy_local_image(missing, maximum_bytes=0)
         self.assertEqual(namespace(), before)
         absent = self.root / "evidence/genuinely-absent.bin"
-        image, parents = m._legacy_local_image(absent)
+        image, parents = m._legacy_local_image(absent, maximum_bytes=0)
         self.assertIsNone(image)
         self.assertEqual([p["path"] for p in parents], [str(p) for p in reversed(absent.parents)])
         self.assertEqual(parents[-1]["identity"], list(m._lifecycle_file_identity(absent.parent.lstat())))
         self.assertEqual(namespace(), before)
         actual = self.root / "evidence/native-image.bin"
         actual.write_bytes(b"real native image bytes\n")
-        image, parents = m._legacy_local_image(actual)
+        image, parents = m._legacy_local_image(actual, maximum_bytes=len(b"real native image bytes\n"))
         self.assertEqual(m._unb64(image["data"]), actual.read_bytes())
         self.assertEqual(image["sha256"], digest(actual.read_bytes()).upper())
         self.assertEqual(image["identity"]["value"], list(m._lifecycle_file_identity(actual.lstat())))
@@ -549,12 +547,12 @@ print('FRESH_PUBLIC_READERS_OK')
             before_unsafe = tuple((str(p.relative_to(self.root)), m._lifecycle_file_identity(p.lstat()))
                                   for p in self.root.rglob("*"))
             with self.assertRaisesRegex(m.LifecycleError, "existing-parent acquisition failed"):
-                m._legacy_local_image(unsafe / "leaf.bin")
+                m._legacy_local_image(unsafe / "leaf.bin", maximum_bytes=0)
             self.assertEqual(before_unsafe, tuple((str(p.relative_to(self.root)), m._lifecycle_file_identity(p.lstat()))
                                                   for p in self.root.rglob("*")))
             m.LifecycleWriteTarget.owned_image = parent_drift
             with self.assertRaisesRegex(m.LifecycleError, "existing-parent acquisition failed") as denied_parent:
-                m._legacy_local_image(leaf)
+                m._legacy_local_image(leaf, maximum_bytes=0)
             # The observed NT sharing contract prevents replacement while this
             # parent is held. Preserve that guard, expose its cause, never mint a
             # replacement or relax native access merely to force a drift fixture.
@@ -574,14 +572,14 @@ print('FRESH_PUBLIC_READERS_OK')
                 return result
             m.LifecycleWriteTarget._read_handle = leaf_drift
             with self.assertRaisesRegex(m.LifecycleError, "changed during readback"):
-                m._legacy_local_image(current)
+                m._legacy_local_image(current, maximum_bytes=len(b"present before native read\n"))
             self.assertEqual(held.read_bytes(), current.read_bytes())
             m.LifecycleWriteTarget._read_handle = read
             def read_failure(target, handle, maximum_bytes):
                 raise OSError("fixture actual read failure")
             m.LifecycleWriteTarget._read_handle = read_failure
             with self.assertRaisesRegex(m.LifecycleError, "actual read failure"):
-                m._legacy_local_image(current)
+                m._legacy_local_image(current, maximum_bytes=len(b"present before native read\n"))
             m.LifecycleWriteTarget._read_handle = read
             released = []
             def release_failure(target, handle):
@@ -592,7 +590,7 @@ print('FRESH_PUBLIC_READERS_OK')
                 return result
             m.LifecycleWriteTarget._close = release_failure
             with self.assertRaisesRegex(m.LifecycleError, "handle release.*existing-parent acquisition failed.*release failure"):
-                m._legacy_local_image(self.root / "another-missing-parent/leaf.bin")
+                m._legacy_local_image(self.root / "another-missing-parent/leaf.bin", maximum_bytes=0)
         finally:
             m.LifecycleWriteTarget._acquire_existing_parents = acquire
             m.LifecycleWriteTarget.owned_image = owned
@@ -644,12 +642,12 @@ print('FRESH_PUBLIC_READERS_OK')
                 m.work_item_dependency_state(self.root, self.slug)
 
         def replace_file(path, raw, label, pattern):
-            image, _ = m._legacy_local_image(path)
+            image, _ = m._legacy_local_image(path, maximum_bytes=path.stat().st_size)
             original = self.root / f"fixture-original-{label}.bin"
             preserved = self.root / f"fixture-foreign-{label}.bin"
             path.rename(original)
             m._atomic_write(path, raw)
-            foreign, _ = m._legacy_local_image(path)
+            foreign, _ = m._legacy_local_image(path, maximum_bytes=len(raw))
             self.assertNotEqual(foreign["identity"], image["identity"])
             refusal(pattern)
             self.assertEqual(path.read_bytes(), raw)
@@ -667,15 +665,17 @@ print('FRESH_PUBLIC_READERS_OK')
 
         # Missing binding plus absent current leaf must not pass None == None.
         board = self.root / "work-items/README.md"
-        board_image, _ = m._legacy_local_image(board)
+        board_image, _ = m._legacy_local_image(board, maximum_bytes=board.stat().st_size)
         board_saved = self.root / "fixture-current-board.bin"
         board.rename(board_saved)
         readme_binding["postImage"] = None
-        m._legacy_save_intent(intent_path, intent)
+        # The fixture actor changes its synthetic disk input; this is not a
+        # producer publication and conveys no plan or native-output authority.
+        intent_path.write_bytes(m._migration_receipt_bytes(intent))
         refusal("indeterminate finalization")
         board_saved.rename(board)
         readme_binding["postImage"] = board_image
-        m._legacy_save_intent(intent_path, intent)
+        intent_path.write_bytes(m._migration_receipt_bytes(intent))
         changed_request = json.loads(evidence)
         changed_request["expectedReadmeSha256"] = "0" * 64
         with self.assertRaisesRegex(m.LifecycleError, "pending replay request differs"):
@@ -747,7 +747,7 @@ print('FRESH_PUBLIC_READERS_OK')
             m.work_item_dependency_state(self.root, self.slug)
         # The fixture actor reconciles its own injected object through a retained
         # native image; the lifecycle owner never removes the foreign replacement.
-        foreign_image, _parents = m._legacy_local_image(retained)
+        foreign_image, _parents = m._legacy_local_image(retained, maximum_bytes=len(foreign))
         preserved = self.root / "foreign-preserved.bin"
         retained.rename(preserved)
         action = m.recover_transition(self.root, "flat-terminal-001")

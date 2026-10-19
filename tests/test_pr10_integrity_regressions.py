@@ -1236,11 +1236,14 @@ def test_readme_reopened_transition_artifacts_are_bounded(tmp_path: Path, artifa
     assert caught.value.failure_id == "WI-README-STALE"
 
 
-def test_readme_input_digest_keeps_its_existing_byte_encoding(tmp_path: Path) -> None:
+@pytest.mark.parametrize("large_selected_image", (False, True))
+def test_readme_input_digest_keeps_its_existing_byte_encoding(tmp_path: Path, large_selected_image: bool) -> None:
     from types import SimpleNamespace
 
     lifecycle = load_module(MUTATE, "pr10_readme_digest_encoding")
     files = [(tmp_path / "b.md", b"second"), (tmp_path / "a.md", b"first\x00\xff")]
+    if large_selected_image:
+        files[1] = (files[1][0], files[1][1] + b"x" * lifecycle.LEDGER_LOCATION_PROOF_BYTE_CAP)
     expected = hashlib.sha256()
     for path, data in sorted(files):
         path.write_bytes(data)

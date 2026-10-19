@@ -2861,8 +2861,8 @@ def test_close_uri_preflight_drift_refuses_without_overwriting_consumer(tmp_path
     write_empty_bug_dispositions(root, slug, instant)
     module.refresh_readme(root)
     original = module._close_link_authority
-    def classify_then_change(*args):
-        authority = original(*args)
+    def classify_then_change(*args, **kwargs):
+        authority = original(*args, **kwargs)
         bug.write_bytes(changed)
         return authority
     module._close_link_authority = classify_then_change
@@ -17418,7 +17418,31 @@ def _parent_successor_link_fixture(tmp_path: Path, *, opaque=False):
     module.refresh_readme(tmp_path)
     fixture["readmeSha"] = hashlib.sha256((tmp_path / "work-items" / "README.md").read_bytes()).hexdigest()
     fixture.update(consumer=bug, consumerBefore=before, evidenceBefore=(item / "evidence.md").read_bytes())
+
     return fixture, helpers
+
+
+def test_parent_successor_preserves_markerless_active_consumer_owner(
+    tmp_path: Path,
+) -> None:
+    fixture, helpers = _parent_successor_link_fixture(tmp_path, opaque=True)
+    module = fixture["lifecycle"]
+    owner_status = tmp_path / "work-items/active/side/status.md"
+    owner_status.write_bytes(b"status: blocked\n")
+    module.refresh_readme(tmp_path)
+    fixture["readmeSha"] = hashlib.sha256(
+        (tmp_path / "work-items" / "README.md").read_bytes()
+    ).hexdigest()
+
+    helpers.run_transfer(fixture)
+
+    expected = fixture["consumerBefore"].replace(
+        f"../../active/{fixture['slug']}/".encode(),
+        f"../../archive/2026-08/{fixture['slug']}/".encode(),
+    )
+    assert fixture["consumer"].read_bytes() == expected
+    assert owner_status.read_bytes() == b"status: blocked\n"
+    assert (tmp_path / "work-items/archive/2026-08" / fixture["slug"]).is_dir()
 
 
 @pytest.mark.parametrize("opaque", (False, True))

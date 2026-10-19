@@ -550,7 +550,12 @@ record format, physical-current membership and mutability; category-known
 current or terminal semantic states can then receive this href-only upkeep.
 Status, identity, context, supersession meaning, other bytes and link fragments
 stay unchanged: no semantic transition, retirement or invented `Terminal-at`
-follows. Current-state validation and lifecycle-audit diagnostics are unchanged.
+follows. For an active-document consumer owner, link upkeep requires only the
+existing current-membership check; the full lifecycle template and recovery
+validation still applies to the selected item being closed. Membership and UTF-8
+refusals at this seam identify the work-items-relative consumer and captured status
+paths, retain the failure code, and include the concrete cause. Current-state validation
+and lifecycle-audit diagnostics are unchanged.
 Read-only decision-format `V0`/`H1` records remain protected: if a physical href
 needs rewriting, close refuses before effects rather than skipping that
 consumer or changing its frozen bytes. Captured-byte/currentness checks, exact
@@ -866,16 +871,26 @@ History applicability follows the original accepted criteria, not the flat filen
 Supply the existing closure fields and strict UTC `Closed` matching `--terminal-instant`. The new terminal instant dates this actual action and archive month; it does not rewrite the historical completion or validate a previously invalid closer. Without `--apply`, the explicit legacy branch validates and previews without canonical writes:
 
 ```powershell
-python -B scripts/mutate-work-item.py --root <repo> close --slug <legacy-slug> --closure-file <closure.md-input> --terminal-instant <YYYY-MM-DDTHH:MM:SSZ> --legacy-evidence-file <legacy-evidence.json>
+python -B scripts/mutate-work-item.py --root <repo> close --slug <legacy-slug> --closure-file <closure.md-input> --terminal-instant <YYYY-MM-DDTHH:MM:SSZ> --legacy-evidence-file <legacy-evidence.json> --transition-read-admission selected-native
 ```
 
-After the original outcome/evidence and preview are accepted, use the same request with positive apply:
+After the original outcome and evidence are accepted, use the same bound request with positive apply. A prior preview is optional; the first apply derives its finite output reservation before writing an intent:
 
 ```powershell
-python -B scripts/mutate-work-item.py --root <repo> close --slug <legacy-slug> --closure-file <closure.md-input> --terminal-instant <YYYY-MM-DDTHH:MM:SSZ> --legacy-evidence-file <legacy-evidence.json> --apply
+python -B scripts/mutate-work-item.py --root <repo> close --slug <legacy-slug> --closure-file <closure.md-input> --terminal-instant <YYYY-MM-DDTHH:MM:SSZ> --legacy-evidence-file <legacy-evidence.json> --apply --transition-read-admission selected-native
 ```
 
 `operationId` belongs to the bound evidence request. Matching reentry/replay retains that exact request, closure and selected bindings; a different request or conflicting identity refuses. Preview success is not apply, settlement or Goal acceptance. Observed physical support is Windows NT; unsupported hosts refuse before physical effects. Portable metadata and preview do not establish all-platform physical support or authorize a weaker rename/ownership route.
+
+### Admit finite transition resources
+
+For managed lifecycle, checker, validator and ledger invocations, positively select `--transition-read-admission selected-native` or supply the complete `--transition-max-intent-bytes`, `--transition-max-inventory-bytes` and `--transition-max-inventory-entries` tuple. The existing lifecycle owner acquires native directory metadata before decoding pending JavaScript Object Notation (JSON), then freezes the input allowance (R). The dimensions are encoded UTF-8 bytes per intent, aggregate selected JSON bytes and every actual directory entry. With selected-native mode, an accompanying numeric tuple is a hard acquisition ceiling. Zero is valid for a proved empty input; incomplete, negative, Boolean or incoherent tuples refuse.
+
+The prepared operation separately seals its finite output reservation (W) before initial publication or business effects. An optional complete `--transition-output-max-intent-bytes`, `--transition-output-max-inventory-bytes` and `--transition-output-max-inventory-entries` tuple supplies a hard output ceiling (H). Omitted H permits the actual prepared demand; it does not create an infinite allowance. R never grows to accommodate W, H never grows to accommodate demand, and a pending file cannot grant itself either allowance. Progress and compensation retain one reservation and refuse unexpected growth. Only the actual owner-published native image may use W for readback; a reserved but unpublished image, a matching pathname or a foreign replacement cannot.
+
+When all resource controls are omitted, the existing limited diagnostic profile remains. It can refuse an enlarged pending intent and does not certify managed receiving. Deploy the common readers and all caller forwarding before enlarged writes. Keep those capable readers while dependent pending state exists; downgrade must preserve the full bytes and visible pending outcome. No historical schema, ledger row, receipt or journal migration is required. Resource admission does not change lifecycle authority, proof selection, native identity, inverse, replay or receipt requirements.
+
+Fresh recovery acquires the current intent under its genuine R, then derives W before the next effect. It needs no guessed allowance for future progress and no prior failed command. Every public receiver that inspects pending state needs the same explicit resource input; a ledger budget is a separate control.
 
 ### Receive the archive and distinct receipts
 
@@ -892,7 +907,7 @@ The accepted public physical receiving covers bounded Windows absence and one ge
 A pending intent, missing or altered action/metadata, unknown settlement or unresolved original history stays nonauthorizing across owner readers. Preserve the exact request, retained original native holds, creator/postimage/parent bindings and failure evidence. Do not clear the intent, recreate a disposed original, edit a receipt or change a hash to make the record look settled. Inspect the actual bounded cause, then use the existing explicit recovery command for that operation:
 
 ```powershell
-python -B scripts/mutate-work-item.py recover-transition --root <repo> --operation-id <bounded-operation-id> --apply
+python -B scripts/mutate-work-item.py recover-transition --root <repo> --operation-id <bounded-operation-id> --apply --transition-read-admission selected-native
 ```
 
 The accepted finalization contract requires complete actual request/action/postimage/history/board proof before cleanup-only recovery can dispense with an already-disposed original hold. Remaining live holds and created parents still require their native ownership checks; foreign substitutions or children must be preserved. Public readers remain pending until cleanup and intent settlement are verified. The independently observed post-hold-disposal recovery correction is not certified by this runbook; do not assume every interrupted finalization state is recoverable from the earlier precommit or board-before-receipt tests. Retain an explicitly indeterminate state when current proof cannot establish safe replay, compensation or finalization, keeping the original failure and secondary recovery cause visible.
@@ -1060,6 +1075,10 @@ Available typed projection contains `openLaunches`, `openRevises`, `unresolvedHi
 Root consumes the completed tool frame and verifies item/selection/strictness/digest/diagnostics, then checks current selected presence and digest before dependent action; changed presence or bytes require a fresh observation. Persist terminal identity, observed revision/selection, exact pending IDs/causes and action owner/resume in existing `Last result`/next-action text. Known strict obligation FAIL is useful state; tool/acquisition failure records unavailable/resume. Continue independent admitted ready work. No acknowledgment-only ledger event mutates the observed revision. Writer success/replay markers stay independent; observation is neither task completion nor publication authority. Independent QA inspects actual tool receipt and persisted Root acknowledgment.
 
 ## Terms and Abbreviations
+
+- R: immutable input acquisition allowance for transition intent bytes and inventory.
+- H: optional immutable caller ceiling on an operation's output reservation.
+- W: finite reservation sealed by the actual prepared operation before effects; only bound native output may use it for receiving.
 
 - `agent-run-ledger.*`: helper script family that initializes work-item ledger files and appends validated `agent-runs.jsonl` events.
 - `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.

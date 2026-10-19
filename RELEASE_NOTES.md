@@ -4,6 +4,12 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-19
 
+- Managed lifecycle transitions can select finite input resources from actual native pending-state metadata and reserve their complete prepared output before writing. Large valid proof/history images retain their full payload and existing ownership checks; fresh recovery and public check/ledger callers carry the same resource input. Explicit read or output ceilings still refuse insufficient demand, and compatible readers must be deployed before enlarged pending writes.
+
+- Active-consumer status refusals now identify the consumer and captured status paths relative to `work-items/`, while preserving the existing failure code and cause.
+
+- Incoming-link upkeep for an active-document consumer now checks the owner status's existing active membership predicate, while selected-task lifecycle validation remains unchanged. Link updates continue to preserve all owner fields and non-href bytes.
+
 - Lifecycle path validation now owns the legacy projection-path grammar, avoiding transaction-validator loads for this pure check while preserving the validator API and path rules.
 
 - Transfer receipt validation now carries the caller's ledger budget through successor activation; existing receipt capacity and refusal behavior remain unchanged.
