@@ -159,7 +159,9 @@ def _read_routes_with_tiny_validator(tmp_path: Path, raw: bytes):
     history = tmp_path / "agent-runs.history.tiny.jsonl"
     source.write_bytes(raw)
     history.write_bytes(raw)
-    validator = SimpleNamespace(MAX_LEDGER_LINE_BYTES=4, MAX_LEDGER_EVENTS=1)
+    validator = writer.load_validator()
+    validator.MAX_LEDGER_LINE_BYTES = 4
+    validator.MAX_LEDGER_EVENTS = 1
     original_fdopen = writer.os.fdopen
     readline_sizes: list[int] = []
 
@@ -185,9 +187,9 @@ def test_noncanonical_raw_readers_reject_tiny_line_limit_without_unbounded_read(
     ):
         with pytest.raises(writer.LedgerNoncanonicalRecoveryError) as raised:
             if route == "source":
-                writer._noncanonical_read_owned_bytes(source, failure_id="DRIFT")
+                writer._noncanonical_read_owned_bytes(source, failure_id="DRIFT", ledger_resource_budget=validator.LedgerResourceBudgetV1(1, 6))
             else:
-                writer._read_exact_history_blob(history, digest(b"12345\n"))
+                writer._read_exact_history_blob(history, digest(b"12345\n"), ledger_resource_budget=validator.LedgerResourceBudgetV1(1, 6))
 
     assert raised.value.failure_id == (
         f"WI-LEDGER-NONCANONICAL-{'DRIFT' if route == 'source' else 'HISTORY-CONFLICT'}"
@@ -207,10 +209,10 @@ def test_noncanonical_raw_reader_rejects_tiny_blank_padding_before_aggregate_gro
         patch.object(writer.os, "fdopen", side_effect=fdopen_without_read),
     ):
         with pytest.raises(writer.LedgerNoncanonicalRecoveryError) as raised:
-            writer._noncanonical_read_owned_bytes(source, failure_id="DRIFT")
+            writer._noncanonical_read_owned_bytes(source, failure_id="DRIFT", ledger_resource_budget=validator.LedgerResourceBudgetV1(1, 6))
 
     assert raised.value.failure_id == "WI-LEDGER-NONCANONICAL-DRIFT"
-    assert readline_sizes == [validator.MAX_LEDGER_LINE_BYTES + 3] * 7
+    assert readline_sizes == [7, 6, 5, 4, 3, 2, 1]
 
 
 def test_noncanonical_raw_readers_preserve_ordinary_opaque_physical_bytes(

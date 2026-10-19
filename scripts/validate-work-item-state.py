@@ -563,12 +563,180 @@ def decode_json_object(
     return value
 
 
+@dataclass(frozen=True)
+class LedgerResourceBudgetV1:
+    """Finite acquisition allowance, never ledger validity or execution authority."""
+
+    max_events: int
+    max_ledger_bytes: int
+
+    def __post_init__(self):
+        for name in ("max_events", "max_ledger_bytes"):
+            value = getattr(self, name)
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"WI-LEDGER-RESOURCE-INVALID: {name} must be a positive finite integer")
+
+
+@dataclass(frozen=True)
+class LedgerResourceDemandV1:
+    selected_identity: str
+    selected_sha256: str
+    selected_events: int
+    selected_byte_length: int
+    required_events: int
+    required_bytes: int
+    participant_bindings: tuple[tuple[str, str, int, int], ...] = ()
+
+
+def resolve_ledger_resource_budget(
+    max_events=None, max_ledger_bytes=None, *, demand=None, managed=False,
+) -> LedgerResourceBudgetV1:
+    """Check trusted finite input; omission is only a limited diagnostic posture."""
+    if (max_events is None) != (max_ledger_bytes is None):
+        raise ValueError("WI-LEDGER-RESOURCE-INVALID: supply both ledger resource values")
+    if max_events is None:
+        if managed:
+            raise ValueError("WI-LEDGER-RESOURCE-MISSING: managed entry requires finite resource admission")
+        max_events, max_ledger_bytes = MAX_LEDGER_EVENTS, _JSONL_SCHEMA["maxLedgerBytes"]
+    budget = LedgerResourceBudgetV1(max_events, max_ledger_bytes)
+    if demand is not None:
+        required_events, required_bytes = demand.required_events, demand.required_bytes
+        if (type(required_events) is not int or type(required_bytes) is not int
+                or required_events < 0 or required_bytes < 0):
+            raise ValueError("WI-LEDGER-RESOURCE-INVALID: invalid demand")
+        if required_events > budget.max_events or required_bytes > budget.max_ledger_bytes:
+            raise ValueError(
+                "WI-LEDGER-RESOURCE-INCOMPLETE: admitted operation requires "
+                f"{required_events} events/{required_bytes} bytes; allowance is "
+                f"{budget.max_events} events/{budget.max_ledger_bytes} bytes"
+            )
+    return budget
+
+
+def _ledger_resource_budget(value=None) -> LedgerResourceBudgetV1:
+    if value is None:
+        return resolve_ledger_resource_budget()
+    # Paired owners load this module under distinct aliases. Validate primitive
+    # fields instead of requiring dataclass identity across those module loads.
+    try:
+        return resolve_ledger_resource_budget(value.max_events, value.max_ledger_bytes)
+    except AttributeError as exc:
+        raise ValueError("WI-LEDGER-RESOURCE-INVALID: finite primitive fields are required") from exc
+
+
+def read_ledger_bytes(path, ledger_resource_budget=None, *, source_bytes=None) -> bytes:
+    """Bound the actual opened input before allocation, including supplied captures."""
+    budget = _ledger_resource_budget(ledger_resource_budget)
+    if source_bytes is None:
+        if isinstance(path, _CapturedHistoryPath):
+            source_bytes = path.read_bytes()  # Already identity-bound immutable capture.
+        else:
+            owner = load_lifecycle_owner()
+            try:
+                source_bytes = owner._capture_file_snapshot(
+                    path, failure_id="WI-LEDGER-RESOURCE-DRIFT", ledger_resource_budget=budget,
+                ).data
+            except owner.LifecycleError as exc:
+                raise ValueError(f"{exc.failure_id}: {exc}") from exc
+    if not isinstance(source_bytes, bytes):
+        raise ValueError("WI-LEDGER-RESOURCE-INVALID: selected capture must be bytes")
+    if len(source_bytes) > budget.max_ledger_bytes:
+        raise ValueError(
+            f"WI-LEDGER-RESOURCE-INCOMPLETE: ledger exceeds admitted byte allowance "
+            f"{budget.max_ledger_bytes}: {path}"
+        )
+    return source_bytes
+
+
+def inspect_ledger_resource_demand(
+    path, ledger_resource_budget, *, source_bytes=None, known_row_bytes=(),
+    unknown_terminal_rows=0, physical_lines=False, expected_sha256=None,
+    participants=None,
+) -> LedgerResourceDemandV1:
+    """Census a finitely acquired selected image and the caller's admitted batch.
+
+    No event list, policy from rows, reservation, or historical authority is
+    produced. Known rows use their exact serialized bytes; unknown genuine
+    terminals use the unchanged line protocol bound, not every old open launch.
+    """
+    budget = _ledger_resource_budget(ledger_resource_budget)
+    if type(unknown_terminal_rows) is not int or unknown_terminal_rows < 0:
+        raise ValueError("WI-LEDGER-RESOURCE-INVALID: invalid terminal headroom")
+    if source_bytes is None and not isinstance(path, _CapturedHistoryPath):
+        owner = load_lifecycle_owner()
+        try:
+            if path.lstat().st_size > budget.max_ledger_bytes:
+                raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: selected bytes exceed allowance")
+            capture = owner._capture_file_snapshot(
+                path, failure_id="WI-LEDGER-RESOURCE-DRIFT",
+                maximum_bytes=budget.max_ledger_bytes, require_single_link=True,
+            )
+        except owner.LifecycleError as exc:
+            raise ValueError(f"{exc.failure_id}: {exc}") from exc
+        source_bytes = capture.data
+    raw = read_ledger_bytes(path, budget, source_bytes=source_bytes)
+    selected_digest = hashlib.sha256(raw).hexdigest()
+    if expected_sha256 is not None and selected_digest != expected_sha256:
+        raise ValueError("WI-LEDGER-RESOURCE-DRIFT: selected image changed")
+    selected = {str(path): raw}
+    if participants is not None:
+        for identity, image in participants.items():
+            if identity in selected and selected[identity] != image:
+                raise ValueError("WI-LEDGER-RESOURCE-DRIFT: conflicting participant image")
+            selected[identity] = image
+    bindings = []
+    total_bytes = total_events = 0
+    for identity, image in selected.items():
+        image = read_ledger_bytes(identity, budget, source_bytes=image)
+        total_bytes += len(image)
+        if total_bytes > budget.max_ledger_bytes:
+            raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: participant bytes exceed allowance")
+        try:
+            with io.StringIO(image.decode("utf-8", errors="strict"), newline="") as stream:
+                count = sum(1 for line in stream if physical_lines or line.strip())
+        except UnicodeError as exc:
+            raise ValueError("WI-LEDGER-RESOURCE-INVALID: census input is not UTF-8") from exc
+        total_events += count
+        if total_events > budget.max_events:
+            raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: charged rows exceed allowance")
+        bindings.append((identity, hashlib.sha256(image).hexdigest(), count, len(image)))
+    if not isinstance(known_row_bytes, Sequence):
+        raise ValueError("WI-LEDGER-RESOURCE-INVALID: known rows must be a finite sequence")
+    if len(known_row_bytes) + unknown_terminal_rows > budget.max_events:
+        raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: admitted batch exceeds event allowance")
+    writes = tuple(known_row_bytes)
+    for row in writes:
+        if not isinstance(row, bytes) or not row:
+            raise ValueError("WI-LEDGER-RESOURCE-INVALID: known row violates line protocol")
+        body = row[:-2] if row.endswith(b"\r\n") else row[:-1] if row.endswith(b"\n") else row
+        if not body or len(body) > MAX_LEDGER_LINE_BYTES:
+            raise ValueError("WI-LEDGER-RESOURCE-INVALID: known row violates line protocol")
+        if b"\n" in body or b"\r" in body:
+            raise ValueError("WI-LEDGER-RESOURCE-INVALID: known row must be one physical record")
+    separator = int(bool(raw) and not raw.endswith(b"\n") and bool(writes or unknown_terminal_rows))
+    required_bytes = total_bytes + separator + sum(len(row) + (not row.endswith(b"\n")) for row in writes)
+    required_bytes += unknown_terminal_rows * (MAX_LEDGER_LINE_BYTES + 2)
+    return LedgerResourceDemandV1(
+        str(path), selected_digest, next(row[2] for row in bindings if row[0] == str(path)),
+        len(raw), total_events + len(writes) + unknown_terminal_rows, required_bytes, tuple(bindings),
+    )
+
+
+def add_ledger_resource_arguments(parser, *, suppress_defaults=False):
+    default = argparse.SUPPRESS if suppress_defaults else None
+    parser.add_argument("--ledger-max-events", type=int, default=default,
+                        help="Finite operation event allowance; omission is a limited diagnostic")
+    parser.add_argument("--ledger-max-bytes", type=int, default=default,
+                        help="Finite ledger byte allowance; supply with --ledger-max-events")
+
+
 def load_jsonl(
     path: Path,
     errors: list[str],
     raw_metadata: list[dict[str, object]] | None = None,
     source_bytes: bytes | None = None,
     *, ledger_acquisition_complete_out: list[bool] | None = None,
+    ledger_resource_budget=None,
 ) -> list[dict]:
     if ledger_acquisition_complete_out is not None:
         ledger_acquisition_complete_out.append(False)
@@ -577,12 +745,13 @@ def load_jsonl(
         fail(errors, f"missing ledger: {path}")
         return []
     events: list[dict] = []
-    if source_bytes is None:
-        try:
-            source_bytes = path.read_bytes()
-        except OSError as exc:
-            fail(errors, f"cannot read ledger: {path}: {exc}")
-            return []
+    budget = _ledger_resource_budget(ledger_resource_budget)
+    try:
+        source_bytes = read_ledger_bytes(path, budget, source_bytes=source_bytes)
+    except (OSError, ValueError) as exc:
+        fail(errors, f"cannot read ledger: {path}: {exc}")
+        return []
+    charged_rows = 0
     try:
         stream = io.StringIO(source_bytes.decode("utf-8", errors="strict"), newline="")
     except UnicodeDecodeError as exc:
@@ -595,6 +764,15 @@ def load_jsonl(
             if raw == "":
                 break
             line_no += 1
+            if raw.strip():
+                charged_rows += 1
+                if charged_rows > budget.max_events:
+                    fail(errors, f"WI-LEDGER-RESOURCE-INCOMPLETE: ledger exceeds bounded event count {budget.max_events}: {path}")
+                    complete = False
+                    events.clear()
+                    if raw_metadata is not None:
+                        raw_metadata.clear()
+                    break
             complete_line = raw.endswith("\n")
             line = raw.rstrip("\r\n")
             if len(line) > MAX_LEDGER_LINE_CHARS or (
@@ -607,10 +785,6 @@ def load_jsonl(
                 continue
             if not line.strip():
                 continue
-            if len(events) >= MAX_LEDGER_EVENTS:
-                fail(errors, f"ledger exceeds bounded event count: {path}")
-                complete = False
-                break
             try:
                 event = decode_json_object(
                     line,
@@ -636,7 +810,7 @@ def load_jsonl(
                         "bytes": len(digest_text.encode("utf-8")),
                     }
                 )
-    if not events:
+    if not events and complete:
         fail(errors, f"ledger has no events: {path}")
     if ledger_acquisition_complete_out is not None:
         ledger_acquisition_complete_out[-1] = complete
@@ -1309,7 +1483,7 @@ def resolve_historical_pass_custody(
     item: Path, selected_ledger_bytes: bytes, events: Sequence[Mapping[str, object]],
     raw_metadata: Sequence[Mapping[str, object]], *,
     candidate_blobs: Mapping[str, bytes] | None = None,
-    selected_association: str | None = None,
+    selected_association: str | None = None, ledger_resource_budget=None,
 ) -> tuple[Mapping[tuple[int, str, str, str], str], tuple[str, ...]]:
     """Bind immutable artifact locators to captured raw PASS identities, not authority."""
     errors: list[str] = []
@@ -1390,7 +1564,7 @@ def resolve_historical_pass_custody(
                 event = identities.get(identity)
                 prefix_errors: list[str] = []
                 prefix_metadata: list[dict[str, object]] = []
-                prefix_events = load_jsonl(item / "agent-runs.jsonl", prefix_errors, prefix_metadata, prefix)
+                prefix_events = load_jsonl(item / "agent-runs.jsonl", prefix_errors, prefix_metadata, prefix, ledger_resource_budget=ledger_resource_budget)
                 prefix_identities = {
                     (metadata["line"], metadata["sha256"], row.get("runId"), row.get("artifact"))
                     for row, metadata in zip(prefix_events, prefix_metadata)
@@ -3731,21 +3905,21 @@ _LEDGER_H1_REGISTRY = "work-items/legacy-ledger-projections.jsonl"
 _LEDGER_H1_RECEIPT_DIR = "work-items/legacy-ledger-projection-receipts"
 
 
-def _ledger_h1_live_participants_exist(root: Path) -> bool:
+def _ledger_h1_live_participants_exist(root: Path, *, ledger_resource_budget=None) -> bool:
     """Detect an exact root/archive set or one invalid observed topology."""
 
     try:
-        return _resolve_ledger_h1_artifact_set_location(root) is not None
+        return _resolve_ledger_h1_artifact_set_location(root, ledger_resource_budget=ledger_resource_budget) is not None
     except _LedgerH1AcquisitionError:
         return True
 
 
-def _resolve_ledger_h1_artifact_set_location(root: Path):
+def _resolve_ledger_h1_artifact_set_location(root: Path, *, ledger_resource_budget=None):
     lifecycle = load_lifecycle_owner()
     try:
         return lifecycle.resolve_ledger_h1_artifact_set_location(
             root.path if isinstance(root, _CapturedHistoryPath) else root, input_role="repository-root",
-            **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}),
+            **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}), ledger_resource_budget=ledger_resource_budget
         )
     except lifecycle.LifecycleError as exc:
         raise _LedgerH1AcquisitionError(
@@ -3772,17 +3946,25 @@ def _ledger_h1_authority_wire(authority: LedgerAuthorityV1) -> dict[str, bool]:
 
 def _ledger_h1_parse_lines(
     raw: bytes, source: str, errors: list[str],
-    *, ledger_acquisition_complete_out: list[bool] | None = None,
+    *, ledger_acquisition_complete_out: list[bool] | None = None, ledger_resource_budget=None,
 ) -> tuple[list[dict[str, object]], list[bytes]]:
     if ledger_acquisition_complete_out is not None:
         ledger_acquisition_complete_out.append(False)
     if not isinstance(raw, bytes) or not raw:
         fail(errors, f"WI-LEDGER-MIGRATION-LEDGER-DRIFT: {source} is empty or not bytes")
         return [], []
-    physical = raw.splitlines(keepends=True)
+    budget = _ledger_resource_budget(ledger_resource_budget)
+    try:
+        read_ledger_bytes(source, budget, source_bytes=raw)
+    except ValueError as exc:
+        fail(errors, str(exc))
+        return [], []
+    if raw.count(b"\n") + int(not raw.endswith(b"\n")) > budget.max_events:
+        fail(errors, f"WI-LEDGER-RESOURCE-INCOMPLETE: {source} exceeds admitted physical line allowance {budget.max_events}")
+        return [], []
+    physical = list(io.BytesIO(raw))
     if (
-        len(physical) > MAX_LEDGER_EVENTS
-        or any(not line.endswith(b"\n") or not line[:-1].strip() for line in physical)
+        any(not line.endswith(b"\n") or not line[:-1].strip() for line in physical)
     ):
         fail(errors, f"WI-LEDGER-MIGRATION-LEDGER-DRIFT: {source} has invalid physical lines")
         return [], []
@@ -3818,11 +4000,11 @@ def _ledger_h1_runtime_rows(
     *,
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
     historical_pass_custody_out: list[Mapping[tuple[int, str, str, str], str]] | None = None,
-    ledger_acquisition_complete_out: list[bool] | None = None,
+    ledger_acquisition_complete_out: list[bool] | None = None, ledger_resource_budget=None,
 ) -> tuple[RuntimeLedgerRowV1, ...]:
     events, physical = _ledger_h1_parse_lines(
         raw, ledger_path, errors,
-        ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+        ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
     )
     if len(events) != len(physical):
         return ()
@@ -3847,7 +4029,7 @@ def _ledger_h1_runtime_rows(
     custody, custody_errors = resolve_historical_pass_custody(
         item, raw, events,
         tuple({"line": row.raw_line_ordinal, "sha256": row.raw_body_sha256} for row in rows),
-        candidate_blobs=historical_pass_custody_blobs,
+        candidate_blobs=historical_pass_custody_blobs, ledger_resource_budget=ledger_resource_budget
     )
     errors.extend(custody_errors)
     if historical_pass_custody_out is not None:
@@ -3936,14 +4118,14 @@ def _ledger_h1_invalid_contexts(
     root: Path,
     artifacts: LedgerCompatibilityArtifactSetV1,
     failure_ids: Sequence[str],
-    diagnostics: Sequence[str],
+    diagnostics: Sequence[str], ledger_resource_budget=None,
 ) -> Mapping[str, LedgerValidationContextV1]:
     token = object()
     contexts: dict[str, LedgerValidationContextV1] = {}
     for ledger_path, raw in artifacts.ledger_bytes_by_path.items():
         item = root.joinpath(*PurePosixPath(ledger_path).parts[:-1])
         row_errors: list[str] = []
-        rows = _ledger_h1_runtime_rows(ledger_path, raw, 0, item, row_errors)
+        rows = _ledger_h1_runtime_rows(ledger_path, raw, 0, item, row_errors, ledger_resource_budget=ledger_resource_budget)
         contexts[ledger_path] = LedgerValidationContextV1(
             ledger_path,
             tuple(
@@ -4160,7 +4342,7 @@ def validate_invalid_current_disposition_candidate(
     disposition_event: Mapping[str, object],
     *,
     ledger_manifest_bytes: bytes | None = None,
-    expected_ledger_sha256: str | None = None,
+    expected_ledger_sha256: str | None = None, ledger_resource_budget=None,
 ) -> tuple[str, ...]:
     """Validate one H1 suffix or ordinary raw-V2 append/replay without authority."""
 
@@ -4178,7 +4360,7 @@ def validate_invalid_current_disposition_candidate(
             not isinstance(expected_ledger_sha256, str)
             or SHA256_RE.fullmatch(expected_ledger_sha256) is None
             or root is None
-            or _ledger_h1_live_participants_exist(root)
+            or _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget)
         ):
             fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: ordinary raw V2 binding is invalid")
             return tuple(errors)
@@ -4201,7 +4383,7 @@ def validate_invalid_current_disposition_candidate(
         ):
             fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: sealed prefix differs")
             return tuple(errors)
-    rows = _ledger_h1_runtime_rows(ledger_path, ledger_bytes, prefix_line_count, item, errors)
+    rows = _ledger_h1_runtime_rows(ledger_path, ledger_bytes, prefix_line_count, item, errors, ledger_resource_budget=ledger_resource_budget)
     if raw_v2 and errors:
         return tuple(errors)
     if raw_v2:
@@ -4720,7 +4902,7 @@ def _validate_ledger_h1_partition(
 def _ledger_h1_candidate_group(
     root: Path, artifacts: LedgerCompatibilityArtifactSetV1,
     historical_pass_custody_blobs_by_item: Mapping[Path, Mapping[str, bytes]] | None = None,
-    *, ledger_acquisition_complete_by_path: dict[str, list[bool]] | None = None,
+    *, ledger_acquisition_complete_by_path: dict[str, list[bool]] | None = None, ledger_resource_budget=None,
 ) -> Mapping[str, LedgerValidationContextV1]:
     failures: list[str] = []
     diagnostics: list[str] = []
@@ -4739,11 +4921,18 @@ def _ledger_h1_candidate_group(
         )
     ):
         reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "candidate ledger members are incomplete or mistyped")
-        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics, ledger_resource_budget=ledger_resource_budget)
+    budget = _ledger_resource_budget(ledger_resource_budget)
+    total_bytes = sum(len(raw) for raw in artifacts.ledger_bytes_by_path.values() if isinstance(raw, bytes))
+    total_lines = sum(raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n"))
+                      for raw in artifacts.ledger_bytes_by_path.values() if isinstance(raw, bytes))
+    if total_bytes > budget.max_ledger_bytes or total_lines > budget.max_events:
+        message = "WI-LEDGER-RESOURCE-INCOMPLETE: complete H1 participant demand exceeds allowance"
+        return _ledger_h1_invalid_contexts(root, artifacts, ["WI-LEDGER-RESOURCE-INCOMPLETE"], [message], ledger_resource_budget=budget)
     partition = _validate_ledger_h1_partition(root, artifacts)
     if isinstance(partition, LedgerValidationContextV1):
         return _ledger_h1_invalid_contexts(
-            root, artifacts, partition.observation.failure_ids, partition.observation.diagnostics,
+            root, artifacts, partition.observation.failure_ids, partition.observation.diagnostics, ledger_resource_budget=ledger_resource_budget
         )
     entries = partition.entries
     ledger_paths = [entry["ledgerPath"] for entry in entries]
@@ -4786,7 +4975,7 @@ def _ledger_h1_candidate_group(
                     logical_work_item=work_item,
                     logical_ledger_path=path,
                     input_role="repository-root",
-                    **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}),
+                    **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}), ledger_resource_budget=ledger_resource_budget
                 )
             except lifecycle.LifecycleError as exc:
                 reject(
@@ -4842,7 +5031,7 @@ def _ledger_h1_candidate_group(
             ledger_acquisition_complete_out=(
                 ledger_acquisition_complete_by_path.setdefault(path, [])
                 if ledger_acquisition_complete_by_path is not None else None
-            ),
+            ), ledger_resource_budget=ledger_resource_budget
         )
         diagnostics.extend(custody_diagnostics)
         failures.extend(message.split(":", 1)[0] for message in custody_diagnostics)
@@ -4898,7 +5087,7 @@ def _ledger_h1_candidate_group(
     if failures or set(entry_rows) != set(ledger_paths) or set(views) != set(ledger_paths):
         if not failures:
             reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "not every manifest ledger projected")
-        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics, ledger_resource_budget=ledger_resource_budget)
 
     disposition_notices_by_path: dict[
         str, tuple[SuffixDispositionNoticeV1, ...]
@@ -4931,7 +5120,7 @@ def _ledger_h1_candidate_group(
                 diagnostics.append(message)
         if failures:
             return _ledger_h1_invalid_contexts(
-                root, artifacts, failures, diagnostics
+                root, artifacts, failures, diagnostics, ledger_resource_budget=ledger_resource_budget
             )
 
     if final_state == "revoked":
@@ -4949,7 +5138,7 @@ def _ledger_h1_candidate_group(
             diagnostics.extend(history_errors)
             failures.extend(message.split(":", 1)[0] for message in history_errors)
         if failures:
-            return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+            return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics, ledger_resource_budget=ledger_resource_budget)
         token = _LedgerInvocationTokenV1(MappingProxyType(dict(revoked_rows)), h1_projection_partition)
         contexts = {
             path: LedgerValidationContextV1(
@@ -5011,11 +5200,11 @@ def _ledger_h1_acquisition_failure_context(
 
 
 def _load_live_ledger_h1_metadata(
-    root: Path,
+    root: Path, ledger_resource_budget=None,
 ) -> LedgerCompatibilityArtifactSetV1 | None:
     """Acquire the exact H1 artifact namespace and metadata, not member leaves."""
 
-    location = _resolve_ledger_h1_artifact_set_location(root)
+    location = _resolve_ledger_h1_artifact_set_location(root, ledger_resource_budget=ledger_resource_budget)
     if location is None:
         return None
     physical_base = root.joinpath(*PurePosixPath(location.physical_base).parts)
@@ -5138,10 +5327,10 @@ def _load_live_ledger_h1_artifacts(
     *,
     selected_ledger_path: Path | None = None,
     selected_ledger_bytes: bytes | None = None,
-    metadata_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
+    metadata_artifacts: LedgerCompatibilityArtifactSetV1 | None = None, ledger_resource_budget=None,
 ) -> LedgerCompatibilityArtifactSetV1 | None:
     """Acquire participant contents only for selected/full-group validation."""
-    metadata = metadata_artifacts or _load_live_ledger_h1_metadata(root)
+    metadata = metadata_artifacts or _load_live_ledger_h1_metadata(root, ledger_resource_budget=ledger_resource_budget)
     if metadata is None:
         return None
     try:
@@ -5150,6 +5339,8 @@ def _load_live_ledger_h1_artifacts(
         )
         if not isinstance(manifest, dict) or not isinstance(manifest.get("entries"), list):
             return None
+        budget = _ledger_resource_budget(ledger_resource_budget)
+        charged_bytes = charged_events = 0
         ledger_bytes_by_path: dict[str, bytes] = {}
         participant_locations_by_path: dict[str, object] = {}
         lifecycle = load_lifecycle_owner()
@@ -5173,7 +5364,7 @@ def _load_live_ledger_h1_artifacts(
                     logical_work_item=logical_work_item,
                     logical_ledger_path=ledger_relative,
                     input_role="repository-root",
-                    **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}),
+                    **({"acquired_input": root} if isinstance(root, _CapturedHistoryPath) else {}), ledger_resource_budget=ledger_resource_budget
                 )
             except lifecycle.LifecycleError as exc:
                 raise _LedgerH1AcquisitionError(
@@ -5187,19 +5378,27 @@ def _load_live_ledger_h1_artifacts(
             ledger_path = root.joinpath(*PurePosixPath(physical_ledger_path).parts)
             if not ledger_path.is_file() or _is_link_or_reparse(ledger_path):
                 return None
-            ledger_bytes_by_path[ledger_relative] = (
-                selected_ledger_bytes
-                if selected_ledger_bytes is not None
-                and selected_ledger_path is not None
-                and ledger_path.absolute() == selected_ledger_path.absolute()
-                else ledger_path.read_bytes()
-            )
+            remaining = budget.max_ledger_bytes - charged_bytes
+            if remaining <= 0:
+                raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: participant byte allowance exhausted")
+            member_budget = LedgerResourceBudgetV1(budget.max_events, remaining)
+            supplied = (selected_ledger_bytes if selected_ledger_bytes is not None
+                        and selected_ledger_path is not None
+                        and ledger_path.absolute() == selected_ledger_path.absolute() else None)
+            raw = read_ledger_bytes(ledger_path, member_budget, source_bytes=supplied)
+            charged_bytes += len(raw)
+            charged_events += raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n"))
+            if charged_events > budget.max_events:
+                raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: participant physical line allowance exhausted")
+            ledger_bytes_by_path[ledger_relative] = raw
             participant_locations_by_path[ledger_relative] = location
         return replace(
             metadata,
             ledger_bytes_by_path=MappingProxyType(ledger_bytes_by_path),
             participant_locations_by_path=MappingProxyType(participant_locations_by_path),
         )
+    except ValueError as exc:
+        raise _LedgerH1AcquisitionError("WI-LEDGER-RESOURCE-INCOMPLETE", str(exc)) from exc
     except OSError:
         return None
 
@@ -5209,13 +5408,13 @@ def _load_effective_ledger_group(
     *,
     compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
     historical_pass_custody_blobs_by_item: Mapping[Path, Mapping[str, bytes]] | None = None,
-    ledger_acquisition_complete_by_path: dict[str, list[bool]] | None = None,
+    ledger_acquisition_complete_by_path: dict[str, list[bool]] | None = None, ledger_resource_budget=None,
 ) -> Mapping[str, LedgerValidationContextV1]:
     """Load and validate one receipt-bound two-ledger group without caching."""
 
     if compatibility_artifacts is None:
         try:
-            compatibility_artifacts = _load_live_ledger_h1_artifacts(root)
+            compatibility_artifacts = _load_live_ledger_h1_artifacts(root, ledger_resource_budget=ledger_resource_budget)
         except _LedgerH1AcquisitionError as exc:
             context = _ledger_h1_acquisition_failure_context(exc)
             return MappingProxyType({exc.logical_ledger_path: context})
@@ -5223,7 +5422,7 @@ def _load_effective_ledger_group(
             return MappingProxyType({})
     return _ledger_h1_candidate_group(
         root if isinstance(root, _CapturedHistoryPath) else Path(root), compatibility_artifacts, historical_pass_custody_blobs_by_item,
-        ledger_acquisition_complete_by_path=ledger_acquisition_complete_by_path,
+        ledger_acquisition_complete_by_path=ledger_acquisition_complete_by_path, ledger_resource_budget=ledger_resource_budget
     )
 
 
@@ -5281,7 +5480,7 @@ def _resolve_ledger_h1_selected(
     selected_ledger_bytes: bytes | None = None,
     selected_ledger_absent: bool = False,
     ledger_acquisition_complete_out: list[bool] | None = None,
-    required_ledger_acquisition_by_path: dict[str, list[bool]] | None = None,
+    required_ledger_acquisition_by_path: dict[str, list[bool]] | None = None, ledger_resource_budget=None,
 ) -> _LedgerH1SelectedV1:
     """One metadata-first selection composition for validator and reader."""
     target_errors: list[str] = []
@@ -5297,11 +5496,11 @@ def _resolve_ledger_h1_selected(
     try:
         metadata = compatibility_artifacts
         if metadata is None:
-            metadata = _load_live_ledger_h1_metadata(root)
+            metadata = _load_live_ledger_h1_metadata(root, ledger_resource_budget=ledger_resource_budget)
     except _LedgerH1AcquisitionError as exc:
         return _LedgerH1SelectedV1("invalid", None, _ledger_h1_acquisition_failure_context(exc))
     if metadata is None:
-        if _ledger_h1_live_participants_exist(root):
+        if _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget):
             failure = _LedgerH1AcquisitionError("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE", selected_ledger_path)
             return _LedgerH1SelectedV1("invalid", None, _ledger_h1_acquisition_failure_context(failure))
         return _LedgerH1SelectedV1("ordinary-nonmember", None, None)
@@ -5325,7 +5524,7 @@ def _resolve_ledger_h1_selected(
         if artifacts is None:
             artifacts = _load_live_ledger_h1_artifacts(
                 root, selected_ledger_path=item / "agent-runs.jsonl",
-                selected_ledger_bytes=selected_ledger_bytes, metadata_artifacts=metadata,
+                selected_ledger_bytes=selected_ledger_bytes, metadata_artifacts=metadata, ledger_resource_budget=ledger_resource_budget
             )
     except _LedgerH1AcquisitionError as exc:
         return _LedgerH1SelectedV1("invalid", partition, _ledger_h1_acquisition_failure_context(exc))
@@ -5343,7 +5542,7 @@ def _resolve_ledger_h1_selected(
             {item: historical_pass_custody_blobs}
             if historical_pass_custody_blobs is not None else None
         ),
-        ledger_acquisition_complete_by_path=acquisition_by_path,
+        ledger_acquisition_complete_by_path=acquisition_by_path, ledger_resource_budget=ledger_resource_budget
     )
     if required_ledger_acquisition_by_path is not None:
         required_ledger_acquisition_by_path.update(acquisition_by_path)
@@ -5729,7 +5928,7 @@ def _ordinary_raw_v2_effective_context(
     item: Path, selected_ledger_path: str, raw: bytes,
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
     *, h1_partition: _LedgerH1PartitionV1 | None = None,
-    ledger_acquisition_complete_out: list[bool] | None = None,
+    ledger_acquisition_complete_out: list[bool] | None = None, ledger_resource_budget=None,
 ) -> LedgerValidationContextV1:
     """Reconstruct inactive raw rows; metadata exclusion conveys no H1 authority."""
 
@@ -5741,14 +5940,14 @@ def _ordinary_raw_v2_effective_context(
         return _ledger_h1_selection_failure(
             selected_ledger_path, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: partition input is invalid",
         )
-    if h1_partition is None and root is not None and _ledger_h1_live_participants_exist(root):
+    if h1_partition is None and root is not None and _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget):
         target = _projection_target_identity(item, selected, diagnostics)
         if target is None:
             return _ledger_h1_selection_failure(
                 selected_ledger_path, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: raw target identity is invalid",
             )
         try:
-            metadata_artifacts = _load_live_ledger_h1_metadata(root)
+            metadata_artifacts = _load_live_ledger_h1_metadata(root, ledger_resource_budget=ledger_resource_budget)
         except _LedgerH1AcquisitionError as exc:
             return _ledger_h1_acquisition_failure_context(exc)
         if metadata_artifacts is None:
@@ -5761,7 +5960,7 @@ def _ordinary_raw_v2_effective_context(
         h1_partition = resolved
     events = load_jsonl(
         selected, diagnostics, metadata, raw,
-        ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+        ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
     )
     projection_rows = _ledger_projection_rows(events, metadata, diagnostics)
     shape_rows, _shape_counters, shape_errors = _project_manifest_rows(
@@ -5778,7 +5977,7 @@ def _ordinary_raw_v2_effective_context(
     )
     diagnostics.extend(disposition_errors)
     custody, custody_errors = resolve_historical_pass_custody(
-        item, raw, events, metadata, candidate_blobs=historical_pass_custody_blobs
+        item, raw, events, metadata, candidate_blobs=historical_pass_custody_blobs, ledger_resource_budget=ledger_resource_budget
     )
     diagnostics.extend(custody_errors)
     rows, history_holds, history_errors = _apply_history_custody(
@@ -5801,7 +6000,7 @@ def load_effective_ledger_view(
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
     selected_ledger_bytes: bytes | None = None,
     selected_ledger_absent: bool = False,
-    ledger_acquisition_complete_out: list[bool] | None = None,
+    ledger_acquisition_complete_out: list[bool] | None = None, ledger_resource_budget=None,
 ) -> LedgerValidationContextV1:
     """Read the selected item; unrelated H1 contents are not ordinary admission."""
     root = root if isinstance(root, _CapturedHistoryPath) else Path(root)
@@ -5820,13 +6019,13 @@ def load_effective_ledger_view(
             selected_ledger_path, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected ledger identity is invalid",
         )
     partition = None
-    if compatibility_artifacts is not None or _ledger_h1_live_participants_exist(root):
+    if compatibility_artifacts is not None or _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget):
         resolution = _resolve_ledger_h1_selected(
             root, item, selected_ledger_path, compatibility_artifacts=compatibility_artifacts,
             historical_pass_custody_blobs=historical_pass_custody_blobs,
             selected_ledger_bytes=selected_ledger_bytes,
             selected_ledger_absent=selected_ledger_absent,
-            ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+            ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
         )
         if resolution.classification != "ordinary-nonmember":
             assert resolution.context is not None
@@ -5839,8 +6038,8 @@ def load_effective_ledger_view(
             (), (), object(),
         )
     try:
-        raw = selected.read_bytes() if selected_ledger_bytes is None else selected_ledger_bytes
-    except OSError as exc:
+        raw = read_ledger_bytes(selected, ledger_resource_budget) if selected_ledger_bytes is None else selected_ledger_bytes
+    except (OSError, ValueError) as exc:
         diagnostic = f"cannot read ledger: {selected}: {exc}"
         return LedgerValidationContextV1(
             selected_ledger_path, (), None,
@@ -5850,7 +6049,7 @@ def load_effective_ledger_view(
     return _ordinary_raw_v2_effective_context(
         item, selected_ledger_path, raw, historical_pass_custody_blobs,
         h1_partition=partition,
-        ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+        ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
     )
 
 
@@ -7010,7 +7209,7 @@ def _transfer_receipts(
         ledger = archive / "agent-runs.jsonl"
         try:
             physical_ledger_sha = _transfer_authority_sha256(
-                root, ledger, maximum_bytes=MAX_TRANSFER_LEDGER_BYTES
+                root, ledger, maximum_bytes=_ledger_resource_budget(ledger_resource_budget).max_ledger_bytes
             )
         except (OSError, ValueError) as exc:
             fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer ledger is unavailable: {exc}")
@@ -7024,7 +7223,7 @@ def _transfer_receipts(
 def validate_transfer_receipt_obligation_coverage(
     root: Path,
     receipt: Mapping[str, object],
-    archive: Path,
+    archive: Path, ledger_resource_budget=None,
 ) -> list[str]:
     """Bind one settled transfer receipt to the archive's canonical open state."""
 
@@ -7034,7 +7233,7 @@ def validate_transfer_receipt_obligation_coverage(
         archive,
         strict_revise=False,
         validate_status_file=False,
-        obligation_state_out=states,
+        obligation_state_out=states, ledger_resource_budget=ledger_resource_budget
     )
     if source_errors or len(states) != 1:
         errors.extend(source_errors)
@@ -7140,7 +7339,7 @@ def _resolve_transferred_obligation(
     operation_id: str,
     obligation: dict,
     errors: list[str],
-    visiting: frozenset[str],
+    visiting: frozenset[str], ledger_resource_budget=None,
 ) -> LedgerProjectionRowV1 | None:
     if operation_id in visiting:
         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer cycle at {operation_id}")
@@ -7172,7 +7371,7 @@ def _resolve_transferred_obligation(
             fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: predecessor obligation is absent or duplicate: {operation_id}")
             return None
         inherited = _resolve_transferred_obligation(
-            root, receipts, predecessor, matches[0], errors, visiting | {operation_id}
+            root, receipts, predecessor, matches[0], errors, visiting | {operation_id}, ledger_resource_budget=ledger_resource_budget
         )
         if inherited is None:
             return None
@@ -7199,7 +7398,7 @@ def _resolve_transferred_obligation(
         archive,
         strict_revise=False,
         validate_status_file=False,
-        obligation_state_out=states,
+        obligation_state_out=states, ledger_resource_budget=ledger_resource_budget
     )
     if validation_errors or len(states) != 1:
         errors.extend(validation_errors)
@@ -7234,7 +7433,7 @@ def _resolve_transferred_obligation(
     )
 
 
-def _inherited_transfer_rows(item: Path, errors: list[str]) -> tuple[LedgerProjectionRowV1, ...]:
+def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_budget=None) -> tuple[LedgerProjectionRowV1, ...]:
     relation = _transfer_status_relation(item, errors)
     if relation is None:
         return ()
@@ -7281,7 +7480,7 @@ def _inherited_transfer_rows(item: Path, errors: list[str]) -> tuple[LedgerProje
         seen_ids.add(obligation_id)
         seen_run_ids.add(run_id)
         resolved = _resolve_transferred_obligation(
-            root, receipts, operation_id, obligation, errors, frozenset()
+            root, receipts, operation_id, obligation, errors, frozenset(), ledger_resource_budget=ledger_resource_budget
         )
         if resolved is not None:
             result.append(LedgerProjectionRowV1(
@@ -7296,7 +7495,7 @@ def _inherited_transfer_rows(item: Path, errors: list[str]) -> tuple[LedgerProje
     return tuple(result)
 
 
-def validate_obligation_transfer_ownership(root: Path) -> list[str]:
+def validate_obligation_transfer_ownership(root: Path, *, ledger_resource_budget=None) -> list[str]:
     """Audit every transferred obligation as one non-branching ownership chain."""
 
     root = Path(root).resolve()
@@ -7307,7 +7506,7 @@ def validate_obligation_transfer_ownership(root: Path) -> list[str]:
     origins: dict[str, list[str]] = {}
     for operation_id, (_receipt_path, receipt, archive) in receipts.items():
         errors.extend(
-            validate_transfer_receipt_obligation_coverage(root, receipt, archive)
+            validate_transfer_receipt_obligation_coverage(root, receipt, archive, ledger_resource_budget=ledger_resource_budget)
         )
         operation_rows: dict[str, dict] = {}
         for row in receipt.get("obligations", []):
@@ -7363,7 +7562,7 @@ def validate_obligation_transfer_ownership(root: Path) -> list[str]:
                 fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: obligation chain row is absent: {operation_id}")
                 break
             if _resolve_transferred_obligation(
-                root, receipts, operation_id, row, errors, frozenset()
+                root, receipts, operation_id, row, errors, frozenset(), ledger_resource_budget=ledger_resource_budget
             ) is None:
                 break
             next_operations = children.get((operation_id, obligation_id), [])
@@ -7390,7 +7589,7 @@ def validate_obligation_transfer_ownership(root: Path) -> list[str]:
                     state: list[WorkItemObligationStateV1] = []
                     terminal_errors = validate_work_item(
                         locations[0], strict_revise=False, validate_status_file=False,
-                        obligation_state_out=state,
+                        obligation_state_out=state, ledger_resource_budget=ledger_resource_budget
                     )
                     errors.extend(terminal_errors)
                     if len(state) != 1 or any(
@@ -7734,7 +7933,7 @@ def validate_archived_ledger_obligations(
     obligation_state_out: list[WorkItemObligationStateV1] | None = None,
     authority_state_out: list[dict[int, LedgerAuthorityV1]] | None = None,
     ledger_acquisition_complete_out: list[bool] | None = None,
-    required_ledger_acquisition_by_path: dict[str, list[bool]] | None = None,
+    required_ledger_acquisition_by_path: dict[str, list[bool]] | None = None, ledger_resource_budget=None,
 ) -> tuple[list[str], list[dict], list[dict]]:
     """Validate one immutable monthly archive through the normal projection owners.
 
@@ -7752,8 +7951,8 @@ def validate_archived_ledger_obligations(
         _projection_fail(errors, "identity", "archived obligation validation requires a monthly archive")
         return errors, [], []
     try:
-        ledger_bytes = ledger.read_bytes()
-    except OSError as exc:
+        ledger_bytes = read_ledger_bytes(ledger, ledger_resource_budget)
+    except (OSError, ValueError) as exc:
         fail(errors, f"cannot read ledger: {ledger}: {exc}")
         return errors, [], []
     if isinstance(item, _CapturedHistoryPath):
@@ -7761,13 +7960,13 @@ def validate_archived_ledger_obligations(
             _root, item, f"{relative_item}/agent-runs.jsonl",
             selected_ledger_bytes=ledger_bytes,
             ledger_acquisition_complete_out=ledger_acquisition_complete_out,
-            required_ledger_acquisition_by_path=required_ledger_acquisition_by_path,
+            required_ledger_acquisition_by_path=required_ledger_acquisition_by_path, ledger_resource_budget=ledger_resource_budget
         )
         if resolution.classification == "invalid":
             # Retain the raw loader's bounded-acquisition semantics without
             # reducing a failed applicable group as an ordinary raw archive.
             load_jsonl(ledger, errors, source_bytes=ledger_bytes,
-                       ledger_acquisition_complete_out=ledger_acquisition_complete_out)
+                       ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget)
             errors.extend(resolution.context.observation.diagnostics)
             return errors, [], []
         if resolution.classification == "member":
@@ -7785,9 +7984,9 @@ def validate_archived_ledger_obligations(
             return errors, open_revise, open_launches
     raw_metadata: list[dict[str, object]] = []
     events = load_jsonl(ledger, errors, raw_metadata, ledger_bytes,
-                        ledger_acquisition_complete_out=ledger_acquisition_complete_out)
+                        ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget)
     historical_pass_custody, custody_errors = resolve_historical_pass_custody(
-        item, ledger_bytes, events, raw_metadata
+        item, ledger_bytes, events, raw_metadata, ledger_resource_budget=ledger_resource_budget
     )
     errors.extend(custody_errors)
     rows = _ledger_projection_rows(events, raw_metadata, errors)
@@ -8011,7 +8210,7 @@ def validate_archived_ledger_obligations(
 
 def observe_captured_work_item_history(
     binding: CapturedWorkItemHistoryBindingV1,
-    telemetry: dict[str, int] | None = None,
+    telemetry: dict[str, int] | None = None, ledger_resource_budget=None,
 ) -> CapturedWorkItemHistoryObservationV1:
     """Acquire original criteria/history and use the existing obligation owners.
 
@@ -8040,19 +8239,19 @@ def observe_captured_work_item_history(
                 fail(errors, f"missing ledger: {selected}")
         else:
             selection = "present"
-            raw = selected.read_bytes()
+            raw = read_ledger_bytes(selected, ledger_resource_budget)
             digest = hashlib.sha256(raw).hexdigest()
             if binding.criteria.owner_contract == "archive":
                 errors, _revises, _launches = validate_archived_ledger_obligations(
                     item, telemetry, obligation_state_out=states,
                     authority_state_out=masks, ledger_acquisition_complete_out=complete,
-                    required_ledger_acquisition_by_path=required_ledger_acquisition_by_path,
+                    required_ledger_acquisition_by_path=required_ledger_acquisition_by_path, ledger_resource_budget=ledger_resource_budget
                 )
             else:
                 errors = validate_work_item(
                     item, strict_revise=True, telemetry=telemetry, validate_status_file=False,
                     selected_ledger_bytes=raw, obligation_state_out=states,
-                    authority_state_out=masks, ledger_acquisition_complete_out=complete,
+                    authority_state_out=masks, ledger_acquisition_complete_out=complete, ledger_resource_budget=ledger_resource_budget
                 )
             if complete != [True] or not states:
                 fail(errors, "WI-LEGACY-COMPLETION-HISTORY: selected owner acquisition/reduction unavailable")
@@ -8582,7 +8781,7 @@ def validate_work_item(
     historical_pass_custody_blobs: Mapping[str, bytes] | None = None,
     selected_ledger_bytes: bytes | None = None,
     *, ledger_acquisition_complete_out: list[bool] | None = None,
-    selected_ledger_absent: bool = False,
+    selected_ledger_absent: bool = False, ledger_resource_budget=None,
 ) -> list[str]:
     """ledger_path: candidate-validation seam — validate THIS file instead of the live
     ledger (the atomic-write flow validates its temp candidate before os.replace).
@@ -8622,7 +8821,7 @@ def validate_work_item(
     root = repo_root_for(item)
     live_compatibility_observed = bool(
         root is not None
-        and _ledger_h1_live_participants_exist(root)
+        and _ledger_h1_live_participants_exist(root, ledger_resource_budget=ledger_resource_budget)
     )
     effective_compatibility_artifacts = compatibility_artifacts
     validated_h1_partition: tuple[
@@ -8640,8 +8839,8 @@ def validate_work_item(
         selected_identity = f"{target[1]}/agent-runs.jsonl"
         if ledger_path is not None and selected_ledger_bytes is None and not selected_ledger_absent:
             try:
-                selected_ledger_bytes = selected_ledger.read_bytes()
-            except OSError as exc:
+                selected_ledger_bytes = read_ledger_bytes(selected_ledger, ledger_resource_budget)
+            except (OSError, ValueError) as exc:
                 fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
                 return errors
         resolution = _resolve_ledger_h1_selected(
@@ -8649,7 +8848,7 @@ def validate_work_item(
             historical_pass_custody_blobs=historical_pass_custody_blobs,
             selected_ledger_bytes=selected_ledger_bytes,
             selected_ledger_absent=selected_ledger_absent,
-            ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+            ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
         )
         if resolution.classification == "invalid":
             assert resolution.context is not None
@@ -8680,7 +8879,7 @@ def validate_work_item(
             historical_pass_custody_blobs=historical_pass_custody_blobs,
             selected_ledger_bytes=selected_ledger_bytes,
             selected_ledger_absent=selected_ledger_absent,
-            ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+            ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
         )
         errors.extend(context.observation.diagnostics)
         if telemetry is not None and context.observation.disposition_notices:
@@ -8783,8 +8982,8 @@ def validate_work_item(
                 ledger_acquisition_complete_out.append(False)
         else:
             try:
-                ledger_bytes = selected_ledger.read_bytes() if selected_ledger_bytes is None else selected_ledger_bytes
-            except OSError as exc:
+                ledger_bytes = read_ledger_bytes(selected_ledger, ledger_resource_budget) if selected_ledger_bytes is None else selected_ledger_bytes
+            except (OSError, ValueError) as exc:
                 fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
                 events = []
                 if ledger_acquisition_complete_out is not None:
@@ -8792,7 +8991,7 @@ def validate_work_item(
             else:
                 events = load_jsonl(
                     selected_ledger, errors, raw_metadata, ledger_bytes,
-                    ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+                    ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
                 )
     else:
         events = []
@@ -8800,7 +8999,7 @@ def validate_work_item(
             ledger_acquisition_complete_out.append(True)
     historical_pass_custody, custody_errors = resolve_historical_pass_custody(
         item, ledger_bytes, events, raw_metadata,
-        candidate_blobs=historical_pass_custody_blobs,
+        candidate_blobs=historical_pass_custody_blobs, ledger_resource_budget=ledger_resource_budget
     )
     errors.extend(custody_errors)
     rows = _ledger_projection_rows(events, raw_metadata, errors)
@@ -8819,7 +9018,7 @@ def validate_work_item(
     _, v3_errors = reduce_v3_events(events)
     errors.extend(v3_errors)
     validate_scratch_ownership(native_effective_events, item, errors)
-    inherited_rows = _inherited_transfer_rows(item, errors)
+    inherited_rows = _inherited_transfer_rows(item, errors, ledger_resource_budget=ledger_resource_budget)
     effective_rows = inherited_rows + native_effective_rows
     effective_events = _row_events(effective_rows)
     root_relative = (
@@ -8974,7 +9173,7 @@ def _serialize_obligations(state: WorkItemObligationStateV1) -> dict[str, object
 
 
 def _obligations_observation(
-    item: Path, ledger_path: Path | None, strict: bool, telemetry: dict[str, int],
+    item: Path, ledger_path: Path | None, strict: bool, telemetry: dict[str, int], ledger_resource_budget=None,
 ) -> dict[str, object]:
     selected = ledger_path or (item / "agent-runs.jsonl")
     root = repo_root_for(item)
@@ -8994,7 +9193,7 @@ def _obligations_observation(
         captured = None
         selected_absent = False
         try:
-            captured = selected.read_bytes()
+            captured = read_ledger_bytes(selected, ledger_resource_budget)
         except FileNotFoundError:
             selected_absent = True
             if ledger_path is None:
@@ -9007,7 +9206,7 @@ def _obligations_observation(
             item, ledger_path=ledger_path, strict_revise=strict, telemetry=telemetry,
             obligation_state_out=states, selected_ledger_bytes=captured,
             selected_ledger_absent=selected_absent,
-            ledger_acquisition_complete_out=acquisition_complete,
+            ledger_acquisition_complete_out=acquisition_complete, ledger_resource_budget=ledger_resource_budget
         )
         if acquisition_complete == [True] and states:
             payload["obligations"] = _serialize_obligations(states[-1])
@@ -9027,14 +9226,19 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--no-strict-revise", action="store_true", help="Do not fail on open v2 REVISE obligations (triage only)")
     parser.add_argument("--telemetry", action="store_true", help="Print closure rule-fire counters")
     parser.add_argument("--obligations-json", action="store_true", help="Emit a captured selected-ledger obligation observation as JSON")
+    add_ledger_resource_arguments(parser)
     args = parser.parse_args(argv)
+    try:
+        ledger_resource_budget = resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     item = Path(args.work_item).resolve()
     telemetry: dict[str, int] = {}
     if args.obligations_json:
         observation = _obligations_observation(
             item, Path(args.ledger_path).resolve() if args.ledger_path else None,
-            not args.no_strict_revise, telemetry,
+            not args.no_strict_revise, telemetry, ledger_resource_budget=ledger_resource_budget
         )
         if args.telemetry:
             observation["telemetry"] = dict(sorted(telemetry.items()))
@@ -9044,7 +9248,7 @@ def main(argv: list[str]) -> int:
         item,
         ledger_path=Path(args.ledger_path).resolve() if args.ledger_path else None,
         strict_revise=not args.no_strict_revise,
-        telemetry=telemetry,
+        telemetry=telemetry, ledger_resource_budget=ledger_resource_budget
     )
     if args.telemetry and telemetry:
         counters = ", ".join(f"{k}={v}" for k, v in sorted(telemetry.items()))

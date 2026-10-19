@@ -7,6 +7,7 @@ import ast
 from collections import Counter
 from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass, field, replace
+import errno
 from functools import wraps
 import hashlib
 import importlib.util
@@ -946,7 +947,8 @@ class _WindowsBoundNode:
                         except BaseException as cleanup:
                             raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "native-acquisition", primary,
                                                   members=(_RollbackFailureMember("backup", -1, str(path),
-                                                           "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
+                                                           "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                                                           cause_exception=cleanup),),
                                                   recovery_path=node.born_path) from primary
                     if not abandoned:
                         yield node
@@ -970,7 +972,8 @@ class _WindowsBoundNode:
                     cause = (previous.cause if previous is not None and previous.cause is not None
                              else primary if primary is not None else cleanup)
                     member = _RollbackFailureMember("backup", -1, str(path),
-                              "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup")
+                              "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                              cause_exception=cleanup)
                     recovery = (previous.recovery_path if previous is not None else
                                 born.born_path if born is not None and not abandoned else None)
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "native-security-release",
@@ -1137,7 +1140,8 @@ class _WindowsBoundNode:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "native-close",
                                       primary if primary is not None else cleanup,
                                       members=(_RollbackFailureMember("backup", 0, str(self.path),
-                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
+                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                                               cause_exception=cleanup),),
                                       recovery_path=self.path) from primary
             self.descriptor = None
         handle = self.handle
@@ -1147,7 +1151,8 @@ class _WindowsBoundNode:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "native-close",
                                       primary if primary is not None else cleanup,
                                       members=(_RollbackFailureMember("backup", 0, str(self.path),
-                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
+                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                                               cause_exception=cleanup),),
                                       recovery_path=self.path) from primary
             self.handle = None
         return False
@@ -1486,6 +1491,74 @@ def _installer_failure_text(error: BaseException) -> str:
         attributes = _passive_owner_storage(BaseException, error)
         def stable(value):
             return value if type(value) is str and value in SLICE_A_FAILURE_IDS else "unavailable"
+        contexts = {"rollback", "backup", "migration", "transaction", "direct", "health", "inventory", "verify",
+                    "native-acquisition", "native-security-release", "native-close", "creator-capture", "borrowed-content",
+                    "copy-close", "scalar-parent-close", "descriptor-read-reset", "scalar-close", "scalar-acquisition",
+                    "file-copy", "file-acquisition", "file-close", "construction", "disposal-close", "snapshot-acquisition",
+                    "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared"}
+        def safe_context(value):
+            return value if type(value) is str and value in contexts else "unavailable"
+        filesystem_types = (
+            OSError, BlockingIOError, ChildProcessError, ConnectionError, FileExistsError,
+            FileNotFoundError, InterruptedError, IsADirectoryError, NotADirectoryError,
+            PermissionError, ProcessLookupError, TimeoutError, BrokenPipeError,
+            ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError,
+        )
+        def native_code(value, field_name):
+            try:
+                descriptor = OSError.__dict__.get(field_name)
+                if descriptor is None:
+                    return "unavailable"
+                code = descriptor.__get__(value, type(value))
+                if type(code) is not int:
+                    return "unavailable"
+                if field_name == "errno":
+                    errorcode = errno.errorcode
+                    if (code == 0 or type(errorcode) is not dict
+                            or not dict.__contains__(errorcode, code)
+                            or type(dict.__getitem__(errorcode, code)) is not str):
+                        return "unavailable"
+                elif not 1 <= code <= 0xFFFFFFFF:
+                    return "unavailable"
+                return str(code)
+            except BaseException:
+                return "unavailable"
+        def safe_cause_projection(value):
+            kind = "unavailable"
+            identity = "unavailable"
+            cause_context = "unavailable"
+            native_errno = "unavailable"
+            native_winerror = "unavailable"
+            if value is None:
+                return kind, identity, cause_context, native_errno, native_winerror
+            cause_type = type(value)
+            if cause_type is _InstallFailure:
+                kind = "installer-failure"
+                try:
+                    cause_storage = _passive_owner_storage(BaseException, value)
+                    if cause_storage is not None:
+                        identity = stable(dict.get(cause_storage, "stable_id"))
+                        cause_context = safe_context(dict.get(cause_storage, "context"))
+                except BaseException:
+                    pass
+            else:
+                try:
+                    is_exception = issubclass(type(value), BaseException)
+                except BaseException:
+                    return kind, identity, cause_context, native_errno, native_winerror
+                if not is_exception:
+                    return kind, identity, cause_context, native_errno, native_winerror
+                if cause_type is ValueError:
+                    kind = "validation-error"
+                elif cause_type is RuntimeError:
+                    kind = "runtime-error"
+                elif any(cause_type is filesystem_type for filesystem_type in filesystem_types):
+                    kind = "filesystem-error"
+                    native_errno = native_code(value, "errno")
+                    native_winerror = native_code(value, "winerror")
+                else:
+                    kind = "unsupported"
+            return kind, identity, cause_context, native_errno, native_winerror
         def path_hash(value):
             if type(value) is type(Path()):
                 value = str(value)
@@ -1494,13 +1567,7 @@ def _installer_failure_text(error: BaseException) -> str:
         typed = type(error) is _InstallFailure
         if typed and attributes is not None:
             identity = stable(dict.get(attributes, "stable_id"))
-            context = dict.get(attributes, "context")
-            contexts = {"rollback", "backup", "migration", "transaction", "direct", "health", "inventory", "verify",
-                        "native-acquisition", "native-security-release", "native-close", "creator-capture", "borrowed-content",
-                        "copy-close", "scalar-parent-close", "descriptor-read-reset", "scalar-close", "scalar-acquisition",
-                        "file-copy", "file-acquisition", "file-close", "construction", "disposal-close", "snapshot-acquisition",
-                        "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared"}
-            context = context if type(context) is str and context in contexts else "unavailable"
+            context = safe_context(dict.get(attributes, "context"))
             cause = "identity-check-failed" if identity in {"E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY",
                 "E_ROLLBACK_CREATED_IDENTITY_CHANGED", "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE"} else "operation-failed"
             original = f"{identity} | context={context} | cause={cause}"
@@ -1520,17 +1587,22 @@ def _installer_failure_text(error: BaseException) -> str:
         operation_errors = _copy_setter_operation_errors(error)
         if operation_errors:
             additions.append("copy-setter-operation-errors=" + str(len(operation_errors)))
+        primary_source = error if not typed or attributes is None else dict.get(attributes, "cause")
+        kind, cause_id, cause_context, cause_errno, cause_winerror = safe_cause_projection(primary_source)
+        additions.append(f"primary-cause=kind:{kind};id:{cause_id};context:{cause_context};errno:{cause_errno};winerror:{cause_winerror}")
         if typed:
             members = None if attributes is None else dict.get(attributes, "members")
             if type(members) not in (tuple, list):
                 return " | ".join((original, *additions))
             for member in members:
                 if type(member) is not _RollbackFailureMember:
-                    additions.append("cleanup-detail=unavailable")
+                    additions.append("cleanup-detail=unavailable;cause-kind:unavailable;cause-id:unavailable"
+                                     ";cause-context:unavailable;errno:unavailable;winerror:unavailable")
                     continue
                 storage = _passive_owner_storage(_RollbackFailureMember, member)
                 if storage is None:
-                    additions.append("cleanup-detail=unavailable")
+                    additions.append("cleanup-detail=unavailable;cause-kind:unavailable;cause-id:unavailable"
+                                     ";cause-context:unavailable;errno:unavailable;winerror:unavailable")
                     continue  # Unsupported association is not inferred from legacy text.
                 failure = dict.get(storage, "copy_setter_failure")
                 phase, ordinal, stable_id = (dict.get(storage, name) for name in ("phase", "ordinal", "stable_id"))
@@ -1542,8 +1614,11 @@ def _installer_failure_text(error: BaseException) -> str:
                     "effect", "snapshot", "created", "migration", "backup", "scalar"} else "unavailable"
                 reason = "identity-check-failed" if identity in {"E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY",
                     "E_ROLLBACK_CREATED_IDENTITY_CHANGED", "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE"} else "settlement-failed"
+                member_source = dict.get(storage, "cause_exception")
+                kind, cause_id, cause_context, cause_errno, cause_winerror = safe_cause_projection(member_source)
                 additions.append(f"cleanup-detail=participant:{participant};phase:{phase};ordinal:{ordinal};id:{identity};reason:{reason}"
-                    + ";target-slot:managed-path;target-path-sha256:" + path_hash(dict.get(storage, "path")))
+                    + ";target-slot:managed-path;target-path-sha256:" + path_hash(dict.get(storage, "path"))
+                    + f";cause-kind:{kind};cause-id:{cause_id};cause-context:{cause_context};errno:{cause_errno};winerror:{cause_winerror}")
                 operation_errors = _copy_setter_operation_errors(failure)
                 if operation_errors:
                     if type(phase) is str and type(ordinal) is int:
@@ -1595,6 +1670,7 @@ class _RollbackFailureMember:
     copy_setter_diagnostic: _CopySetterDiagnostic | tuple | None = field(default=None, compare=False, repr=False)
     copy_setter_failure: BaseException | None = field(default=None, compare=False, repr=False)
     participant: str = field(default="unavailable", compare=False, repr=False)
+    cause_exception: BaseException | None = field(default=None, compare=False, repr=False)
 
 
 class _InstallFailure(RuntimeError):
@@ -2133,11 +2209,13 @@ class _InstallTransaction:
         if isinstance(exc, _InstallFailure):
             members = (list(exc.members) if exc.members else
                         [_RollbackFailureMember(phase, ordinal, str(path), exc.stable_id, str(exc.cause),
-                                                 _copy_setter_detail(exc), copy_setter_failure, participant or "unavailable")])
+                                                 _copy_setter_detail(exc), copy_setter_failure,
+                                                 participant or "unavailable", cause_exception=exc)])
             paths = list(unsafe) + list(exc.unresolved_paths) + [Path(member.path) for member in members]
         else:
             members = [_RollbackFailureMember(phase, ordinal, str(path), stable_id, str(exc),
-                                               _copy_setter_detail(exc), copy_setter_failure, participant or "unavailable")]
+                                               _copy_setter_detail(exc), copy_setter_failure,
+                                               participant or "unavailable", cause_exception=exc)]
             paths = list(unsafe)
         return paths, members, (() if copy_setter_failure is None else (copy_setter_failure,))
 
@@ -2331,7 +2409,8 @@ class _InstallTransaction:
             except OSError as cleanup:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "copy-close", primary or cleanup,
                     members=(_RollbackFailureMember("backup", -1, str(path),
-                             "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),)) from primary
+                             "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                             cause_exception=cleanup),)) from primary
 
     def _acquire_copy_metadata(self, path, metadata, descriptor, bound):
         participant = self._copy_metadata.get(path)
@@ -2661,7 +2740,8 @@ class _InstallTransaction:
                     except OSError as cleanup:
                         raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-parent-close", primary or cleanup,
                             members=(_RollbackFailureMember("backup", -1, str(path),
-                                     "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="scalar"),)) from primary
+                                     "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="scalar",
+                                     cause_exception=cleanup),)) from primary
             reference = resources.enter_context(held_parent())
             actual = self._capture_node(path, descriptor=reference, kind="directory")
         if actual != expected:
@@ -3481,7 +3561,8 @@ class _InstallTransaction:
                     os.close(descriptor)
                 except OSError as cleanup:
                     failures.append(_RollbackFailureMember("backup", len(failures), str(target),
-                                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"))
+                                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                                    cause_exception=cleanup))
             if failures:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "file-copy",
                                       primary if primary is not None else failures[0].cause,
@@ -3552,7 +3633,8 @@ class _InstallTransaction:
             except OSError as cleanup:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "file-close", primary or cleanup,
                                       members=(_RollbackFailureMember("backup", -1, str(path),
-                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
+                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                                               cause_exception=cleanup),),
                                       recovery_path=path) from primary
 
     def _construct_exclusive_tree(
@@ -3674,7 +3756,7 @@ class _InstallTransaction:
                     failures.append(_RollbackFailureMember(
                         "backup", len(failures), str(target),
                         "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup),
-                     participant="backup"))
+                     participant="backup", cause_exception=cleanup))
             if failures:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "construction",
                                       original or failures[0].cause, members=tuple(failures),
@@ -3799,7 +3881,8 @@ class _InstallTransaction:
                 except OSError as cleanup:
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "disposal-close", primary or cleanup,
                                           members=(_RollbackFailureMember("backup", -1, str(path),
-                                                   "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
+                                                   "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                                                   cause_exception=cleanup),),
                                           recovery_path=path) from primary
 
     def _dispose_image(self, path: Path, expected: dict[Path, _PhysicalNode]) -> None:
@@ -4366,7 +4449,8 @@ class _InstallTransaction:
             except BaseException as cleanup:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "retention-acquisition", primary,
                                       members=(_RollbackFailureMember("backup", -1, str(directory),
-                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
+                                               "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                                               cause_exception=cleanup),),
                                       recovery_path=directory) from primary
             raise
         return directory
@@ -5692,7 +5776,8 @@ class _CreateOnlyMutablePath:
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "migration-stage",
                                           original if original is not None else cleanup,
                                           members=(_RollbackFailureMember("backup", -1, str(temporary),
-                                                   "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup"),),
+                                                   "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                                                   cause_exception=cleanup),),
                                           recovery_path=temporary) from original
             current = next((item for item in self.transaction._slice_a_migrated
                             if record is not None and item.proof_key == record.proof_key), record)

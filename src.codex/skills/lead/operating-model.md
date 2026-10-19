@@ -410,7 +410,7 @@ Use the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap; t
 
 Every completed chain producing an accepted artifact MUST persist it in its owning active work-item before the session ends. Standalone persistence is conditional:
 
-An active work-item means the current task has `work-items/active/<slug>/`, not merely that the repository contains `work-items/`. With an active item, each specialist writes only its canonical artifact and the root records its concise lane result and provenance in `agent-runs.jsonl`; do not create `.reports/` or `.plans/` duplicates. Trivial work with no preservation value writes nothing. Without an active item, one meaningful standalone result MAY use `.reports/`; an explicitly requested standalone plan MAY use `.plans/`. Work needing stages, recovery, or continuation is admitted as a work-item.
+An active work-item means the current task has `work-items/active/<slug>/`, not merely that the repository contains `work-items/`. With an active item, each specialist writes only its canonical artifact; the root owns its concise lane result and provenance in `agent-runs.jsonl` through the single route selected by the Lead work-cycle recipe. Do not duplicate a wrapper-recorded execution or create `.reports/` or `.plans/` copies. Trivial work with no preservation value writes nothing. Without an active item, one meaningful standalone result MAY use `.reports/`; an explicitly requested standalone plan MAY use `.plans/`. Work needing stages, recovery, or continuation is admitted as a work-item.
 
 | Tier | Location | When to use |
 |---|---|---|

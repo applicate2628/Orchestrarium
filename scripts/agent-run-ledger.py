@@ -276,13 +276,13 @@ def stage_invalid_finding_class_migration(
     target_event_sha256: str,
     expected_ledger_sha256: str,
     operation_id: str,
-    recorded_at: str,
+    recorded_at: str, ledger_resource_budget=None,
 ) -> StagedLegacyMigration:
     """Build and validate one append-only migration anchor without replacing the ledger."""
 
     return stage_legacy_obligation_migration(
         item, target_run_id, target_event_sha256, expected_ledger_sha256,
-        operation_id, recorded_at, "invalid-finding-class",
+        operation_id, recorded_at, "invalid-finding-class", ledger_resource_budget=ledger_resource_budget
     )
 
 
@@ -292,11 +292,11 @@ def stage_legacy_scratch_evidence_migration(
     target_event_sha256: str,
     expected_ledger_sha256: str,
     operation_id: str,
-    recorded_at: str,
+    recorded_at: str, ledger_resource_budget=None,
 ) -> StagedLegacyMigration:
     return stage_legacy_obligation_migration(
         item, target_run_id, target_event_sha256, expected_ledger_sha256,
-        operation_id, recorded_at, "remove-string-scratch-evidence",
+        operation_id, recorded_at, "remove-string-scratch-evidence", ledger_resource_budget=ledger_resource_budget
     )
 
 
@@ -307,7 +307,7 @@ def stage_legacy_obligation_migration(
     expected_ledger_sha256: str,
     operation_id: str,
     recorded_at: str,
-    normalization_kind: str,
+    normalization_kind: str, ledger_resource_budget=None,
 ) -> StagedLegacyMigration:
     _strict_migration_inputs(operation_id, recorded_at)
     for value, failure_id in (
@@ -319,7 +319,7 @@ def stage_legacy_obligation_migration(
     item = Path(item)
     ledger_path = item / "agent-runs.jsonl"
     try:
-        before = ledger_path.read_bytes()
+        before = load_validator().read_ledger_bytes(ledger_path, ledger_resource_budget)
     except OSError as exc:
         _migration_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", str(exc))
     before_sha = hashlib.sha256(before).hexdigest()
@@ -332,7 +332,7 @@ def stage_legacy_obligation_migration(
         _migration_fail("WI-LEDGER-MIGRATION-NORMALIZATION-KIND", "normalization kind is not closed")
     metadata: list[dict[str, Any]] = []
     parse_errors: list[str] = []
-    events = validator.load_jsonl(ledger_path, parse_errors, metadata)
+    events = validator.load_jsonl(ledger_path, parse_errors, metadata, ledger_resource_budget=ledger_resource_budget)
     if any(event.get("schemaVersion") == 3 for event in events):
         _migration_fail("WI-LEDGER-MIGRATION-V3-UNSUPPORTED", "V3 ledger is not writable by this migration")
     if parse_errors:
@@ -417,7 +417,7 @@ def stage_legacy_obligation_migration(
             stream.flush()
         parse_errors: list[str] = []
         candidate_metadata: list[dict[str, Any]] = []
-        candidate_events = validator.load_jsonl(candidate_path, parse_errors, candidate_metadata)
+        candidate_events = validator.load_jsonl(candidate_path, parse_errors, candidate_metadata, ledger_resource_budget=ledger_resource_budget)
         _effective, _counters, projection_errors = validator.project_legacy_obligation_migrations(
             candidate_events, candidate_metadata, item
         )
@@ -462,47 +462,20 @@ def restore_ledger(path: Path, previous: str | None) -> None:
         path.write_text(previous, encoding="utf-8")
 
 
-def _read_ledger(item: Path, validator: Any | None = None) -> tuple[list[dict[str, Any]], int]:
+def _read_ledger(item: Path, validator: Any | None = None, *, ledger_resource_budget=None) -> tuple[list[dict[str, Any]], int]:
     """Return (events, malformed_line_count). A corrupt or non-object JSONL line
     is skipped but COUNTED so the rollup can surface it — an audit surface
     (evidence coverage) must not silently under-count corrupt input."""
     ledger = item / "agent-runs.jsonl"
-    events: list[dict[str, Any]] = []
-    malformed = 0
     if not ledger.exists():
-        return events, malformed
+        return [], 0
     validator = validator or load_validator()
-    with ledger.open("r", encoding="utf-8", newline="") as stream:
-        line_no = 0
-        while True:
-            raw = stream.readline(validator.MAX_LEDGER_LINE_CHARS + 2)
-            if raw == "":
-                break
-            line_no += 1
-            complete_line = raw.endswith("\n")
-            line = raw.rstrip("\r\n")
-            if len(line) > validator.MAX_LEDGER_LINE_CHARS or (
-                not complete_line and len(raw) > validator.MAX_LEDGER_LINE_CHARS
-            ):
-                while raw and not raw.endswith("\n"):
-                    raw = stream.readline(validator.MAX_LEDGER_LINE_CHARS + 2)
-                malformed += 1
-                continue
-            if not line.strip():
-                continue
-            if len(events) >= validator.MAX_LEDGER_EVENTS:
-                malformed += 1
-                break
-            try:
-                events.append(
-                    validator.decode_json_object(
-                        line,
-                        source=f"{ledger}:{line_no}",
-                    )
-                )
-            except ValueError:
-                malformed += 1
-    return events, malformed
+    errors: list[str] = []
+    events = validator.load_jsonl(ledger, errors, ledger_resource_budget=ledger_resource_budget)
+    resource_errors = [error for error in errors if "WI-LEDGER-RESOURCE-" in error]
+    if resource_errors:
+        raise ValueError("; ".join(resource_errors))
+    return events, len(errors)
 
 
 class LedgerWriteLockError(RuntimeError):
@@ -598,11 +571,11 @@ def _has_valid_v3_identity(event: dict[str, Any], validator: Any) -> bool:
 
 
 def _validate_noncanonical_history(
-    item: Path, ledger_bytes: bytes, validator: Any
+    item: Path, ledger_bytes: bytes, validator: Any, ledger_resource_budget=None,
 ) -> tuple[dict[str, Any], ...]:
     parse_errors: list[str] = []
     events = validator.load_jsonl(
-        item / "agent-runs.jsonl", parse_errors, None, ledger_bytes
+        item / "agent-runs.jsonl", parse_errors, None, ledger_bytes, ledger_resource_budget=ledger_resource_budget
     )
     if parse_errors:
         _noncanonical_fail("MALFORMED", "; ".join(parse_errors))
@@ -708,14 +681,15 @@ def _noncanonical_open_ordinary(
 
 
 def _collect_noncanonical_binary_lines(
-    stream, *, validator: Any, failure_id: str
+    stream, *, validator: Any, failure_id: str, ledger_resource_budget=None,
 ) -> bytes:
-    aggregate_limit = validator.MAX_LEDGER_EVENTS * (validator.MAX_LEDGER_LINE_BYTES + 2)
+    budget = validator._ledger_resource_budget(ledger_resource_budget)
+    aggregate_limit = budget.max_ledger_bytes
     chunks: list[bytes] = []
     total_bytes = 0
     event_count = 0
     while True:
-        raw = stream.readline(validator.MAX_LEDGER_LINE_BYTES + 3)
+        raw = stream.readline(min(validator.MAX_LEDGER_LINE_BYTES + 3, aggregate_limit - total_bytes + 1))
         if raw == b"":
             break
         if raw.endswith(b"\r\n"):
@@ -727,21 +701,21 @@ def _collect_noncanonical_binary_lines(
         if len(body) > validator.MAX_LEDGER_LINE_BYTES:
             _noncanonical_fail(failure_id, "ledger line exceeds bounded length")
         if total_bytes + len(raw) > aggregate_limit:
-            _noncanonical_fail(failure_id, "ledger exceeds bounded aggregate length")
+            _noncanonical_fail(failure_id, "WI-LEDGER-RESOURCE-INCOMPLETE: ledger exceeds admitted byte allowance")
         try:
             nonblank = bool(body.decode("utf-8", errors="strict").strip())
         except UnicodeDecodeError:
             nonblank = True
         if nonblank:
-            if event_count >= validator.MAX_LEDGER_EVENTS:
-                _noncanonical_fail(failure_id, "ledger exceeds bounded event count")
+            if event_count >= budget.max_events:
+                _noncanonical_fail(failure_id, "WI-LEDGER-RESOURCE-INCOMPLETE: ledger exceeds bounded event count")
             event_count += 1
         chunks.append(raw)
         total_bytes += len(raw)
     return b"".join(chunks)
 
 
-def _noncanonical_read_owned_bytes(path: Path, *, failure_id: str) -> bytes:
+def _noncanonical_read_owned_bytes(path: Path, *, failure_id: str, ledger_resource_budget=None) -> bytes:
     descriptor, opened = _noncanonical_open_ordinary(
         path, writable=False, failure_id=failure_id
     )
@@ -752,7 +726,7 @@ def _noncanonical_read_owned_bytes(path: Path, *, failure_id: str) -> bytes:
         with os.fdopen(descriptor, "rb") as stream:
             descriptor = -1
             return _collect_noncanonical_binary_lines(
-                stream, validator=load_validator(), failure_id=failure_id
+                stream, validator=load_validator(), failure_id=failure_id, ledger_resource_budget=ledger_resource_budget
             )
     except OSError as exc:
         _noncanonical_fail(failure_id, str(exc))
@@ -761,7 +735,7 @@ def _noncanonical_read_owned_bytes(path: Path, *, failure_id: str) -> bytes:
             os.close(descriptor)
 
 
-def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
+def _read_exact_history_blob(path: Path, expected_sha256: str, *, ledger_resource_budget=None) -> bytes | None:
     try:
         metadata = path.lstat()
     except FileNotFoundError:
@@ -797,7 +771,7 @@ def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
         with os.fdopen(descriptor, "rb") as stream:
             descriptor = -1
             value = _collect_noncanonical_binary_lines(
-                stream, validator=load_validator(), failure_id="HISTORY-CONFLICT"
+                stream, validator=load_validator(), failure_id="HISTORY-CONFLICT", ledger_resource_budget=ledger_resource_budget
             )
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
@@ -1100,10 +1074,10 @@ def _replace_exact_staging_file(
 
 
 def _publish_noncanonical_history_blob(
-    item: Path, history_path: Path, expected_sha256: str, original_bytes: bytes
+    item: Path, history_path: Path, expected_sha256: str, original_bytes: bytes, ledger_resource_budget=None,
 ) -> None:
     staging = item / f".{history_path.name}.tmp"
-    existing = _read_exact_history_blob(history_path, expected_sha256)
+    existing = _read_exact_history_blob(history_path, expected_sha256, ledger_resource_budget=ledger_resource_budget)
     if existing is not None:
         if existing != original_bytes:
             _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
@@ -1114,12 +1088,12 @@ def _publish_noncanonical_history_blob(
         try:
             os.link(staging, history_path, follow_symlinks=False)
         except FileExistsError:
-            existing = _read_exact_history_blob(history_path, expected_sha256)
+            existing = _read_exact_history_blob(history_path, expected_sha256, ledger_resource_budget=ledger_resource_budget)
             if existing is None:
                 _noncanonical_fail(
                     "HISTORY-CONFLICT", "history publication raced without a file"
                 )
-        published = _read_exact_history_blob(history_path, expected_sha256)
+        published = _read_exact_history_blob(history_path, expected_sha256, ledger_resource_budget=ledger_resource_budget)
         if published != original_bytes:
             _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
     except OSError as exc:
@@ -1128,28 +1102,28 @@ def _publish_noncanonical_history_blob(
 
 
 def publish_mixed_current_history_blob(
-    item: Path, expected_sha256: str, original_bytes: bytes
+    item: Path, expected_sha256: str, original_bytes: bytes, ledger_resource_budget=None,
 ) -> tuple[Path, bool, tuple[int, int, int, int]]:
     """Publish exact current-ledger bytes using the existing create-once blob owner."""
 
     if hashlib.sha256(original_bytes).hexdigest() != expected_sha256:
         _noncanonical_fail("HISTORY-CONFLICT", "mixed history preimage digest differs")
     history_path = item / f"agent-runs.history.{expected_sha256}.jsonl"
-    preexisting = _read_exact_history_blob(history_path, expected_sha256) is not None
+    preexisting = _read_exact_history_blob(history_path, expected_sha256, ledger_resource_budget=ledger_resource_budget) is not None
     staging = item / f".{history_path.name}.tmp"
     staging_preexisting = staging.exists()
     try:
-        _publish_noncanonical_history_blob(item, history_path, expected_sha256, original_bytes)
+        _publish_noncanonical_history_blob(item, history_path, expected_sha256, original_bytes, ledger_resource_budget=ledger_resource_budget)
     except Exception:
         if not preexisting:
             # Publication may have succeeded before its readback or private
             # staging cleanup failed.  The writer still owns that new blob;
             # never leave it orphaned merely because no return value escaped.
             current = _noncanonical_read_owned_bytes(
-                item / "agent-runs.jsonl", failure_id="READBACK-INDETERMINATE"
+                item / "agent-runs.jsonl", failure_id="READBACK-INDETERMINATE", ledger_resource_budget=ledger_resource_budget
             )
             if current == original_bytes:
-                published = _read_exact_history_blob(history_path, expected_sha256)
+                published = _read_exact_history_blob(history_path, expected_sha256, ledger_resource_budget=ledger_resource_budget)
                 if published is not None:
                     if published != original_bytes or (staging_preexisting and staging.exists()):
                         _noncanonical_fail("HISTORY-CONFLICT", "new history cleanup identity is ambiguous")
@@ -1204,14 +1178,14 @@ def _noncanonical_recovery_state(
     expected_sha256: str,
     operation_id: str,
     recorded_at: str,
-    validator: Any,
+    validator: Any, ledger_resource_budget=None,
 ) -> tuple[str, bytes, Path, bytes]:
     ledger_path = item / "agent-runs.jsonl"
     history_path = item / f"agent-runs.history.{expected_sha256}.jsonl"
-    current = _noncanonical_read_owned_bytes(ledger_path, failure_id="DRIFT")
-    history = _read_exact_history_blob(history_path, expected_sha256)
+    current = _noncanonical_read_owned_bytes(ledger_path, failure_id="DRIFT", ledger_resource_budget=ledger_resource_budget)
+    history = _read_exact_history_blob(history_path, expected_sha256, ledger_resource_budget=ledger_resource_budget)
     original = history if history is not None else current
-    _validate_noncanonical_history(item, original, validator)
+    _validate_noncanonical_history(item, original, validator, ledger_resource_budget=ledger_resource_budget)
     marker = _noncanonical_history_marker(
         item, expected_sha256, original, operation_id, recorded_at
     )
@@ -1224,10 +1198,10 @@ def _noncanonical_recovery_state(
 
 
 def _validate_noncanonical_marker_candidate(
-    item: Path, candidate: Path, validator: Any
+    item: Path, candidate: Path, validator: Any, ledger_resource_budget=None,
 ) -> None:
     errors = validator.validate_work_item(
-        item, ledger_path=candidate, strict_revise=False
+        item, ledger_path=candidate, strict_revise=False, ledger_resource_budget=ledger_resource_budget
     )
     if errors:
         _noncanonical_fail("CANDIDATE-INVALID", "; ".join(errors))
@@ -1239,10 +1213,10 @@ def _command_apply_noncanonical_history(
     operation_id: str,
     recorded_at: str,
     validator: Any,
-    inject_failure: str | None,
+    inject_failure: str | None, ledger_resource_budget=None,
 ) -> tuple[bool, Path]:
     state, original, history_path, marker_bytes = _noncanonical_recovery_state(
-        item, expected_sha256, operation_id, recorded_at, validator
+        item, expected_sha256, operation_id, recorded_at, validator, ledger_resource_budget=ledger_resource_budget
     )
     if state == "applied":
         return True, history_path
@@ -1258,13 +1232,13 @@ def _command_apply_noncanonical_history(
         # prerequisite before materializing the fixed-name ledger candidate, so a
         # post-history interruption leaves no candidate path to recover or clean.
         _publish_noncanonical_history_blob(
-            item, history_path, expected_sha256, original
+            item, history_path, expected_sha256, original, ledger_resource_budget=ledger_resource_budget
         )
         if inject_failure == "post-history-publish":
             print("FAIL: injected post-history-publish interruption", file=sys.stderr)
             return False, history_path
         staging_identity = _write_exact_staging_file(candidate, marker_bytes)
-        _validate_noncanonical_marker_candidate(item, candidate, validator)
+        _validate_noncanonical_marker_candidate(item, candidate, validator, ledger_resource_budget=ledger_resource_budget)
         if inject_failure == "pre-ledger-replace":
             print("FAIL: injected pre-ledger-replace interruption", file=sys.stderr)
             return False, history_path
@@ -1277,7 +1251,7 @@ def _command_apply_noncanonical_history(
                 "READBACK-INDETERMINATE", "injected post-replace readback failure"
             )
         actual = _noncanonical_read_owned_bytes(
-            ledger_path, failure_id="READBACK-INDETERMINATE"
+            ledger_path, failure_id="READBACK-INDETERMINATE", ledger_resource_budget=ledger_resource_budget
         )
         if actual != marker_bytes:
             _noncanonical_fail("READBACK-INDETERMINATE", "marker readback changed")
@@ -1294,10 +1268,10 @@ def _command_rollback_noncanonical_history(
     operation_id: str,
     recorded_at: str,
     validator: Any,
-    inject_failure: str | None,
+    inject_failure: str | None, ledger_resource_budget=None,
 ) -> tuple[bool, Path]:
     state, original, history_path, marker_bytes = _noncanonical_recovery_state(
-        item, expected_sha256, operation_id, recorded_at, validator
+        item, expected_sha256, operation_id, recorded_at, validator, ledger_resource_budget=ledger_resource_budget
     )
     if state == "original":
         if history_path.exists():
@@ -1310,7 +1284,7 @@ def _command_rollback_noncanonical_history(
 
     ledger_path = item / "agent-runs.jsonl"
     current = _noncanonical_read_owned_bytes(
-        ledger_path, failure_id="ROLLBACK-NOT-EMPTY"
+        ledger_path, failure_id="ROLLBACK-NOT-EMPTY", ledger_resource_budget=ledger_resource_budget
     )
     if current != marker_bytes:
         _noncanonical_fail(
@@ -1333,7 +1307,7 @@ def _command_rollback_noncanonical_history(
                 "READBACK-INDETERMINATE", "injected rollback readback failure"
             )
         actual = _noncanonical_read_owned_bytes(
-            ledger_path, failure_id="READBACK-INDETERMINATE"
+            ledger_path, failure_id="READBACK-INDETERMINATE", ledger_resource_budget=ledger_resource_budget
         )
         if actual != original:
             _noncanonical_fail("READBACK-INDETERMINATE", "rollback readback changed")
@@ -1370,7 +1344,7 @@ def active_work_item(args: argparse.Namespace, command: str) -> Path | None:
     return item
 
 
-def command_recover_noncanonical_history(args: argparse.Namespace) -> int:
+def command_recover_noncanonical_history(args: argparse.Namespace, *, ledger_resource_budget=None) -> int:
     item = active_work_item(args, "recover-noncanonical-history")
     if item is None or not item.exists():
         print(f"FAIL: missing work item: {item}", file=sys.stderr)
@@ -1387,7 +1361,7 @@ def command_recover_noncanonical_history(args: argparse.Namespace) -> int:
                 expected_sha256,
                 args.operation_id,
                 args.recorded_at,
-                validator,
+                validator, ledger_resource_budget=ledger_resource_budget
             )
             if state == "other":
                 _noncanonical_fail("DRIFT", "ledger digest or recovery marker changed")
@@ -1411,7 +1385,7 @@ def command_recover_noncanonical_history(args: argparse.Namespace) -> int:
                         args.operation_id,
                         args.recorded_at,
                         validator,
-                        args.inject_failure,
+                        args.inject_failure, ledger_resource_budget=ledger_resource_budget
                     )
                     action = "apply"
                 else:
@@ -1421,7 +1395,7 @@ def command_recover_noncanonical_history(args: argparse.Namespace) -> int:
                         args.operation_id,
                         args.recorded_at,
                         validator,
-                        args.inject_failure,
+                        args.inject_failure, ledger_resource_budget=ledger_resource_budget
                     )
                     action = "rollback"
         except LedgerWriteLockError as exc:
@@ -1467,7 +1441,7 @@ def _append_candidate_bytes(previous: bytes, event: dict[str, Any]) -> bytes:
 
 def _append_event_transaction(
     item: Path, validator: Any, event_factory: Any, on_abort: Any = None,
-    *, candidate_custody_blobs: dict[str, bytes] | None = None, before_replace: Any = None,
+    *, candidate_custody_blobs: dict[str, bytes] | None = None, before_replace: Any = None, ledger_resource_budget=None,
 ) -> bool:
     """Append one validator-approved event, or report an idempotent no-op.
 
@@ -1502,11 +1476,32 @@ def _append_event_transaction(
 
     candidate = ledger_path.with_suffix(".jsonl.tmp")
     try:
-        previous_bytes = ledger_path.read_bytes() if ledger_path.exists() else b""
+        previous_bytes = validator.read_ledger_bytes(ledger_path, ledger_resource_budget) if ledger_path.exists() else b""
+        if previous_bytes:
+            errors: list[str] = []
+            validator.load_jsonl(ledger_path, errors, source_bytes=previous_bytes,
+                                 ledger_resource_budget=ledger_resource_budget)
+            if errors:
+                raise ValueError("; ".join(errors))
         previous = previous_bytes.decode("utf-8")
         event = event_factory(previous)
         if event is None:
+            errors = validator.validate_work_item(
+                item, selected_ledger_bytes=previous_bytes, strict_revise=False,
+                ledger_resource_budget=ledger_resource_budget,
+            )
+            if errors:
+                raise ValueError("; ".join(errors))
             return False
+        budget = validator._ledger_resource_budget(ledger_resource_budget)
+        demand = validator.inspect_ledger_resource_demand(
+            ledger_path, budget, source_bytes=previous_bytes,
+            known_row_bytes=((serialize_event(event) + "\n").encode("utf-8"),),
+            unknown_terminal_rows=int(event.get("eventKind") == "launch"),
+        )
+        validator.resolve_ledger_resource_budget(
+            budget.max_events, budget.max_ledger_bytes, demand=demand,
+        )
         with candidate.open("wb") as fh:
             fh.write(_append_candidate_bytes(previous_bytes, event))
             fh.flush()
@@ -1514,7 +1509,7 @@ def _append_event_transaction(
         # strict_revise=False: the helper RECORDS events (including REVISE verdicts
         # themselves); closure strictness is the checker's and the gates' job.
         custody_args = {"historical_pass_custody_blobs": candidate_custody_blobs} if candidate_custody_blobs is not None else {}
-        errors = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False, **custody_args)
+        errors = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False, **custody_args, ledger_resource_budget=ledger_resource_budget)
         if errors:
             candidate.unlink(missing_ok=True)
             for error in errors:
@@ -1588,7 +1583,7 @@ def _acquire_custody_snapshot(
 
 def _capture_review_custody(
     item: Path, args: argparse.Namespace, validator: Any,
-    previous: str, event: dict[str, Any], owned: dict[str, Path],
+    previous: str, event: dict[str, Any], owned: dict[str, Path], ledger_resource_budget=None,
 ) -> dict[str, Any]:
     digest = args.expected_reviewed_sha256
     expected_ledger = args.expected_ledger_sha256
@@ -1600,7 +1595,7 @@ def _capture_review_custody(
         raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: ledger digest changed")
     parse_errors: list[str] = []
     metadata: list[dict[str, Any]] = []
-    events = validator.load_jsonl(item / "agent-runs.jsonl", parse_errors, metadata, previous.encode("utf-8"))
+    events = validator.load_jsonl(item / "agent-runs.jsonl", parse_errors, metadata, previous.encode("utf-8"), ledger_resource_budget=ledger_resource_budget)
     if parse_errors:
         raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: ledger is not parseable")
     closes = event.get("closesRunIds")
@@ -1656,7 +1651,7 @@ def _capture_review_custody(
     return event
 
 
-def _append_retained_preimage(item: Path, validator: Any, event: dict[str, Any], profiles: list[tuple[dict, dict]]) -> bool:
+def _append_retained_preimage(item: Path, validator: Any, event: dict[str, Any], profiles: list[tuple[dict, dict]], *, ledger_resource_budget=None) -> bool:
     """Extend the existing append/custody transaction, never the retained payload."""
     owner = validator.load_lifecycle_owner()
     blobs: dict[str, bytes] = {}
@@ -1729,10 +1724,10 @@ def _append_retained_preimage(item: Path, validator: Any, event: dict[str, Any],
             raise ValueError("WI-RETAINED-PREIMAGE: changed or ambiguous owned append residue preserved")
 
     return _append_event_transaction(item, validator, prepare, on_abort=abort,
-                                     candidate_custody_blobs=blobs, before_replace=publish)
+                                     candidate_custody_blobs=blobs, before_replace=publish, ledger_resource_budget=ledger_resource_budget)
 
 
-def command_append(args: argparse.Namespace) -> int:
+def command_append(args: argparse.Namespace, *, ledger_resource_budget=None) -> int:
     item = active_work_item(args, "append")
     if item is None:
         return 1
@@ -1754,7 +1749,7 @@ def command_append(args: argparse.Namespace) -> int:
         if retained_profiles and custody_requested:
             raise ValueError("WI-RETAINED-PREIMAGE: retained stewardship cannot claim a linked review closer")
         if retained_profiles:
-            _append_retained_preimage(item, validator, event, retained_profiles)
+            _append_retained_preimage(item, validator, event, retained_profiles, ledger_resource_budget=ledger_resource_budget)
         elif custody_requested:
             if any(getattr(args, name, None) is None for name in (
                 "source_worktree", "expected_source_worktree_id", "expected_reviewed_sha256",
@@ -1772,11 +1767,11 @@ def command_append(args: argparse.Namespace) -> int:
                         pass
             _append_event_transaction(
                 item, validator,
-                lambda previous: _capture_review_custody(item, args, validator, previous, event, owned),
-                on_abort=abort_custody,
+                lambda previous: _capture_review_custody(item, args, validator, previous, event, owned, ledger_resource_budget=ledger_resource_budget),
+                on_abort=abort_custody, ledger_resource_budget=ledger_resource_budget
             )
         else:
-            _append_event_transaction(item, validator, lambda _previous: event)
+            _append_event_transaction(item, validator, lambda _previous: event, ledger_resource_budget=ledger_resource_budget)
     except (ValueError, LedgerWriteLockError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
@@ -1881,7 +1876,7 @@ def _settle_launch_from_ledger(
     return event
 
 
-def command_settle_launch(args: argparse.Namespace) -> int:
+def command_settle_launch(args: argparse.Namespace, *, ledger_resource_budget=None) -> int:
     item = active_work_item(args, "settle-launch")
     if item is None or not item.exists():
         print(f"FAIL: missing work item: {item}", file=sys.stderr)
@@ -1891,7 +1886,7 @@ def command_settle_launch(args: argparse.Namespace) -> int:
         appended = _append_event_transaction(
             item,
             validator,
-            lambda previous: _settle_launch_from_ledger(previous, args, validator),
+            lambda previous: _settle_launch_from_ledger(previous, args, validator), ledger_resource_budget=ledger_resource_budget
         )
     except (ValueError, LedgerWriteLockError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
@@ -1903,7 +1898,7 @@ def command_settle_launch(args: argparse.Namespace) -> int:
     return 0
 
 
-def command_recover_invalid_closure(args: argparse.Namespace) -> int:
+def command_recover_invalid_closure(args: argparse.Namespace, *, ledger_resource_budget=None) -> int:
     item = active_work_item(args, "recover-invalid-closure")
     if item is None or not item.exists():
         print(f"FAIL: missing work item: {item}")
@@ -1927,14 +1922,14 @@ def command_recover_invalid_closure(args: argparse.Namespace) -> int:
         "updatedAt": args.updated_at or started_at,
     }
     ledger_path = item / "agent-runs.jsonl"
-    decoded, _ = _read_ledger(item, validator)
+    decoded, _ = _read_ledger(item, validator, ledger_resource_budget=ledger_resource_budget)
     if any(event.get("schemaVersion") == 3 for event in decoded):
         print("FAIL: legacy V1/V2 writer refuses a ledger containing schemaVersion 3")
         return 1
 
     def validate_candidate(candidate: Path, _expected: bytes) -> list[str]:
         return validator.validate_work_item(
-            item, ledger_path=candidate, strict_revise=False
+            item, ledger_path=candidate, strict_revise=False, ledger_resource_budget=ledger_resource_budget
         )
 
     return _commit_recovery_append(
@@ -1942,7 +1937,7 @@ def command_recover_invalid_closure(args: argparse.Namespace) -> int:
         event,
         validate_candidate,
         RECOVERY_SUCCESS_MARKER,
-        args.inject_failure,
+        args.inject_failure, ledger_resource_budget=ledger_resource_budget
     )
 
 
@@ -1953,7 +1948,7 @@ def _commit_recovery_append(
     success_marker: str,
     inject_failure: str | None,
     *,
-    replay_detector: Callable[[bytes], bool] | None = None,
+    replay_detector: Callable[[bytes], bool] | None = None, ledger_resource_budget=None,
 ) -> int:
     """Commit one validated recovery row through the existing atomic append path."""
 
@@ -1973,8 +1968,19 @@ def _commit_recovery_append(
     candidate = ledger_path.with_suffix(".jsonl.tmp")
     replaced = False
     try:
-        previous = ledger_path.read_bytes() if ledger_path.exists() else b""
+        previous = load_validator().read_ledger_bytes(ledger_path, ledger_resource_budget) if ledger_path.exists() else b""
+        complete_errors: list[str] = []
+        load_validator().load_jsonl(ledger_path, complete_errors, source_bytes=previous,
+                                   ledger_resource_budget=ledger_resource_budget)
+        if any("WI-LEDGER-RESOURCE-" in error for error in complete_errors):
+            raise ValueError("; ".join(complete_errors))
         if replay_detector is not None and replay_detector(previous):
+            errors = load_validator().validate_work_item(
+                item, selected_ledger_bytes=previous, strict_revise=False,
+                ledger_resource_budget=ledger_resource_budget,
+            )
+            if errors:
+                raise ValueError("; ".join(errors))
             print(f"{success_marker} ({ledger_path})")
             return 0
         line = (serialize_event(event) + "\n").encode("utf-8")
@@ -1998,7 +2004,7 @@ def _commit_recovery_append(
             print("FAIL: ledger-recovery:post-commit-readback-indeterminate")
             return 1
         try:
-            actual = ledger_path.read_bytes()
+            actual = load_validator().read_ledger_bytes(ledger_path, ledger_resource_budget)
         except OSError:
             print("FAIL: ledger-recovery:post-commit-readback-indeterminate")
             return 1
@@ -2022,7 +2028,7 @@ def _commit_recovery_append(
     return 0
 
 
-def command_dispose_invalid_current(args: argparse.Namespace) -> int:
+def command_dispose_invalid_current(args: argparse.Namespace, *, ledger_resource_budget=None) -> int:
     item = active_work_item(args, "dispose-invalid-current")
     if item is None or not item.exists():
         print(f"FAIL: missing work item: {item}")
@@ -2035,7 +2041,7 @@ def command_dispose_invalid_current(args: argparse.Namespace) -> int:
         except OSError as exc:
             print(f"FAIL: WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: {exc}")
             return 1
-    decoded, _malformed = _read_ledger(item, validator)
+    decoded, _malformed = _read_ledger(item, validator, ledger_resource_budget=ledger_resource_budget)
     existing = [event for event in decoded if event.get("runId") == args.run_id]
     existing_disposition = existing[0] if len(existing) == 1 else None
     if (
@@ -2076,13 +2082,13 @@ def command_dispose_invalid_current(args: argparse.Namespace) -> int:
             expected,
             event,
             ledger_manifest_bytes=manifest_bytes,
-            expected_ledger_sha256=args.expected_ledger_sha256,
+            expected_ledger_sha256=args.expected_ledger_sha256, ledger_resource_budget=ledger_resource_budget
         )
 
     def is_replay(previous: bytes) -> bool:
         replay_errors: list[str] = []
         current = validator.load_jsonl(
-            item / "agent-runs.jsonl", replay_errors, None, previous
+            item / "agent-runs.jsonl", replay_errors, None, previous, ledger_resource_budget=ledger_resource_budget
         )
         return not replay_errors and any(candidate == event for candidate in current) and not (
             validator.validate_invalid_current_disposition_candidate(
@@ -2090,7 +2096,7 @@ def command_dispose_invalid_current(args: argparse.Namespace) -> int:
                 previous,
                 event,
                 ledger_manifest_bytes=manifest_bytes,
-                expected_ledger_sha256=args.expected_ledger_sha256,
+                expected_ledger_sha256=args.expected_ledger_sha256, ledger_resource_budget=ledger_resource_budget
             )
         )
 
@@ -2100,7 +2106,7 @@ def command_dispose_invalid_current(args: argparse.Namespace) -> int:
         validate_candidate,
         INVALID_CURRENT_DISPOSITION_SUCCESS_MARKER,
         args.inject_failure,
-        replay_detector=is_replay,
+        replay_detector=is_replay, ledger_resource_budget=ledger_resource_budget
     )
 
 
@@ -2108,7 +2114,7 @@ def _fmt_counts(counts: dict[str, int]) -> str:
     return ", ".join(f"{key}={value}" for key, value in sorted(counts.items())) or "(none)"
 
 
-def command_rollup(args: argparse.Namespace) -> int:
+def command_rollup(args: argparse.Namespace, *, ledger_resource_budget=None) -> int:
     """Aggregate agent-runs.jsonl events for one work-item (--work-item) or across
     all active items (--root). Read-only summary; never mutates a ledger."""
     if args.work_item is not None:
@@ -2128,7 +2134,13 @@ def command_rollup(args: argparse.Namespace) -> int:
 
     validator = load_validator()
     for item in items:
-        events, malformed = _read_ledger(item, validator)
+        events, malformed = _read_ledger(item, validator, ledger_resource_budget=ledger_resource_budget)
+        if events and not malformed:
+            validation_errors = validator.validate_work_item(
+                item, strict_revise=False, ledger_resource_budget=ledger_resource_budget,
+            )
+            if validation_errors:
+                raise ValueError("; ".join(validation_errors))
         malformed_total += malformed
         per_item.append((item.name, len(events)))
         for event in events:
@@ -2338,13 +2350,27 @@ def build_parser() -> argparse.ArgumentParser:
     rollup.add_argument("--active-dir", default="work-items/active", help="Active dir relative to --root. Defaults to work-items/active.")
     rollup.add_argument("--json", action="store_true", help="Emit the rollup as JSON instead of a human-readable summary.")
     rollup.set_defaults(func=command_rollup)
+    resource_owner = load_validator()
+    resource_owner.add_ledger_resource_arguments(parser)
+    for command_parser in subparsers.choices.values():
+        resource_owner.add_ledger_resource_arguments(command_parser, suppress_defaults=True)
     return parser
 
 
 def main(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        ledger_resource_budget = load_validator().resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes)
+    except ValueError as exc:
+        parser.error(str(exc))
+    try:
+        if args.command == "init":
+            return args.func(args)
+        return args.func(args, ledger_resource_budget=ledger_resource_budget)
+    except (ValueError, LedgerNoncanonicalRecoveryError) as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

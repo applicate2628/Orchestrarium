@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-19
 
+- Managed execution budgets now follow the actual ledger history and admitted upcoming writes instead of treating the diagnostic default as a task lifetime quota. The same bounded allowance reaches recording and lifecycle receivers; complete history and real unresolved obligations remain intact. One recording owner writes each actual launch/terminal pair, while recovery uses the existing compact obligation view.
+
+- Installer failure summaries now distinguish primary and cleanup causes using safe type categories, owned identifiers and native error codes. Invalid optional data leaves independently available details visible; exception messages and private paths stay out of the new public fields.
+
 - Incoming-link maintenance can inspect and update Markdown navigation while preserving undecodable prose bytes, byte-order marks and original line endings. The shared byte image also drives durable receiving and inverse checks. Unknown local targets, unrepresentable affected links, and detected unsupported or malformed containers still stop the operation; metadata schemas, attachment exemptions and lifecycle authority remain unchanged. Receipts keep their existing shape, but helpers verifying these new byte images must retain the revised reader until dependent pending or settled operations no longer need it.
 
 ## 2026-10-18

@@ -6,6 +6,8 @@
     "maxLineChars": 131072,
     "maxLineBytes": 131072,
     "maxEvents": 4096,
+    "maxLedgerBytes": 536879104,
+    "$comment": "maxEvents/maxLedgerBytes are omitted low-level diagnostic operation defaults, not lifetime ledger validity limits. Managed operations admit sufficient finite demand before dispatch; line/depth bounds remain protocol invariants.",
     "maxNestingDepth": 8
   },
   "type": "object",
@@ -88,7 +90,7 @@
     },
     "eventKind": {
       "enum": ["launch", "terminal", "standalone", "closure-invalidation", "legacy-obligation-migration"],
-      "$comment": "v2 lifecycle discriminator: 'launch' = a dispatch record (external run started); 'terminal' = its settlement (requires launchRunId); 'standalone' = an event that is not part of a launch/terminal pair (verdicts recorded directly, planning notes)."
+      "$comment": "v2 lifecycle discriminator: 'launch' = one admitted native or external dispatch recorded before scheduling; 'terminal' = its correlated actual outcome (requires launchRunId); 'standalone' = a distinct accepted role result or substantive gate action outside that pair. The selected provider wrapper records its pair on Root behalf. Readback, polling, progress and acknowledgment do not create another result."
     },
     "launchRunId": {
       "type": "string",

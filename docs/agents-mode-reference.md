@@ -143,7 +143,7 @@ Notes:
 - `parallelMode` is the general orchestrator fan-out rule for any helper or subagent lane, not only for external adapters.
 - `parallelMode: manual` does not waive an explicit user-requested or repo-policy-required parallel bundle; it only disables ordinary judgment-based parallel fan-out as the default.
 - External-specific controls remain overlays on top of `parallelMode`: `externalOpinionCounts` governs same-lane external distinct-opinion requirements, and `external-brigade` governs one bounded parallel external helper set.
-- When work-item tracking is enabled, every parallel helper lane, external-opinion lane, and brigade item must write or be represented by one `agent-runs.jsonl` event so closeout can distinguish completed work from still-running, missing-evidence, or no-artifact lanes.
+- When work-item tracking is enabled, each admitted actual execution in a parallel helper lane, external-opinion lane, or brigade item uses one matching launch/terminal pair through the selected Root-owned route: Root records native and already-admitted direct external owner-equivalent executions; a supported provider wrapper records on Root's behalf only when it executes. Direct external equivalence remains under the [external-dispatch contract](../src.codex/skills/lead/external-dispatch.md), never with manufactured wrapper IDs. Do not require a wrapper, add a duplicate Root pair, or record polling/progress/readback/status acknowledgment as another execution. A separate substantive review or Root/internal acceptance remains recorded where required; managed callers use Lead step 3's finite demand-derived budget and carry it to receiving.
 
 ### `mcpMode`
 

@@ -216,7 +216,7 @@ LAUNCH_FLAGS_MAX_COUNT = 64
 LAUNCH_FLAGS_MAX_TOKEN_BYTES = 2048
 LAUNCH_FLAGS_MAX_TOTAL_BYTES = 16 * 1024
 AGENT_RUN_MAX_LINE_CHARS = 128 * 1024
-AGENT_RUN_MAX_EVENTS = 4096
+KIMI_INVOCATION_MAX_RECORDS = 4096
 _MODEL_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$", re.ASCII)
 _CLAUDE_TOOL_LIST = re.compile(
     r"^[A-Za-z][A-Za-z0-9_*:-]*(?:,[A-Za-z][A-Za-z0-9_*:-]*)*$",
@@ -240,6 +240,9 @@ class Control:
     ledger_lane: str | None = None
     ledger_artifact: str | None = None
     ledger_closes: list[str] = field(default_factory=list)
+    ledger_max_events: int | None = None
+    ledger_max_bytes: int | None = None
+    resolved_ledger_budget: object | None = None
     timeout_secs: float = 3600.0
     result_max_bytes: int = RESULT_MAX_BYTES_DEFAULT
     capture_max_bytes: int = CAPTURE_MAX_BYTES_DEFAULT
@@ -1076,8 +1079,8 @@ class KimiAcpOneShotV1:
 
     def _validate_observation_bounds(self) -> None:
         if (
-            len(self._tool_calls) > AGENT_RUN_MAX_EVENTS
-            or len(self._permission_decisions) > AGENT_RUN_MAX_EVENTS
+            len(self._tool_calls) > KIMI_INVOCATION_MAX_RECORDS
+            or len(self._permission_decisions) > KIMI_INVOCATION_MAX_RECORDS
         ):
             raise ValueError("E_KIMI_ACP_PROTOCOL")
         if self._observed_serialized_chars > self._observation_budget_chars:
@@ -1119,7 +1122,7 @@ class KimiAcpOneShotV1:
                 "title": title,
                 "status": status,
             }
-            if len(self._tool_calls) >= AGENT_RUN_MAX_EVENTS:
+            if len(self._tool_calls) >= KIMI_INVOCATION_MAX_RECORDS:
                 raise ValueError("E_KIMI_ACP_PROTOCOL")
             delta = len(_kimi_receipt_json(observed)) + (1 if self._tool_calls else 0)
             if self._retain_observation_delta(delta):
@@ -1203,7 +1206,7 @@ class KimiAcpOneShotV1:
         if self._observations_omitted:
             return
         observed = {"id": tool_id, "title": title, "decision": self.permission}
-        if len(self._permission_decisions) >= AGENT_RUN_MAX_EVENTS:
+        if len(self._permission_decisions) >= KIMI_INVOCATION_MAX_RECORDS:
             raise ValueError("E_KIMI_ACP_PROTOCOL")
         delta = len(_kimi_receipt_json(observed)) + (
             1 if self._permission_decisions else 0
@@ -2799,6 +2802,10 @@ def parse_control(
         "--ledger-artifact": "ledger_artifact",
         "-ledgercloses": "ledger_closes",
         "--ledger-closes": "ledger_closes",
+        "--ledger-max-events": "ledger_max_events",
+        "-ledgermaxevents": "ledger_max_events",
+        "--ledger-max-bytes": "ledger_max_bytes",
+        "-ledgermaxbytes": "ledger_max_bytes",
         "-timeoutsecs": "timeout_secs",
         "--timeout-secs": "timeout_secs",
         "-resultmaxbytes": "result_max_bytes",
@@ -2840,7 +2847,7 @@ def parse_control(
                 parsed_value = float(value)
                 if not math.isfinite(parsed_value) or parsed_value <= 0:
                     raise ValueError(f"{token} must be a positive finite number")
-            elif attr in {"result_max_bytes", "capture_max_bytes"}:
+            elif attr in {"result_max_bytes", "capture_max_bytes", "ledger_max_events", "ledger_max_bytes"}:
                 parsed_value = int(value)
                 if parsed_value <= 0:
                     raise ValueError(f"{token} must be a positive integer")
@@ -5176,12 +5183,64 @@ def run_support_command(
     return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
 
 
+def _ledger_owner():
+    """Use the existing paired writer/module-loader owner, never row policy."""
+    helper = ledger_helper()
+    if helper is None:
+        raise ValueError("WI-LEDGER-RESOURCE-MISSING: paired ledger owner unavailable")
+    spec = importlib.util.spec_from_file_location("_provider_paired_ledger_owner", helper)
+    if spec is None or spec.loader is None:
+        raise ValueError("WI-LEDGER-RESOURCE-MISSING: paired ledger owner cannot load")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def ledger_resource_options(control: Control) -> list[str]:
+    validator = _ledger_owner().load_validator()
+    budget = validator.resolve_ledger_resource_budget(
+        control.ledger_max_events, control.ledger_max_bytes, managed=True,
+    )
+    held = control.resolved_ledger_budget
+    if held is not None and (held.max_events, held.max_ledger_bytes) != (budget.max_events, budget.max_ledger_bytes):
+        raise ValueError("WI-LEDGER-RESOURCE-DRIFT: wrapper resource transport changed after admission")
+    if held is not None:
+        budget = validator._ledger_resource_budget(held)
+    return ["--ledger-max-events", str(budget.max_events),
+            "--ledger-max-bytes", str(budget.max_ledger_bytes)]
+
+
+def prepare_ledger_admission(control: Control, launch_args: list[str]):
+    """Resolve Root's finite allowance against exact launch and terminal demand."""
+    writer = _ledger_owner()
+    validator = writer.load_validator()
+    ledger_resource_options(control)
+    budget = validator.resolve_ledger_resource_budget(
+        control.ledger_max_events, control.ledger_max_bytes, managed=True,
+    )
+    # Reuse the actual producer's parsing/serialization, including option position.
+    parsed = writer.build_parser().parse_args(launch_args)
+    launch = writer.build_event(parsed, validator)
+    known = (writer.serialize_event(launch) + "\n").encode("utf-8")
+    ledger = Path(control.ledger) / "agent-runs.jsonl"
+    demand = validator.inspect_ledger_resource_demand(
+        ledger, budget, source_bytes=None if ledger.exists() else b"",
+        known_row_bytes=(known,), unknown_terminal_rows=1,
+    )
+    resolved = validator.resolve_ledger_resource_budget(
+        budget.max_events, budget.max_ledger_bytes, demand=demand, managed=True,
+    )
+    if control.resolved_ledger_budget is None:
+        control.resolved_ledger_budget = resolved
+    return resolved
+
+
 def run_ledger(runner: ProcessRunnerV1, args: list[str]) -> bool:
     helper = ledger_helper()
     if helper is None:
         return False
     try:
-        result, _stdout, _stderr = run_support_command(
+        result, stdout, stderr = run_support_command(
             runner,
             [sys.executable, str(helper), *args],
             cwd=Path.cwd().resolve(),
@@ -5190,7 +5249,14 @@ def run_ledger(runner: ProcessRunnerV1, args: list[str]) -> bool:
         )
     except (OSError, ValueError):
         return False
-    return result.outcome == "success" and result.target_exit_code == 0
+    success = result.outcome == "success" and result.target_exit_code == 0
+    if not success:
+        # Retain a closed resource-cause vocabulary across the boolean boundary;
+        # arbitrary helper output may contain private values and is not echoed.
+        cause = re.search(rb"WI-LEDGER-RESOURCE-(?:INCOMPLETE|INVALID|MISSING|DRIFT)\b", stdout + b"\n" + stderr)
+        if cause is not None:
+            print("FAIL: " + cause.group().decode("ascii"), file=sys.stderr)
+    return success
 
 
 def codex_hook_health_helper(codex_home: Path) -> Path | None:
@@ -6290,8 +6356,8 @@ def _validate_kimi_receipt_fields(
     if (
         not isinstance(tool_calls, list)
         or not isinstance(decisions, list)
-        or len(tool_calls) > AGENT_RUN_MAX_EVENTS
-        or len(decisions) > AGENT_RUN_MAX_EVENTS
+        or len(tool_calls) > KIMI_INVOCATION_MAX_RECORDS
+        or len(decisions) > KIMI_INVOCATION_MAX_RECORDS
     ):
         raise ValueError("provider result Kimi capability evidence mismatch")
     tool_ids: set[str] = set()
@@ -6733,12 +6799,6 @@ def parse_provider_result(output: str) -> dict[str, object]:
     return payload
 
 
-def _agent_run_jsonl_limits() -> tuple[int, int]:
-    """Return compiled protocol limits; source tests bind them to the schema owner."""
-
-    return AGENT_RUN_MAX_LINE_CHARS, AGENT_RUN_MAX_EVENTS
-
-
 def read_back_external_terminal(
     control: Control,
     provider: str,
@@ -6749,52 +6809,34 @@ def read_back_external_terminal(
 
     if not control.ledger or not launch_run_id:
         return None
-    terminal: dict[str, object] | None = None
-    matches = 0
-    events = 0
-    invalid = False
     try:
-        max_line_chars, max_events = _agent_run_jsonl_limits()
-        with (Path(control.ledger) / "agent-runs.jsonl").open(
-            "r", encoding="utf-8", newline=""
-        ) as stream:
-            while True:
-                raw = stream.readline(max_line_chars + 2)
-                if raw == "":
-                    break
-                complete_line = raw.endswith("\n")
-                line = raw.rstrip("\r\n")
-                if len(line) > max_line_chars or (
-                    not complete_line and len(raw) > max_line_chars
-                ):
-                    events += 1
-                    if events > max_events:
-                        return None
-                    invalid = True
-                    while raw and not raw.endswith("\n"):
-                        raw = stream.readline(max_line_chars + 2)
-                    continue
-                if not line.strip():
-                    continue
-                events += 1
-                if events > max_events:
-                    return None
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    invalid = True
-                    continue
-                if (
-                    isinstance(row, dict)
-                    and row.get("eventKind") == "terminal"
-                    and row.get("launchRunId") == launch_run_id
-                ):
-                    matches += 1
-                    if matches == 1:
-                        terminal = row
+        validator = _ledger_owner().load_validator()
+        budget = validator.resolve_ledger_resource_budget(
+            control.ledger_max_events, control.ledger_max_bytes,
+        )
+        held = control.resolved_ledger_budget
+        if held is not None:
+            if (held.max_events, held.max_ledger_bytes) != (budget.max_events, budget.max_ledger_bytes):
+                return None
+            budget = validator._ledger_resource_budget(held)
+        item = Path(control.ledger)
+        ledger = item / "agent-runs.jsonl"
+        raw = validator.read_ledger_bytes(ledger, budget)
+        errors = validator.validate_work_item(
+            item, selected_ledger_bytes=raw, strict_revise=False,
+            ledger_resource_budget=budget,
+        )
+        if errors:
+            return None
+        events = validator.load_jsonl(ledger, errors, source_bytes=raw, ledger_resource_budget=budget)
+        if errors:
+            return None
+        terminals = [row for row in events if row.get("eventKind") == "terminal"
+                     and row.get("launchRunId") == launch_run_id]
+        if len(terminals) != 1:
+            return None
+        terminal = terminals[0]
     except (OSError, KeyError, TypeError, ValueError):
-        return None
-    if invalid or matches != 1 or terminal is None:
         return None
     if (
         not isinstance(terminal.get("runId"), str)
@@ -6858,6 +6900,7 @@ def record_terminal(
         f"stderrMarkers={outcome.stderr_marker_count}{category_note}"
     )[:1024]
     args = [
+        *ledger_resource_options(control),
         "--work-item",
         control.ledger or "",
         "append",
@@ -7789,8 +7832,13 @@ def _launch_with_runner(
             ),
         ]
         try:
+            prepare_ledger_admission(control, launch_args)
+            launch_args = [*ledger_resource_options(control), *launch_args]
             launch_recorded = run_ledger(runner, launch_args)
-        except Exception:
+        except Exception as exc:
+            cause = re.search(r"WI-LEDGER-RESOURCE-(?:INCOMPLETE|INVALID|MISSING|DRIFT)\b", str(exc))
+            if cause is not None:
+                print("FAIL: " + cause.group(), file=sys.stderr)
             launch_recorded = False
         if not launch_recorded:
             return finalize_reserved_run_once(

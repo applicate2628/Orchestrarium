@@ -151,7 +151,7 @@ def unsettled_launch_run_ids(item: Path, context: Any, validator: Any) -> set[st
 
 
 def stale_running_errors(
-    item: Path, now: datetime, stale_after: timedelta, validator: Any
+    item: Path, now: datetime, stale_after: timedelta, validator: Any, ledger_resource_budget=None,
 ) -> list[str]:
     if stale_after.total_seconds() <= 0:
         return []
@@ -162,7 +162,7 @@ def stale_running_errors(
     selected_ledger = (item / "agent-runs.jsonl").absolute()
     selected_identity = selected_ledger.relative_to(root.absolute()).as_posix()
     context = validator.load_effective_ledger_view(
-        root, item, selected_identity
+        root, item, selected_identity, ledger_resource_budget=ledger_resource_budget
     )
     if context.observation.activation_state == "invalid":
         return errors
@@ -231,7 +231,7 @@ def blocked_by_notes(
     root: Path,
     lifecycle: Any,
     is_valid_slug: Any,
-    *, root_input_role: str = "caller-root", original_root: Path | None = None, binding_evidence: tuple = (),
+    *, root_input_role: str = "caller-root", original_root: Path | None = None, binding_evidence: tuple = (), ledger_resource_budget=None,
 ) -> list[str]:
     """Informational: open Depends-on blockers + dangling targets for an active
     item. A blocked item is EXPECTED state, NOT a failure (so this never flips the
@@ -258,10 +258,10 @@ def blocked_by_notes(
             continue
         try:
             if root_input_role == "caller-root" and original_root is None and not binding_evidence:
-                state = lifecycle.work_item_dependency_state(root, slug)
+                state = lifecycle.work_item_dependency_state(root, slug, ledger_resource_budget=ledger_resource_budget)
             else:
                 state = lifecycle.work_item_dependency_state(root, slug, _input_role=root_input_role,
-                    _original_root=root if original_root is None else original_root, _binding_evidence=binding_evidence)
+                    _original_root=root if original_root is None else original_root, _binding_evidence=binding_evidence, ledger_resource_budget=ledger_resource_budget)
         except lifecycle.LifecycleError as exc:
             if exc.failure_id == "WI-REFERENCE-MISSING":
                 unresolved_targets.append(slug)
@@ -408,7 +408,7 @@ def next_action_line(item: Path, validator=None) -> str:
     return "(no ## Next action content)"
 
 
-def command_check(args: argparse.Namespace) -> int:
+def command_check(args: argparse.Namespace, *, ledger_resource_budget=None) -> int:
     root = args.root.resolve()
     active_dir = (root / args.active_dir).resolve()
     items = iter_work_items(active_dir)
@@ -430,13 +430,13 @@ def command_check(args: argparse.Namespace) -> int:
         base_root, _base_work_items, base_evidence = identity(args.root,
             known_work_items_root=(args.root / args.active_dir).parent)
         lifecycle.audit_categories(base_root, _input_role="repository-root",
-            _original_root=args.root, _binding_evidence=base_evidence)
+            _original_root=args.root, _binding_evidence=base_evidence, ledger_resource_budget=ledger_resource_budget)
     except lifecycle.LifecycleError as exc:
         failed += 1
         print(f"FAIL category lifecycle: {exc.failure_id}: {exc}")
 
     if base_root is not None:
-        transfer_errors = validator.validate_obligation_transfer_ownership(base_root)
+        transfer_errors = validator.validate_obligation_transfer_ownership(base_root, ledger_resource_budget=ledger_resource_budget)
         if transfer_errors:
             failed += 1
             print("FAIL obligation transfer ownership:")
@@ -455,16 +455,16 @@ def command_check(args: argparse.Namespace) -> int:
         errors = validator.validate_work_item(
             item,
             strict_revise=not args.no_strict_revise,
-            telemetry=telemetry,
+            telemetry=telemetry, ledger_resource_budget=ledger_resource_budget
         )
-        errors.extend(stale_running_errors(item, now, stale_after, validator))
+        errors.extend(stale_running_errors(item, now, stale_after, validator, ledger_resource_budget=ledger_resource_budget))
         resolver = sentinel_dependency.resolve_epic_locations
         if callable(resolver):
             errors.extend(epic_link_notes(item, active_dir, resolver, is_valid_slug))
         notes = item_aging_notes(item, today, args.max_age_days)
         if base_root is not None:
             notes.extend(blocked_by_notes(item, base_root, lifecycle, is_valid_slug,
-                root_input_role="repository-root", original_root=args.root, binding_evidence=base_evidence))
+                root_input_role="repository-root", original_root=args.root, binding_evidence=base_evidence, ledger_resource_budget=ledger_resource_budget))
         label = item.name
         if errors:
             failed += 1
@@ -523,7 +523,7 @@ def command_check(args: argparse.Namespace) -> int:
                 if not lifecycle._ledger_location_lexically_exists(ledger):
                     continue
                 arch_errors, open_revise, _open_launches = validator.validate_archived_ledger_obligations(
-                    item, telemetry=telemetry
+                    item, telemetry=telemetry, ledger_resource_budget=ledger_resource_budget
                 )
                 if open_revise or arch_errors:
                     failed += 1
@@ -648,7 +648,7 @@ def _goal_block(data: bytes, kind: str, validator: Any) -> tuple[dict, bytes]:
     return value, data[:start]
 
 
-def _goal_root_profile(owner: Any, root_id: str, root: Path, goal: dict, original: dict) -> dict:
+def _goal_root_profile(owner: Any, root_id: str, root: Path, goal: dict, original: dict, *, ledger_resource_budget=None) -> dict:
     """Derive task applicability from acquired topology and root-matching authority."""
     expected = any(row["rootId"] == root_id for row in original["originalMembers"] + goal["members"])
     expected |= goal["goalItem"]["rootId"] == root_id
@@ -671,7 +671,7 @@ def _goal_root_profile(owner: Any, root_id: str, root: Path, goal: dict, origina
     try:
         owner._lifecycle_reject_unreduced_reparse(root, failure_id="WI-GOAL-ROOT",
                                                 message="Goal root crosses a link or reparse point")
-        topology = owner._resolve_project_topology(root)
+        topology = owner._resolve_project_topology(root, ledger_resource_budget=ledger_resource_budget)
         work_items = topology.work_items
         owner._lifecycle_reject_unreduced_reparse(work_items, failure_id="WI-GOAL-ROOT",
                                                 message="Goal task domain crosses a link or reparse point")
@@ -706,7 +706,7 @@ def _require_complete_archive_inventory(read_model: dict, root_id: str) -> None:
         raise GoalInputError("GC-REFERENCE", "WI-ARCHIVE-ENTITY-UNBOUND: archive classification remains incomplete", root_id=root_id)
 
 
-def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase: str = "observe") -> dict:
+def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase: str = "observe", ledger_resource_budget=None) -> dict:
     """Read-only composition of admitted scope, physical owners and accepted proof.
 
     Root owns semantic acceptance. This query binds those inputs and reports
@@ -728,10 +728,10 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
     def cause(code: str, detail: str, root_id=None, item=None, ref=None):
         result["causes"].append({"code": code, "rootId": root_id, "item": item, "ref": ref, "detail": detail})
 
-    def capture(path: Path):
+    def capture(path: Path, *, maximum_bytes=None):
         try:
             snapshot = owner._capture_file_snapshot(path, failure_id="WI-GOAL-REFERENCE",
-                                                    maximum_bytes=validator.MAX_TRANSFER_LEDGER_BYTES)
+                                                    maximum_bytes=(validator.MAX_TRANSFER_LEDGER_BYTES if maximum_bytes is None else maximum_bytes))
         except (OSError, ValueError, owner.LifecycleError) as exc:
             raise GoalInputError("GC-REFERENCE", f"cannot acquire reference: {exc}") from exc
         captures.append(snapshot)
@@ -740,7 +740,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
     def item_path(root_id: str, slug: str) -> Path:
         if root_id not in roots or not owner.is_valid_slug(slug):
             raise GoalInputError("GC-REFERENCE", "unknown root or invalid work-item slug")
-        locations = owner._category_locations(roots[root_id], owner.CATEGORIES["work-item"], slug)
+        locations = owner._category_locations(roots[root_id], owner.CATEGORIES["work-item"], slug, ledger_resource_budget=ledger_resource_budget)
         if len(locations) != 1 or not locations[0].is_dir():
             raise GoalInputError("GC-REFERENCE", "work-item has no unique active/archive location")
         return locations[0].resolve()
@@ -761,7 +761,10 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
         if path != base.resolve() and base.resolve() not in path.parents:
             raise GoalInputError("GC-REFERENCE", "reference escapes admitted owner", ref)
         try:
-            data = capture(path)
+            data = capture(path, maximum_bytes=(
+                validator._ledger_resource_budget(ledger_resource_budget).max_ledger_bytes
+                if ref["workItem"] is not None and ref["path"] == "agent-runs.jsonl" else None
+            ))
         except GoalInputError as exc:
             exc.ref = ref
             raise
@@ -777,7 +780,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
                                closure_fields: dict):
         context = {"root_id": root_id, "item": slug}
         try:
-            observed = owner.observe_work_item_terminal(roots[root_id], f"work-item:{slug}")
+            observed = owner.observe_work_item_terminal(roots[root_id], f"work-item:{slug}", ledger_resource_budget=ledger_resource_budget)
             if not isinstance(observed, owner.WorkItemTerminalObservation):
                 raise GoalInputError("GC-REFERENCE", "terminal observation is not issued by the loaded owner", **context)
             observed.verify()
@@ -889,7 +892,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
         if phase not in {"observe", "preclose", "final"}:
             raise GoalInputError("GC-SCOPE", "unsupported Goal phase")
         validator, owner = load_validator(), load_lifecycle_owner()
-        coordinator = owner._work_items_root(Path(coordinator_root)).parent.resolve()
+        coordinator = owner._work_items_root(Path(coordinator_root), ledger_resource_budget=ledger_resource_budget).parent.resolve()
         record = Path(goal_record)
         record = record.resolve() if record.is_absolute() else (coordinator / record).resolve()
         if coordinator not in record.parents:
@@ -924,7 +927,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
                                                         message="Goal root crosses a link or reparse point")
             except owner.LifecycleError as exc:
                 raise GoalInputError("GC-REFERENCE", f"{exc.failure_id}: {exc}", root_id=root_id) from exc
-            canonical = owner._work_items_root(candidate).parent.resolve()
+            canonical = owner._work_items_root(candidate, ledger_resource_budget=ledger_resource_budget).parent.resolve()
             if str(canonical) != _goal_text(row["identity"], "root identity") or canonical in physical:
                 raise GoalInputError("GC-SCOPE", "root identity differs or repeats", row["admission"])
             physical.add(canonical)
@@ -943,7 +946,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
         if original["unresolvedRoots"]:
             row = original["unresolvedRoots"][0]
             raise GoalInputError("GC-SCOPE", "original root authority remains unresolved", row["authority"], root_id=row["id"])
-        locations = owner._category_locations(coordinator, owner.CATEGORIES["epic"], record.stem)
+        locations = owner._category_locations(coordinator, owner.CATEGORIES["epic"], record.stem, ledger_resource_budget=ledger_resource_budget)
         if len(locations) != 1 or locations[0].resolve() != record:
             raise GoalInputError("GC-REFERENCE", "Goal epic is not uniquely located")
         if phase == "final":
@@ -1033,7 +1036,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
         for root_row in result["roots"]:
             root_id, root = root_row["id"], roots[root_row["id"]]
             chain = owner._capture_path_parent_chain(root / "work-items", "WI-GOAL-ROOT")
-            profile = _goal_root_profile(owner, root_id, root, goal, original)
+            profile = _goal_root_profile(owner, root_id, root, goal, original, ledger_resource_budget=ledger_resource_budget)
             work_items = profile["workItems"]
             identity = owner._lifecycle_file_identity(work_items.lstat()) if profile["kind"] == "managed" else None
             root_row["taskDomain"] = profile["kind"]
@@ -1056,7 +1059,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
                     cause("GC-SCOPE", "discovered active member requires retained admission", root_id, path.name)
                     pending = True
             try:
-                read_model = owner.observe_readme(root)
+                read_model = owner.observe_readme(root, ledger_resource_budget=ledger_resource_budget)
             except owner.LifecycleError as exc:
                 raise GoalInputError("GC-DRIFT", f"{exc.failure_id}: {exc}", root_id=root_id) from exc
             _require_complete_archive_inventory(read_model, root_id)
@@ -1064,7 +1067,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
                 resolve_ref({"rootId": root_id, "workItem": None, "path": "work-items/README.md", "sha256": read_model["observedSha256"]})
             if not read_model["matches"]:
                 raise GoalInputError("GC-DRIFT", "WI-README-STALE: covered read-model differs", root_id=root_id)
-            for error in validator.validate_obligation_transfer_ownership(root):
+            for error in validator.validate_obligation_transfer_ownership(root, ledger_resource_budget=ledger_resource_budget):
                 cause("GC-OBLIGATION", error, root_id)
         for key, row in members.items():
             root_id, slug = key
@@ -1081,7 +1084,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
             if active:
                 if row["receipt"] is not None:
                     raise GoalInputError("GC-RECEIPT", "active member cannot claim owner-close receipt")
-                observation = validator._obligations_observation(path, None, True, {})
+                observation = validator._obligations_observation(path, None, True, {}, ledger_resource_budget=ledger_resource_budget)
                 if observation["ledgerSha256"] is not None:
                     resolve_ref({"rootId": root_id, "workItem": slug, "path": "agent-runs.jsonl", "sha256": observation["ledgerSha256"]})
                 for error in observation["diagnostics"]:
@@ -1093,7 +1096,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
                 cause("GC-ACTIVE", "covered member remains active", root_id, slug)
                 pending = True
             else:
-                entry = owner._archived_work_item_entry(path)
+                entry = owner._archived_work_item_entry(path, ledger_resource_budget=ledger_resource_budget)
                 closure_path = path / "closure.md"
                 closure_bytes = capture(closure_path)
                 closure_fields = owner._parse_fields(closure_bytes.decode("utf-8"))
@@ -1114,14 +1117,14 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
                     if receipt_path != path / owner.BUG_DISPOSITIONS_RECEIPT:
                         raise GoalInputError("GC-RECEIPT", "member receipt is not actual close receipt")
                     try:
-                        owner._verify_archived_bug_dispositions(roots[root_id], path, closure_bytes, closure_fields.get("closed", ""))
+                        owner._verify_archived_bug_dispositions(roots[root_id], path, closure_bytes, closure_fields.get("closed", ""), ledger_resource_budget=ledger_resource_budget)
                     except owner.LifecycleError as exc:
                         raise GoalInputError("GC-RECEIPT", f"{exc.failure_id}: {exc}", row["receipt"]) from exc
                 elif row["receipt"] is not None:
                     resolve_ref(row["receipt"])
                 resolve_ref({"rootId": root_id, "workItem": slug, "path": "closure.md", "sha256": hashlib.sha256(closure_bytes).hexdigest()})
                 if profile != "legacy-flat-completion-v1" and (path / "agent-runs.jsonl").exists():
-                    errors, reviews, launches = validator.validate_archived_ledger_obligations(path)
+                    errors, reviews, launches = validator.validate_archived_ledger_obligations(path, ledger_resource_budget=ledger_resource_budget)
                     for error in errors:
                         cause("GC-OBLIGATION", error, root_id, slug)
                     if reviews or launches:
@@ -1139,7 +1142,7 @@ def evaluate_goal_completion(coordinator_root: Path, goal_record: Path, *, phase
             chain, kind, identity, contract_present = profile_observations[root_id]
             try:
                 owner._verify_captured_parent_chain(chain, "WI-GOAL-DRIFT")
-                current = _goal_root_profile(owner, root_id, roots[root_id], goal, original)
+                current = _goal_root_profile(owner, root_id, roots[root_id], goal, original, ledger_resource_budget=ledger_resource_budget)
                 current_identity = owner._lifecycle_file_identity(current["workItems"].lstat()) if current["kind"] == "managed" else None
                 current_contract = owner._ledger_location_lexically_exists(current["workItems"] / owner.ROOT_CONTRACT_FILE)
                 if current["kind"] != kind or current_identity != identity or current_contract != contract_present:
@@ -1236,6 +1239,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.0,
         help="Report (informational) active items whose <date>- dir prefix is older than this many days. Use 0 to disable.",
     )
+    load_validator().add_ledger_resource_arguments(parser)
     return parser
 
 
@@ -1248,6 +1252,10 @@ def main(argv: list[str]) -> int:
                 pass
     parser = build_parser()
     args = parser.parse_args(argv)
+    try:
+        ledger_resource_budget = load_validator().resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes)
+    except ValueError as exc:
+        parser.error(str(exc))
     explicit = {argument.split("=", 1)[0] for argument in argv if argument.startswith("--")}
     if args.goal is not None:
         if "--root" not in explicit or not args.json:
@@ -1256,12 +1264,12 @@ def main(argv: list[str]) -> int:
             parser.error("Goal mode cannot narrow original covered state")
         if hasattr(sys.stdout, "reconfigure"):
             sys.stdout.reconfigure(encoding="utf-8")
-        result = evaluate_goal_completion(args.root, args.goal, phase=args.goal_phase)
+        result = evaluate_goal_completion(args.root, args.goal, phase=args.goal_phase, ledger_resource_budget=ledger_resource_budget)
         print(json.dumps(result, ensure_ascii=True))
         return 0 if result["decision"] in {"eligible", "ready-for-last-close"} else 1
     if args.json or "--goal-phase" in explicit:
         parser.error("--json/--goal-phase require --goal")
-    return command_check(args)
+    return command_check(args, ledger_resource_budget=ledger_resource_budget)
 
 
 if __name__ == "__main__":

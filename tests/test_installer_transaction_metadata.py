@@ -846,11 +846,13 @@ class CopyMetadataTests(unittest.TestCase):
         value_free = stderr
         for addition in additions:
             value_free = value_free.replace("; " + addition, "")
-        expected_legacy = "FAIL: unavailable | context=rollback | cause=operation-failed | copy-setter=" + legacy[0]
+        expected_legacy = ("FAIL: unavailable | context=rollback | cause=operation-failed | copy-setter=" + legacy[0]
+            + " | primary-cause=kind:validation-error;id:unavailable;context:unavailable;errno:unavailable;winerror:unavailable")
         for index, context in enumerate(legacy[1:]):
             target_hash = hashlib.sha256(f"member-{index:02}".encode()).hexdigest()
             expected_legacy += (f" | cleanup-detail=participant:snapshot;phase:snapshot;ordinal:{index};id:unavailable;reason:settlement-failed"
-                f";target-slot:managed-path;target-path-sha256:{target_hash}")
+                f";target-slot:managed-path;target-path-sha256:{target_hash}"
+                ";cause-kind:filesystem-error;cause-id:unavailable;cause-context:unavailable;errno:5;winerror:unavailable")
             expected_legacy += f" | cleanup-copy-setter=snapshot:{index}:unavailable:" + context
         expected_legacy += (" | recovery-beforeimage=available;target-slot:managed-recovery;target-path-sha256:"
             + hashlib.sha256(b"synthetic-recovery").hexdigest())
@@ -1370,7 +1372,11 @@ class CopyMetadataTests(unittest.TestCase):
         tx = PI._InstallTransaction([self.target, second], enabled=True, copy_paths=(self.target, second))
         primary = RuntimeError("later-checkpoint")
         setter = PI._WindowsBoundNode.set_copy_times
-        failure_objects = [OSError(errno.EIO, "PRIVATE-inverse-token-one"), OSError(errno.EIO, "PRIVATE-inverse-token-two")]
+        failure_objects = [OSError(errno.EIO, "PRIVATE-inverse-token-one"), OSError(errno.EACCES, "PRIVATE-inverse-token-two")]
+        winerror_descriptor = OSError.__dict__.get("winerror")
+        if winerror_descriptor is not None:
+            winerror_descriptor.__set__(failure_objects[0], 5)
+            winerror_descriptor.__set__(failure_objects[1], 32)
         receipts = []
         settlement = PI._InstallTransaction._settlement_failure
         def observe(*args, **kwargs):
@@ -1405,6 +1411,16 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertTrue(all(any(member is receipt for receipt in receipts) for member in aggregate.members))
         self.assertEqual([member.ordinal for member in aggregate.members], sorted(member.ordinal for member in aggregate.members))
         self.assertEqual({member.cause for member in aggregate.members}, {str(error) for error in failure_objects})
+        self.assertTrue(all(any(member.cause_exception is error for error in failure_objects) for member in aggregate.members))
+        self.assertIn("primary-cause=kind:runtime-error", stderr)
+        self.assertIn("cause-kind:filesystem-error", stderr)
+        self.assertIn("errno:5", stderr)
+        self.assertIn("errno:13", stderr)
+        if winerror_descriptor is not None:
+            self.assertIn("winerror:5", stderr)
+            self.assertIn("winerror:32", stderr)
+        else:
+            self.assertIn("winerror:unavailable", stderr)
         self.assertEqual(stderr.count("cleanup-copy-setter="), 2)
         self.assertEqual(stderr.count("direction=inverse"), 2)
         self.assertNotIn("PRIVATE-inverse-token", stderr)
@@ -1417,6 +1433,7 @@ class CopyMetadataTests(unittest.TestCase):
         associated = ValueError(private)
         associated._copy_setter_diagnostic = {"unrecognized": private}
         _paths, members, retained_errors = PI._InstallTransaction._settlement_failure(associated, "snapshot", 2, self.target, "E_CUSTOM_NEW_ID")
+        self.assertIs(members[0].cause_exception, associated)
         child = PI._InstallFailure("E_CHILD", "child", "original", members=tuple(members))
         _paths, forwarded, retained_errors = PI._InstallTransaction._settlement_failure(child, "backup", 5, self.source, "E_OTHER")
         self.assertIs(forwarded[0], members[0])
@@ -1439,7 +1456,7 @@ class CopyMetadataTests(unittest.TestCase):
         result, stderr, escaped = self.through_install(missing_detail)
         self.assertEqual(result, 1)
         self.assertIs(escaped[0], missing)
-        self.assertEqual(stderr, "FAIL: failure-id=unavailable | context=unavailable | cause=validation-failed | copy-setter=unavailable\n")
+        self.assertEqual(stderr, "FAIL: failure-id=unavailable | context=unavailable | cause=validation-failed | copy-setter=unavailable | primary-cause=kind:validation-error;id:unavailable;context:unavailable;errno:unavailable;winerror:unavailable\n")
         for error in (ValueError("ordinary legacy failure"),
                       PI._InstallFailure("E_ORDINARY", "old", "primary", members=(PI._RollbackFailureMember("snapshot", 0, "ordinary", "E_OLD", private),))):
             def fail():
@@ -1447,10 +1464,258 @@ class CopyMetadataTests(unittest.TestCase):
             result, stderr, _escaped = self.through_install(fail)
             self.assertEqual(result, 1)
             if type(error) is ValueError:
-                self.assertEqual(stderr, "FAIL: failure-id=unavailable | context=unavailable | cause=validation-failed\n")
+                self.assertEqual(stderr, "FAIL: failure-id=unavailable | context=unavailable | cause=validation-failed | primary-cause=kind:validation-error;id:unavailable;context:unavailable;errno:unavailable;winerror:unavailable\n")
             else:
-                self.assertTrue(stderr.startswith("FAIL: unavailable | context=unavailable | cause=operation-failed | cleanup-detail="))
+                self.assertTrue(stderr.startswith("FAIL: unavailable | context=unavailable | cause=operation-failed | primary-cause=kind:unavailable;id:unavailable;context:unavailable;errno:unavailable;winerror:unavailable | cleanup-detail="))
                 self.assertNotIn(private, stderr)
+
+    def test_immediate_cause_projection_is_passive_and_keeps_later_evidence(self):
+        hooks = []
+        class ForeignInteger(int):
+            def __str__(self):
+                hooks.append("int-str")
+                return "PRIVATE_INTEGER"
+            def __repr__(self):
+                hooks.append("int-repr")
+                return "PRIVATE_INTEGER"
+            def __format__(self, _spec):
+                hooks.append("int-format")
+                return "PRIVATE_INTEGER"
+            def __eq__(self, _other):
+                hooks.append("int-equality")
+                return True
+
+        class PrivateCredentialPathInstructionCause(Exception):
+            def __getattribute__(self, name):
+                if name in {"args", "errno", "winerror", "__cause__", "__context__", "__traceback__"}:
+                    hooks.append("instance-attribute")
+                    raise AssertionError("private cause attribute dispatched")
+                return super().__getattribute__(name)
+            def __str__(self):
+                hooks.append("exception-str")
+                return "PRIVATE credential path instruction"
+            def __repr__(self):
+                hooks.append("exception-repr")
+                return "PRIVATE credential path instruction"
+
+        class HostileCauseMeta(type):
+            @property
+            def __mro__(cls):
+                hooks.append("metaclass-mro-property")
+                return (cls, Exception, BaseException, object)
+            @property
+            def __name__(cls):
+                hooks.append("metaclass-name-property")
+                return "PRIVATE_CLASS_NAME"
+            def __eq__(cls, _other):
+                hooks.append("metaclass-equality")
+                return False
+            def __hash__(cls):
+                hooks.append("metaclass-hash")
+                return type.__hash__(cls)
+            def __str__(cls):
+                hooks.append("metaclass-str")
+                return "PRIVATE_METACLASS_STRING"
+            def __getattribute__(cls, name):
+                if name in {"__mro__", "__name__"}:
+                    hooks.append("metaclass-getattribute")
+                return type.__getattribute__(cls, name)
+
+        class PrivateMetaclassCause(Exception, metaclass=HostileCauseMeta):
+            def __getattribute__(self, name):
+                if name in {"args", "__cause__", "__context__", "__traceback__"}:
+                    hooks.append("metaclass-cause-instance-attribute")
+                    raise AssertionError("metaclass cause attribute dispatched")
+                return super().__getattribute__(name)
+            def __str__(self):
+                hooks.append("metaclass-cause-str")
+                return "PRIVATE-CREDENTIAL-PATH-INSTRUCTION"
+            def __repr__(self):
+                hooks.append("metaclass-cause-repr")
+                return "PRIVATE-CREDENTIAL-PATH-INSTRUCTION"
+
+        private_cause = PrivateCredentialPathInstructionCause("PRIVATE credential path instruction")
+        metaclass_cause = PrivateMetaclassCause("PRIVATE-CREDENTIAL-PATH-INSTRUCTION")
+        hooks.clear()
+        self.assertIsNotNone(PI._passive_owner_storage(BaseException, metaclass_cause))
+        self.assertIsNone(PI._passive_owner_storage(BaseException, object()))
+        self.assertEqual(hooks, [])
+        nested_typed_cause = PI._InstallFailure(
+            "E_ROLLBACK_RESTORE_FAILED", "rollback", OSError(errno.EIO, "PRIVATE nested cause"))
+        invalid_errno = OSError.__new__(OSError)
+        OSError.__dict__["errno"].__set__(invalid_errno, ForeignInteger(errno.EIO))
+        invalid_codes = [OSError(0, "PRIVATE zero errno"), OSError(True, "PRIVATE bool errno"),
+                         OSError(999999, "PRIVATE unknown errno")]
+        winerror_descriptor = OSError.__dict__.get("winerror")
+        invalid_winerrors = []
+        if winerror_descriptor is not None:
+            for value in (-1, 0, 0x100000000):
+                error = OSError(errno.EIO, "PRIVATE invalid winerror")
+                winerror_descriptor.__set__(error, value)
+                invalid_winerrors.append(error)
+
+        causes = [object(), None, invalid_errno, *invalid_codes, *invalid_winerrors,
+                  private_cause, metaclass_cause, OSError(errno.EACCES, "PRIVATE later valid cause")]
+        members = tuple(PI._RollbackFailureMember(
+            "snapshot", ordinal, f"PRIVATE-path/member-{ordinal}", "E_ROLLBACK_RESTORE_FAILED",
+            "PRIVATE legacy cause", cause_exception=cause)
+            for ordinal, cause in enumerate(causes))
+        aggregate = PI._InstallFailure(
+            "E_ROLLBACK_SETTLEMENT_FAILED", "rollback", nested_typed_cause, members=members)
+        recovered = aggregate._with_recovery_path(self.root / "PRIVATE-recovery")
+        self.assertIs(recovered.cause, nested_typed_cause)
+        self.assertIs(recovered.members, aggregate.members)
+        self.assertIs(recovered.members[2].cause_exception, invalid_errno)
+        self.assertIs(recovered.members[-1].cause_exception, causes[-1])
+        hooks.clear()  # Existing _InstallFailure construction keeps its legacy string behavior.
+
+        def fail():
+            raise aggregate
+        passive_storage = PI._passive_owner_storage
+        def malformed_first_member_storage(owner, value):
+            if owner is PI._RollbackFailureMember and value is members[0]:
+                return None
+            return passive_storage(owner, value)
+        with patch.object(PI, "_passive_owner_storage", side_effect=malformed_first_member_storage):
+            result, stderr, escaped = self.through_install(fail)
+
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], aggregate)
+        self.assertEqual(hooks, [])
+        cleanup_records = [item for item in stderr.split(" | ") if item.startswith("cleanup-detail=")]
+        self.assertEqual(len(cleanup_records), len(members))
+        self.assertIn("ordinal:1;", cleanup_records[1])
+        self.assertIn("cause-kind:unavailable;", cleanup_records[1])
+        self.assertIn(
+            "primary-cause=kind:installer-failure;id:E_ROLLBACK_RESTORE_FAILED;context:rollback;errno:unavailable;winerror:unavailable",
+            stderr)
+        self.assertIn("cleanup-detail=unavailable;", stderr)
+        self.assertIn("cause-kind:unavailable;cause-id:unavailable;cause-context:unavailable;errno:unavailable;winerror:unavailable", stderr)
+        self.assertIn("cause-kind:unsupported;cause-id:unavailable;cause-context:unavailable;errno:unavailable;winerror:unavailable", stderr)
+        self.assertIn("cause-kind:filesystem-error;cause-id:unavailable;cause-context:unavailable;errno:13;winerror:unavailable", stderr)
+        self.assertNotIn("PRIVATE", stderr)
+        self.assertNotIn("PrivateCredentialPathInstructionCause", stderr)
+        self.assertNotIn("PRIVATE_CLASS_NAME", stderr)
+
+        same_contract_outputs = []
+        for immediate in (ValueError("PRIVATE validation"), OSError(errno.EIO, "PRIVATE filesystem"),
+                          RuntimeError("PRIVATE runtime")):
+            member = PI._RollbackFailureMember(
+                "backup", 20, "PRIVATE-same-member-path", "E_ROLLBACK_RESTORE_FAILED",
+                "PRIVATE legacy cause", cause_exception=immediate)
+            typed = PI._InstallFailure(
+                "E_ROLLBACK_SETTLEMENT_FAILED", "rollback", immediate, members=(member,))
+            text = PI._installer_failure_text(typed)
+            self.assertIn("E_ROLLBACK_SETTLEMENT_FAILED | context=rollback", text)
+            self.assertIn("id:E_ROLLBACK_RESTORE_FAILED", text)
+            self.assertNotIn("PRIVATE", text)
+            same_contract_outputs.append(text)
+        self.assertEqual(len(set(same_contract_outputs)), 3)
+
+        malformed_members = PI._InstallFailure(
+            "E_ROLLBACK_SETTLEMENT_FAILED", "rollback", OSError(errno.EIO, "PRIVATE typed error"),
+            members=(members[-1],))
+        object.__setattr__(malformed_members, "members", (object(), members[-1]))
+        malformed_text = PI._installer_failure_text(malformed_members)
+        self.assertIn("primary-cause=kind:filesystem-error", malformed_text)
+        self.assertIn("cleanup-detail=unavailable;cause-kind:unavailable", malformed_text)
+        self.assertIn("cause-kind:filesystem-error;cause-id:unavailable;cause-context:unavailable;errno:13", malformed_text)
+        invalid_member_container = PI._InstallFailure(
+            "E_ROLLBACK_SETTLEMENT_FAILED", "rollback", ValueError("PRIVATE invalid members"),
+            members=(members[-1],))
+        object.__setattr__(invalid_member_container, "members", object())
+        unavailable_text = PI._installer_failure_text(invalid_member_container)
+        self.assertIn("primary-cause=kind:validation-error", unavailable_text)
+        self.assertNotIn("cleanup-detail=", unavailable_text)
+
+    def test_optional_namespace_does_not_gate_primary_or_member_cause_projection(self):
+        hooks = []
+
+        class HostileCauseMeta(type):
+            @property
+            def __mro__(cls):
+                hooks.append("metaclass-mro")
+                return (cls, Exception, BaseException, object)
+            @property
+            def __bases__(cls):
+                hooks.append("metaclass-bases")
+                return (Exception,)
+
+        class HostileCause(Exception, metaclass=HostileCauseMeta):
+            def __getattribute__(self, name):
+                if name in {"args", "errno", "winerror", "__cause__", "__context__", "__traceback__"}:
+                    hooks.append("instance-attribute")
+                    raise AssertionError("hostile cause attribute dispatched")
+                return super().__getattribute__(name)
+            def __str__(self):
+                hooks.append("exception-str")
+                return "PRIVATE hostile cause"
+
+        class ForgedNonException(metaclass=HostileCauseMeta):
+            pass
+
+        native = OSError(errno.EACCES, "PRIVATE native cause")
+        winerror_descriptor = OSError.__dict__.get("winerror")
+        expected_winerror = "unavailable"
+        if winerror_descriptor is not None:
+            winerror_descriptor.__set__(native, 32)
+            expected_winerror = "32"
+        cases = (
+            (ValueError("PRIVATE validation"), "validation-error", "unavailable", "unavailable"),
+            (RuntimeError("PRIVATE runtime"), "runtime-error", "unavailable", "unavailable"),
+            (native, "filesystem-error", "13", expected_winerror),
+            (HostileCause("PRIVATE hostile cause"), "unsupported", "unavailable", "unavailable"),
+        )
+
+        for ordinal, (cause, kind, expected_errno, expected_winerror) in enumerate(cases):
+            with self.subTest(kind=kind):
+                namespace = BaseException.__dict__["__dict__"].__get__(cause)
+                namespace[ordinal] = "PRIVATE unrelated namespace value"
+                member = PI._RollbackFailureMember(
+                    "snapshot", ordinal, f"PRIVATE/member-{ordinal}", "E_ROLLBACK_RESTORE_FAILED",
+                    "PRIVATE legacy cause", cause_exception=cause)
+                aggregate = PI._InstallFailure(
+                    "E_ROLLBACK_SETTLEMENT_FAILED", "rollback", cause, members=(member,))
+                hooks.clear()  # Constructor stringification is a preserved, separate behavior.
+
+                def fail():
+                    raise aggregate
+
+                result, stderr, escaped = self.through_install(fail)
+                expected = (f"kind:{kind};id:unavailable;context:unavailable;errno:{expected_errno};"
+                            f"winerror:{expected_winerror}")
+                self.assertEqual(result, 1)
+                self.assertIs(escaped[0], aggregate)
+                self.assertIs(aggregate.cause, cause)
+                self.assertIs(member.cause_exception, cause)
+                self.assertIn("primary-cause=" + expected, stderr)
+                cleanup = next(item for item in stderr.split(" | ") if item.startswith("cleanup-detail="))
+                member_expected = (expected.replace("kind:", "cause-kind:", 1)
+                                   .replace(";id:", ";cause-id:")
+                                   .replace(";context:", ";cause-context:"))
+                self.assertIn(member_expected, cleanup)
+                self.assertNotIn("PRIVATE", stderr)
+                self.assertEqual(hooks, [])
+
+        hooks.clear()
+        forged = ForgedNonException()
+        forged.__dict__[1] = "PRIVATE forged namespace"
+        member = PI._RollbackFailureMember(
+            "snapshot", 9, "PRIVATE/forged", "E_ROLLBACK_RESTORE_FAILED", "PRIVATE legacy cause",
+            cause_exception=forged)
+        aggregate = PI._InstallFailure(
+            "E_ROLLBACK_SETTLEMENT_FAILED", "rollback", forged, members=(member,))
+        hooks.clear()  # Measure only the cause projection after the preserved constructor path.
+        def fail_forged():
+            raise aggregate
+        result, stderr, escaped = self.through_install(fail_forged)
+        self.assertEqual(result, 1)
+        self.assertIs(escaped[0], aggregate)
+        self.assertIn("primary-cause=kind:unavailable;id:unavailable;context:unavailable;errno:unavailable;winerror:unavailable", stderr)
+        cleanup = next(item for item in stderr.split(" | ") if item.startswith("cleanup-detail="))
+        self.assertIn("cause-kind:unavailable;cause-id:unavailable;cause-context:unavailable;errno:unavailable;winerror:unavailable", cleanup)
+        self.assertNotIn("PRIVATE", stderr)
+        self.assertEqual(hooks, [])
 
     def test_unrelated_record_failure_stays_uninstrumented(self):
         current = PI._CopyMetadataImage(100, 200, None, None)
@@ -1541,7 +1806,7 @@ class CopyMetadataTests(unittest.TestCase):
             result, stderr, escaped = self.through_install(action)
             self.assertEqual(result, 1)
             self.assertIs(escaped[0], primary)
-            self.assertEqual(stderr, "FAIL: failure-id=unavailable | context=unavailable | cause=validation-failed | copy-setter=unavailable\n")
+            self.assertEqual(stderr, "FAIL: failure-id=unavailable | context=unavailable | cause=validation-failed | copy-setter=unavailable | primary-cause=kind:validation-error;id:unavailable;context:unavailable;errno:unavailable;winerror:unavailable\n")
         self.assertEqual(hooks, [])
         self.assertIn("operation=owner-extension", ordinary.render())
 
@@ -2545,6 +2810,7 @@ class ExpectedImageAndTypedSettlementTests(unittest.TestCase):
         paths, members, retained_errors = PI._InstallTransaction._settlement_failure(child, "created", 9, self.absent,
                                                                   "E_ROLLBACK_CREATED_IDENTITY_CHANGED")
         self.assertIn(endpoint, paths)
+        self.assertIs(members[0].cause_exception, child)
         self.assertEqual((members[0].phase, members[0].ordinal, members[0].path, members[0].stable_id, members[0].cause),
                          ("created", 9, str(self.absent), "E_NATIVE_SETTLEMENT_DETAIL", "actual close cause"))
 

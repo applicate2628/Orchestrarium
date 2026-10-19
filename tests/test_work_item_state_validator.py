@@ -1093,7 +1093,7 @@ def test_load_jsonl_count_limit_records_incomplete_in_same_pass(tmp_path, monkey
     observed = []
     errors = []
     events = module.load_jsonl(tmp_path / "unused", errors, source_bytes=b'{}\n{}\n', ledger_acquisition_complete_out=observed)
-    assert events == [{}] and observed == [False]
+    assert events == [] and observed == [False]
     assert any("bounded event count" in value for value in errors)
 
 
@@ -1150,12 +1150,12 @@ def test_selected_api_read_failure_is_not_successful_empty_acquisition(tmp_path,
     item, captured = _selection_revise_fixture(tmp_path)
     selected = item / "agent-runs.jsonl"
     selected.write_bytes(captured)
-    original = Path.read_bytes
-    def fail_selected(path):
+    original = module.read_ledger_bytes
+    def fail_selected(path, *args, **kwargs):
         if path == selected:
             raise OSError("controlled selected acquisition failure")
-        return original(path)
-    monkeypatch.setattr(Path, "read_bytes", fail_selected)
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(module, "read_ledger_bytes", fail_selected)
     acquired = []
     errors = module.validate_work_item(item, ledger_acquisition_complete_out=acquired)
     assert any("cannot read ledger:" in value and "controlled selected acquisition failure" in value for value in errors)
