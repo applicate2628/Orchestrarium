@@ -1615,21 +1615,9 @@ _LEGACY_PROJECTION_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}
 
 
 def _legacy_projection_path_parts(value: object, prefix: tuple[str, ...], failure_id: str) -> list[str]:
-    """One lexical owner for both physical and captured projection locators."""
-    if (
-        not isinstance(value, str)
-        or not value
-        or "\x00" in value
-        or "\\" in value
-        or ":" in value
-        or value.startswith("/")
-        or value.startswith("//")
-    ):
-        raise ValueError(f"{failure_id}: unsafe projection path")
-    parts = value.split("/")
-    if any(part in {"", ".", ".."} for part in parts) or tuple(parts[:len(prefix)]) != prefix:
-        raise ValueError(f"{failure_id}: projection path escapes its structural scope")
-    return parts
+    return load_lifecycle_owner()._legacy_projection_path_parts(
+        value, prefix, failure_id
+    )
 
 
 def confine_legacy_projection_path(

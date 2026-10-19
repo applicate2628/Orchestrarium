@@ -163,21 +163,20 @@ def test_validator_factory_binds_actual_registered_owner_for_aliases(tmp_path: P
 def test_validator_factory_refuses_unqualified_lifecycle_origin(tmp_path, monkeypatch, origin):
     module, _runtime, _alias, _physical, subject = _runtime_authority_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(module, "_LIFECYCLE_MODULE_ORIGIN", origin, raising=False)
-    transaction = module.LifecycleTransaction(subject)
-    with pytest.raises(module.LifecycleError) as closing:
-        with transaction:
-            token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
-            try:
-                with pytest.raises(module.LifecycleError) as refused:
-                    module._validator_module()
-                assert refused.value.failure_id == "WI-VALIDATOR-LOAD"
-                assert transaction._source_admission_failure is refused.value
-                assert transaction._validator_reuse is None
-            finally:
-                module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
-    assert closing.value.failure_id == "WI-VALIDATOR-LOAD"
-    assert transaction._source_admission_failure is closing.value
-    assert transaction._validator_reuse is None
+    subject_before = {
+        path.relative_to(subject).as_posix(): path.read_bytes()
+        for path in subject.rglob("*")
+        if path.is_file()
+    }
+    with pytest.raises(module.LifecycleError) as refused:
+        module.LifecycleTransaction(subject)
+    assert refused.value.failure_id == "WI-VALIDATOR-LOAD"
+    assert not (subject / module.LIFECYCLE_LOCK_RELATIVE).exists()
+    assert {
+        path.relative_to(subject).as_posix(): path.read_bytes()
+        for path in subject.rglob("*")
+        if path.is_file()
+    } == subject_before
 
 
 def test_standalone_validator_owners_survive_registration_replacement_and_removal(tmp_path, monkeypatch):

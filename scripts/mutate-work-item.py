@@ -3880,7 +3880,7 @@ def _legacy_relative(value, *, root_directory=False):
     if root_directory and value == ".":
         return "."
     try:
-        _validator_module()._legacy_projection_path_parts(value, (), "WI-LEGACY-COMPLETION-CUSTODY")
+        _legacy_projection_path_parts(value, (), "WI-LEGACY-COMPLETION-CUSTODY")
     except (ValueError, TypeError) as exc:
         raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", str(exc)) from exc
     return value
@@ -5341,6 +5341,24 @@ def _work_items_root(
 def is_valid_slug(slug: str) -> bool:
     """Return whether *slug* satisfies the canonical lifecycle identity grammar."""
     return isinstance(slug, str) and SLUG_RE.fullmatch(slug) is not None
+
+
+def _legacy_projection_path_parts(value: object, prefix: tuple[str, ...], failure_id: str) -> list[str]:
+    """One lexical owner for both physical and captured projection locators."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or "\x00" in value
+        or "\\" in value
+        or ":" in value
+        or value.startswith("/")
+        or value.startswith("//")
+    ):
+        raise ValueError(f"{failure_id}: unsafe projection path")
+    parts = value.split("/")
+    if any(part in {"", ".", ".."} for part in parts) or tuple(parts[:len(prefix)]) != prefix:
+        raise ValueError(f"{failure_id}: projection path escapes its structural scope")
+    return parts
 
 
 def _validate_slug(slug: str) -> None:
