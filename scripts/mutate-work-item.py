@@ -1060,6 +1060,31 @@ class LifecycleTransaction:
                 self._retain_integrity_failure(constraint, failure, paths=paths)
             raise
 
+    def _verify_admitted_observation(self, snapshot, verification):
+        """Bind actual admission before a fallible local observation check."""
+        admitted = None
+        if isinstance(snapshot, (CapturedFileSnapshot, CapturedDirectorySnapshotV1)):
+            retained = self._retained_observations.get(snapshot.path)
+            if isinstance(retained, (CapturedFileSnapshot, CapturedDirectorySnapshotV1)):
+                if retained is snapshot:
+                    admitted = retained
+                else:
+                    try:
+                        minted = (not isinstance(snapshot, CapturedDirectorySnapshotV1)
+                            or (isinstance(retained, CapturedDirectorySnapshotV1)
+                                and getattr(retained, "capture_binding", None) == _directory_capture_binding(retained)
+                                and getattr(snapshot, "capture_binding", None) == _directory_capture_binding(snapshot)))
+                        if (minted and _captured_observations_equivalent(retained, snapshot)
+                                and (not isinstance(snapshot, CapturedFileSnapshot)
+                                     or snapshot.require_single_link == retained.require_single_link)):
+                            admitted = retained
+                    except (AttributeError, TypeError, ValueError):
+                        # Malformed copies cannot establish admission; their own check still runs.
+                        pass
+        if admitted is None:
+            return verification()
+        return self._verify_integrity_constraint(admitted, verification)
+
     def _retain_integrity_failures(self):
         for snapshot in tuple(self._retained_observations.values()):
             if self._is_runtime_source(snapshot.path):
@@ -1823,24 +1848,21 @@ class LifecycleTransaction:
                 "lifecycle lock handle/path identity changed",
             )
         for snapshot in observations.values():
-            try:
+            def verification():
                 if isinstance(snapshot, CapturedDirectorySnapshotV1):
                     _verify_owned_directory_snapshot(snapshot, "WI-CATEGORY-MIGRATION-INVENTORY",
                         **({"creation_owner": creation_owner} if creation_owner is not None else {}))
                 else:
                     _verify_captured_file(snapshot, "WI-CATEGORY-MIGRATION-INVENTORY")
+            try:
+                if self._is_runtime_source(snapshot.path):
+                    verification()
+                else:
+                    self._verify_admitted_observation(snapshot, verification)
             except BaseException as failure:
                 self._validator_reuse = None
                 if self._is_runtime_source(snapshot.path):
                     self._retain_source_failure(failure)
-                else:
-                    admitted = self._retained_observations.get(snapshot.path)
-                    if admitted is snapshot or (admitted is not None
-                            and _captured_observations_equivalent(admitted, snapshot)
-                            and (not isinstance(snapshot, CapturedFileSnapshot)
-                                 or snapshot.require_single_link == admitted.require_single_link)):
-                        if isinstance(failure, (LifecycleError, OSError)):
-                            self._retain_integrity_failure(admitted, failure)
                 raise
 
     def observe_retained_inputs(self, snapshots: Iterable[CapturedFileSnapshot | CapturedDirectorySnapshotV1]) -> None:
@@ -4658,8 +4680,7 @@ class SettledWorkItemHistoryInputV1:
         _settled_history_input(self)
         for snapshot in self._current_files:
             _verify_captured_file(snapshot, "WI-LEGACY-COMPLETION-DRIFT")
-        for snapshot in self._current_directories:
-            _verify_captured_directory(snapshot, "WI-LEGACY-COMPLETION-DRIFT")
+        _verify_captured_directories(self._current_directories, "WI-LEGACY-COMPLETION-DRIFT")
 
 
 def _legacy_freeze(value):
@@ -5152,8 +5173,7 @@ class AcquiredWorkItemInputV1:
             if not stat.S_ISREG(metadata.st_mode) or _lifecycle_file_identity(metadata) != row.original.identity:
                 raise LifecycleError("WI-LEGACY-COMPLETION-CUSTODY", "original file/native directory association differs")
             _verify_captured_file(row.current, "WI-LEGACY-COMPLETION-DRIFT")
-        for snapshot in current_directories.values():
-            _verify_captured_directory(snapshot, "WI-LEGACY-COMPLETION-DRIFT")
+        _verify_captured_directories(current_directories.values(), "WI-LEGACY-COMPLETION-DRIFT")
 
 
 def _call_acquired_input(acquired_input, method: str, *args, **kwargs):
@@ -21406,11 +21426,24 @@ def _capture_owned_directory_snapshot(path: Path, *, failure_id: str, creation_o
                     object.__setattr__(movement, "observation_owner", None)
 
 
-def _verify_captured_directory(snapshot: CapturedDirectorySnapshotV1, failure_id: str, *, inverse=None):
+def _verify_captured_directories(snapshots: Iterable[CapturedDirectorySnapshotV1], failure_id: str, *, inverse=None):
+    snapshots = iter(snapshots)
+    try:
+        first = next(snapshots)
+    except StopIteration:
+        return
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
     if transaction is not None:
         transaction.verify(inverse=inverse)
-    _verify_owned_directory_snapshot(snapshot, failure_id)
+    def verify_snapshot(snapshot):
+        verification = lambda: _verify_owned_directory_snapshot(snapshot, failure_id)
+        if transaction is None:
+            verification()
+        else:
+            transaction._verify_admitted_observation(snapshot, verification)
+    verify_snapshot(first)
+    for snapshot in snapshots:
+        verify_snapshot(snapshot)
     if transaction is not None:
         transaction.verify(inverse=inverse)
 

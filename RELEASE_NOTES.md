@@ -12,6 +12,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Legacy-flat close derives the generated README from the operation's prepared final images for affected backlog, active, roadmap, archive and relation-resolved inputs. The static guide retains its existing acquisition path, and ordinary post-apply readers independently verify the persisted category, dependency, README, replay and audit state.
 
+- Lifecycle verification now guards each complete selected directory collection around its ordered local native proofs. Failure attribution is bound to the admitted observation before the callback, while unadmitted local errors remain outside transaction history.
+
 - Active-successor staging now retires only current file and directory snapshots admitted by the version-1 intent and receipt, publishing each effect through the lifecycle transaction owner. Same-invocation cleanup removes the shared staging parent only through its actual creator record; preexisting or restarted shared parents and unrelated siblings remain preserved. Unknown contents or failed effects leave the operation pending for recovery; public intent, receipt and replay formats remain unchanged.
 
 ## 2026-10-19

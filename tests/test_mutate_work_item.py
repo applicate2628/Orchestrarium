@@ -15676,6 +15676,316 @@ def _directory_observation_stat(info, **changes):
     return os.stat_result(values, attributes)
 
 
+@pytest.mark.parametrize("candidate_kind", ("exact", "exact-corrupt-at-entry", "minted-equivalent"))
+def test_collection_admission_binds_before_failure_and_restoration(tmp_path, candidate_kind):
+    module, root, source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    admitted = module._capture_owned_directory_snapshot(source, failure_id="TEST")
+    candidate = replace(admitted) if candidate_kind == "minted-equivalent" else admitted
+    cause = OSError("original native cause")
+    first = module.LifecycleError("TEST-COLLECTION-LOCAL", "original local refusal")
+    first.__cause__ = cause
+    original_binding = candidate.capture_binding
+    original_members = candidate.members
+    with pytest.raises(module.LifecycleError) as final:
+        with module.LifecycleTransaction(root) as transaction:
+            transaction.observe_retained_inputs((admitted,))
+            transaction._validator_reuse = object()
+            if candidate_kind == "exact-corrupt-at-entry":
+                object.__setattr__(candidate, "capture_binding", ())
+            calls = []
+            def refuse():
+                calls.append(candidate)
+                object.__setattr__(candidate, "capture_binding", ())
+                object.__setattr__(candidate, "members", ())
+                raise first
+            try:
+                with pytest.raises(module.LifecycleError) as caught:
+                    transaction._verify_admitted_observation(candidate, refuse)
+                assert caught.value is first and caught.value.__cause__ is cause
+            finally:
+                object.__setattr__(candidate, "capture_binding", original_binding)
+                object.__setattr__(candidate, "members", original_members)
+            assert calls == [candidate]
+            failures = [value for kind, value in transaction.current_binding_evidence if kind == "integrity-failure"]
+            assert failures[0][0] is admitted and failures[0][1] is first
+            assert sum(row[1] is first for row in failures) == 1
+            assert transaction._validator_reuse is None
+            with pytest.raises(module.LifecycleError) as sticky:
+                transaction.verify()
+            assert sticky.value is first
+    assert final.value is first and not transaction._locked and transaction._file is None
+
+
+@pytest.mark.parametrize("invalid", ("empty-mint", "none-mint", "missing-mint", "different-parent", "different-metadata", "different-members", "unadmitted", "none-entry", "none-candidate"))
+def test_collection_unadmitted_local_failure_never_poisoned_transaction(tmp_path, invalid):
+    module, root, source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    admitted = module._capture_owned_directory_snapshot(source, failure_id="TEST")
+    candidate = replace(admitted)
+    if invalid == "empty-mint":
+        candidate = replace(candidate, capture_binding=())
+    elif invalid == "none-mint":
+        candidate = replace(candidate, capture_binding=None)
+    elif invalid == "missing-mint":
+        object.__delattr__(candidate, "capture_binding")
+    elif invalid == "different-parent":
+        candidate = replace(candidate, parent_chain=module.CapturedPathParentChain(()))
+    elif invalid == "different-metadata":
+        candidate = replace(candidate, metadata=_directory_observation_stat(candidate.metadata, st_ino=0))
+    elif invalid == "different-members":
+        candidate = replace(candidate, members=())
+    elif invalid == "none-candidate":
+        candidate = None
+    if invalid.startswith("different-"):
+        object.__setattr__(candidate, "capture_binding", module._directory_capture_binding(candidate))
+    with module.LifecycleTransaction(root) as transaction:
+        if invalid not in ("unadmitted", "none-entry"):
+            transaction.observe_retained_inputs((admitted,))
+        elif invalid == "none-entry":
+            transaction._retained_observations[source] = None
+        before = transaction.current_binding_evidence
+        reuse = transaction._validator_reuse = object()
+        first = module.LifecycleError("TEST-LOCAL-ONLY", "port-local refusal")
+        cause = OSError("port-local native cause")
+        first.__cause__ = cause
+        def refuse():
+            # Post-failure equality cannot manufacture admission.
+            if candidate is not None:
+                for field in ("parent_chain", "metadata", "members", "capture_binding"):
+                    object.__setattr__(candidate, field, getattr(admitted, field))
+            raise first
+        with pytest.raises(module.LifecycleError) as caught:
+            transaction._verify_admitted_observation(candidate, refuse)
+        assert caught.value is first and caught.value.__cause__ is cause
+        assert transaction.current_binding_evidence is before
+        assert transaction._source_admission_failure is None and transaction._validator_reuse is reuse
+        if invalid == "none-entry":
+            del transaction._retained_observations[source]
+        transaction.verify()
+
+
+def test_collection_genuine_empty_native_mint_and_file_qualification(tmp_path):
+    module, root, _source, _destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
+    empty = root / "empty"; empty.mkdir()
+    directory = module._capture_owned_directory_snapshot(empty, failure_id="TEST")
+    file = module._capture_file_snapshot(leaf, failure_id="TEST")
+    with module.LifecycleTransaction(root) as transaction:
+        transaction.observe_retained_inputs((directory, file))
+        observed = []
+        original = transaction._verify_integrity_constraint
+        def track(constraint, verification):
+            observed.append(constraint)
+            return original(constraint, verification)
+        transaction._verify_integrity_constraint = track
+        transaction._verify_admitted_observation(replace(directory), lambda: None)
+        transaction._verify_admitted_observation(replace(file), lambda: None)
+        transaction._verify_admitted_observation(replace(file, require_single_link=True), lambda: None)
+        assert observed == [directory, file]
+
+
+def test_collection_guards_are_fresh_ordered_and_keep_local_failures(tmp_path, monkeypatch):
+    module, _root, source, _destination, _leaf, outside = _relocation_observation_fixture(tmp_path)
+    snapshots = tuple(module._capture_owned_directory_snapshot(path, failure_id="TEST")
+                      for path in (source, outside.parent))
+    events = []
+    class Transaction:
+        def verify(self, *, inverse=None):
+            events.append(("global", inverse))
+        def _verify_admitted_observation(self, snapshot, verification):
+            events.append(("bind", snapshot.path))
+            return verification()
+    real = module._verify_owned_directory_snapshot
+    def local(snapshot, failure_id):
+        events.append(("native", snapshot.path))
+        # The scheduling double has no native ownership; acquire the real proof standalone.
+        native_token = module._CURRENT_LIFECYCLE_TRANSACTION.set(None)
+        try:
+            return real(snapshot, failure_id)
+        finally:
+            module._CURRENT_LIFECYCLE_TRANSACTION.reset(native_token)
+    monkeypatch.setattr(module, "_verify_owned_directory_snapshot", local)
+    token = module._CURRENT_LIFECYCLE_TRANSACTION.set(Transaction())
+    try:
+        for _ in range(2):
+            module._verify_captured_directories(snapshots, "TEST", inverse="owned-inverse")
+        expected = [("global", "owned-inverse")]
+        for snapshot in snapshots:
+            expected += [("bind", snapshot.path), ("native", snapshot.path)]
+        expected += [("global", "owned-inverse")]
+        assert events == expected * 2
+        events.clear()
+        module._verify_captured_directories((), "TEST")
+        assert events == []
+        with pytest.raises(AttributeError):
+            module._verify_captured_directories((None,), "TEST")
+        assert events == [("global", None)]
+        events.clear()
+        first = module.LifecycleError("TEST-LOCAL", "stop before successful postguard")
+        def refuse(snapshot, failure_id):
+            events.append(("refuse", snapshot.path))
+            raise first
+        monkeypatch.setattr(module, "_verify_owned_directory_snapshot", refuse)
+        with pytest.raises(module.LifecycleError) as caught:
+            module._verify_captured_directories(snapshots, "TEST")
+        assert caught.value is first
+        assert events == [("global", None), ("bind", snapshots[0].path), ("refuse", snapshots[0].path)]
+    finally:
+        module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+    events.clear()
+    monkeypatch.setattr(module, "_verify_owned_directory_snapshot", local)
+    module._verify_captured_directories(snapshots, "TEST")
+    assert events == [("native", snapshot.path) for snapshot in snapshots]
+
+
+def test_collection_success_exit_refuses_persistent_midcollection_drift(tmp_path, monkeypatch):
+    module, root, source, _destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    snapshots = tuple(module._capture_owned_directory_snapshot(path, failure_id="TEST")
+                      for path in (source, outside.parent))
+    retained = module._capture_file_snapshot(leaf, failure_id="TEST")
+    first = None
+    with pytest.raises(module.LifecycleError):
+        with module.LifecycleTransaction(root) as transaction:
+            transaction.observe_retained_inputs((retained,))
+            token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            real = module._verify_owned_directory_snapshot
+            checked = []
+            def change_after_local(snapshot, failure_id, **kwargs):
+                real(snapshot, failure_id, **kwargs)
+                checked.append(snapshot.path)
+                if snapshot is snapshots[0]:
+                    leaf.write_bytes(b"changed retained evidence")
+            try:
+                with monkeypatch.context() as scoped:
+                    scoped.setattr(module, "_verify_owned_directory_snapshot", change_after_local)
+                    with pytest.raises(module.LifecycleError) as refused:
+                        module._verify_captured_directories(snapshots, "TEST")
+                first = refused.value
+                assert checked == [snapshot.path for snapshot in snapshots]
+            finally:
+                module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+            leaf.write_bytes(retained.data)
+            with pytest.raises(module.LifecycleError) as sticky:
+                transaction.verify()
+            assert sticky.value is first
+
+
+def test_collection_local_admitted_refusal_is_sticky_through_real_boundary(tmp_path, monkeypatch):
+    module, root, source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    admitted = module._capture_owned_directory_snapshot(source, failure_id="TEST")
+    supplied = replace(admitted)
+    first = module.LifecycleError("TEST-LOCAL", "actual collection local refusal")
+    with pytest.raises(module.LifecycleError) as final:
+        with module.LifecycleTransaction(root) as transaction:
+            transaction.observe_retained_inputs((admitted,))
+            token = module._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            real = module._verify_owned_directory_snapshot
+            calls = []
+            def refuse_local(snapshot, failure_id, **kwargs):
+                if failure_id == "TEST-LOCAL":
+                    calls.append(snapshot)
+                    object.__setattr__(snapshot, "capture_binding", ())
+                    raise first
+                return real(snapshot, failure_id, **kwargs)
+            try:
+                with monkeypatch.context() as scoped:
+                    scoped.setattr(module, "_verify_owned_directory_snapshot", refuse_local)
+                    with pytest.raises(module.LifecycleError) as caught:
+                        module._verify_captured_directories((supplied,), "TEST-LOCAL")
+                assert caught.value is first and calls == [supplied]
+            finally:
+                object.__setattr__(supplied, "capture_binding", admitted.capture_binding)
+                module._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+            assert transaction._retained_observations[source] is admitted
+            with pytest.raises(module.LifecycleError) as sticky:
+                transaction.verify()
+            assert sticky.value is first
+    assert final.value is first and not transaction._locked
+
+
+def test_collection_global_route_keeps_minted_equivalent_and_rejects_unminted(tmp_path):
+    module, root, source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    admitted = module._capture_owned_directory_snapshot(source, failure_id="TEST")
+    with module.LifecycleTransaction(root) as transaction:
+        transaction.observe_retained_inputs((admitted,))
+        transaction._verify_observation_map({source: replace(admitted)})
+        before = transaction.current_binding_evidence
+        transaction._validator_reuse = object()
+        with pytest.raises(module.LifecycleError, match="not minted intact"):
+            transaction._verify_observation_map({source: replace(admitted, capture_binding=())})
+        assert transaction.current_binding_evidence is before
+        assert transaction._validator_reuse is None and transaction._source_admission_failure is None
+        transaction.verify()
+
+
+def test_collection_midpoint_native_directory_replacement(tmp_path, monkeypatch):
+    module, _root, source, _destination, _leaf, outside = _relocation_observation_fixture(tmp_path)
+    snapshots = tuple(module._capture_owned_directory_snapshot(path, failure_id="TEST")
+                      for path in (source, outside.parent))
+    held = outside.parent.with_name("held-outside")
+    real = module._verify_owned_directory_snapshot
+    checked = []
+    def replace_after_first(snapshot, failure_id):
+        checked.append(snapshot)
+        real(snapshot, failure_id)
+        if snapshot is snapshots[0]:
+            outside.parent.rename(held)
+            outside.parent.mkdir()
+    monkeypatch.setattr(module, "_verify_owned_directory_snapshot", replace_after_first)
+    try:
+        with pytest.raises(module.LifecycleError) as refused:
+            module._verify_captured_directories(snapshots, "TEST-NATIVE-MIDPOINT")
+        assert refused.value.failure_id == "TEST-NATIVE-MIDPOINT"
+        assert checked == list(snapshots)
+    finally:
+        if held.exists():
+            outside.parent.rmdir()
+            held.rename(outside.parent)
+    assert outside.read_bytes() == b"unaffected original proof"
+
+
+def test_collection_primary_survives_discriminator_failure(tmp_path, monkeypatch):
+    module, root, source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    admitted = module._capture_owned_directory_snapshot(source, failure_id="TEST")
+    primary = module.LifecycleError("TEST-PRIMARY", "first acquired local refusal")
+    cause = OSError("original native read cause"); primary.__cause__ = cause
+    secondary = OSError("later failure-path discriminator refusal")
+    with pytest.raises(module.LifecycleError) as final:
+        with module.LifecycleTransaction(root) as transaction:
+            transaction.observe_retained_inputs((admitted,))
+            def discriminator(constraint):
+                assert constraint is admitted
+                raise secondary
+            monkeypatch.setattr(transaction, "_failure_paths", discriminator)
+            def refuse():
+                raise primary
+            with pytest.raises(module.LifecycleError) as caught:
+                transaction._verify_admitted_observation(admitted, refuse)
+            assert caught.value is primary and caught.value.__cause__ is cause
+            failures = [value for kind, value in transaction.current_binding_evidence if kind == "integrity-failure"]
+            assert [row[1] for row in failures] == [primary, secondary]
+            assert all(row[0] is admitted for row in failures)
+            with pytest.raises(module.LifecycleError) as sticky:
+                transaction.verify()
+            assert sticky.value is primary
+    assert final.value is primary and not transaction._locked
+
+
+def test_collection_noneligible_local_failure_stays_local(tmp_path):
+    module, root, source, _destination, _leaf, _outside = _relocation_observation_fixture(tmp_path)
+    admitted = module._capture_owned_directory_snapshot(source, failure_id="TEST")
+    with module.LifecycleTransaction(root) as transaction:
+        transaction.observe_retained_inputs((admitted,))
+        before = transaction.current_binding_evidence
+        reuse = transaction._validator_reuse = object()
+        first = RuntimeError("noneligible port-local failure")
+        def refuse():
+            raise first
+        with pytest.raises(RuntimeError) as caught:
+            transaction._verify_admitted_observation(admitted, refuse)
+        assert caught.value is first and transaction.current_binding_evidence is before
+        assert transaction._validator_reuse is reuse and transaction._source_admission_failure is None
+        transaction.verify()
+
+
 def _directory_observation_atime_change(module, snapshot):
     def changed(info):
         return _directory_observation_stat(info, st_atime=info.st_atime + 1,
