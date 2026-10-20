@@ -1743,6 +1743,68 @@ def test_append_rejects_malformed_or_unsafe_launch_flag_binding(
     assert not ledger.exists() or ledger.read_text(encoding="utf-8") == ""
 
 
+def test_claude_explicit_empty_tools_roundtrips_public_writer_and_reader(tmp_path: Path) -> None:
+    spec = importlib.util.spec_from_file_location("empty_tools_producer_fixture", ROOT / "scripts/provider_prompt.py")
+    producer = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = producer
+    spec.loader.exec_module(producer)
+    control = producer.parse_control([
+        "fixture-text-only", "-p", "--output-format", "text", "--model", "opus",
+        "--effort", "xhigh", "--tools", "",
+    ], provider="claude")
+    flags, model, effort = producer.resolved_profile("claude", control.provider_flags)
+    item = prepare_valid_work_item(tmp_path)
+    common = [
+        "--role", "external-reviewer", "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer", "--provider", "claude", "--model", model,
+        "--effort", effort, "--scope", "synthetic empty-tool ledger contract",
+        "--artifact", "reviews/qa.md", "--launch-flags-json", json.dumps(flags),
+    ]
+    launch = run_ledger(
+        item, "append", *common, "--run-id", "fixture-empty-tools-launch",
+        "--status", "running", "--gate", "none", "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stdout + launch.stderr
+    terminal = run_ledger(
+        item, "append", *common, "--run-id", "fixture-empty-tools-terminal",
+        "--status", "completed", "--gate", "PASS", "--event-kind", "terminal",
+        "--launch-run-id", "fixture-empty-tools-launch", "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false", "--actual-execution-path", "direct-external-cli",
+        "--artifact-identity", "sha256:" + hashlib.sha256((item / "reviews/qa.md").read_bytes()).hexdigest(),
+        "--evidence", "artifact:reviews/qa.md",
+    )
+    assert terminal.returncode == 0, terminal.stdout + terminal.stderr
+    events = [json.loads(line) for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [event["launchFlags"] for event in events] == [flags, flags]
+    assert all(event["launchFlags"][event["launchFlags"].index("--tools") + 1] == "" for event in events)
+    assert events[1]["authorizing"] is False and events[1]["launchRunId"] == events[0]["runId"]
+    reader = run_validator(item)
+    assert reader.returncode == 0, reader.stdout + reader.stderr
+
+
+@pytest.mark.parametrize("flag", ("--tools", "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools"))
+def test_persisted_claude_nonempty_tool_lists_preserve_exact_profile(flag: str) -> None:
+    validator = load_ledger_module().load_validator()
+    flags = ["-p", "--model", "opus", "--effort", "xhigh", flag, "Read,Grep"]
+    assert validator.validate_launch_profile("claude", flags) == (tuple(flags), "opus", "xhigh")
+
+
+@pytest.mark.parametrize(
+    "selection",
+    (
+        ("--allowedTools", ""), ("--allowed-tools", ""),
+        ("--disallowedTools", ""), ("--disallowed-tools", ""),
+        ("--tools", " "), ("--tools", ","), ("--tools", "Read,"),
+        ("--tools", "Read,,Grep"), ("--tools", "Read;Bash"),
+        ("--tools", "--permission-mode"), ("--tools",), ("--tools=",),
+    ),
+)
+def test_persisted_claude_other_empty_flags_and_malformed_tools_refuse(selection) -> None:
+    validator = load_ledger_module().load_validator()
+    with pytest.raises(ValueError, match="invalid launch flags"):
+        validator.validate_launch_profile("claude", ["-p", "--model", "opus", "--effort", "xhigh", *selection])
+
+
 def test_terminal_launch_flags_must_match_the_referenced_launch(tmp_path: Path) -> None:
     item = prepare_valid_work_item(tmp_path)
     common = [

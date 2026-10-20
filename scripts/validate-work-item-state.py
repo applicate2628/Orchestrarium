@@ -328,7 +328,8 @@ def validate_launch_profile(
             "--tools", "--allowedTools", "--allowed-tools",
             "--disallowedTools", "--disallowed-tools",
         } and index + 1 < len(exact):
-            if _CLAUDE_TOOL_LIST.fullmatch(exact[index + 1]) is None:
+            value = exact[index + 1]
+            if not (token == "--tools" and value == "") and _CLAUDE_TOOL_LIST.fullmatch(value) is None:
                 raise ValueError("invalid launch flags")
             index += 2
             continue

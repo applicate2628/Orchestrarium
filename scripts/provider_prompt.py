@@ -3005,7 +3005,8 @@ def normalize_launch_profile(
             "--tools", "--allowedTools", "--allowed-tools",
             "--disallowedTools", "--disallowed-tools",
         } and index + 1 < len(frozen):
-            if _CLAUDE_TOOL_LIST.fullmatch(frozen[index + 1]) is None:
+            value = frozen[index + 1]
+            if not (token == "--tools" and value == "") and _CLAUDE_TOOL_LIST.fullmatch(value) is None:
                 raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
             index += 2
             continue
