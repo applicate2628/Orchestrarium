@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import shutil
 import stat
 import subprocess
@@ -1954,6 +1955,39 @@ def _receipt_fixture(tmp_path: Path):
     return installer, source, anchor, skills, skills / ".orchestrarium-lead-receipt.v1.json"
 
 
+def _write_directory_attributes(installer, path: Path, attributes: int) -> None:
+    ctypes_api, _wintypes, kernel, *_rest = installer._WindowsBoundNode._api()
+    with installer._WindowsBoundNode(path, purpose="attributes") as bound:
+        basic = bound.basic()
+        basic.attributes = attributes
+        if not kernel.SetFileInformationByHandle(
+            bound.live_handle, 0, ctypes_api.byref(basic), ctypes_api.sizeof(basic)
+        ):
+            raise ctypes_api.WinError(ctypes_api.get_last_error())
+
+
+def _flip_directory_binding_attributes(installer, path: Path):
+    before = installer._InstallTransaction._capture_node(path)
+    raw_change_bits = stat.FILE_ATTRIBUTE_ARCHIVE | stat.FILE_ATTRIBUTE_READONLY
+    attributes = before.python_identity[3] ^ raw_change_bits
+    _write_directory_attributes(installer, path, attributes)
+    requested = stat.S_IMODE(before.python_identity[2])
+    if attributes & stat.FILE_ATTRIBUTE_READONLY:
+        requested &= ~stat.S_IWRITE
+    else:
+        requested |= stat.S_IWRITE
+    path.chmod(requested)
+    after = installer._InstallTransaction._capture_node(path)
+    assert before.kind == after.kind == "directory"
+    assert before.python_identity[:2] == after.python_identity[:2]
+    assert before.native_proof == after.native_proof
+    assert before.python_identity[3] ^ after.python_identity[3] == raw_change_bits
+    assert after.python_identity[2] == installer._InstallTransaction._chmod_identity(
+        before.python_identity, requested
+    )[2]
+    return before, after
+
+
 def _apply_receipted(installer, source: Path, anchor: Path, skills: Path,
                      *, dry_run: bool = False) -> None:
     plan = installer._preflight_canonical_skills(
@@ -2053,6 +2087,131 @@ def test_lead_receipt_transaction_failpoints(tmp_path: Path, monkeypatch, failpo
         installer._discard_canonical_skills_plan(plan)
     assert _tree_bytes(skills) == before
     assert receipt.read_bytes() == before[Path(".orchestrarium-lead-receipt.v1.json")]
+
+
+def test_lead_receipt_commit_accepts_published_directory_metadata_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows directory attribute binding")
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    monkeypatch.setattr(installer.tempfile, "tempdir", str(tmp_path))
+    created_temporaries = []
+    real_mkdtemp = installer.tempfile.mkdtemp
+
+    def record_mkdtemp(*args, **kwargs):
+        path = Path(real_mkdtemp(*args, **kwargs))
+        created_temporaries.append(path)
+        return str(path)
+
+    monkeypatch.setattr(installer.tempfile, "mkdtemp", record_mkdtemp)
+    _apply_receipted(installer, source, anchor, skills)
+    sibling = skills / "protected-sibling.bin"
+    sibling.write_bytes(b"protected sibling")
+    before = _tree_bytes(skills)
+    receipt_before = receipt.read_bytes()
+    (source / "lead" / "SKILL.md").write_bytes(b"new version")
+    plan = installer._preflight_canonical_skills(
+        source, skills, root=ROOT, global_install=True
+    )
+    lead = skills / "lead"
+    changed = []
+    original_replace = installer._CreateOnlyMutablePath.replace_exact_tree
+
+    def publish_then_drift(owner, relative, *args, **kwargs):
+        result = original_replace(owner, relative, *args, **kwargs)
+        if owner.anchor / relative == lead:
+            changed.append((lead, _flip_directory_binding_attributes(installer, lead)))
+            nested = lead / "scripts"
+            changed.append((nested, _flip_directory_binding_attributes(installer, nested)))
+        return result
+
+    monkeypatch.setattr(
+        installer._CreateOnlyMutablePath, "replace_exact_tree", publish_then_drift
+    )
+    try:
+        with installer._InstallTransaction([skills], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+            installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+            installer._finalize_canonical_lead_receipt(plan, skills, owner)
+            transaction.commit()
+        assert len(changed) == 2
+        assert (lead / "SKILL.md").read_bytes() == b"new version"
+        assert receipt.read_bytes() != receipt_before
+        assert json.loads(receipt.read_text(encoding="utf-8"))["treeSha256"] == installer._tree_sha256(lead)
+        assert sibling.read_bytes() == b"protected sibling"
+        assert _tree_bytes(skills) != before
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+        for path, _observations in reversed(changed):
+            if path.exists():
+                path.chmod(stat.S_IMODE(path.stat().st_mode) | stat.S_IWRITE)
+    assert transaction._temporary is None
+    assert all(not path.exists() for path in created_temporaries)
+
+
+def test_lead_receipt_rollback_restores_after_published_directory_metadata_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows directory attribute binding")
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    monkeypatch.setattr(installer.tempfile, "tempdir", str(tmp_path))
+    created_temporaries = []
+    real_mkdtemp = installer.tempfile.mkdtemp
+
+    def record_mkdtemp(*args, **kwargs):
+        path = Path(real_mkdtemp(*args, **kwargs))
+        created_temporaries.append(path)
+        return str(path)
+
+    monkeypatch.setattr(installer.tempfile, "mkdtemp", record_mkdtemp)
+    _apply_receipted(installer, source, anchor, skills)
+    sibling = skills / "protected-sibling.bin"
+    sibling.write_bytes(b"protected sibling")
+    before = _tree_bytes(skills)
+    receipt_before = receipt.read_bytes()
+    old_metadata = (skills / "lead").stat()
+    old_mode_and_attributes = old_metadata.st_mode, old_metadata.st_file_attributes
+    (source / "lead" / "SKILL.md").write_bytes(b"new version")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+    lead = skills / "lead"
+    changed = []
+    original_replace = installer._CreateOnlyMutablePath.replace_exact_tree
+
+    def fail_after_publish_then_drift(owner, relative, *args, **kwargs):
+        result = original_replace(owner, relative, *args, **kwargs)
+        if owner.anchor / relative == lead:
+            changed.append((lead, _flip_directory_binding_attributes(installer, lead)))
+            raise RuntimeError("injected after lead metadata drift")
+        return result
+
+    monkeypatch.setattr(
+        installer._CreateOnlyMutablePath,
+        "replace_exact_tree",
+        fail_after_publish_then_drift,
+    )
+    try:
+        transaction = installer._InstallTransaction([skills], enabled=True)
+        with pytest.raises(RuntimeError, match="injected after lead metadata drift"):
+            with transaction:
+                owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+                installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+                installer._finalize_canonical_lead_receipt(plan, skills, owner)
+                transaction.commit()
+        assert changed
+        assert _tree_bytes(skills) == before
+        assert receipt.read_bytes() == receipt_before
+        restored = installer._InstallTransaction([], enabled=False)._capture_node(lead)
+        assert (restored.python_identity[2], restored.python_identity[3]) == old_mode_and_attributes
+        assert sibling.read_bytes() == b"protected sibling"
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+        if (lead.exists() and changed
+                and (lead.stat().st_dev, lead.stat().st_ino) == changed[-1][1][1].python_identity[:2]):
+            lead.chmod(stat.S_IMODE(lead.stat().st_mode) | stat.S_IWRITE)
+    assert transaction._temporary is None
+    assert all(not path.exists() for path in created_temporaries)
 
 
 def test_unreceipted_lead_adoption_is_digest_bound_global_only(tmp_path: Path) -> None:

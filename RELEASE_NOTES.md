@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-20
+
+- Windows installer binding now recognizes the same ordinary directory by its kind and stable volume/file identity, while keeping raw metadata observations intact. Permission and decoration metadata no longer serve as directory identity; requested metadata writes/restores, file and link checks, content, membership, native proof and actual access denials remain enforced.
+
 ## 2026-10-19
 
 - Managed lifecycle transitions can select finite input resources from actual native pending-state metadata and reserve their complete prepared output before writing. Large valid proof/history images retain their full payload and existing ownership checks; fresh recovery and public check/ledger callers carry the same resource input. Explicit read or output ceilings still refuse insufficient demand, and compatible readers must be deployed before enlarged pending writes.

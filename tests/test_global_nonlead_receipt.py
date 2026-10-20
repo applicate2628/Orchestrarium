@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -58,6 +59,39 @@ def _apply(installer, source: Path, home: Path, skills: Path) -> None:
         installer._discard_canonical_skills_plan(plan)
 
 
+def _write_directory_attributes(installer, path: Path, attributes: int) -> None:
+    ctypes_api, _wintypes, kernel, *_rest = installer._WindowsBoundNode._api()
+    with installer._WindowsBoundNode(path, purpose="attributes") as bound:
+        basic = bound.basic()
+        basic.attributes = attributes
+        if not kernel.SetFileInformationByHandle(
+            bound.live_handle, 0, ctypes_api.byref(basic), ctypes_api.sizeof(basic)
+        ):
+            raise ctypes_api.WinError(ctypes_api.get_last_error())
+
+
+def _flip_directory_binding_attributes(installer, path: Path):
+    before = installer._InstallTransaction._capture_node(path)
+    raw_change_bits = stat.FILE_ATTRIBUTE_ARCHIVE | stat.FILE_ATTRIBUTE_READONLY
+    attributes = before.python_identity[3] ^ raw_change_bits
+    _write_directory_attributes(installer, path, attributes)
+    requested = stat.S_IMODE(before.python_identity[2])
+    if attributes & stat.FILE_ATTRIBUTE_READONLY:
+        requested &= ~stat.S_IWRITE
+    else:
+        requested |= stat.S_IWRITE
+    path.chmod(requested)
+    after = installer._InstallTransaction._capture_node(path)
+    assert before.kind == after.kind == "directory"
+    assert before.python_identity[:2] == after.python_identity[:2]
+    assert before.native_proof == after.native_proof
+    assert before.python_identity[3] ^ after.python_identity[3] == raw_change_bits
+    assert after.python_identity[2] == installer._InstallTransaction._chmod_identity(
+        before.python_identity, requested
+    )[2]
+    return before, after
+
+
 def test_nonlead_receipt_two_named_skills_upgrade_a_b_c(tmp_path: Path) -> None:
     """A version change for either name must update one shared receipt map."""
     installer, source, home, skills, receipt = _fixture(tmp_path)
@@ -78,6 +112,57 @@ def test_nonlead_receipt_two_named_skills_upgrade_a_b_c(tmp_path: Path) -> None:
         versions.append(observed)
     assert all(versions[0][name] != versions[1][name] != versions[2][name]
                for name in NAMES)
+
+
+def test_nonlead_tree_commit_accepts_directory_metadata_binding_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows directory attribute binding")
+    installer, source, home, skills, receipt = _fixture(tmp_path)
+    monkeypatch.setattr(installer.tempfile, "tempdir", str(tmp_path))
+    _apply(installer, source, home, skills)
+    sibling = skills / "operator-data.bin"
+    sibling.write_bytes(b"protected sibling")
+    lead_before = _inventory(skills / "lead")
+    receipt_before = receipt.read_bytes()
+    (source / "analyst" / "SKILL.md").write_bytes(b"next source\n")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+    analyst = skills / "analyst"
+    changed = []
+    original_replace = installer._CreateOnlyMutablePath.replace_exact_tree
+
+    def publish_then_drift(owner, relative, *args, **kwargs):
+        result = original_replace(owner, relative, *args, **kwargs)
+        if owner.anchor / relative == analyst:
+            changed.append(_flip_directory_binding_attributes(installer, analyst))
+        return result
+
+    monkeypatch.setattr(installer._CreateOnlyMutablePath, "replace_exact_tree", publish_then_drift)
+    try:
+        with installer._InstallTransaction([skills], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(home, transaction, dry_run=False)
+            installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+            transaction.commit()
+        assert changed
+        assert (analyst / "SKILL.md").read_bytes() == b"next source\n"
+        assert receipt.read_bytes() != receipt_before
+        receipt_data = json.loads(receipt.read_bytes())
+        assert receipt_data == {
+            "schema": SCHEMA,
+            "skills": {
+                name: installer._tree_sha256(skills / name, ignore_runtime_cache=True)
+                for name in NAMES
+            },
+        }
+        assert _inventory(skills / "lead") == lead_before
+        assert sibling.read_bytes() == b"protected sibling"
+        assert transaction._temporary is None
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+        if analyst.exists():
+            analyst.chmod(stat.S_IMODE(analyst.stat().st_mode) | stat.S_IWRITE)
+    assert not tuple(tmp_path.glob("orchestrarium-install-transaction-*"))
 
 
 def _inventory(root: Path) -> dict[str, tuple[str, bytes | str]]:

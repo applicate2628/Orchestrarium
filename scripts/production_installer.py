@@ -2078,6 +2078,37 @@ class _InstallTransaction:
         return result
 
     @staticmethod
+    def _binding_identity_matches(
+        expected_identity: tuple[int, int, int, int],
+        observed_identity: tuple[int, int, int, int],
+    ) -> bool:
+        """Compare Windows ordinary directories by object identity, not raw metadata."""
+        identities = (expected_identity, observed_identity)
+        if any(
+            type(identity) is not tuple
+            or len(identity) != 4
+            or any(type(value) is not int for value in identity)
+            for identity in identities
+        ):
+            return False
+        if os.name != "nt":
+            return expected_identity == observed_identity
+        expected_device, expected_file_id, expected_mode, expected_attributes = expected_identity
+        observed_device, observed_file_id, observed_mode, observed_attributes = observed_identity
+        expected_directory = stat.S_ISDIR(expected_mode)
+        observed_directory = stat.S_ISDIR(observed_mode)
+        if expected_directory or observed_directory:
+            ordinary = (
+                expected_directory
+                and observed_directory
+                and (expected_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT) == 0
+                and (observed_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT) == 0
+            )
+            if ordinary:
+                return (expected_device, expected_file_id) == (observed_device, observed_file_id)
+        return expected_identity == observed_identity
+
+    @staticmethod
     def _node_metadata_matches(path: Path, expected: _PhysicalNode | None) -> bool:
         if expected is None:
             try:
@@ -2087,7 +2118,10 @@ class _InstallTransaction:
             return False
         try:
             def metadata_matches(current):
-                return (current.kind == expected.kind and current.python_identity == expected.python_identity
+                return (current.kind == expected.kind
+                        and _InstallTransaction._binding_identity_matches(
+                            expected.python_identity, current.python_identity
+                        )
                         and current.native_proof == expected.native_proof)
             if os.name == "nt":
                 with _WindowsBoundNode(path) as bound:
@@ -2305,7 +2339,8 @@ class _InstallTransaction:
 
     def _assert_readonly_bindings(self, dependency: _ReadOnlyPathDependency) -> None:
         owner, path = dependency.owner, dependency.path
-        if owner.transaction is not self or owner._identity(owner.anchor) != owner._anchor_identity:
+        if (owner.transaction is not self or not self._binding_identity_matches(
+                owner._anchor_identity, owner._identity(owner.anchor))):
             raise ValueError("E_READ_ONLY_DEPENDENCY_CHANGED: owner anchor")
         owner.destination(path.relative_to(owner.anchor))
         self._assert_readonly_parents(dependency.parents)
@@ -2816,7 +2851,7 @@ class _InstallTransaction:
             raise ValueError("E_MUTABLE_PATH_ESCAPE: scalar selection")
         if owner.linked_authority is not None:
             owner.linked_authority.assert_current()
-        if owner._identity(owner.anchor) != owner._anchor_identity:
+        if not self._binding_identity_matches(owner._anchor_identity, owner._identity(owner.anchor)):
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED")
         selected = self._bind_scalar_storage(logical)
         storage, before, links, leaf = selected
@@ -3210,7 +3245,7 @@ class _InstallTransaction:
                  for root in (effect.retained, effect.quarantine)) else effect.owner)
         if owner.transaction is not self or effect.owner.transaction is not self:
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: effect transaction owner")
-        if owner._identity(owner.anchor) != owner._anchor_identity:
+        if not self._binding_identity_matches(owner._anchor_identity, owner._identity(owner.anchor)):
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: effect anchor drift")
         owner.destination(path.relative_to(owner.anchor), allow_leaf_reparse=True)
 
@@ -3226,7 +3261,10 @@ class _InstallTransaction:
         if effect.retention_parent is not None:
             destination_owner = effect.retained_owner or effect.owner
             destination_owner.destination(effect.retention_parent.relative_to(destination_owner.anchor))
-            if destination_owner._identity(effect.retention_parent) != effect.retention_parent_identity:
+            if not self._binding_identity_matches(
+                effect.retention_parent_identity,
+                destination_owner._identity(effect.retention_parent),
+            ):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retention parent drift")
             retained = effect.reservation_state or effect.retained_state or {}
             if (not self._image_matches(effect.retained, retained)):
@@ -3282,7 +3320,12 @@ class _InstallTransaction:
         for member, node in current.items():
             previous = expected.get(member)
             if previous is not None and (previous.evidence_role == "sealed" or previous.kind != "file"):
-                if node != previous:
+                if (
+                    not self._binding_identity_matches(
+                        previous.python_identity, node.python_identity
+                    )
+                    or replace(node, python_identity=previous.python_identity) != previous
+                ):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: sealed observation drift")
                 current[member] = previous
                 continue
@@ -3658,14 +3701,21 @@ class _InstallTransaction:
         def identity(metadata):
             return (metadata.st_dev, metadata.st_ino, metadata.st_mode,
                     getattr(metadata, "st_file_attributes", 0))
-        def opened_directory(parent_descriptor, name, path, expected_identity):
+        def opened_directory(parent_descriptor, name, path, expected_node):
+            if expected_node.kind != "directory" or expected_node.reparse_data is not None:
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: directory creation proof")
+            expected_identity = expected_node.python_identity
             if not relative:
-                if _CreateOnlyMutablePath._identity(path) != expected_identity:
+                if not self._binding_identity_matches(
+                    expected_identity, _CreateOnlyMutablePath._identity(path)
+                ):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: directory creation drift")
                 return None
             descriptor = os.open(name, flags, dir_fd=parent_descriptor)
             descriptors.append(descriptor)
-            if identity(os.fstat(descriptor)) != expected_identity or _CreateOnlyMutablePath._identity(path) != expected_identity:
+            if (not self._binding_identity_matches(expected_identity, identity(os.fstat(descriptor)))
+                    or not self._binding_identity_matches(
+                        expected_identity, _CreateOnlyMutablePath._identity(path))):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: directory descriptor drift")
             return descriptor
         def record(path, value):
@@ -3681,29 +3731,39 @@ class _InstallTransaction:
         def current(*, complete=False):
             if effect is not None:
                 effect.owner.destination(target.relative_to(effect.owner.anchor))
-            if (_CreateOnlyMutablePath._identity(target) != actual[target].python_identity
-                    or _CreateOnlyMutablePath._identity(source) != before[source].python_identity
+            if (not self._binding_identity_matches(
+                        actual[target].python_identity, _CreateOnlyMutablePath._identity(target))
+                    or not self._binding_identity_matches(
+                        before[source].python_identity, _CreateOnlyMutablePath._identity(source))
                     or (complete and ((not self._image_matches(target, actual)) or (not self._image_matches(source, source_witness))))):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: construction currency")
         def construct(source_directory, source_descriptor, destination_directory, destination_descriptor):
             children = sorted(path for path in before if path.parent == source_directory)
             for old in children:
                 current()
-                if (_CreateOnlyMutablePath._identity(source_directory) != before[source_directory].python_identity
-                        or _CreateOnlyMutablePath._identity(destination_directory) != actual[destination_directory].python_identity
-                        or (relative and (_CreateOnlyMutablePath._identity(source_directory) != identity(os.fstat(source_descriptor))
-                                          or _CreateOnlyMutablePath._identity(destination_directory) != identity(os.fstat(destination_descriptor))))):
+                if (not self._binding_identity_matches(
+                            before[source_directory].python_identity,
+                            _CreateOnlyMutablePath._identity(source_directory))
+                        or not self._binding_identity_matches(
+                            actual[destination_directory].python_identity,
+                            _CreateOnlyMutablePath._identity(destination_directory))
+                        or (relative and (
+                            not self._binding_identity_matches(
+                                before[source_directory].python_identity,
+                                identity(os.fstat(source_descriptor)))
+                            or not self._binding_identity_matches(
+                                actual[destination_directory].python_identity,
+                                identity(os.fstat(destination_descriptor)))))):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: construction ancestor drift")
                 value = before[old]
                 new = destination_directory / old.name
                 metadata = os.stat(old.name, dir_fd=source_descriptor, follow_symlinks=False) if relative else old.lstat()
-                if identity(metadata) != value.python_identity:
+                if not self._binding_identity_matches(value.python_identity, identity(metadata)):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: construction source")
                 if value.kind == "directory":
                     created_node = self._create_owned_directory(new, record, parent_descriptor=destination_descriptor)
-                    created = created_node.python_identity
-                    source_child = opened_directory(source_descriptor, old.name, old, value.python_identity)
-                    destination_child = opened_directory(destination_descriptor, old.name, new, created)
+                    source_child = opened_directory(source_descriptor, old.name, old, value)
+                    destination_child = opened_directory(destination_descriptor, old.name, new, created_node)
                     construct(old, source_child, new, destination_child)
                     changed = self._chmod_owned(new, actual[new].python_identity, stat.S_IMODE(metadata.st_mode),
                                                 descriptor=destination_child, native_proof=actual[new].native_proof)
@@ -3727,17 +3787,18 @@ class _InstallTransaction:
             if relative:
                 descriptors.append(destination_parent)
             parent_identity = identity(os.fstat(destination_parent)) if relative else _CreateOnlyMutablePath._identity(target.parent)
-            source_descriptor = opened_directory(source_parent, source.name, source, before[source].python_identity)
+            source_descriptor = opened_directory(source_parent, source.name, source, before[source])
             if effect is not None:
                 effect.owner.destination(target.relative_to(effect.owner.anchor))
             created_node = self._create_owned_directory(target, record, parent_descriptor=destination_parent)
-            created = created_node.python_identity
-            destination_descriptor = opened_directory(destination_parent, target.name, target, created)
+            destination_descriptor = opened_directory(destination_parent, target.name, target, created_node)
             construct(source, source_descriptor, target, destination_descriptor)
             changed = self._chmod_owned(target, actual[target].python_identity, stat.S_IMODE(before[source].python_identity[2]),
                                         descriptor=destination_descriptor, native_proof=actual[target].native_proof)
             record(target, replace(actual[target], python_identity=changed))
-            if _CreateOnlyMutablePath._identity(target.parent) != parent_identity:
+            if not self._binding_identity_matches(
+                parent_identity, _CreateOnlyMutablePath._identity(target.parent)
+            ):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: construction parent drift")
             current(complete=True)
             expected_content = {path: (value.kind, value.data) for path, value in self._relocate(before, source, target).items()}
@@ -3816,7 +3877,7 @@ class _InstallTransaction:
                 metadata = path.lstat() if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT else bound.python_metadata()
                 actual_identity = (metadata.st_dev, metadata.st_ino, metadata.st_mode,
                                    getattr(metadata, "st_file_attributes", 0))
-                if actual_identity != expected.python_identity:
+                if not self._binding_identity_matches(expected.python_identity, actual_identity):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal metadata")
                 if expected.kind == "file" and bound.digest() != expected.data:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal bytes")
@@ -3850,11 +3911,15 @@ class _InstallTransaction:
             if relative:
                 descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
                 parent = os.fstat(descriptor)
-                if (parent.st_dev, parent.st_ino, parent.st_mode, getattr(parent, "st_file_attributes", 0)) != parent_identity:
+                if not self._binding_identity_matches(
+                    parent_identity,
+                    (parent.st_dev, parent.st_ino, parent.st_mode, getattr(parent, "st_file_attributes", 0)),
+                ):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal parent descriptor")
             actual = self._capture_node(path, kind=expected.kind, data=expected.data)
             content_matches = self._image_matches(path, {path: expected})
-            if not content_matches or _CreateOnlyMutablePath._identity(path.parent) != parent_identity:
+            if (not content_matches or not self._binding_identity_matches(
+                    parent_identity, _CreateOnlyMutablePath._identity(path.parent))):
                 if (permission_changed and actual.kind == expected.kind == "file"
                         and actual.python_identity == expected.python_identity
                         and actual.native_proof == expected.native_proof
@@ -4257,7 +4322,12 @@ class _InstallTransaction:
                     or record.digest != empty_digest or record.reparse_data is not None
                     or record.projection_target is not None or record.ignore_runtime_cache
                     or (record.logical_leaf_path or record.leaf_path) != record.leaf_path
-                    or node != record.current_node or node.python_identity != record.leaf_identity
+                    or record.current_node is None
+                    or record.current_node.python_identity != record.leaf_identity
+                    or not self._binding_identity_matches(
+                        record.leaf_identity, node.python_identity
+                    )
+                    or replace(node, python_identity=record.leaf_identity) != record.current_node
                     or node.native_proof != record.native_proof or node.reparse_data is not None
                     or owner is None or owner.transaction is not self
                     or owner._anchor_identity != record.anchor_identity):
@@ -4463,8 +4533,9 @@ class _InstallTransaction:
         if bound_owner is not owner:
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration retention owner")
         owner.destination(directory.relative_to(owner.anchor))
-        if (owner._identity(owner.anchor) != owner._anchor_identity
-                or owner._identity(parent) != parent_identity
+        if (not self._binding_identity_matches(
+                    owner._anchor_identity, owner._identity(owner.anchor))
+                or not self._binding_identity_matches(parent_identity, owner._identity(parent))
                 or not self._point_matches(directory, directory_identity)):
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration retention storage")
         recorded = {record.tombstone_path for record in self._slice_a_migrated
@@ -5100,7 +5171,9 @@ class _CreateOnlyMutablePath:
 
     def _final_absence(self, path: Path) -> None:
         self._walk_existing(path.parent)
-        if self._identity(self.anchor) != self._anchor_identity or path.exists() or path.is_symlink():
+        if (not self.transaction._binding_identity_matches(
+                self._anchor_identity, self._identity(self.anchor))
+                or path.exists() or path.is_symlink()):
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED")
 
     def _record_created(
@@ -5134,7 +5207,9 @@ class _CreateOnlyMutablePath:
                                   if path in effect.actual), None)
         if acquired_node is None:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing creation witness")
-        if self._identity(path) != acquired_node.python_identity:
+        if not self.transaction._binding_identity_matches(
+            acquired_node.python_identity, self._identity(path)
+        ):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: creation witness drift")
         creation_state = (next((dict(effect.actual) for effect in self.transaction._effects
                                 if effect.location == path and path in effect.actual
@@ -5142,6 +5217,7 @@ class _CreateOnlyMutablePath:
                           if kind == "tree" else {path: acquired_node})
         if creation_state is None:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing created tree members")
+        creator_node = creation_state[path]
         allow_leaf_reparse = kind == "projection"
         allow_root_reparse = allow_leaf_reparse and root == path
         self._walk_existing(self.anchor)
@@ -5166,14 +5242,14 @@ class _CreateOnlyMutablePath:
                 parent_path=path.parent,
                 parent_identity=self._identity(path.parent),
                 leaf_path=path,
-                leaf_identity=self._identity(path),
+                leaf_identity=creator_node.python_identity,
                 kind=kind,
                 digest=digest,
                 projection_target=projection_target,
                 ignore_runtime_cache=ignore_runtime_cache,
-                native_proof=acquired_node.native_proof,
-                reparse_data=acquired_node.reparse_data,
-                projection_data=acquired_node.data if kind == "projection" else None,
+                native_proof=creator_node.native_proof,
+                reparse_data=creator_node.reparse_data,
+                projection_data=creator_node.data if kind == "projection" else None,
             ),
             self,
             state=creation_state,
@@ -5200,10 +5276,14 @@ class _CreateOnlyMutablePath:
         self._walk_existing(record.root_path, allow_leaf_reparse=allow_leaf_reparse and record.root_path == record.leaf_path)
         self._walk_existing(record.parent_path)
         self._walk_existing(record.leaf_path, allow_leaf_reparse=allow_leaf_reparse)
-        if (self._identity(record.anchor_path) != record.anchor_identity
-                or self._identity(record.root_path) != record.root_identity
-                or self._identity(record.parent_path) != record.parent_identity
-                or self._identity(record.leaf_path) != record.leaf_identity):
+        if (not self.transaction._binding_identity_matches(
+                record.anchor_identity, self._identity(record.anchor_path))
+                or not self.transaction._binding_identity_matches(
+                    record.root_identity, self._identity(record.root_path))
+                or not self.transaction._binding_identity_matches(
+                    record.parent_identity, self._identity(record.parent_path))
+                or not self.transaction._binding_identity_matches(
+                    record.leaf_identity, self._identity(record.leaf_path))):
             self._rollback_identity_changed()
         return record.leaf_path.lstat()
 
@@ -5324,7 +5404,9 @@ class _CreateOnlyMutablePath:
         if (not self.transaction.enabled or not any(path == root or root in path.parents
                                                    for root in self.transaction._expected)):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: byte publication requires admitted snapshot")
-        if self._identity(self.anchor) != self._anchor_identity:
+        if not self.transaction._binding_identity_matches(
+            self._anchor_identity, self._identity(self.anchor)
+        ):
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: byte anchor")
         self.transaction._assert_copy_metadata(path)
         existing = next((image[path] for image in self.transaction._expected.values() if path in image), None)
@@ -5368,7 +5450,9 @@ class _CreateOnlyMutablePath:
             # Acquisition and actual bytes are checked on original references,
             # before the publication syscall; the old target is never retained away.
             self.destination(relative)
-            if self._identity(self.anchor) != self._anchor_identity:
+            if not self.transaction._binding_identity_matches(
+                self._anchor_identity, self._identity(self.anchor)
+            ):
                 raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: atomic byte anchor")
             if existing is None:
                 self._final_absence(path)
@@ -5795,8 +5879,10 @@ class _CreateOnlyMutablePath:
         if record.retention_parent_path is None:
             return
         self.transaction.assert_migration_retention(record.tombstone_path.parent, self, pending=record)
-        if (self._identity(record.retention_parent_path) != record.retention_parent_identity
-                or self._identity(record.tombstone_path.parent) != record.retention_directory_identity):
+        if (not self.transaction._binding_identity_matches(
+                record.retention_parent_identity, self._identity(record.retention_parent_path))
+                or not self.transaction._binding_identity_matches(
+                    record.retention_directory_identity, self._identity(record.tombstone_path.parent))):
             self._rollback_identity_changed()
 
     def rollback_migrated(self, record: _SliceAMigratedFileRecord, *, replacement_may_be_absent: bool = False) -> None:
@@ -5809,7 +5895,9 @@ class _CreateOnlyMutablePath:
             if (
                 os.path.normcase(str(record.anchor_path))
                 != os.path.normcase(str(self.anchor))
-                or self._identity(record.anchor_path) != record.anchor_identity
+                or not self.transaction._binding_identity_matches(
+                    record.anchor_identity, self._identity(record.anchor_path)
+                )
             ):
                 self._rollback_identity_changed()
             for path in (record.parent_path, record.leaf_path, record.tombstone_path):
@@ -5825,7 +5913,9 @@ class _CreateOnlyMutablePath:
             old_current = self.transaction._current_role(record, old=True)
             new_current = self.transaction._current_role(record, old=False)
             if (
-                self._identity(record.parent_path) != record.parent_identity
+                not self.transaction._binding_identity_matches(
+                    record.parent_identity, self._identity(record.parent_path)
+                )
                 or (not replacement_absent and self._identity(record.leaf_path) != record.new_identity)
                 or self._identity(record.tombstone_path) != record.tombstone_identity
                 or (not replacement_absent and (not self.transaction._image_matches(record.leaf_path, {record.leaf_path: new_current})))
@@ -6063,7 +6153,9 @@ class _CreateOnlyMutablePath:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
             self._walk_existing(target.parent)
             if (
-                self._identity(target) != target_identity
+                not self.transaction._binding_identity_matches(
+                    target_identity, self._identity(target)
+                )
                 or _tree_sha256(target) != expected_digest
             ):
                 raise ValueError(f"E_CREATE_ONLY_PROJECTION_COLLISION: {relative}")
@@ -6125,7 +6217,10 @@ def _resolve_global_home() -> Path:
     if not alternate.is_dir():
         raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: HOME is not a directory")
     require_non_reparse(alternate)
-    if _CreateOnlyMutablePath._identity(primary) != _CreateOnlyMutablePath._identity(alternate):
+    if not _InstallTransaction._binding_identity_matches(
+        _CreateOnlyMutablePath._identity(primary),
+        _CreateOnlyMutablePath._identity(alternate),
+    ):
         raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: USERPROFILE and HOME disagree")
     return primary
 
@@ -6504,7 +6599,9 @@ def _apply_claude_transport_projection(
         validator = _projection_validator(stage.predecessor.source_root)
         for path, identity in stage.predecessor.peer_roots:
             validator._walk_ordinary_components(path, "predecessor root")
-            if _CreateOnlyMutablePath._identity(path) != identity:
+            if not _InstallTransaction._binding_identity_matches(
+                identity, _CreateOnlyMutablePath._identity(path)
+            ):
                 raise ValueError("E_TRANSPORT_PROJECTION_PARITY: peer root drift")
         for item in stage.witnesses:
             validator._walk_ordinary_components(item.path, "predecessor member")
@@ -8315,7 +8412,9 @@ def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: P
             except BaseException as cleanup:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "capability", original or cleanup,
                                       recovery_path=probe) from original
-        if _CreateOnlyMutablePath._identity(parent) != parent_identity:
+        if not _InstallTransaction._binding_identity_matches(
+            parent_identity, _CreateOnlyMutablePath._identity(parent)
+        ):
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: directory move parent")
         witnesses.append((parent, parent_identity))
     return tuple(witnesses)
@@ -8598,7 +8697,9 @@ def _assert_canonical_skills_plan_current(
     if required_parents != {parent for parent, _identity in plan.directory_move_parents}:
         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing directory move capability observation")
     for parent, identity in plan.directory_move_parents:
-        if _CreateOnlyMutablePath._identity(parent) != identity:
+        if not _InstallTransaction._binding_identity_matches(
+            identity, _CreateOnlyMutablePath._identity(parent)
+        ):
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: directory move parent drift")
 
     lead_effect = None
@@ -9123,7 +9224,16 @@ def _assert_codex_legacy_skill_projection_plan_current(
         current_root_identity = _CreateOnlyMutablePath._identity(projection_root)
     except FileNotFoundError:
         current_root_identity = None
-    if current_root_identity != root_identity:
+    root_current = (
+        current_root_identity is None and root_identity is None
+    ) or (
+        current_root_identity is not None
+        and root_identity is not None
+        and _InstallTransaction._binding_identity_matches(
+            root_identity, current_root_identity
+        )
+    )
+    if not root_current:
         raise ValueError("E_LEGACY_CODEX_SKILL_COLLISION:<root>")
     for item in plan:
         canonical = canonical_by_name[item.name]

@@ -20,6 +20,18 @@ SPEC = importlib.util.spec_from_file_location("_installer_metadata_under_test", 
 PI = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = PI
 SPEC.loader.exec_module(PI)
+WINDOWS_FILE_ATTRIBUTE_PINNED = 0x00080000  # Win32 FILE_ATTRIBUTE_PINNED test value.
+
+
+def _write_windows_directory_attributes(path: Path, attributes: int) -> None:
+    ctypes_api, _wintypes, kernel, *_rest = PI._WindowsBoundNode._api()
+    with PI._WindowsBoundNode(path, purpose="attributes") as bound:
+        basic = bound.basic()
+        basic.attributes = attributes
+        if not kernel.SetFileInformationByHandle(
+            bound.live_handle, 0, ctypes_api.byref(basic), ctypes_api.sizeof(basic)
+        ):
+            raise ctypes_api.WinError(ctypes_api.get_last_error())
 
 
 class CopyMetadataTests(unittest.TestCase):
@@ -2488,6 +2500,78 @@ class CreatedDirectorySnapshotHandoffTests(unittest.TestCase):
         owner.create_file(Path("generic/nested/deeper/member"), b"managed child")
         return owner
 
+    def test_tree_creator_record_uses_one_acquired_witness_for_exact_inverse(self):
+        if os.name != "nt":
+            self.skipTest("Windows creator directory metadata binding")
+        source = self.root / "incoming"
+        source.mkdir()
+        (source / "payload.bin").write_bytes(b"creator edge payload")
+        target = self.root / "created-tree"
+        transaction = PI._InstallTransaction([target], enabled=True)
+        owner = PI._CreateOnlyMutablePath(self.root, transaction, dry_run=False)
+        record_created = PI._CreateOnlyMutablePath._record_created
+        changed = []
+        records = []
+
+        def drift_before_record(current_owner, path, kind, digest, **kwargs):
+            if path == target and kind == "tree":
+                effect = next(
+                    effect for effect in current_owner.transaction._effects
+                    if effect.location == path and path in effect.actual
+                )
+                acquired = effect.actual[path]
+                before = current_owner.transaction._capture_node(path)
+                self.assertEqual(before.python_identity, acquired.python_identity)
+                archive = before.python_identity[3] ^ stat.FILE_ATTRIBUTE_ARCHIVE
+                _write_windows_directory_attributes(path, archive)
+                after = current_owner.transaction._capture_node(path)
+                self.assertEqual(before.kind, after.kind)
+                self.assertEqual(before.python_identity[:2], after.python_identity[:2])
+                self.assertEqual(before.native_proof, after.native_proof)
+                self.assertEqual(before.python_identity[3] ^ after.python_identity[3],
+                                 stat.FILE_ATTRIBUTE_ARCHIVE)
+                changed.append((before.python_identity, after.python_identity,
+                                acquired.python_identity))
+            result = record_created(current_owner, path, kind, digest, **kwargs)
+            if path == target and kind == "tree":
+                records.append(next(
+                    record for record in current_owner.transaction._slice_a_created
+                    if record.leaf_path == path and record.kind == "tree"
+                ))
+            return result
+
+        inverse_error = None
+        with patch.object(PI._CreateOnlyMutablePath, "_record_created", drift_before_record):
+            with transaction:
+                owner.create_tree(Path("created-tree"), source)
+                record = records[0]
+                try:
+                    owner.rollback_created(record)
+                except (OSError, ValueError, RuntimeError) as error:
+                    inverse_error = error
+                transaction.commit()
+
+        self.assertEqual(len(changed), 1)
+        self.assertEqual(len(records), 1)
+        before_identity, after_identity, acquired_identity = changed[0]
+        record = records[0]
+        details = (
+            f"before={before_identity!r}; after={after_identity!r}; "
+            f"acquired={acquired_identity!r}; recordLeaf={record.leaf_identity!r}; "
+            f"recordCurrent={record.current_node.python_identity if record.current_node else None!r}; "
+            f"inverse={inverse_error!r}"
+        )
+        self.assertIsNone(inverse_error, details)
+        self.assertEqual(record.leaf_identity, acquired_identity, details)
+        self.assertEqual(record.leaf_identity, record.current_node.python_identity, details)
+        self.assertEqual(record.root_identity, after_identity, details)
+        stored_record = next(row for row in transaction._slice_a_created
+                             if row.proof_key == record.proof_key)
+        self.assertTrue(stored_record.consumed)
+        self.assertFalse(target.exists())
+        self.assertTrue((source / "payload.bin").is_file())
+        self.assertIsNone(transaction._temporary)
+
     def test_absent_snapshot_hands_nested_owned_directories_to_creator_once(self):
         transaction = PI._InstallTransaction([self.absent], enabled=True)
         removed = []
@@ -2990,6 +3074,174 @@ class PointAndRecoverySelectionTests(unittest.TestCase):
         directory.rename(self.root / "original-parent")
         directory.mkdir()
         self.assertFalse(transaction._point_matches(directory, expected))
+
+    def test_windows_directory_binding_accepts_same_object_after_raw_metadata_change(self):
+        if os.name != "nt":
+            self.skipTest("Windows directory attribute binding")
+        directory = self.root / "qualified-directory"
+        directory.mkdir()
+        transaction = PI._InstallTransaction([], enabled=False)
+        original = transaction._capture_node(directory)
+        ctypes_api, _wintypes, kernel, *_rest = PI._WindowsBoundNode._api()
+
+        def write_attributes(attributes):
+            with PI._WindowsBoundNode(directory, purpose="attributes") as bound:
+                basic = bound.basic()
+                basic.attributes = attributes
+                if not kernel.SetFileInformationByHandle(
+                    bound.live_handle, 0, ctypes_api.byref(basic), ctypes_api.sizeof(basic)
+                ):
+                    raise ctypes_api.WinError(ctypes_api.get_last_error())
+
+        def restore_original():
+            os.chmod(directory, stat.S_IMODE(original.python_identity[2]))
+            write_attributes(original.python_identity[3])
+            self.assertEqual(
+                transaction._capture_node(directory).python_identity,
+                original.python_identity,
+            )
+
+        self.addCleanup(restore_original)
+        repro_change = stat.FILE_ATTRIBUTE_ARCHIVE | stat.FILE_ATTRIBUTE_READONLY
+        write_attributes(original.python_identity[3] & ~repro_change)
+        os.chmod(directory, stat.S_IMODE(original.python_identity[2]) | stat.S_IWRITE)
+        expected = transaction._capture_node(directory)
+        expected_image = transaction._observe(directory)
+        self.assertEqual(expected.kind, "directory")
+        self.assertFalse(expected.python_identity[3] & repro_change)
+
+        write_attributes(expected.python_identity[3] | stat.FILE_ATTRIBUTE_ARCHIVE)
+        os.chmod(directory, stat.S_IMODE(expected.python_identity[2]) & ~stat.S_IWRITE)
+        current = transaction._capture_node(directory)
+
+        self.assertEqual(current.kind, "directory")
+        self.assertEqual(current.python_identity[:2], expected.python_identity[:2])
+        self.assertEqual(current.native_proof, expected.native_proof)
+        self.assertEqual(current.python_identity[3] ^ expected.python_identity[3], repro_change)
+        projected_readonly = transaction._chmod_identity(
+            expected.python_identity,
+            stat.S_IMODE(expected.python_identity[2]) & ~stat.S_IWRITE,
+        )
+        self.assertEqual(current.python_identity[2], projected_readonly[2])
+        self.assertTrue(transaction._node_metadata_matches(directory, expected))
+        (directory / "unowned-child.txt").write_bytes(b"new member")
+        self.assertTrue(transaction._point_matches(directory, expected))
+        self.assertFalse(transaction._image_matches(directory, expected_image))
+
+    def test_binding_identity_uses_directory_object_kind_and_id_not_raw_metadata(self):
+        if os.name != "nt":
+            self.skipTest("Windows directory attribute binding")
+        directory = self.root / "strict-directory"
+        directory.mkdir()
+        expected = PI._InstallTransaction._capture_node(directory).python_identity
+
+        different_object = (expected[0] + 1, expected[1], expected[2], expected[3])
+        # This synthetic raw observation uses FILE_ATTRIBUTE_PINNED as an
+        # independent non-kind variation; production has no bit-specific rule.
+        pinned = (expected[0], expected[1], expected[2],
+                  expected[3] ^ WINDOWS_FILE_ATTRIBUTE_PINNED)
+        permission_change = (expected[0], expected[1], expected[2] ^ stat.S_IWRITE, expected[3])
+        readonly_without_mode_projection = (
+            expected[0], expected[1], expected[2],
+            expected[3] ^ stat.FILE_ATTRIBUTE_READONLY,
+        )
+        reparse = (
+            expected[0], expected[1], expected[2],
+            expected[3] | stat.FILE_ATTRIBUTE_REPARSE_POINT,
+        )
+
+        for observed in (pinned, permission_change, readonly_without_mode_projection):
+            with self.subTest(observed=observed):
+                self.assertTrue(PI._InstallTransaction._binding_identity_matches(expected, observed))
+
+        for observed in (different_object, reparse, None, (expected[0], expected[1], expected[2])):
+            with self.subTest(observed=observed):
+                self.assertFalse(PI._InstallTransaction._binding_identity_matches(expected, observed))
+
+        regular_file = self.root / "strict-file"
+        regular_file.write_bytes(b"file content")
+        file_identity = PI._InstallTransaction._capture_node(regular_file).python_identity
+        readonly_file = PI._InstallTransaction._chmod_identity(file_identity, stat.S_IREAD)
+        self.assertFalse(
+            PI._InstallTransaction._binding_identity_matches(file_identity, readonly_file)
+        )
+
+        with patch.object(PI.os, "name", "posix"):
+            self.assertFalse(
+                PI._InstallTransaction._binding_identity_matches(expected, pinned)
+            )
+            self.assertFalse(
+                PI._InstallTransaction._binding_identity_matches(expected, permission_change)
+            )
+
+        current_node = PI._InstallTransaction._capture_node(directory)
+        pinned_node = replace(
+            current_node,
+            python_identity=(
+                *current_node.python_identity[:3],
+                current_node.python_identity[3] ^ WINDOWS_FILE_ATTRIBUTE_PINNED,
+            ),
+        )
+        with patch.object(PI._InstallTransaction, "_capture_node", return_value=pinned_node):
+            self.assertTrue(PI._InstallTransaction._node_metadata_matches(directory, current_node))
+
+    def test_runtime_reconciliation_accepts_directory_raw_metadata_change_full_node(self):
+        if os.name != "nt":
+            self.skipTest("Windows directory attribute binding")
+        directory = self.root / "reconcile-directory"
+        directory.mkdir()
+        (directory / "sealed.txt").write_bytes(b"sealed payload")
+        transaction = PI._InstallTransaction([], enabled=False)
+        before = transaction._observe(directory)
+        effect = PI._DeclaredPathEffect(
+            directory, None, dict(before), dict(before), directory, dict(before),
+            published_state=dict(before), ignore_runtime_cache=True,
+        )
+        synthetic_current = dict(before)
+        root_node = synthetic_current[directory]
+        synthetic_current[directory] = replace(
+            root_node,
+            python_identity=(root_node.python_identity[0], root_node.python_identity[1],
+                             root_node.python_identity[2],
+                             root_node.python_identity[3] ^ WINDOWS_FILE_ATTRIBUTE_PINNED),
+        )
+        captured_identity = synthetic_current[directory].python_identity
+        with patch.object(transaction, "_observe", return_value=synthetic_current):
+            transaction._reconcile_runtime_image(effect)
+
+        self.assertEqual(effect.actual, before)
+        self.assertEqual(
+            captured_identity[3] ^ before[directory].python_identity[3],
+            WINDOWS_FILE_ATTRIBUTE_PINNED,
+        )
+        self.assertEqual(effect.actual[directory].python_identity, before[directory].python_identity)
+        self.assertTrue(transaction._image_matches(directory, effect.actual))
+
+    def test_native_directory_disposal_denial_remains_visible_after_binding_match(self):
+        if os.name != "nt":
+            self.skipTest("Windows native directory disposal")
+        directory = self.root / "dispose-directory"
+        directory.mkdir()
+        transaction = PI._InstallTransaction([], enabled=False)
+        expected = transaction._capture_node(directory)
+        calls = []
+
+        def deny_disposal(bound):
+            calls.append(bound.path)
+            raise PermissionError("injected native disposal denial")
+
+        _write_windows_directory_attributes(
+            directory,
+            expected.python_identity[3] | stat.FILE_ATTRIBUTE_ARCHIVE,
+        )
+        with patch.object(PI._WindowsBoundNode, "mark_disposal", deny_disposal):
+            with self.assertRaisesRegex(PermissionError, "injected native disposal denial"):
+                transaction._dispose_node(directory, expected)
+
+        current = transaction._capture_node(directory)
+        self.assertEqual(calls, [directory])
+        self.assertEqual(current.native_proof, expected.native_proof)
+        self.assertTrue(directory.is_dir())
 
     def test_committed_native_lock_freezes_primary_and_prior_secondary(self):
         if os.name != "nt":
