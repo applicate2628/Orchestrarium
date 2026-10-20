@@ -4,7 +4,15 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-20
 
+- Canonical ledger writes now retain and publish the exact validated native candidate, supporting compatible Windows readers without closing them. Publication feature errors and permission refusals remain visible; actual placement controls cleanup so late failures cannot delete an already-published journal or its custody evidence, unchanged replay avoids write-only capability checks, and actual finalization failures remain visible after return-based refusals or otherwise successful bodies without replacing an earlier failure.
+
+- Windows lifecycle identity, attribute/tag, Unicode, and status ctypes declarations now share one module-lifetime definition; each target still binds its own DLLs and prototypes and performs fresh native observations and cleanup.
+
 - Windows installer binding now recognizes the same ordinary directory by its kind and stable volume/file identity, while keeping raw metadata observations intact. Permission and decoration metadata no longer serve as directory identity; requested metadata writes/restores, file and link checks, content, membership, native proof and actual access denials remain enforced.
+
+- Legacy-flat close derives the generated README from the operation's prepared final images for affected backlog, active, roadmap, archive and relation-resolved inputs. The static guide retains its existing acquisition path, and ordinary post-apply readers independently verify the persisted category, dependency, README, replay and audit state.
+
+- Active-successor staging now retires only current file and directory snapshots admitted by the version-1 intent and receipt, publishing each effect through the lifecycle transaction owner. Same-invocation cleanup removes the shared staging parent only through its actual creator record; preexisting or restarted shared parents and unrelated siblings remain preserved. Unknown contents or failed effects leave the operation pending for recovery; public intent, receipt and replay formats remain unchanged.
 
 ## 2026-10-19
 

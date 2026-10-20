@@ -374,6 +374,127 @@ class LegacyFlatTerminalTests(unittest.TestCase):
 
     def test_public_opaque_markdown_dryrun_apply_replay_and_receiving(self):
         self.exercise_incoming_byte_images()
+    def test_selected_active_status_afterimage_is_used_by_public_close(self):
+        from test_mutate_work_item import seed_active
+
+        owner_slug = "unselected-owner"
+        seed_active(m, self.root, owner_slug)
+        owner = self.root / "work-items" / "active" / owner_slug
+        status = owner / "status.md"
+        original_status = status.read_bytes()
+        line_ending = b"\r\n" if b"\r\n" in original_status else b"\n"
+        old_action = b"- **Next action**: Run the oracle." + line_ending
+        new_action = b"- **Next action**: [source](../../backlog/original-flat-task.md)" + line_ending
+        self.assertEqual(original_status.count(old_action), 1)
+        selected_status = original_status.replace(old_action, new_action)
+        status.write_bytes(selected_status)
+        backlog_consumer = self.root / "work-items" / "backlog" / "backlog-consumer.md"
+        backlog_consumer.write_bytes(
+            b"- **Task**: Backlog source consumer\n"
+            b"- **Status**: candidate\n"
+            b"- **Next action**: [original source](original-flat-task.md#accepted)\n"
+        )
+        original_backlog_consumer = backlog_consumer.read_bytes()
+        unrelated_markdown = self.root / "docs" / "unrelated.md"
+        unrelated_markdown.parent.mkdir(parents=True)
+        unrelated_bytes = b"# Unrelated Markdown\n\nThis is outside the work-items README read model.\n"
+        unrelated_markdown.write_bytes(unrelated_bytes)
+        proof = owner / "proof.md"
+        proof.write_bytes(b"# Accepted\nOne bounded standalone result.\n")
+        event = {
+            "schemaVersion": 2,
+            "runId": "selected-status-owner-complete",
+            "workItem": owner_slug,
+            "role": "analyst",
+            "executionRole": "internal",
+            "eventKind": "standalone",
+            "status": "completed",
+            "gate": "PASS",
+            "scope": ["selected close status consumer"],
+            "artifact": "proof.md",
+            "lane": "implementation",
+            "effort": "high",
+            "evidence": [{"kind": "artifact", "ref": "proof.md"}],
+            "startedAt": "2026-10-10T09:00:00Z",
+            "updatedAt": "2026-10-10T09:30:00Z",
+        }
+        serialized = m._load_agent_run_ledger().serialize_event(event)
+        (owner / "agent-runs.jsonl").write_bytes((serialized + "\n").encode("utf-8"))
+        validation = m._validator_module().validate_work_item(owner)
+        self.assertEqual(validation, [], validation)
+        m.refresh_readme(self.root)
+        m.check_readme(self.root)
+        _evidence, arguments = self.legacy_request()
+        before = self.canonical_images()
+        public = subprocess.run(
+            [sys.executable, "-B", str(ROOT / "scripts/mutate-work-item.py"), *arguments, "--apply"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=240,
+            check=False,
+        )
+        self.assertEqual(public.returncode, 0, public.stdout + public.stderr)
+        archive = self.root / "work-items/archive/2026-10" / self.slug
+        self.assertFalse(self.source.exists())
+        self.assertEqual((archive / "legacy-source" / self.source.name).read_bytes(), before[self.source.relative_to(self.root).as_posix()])
+        expected_status = selected_status.replace(
+            b"../../backlog/original-flat-task.md",
+            b"../../archive/2026-10/original-flat-task/legacy-source/original-flat-task.md",
+        )
+        self.assertEqual(status.read_bytes(), expected_status)
+        expected_backlog_consumer = original_backlog_consumer.replace(
+            b"(original-flat-task.md#accepted)",
+            b"(../archive/2026-10/original-flat-task/legacy-source/original-flat-task.md#accepted)",
+        )
+        self.assertEqual(backlog_consumer.read_bytes(), expected_backlog_consumer)
+        self.assertEqual(unrelated_markdown.read_bytes(), unrelated_bytes)
+        board = self.root / "work-items/README.md"
+        m.check_readme(self.root)
+        board_bytes = board.read_bytes()
+        self.assertIn(
+            b"[Backlog source consumer](backlog/backlog-consumer.md)", board_bytes
+        )
+        self.assertIn(
+            b"[original source](../archive/2026-10/original-flat-task/legacy-source/original-flat-task.md#accepted)",
+            board_bytes,
+        )
+        action_bytes = (archive / m.LEGACY_COMPLETION_RECEIPT).read_bytes()
+        replay = subprocess.run(
+            [sys.executable, "-B", str(ROOT / "scripts/mutate-work-item.py"), *arguments, "--apply"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=240,
+            check=False,
+        )
+        self.assertEqual(replay.returncode, 0, replay.stdout + replay.stderr)
+        self.assertEqual(board.read_bytes(), board_bytes)
+        self.assertEqual(backlog_consumer.read_bytes(), expected_backlog_consumer)
+        self.assertEqual(unrelated_markdown.read_bytes(), unrelated_bytes)
+        self.assertEqual((archive / m.LEGACY_COMPLETION_RECEIPT).read_bytes(), action_bytes)
+        code = """import importlib.util,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location('fresh_selected_owner',sys.argv[1]);m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)
+root=Path(sys.argv[2]);slug=sys.argv[3]
+assert m.work_item_dependency_state(root,slug)=='done'
+assert m.resolve_category(root,'work-item:'+slug).is_dir()
+m.check_readme(root)
+assert m.audit(root)==(),m.audit(root)
+print('FRESH_SELECTED_READERS_OK')
+"""
+        reader = subprocess.run(
+            [sys.executable, "-B", "-c", code, str(ROOT / "scripts/mutate-work-item.py"), str(self.root), self.slug],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=240,
+            check=False,
+        )
+        self.assertEqual(reader.returncode, 0, reader.stdout + reader.stderr)
+        self.assertIn("FRESH_SELECTED_READERS_OK", reader.stdout)
+
+
 
     def test_public_cli_fresh_process_readers_and_historical_replay(self):
         evidence, arguments = self.legacy_request()
@@ -449,7 +570,7 @@ print('FRESH_PUBLIC_READERS_OK')
     def _finalization_cut(self, cut, *, caught=False):
         evidence, _arguments = self.legacy_request()
         intent_path = m._transition_intent_path(self.root, "flat-terminal-001")
-        save, remove, unlink = m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned, Path.unlink
+        save, remove = m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned
         fired = []
         def saved(path, intent, **kwargs):
             result = save(path, intent, **kwargs)
@@ -460,23 +581,21 @@ print('FRESH_PUBLIC_READERS_OK')
                 raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
             return result
         def removed(owner, name, image):
+            if cut == "last-cleanup" and owner.path == intent_path and name == intent_path.name:
+                fired.append(cut)
+                raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
             result = remove(owner, name, image)
             if cut == "remove-before-save" and name.startswith(f".{self.source.name}.") and name.endswith(".hold"):
                 fired.append(cut)
                 raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
             return result
-        def unlinked(path, *args, **kwargs):
-            if cut == "last-cleanup" and path == intent_path:
-                fired.append(cut)
-                raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
-            return unlink(path, *args, **kwargs)
-        m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned, Path.unlink = saved, removed, unlinked
+        m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned = saved, removed
         try:
             with self.assertRaisesRegex(m.LifecycleError, cut):
                 m.close_item(self.root, self.slug, self.closure, self.instant,
                     legacy_evidence_data=evidence, apply=True, inject_failure_at=None if caught else "b1-owned-fixture")
         finally:
-            m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned, Path.unlink = save, remove, unlink
+            m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned = save, remove
         self.assertEqual(fired, [cut])
         return evidence, intent_path
 
@@ -1408,3 +1527,32 @@ print(json.dumps({'moduleSha256':hashlib.sha256(source.read_bytes()).hexdigest()
 
 if __name__ == "__main__":
     unittest.main()
+
+def test_candidate_verify_uses_settled_custody_after_original_path_disappears():
+    from unittest.mock import patch
+
+    case = LegacyFlatTerminalTests()
+    case.setUp()
+    try:
+        case.component_settled_record()
+        port = m.acquire_settled_work_item_history(
+            case.root, f"work-item:{case.slug}"
+        )
+        assert not case.source.exists()
+        current = port.files[case.source].current
+        assert current.path != case.source
+        real_lstat = Path.lstat
+
+        def refuse_original_path(path):
+            if path == case.source:
+                raise AssertionError("settled diagnostic path reread the absent original")
+            return real_lstat(path)
+
+        with patch.object(Path, "lstat", refuse_original_path):
+            m._verify_captured_file(
+                current,
+                "WI-TEST-SETTLED-ORIGINAL",
+                acquired_input=port,
+            )
+    finally:
+        case.doCleanups()

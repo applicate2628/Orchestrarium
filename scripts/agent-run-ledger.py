@@ -1443,6 +1443,20 @@ def _append_candidate_bytes(previous: bytes, event: dict[str, Any]) -> bytes:
     return previous + separator + serialize_event(event).encode("utf-8") + b"\n"
 
 
+def _capture_ledger_preimage(path: Path, validator: Any, ledger_resource_budget=None):
+    """Retain identity and bytes from the very same original reader acquisition."""
+    owner = validator.load_lifecycle_owner()
+    if not os.path.lexists(path):
+        return owner, None, b""
+    try:
+        snapshot = owner._capture_file_snapshot(path, failure_id="WI-LEDGER-RESOURCE-DRIFT",
+            ledger_resource_budget=validator._ledger_resource_budget(ledger_resource_budget))
+    except owner.LifecycleError as error:
+        raise ValueError(f"{error.failure_id}: {error}") from error
+    data = validator.read_ledger_bytes(path, ledger_resource_budget, source_bytes=snapshot.data)
+    return owner, snapshot, data
+
+
 def _append_event_transaction(
     item: Path, validator: Any, event_factory: Any, on_abort: Any = None,
     *, candidate_custody_blobs: dict[str, bytes] | None = None, before_replace: Any = None, ledger_resource_budget=None,
@@ -1453,10 +1467,11 @@ def _append_event_transaction(
     The factory runs while the ledger lock is held so a launch lookup and its
     terminal append observe one indivisible ledger state.
     """
+    lifecycle = validator.load_lifecycle_owner()
     ledger_path = item / "agent-runs.jsonl"
     # Kill-safe old-or-new transaction (decision 2026-07-16-review-verdict-closure):
     # lock -> read -> merge -> write TEMP (same dir) -> validate the CANDIDATE ->
-    # os.replace -> unlock. NO automatic stale-lock takeover (the ABA reclamation
+    # exact native placement -> unlock. NO automatic stale-lock takeover (the ABA reclamation
     # race is unfixable without fencing): on timeout we fail closed with a manual
     # recovery diagnostic. Power-loss durability is explicitly NOT claimed.
     lock_path = item / "agent-runs.jsonl.lock"
@@ -1480,8 +1495,9 @@ def _append_event_transaction(
         )
 
     candidate = ledger_path.with_suffix(".jsonl.tmp")
+    publication = None
     try:
-        previous_bytes = validator.read_ledger_bytes(ledger_path, ledger_resource_budget) if ledger_path.exists() else b""
+        lifecycle, original, previous_bytes = _capture_ledger_preimage(ledger_path, validator, ledger_resource_budget)
         if previous_bytes:
             errors: list[str] = []
             validator.load_jsonl(ledger_path, errors, source_bytes=previous_bytes,
@@ -1508,27 +1524,30 @@ def _append_event_transaction(
         validator.resolve_ledger_resource_budget(
             budget.max_events, budget.max_ledger_bytes, demand=demand,
         )
-        with candidate.open("wb") as fh:
-            fh.write(_append_candidate_bytes(previous_bytes, event))
-            fh.flush()
-
-        # strict_revise=False: the helper RECORDS events (including REVISE verdicts
-        # themselves); closure strictness is the checker's and the gates' job.
-        custody_args = {"historical_pass_custody_blobs": candidate_custody_blobs} if candidate_custody_blobs is not None else {}
-        errors = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False, **custody_args, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
-        if errors:
-            candidate.unlink(missing_ok=True)
-            for error in errors:
-                print(f"FAIL: {error}", file=sys.stderr)
-            print(f"RESULT: FAIL ({len(errors)} errors)", file=sys.stderr)
-            raise ValueError("; ".join(errors))
-        if before_replace is not None:
-            before_replace()
-        os.replace(candidate, ledger_path)
-    except BaseException:
-        candidate.unlink(missing_ok=True)
-        if on_abort is not None:
-            on_abort()
+        with lifecycle.qualified_ledger_publication(ledger_path, original) as publication:
+            record = publication.create_qualified_candidate(candidate, _append_candidate_bytes(previous_bytes, event))
+            # The logical writer qualifies this actual native object exactly once.
+            custody_args = {"historical_pass_custody_blobs": candidate_custody_blobs} if candidate_custody_blobs is not None else {}
+            errors = validator.validate_work_item(item, ledger_path=record.locator, strict_revise=False, **custody_args, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+            if errors:
+                for error in errors:
+                    print(f"FAIL: {error}", file=sys.stderr)
+                print(f"RESULT: FAIL ({len(errors)} errors)", file=sys.stderr)
+                raise ValueError("; ".join(errors))
+            if before_replace is not None:
+                before_replace()
+            publication.place_qualified_candidate(record, original)
+    except BaseException as error:
+        if on_abort is not None and (publication is None or publication.qualified_outcome in {"unattempted", "no-effect"}):
+            try:
+                on_abort()
+            except BaseException as cleanup:
+                BaseException.add_note(error, f"ledger abort cleanup: {cleanup}")
+        if isinstance(error, lifecycle.LifecycleError):
+            translated = ValueError(f"{error.failure_id}: {error}")
+            for note in getattr(error, "__notes__", ()):
+                translated.add_note(note)
+            raise translated from error
         raise
     finally:
         os.close(lock_fd)
@@ -1781,6 +1800,8 @@ def command_append(args: argparse.Namespace, *, ledger_resource_budget=None, tra
             _append_event_transaction(item, validator, lambda _previous: event, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     except (ValueError, LedgerWriteLockError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
+        for note in getattr(exc, "__notes__", ()):
+            print(f"FAIL: {note}", file=sys.stderr)
         return 1
 
     print(f"{APPEND_SUCCESS_MARKER} ({item / 'agent-runs.jsonl'})")
@@ -1898,6 +1919,8 @@ def command_settle_launch(args: argparse.Namespace, *, ledger_resource_budget=No
         )
     except (ValueError, LedgerWriteLockError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
+        for note in getattr(exc, "__notes__", ()):
+            print(f"FAIL: {note}", file=sys.stderr)
         return 1
     if appended:
         print(f"{SETTLE_SUCCESS_MARKER} ({item / 'agent-runs.jsonl'})")
@@ -1963,6 +1986,8 @@ def _commit_recovery_append(
 ) -> int:
     """Commit one validated recovery row through the existing atomic append path."""
 
+    validator = load_validator()
+    lifecycle = validator.load_lifecycle_owner()
     ledger_path = item / "agent-runs.jsonl"
     lock_path = item / "agent-runs.jsonl.lock"
     lock_fd = None
@@ -1977,16 +2002,15 @@ def _commit_recovery_append(
         print(f"FAIL: ledger locked ({lock_path}); no automatic takeover")
         return 1
     candidate = ledger_path.with_suffix(".jsonl.tmp")
-    replaced = False
     try:
-        previous = load_validator().read_ledger_bytes(ledger_path, ledger_resource_budget) if ledger_path.exists() else b""
+        lifecycle, original, previous = _capture_ledger_preimage(ledger_path, validator, ledger_resource_budget)
         complete_errors: list[str] = []
-        load_validator().load_jsonl(ledger_path, complete_errors, source_bytes=previous,
+        validator.load_jsonl(ledger_path, complete_errors, source_bytes=previous,
                                    ledger_resource_budget=ledger_resource_budget)
         if any("WI-LEDGER-RESOURCE-" in error for error in complete_errors):
             raise ValueError("; ".join(complete_errors))
         if replay_detector is not None and replay_detector(previous):
-            errors = load_validator().validate_work_item(
+            errors = validator.validate_work_item(
                 item, selected_ledger_bytes=previous, strict_revise=False,
                 ledger_resource_budget=ledger_resource_budget,
                 transition_resource_budget=transition_resource_budget,
@@ -1998,25 +2022,27 @@ def _commit_recovery_append(
         line = (serialize_event(event) + "\n").encode("utf-8")
         prefix = b"" if not previous or previous.endswith(b"\n") else b"\n"
         expected = previous + prefix + line
-        with candidate.open("xb") as stream:
-            stream.write(expected)
-            stream.flush()
-        errors = validate_candidate(candidate, expected)
-        if errors:
-            for error in errors:
-                print(f"FAIL: {error}")
-            print(f"RESULT: FAIL ({len(errors)} errors)")
-            return 1
-        if inject_failure == "pre-replace":
-            print("FAIL: ledger-recovery:pre-replace-injected")
-            return 1
-        os.replace(candidate, ledger_path)
-        replaced = True
+        budget = validator._ledger_resource_budget(ledger_resource_budget)
+        demand = validator.inspect_ledger_resource_demand(ledger_path, budget,
+            source_bytes=previous, known_row_bytes=(line,))
+        validator.resolve_ledger_resource_budget(budget.max_events, budget.max_ledger_bytes, demand=demand)
+        with lifecycle.qualified_ledger_publication(ledger_path, original) as publication:
+            record = publication.create_qualified_candidate(candidate, expected)
+            errors = validate_candidate(record.locator, expected)
+            if errors:
+                for error in errors:
+                    print(f"FAIL: {error}")
+                print(f"RESULT: FAIL ({len(errors)} errors)")
+                return 1
+            if inject_failure == "pre-replace":
+                print("FAIL: ledger-recovery:pre-replace-injected")
+                return 1
+            publication.place_qualified_candidate(record, original)
         if inject_failure == "post-replace-readback":
             print("FAIL: ledger-recovery:post-commit-readback-indeterminate")
             return 1
         try:
-            actual = load_validator().read_ledger_bytes(ledger_path, ledger_resource_budget)
+            actual = validator.read_ledger_bytes(ledger_path, ledger_resource_budget)
         except OSError:
             print("FAIL: ledger-recovery:post-commit-readback-indeterminate")
             return 1
@@ -2028,12 +2054,12 @@ def _commit_recovery_append(
         ):
             print("FAIL: ledger-recovery:post-commit-readback-indeterminate")
             return 1
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, lifecycle.LifecycleError) as exc:
         print(f"FAIL: ledger-recovery:store-error: {exc}")
+        for note in getattr(exc, "__notes__", ()):
+            print(f"FAIL: {note}")
         return 1
     finally:
-        if not replaced:
-            candidate.unlink(missing_ok=True)
         os.close(lock_fd)
         lock_path.unlink(missing_ok=True)
     print(f"{success_marker} ({ledger_path})")
@@ -2406,6 +2432,8 @@ def main(argv: list[str]) -> int:
         return result
     except (ValueError, LedgerNoncanonicalRecoveryError, lifecycle.LifecycleError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
+        for note in getattr(exc, "__notes__", ()):
+            print(f"FAIL: {note}", file=sys.stderr)
         return 1
 
 

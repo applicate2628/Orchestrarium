@@ -4313,8 +4313,15 @@ def test_import_active_successor_apply_preserves_archive_and_run_authority(tmp_p
     assert not (root / ".scratch" / "work-items-lifecycle-successor-imports").exists()
 
 
-def test_import_active_successor_apply_maps_index_links_and_readme(tmp_path: Path) -> None:
+@pytest.mark.parametrize("stage_parent_state", ("absent", "empty", "sibling"))
+def test_import_active_successor_apply_maps_index_links_and_readme(tmp_path: Path, stage_parent_state: str) -> None:
     root = tmp_path / "candidate"
+    stage_parent = root / ".scratch" / "work-items-lifecycle-successor-imports"
+    if stage_parent_state != "absent":
+        stage_parent.mkdir(parents=True)
+    sibling = stage_parent / "separately-owned.txt"
+    if stage_parent_state == "sibling":
+        sibling.write_bytes(b"Preserve shared staging evidence.\n")
     fixture = _active_successor_preflight_fixture(root)
     module = fixture["module"]
     work_items = root / "work-items"
@@ -4377,6 +4384,155 @@ def test_import_active_successor_apply_maps_index_links_and_readme(tmp_path: Pat
         assert error.failure_id == "WI-SUCCESSOR-IDENTITY-CONFLICT"
     else:
         raise AssertionError("changed replay was accepted")
+    operation_stage = stage_parent / "front-apply-links"
+    assert not operation_stage.exists()
+    if stage_parent_state == "absent":
+        assert not stage_parent.exists()
+    elif stage_parent_state == "empty":
+        assert stage_parent.is_dir() and list(stage_parent.iterdir()) == []
+    else:
+        assert sibling.read_bytes() == b"Preserve shared staging evidence.\n"
+        assert list(stage_parent.iterdir()) == [sibling]
+
+
+
+def test_successor_commit_recovery_replay_keeps_unproven_shared_parent(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "candidate"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    work_items = root / "work-items"
+    consumer = work_items / "backlog" / "consumer.md"
+    write(consumer, (
+        f"status: candidate\n[Current](../active/{fixture['old']}/status.md)\n"
+        f"Relation: work-item:{fixture['old']}\n"
+    ))
+    fixture["dispositions"]["references"] = [{
+        "consumer": "backlog/consumer.md", "kind": "physical",
+        "value": f"../active/{fixture['old']}/status.md",
+        "target": f"work-items/active/{fixture['new']}/status.md",
+    }, {
+        "consumer": "backlog/consumer.md", "kind": "logical",
+        "value": f"work-item:{fixture['old']}", "meaning": "current-successor",
+    }]
+    operation = "front-commit-replay"
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], operation,
+    )
+    staging_parent = root / ".scratch" / "work-items-lifecycle-successor-imports"
+    stage_root = staging_parent / operation
+    assert not staging_parent.exists()
+    archive_before = tree_file_bytes(fixture["archive"])
+    with pytest.raises(module.LifecycleError) as interrupted:
+        module.apply_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"],
+            fixture["dispositions"], operation, plan["digest"],
+            inject_failure_at="after-receipt-publish",
+        )
+    assert interrupted.value.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY"
+    intent_path = module._transition_intent_path(root, operation)
+    assert intent_path.is_file() and stage_root.is_dir() and staging_parent.is_dir()
+
+    deleted_before_publish = []
+    original_publish = module.LifecycleWriteTarget._publish_effect
+    publication_failure = module.LifecycleError("TEST-PUBLICATION", "injected after native directory removal")
+
+    def fail_after_native_directory_removal(owner, prepared, identity):
+        if (prepared.directory and prepared.source == stage_root and prepared.destination is None
+                and not deleted_before_publish):
+            assert not stage_root.exists()
+            deleted_before_publish.append((owner, prepared, identity))
+            raise publication_failure
+        return original_publish(owner, prepared, identity)
+
+    monkeypatch.setattr(module.LifecycleWriteTarget, "_publish_effect", fail_after_native_directory_removal)
+    with pytest.raises(module.LifecycleError) as failed_publication:
+        module.recover_transition(root, operation)
+    assert failed_publication.value.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY"
+    assert "injected after native directory removal" in str(failed_publication.value)
+    assert len(deleted_before_publish) == 1
+    removed_owner, removed_effect, removed_identity = deleted_before_publish[0]
+    assert removed_effect.source == stage_root and removed_identity is not None
+    assert not removed_owner._open and removed_owner._source_observation is None
+    assert not stage_root.exists() and staging_parent.is_dir() and intent_path.is_file()
+
+    monkeypatch.undo()
+    recovered = run_cli(
+        "recover-transition", "--root", str(root), "--operation-id", operation, "--apply",
+    )
+    assert recovered.returncode == 0, recovered.stdout
+    assert not intent_path.exists()
+    assert not stage_root.exists() and staging_parent.is_dir() and list(staging_parent.iterdir()) == []
+    assert tree_file_bytes(fixture["archive"]) == archive_before
+    assert not fixture["source"].exists()
+    successor = root / "work-items" / "active" / fixture["new"]
+    receipt = successor / module.SUCCESSOR_IMPORT_RECEIPT
+    assert successor.is_dir() and receipt.is_file()
+    assert (successor / "status.md").read_bytes() == fixture["status"]
+    assert consumer.read_bytes() == base64.b64decode(plan["links"][0]["afterBase64"])
+    assert (work_items / "index.md").read_bytes() == plan["compatibilityIndex"]["afterBytes"]
+    assert (work_items / "README.md").read_bytes() == plan["readme"]["afterBytes"]
+    module.check_readme(root)
+
+    status_input = tmp_path / "replay-status.md"
+    links_input = tmp_path / "replay-links.json"
+    status_input.write_bytes(fixture["status"])
+    links_input.write_bytes(json.dumps(fixture["dispositions"]).encode())
+    settled_before_replay = tree_file_bytes(root)
+    replay = run_cli(
+        "import-active-successor", "--root", str(root),
+        "--predecessor-slug", fixture["old"], "--successor-slug", fixture["new"],
+        "--status-file", str(status_input), "--links-file", str(links_input),
+        "--operation-id", operation, "--apply", "--preflight-digest", plan["digest"],
+    )
+    assert replay.returncode == 0, replay.stdout
+    replayed = json.loads(replay.stdout)
+    assert replayed["state"] == "committed" and replayed["alreadySettled"] is True
+    assert tree_file_bytes(root) == settled_before_replay
+    assert staging_parent.is_dir() and list(staging_parent.iterdir()) == []
+    assert not intent_path.exists() and receipt.is_file()
+
+
+def test_successor_recovery_preserves_member_added_before_native_directory_retirement(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    root = tmp_path / "candidate"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    operation = "front-late-member"
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"],
+        fixture["dispositions"], operation,
+    )
+    with pytest.raises(module.LifecycleError):
+        module.apply_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"],
+            fixture["dispositions"], operation, plan["digest"],
+            inject_failure_at="after-source-hold",
+        )
+    intent_path = module._transition_intent_path(root, operation)
+    stage_root = root / ".scratch" / "work-items-lifecycle-successor-imports" / operation
+    foreign = stage_root / "unowned-evidence.bin"
+    foreign_bytes = b"Preserve late foreign stage evidence.\n"
+    original_verify = module._verify_owned_directory_snapshot
+    injected = []
+
+    def add_foreign_member(snapshot, failure_id, *, creation_owner=None):
+        if (snapshot.path == stage_root and snapshot.members == () and creation_owner is not None
+                and not injected):
+            foreign.write_bytes(foreign_bytes)
+            injected.append(module._lifecycle_file_identity(foreign.lstat()))
+        return original_verify(snapshot, failure_id, creation_owner=creation_owner)
+
+    monkeypatch.setattr(module, "_verify_owned_directory_snapshot", add_foreign_member)
+    with pytest.raises(module.LifecycleError) as refused:
+        module.recover_transition(root, operation)
+    assert refused.value.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY"
+    assert injected and foreign.read_bytes() == foreign_bytes
+    assert module._lifecycle_file_identity(foreign.lstat()) == injected[0]
+    assert intent_path.is_file() and stage_root.is_dir()
+    assert fixture["source"].is_dir()
+    assert not (root / "work-items" / "active" / fixture["new"]).exists()
 
 
 def test_import_active_successor_fault_recovery_and_replay(tmp_path: Path) -> None:
@@ -18794,3 +18950,166 @@ def test_consumed_inverse_refuses_invalid_repeat_without_minting_physical_failur
     assert row['negativeAfterInvalidRequest']==[],row
     assert row['defaultVerify']['returned'] and row['newForward']['returned'] and row['newForwardExists'],row
     assert row['finalExit']['returned'] and row['settled'] and row['contextCleared'],row
+
+
+def test_lifecycle_outcome_composer_readiness_uses_raw_cleanup_state() -> None:
+    module = load_module()
+    clean = module.LifecycleOutcomeComposer()
+    assert clean.has_cleanup_failures() is False
+
+    single_slot = module.LifecycleOutcomeComposer()
+    phase = next(
+        phase for phase in module.LIFECYCLE_CLEANUP_PHASES
+        if phase not in module.LIFECYCLE_REPEATABLE_CLEANUP_PHASES
+    )
+    single_slot.record_cleanup(
+        phase=phase, failure_id="TEST-CLEANUP", resource="intent",
+        diagnostic="recorded cleanup failure",
+    )
+    assert single_slot.has_cleanup_failures() is True
+
+    occurrences = module.LifecycleOutcomeComposer()
+    occurrences.record_write_cleanup(
+        phase="write-target-release", failure_id="TEST-CLEANUP",
+        resource="intent", diagnostic="recorded release failure",
+        cause=OSError("owned image release fault"),
+    )
+    assert occurrences.has_cleanup_failures() is True
+
+
+def test_successor_retirement_binding_rejects_missing_mismatched_and_unheld_composer(tmp_path: Path) -> None:
+    module = load_module()
+    with pytest.raises(module.LifecycleError, match="current lifecycle outcome composer") as missing:
+        module._recover_successor_import.__wrapped__(
+            tmp_path, tmp_path / "missing-intent.json", {"operationId": "front-missing-composer"},
+        )
+    assert missing.value.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY"
+
+    target_path = tmp_path / "uncreated-intent.json"
+    target = module.LifecycleWriteTarget(target_path, failure_id="TEST-RETIREMENT")
+    with pytest.raises(module.LifecycleError, match="outcome composer differs"):
+        target.remove_owned(target_path.name, {}, outcome_composer=object())
+
+    current = module.LifecycleOutcomeComposer()
+    other = module.LifecycleOutcomeComposer()
+    token = module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.set(current)
+    try:
+        with pytest.raises(module.LifecycleError, match="outcome composer differs"):
+            target.remove_owned(target_path.name, {}, outcome_composer=other)
+        with pytest.raises(module.LifecycleError, match="current held lifecycle owner"):
+            target.remove_owned(target_path.name, {}, outcome_composer=current)
+    finally:
+        module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(token)
+    assert not target_path.exists()
+
+
+def test_unbound_native_owned_removal_preserves_none_result(tmp_path: Path) -> None:
+    module = load_module()
+    path = tmp_path / "ordinary-intent.json"
+    payload = b"ordinary unbound removal\n"
+    path.write_bytes(payload)
+    with module.LifecycleWriteTarget(path, failure_id="TEST-ORDINARY-REMOVAL") as owner:
+        image = owner.owned_image(path.name, maximum_bytes=len(payload))
+        result = owner.remove_owned(path.name, image)
+    assert result is None
+    assert not path.exists()
+
+
+def test_clean_successor_terminal_removal_returns_true(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "candidate"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    operation = "front-clean-readiness"
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"], fixture["dispositions"], operation,
+    )
+    with pytest.raises(module.LifecycleError):
+        module.apply_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"],
+            fixture["dispositions"], operation, plan["digest"],
+            inject_failure_at="after-receipt-publish",
+        )
+    intent_path = module._transition_intent_path(root, operation)
+    assert intent_path.is_file()
+    retired = []
+    original_remove = module.LifecycleWriteTarget.remove_owned
+
+    def capture_removal(owner, leaf, image, *, outcome_composer=None):
+        if outcome_composer is None:
+            result = original_remove(owner, leaf, image)
+        else:
+            result = original_remove(owner, leaf, image, outcome_composer=outcome_composer)
+        if owner.path == intent_path:
+            retired.append((outcome_composer, result))
+        return result
+
+    monkeypatch.setattr(module.LifecycleWriteTarget, "remove_owned", capture_removal)
+    module.recover_transition(root, operation)
+    assert len(retired) == 1 and type(retired[0][0]) is module.LifecycleOutcomeComposer
+    assert retired[0][1] is True
+    assert not intent_path.exists()
+
+
+def test_successor_terminal_removal_defers_after_owned_image_release_failure(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "candidate"
+    fixture = _active_successor_preflight_fixture(root)
+    module = fixture["module"]
+    operation = "front-image-release-readiness"
+    plan = module.preflight_import_active_successor(
+        root, fixture["old"], fixture["new"], fixture["status"], fixture["dispositions"], operation,
+    )
+    with pytest.raises(module.LifecycleError):
+        module.apply_import_active_successor(
+            root, fixture["old"], fixture["new"], fixture["status"],
+            fixture["dispositions"], operation, plan["digest"],
+            inject_failure_at="after-receipt-publish",
+        )
+    intent_path = module._transition_intent_path(root, operation)
+    intent_before = intent_path.read_bytes()
+    work_items_before = tree_file_bytes(root / "work-items")
+    stage_root = root / ".scratch" / "work-items-lifecycle-successor-imports" / operation
+    injected = []
+    retired = []
+    intent_effects = []
+    native_owners = []
+    original_close = module.LifecycleWriteTarget._close
+    original_remove = module.LifecycleWriteTarget.remove_owned
+    original_publish = module.LifecycleWriteTarget._publish_effect
+
+    def close_then_report(owner, handle):
+        original_close(owner, handle)
+        if owner.path == intent_path and not injected:
+            injected.append(handle)
+            raise OSError("owned intent image released with a reported failure")
+
+    def capture_removal(owner, leaf, image, *, outcome_composer=None):
+        result = original_remove(owner, leaf, image, outcome_composer=outcome_composer)
+        if owner.path == intent_path:
+            native_owners.append(owner)
+            retired.append((outcome_composer, result))
+        return result
+
+    def capture_publication(owner, prepared, identity):
+        if (prepared is not None and prepared.source == intent_path and prepared.destination is None):
+            intent_effects.append(prepared)
+        return original_publish(owner, prepared, identity)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(module.LifecycleWriteTarget, "_close", close_then_report)
+        scoped.setattr(module.LifecycleWriteTarget, "remove_owned", capture_removal)
+        scoped.setattr(module.LifecycleWriteTarget, "_publish_effect", capture_publication)
+        with pytest.raises(module.LifecycleError) as failed:
+            module.recover_transition(root, operation)
+
+    assert injected and len(injected) == 1
+    assert failed.value.failure_id == "WI-LIFECYCLE-WRITE-BOUNDARY"
+    assert "occurrences=1" in str(failed.value)
+    assert "owned intent image released with a reported failure" in str(failed.value)
+    assert len(retired) == 1 and type(retired[0][0]) is module.LifecycleOutcomeComposer
+    assert retired[0][1] is False
+    assert intent_effects == []
+    assert intent_path.read_bytes() == intent_before
+    assert tree_file_bytes(root / "work-items") == work_items_before
+    assert not stage_root.exists()
+    assert len(native_owners) == 1 and not native_owners[0]._open
+    assert native_owners[0]._directories == [] and native_owners[0]._parent is None
