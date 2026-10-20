@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-20
 
+- Installer rollback now retires live copy-metadata references when the transaction records consumption of their physical subtree. This lets an owned tree replacement followed by a descendant copy restore the original object and metadata without a stale-reference cleanup error, while preserving foreign-object refusals and recoverable failure details.
+
 - Claude prompt profiles and ledger validation now accept the native `--tools ""` selection to disable all tools and preserve its explicit empty argument in execution records. Allow/deny lists retain their existing nonempty validation.
 
 - Canonical ledger writes now retain and publish the exact validated native candidate, supporting compatible Windows readers without closing them. Publication feature errors and permission refusals remain visible; actual placement controls cleanup so late failures cannot delete an already-published journal or its custody evidence, unchanged replay avoids write-only capability checks, and actual finalization failures remain visible after return-based refusals or otherwise successful bodies without replacing an earlier failure.

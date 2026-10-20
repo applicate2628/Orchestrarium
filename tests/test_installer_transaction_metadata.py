@@ -559,23 +559,267 @@ class CopyMetadataTests(unittest.TestCase):
         directory.mkdir()
         self.target.rename(directory / "target")
         self.target = directory / "target"
-        old_inode = self.target.stat().st_ino
+        sibling = self.root / "sibling"
+        sibling.write_bytes(b"outside the selected subtree")
+        sibling_identity = PI._CreateOnlyMutablePath._identity(sibling)
         prepared = self.root / "prepared"
         prepared.mkdir()
         (prepared / "target").write_bytes(b"prepared")
         transaction = self.transaction([directory])
         owner = self.owner(transaction)
-        with self.assertRaisesRegex(RuntimeError, "later"):
-            with transaction:
+        sentinel = RuntimeError("intentional rollback sentinel")
+        assignments = []
+        setter = PI._WindowsBoundNode.set_copy_times
+        def observe_assignment(bound, atime, mtime):
+            result = setter(bound, atime, mtime)
+            basic = bound.basic()
+            epoch = 116444736000000000
+            assignments.append(((basic.access - epoch) * 100, (basic.write - epoch) * 100))
+            return result
+        with self.assertRaises(RuntimeError) as caught:
+            with patch.object(PI._WindowsBoundNode, "set_copy_times", observe_assignment), transaction:
+                original_node = transaction._original[directory][self.target]
+                participant = transaction._copy_metadata[self.target]
+                original_before = participant.before
+                original_origin = participant.origin
                 effect = transaction.arm_replacement(directory, prepared, owner)
                 owner._replace_prepared(directory, prepared, effect=effect)
                 owner.copy_file(Path("tree/target"), self.source)
-                raise RuntimeError("later")
-        self.assertEqual(self.target.stat().st_ino, old_inode)
-        self.assertEqual(self.target.stat().st_mtime_ns, self.before.st_mtime_ns)
+                raise sentinel
+        self.assertIs(caught.exception, sentinel)
+        restored_node = transaction._expected[directory][self.target]
+        self.assertEqual(restored_node.native_proof, original_node.native_proof)
+        self.assertEqual(restored_node.python_identity[:2], original_node.python_identity[:2])
+        self.assertEqual(stat.S_IMODE(restored_node.python_identity[2]),
+                         stat.S_IMODE(original_node.python_identity[2]))
+        if os.name == "nt":
+            self.assertIn((original_before.atime_ns, original_before.mtime_ns), assignments)
         self.assertEqual(self.target.read_bytes(), b"same")
+        with transaction._copy_reference(self.target, restored_node, metadata_only=True) as (descriptor, bound):
+            observed = transaction._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
+        self.assertEqual(observed.stable(), original_before.stable())
+        self.assertIs(participant.before, original_before)
+        self.assertIs(participant.origin, original_origin)
+        self.assertIs(participant.origin, original_node)
+        self.assertEqual(participant.current.stable(), original_before.stable())
+        self.assertEqual(participant.restored.stable(), original_before.stable())
+        self.assertFalse(participant.unknown)
+        self.assertEqual(set(transaction._copy_current), {self.target})
+        for member in transaction._copy_current:
+            transaction._assert_copy_metadata(member)
+        self.assertFalse(any(member == effect.quarantine or effect.quarantine in member.parents
+                             for member in transaction._copy_current))
+        self.assertEqual(PI._CreateOnlyMutablePath._identity(sibling), sibling_identity)
+        self.assertEqual(sibling.read_bytes(), b"outside the selected subtree")
         self.assertTrue(effect.settled)
         self.assert_clean()
+
+    def test_foreign_equal_byte_replacement_remains_refused_and_preserved(self):
+        container = self.root / "container"
+        unit = container / "unit"
+        unit.mkdir(parents=True)
+        current = unit / "data.txt"
+        current.write_bytes(b"old\n")
+        sibling = container / "sibling.txt"
+        sibling.write_bytes(b"untouched\n")
+        sibling_before = PI._CreateOnlyMutablePath._identity(sibling)
+        prepared = self.root / "prepared"
+        prepared.mkdir()
+        (prepared / "data.txt").write_bytes(b"new\n")
+        transaction = PI._InstallTransaction([container], enabled=True, copy_paths=(current,))
+        owner = self.owner(transaction)
+        primary = RuntimeError("intentional foreign-object sentinel")
+        foreign_identity = None
+        with self.assertRaises(PI._InstallFailure) as caught:
+            with transaction:
+                original = transaction._original[container][current]
+                participant = transaction._copy_metadata[current]
+                before = participant.before
+                effect = transaction.arm_replacement(unit, prepared, owner)
+                owner._replace_prepared(unit, prepared, effect=effect)
+                retained = effect.retained / current.name
+                retained_node = effect.retained_state[retained]
+                self.assertEqual(retained_node.native_proof, original.native_proof)
+                live_metadata = dict(transaction._copy_current)
+                foreign = self.root / "foreign.txt"
+                foreign.write_bytes(b"new\n")
+                os.replace(foreign, current)
+                foreign_identity = PI._CreateOnlyMutablePath._identity(current)
+                raise primary
+        self.assertIs(caught.exception.cause, primary)
+        self.assertEqual(current.read_bytes(), b"new\n")
+        self.assertEqual(PI._CreateOnlyMutablePath._identity(current), foreign_identity)
+        self.assertEqual(sibling.read_bytes(), b"untouched\n")
+        self.assertEqual(PI._CreateOnlyMutablePath._identity(sibling), sibling_before)
+        self.assertEqual(transaction._copy_current, live_metadata)
+        self.assertIs(participant.before, before)
+        self.assertIs(participant.origin, original)
+        self.assertIsNone(participant.restored)
+        self.assertTrue(transaction._image_matches(effect.retained, effect.retained_state))
+        self.assertEqual(retained.read_bytes(), b"old\n")
+        with transaction._copy_reference(retained, retained_node, metadata_only=True) as (descriptor, bound):
+            observed = transaction._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
+        self.assertEqual(observed.stable(), before.stable())
+        recovery = caught.exception.recovery_path
+        self.assertIsNotNone(recovery)
+        self.assertTrue(recovery.exists())
+        backup = transaction._entries[0]["backup"]
+        self.assertTrue(transaction._image_matches(backup, transaction._backup_states[backup]))
+
+    def test_partial_disposal_retires_only_proved_metadata_and_preserves_recovery(self):
+        if os.name != "nt":
+            self.skipTest("partial native disposal and setter guards require Windows")
+        container = self.root / "container"
+        unit = container / "unit"
+        unit.mkdir(parents=True)
+        first = unit / "a.txt"
+        second = unit / "b.txt"
+        third = unit / "c.txt"
+        first.write_bytes(b"old a\n")
+        second.write_bytes(b"old b\n")
+        third.write_bytes(b"old c\n")
+        sibling = container / "sibling.txt"
+        sibling.write_bytes(b"unknown participant\n")
+        prepared = self.root / "prepared"
+        prepared.mkdir()
+        (prepared / "a.txt").write_bytes(b"new a\n")
+        (prepared / "b.txt").write_bytes(b"new b\n")
+        (prepared / "c.txt").write_bytes(b"new c\n")
+        update_a = self.root / "update-a.txt"
+        update_b = self.root / "update-b.txt"
+        update_a.write_bytes(b"updated a\n")
+        update_b.write_bytes(b"updated b\n")
+        transaction = PI._InstallTransaction([container], enabled=True,
+                                             copy_paths=(first, second, third, sibling))
+        owner = self.owner(transaction)
+        primary = RuntimeError("intentional caller sentinel")
+        cleanup = OSError("injected failure after one proved disposal")
+        partial = {}
+        effect = None
+        dispose = transaction._dispose_node
+
+        def fail_after_one(path, expected):
+            quarantine = effect.quarantine if effect is not None else None
+            if quarantine is not None and path.parent == quarantine and path.name in selected_names:
+                if partial.get("completed") is None:
+                    partial["beforeKeys"] = dict(transaction._copy_current)
+                    partial["nativeProof"] = expected.native_proof
+                    result = dispose(path, expected)
+                    partial["completed"] = path
+                    self.assertFalse(path.exists())
+                    return result
+                partial["failed"] = path
+                partial["completedAbsent"] = partial["completed"] not in transaction._copy_current
+                partial["failedStillGuarded"] = path in transaction._copy_current
+                partial["unknownStillGuarded"] = transaction._copy_metadata[sibling].unknown
+                expected_keys = partial["beforeKeys"].keys() - {partial["completed"]}
+                partial["currentKeys"] = dict(transaction._copy_current)
+                self.assertTrue(partial["completedAbsent"])
+                self.assertTrue(partial["failedStillGuarded"])
+                self.assertTrue(partial["unknownStillGuarded"])
+                self.assertEqual(transaction._copy_current.keys(), expected_keys)
+                for member in expected_keys:
+                    self.assertIs(transaction._copy_current[member], partial["beforeKeys"][member])
+                for member in selected_names - {partial["completed"].name}:
+                    self.assertIn(quarantine / member, transaction._copy_current)
+                    self.assertTrue((quarantine / member).exists())
+                raise cleanup
+            return dispose(path, expected)
+
+        with self.assertRaises(PI._InstallFailure) as caught:
+            with patch.object(transaction, "_dispose_node", fail_after_one):
+                with transaction:
+                    selected_names = {first.name, second.name, third.name}
+                    original = dict(transaction._original[container])
+                    effect = transaction.arm_replacement(unit, prepared, owner)
+                    owner._replace_prepared(unit, prepared, effect=effect)
+                    owner.copy_file(Path("container/unit/a.txt"), update_a)
+                    owner.copy_file(Path("container/unit/b.txt"), update_b)
+                    participant = transaction._copy_metadata[sibling]
+                    node = transaction._expected[container][sibling]
+                    desired = replace(participant.before,
+                                      atime_ns=participant.before.atime_ns + 1_000_000_000,
+                                      mtime_ns=participant.before.mtime_ns + 1_000_000_000)
+                    set_times = PI._WindowsBoundNode.set_copy_times
+                    def wrong_time_assignment(bound, atime, mtime):
+                        return set_times(bound, atime, mtime + 100)
+                    with patch.object(PI._WindowsBoundNode, "set_copy_times", wrong_time_assignment):
+                        with self.assertRaisesRegex(ValueError, "unknown copy setter effect"):
+                            transaction._apply_copy_metadata(sibling, node, desired,
+                                stat.S_IMODE(node.python_identity[2]), lambda *_args: None, participant)
+                    self.assertTrue(participant.unknown)
+                    raise primary
+        self.assertIs(caught.exception.cause, primary)
+        self.assertIn("failed", partial)
+        self.assertIsNotNone(partial["nativeProof"])
+        self.assertNotIn(partial["completed"], partial["currentKeys"])
+        for member in (first, second, third):
+            self.assertEqual(transaction._expected[container][member].native_proof, original[member].native_proof)
+        self.assertEqual(first.read_bytes(), b"old a\n")
+        self.assertEqual(second.read_bytes(), b"old b\n")
+        self.assertEqual(third.read_bytes(), b"old c\n")
+        self.assertIsNotNone(caught.exception.recovery_path)
+        self.assertTrue(caught.exception.recovery_path.exists())
+        self.assertTrue(any(member.cause_exception is cleanup for member in caught.exception.members))
+        self.assertTrue(transaction._copy_metadata[sibling].unknown)
+
+    def publication_move_keeps_target_copy_metadata(self, *, hardlink_fallback):
+        container = self.root / "container"
+        container.mkdir()
+        self.target.rename(container / "source")
+        source = container / "source"
+        target = container / "published"
+        sibling = container / "sibling"
+        sibling.write_bytes(b"outside the moved subtree")
+        transaction = PI._InstallTransaction([container], enabled=True, copy_paths=(source, sibling))
+        with transaction:
+            original = transaction._original[container][source]
+            participant = transaction._copy_metadata[source]
+            before, origin = participant.before, participant.origin
+            current = transaction._copy_current[source]
+            sibling_metadata = transaction._copy_current[sibling]
+            sibling_node = transaction._original[container][sibling]
+            empty_progress = []
+            advance = transaction._advance
+            def observe_progress(path, state, **kwargs):
+                if path == source and not state:
+                    self.assertFalse(source.exists())
+                    self.assertNotIn(source, transaction._copy_current)
+                    self.assertIs(transaction._copy_current[target], current)
+                    empty_progress.append(path)
+                return advance(path, state, **kwargs)
+            native = transaction._native_publish_no_replace
+            def publication(*args, **kwargs):
+                return False if hardlink_fallback else native(*args, **kwargs)
+            with patch.object(transaction, "_native_publish_no_replace", publication), \
+                    patch.object(transaction, "_advance", observe_progress), \
+                    patch.object(PI.os, "link", wraps=PI.os.link) as links:
+                actual = transaction._publish_retained(source, target, source_state={source: original})
+            self.assertEqual(empty_progress, [source])
+            self.assertEqual(links.call_count, 1 if hardlink_fallback else 0)
+            self.assertEqual(actual[target].native_proof, original.native_proof)
+            self.assertEqual(PI._CreateOnlyMutablePath._identity(target)[:2], original.python_identity[:2])
+            self.assertIs(transaction._copy_current[target], current)
+            self.assertIs(transaction._copy_current[sibling], sibling_metadata)
+            self.assertEqual(transaction._expected[container][sibling], sibling_node)
+            self.assertEqual(transaction._expected[container][target], original)
+            transaction._assert_copy_metadata(target)
+            self.assertIs(participant.before, before)
+            self.assertIs(participant.origin, origin)
+            self.assertFalse(participant.unknown)
+            self.assertEqual(target.read_bytes(), b"same")
+            transaction._publish_retained(target, source, source_state=actual)
+            transaction._assert_copy_metadata(source)
+            transaction.commit()
+        self.assertFalse(target.exists())
+        self.assertEqual(sibling.read_bytes(), b"outside the moved subtree")
+        self.assert_clean()
+
+    def test_native_publication_move_keeps_target_copy_metadata(self):
+        self.publication_move_keeps_target_copy_metadata(hardlink_fallback=False)
+
+    def test_hardlink_publication_fallback_keeps_target_copy_metadata(self):
+        self.publication_move_keeps_target_copy_metadata(hardlink_fallback=True)
 
     def test_source_readonly_final_mode_follows_timestamps_and_rollback(self):
         self.source.chmod(stat.S_IREAD)

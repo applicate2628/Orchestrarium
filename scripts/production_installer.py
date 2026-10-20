@@ -2657,6 +2657,9 @@ class _InstallTransaction:
                  *, exclude: _DeclaredPathEffect | None = None) -> None:
         """Compose only the declared subtree, preserving all untouched witnesses."""
         state = dict(state)
+        if not state:
+            self._copy_current = {member: image for member, image in self._copy_current.items()
+                                  if member != path and path not in member.parents}
         def composed(root, image):
             result = dict(image)
             if self._paths_overlap(root, path):
@@ -4271,8 +4274,6 @@ class _InstallTransaction:
         expected = self._expected[path]
         self._dispose_image(path, expected)
         self._advance(path, {})
-        self._copy_current = {member: image for member, image in self._copy_current.items()
-                              if member != path and path not in member.parents}
 
     def _restore_copy_metadata(self, path: Path) -> None:
         for selected, participant in self._copy_metadata.items():
