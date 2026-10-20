@@ -241,9 +241,15 @@ def test_custody_accepts_in_worktree_link_with_approved_bytes(tmp_path: Path) ->
 def test_custody_failed_candidate_cleans_only_new_snapshot(tmp_path: Path) -> None:
     item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
     approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()
+    # A profession mismatch reaches candidate validation after snapshot creation.
+    event = json.loads((item / "agent-runs.jsonl").read_text().splitlines()[0])
+    event["role"] = "analyst"
+    raw = (json.dumps(event) + "\n").encode()
+    (item / "agent-runs.jsonl").write_bytes(raw)
+    target_sha = hashlib.sha256(raw.rstrip(b"\n")).hexdigest()
     before = (item / "agent-runs.jsonl").read_bytes()
     result = custody_append(item, source, key, target_sha, worktree_id, approved_sha, effort="low")
-    assert result.returncode != 0 and "C3 same-provider tier" in result.stderr
+    assert result.returncode != 0 and "C3" in result.stderr and "authority" in result.stderr
     assert (item / "agent-runs.jsonl").read_bytes() == before
     assert not (item / "review-artifact-custody" / approved_sha).exists()
 

@@ -25946,15 +25946,20 @@ def recover_mixed_current_ledger(
             open_launches = [row.run_id for row in obligations[0].open_launches]
             before_axes = {}
             if request["schemaVersion"] == 2:
-                before_context = validator._ordinary_raw_v2_effective_context(item, str(ledger), original, evidence_blobs or None, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
+                before_context = validator.load_effective_ledger_view(root, item,
+                    ledger.relative_to(root).as_posix(), selected_ledger_bytes=original,
+                    historical_pass_custody_blobs=evidence_blobs or None,
+                    ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
                 before_errors: list[str] = []
                 _active, before_validity, before_revise, before_launches = validator._reduce_effective_current_state(
                     before_context.rows, item, before_errors, None, context=before_context
                 )
                 before_axes = {row.raw_line_ordinal: entry.authority
                                for row, entry in zip(before_context.rows, before_validity)}
-                raw_revise = {row["runId"] for row in before_revise}
-                raw_launches = {row["runId"] for row in before_launches}
+                raw_revise = {row.event["runId"] for row, entry in zip(before_context.rows, before_validity)
+                              if entry.authority.revise_target_eligible}
+                raw_launches = {row.event["runId"] for row, entry in zip(before_context.rows, before_validity)
+                                if entry.authority.launch_eligible}
             else:
                 raw_revise = {str(event["runId"]) for event in events if event.get("schemaVersion") == 2 and event.get("gate") == "REVISE"}
                 raw_launches = {str(event["runId"]) for event in events if event.get("eventKind") == "launch"}

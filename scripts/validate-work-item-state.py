@@ -3174,6 +3174,10 @@ def derive_event_validity(
                     fail(errors, f"duplicate runId: {run_id}")
                 seen.add(run_id.casefold())
             continue
+        if row.epoch == "sealed-prefix" and event.get("eventKind") == "closure-invalidation" \
+            and "invalidationMode" not in event:
+            current.append(_validate_event(dict(event), item, seen, errors))
+            continue
         if row.epoch in {
             "manifest-profile", "sealed-prefix", "disposed-suffix", "disposed-raw", "transferred"
         } or (
@@ -3268,7 +3272,26 @@ def derive_archived_event_validity(
     return validity, closure_validity
 
 
-def _validate_closure_authority(
+def _closure_validity(rows, validity, errors):
+    if validity is not None and validity and isinstance(validity[0], bool):
+        if any(
+            row.projection_transformation != "raw"
+            or row.epoch not in {"raw", "strict-suffix"}
+            for row in rows
+        ):
+            fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: projected rows require typed validity")
+            return None
+        validity = _validity_from_boolean_events(rows, validity)
+    if validity is None:
+        fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: typed validity is required")
+        return None
+    if len(rows) != len(validity):
+        fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: row/validity cardinality differs")
+        return None
+    return validity
+
+
+def _reduce_closure_relations(
     rows: Sequence[RuntimeLedgerRowV1],
     errors: list[str],
     telemetry: dict[str, int] | None = None,
@@ -3276,6 +3299,7 @@ def _validate_closure_authority(
     validity: Sequence[LedgerEventValidityV1] | None = None,
     event_validity: Sequence[LedgerEventValidityV1] | Sequence[bool] | None = None,
     _archived_preclose_v2_rows: frozenset[int] = frozenset(),
+    _format1_effort: bool = False,
 ) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]]]:
     """Ledger-level REVISE-closure validation (decision 2026-07-16-review-verdict-closure,
     minimal slice). Returns (open_v2_revise_events, open_launch_events) — obligations never discharged/settled events (never discharged by a valid
@@ -3287,20 +3311,8 @@ def _validate_closure_authority(
         rows = _runtime_rows_from_events(rows)  # protected cross-script reader compatibility
     if validity is None:
         validity = event_validity
-    if validity is not None and validity and isinstance(validity[0], bool):
-        if any(
-            row.projection_transformation != "raw"
-            or row.epoch not in {"raw", "strict-suffix"}
-            for row in rows
-        ):
-            fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: projected rows require typed validity")
-            return [], []
-        validity = _validity_from_boolean_events(rows, validity)
+    validity = _closure_validity(rows, validity, errors)
     if validity is None:
-        fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: typed validity is required")
-        return [], []
-    if len(rows) != len(validity):
-        fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: row/validity cardinality differs")
         return [], []
     events = [row.event for row in rows]
 
@@ -3713,7 +3725,7 @@ def _validate_closure_authority(
                 if isinstance(t_rev, str) and isinstance(c_rev, str) and t_rev != c_rev:
                     bump("audit-artifact-revision-drift")
                 t_eff, c_eff = target.get("effort"), event.get("effort")
-                if t_eff in EFFORT_ORDER:
+                if _format1_effort and t_eff in EFFORT_ORDER:
                     # Totality (fail closed): a target that declares its tier cannot be
                     # closed by an undeclared-tier closer — omission is not a bypass.
                     if c_eff not in EFFORT_ORDER:
@@ -3751,6 +3763,17 @@ def _validate_closure_authority(
     return open_revise, open_launches
 
 
+def _validate_closure_authority(
+    rows, errors, telemetry=None, *, validity=None, event_validity=None,
+    _archived_preclose_v2_rows=frozenset(),
+):
+    """Current authority; descriptive cross-run effort grants no mandate."""
+    return _reduce_closure_relations(
+        rows, errors, telemetry, validity=validity, event_validity=event_validity,
+        _archived_preclose_v2_rows=_archived_preclose_v2_rows,
+    )
+
+
 def validate_closure(
     rows: Sequence[RuntimeLedgerRowV1],
     errors: list[str],
@@ -3766,13 +3789,18 @@ def validate_closure(
         rows, context, errors
     ):
         return [], []
-    return _validate_closure_authority(
-        rows,
-        errors,
-        telemetry,
-        validity=validity,
-        event_validity=event_validity,
-    )
+    if rows and isinstance(rows[0], Mapping):
+        rows = _runtime_rows_from_events(rows)
+    selected_validity = validity if validity is not None else event_validity
+    selected_validity = _closure_validity(rows, selected_validity, errors)
+    if selected_validity is None:
+        return [], []
+    pending: list = []
+    inactive = resolve_closure_invalidations(rows, selected_validity, errors, telemetry,
+        context=context, pending_closing_effects_out=pending)
+    available = _withhold_pending_closers(rows, selected_validity, pending)
+    return _validate_closure_authority(tuple(row for i, row in enumerate(rows) if i not in inactive),
+        errors, telemetry, validity=tuple(entry for i, entry in enumerate(available) if i not in inactive))
 
 
 def classify_migrated_launch_terminals(
@@ -4058,8 +4086,8 @@ def _ledger_h1_view_wire(
         LedgerEventValidityV1(False, row.authority) for row in prefix_rows
     )
     reduction_errors: list[str] = []
-    open_revise_rows, _ = _validate_closure_authority(
-        prefix_rows, reduction_errors, validity=validity
+    open_revise_rows, _ = _reduce_closure_relations(
+        prefix_rows, reduction_errors, validity=validity, _format1_effort=True
     )
     open_revises = {
         row["runId"]
@@ -5098,9 +5126,17 @@ def _ledger_h1_candidate_group(
                     entry["prefixLineCount"],
                 )
             )
+            # Suffix disposition rows must also be exactly bound before history qualification.
+            base_rows = dict(entry_rows)
+            base_rows[path] = effective_rows
+            base_token = _LedgerInvocationTokenV1(MappingProxyType(base_rows), h1_projection_partition)
+            base_context = LedgerValidationContextV1(path, effective_rows, views[path],
+                LedgerCompatibilityObservationV1("active", (), ()), tuple(revise_identities),
+                tuple(sorted(open_launch_ids, key=lambda value: value.encode("utf-8"))), base_token,
+                custody_by_path.get(path, MappingProxyType({})))
             effective_rows, history_holds, history_errors = _apply_history_custody(
                 effective_rows, item, artifacts.ledger_bytes_by_path[path], custody_by_path.get(path),
-                (historical_pass_custody_blobs_by_item or {}).get(item),
+                (historical_pass_custody_blobs_by_item or {}).get(item), context=base_context,
             )
             entry_rows[path] = effective_rows
             history_by_path[path] = history_holds
@@ -5688,6 +5724,7 @@ def _qualified_history_disposition(
     event: Mapping[str, object], hold: HistoricalLedgerHoldV1,
     candidate_blobs: Mapping[str, bytes] | None,
     historical_positions: set[int],
+    pending_closing_effects=(), current_validity=(),
 ) -> None:
     proof = event["historyDisposition"]
     if set(proof) != {"kind", "classificationRunId", "resolutionRunIds", "evidence", "boundEvents"}:
@@ -5745,6 +5782,19 @@ def _qualified_history_disposition(
             covered.add(requirement_id)
     if covered != set(required_by_id):
         raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: resolution requirement coverage is incomplete")
+    dependent = [closer for control, closer in pending_closing_effects
+                 if control.raw_line_ordinal == hold.raw_line_ordinal]
+    if dependent:
+        if proof["kind"] != "current-evidence-covered":
+            raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: controlled review obligations require current evidence coverage")
+        required_targets = {run_id for closer in dependent for run_id in closer.event["closesRunIds"]}
+        available = _withhold_pending_closers(rows, current_validity, pending_closing_effects)
+        proof_rows = tuple(row for i, row in enumerate(rows) if i < control_position)
+        proof_validity = tuple(entry for i, entry in enumerate(available) if i < control_position)
+        relation_errors = []
+        open_targets, _launches = _validate_closure_authority(proof_rows, relation_errors, validity=proof_validity)
+        if relation_errors or required_targets & {row["runId"] for row in open_targets}:
+            raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: exact dependent current obligations remain unresolved")
     if proof["kind"] != "current-evidence-covered" and (
         hold.event.get("gate") == "REVISE" or hold.authority_before.launch_eligible
         or hold.authority_before.revise_target_eligible or hold.event.get("findingClass") in PROTECTED_CLASSES
@@ -5768,6 +5818,7 @@ def _apply_history_custody(
     rows: tuple[RuntimeLedgerRowV1, ...], item: Path, ledger_bytes: bytes,
     historical_pass_custody: Mapping[tuple[int, str, str, str], str] | None = None,
     candidate_blobs: Mapping[str, bytes] | None = None,
+    *, context: LedgerValidationContextV1 | None = None,
 ) -> tuple[tuple[RuntimeLedgerRowV1, ...], tuple[HistoricalLedgerHoldV1, ...], tuple[str, ...]]:
     """Bind append-only history controls and conserve the owner's preimage axes."""
     controls = [(pos, row.event) for pos, row in enumerate(rows)
@@ -5796,6 +5847,10 @@ def _apply_history_custody(
         current.append(_validate_event(dict(row.event), item, set(), individual_errors,
                                        historical_pass_snapshot=snapshot))
     masks = _derive_authority_masks(rows, current, item, historical_pass_custody)
+    pending: list = []
+    resolve_closure_invalidations(rows, tuple(LedgerEventValidityV1(ok, mask) for ok, mask in zip(current, masks)),
+        [], context=context, pending_closing_effects_out=pending)
+    unresolved_controls = {id(control) for control, _closer in pending}
     admissions: dict[int, HistoricalLedgerHoldV1] = {}
     relation_events = tuple(row.event for row in rows)
     by_run: dict[str, list[int]] = {}
@@ -5833,16 +5888,18 @@ def _apply_history_custody(
                 fail(errors, "WI-LEDGER-HISTORY-DISPOSITION: hold is absent, already resolved or differently bound")
                 continue
             try:
-                _qualified_history_disposition(rows, item, control_position, event, hold, candidate_blobs, set(admissions))
+                _qualified_history_disposition(rows, item, control_position, event, hold, candidate_blobs, set(admissions),
+                    pending, tuple(LedgerEventValidityV1(ok, mask) for ok, mask in zip(current, masks)))
             except ValueError as exc:
                 fail(errors, str(exc))
                 continue
             admissions[target_position] = replace(hold, disposition_run_id=event["runId"])
             continue
+        controlled_relation = id(target) in unresolved_controls
         if (
             target_position in admissions
-            or target.epoch not in {"raw", "strict-suffix"}
-            or history_owner_control(target.event)
+            or (target.epoch not in {"raw", "strict-suffix"} and not (controlled_relation and target.epoch == "sealed-prefix"))
+            or (history_owner_control(target.event) and not controlled_relation)
             or (isinstance(target.event.get("workItem"), str)
                 and target.event["workItem"] != item.name)
         ):
@@ -5850,7 +5907,7 @@ def _apply_history_custody(
             continue
         orphan = bool(target.event.get("eventKind") == "terminal" and not
                       terminal_has_valid_earlier_launch(relation_events, target_position, item, run_positions))
-        if current[target_position] and not orphan:
+        if current[target_position] and not orphan and not controlled_relation:
             fail(errors, "WI-LEDGER-HISTORY-TARGET: target has no historical validation failure")
             continue
         admissions[target_position] = HistoricalLedgerHoldV1(
@@ -7950,33 +8007,32 @@ def validate_archived_ledger_obligations(
     except (OSError, ValueError) as exc:
         fail(errors, f"cannot read ledger: {ledger}: {exc}")
         return errors, [], []
-    if isinstance(item, _CapturedHistoryPath):
-        resolution = _resolve_ledger_h1_selected(
-            _root, item, f"{relative_item}/agent-runs.jsonl",
-            selected_ledger_bytes=ledger_bytes,
-            ledger_acquisition_complete_out=ledger_acquisition_complete_out,
-            required_ledger_acquisition_by_path=required_ledger_acquisition_by_path, ledger_resource_budget=ledger_resource_budget
-        , transition_resource_budget=transition_resource_budget)
-        if resolution.classification == "invalid":
-            # Retain the raw loader's bounded-acquisition semantics without
-            # reducing a failed applicable group as an ordinary raw archive.
-            load_jsonl(ledger, errors, source_bytes=ledger_bytes,
-                       ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget)
-            errors.extend(resolution.context.observation.diagnostics)
-            return errors, [], []
-        if resolution.classification == "member":
-            context = resolution.context
-            runtime_rows = context.rows
-            _active, validity, open_revise, open_launches = _reduce_effective_current_state(
-                runtime_rows, item, errors, telemetry, context=context
-            )
-            _capture_obligation_state(obligation_state_out, runtime_rows, open_revise,
-                                      open_launches, context.unresolved_history)
-            if authority_state_out is not None:
-                authority_state_out.append({row.raw_line_ordinal: entry.authority
-                                            for row, entry in zip(runtime_rows, validity)})
-            _history_hold_errors(context.history_custody, errors)
-            return errors, open_revise, open_launches
+    resolution = _resolve_ledger_h1_selected(
+        _root, item, f"{relative_item}/agent-runs.jsonl",
+        selected_ledger_bytes=ledger_bytes,
+        ledger_acquisition_complete_out=ledger_acquisition_complete_out,
+        required_ledger_acquisition_by_path=required_ledger_acquisition_by_path, ledger_resource_budget=ledger_resource_budget
+    , transition_resource_budget=transition_resource_budget)
+    if resolution.classification == "invalid":
+        # Retain the raw loader's bounded-acquisition semantics without
+        # reducing a failed applicable group as an ordinary raw archive.
+        load_jsonl(ledger, errors, source_bytes=ledger_bytes,
+                   ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget)
+        errors.extend(resolution.context.observation.diagnostics)
+        return errors, [], []
+    if resolution.classification == "member":
+        context = resolution.context
+        runtime_rows = context.rows
+        _active, validity, open_revise, open_launches = _reduce_effective_current_state(
+            runtime_rows, item, errors, telemetry, context=context
+        )
+        _capture_obligation_state(obligation_state_out, runtime_rows, open_revise,
+                                  open_launches, context.unresolved_history)
+        if authority_state_out is not None:
+            authority_state_out.append({row.raw_line_ordinal: entry.authority
+                                        for row, entry in zip(runtime_rows, validity)})
+        _history_hold_errors(context.history_custody, errors)
+        return errors, open_revise, open_launches
     raw_metadata: list[dict[str, object]] = []
     events = load_jsonl(ledger, errors, raw_metadata, ledger_bytes,
                         ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget)
@@ -8103,12 +8159,13 @@ def validate_archived_ledger_obligations(
         )
         historical_target_positions.add(position)
     typed_closure_validity = tuple(archived_validity)
+    pending: list = []
     inactive = resolve_closure_invalidations(
         runtime_rows,
         typed_closure_validity,
         errors,
         telemetry,
-        context=None,
+        context=None, pending_closing_effects_out=pending,
     )
     active_positions = [
         pos
@@ -8133,6 +8190,7 @@ def validate_archived_ledger_obligations(
             else LedgerEventValidityV1(closure_validity[pos], mask)
             for pos, mask in zip(active_positions, active_masks)
         )
+    active_validity = _withhold_pending_closers(active_rows, active_validity, pending)
     # Only this read-only monthly-archive reader may preserve the old C3 meaning
     # of raw V2 relations recorded before the lifecycle owner's terminal instant.
     preclose_v2_rows: set[int] = set()
@@ -8588,112 +8646,118 @@ def validate_solution_attempt_gate_binding(binding: object) -> dict[str, object]
     return {"result": "SOL-OK", "eligible": True}
 
 
+def _bind_ordinary_invalidation(rows, validity, pos, inactive, errors, *, require_obligations=False):
+    """Bind existing ordinary control/target identities, without deciding effect."""
+    recovery = rows[pos].event
+    recovery_id = recovery.get("runId")
+    target_id = recovery.get("invalidatesRunId")
+    if recovery.get("eventKind") != "closure-invalidation" or "invalidationMode" in recovery:
+        return None
+    positions = {}
+    for index, row in enumerate(rows):
+        run_id = row.event.get("runId")
+        if isinstance(run_id, str):
+            positions.setdefault(run_id, []).append(index)
+    candidates = positions.get(target_id, []) if isinstance(target_id, str) else []
+    if len(candidates) != 1 or candidates[0] >= pos:
+        fail(errors, f"{recovery_id}: ledger-recovery:target-identity requires exactly one earlier event for {target_id!r}")
+        return None
+    target_pos = candidates[0]
+    target_row = rows[target_pos]
+    target = target_row.event
+    if target_pos in inactive or target.get("eventKind") == "closure-invalidation":
+        fail(errors, f"{recovery_id}: ledger-recovery:topology forbids duplicate, chain, cycle, or correction target {target_id}")
+        return None
+    legacy_revise = bool(not validity[target_pos].current_schema_valid
+        and validity[target_pos].authority.revise_target_eligible
+        and target.get("schemaVersion") == "1.0" and target.get("gate") == "REVISE")
+    if not legacy_revise and (target.get("schemaVersion") != 2
+        or target.get("eventKind") == "launch" or not isinstance(target.get("closesRunIds"), list)):
+        fail(errors, f"{recovery_id}: ledger-recovery:target-ineligible {target_id}")
+        return None
+    individually_valid = legacy_revise or (validity[target_pos].authority.closer_eligible
+        if target_row.epoch == "sealed-prefix" else validity[target_pos].current_schema_valid)
+    if not individually_valid:
+        fail(errors, f"{recovery_id}: ledger-recovery:target-per-event-invalid {target_id}")
+        return None
+    if recovery.get("invalidatesEventSha256") != target_row.raw_body_sha256:
+        fail(errors, f"{recovery_id}: ledger-recovery:target-digest-mismatch {target_id}")
+        return None
+    if not legacy_revise and require_obligations:
+        closes = target.get("closesRunIds")
+        if not closes or len(set(closes)) != len(closes):
+            fail(errors, f"{recovery_id}: ledger-recovery:target-ineligible {target_id}")
+            return None
+        for run_id in closes:
+            found = positions.get(run_id, []) if isinstance(run_id, str) else []
+            if len(found) != 1 or found[0] >= target_pos or rows[found[0]].event.get("gate") != "REVISE" \
+                or not validity[found[0]].authority.revise_target_eligible \
+                or rows[found[0]].event.get("workItem") != target.get("workItem"):
+                fail(errors, f"{recovery_id}: ledger-recovery:target-obligation-identity {run_id!r}")
+                return None
+    return target_pos, legacy_revise
+
+
+def _withhold_pending_closers(rows, validity, pending):
+    """Reapply exact full-view dependencies after any filtering/mask recomputation."""
+    held = {id(closer) for _control, closer in pending}
+    return tuple(replace(entry, authority=replace(entry.authority, closer_eligible=False))
+                 if id(row) in held else entry for row, entry in zip(rows, validity))
+
+
 def resolve_closure_invalidations(
-    rows: Sequence[RuntimeLedgerRowV1],
-    validity: Sequence[LedgerEventValidityV1],
-    errors: list[str],
-    telemetry: dict[str, int] | None = None,
-    *,
+    rows: Sequence[RuntimeLedgerRowV1], validity: Sequence[LedgerEventValidityV1],
+    errors: list[str], telemetry: dict[str, int] | None = None, *,
     context: LedgerValidationContextV1 | None = None,
+    pending_closing_effects_out: list[tuple[RuntimeLedgerRowV1, RuntimeLedgerRowV1]] | None = None,
 ) -> set[int]:
-    """Return whole-event positions excluded only from V1/V2 relation reduction."""
+    """Resolve warranted invalidations and exact nonauthorizing dependencies."""
     if len(rows) != len(validity):
         fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: invalidation row/validity cardinality differs")
         return set()
     if not _sealed_context_is_bound(rows, context, errors):
         return set()
     tel = telemetry if telemetry is not None else {}
-    inactive: set[int] = set()
-    positions: dict[str, list[int]] = {}
-    for pos, row in enumerate(rows):
-        event = row.event
-        run_id = event.get("runId")
-        if isinstance(run_id, str):
-            positions.setdefault(run_id, []).append(pos)
-
+    inactive = set()
+    pending = []
     for pos, recovery_row in enumerate(rows):
         recovery = recovery_row.event
-        if recovery.get("eventKind") != "closure-invalidation":
+        if recovery.get("eventKind") != "closure-invalidation" or "invalidationMode" in recovery:
             continue
-        if recovery.get("invalidationMode") in {_INVALID_CURRENT_DISPOSITION_MODE, _HISTORY_CUSTODY_MODE}:
+        preserved = recovery_row.epoch in {"historical-custody", "sealed-prefix"}
+        if not validity[pos].current_schema_valid:
             continue
-        active_context = context is not None and context.observation.activation_state == "active"
-        if not validity[pos].current_schema_valid or (
-            active_context and recovery_row.epoch != "strict-suffix"
-        ):
+        binding = _bind_ordinary_invalidation(rows, validity, pos, inactive, errors)
+        if binding is None:
             continue
-        recovery_id = recovery.get("runId")
-        target_id = recovery.get("invalidatesRunId")
-        candidates = positions.get(target_id, []) if isinstance(target_id, str) else []
-        if len(candidates) != 1 or candidates[0] >= pos:
-            fail(errors, f"{recovery_id}: ledger-recovery:target-identity requires exactly one earlier event for {target_id!r}")
-            continue
-        target_pos = candidates[0]
-        target_row = rows[target_pos]
-        target = target_row.event
-        if target_pos in inactive or target.get("eventKind") == "closure-invalidation":
-            fail(errors, f"{recovery_id}: ledger-recovery:topology forbids duplicate, chain, cycle, or correction target {target_id}")
-            continue
-        legacy_revise = bool(
-            not validity[target_pos].current_schema_valid
-            and validity[target_pos].authority.revise_target_eligible
-            and target.get("schemaVersion") == "1.0"
-            and target.get("gate") == "REVISE"
-        )
-        if not legacy_revise and (
-            target.get("schemaVersion") != 2
-            or target.get("eventKind") == "launch"
-            or not isinstance(target.get("closesRunIds"), list)
-        ):
-            fail(errors, f"{recovery_id}: ledger-recovery:target-ineligible {target_id}")
-            continue
-        target_individually_valid = (
-            legacy_revise
-            or (
-                validity[target_pos].authority.closer_eligible
-                if active_context and target_row.epoch == "sealed-prefix"
-                else validity[target_pos].current_schema_valid
-            )
-        )
-        if not target_individually_valid:
-            fail(errors, f"{recovery_id}: ledger-recovery:target-per-event-invalid {target_id}")
-            continue
-        if recovery.get("invalidatesEventSha256") != target_row.raw_body_sha256:
-            fail(errors, f"{recovery_id}: ledger-recovery:target-digest-mismatch {target_id}")
-            continue
-
-        if legacy_revise:
+        target_pos, legacy_revise = binding
+        if legacy_revise and not preserved:
             inactive.add(target_pos)
             tel["recovery-accepted"] = tel.get("recovery-accepted", 0) + 1
             continue
-
-        # Reuse the one C1-C5 evaluator: adding the candidate target to its
-        # already-active prefix must introduce a relation diagnostic. No copied
-        # C-rule logic is maintained in this recovery owner.
+        if legacy_revise:
+            fail(errors, f"{recovery.get('runId')}: ledger-recovery:target-ineligible preserved legacy target")
+            continue
+        available = _withhold_pending_closers(rows, validity, pending)
         before_positions = [index for index in range(target_pos) if index not in inactive]
         with_positions = before_positions + [target_pos]
-        before_rows = tuple(rows[index] for index in before_positions)
-        with_rows = tuple(rows[index] for index in with_positions)
-        before_validity = tuple(validity[index] for index in before_positions)
-        with_validity = tuple(validity[index] for index in with_positions)
-        before_errors: list[str] = []
-        with_errors: list[str] = []
-        _validate_closure_authority(
-            before_rows,
-            before_errors,
-            validity=before_validity,
-        )
-        _validate_closure_authority(
-            with_rows,
-            with_errors,
-            validity=with_validity,
-        )
-        introduced = with_errors[len(before_errors):] if with_errors[: len(before_errors)] == before_errors else with_errors
-        if not introduced:
-            fail(errors, f"{recovery_id}: ledger-recovery:target-authoritative {target_id}")
+        before_errors, with_errors = [], []
+        _validate_closure_authority(tuple(rows[i] for i in before_positions), before_errors,
+                                    validity=tuple(available[i] for i in before_positions))
+        _validate_closure_authority(tuple(rows[i] for i in with_positions), with_errors,
+                                    validity=tuple(available[i] for i in with_positions))
+        introduced = with_errors[len(before_errors):] if with_errors[:len(before_errors)] == before_errors else with_errors
+        if preserved or not introduced:
+            if _bind_ordinary_invalidation(rows, validity, pos, inactive, errors, require_obligations=True) is None:
+                continue
+            pending.append((recovery_row, rows[target_pos]))
+            if recovery_row.epoch != "historical-custody":
+                fail(errors, f"{recovery.get('runId')}: ledger-recovery:target-authoritative {recovery.get('invalidatesRunId')} (pending current effect)")
             continue
         inactive.add(target_pos)
         tel["recovery-accepted"] = tel.get("recovery-accepted", 0) + 1
+    if pending_closing_effects_out is not None:
+        pending_closing_effects_out.extend(pending)
     return inactive
 
 
@@ -8719,8 +8783,9 @@ def _reduce_effective_current_state(
     baseline_revise, baseline_launches = _validate_closure_authority(
         rows, baseline_errors, validity=validity
     )
+    pending: list = []
     inactive = resolve_closure_invalidations(
-        rows, validity, errors, telemetry, context=context
+        rows, validity, errors, telemetry, context=context, pending_closing_effects_out=pending
     )
     active_positions = tuple(
         position for position in range(len(rows)) if position not in inactive
@@ -8739,6 +8804,7 @@ def _reduce_effective_current_state(
             active_current_validity, active_masks
         )
     )
+    active_validity = _withhold_pending_closers(active_rows, active_validity, pending)
     effective_validity = [
         LedgerEventValidityV1(entry.current_schema_valid, _NO_LEDGER_AUTHORITY)
         for entry in validity

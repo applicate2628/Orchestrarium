@@ -228,7 +228,7 @@ class ClosureFixture(unittest.TestCase):
         errors = self._validate([revise, wrong_lane])
         self.assertTrue(any("lane" in e and "(C3)" in e for e in errors), errors)
 
-    def test_c3_same_provider_lower_effort_fails(self) -> None:
+    def test_c3_descriptive_cross_run_effort_is_not_authority(self) -> None:
         revise = _event(
             "run-00000050-revise", gate="REVISE", status="revise",
             artifact="a.md", effort="xhigh", provider="codex",
@@ -238,7 +238,7 @@ class ClosureFixture(unittest.TestCase):
             closesRunIds=["run-00000050-revise"], evidence=[{"kind": "review", "ref": "x"}],
         )
         errors = self._validate([revise, weak])
-        self.assertTrue(any("effort" in e and "(C3" in e for e in errors), errors)
+        self.assertEqual(errors, [])
 
     def test_c3_lead_main_requires_truthful_qa_reviewed_role(self) -> None:
         target = _event(
@@ -824,7 +824,7 @@ class ClosureFixture(unittest.TestCase):
         errors = self._validate([revise, author_close])
         self.assertTrue(any("reviewer-side" in e and "(C3)" in e for e in errors), errors)
 
-    def test_effort_omission_is_not_a_bypass(self) -> None:
+    def test_optional_cross_run_effort_may_be_omitted(self) -> None:
         revise = _event(
             "run-00000110-revise", gate="REVISE", status="revise",
             artifact="a.md", effort="xhigh", provider="codex",
@@ -834,7 +834,7 @@ class ClosureFixture(unittest.TestCase):
             closesRunIds=["run-00000110-revise"], evidence=[{"kind": "review", "ref": "x"}],
         )
         errors = self._validate([revise, no_effort])
-        self.assertTrue(any("omits effort" in e for e in errors), errors)
+        self.assertEqual(errors, [])
 
     def test_unclassified_finding_is_not_user_waivable(self) -> None:
         revise = _event("run-00000120-revise", gate="REVISE", status="revise", artifact="a.md")

@@ -130,7 +130,7 @@ A later native professional PASS may close its findings through a launch-bound t
 - The closer's `role` equals the target's `assignedRole`; any closer `assignedRole` must agree. Native `executionRole` stays `internal`, not the adapter role.
 - `artifact` identifies each produced report. The native and external reports must have distinct paths.
 - Matching nonblank `artifactIdentity` values identify the reviewed subject, not those report paths; `scope` must match exactly.
-- `closesRunIds` names the exact external REVISE event. Existing launch, lane, effort, and other checks still apply.
+- `closesRunIds` names the exact external REVISE event. Existing own launch/profile, lane, and other authority checks still apply. Descriptive effort on another run imposes no closer requirement.
 
 This flag fragment supplements an otherwise valid native PASS append; use the actual target's identity and scope:
 
@@ -142,7 +142,7 @@ Unrelated professions, subjects, scopes, and invalid report relations still fail
 
 ## Close A Lead/Main QA Finding
 
-For a `role=lead`, `executionRole=main` REVISE, the independent closer keeps its actual `role=qa-engineer`, `executionRole=internal`, and truthful `assignedRole` (if any). Its PASS names exactly one earlier target with `--closes <run-id>` and sets `--reviewed-role lead`. `assignedRole=lead` is not authority for this case, even alongside `reviewedRole`; Lead/main cannot close its own finding. Matching artifact, lane, and declared-effort checks still apply. Other reviewer professions retain their existing C3 rule.
+For a `role=lead`, `executionRole=main` REVISE, the independent closer keeps its actual `role=qa-engineer`, `executionRole=internal`, and truthful `assignedRole` (if any). Its PASS names exactly one earlier target with `--closes <run-id>` and sets `--reviewed-role lead`. `assignedRole=lead` is not authority for this case, even alongside `reviewedRole`; Lead/main cannot close its own finding. Matching artifact, lane, evidence, and own launch/profile checks still apply. Reasoning effort is model-local descriptive data, so a previous run does not impose an effort ordering or an otherwise optional effort declaration on its closer. Other reviewer professions retain their existing C3 authority rule.
 
 ## Preserve A Linked-Worktree Review Artifact
 
@@ -378,6 +378,10 @@ python -B scripts/mutate-work-item.py recover-mixed-current-ledger --root . --re
 The same `recover-mixed-current-ledger` command admits malformed application history without requiring a historical semantic run ID. Version 1 requests and receipts retain their existing migration/disposition behavior. Version 2 targets use `custody-invalid-history` or `dispose-history-custody`; they bind `sourcePrefixSha256`, `sourcePrefixBytes`, `rawLineOrdinal`, and `physicalLineSha256`. The prefix is the exact captured byte stream and the line digest includes its terminator. Missing or invalid old IDs remain opaque. All valid decoded IDs remain reserved, and case-insensitive collisions, forged work-item identities, conflicting valid terminal relations, or damaged owner controls refuse.
 
 Admission appends a nonauthorizing `closure-invalidation` with `invalidationMode="historical-custody"` and `custodyAction="admit"`. It neither invents old timestamps/scope nor turns old output into a successful verdict. The existing evaluator conserves independently valid authority and closure effects, including valid orphan artifact/closer axes. The public obligation state exposes physically bound `unresolved_history` separately from real review/launch obligations. Fresh fully valid launches and terminals remain appendable; invalid fresh input still refuses the whole candidate. Default strict validation, ordinary close, and transfer reject unresolved historical holds with `WI-LEDGER-HISTORY-UNRESOLVED`.
+
+A structurally exact ordinary invalidation whose current effect is unresolved may also enter this existing custody route. Its earlier unique closer, body digest, and every earlier review target must bind exactly. The preserved control cannot execute; the reducer withholds only that referenced closer's closing effect for all its targets, preserving independently proved terminal and artifact axes. Those original obligations remain visible until a different genuine current closer discharges them. Malformed, ambiguous, nested custody/migration, or foreign controls still refuse. Disposition cannot relabel dependent review obligations as bookkeeping, and resolving a hold never revives the old closing effect.
+
+For a sealed History 1 (H1) prefix, the reader first verifies the complete existing profile `sealed-active-prefix-v1`, version 1, with its exact original wire, authority masks, digest domains and group oracle. That frozen prefix projection includes its format's effort-sensitive reduction; it proves compatibility identity, not current closure authority. A real fully verified base context qualifies sealed targets for custody before the final context binds the actual resulting holds. Live review and launch state always comes from the current reducer, including later suffix records. New seals retain genuine current-qualified closers even when the frozen format projection reports an open target. Missing, revoked, partial or corrupt proof never falls back to raw authority.
 
 Disposition uses the same Version 2 command and positive `--apply-admitted` flag. One target is:
 

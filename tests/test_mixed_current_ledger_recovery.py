@@ -1040,14 +1040,14 @@ def _history_review_record(item: Path, run_id: str, payload: dict, *, role="qa-e
     return evidence, payload
 
 
-def _history_disposition_request(item: Path, admission: dict, *, kind="non-obligating"):
+def _history_disposition_request(item: Path, admission: dict, *, kind="non-obligating", identity_prefix=""):
     contract_bytes = b"# Accepted current task\nHistorical malformed rows are bookkeeping; actual review obligations remain separate.\n"
     (item / "current-contract.md").write_bytes(contract_bytes)
     contract = {"ref": "current-contract.md", "sha256": _sha(contract_bytes)}
     targets = []
     for target in admission["targets"]:
         subject = {key: target[key] for key in ("sourcePrefixSha256", "sourcePrefixBytes", "rawLineOrdinal", "physicalLineSha256")}
-        run_id = f"classification-row-{target['rawLineOrdinal']}"
+        run_id = f"{identity_prefix}classification-row-{target['rawLineOrdinal']}"
         requirements = [{"requirementId": "current-functional-check", "role": "qa-engineer",
                          "scope": ["current-requirement"], "lane": "history-check", "minimumEffort": "high"}] \
             if kind == "current-evidence-covered" else []
@@ -1059,7 +1059,7 @@ def _history_disposition_request(item: Path, admission: dict, *, kind="non-oblig
         entries = [evidence]
         resolutions = []
         if requirements:
-            resolution_id = f"resolution-row-{target['rawLineOrdinal']}"
+            resolution_id = f"{identity_prefix}resolution-row-{target['rawLineOrdinal']}"
             resolution, _payload = _history_review_record(item, resolution_id, {
                 "schemaVersion": 1, "kind": "history-resolution", "workItem": item.name,
                 "subject": subject, "currentContract": contract, "classificationRunId": run_id,
@@ -1230,3 +1230,69 @@ def test_history_custody_context_rejects_forged_invocation(tmp_path: Path):
     errors = []
     validator.derive_event_validity(forged.rows, item, errors, context=forged)
     assert any("WI-LEDGER-HISTORY-BINDING" in error for error in errors), errors
+
+
+def test_controlled_history_preserves_exact_closing_dependencies(tmp_path: Path) -> None:
+    from tests.test_review_verdict_closure import _event, _revise, _recovery
+    owner = load_script(LIFECYCLE, "mixed_controlled_history_owner")
+    v = owner._load_agent_run_ledger().load_validator()
+    item = tmp_path / "work-items/active/fixture-item"
+    item.mkdir(parents=True)
+    (item / "status.md").write_text(minimal_staged_status(), encoding="utf-8")
+    (item / "design.md").write_text("synthetic current evidence\n")
+    targets = [_revise("required-first-revise"), _revise("required-second-revise")]
+    unrelated = _revise("unrelated-live-revise")
+    launch = _event("old-closer-launch", eventKind="launch", status="running")
+    closer = _event("old-current-closer", eventKind="terminal", launchRunId=launch["runId"],
+        gate="PASS", artifact="design.md", lane="architecture", effort="low", provider="codex",
+        closesRunIds=[target["runId"] for target in targets], evidence=[{"kind":"review","ref":"synthetic review"}])
+    old = targets + [unrelated, launch, closer]
+    control = _recovery("unknown-original-control", closer, _line(closer).rstrip(b"\n"))
+    raw = b"".join(map(_line, old + [control]))
+    ledger = item / "agent-runs.jsonl"; ledger.write_bytes(raw)
+    request = {"schemaVersion":2,"operationId":"controlled-history-001","recordedAt":"2026-10-20T08:00:00Z",
+        "workItem":"work-items/active/fixture-item","expectedLedgerSha256":_sha(raw),"targets":[{
+        "action":"custody-invalid-history","sourcePrefixSha256":_sha(raw),"sourcePrefixBytes":len(raw),
+        "rawLineOrdinal":len(old)+1,"physicalLineSha256":_sha(_line(control))}]}
+    def observe():
+        states, axes = [], []
+        errors = v.validate_work_item(item, strict_revise=False, validate_status_file=False,
+            obligation_state_out=states, authority_state_out=axes)
+        assert {row.run_id for row in states[0].open_revise} == {e["runId"] for e in targets+[unrelated]}
+        assert not states[0].open_launches
+        mask=axes[0][len(old)]
+        assert not mask.closer_eligible and mask.terminal_eligible and mask.artifact_evidence_eligible
+        return errors
+    assert any("target-authoritative" in e for e in observe())
+    preview=owner.recover_mixed_current_ledger(tmp_path,json.dumps(request).encode())
+    assert ledger.read_bytes()==raw
+    result=owner.recover_mixed_current_ledger(tmp_path,json.dumps(request).encode(),apply_admitted=True)
+    assert ledger.read_bytes().startswith(raw)
+    assert not observe()
+    context=v.load_effective_ledger_view(tmp_path,item,"work-items/active/fixture-item/agent-runs.jsonl")
+    assert len(context.unresolved_history)==1 and len(context.history_custody)==1
+    strict=v.validate_work_item(item,validate_status_file=False)
+    assert any("WI-LEDGER-HISTORY-UNRESOLVED" in error for error in strict)
+    replay=owner.recover_mixed_current_ledger(tmp_path,json.dumps(request).encode(),apply_admitted=True)
+    assert not observe()
+    fresh={**closer,"runId":"fresh-current-closer"}
+    fresh.pop("eventKind");fresh.pop("launchRunId")
+    with ledger.open("ab") as stream:stream.write(_line(fresh))
+    states=[]
+    assert v.validate_work_item(item,strict_revise=False,validate_status_file=False,obligation_state_out=states)==[]
+    assert {row.run_id for row in states[0].open_revise}=={unrelated["runId"]}
+    assert not ledger.with_suffix(".jsonl.tmp").exists()
+    bookkeeping = _history_disposition_request(item, request, identity_prefix="bookkeeping-")
+    with pytest.raises(owner.LifecycleError, match="controlled review obligations require current evidence coverage"):
+        owner.recover_mixed_current_ledger(tmp_path,json.dumps(bookkeeping).encode(),apply_admitted=True)
+    disposition_request = _history_disposition_request(item, request,
+        kind="current-evidence-covered", identity_prefix="current-")
+    disposition_result=owner.recover_mixed_current_ledger(tmp_path,json.dumps(disposition_request).encode(),apply_admitted=True)
+    owner.recover_mixed_current_ledger(tmp_path,json.dumps(disposition_request).encode(),apply_admitted=True)
+    states,axes=[],[]
+    assert v.validate_work_item(item,strict_revise=False,validate_status_file=False,
+        obligation_state_out=states,authority_state_out=axes)==[]
+    assert not states[0].unresolved_history
+    assert {row.run_id for row in states[0].open_revise}=={unrelated["runId"]}
+    assert not axes[0][len(old)].closer_eligible
+    assert axes[0][len(old)].terminal_eligible and axes[0][len(old)].artifact_evidence_eligible

@@ -167,7 +167,7 @@
     },
     "effort": {
       "enum": ["low", "medium", "high", "xhigh", "max", "unsupported"],
-      "$comment": "Typed declared reasoning-effort tier. unsupported records an external provider with no native effort control and is not an ordered tier. When both a REVISE and its closer declare ordered effort and share a provider, the closer's tier must be >= the target's."
+      "$comment": "Declared model-local reasoning effort. unsupported records an external provider with no native effort control. This descriptive field imposes no cross-run closer ordering or presence requirement; the run's own admitted launch/profile controls remain binding."
     },
     "findingClass": {
       "enum": ["publication-safety", "security", "correctness", "performance", "other", "legacy-unclassified"],

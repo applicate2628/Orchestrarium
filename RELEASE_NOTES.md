@@ -2,7 +2,13 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-21
+
+- Read-only archived ledger checks now route ordinary filesystem paths and captured history through the same complete sealed-prefix selection and current-authority reducer. The public checker can therefore receive valid archived sealed-prefix history without misreading its frozen manifest as an ordinary projection; missing, corrupt, or revoked proof retains the existing failure and authority boundaries.
+
 ## 2026-10-20
+
+- Review closure now uses the closer's actual profession, subject, evidence and own launch/profile requirements without inheriting another run's descriptive effort. Exact unresolved historical invalidation claims can be preserved through the existing custody transaction while their referenced old closer receives no closing credit; original obligations and independent terminal/artifact evidence remain visible. Existing sealed-prefix version-1 bytes and fingerprints remain compatible through their fixed format codec, separately from current authority, including later genuine closure and qualified history disposition.
 
 - Installer rollback now retires live copy-metadata references when the transaction records consumption of their physical subtree. This lets an owned tree replacement followed by a descendant copy restore the original object and metadata without a stale-reference cleanup error, while preserving foreign-object refusals and recoverable failure details.
 

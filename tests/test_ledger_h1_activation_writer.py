@@ -437,6 +437,14 @@ def test_archive_one_activated_h1_member_keeps_remaining_member_valid(
     )
     assert archived_context.selected_ledger_path == paths[0]
     assert archived_context.view == contexts[paths[0]].view
+    archived_states, archived_axes = [], []
+    archived_errors, archived_revises, archived_launches = reader.validate_archived_ledger_obligations(
+        archive, obligation_state_out=archived_states, authority_state_out=archived_axes,
+    )
+    assert archived_errors == []
+    assert [event["runId"] for event in archived_revises] == ["revise-a-0001"]
+    assert archived_launches == []
+    assert [row.run_id for row in archived_states[0].open_revise] == ["revise-a-0001"]
     assert not any(
         "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in error
         for error in remaining_errors
@@ -703,6 +711,26 @@ def test_unselected_ordinary_ledger_routes_beside_activated_h1_group(
         for path in root.rglob("*")
         if path.is_file() and ordinary not in path.parents
     } == revoked_h1_before
+
+
+@pytest.mark.parametrize("proof_failure", ["missing-receipt", "corrupt-manifest"])
+def test_archived_h1_path_requires_complete_group_proof(tmp_path: Path, proof_failure: str) -> None:
+    writer, reader, items, paths, receipt = archive_first_activated_h1_member(tmp_path)
+    archive = tmp_path / receipt["archivePath"]
+    before = (archive / "agent-runs.jsonl").read_bytes()
+    if proof_failure == "missing-receipt":
+        proof = next((tmp_path / "work-items/legacy-ledger-projection-receipts").glob("r-*.json"))
+        proof.unlink()
+    else:
+        proof = tmp_path / "work-items/legacy-ledger-projection-manifests/synthetic-h1-ledgers.json"
+        proof.write_bytes(b"{}\n")
+    states, axes = [], []
+    errors, revises, launches = reader.validate_archived_ledger_obligations(
+        archive, obligation_state_out=states, authority_state_out=axes,
+    )
+    assert errors and any("WI-LEDGER-COMPAT" in error for error in errors)
+    assert revises == [] and launches == [] and states == [] and axes == []
+    assert (archive / "agent-runs.jsonl").read_bytes() == before
 
 
 def test_unselected_live_ordinary_preserves_mixed_legacy_registry_order(
@@ -1403,3 +1431,40 @@ def test_cli_v2_dry_run_and_partial_or_mixed_modes_fail_before_mutation(
         assert failed.returncode == 1
         assert "WI-LEDGER-COMPAT-CLI-ARGS" in failed.stdout
         assert tree_state(root) == before
+
+
+def test_new_seal_keeps_current_effort_authority_separate_from_format1(tmp_path: Path) -> None:
+    writer, reader, request, items, paths = fixture(tmp_path)
+    ef = load_module(READER_FIXTURE_SCRIPT, "h1_new_current_effort_fixture")
+    ledger = tmp_path / paths[0]
+    events = [json.loads(line) for line in ledger.read_bytes().splitlines()]
+    target = next(e for e in events if e["runId"] == "revise-a-0001")
+    target.update(provider="codex", effort="xhigh")
+    closer = ef.event("new-current-low-closer", items[0].name, role="analyst", executionRole="internal",
+        gate="PASS", artifact="target.md", effort="low", provider="codex", closesRunIds=[target["runId"]],
+        evidence=[{"kind":"review","ref":"synthetic current review"}])
+    ledger.write_bytes(ef.ledger_bytes(events + [closer]))
+    manifest = json.loads(request.ledger_manifest_bytes)
+    identities=[]
+    for entry in manifest["entries"]:
+        body=(tmp_path / entry["ledgerPath"]).read_bytes()
+        entry.update(prefixLineCount=len(body.splitlines()),prefixByteLength=len(body),prefixSha256=digest(body))
+        errors=[]
+        rows=reader._ledger_h1_runtime_rows(entry["ledgerPath"],body,entry["prefixLineCount"],tmp_path/entry["workItem"],errors)
+        assert not errors
+        wire, revises, launches=reader._ledger_h1_view_wire(entry,rows)
+        entry["projectedViewSha256"]=reader._ledger_h1_digest("orchestrarium:ledger-h1:projected-view:v1",wire)
+        identities.extend(f"{Path(entry['workItem']).name}\0{run_id}" for run_id in revises)
+    identities.sort(key=lambda value:value.encode())
+    manifest["openReviseIdentitySha256"]=digest("\n".join(identities).encode())
+    oracle={"schemaVersion":1,"ledgerPrefixes":[{"ledgerPath":e["ledgerPath"],"prefixSha256":e["prefixSha256"]} for e in manifest["entries"]],"openReviseIdentities":identities}
+    manifest["openReviseOracleSha256"]=reader._ledger_h1_digest("orchestrarium:ledger-h1:open-revise-oracle:v1",oracle)
+    request=replace(request,ledger_manifest_bytes=canonical(manifest)+b"\n")
+    result=writer.apply_sealed_prefix_activation(tmp_path,request)
+    context=reader.load_effective_ledger_view(tmp_path,items[0],paths[0])
+    assert context.observation.activation_state=="active"
+    assert list(context.view.wire["reduction"]["openReviseRunIds"])==[target["runId"]]
+    errors=[]
+    active, validity, revises, launches=reader._reduce_effective_current_state(context.rows,items[0],errors,None,context=context)
+    assert errors==[] and revises==[] and launches==[]
+    assert next(validity[i].authority for i,row in enumerate(context.rows) if row.event.get("runId")==closer["runId"]).closer_eligible
