@@ -33,7 +33,11 @@ KIMI_EXTERNAL_DISPATCH_PROJECTIONS = (
 DEAD_CODE_DISPOSITION_FIELD = "Dead/superseded code disposition:"
 DEAD_CODE_DISPOSITION_REQUIREMENT = "When a change supersedes a mechanism, `none` is invalid."
 DEAD_CODE_DISPOSITION_ECHO = "Dead/superseded code disposition result"
-DEAD_CODE_DISPOSITION_QA_GATE = "cannot return `PASS` until it verifies the disposition field against the diff"
+DEAD_CODE_DISPOSITION_SECTION = "**Artifact disposition and project hygiene:**"
+DEAD_CODE_DISPOSITION_QA_GATE = "Verify disposition for the mechanism changed or superseded in the commissioned slice"
+DEAD_CODE_DISPOSITION_QA_SUPERSESSION = "When the change supersedes a mechanism, a `none` disposition is `REVISE`."
+DEAD_CODE_DISPOSITION_QA_PASS = "`PASS` requires every mandatory criterion of the commissioned slice to be verified."
+DEAD_CODE_DISPOSITION_VALIDATOR_PREDICATE = "QA gate verifies dead/superseded code disposition before PASS"
 
 EXTERNAL_PROMPT_CONSUMERS = (
     "src.codex/skills/lead/external-dispatch.md",
@@ -81,7 +85,6 @@ ARCHITECTURE_REVIEWER_PROJECTIONS = (
 )
 LEAD_SKILL_PROJECTIONS = (
     "src.codex/skills/lead/SKILL.md",
-    "src.claude/skills/lead/SKILL.md",
 )
 LEAD_ROUTING_PROJECTIONS = (
     "src.codex/skills/lead/operating-model.md",
@@ -114,32 +117,30 @@ RETIRED_MODEL_VIEW_RESET_RULE = "full reset is reserved for changes incremental 
 def workflow_duties(text: str) -> dict[str, bool]:
     unit = selected_unit(text, "Core delegation principles", "Workflow economy (binding):")
     return relationships(unit, {
-        "optional-review-evidence": "Optional review needs evidence",
-        "design-decision-gate": "design-decision=>one gate, not standing pre-implementation gate",
-        "triggered-mandatory-qa": "One final QA package of triggered mandatory risk owners",
-        "scoped-rereview": "Re-review open finding/changed delta only",
+        "optional-review-evidence": "Evidence gates optional review",
+        "design-decision-gate": "design-decision: one gate, no standing pre-review",
+        "triggered-mandatory-qa": "One final mandatory-risk QA package",
+        "scoped-rereview": "Re-review finding/delta only",
         "full-review-trigger": "full only new defect class/material upstream revision",
-        "optional-advice-default": "Consultant/$external-brigade default off",
-        "advisory-readiness": "At readiness/decision Lead may choose Kimi",
-        "unavailable-provider": "Grok unavailable in 1.x; no launch/probe",
-        "quick-fix-ceremony": "Quick-fix: no pre-implementation review ceremony",
-        "specialist-artifact": "Per result: one canonical specialist artifact",
-        "root-ledger": "Per result: one canonical specialist artifact and one concise root ledger entry",
-        "progress-only-refusal": "No progress-only artifact/REVISE while safe implementation/validation remains",
-        "publication-preservation": "Never weaken human publication/leak gates",
-        "domain-gate-preservation": "Never weaken human publication/leak gates or security-, performance-, geometry-sensitive template requirements",
+        "optional-advice-default": "Consultant/external-brigade default off",
+        "advisory-readiness": "Lead may choose read-only Kimi ambiguity/options at readiness/decision",
+        "unavailable-provider": "Grok unavailable1.x: no launch/probe",
+        "quick-fix-ceremony": "Quick-fix: no pre-review ceremony",
+        "artifact-root-entry": "Each result one artifact/root entry",
+        "progress-only-refusal": "no duplicates/progress-only artifact/REVISE while safe implementation/validation remains",
+        "publication-and-domain-gates": "Human publication/leak and security/performance/geometry template gates stay binding",
     })
 
 
 def shared_advisory_duties(text: str) -> dict[str, bool]:
     unit = selected_unit(text, "Core delegation principles", "Workflow economy (binding):")
     duties = relationships(unit, {
-        "lead-optional-read-only": "At readiness/decision Lead may choose Kimi for bounded independent read-only ambiguity/options",
-        "no-call-or-skip": "At readiness/decision Lead may choose Kimi for bounded independent read-only ambiguity/options, else no call/skip",
-        "no-auto-gate-counter": "Kimi: not auto/gate/counter",
-        "availability-evidence": "availability/quota evidence",
-        "fixed-wrapper": "fixed kimi-code/k3 wrapper",
-        "independent-verification": "independent verification; nonauthorizing",
+        "lead-optional-read-only": "Lead may choose read-only Kimi ambiguity/options at readiness/decision",
+        "no-call-or-skip": "else skip",
+        "no-auto-gate-counter": "Lead may choose read-only Kimi ambiguity/options at readiness/decision: not auto/gate/counter",
+        "availability-evidence": "actual availability/quota",
+        "fixed-wrapper": "actual availability/quota, fixed kimi-code/k3",
+        "independent-verification": "actual availability/quota, fixed kimi-code/k3, independent check/nonauthority",
     })
     duties["fixed-wrapper"] &= identifier_present(unit, "kimi-code/k3")
     return duties
@@ -167,7 +168,7 @@ def readability_duties(text: str) -> dict[str, bool]:
     duties = relationships(unit, {
         "clear-owner-flow": "clear names/flow/invariants/ownership/abstraction",
         "conditional-separation": "separate scenario from parse/storage/transport only if mixing harms local/independent reasoning/change",
-        "operations": "Operations, not pass-throughs",
+        "responsibility-boundary": "Judge a boundary or indirection by the responsibility and required guarantees it owns under the simplicity/cost-benefit rule above, not by call forwarding or size",
         "no-forced-fragmentation": "No forced wrappers/fragmentation/length limits or atomic-invariant/measured-hot-path splits",
         "needed-reads": "Read all needed; minimize edits, not reads",
     })
@@ -177,18 +178,25 @@ def readability_duties(text: str) -> dict[str, bool]:
 
 
 def continuation_duties(text: str) -> dict[str, bool]:
-    unit = selected_unit(text, "Core delegation principles", "One task across questions/updates/compaction:")
+    unit = selected_unit(text, "Core delegation principles", "Primary-task continuity and side work (binding).")
     return relationships(unit, {
-        "task-free-only": "task-free questions may end, no closeout while work remains",
-        "independent-continuation": "Decisions pause dependents; independent ready work continues",
-        "authorized-remainder": "end only with all authorized remainder concretely blocked",
+        "task-free-only": "Task-free questions may end",
+        "independent-continuation": "When primary work is blocked, continue useful independent ready work while retaining the primary outcome, hold and next action",
+        "dependent-only-hold": "Side failure, blockage or approval wait holds only dependent actions",
+        "authorized-remainder": "end only when all remaining authorized work is concretely blocked",
     })
 
 
 def projected_continuation_duties(text: str, primary_section: str) -> dict[str, bool]:
-    primary = selected_unit(text, primary_section, "For a question, status check, or clarification,")
+    primary = selected_unit(
+        text,
+        primary_section,
+        "Apply the shared **Primary-task continuity and side work** rule in AGENTS.md:",
+    )
     duties = relationships(primary, {
-        "dependent-decision-only": "a required user decision pauses only dependent work; independent ready work continues; stopping requires every remaining authorized action be concretely blocked",
+        "brief-response": "answer brief questions/status/clarifications in commentary",
+        "same-turn-continuation": "take the next ready primary action in the same turn without waiting for the side result",
+        "dependent-decision-only": "Preserve explicit user/manual/native holds, dependent-only decisions and existing recovery/resource settlement",
     })
     waiting = selected_unit(text, "Bootstrap - first action", "Wait only for an artifact or gate decision")
     duties.update(relationships(waiting, {
@@ -204,6 +212,48 @@ def projected_continuation_duties(text: str, primary_section: str) -> dict[str, 
         "no-repeat-closeout": "do not repeat verdict or polish unless evidence is incomplete",
     }))
     return duties
+
+
+def functional_first_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Core delegation principles", "Workflow economy (binding):")
+    return relationships(unit, {
+        "binding-spine-wins": "Spine wins over maintainer `shared/references/spine/functional-first-delivery.md` detail",
+        "pao-freeze": "Pre-implementation freeze: criteria/contracts, scenario/env/steps, success/failure, safety/cleanup, evidence/owner, source/config/env identity",
+        "actual-run-snapshot": "runs record actual snapshots",
+        "unit-not-functional-pass": "Mock/unit≠Functional PASS",
+        "scope-revision-keeps-implementation-out": "Scope revision changes PAO ID/gates, never implementation",
+        "tdd-stays-within-verified-inputs": "TDD only failure/acceptance/verified cause/PAO/repo checks, never expands/freezes unverified/workaround output",
+        "pre-pass-work-is-pao-causal": "Pre-PASS work is PAO-causal",
+        "contract-change-needs-architecture": "contract/owner/seam/lifecycle/API-schema/dependency/reuse/rollback changes require architecture first",
+        "unsettled-structure-owner": "Unsettled structure: architect, never implementer invention",
+        "accepted-seam-condition": "Accepted requirement/future direction/domain variation/current second consumer/verified contract evolution needs simplest one-owner stable/local seam",
+        "local-preserved-contract-correction": "Urgency bypasses no required design/lifecycle; local preserved-contract correction adds no ceremony",
+        "pure-model-domain-owner": "Pure model/math/units: domain owner",
+        "reachable-risk-fails-closed": "Reachable confidentiality/integrity/authentication/authorization/trust/injection/untrusted-execution/data-loss/corruption/irreversible/publication risk requires fail-closed owners/containment/remediation, grants no publication",
+        "post-pass-regression-evidence": "Post-PASS: smallest deterministic guards/repo+adjacent checks/PAO; changes invalidate evidence",
+        "hardening-deferral": "Beyond-contract hardening waits for Functional+Regression PASS, else nonblocking mandatory backlog/no implementation",
+        "visible-success-failure-restarts": "Visible success/failure changes restart functional gates",
+        "risk-label-does-not-expand-scope": "Labels add no scope: broader threat-model/privilege/ACL/adjacent-path/hardening needs user admission or proven blocking risk, else backlog/no implementation",
+        "qa-records-triggered-review": "PAO/checks/snapshot/unchecked/trigger-rule/evidence/invocation table",
+        "veto-and-ambiguity-routing": "Only AGENTS/repo/clause-4 veto; ambiguity invokes reviewer, others nonveto; no implementer/lead waiver",
+        "correction-budget": "Two equivalent failures forbid a third use of that approach",
+        "new-budget-falsifier": "new budget needs new hypothesis/material difference/falsifier/lead acceptance",
+        "lineage-preserved": "Supersession/relabel/split/merge/derived never reset lineage/budget/gate-backlog",
+        "gate-entry-exit-evidence": "Gate entry/exit: frozen PAO evidence; ambiguity resolves into scope/veto",
+        "publication-safety": "Human approval/leak mandatory",
+        "commission-final-candidate": "Freeze final cross-cutting governance/design",
+        "commission-independent-assessments": "obtain at least two independent specialist assessments of that candidate under existing role/profile admission",
+        "reviewers-do-not-author-or-cross-read": "Reviewers do not author the candidate or receive another reviewer's verdict before returning their own",
+        "model-selection-controls": "Prefer different supported model selections where admissible",
+        "runtime-identity-provenance": "record requested/resolved controls separately from actual runtime identity, using `unspecified by runtime` when absent",
+        "missing-identity-is-not-blocking": "Missing identity or unproved family diversity alone never blocks final acceptance",
+        "requested-controls-do-not-prove-diversity": "requested names, roles, prompts, efforts, aliases or variants prove no actual diversity",
+        "host-and-review-failures-still-hold": "Observed host rejection/drift, missing or failed required substantive reviews, and existing safety/host/publication gates retain their effect; no automatic retry/fallback or role expansion",
+        "independent-review-content": "Independently challenge/name accepted+rejected premises/materially better alternative when one exists+tradeoff/Would-flip-if",
+        "synthesis-uses-evidence": "Synthesis only PAO/veto/evidence, no majority/deference",
+        "delta-only-reround": "Changed delta gets affected-member re-review",
+        "optional-alternatives-backlog": "optional alternatives backlog/no reround",
+    })
 
 
 class TestWorkflowEconomyContract(unittest.TestCase):
@@ -228,17 +278,27 @@ class TestWorkflowEconomyContract(unittest.TestCase):
 
     def test_scoped_duties_accept_formatting_and_reject_wrong_locations(self) -> None:
         text = self._read(SPINE)
-        formatted = text.replace("Optional review", "**OPTIONAL**   REVIEW").replace(
-            "Re-review", "Re—review"
-        ).replace("No forced", "_NO_    FORCED").replace(
-            "## Core delegation principles", "  ## **CORE DELEGATION PRINCIPLES**"
-        )
+        formatted = text
+        for old, new in (
+            ("Evidence gates optional review", "**EVIDENCE**   GATES optional REVIEW"),
+            ("Re-review finding/delta only", "Re—review finding/delta ONLY"),
+            ("No forced wrappers/fragmentation/length limits", "_NO_    FORCED wrappers/fragmentation/length limits"),
+            ("## Core delegation principles", "  ## **CORE DELEGATION PRINCIPLES**"),
+        ):
+            with self.subTest(case="formatting-preimage", target=old):
+                self.assertEqual(formatted.count(old), 1)
+            formatted = formatted.replace(old, new, 1)
+        self.assertNotEqual(formatted, text)
         for check in (workflow_duties, shared_advisory_duties, readability_duties, continuation_duties):
-            with self.subTest(check=check.__name__, case="formatting"):
-                self.assertTrue(all(check(formatted).values()))
-        qualified = text.replace("At readiness/decision Lead may choose", "**AT** readiness/decision   Lead may choose")
+            for duty, present in check(formatted).items():
+                with self.subTest(check=check.__name__, duty=duty, case="formatting"):
+                    self.assertTrue(present)
+        old = "Lead may choose read-only Kimi ambiguity/options"
+        self.assertEqual(text.count(old), 1)
+        qualified = text.replace(old, "**LEAD**   may choose read-only Kimi ambiguity/options", 1)
+        self.assertNotEqual(qualified, text)
         with self.subTest(case="intact-governing-advisory-condition"):
-            self.assertTrue(shared_advisory_duties(qualified)["no-call-or-skip"])
+            self.assertTrue(shared_advisory_duties(qualified)["lead-optional-read-only"])
         for malformed in ("", "## Core delegation principles\n", text.replace("## Core delegation principles", "## Unrelated"),
                           text + "\n## Core delegation principles\n- Duplicate owner\n"):
             with self.subTest(case="missing-empty-or-duplicate"):
@@ -248,7 +308,8 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         with self.subTest(case="duplicate-normative-unit"):
             with self.assertRaises(AssertionError):
                 workflow_duties(text.replace(unit, unit + "\n- **Workflow economy (binding):** " + unit, 1))
-        clause = "One final QA package of triggered mandatory risk owners;"
+        clause = "One final mandatory-risk QA package"
+        self.assertEqual(unit.count(clause), 1)
         moved = text.replace(unit, unit.replace(clause, "", 1), 1) + "\n## Examples\n" + clause
         self.assertFalse(workflow_duties(moved)["triggered-mandatory-qa"])
 
@@ -256,35 +317,35 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         text = self._read(SPINE)
         unit = selected_unit(text, "Core delegation principles", "Workflow economy (binding):")
         cases = (
-            (workflow_duties, "optional-review-evidence", "Optional review needs evidence", "Optional review needs no evidence"),
-            (workflow_duties, "design-decision-gate", "not standing pre-implementation gate", "a standing pre-implementation gate"),
-            (workflow_duties, "triggered-mandatory-qa", "One final QA", "One preliminary QA"),
-            (workflow_duties, "triggered-mandatory-qa", "One final QA", "Optional one final QA"),
-            (workflow_duties, "triggered-mandatory-qa", "One final QA", "Optional: One final QA"),
-            (workflow_duties, "triggered-mandatory-qa", "One final QA", "Optionally, One final QA"),
-            (workflow_duties, "triggered-mandatory-qa", "One final QA", "Not required: One final QA"),
-            (workflow_duties, "triggered-mandatory-qa", "One final QA", "Informative: One final QA"),
-            (workflow_duties, "triggered-mandatory-qa", "triggered mandatory risk", "mandatory risk"),
-            (workflow_duties, "triggered-mandatory-qa", "triggered mandatory risk", "triggered optional risk"),
-            (workflow_duties, "scoped-rereview", "open finding/changed delta only", "all findings and unchanged deltas"),
-            (workflow_duties, "full-review-trigger", "full only new defect class/material upstream revision", "full on every local edit"),
-            (workflow_duties, "optional-advice-default", "default off", "default on"),
-            (workflow_duties, "specialist-artifact", "one canonical specialist artifact", "two canonical specialist artifacts"),
-            (workflow_duties, "root-ledger", "one concise root ledger entry", "an optional root ledger entry"),
-            (workflow_duties, "progress-only-refusal", "while safe implementation/validation remains", "after all implementation/validation is blocked"),
-            (workflow_duties, "publication-preservation", "human publication/leak gates", "publication/leak gates"),
-            (workflow_duties, "publication-preservation", "human publication/leak gates", "human publication gates"),
-            (workflow_duties, "domain-gate-preservation", "security-, performance-, geometry-sensitive", "performance-, geometry-sensitive"),
-            (workflow_duties, "domain-gate-preservation", "security-, performance-, geometry-sensitive", "security-, geometry-sensitive"),
-            (workflow_duties, "domain-gate-preservation", "security-, performance-, geometry-sensitive", "security-, performance-sensitive"),
-            (shared_advisory_duties, "lead-optional-read-only", "Lead may choose Kimi", "Lead must choose Kimi"),
-            (shared_advisory_duties, "lead-optional-read-only", "bounded independent read-only", "bounded independent read-write"),
-            (shared_advisory_duties, "no-call-or-skip", "else no call/skip", "else a skip record is mandatory"),
-            (shared_advisory_duties, "no-auto-gate-counter", "not `auto`/gate/counter", "use `auto`/gate/counter"),
-            (shared_advisory_duties, "availability-evidence", "availability/quota evidence", "availability/quota assumptions"),
-            (shared_advisory_duties, "fixed-wrapper", "kimi-code/k3", "kimi-code/k4"),
-            (shared_advisory_duties, "independent-verification", "independent verification; nonauthorizing", "independent verification; authorizing"),
-            (shared_advisory_duties, "independent-verification", "independent verification; nonauthorizing", "self-verification; nonauthorizing"),
+            (workflow_duties, "optional-review-evidence", "Evidence gates optional review", "Optional review requires no evidence"),
+            (workflow_duties, "design-decision-gate", "design-decision: one gate, no standing pre-review", "design-decision: multiple gates, standing pre-review"),
+            (workflow_duties, "triggered-mandatory-qa", "One final mandatory-risk QA package", "One preliminary mandatory-risk QA package"),
+            (workflow_duties, "triggered-mandatory-qa", "One final mandatory-risk QA package", "Optional: One final mandatory-risk QA package"),
+            (workflow_duties, "triggered-mandatory-qa", "One final mandatory-risk QA package", "Optionally, One final mandatory-risk QA package"),
+            (workflow_duties, "triggered-mandatory-qa", "One final mandatory-risk QA package", "Optional one final mandatory-risk QA package"),
+            (workflow_duties, "triggered-mandatory-qa", "One final mandatory-risk QA package", "Not required: One final mandatory-risk QA package"),
+            (workflow_duties, "triggered-mandatory-qa", "One final mandatory-risk QA package", "Informative: One final mandatory-risk QA package"),
+            (workflow_duties, "triggered-mandatory-qa", "One final mandatory-risk QA package", "One final risk QA package"),
+            (workflow_duties, "triggered-mandatory-qa", "One final mandatory-risk QA package", "One final optional-risk QA package"),
+            (workflow_duties, "scoped-rereview", "Re-review finding/delta only", "Re-review all findings and unchanged deltas"),
+            (workflow_duties, "full-review-trigger", "full only new defect class/material upstream revision", "full review on every local edit"),
+            (workflow_duties, "optional-advice-default", "Consultant/external-brigade default off", "Consultant/external-brigade default on"),
+            (workflow_duties, "artifact-root-entry", "Each result one artifact/root entry", "Each result two artifacts/root entries"),
+            (workflow_duties, "artifact-root-entry", "root entry", "an optional root entry"),
+            (workflow_duties, "progress-only-refusal", "no duplicates/progress-only artifact/REVISE while safe implementation/validation remains", "no duplicates/progress-only artifact/REVISE after all implementation/validation is blocked"),
+            (workflow_duties, "publication-and-domain-gates", "Human publication/leak", "Publication/leak"),
+            (workflow_duties, "publication-and-domain-gates", "Human publication/leak", "Human publication"),
+            (workflow_duties, "publication-and-domain-gates", "security/performance/geometry", "performance/geometry"),
+            (workflow_duties, "publication-and-domain-gates", "security/performance/geometry", "security/geometry"),
+            (workflow_duties, "publication-and-domain-gates", "security/performance/geometry", "security/performance"),
+            (shared_advisory_duties, "lead-optional-read-only", "Lead may choose read-only Kimi ambiguity/options at readiness/decision", "Lead must choose read-only Kimi ambiguity/options at readiness/decision"),
+            (shared_advisory_duties, "lead-optional-read-only", "Lead may choose read-only Kimi ambiguity/options at readiness/decision", "Lead may choose read-write Kimi ambiguity/options at readiness/decision"),
+            (shared_advisory_duties, "no-call-or-skip", "else skip", "else a skip record is mandatory"),
+            (shared_advisory_duties, "no-auto-gate-counter", "not auto/gate/counter", "use auto/gate/counter"),
+            (shared_advisory_duties, "availability-evidence", "actual availability/quota", "assumed availability/quota"),
+            (shared_advisory_duties, "fixed-wrapper", "fixed kimi-code/k3", "fixed kimi-code/k4"),
+            (shared_advisory_duties, "independent-verification", "independent check/nonauthority", "independent check/authorizing"),
+            (shared_advisory_duties, "independent-verification", "independent check/nonauthority", "self-check/nonauthority"),
         )
         for check, duty, old, new in cases:
             with self.subTest(duty=duty, loss=old, changed_to=new):
@@ -295,14 +356,15 @@ class TestWorkflowEconomyContract(unittest.TestCase):
     def test_readability_and_continuation_guards_reject_distinct_losses(self) -> None:
         text = self._read(SPINE)
         cases = (
-            (readability_duties, "Scope and ownership discipline", "Readability:", "conditional-separation", "only if mixing harms", "whether or not mixing harms"),
-            (readability_duties, "Scope and ownership discipline", "Readability:", "operations", "Operations, not pass-throughs", "Pass-throughs, not operations"),
-            (readability_duties, "Scope and ownership discipline", "Readability:", "no-forced-fragmentation", "No forced wrappers", "Mandatory wrappers"),
+            (readability_duties, "Scope and ownership discipline", "Readability:", "conditional-separation", "separate scenario from parse/storage/transport only if mixing harms local/independent reasoning/change", "separate scenario from parse/storage/transport regardless of whether mixing harms local/independent reasoning/change"),
+            (readability_duties, "Scope and ownership discipline", "Readability:", "responsibility-boundary", "Judge a boundary or indirection by the responsibility and required guarantees it owns under the simplicity/cost-benefit rule above, not by call forwarding or size", "Judge a boundary or indirection by call forwarding or size"),
+            (readability_duties, "Scope and ownership discipline", "Readability:", "no-forced-fragmentation", "No forced wrappers/fragmentation/length limits", "Mandatory wrappers/fragmentation/length limits"),
             (readability_duties, "Scope and ownership discipline", "Readability:", "no-forced-fragmentation", "atomic-invariant/measured-hot-path splits", "unmeasured splits"),
-            (readability_duties, "Scope and ownership discipline", "Readability:", "needed-reads", "minimize edits, not reads", "minimize reads, not edits"),
-            (continuation_duties, "Core delegation principles", "One task across questions/updates/compaction:", "task-free-only", "no closeout while work remains", "closeout while work remains"),
-            (continuation_duties, "Core delegation principles", "One task across questions/updates/compaction:", "independent-continuation", "independent ready work continues", "independent ready work stops"),
-            (continuation_duties, "Core delegation principles", "One task across questions/updates/compaction:", "authorized-remainder", "all authorized remainder concretely blocked", "any authorized action blocked"),
+            (readability_duties, "Scope and ownership discipline", "Readability:", "needed-reads", "Read all needed; minimize edits, not reads", "Read all needed; minimize reads, not edits"),
+            (continuation_duties, "Core delegation principles", "Primary-task continuity and side work (binding).", "task-free-only", "task-free questions may end", "task-free questions must not end"),
+            (continuation_duties, "Core delegation principles", "Primary-task continuity and side work (binding).", "independent-continuation", "continue useful independent ready work", "stop useful independent ready work"),
+            (continuation_duties, "Core delegation principles", "Primary-task continuity and side work (binding).", "dependent-only-hold", "holds only dependent actions", "holds all actions"),
+            (continuation_duties, "Core delegation principles", "Primary-task continuity and side work (binding).", "authorized-remainder", "end only when all remaining authorized work is concretely blocked", "end only when any remaining authorized action is concretely blocked"),
         )
         for check, section, marker, duty, old, new in cases:
             with self.subTest(duty=duty, loss=old):
@@ -338,7 +400,9 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         shared = self._read(SPINE)
         unit = selected_unit(shared, "Core delegation principles", "Workflow economy (binding):")
         with self.subTest(case="exact-wrapper-characters"):
+            self.assertEqual(unit.count("kimi-code/k3"), 1)
             changed = shared.replace(unit, unit.replace("kimi-code/k3", "kimi—code/k3", 1), 1)
+            self.assertNotEqual(changed, shared)
             self.assertNotIn("kimi-code/k3", selected_unit(changed, "Core delegation principles", "Workflow economy (binding):"))
             self.assertFalse(shared_advisory_duties(changed)["fixed-wrapper"])
 
@@ -473,38 +537,9 @@ class TestWorkflowEconomyContract(unittest.TestCase):
     def test_functional_first_policy_keeps_the_approved_boundaries(self) -> None:
         spine = self._read(SPINE)
         extract = self._read(FUNCTIONAL_FIRST_EXTRACT)
-        for required in (
-            "**Functional-first delivery (binding).**",
-            "shared/references/spine/functional-first-delivery.md",
-            ": detail; spine wins",
-            "criteria/contracts; scenario/env/steps; success/failure; safety/cleanup; evidence/owner; source/config/env",
-            "actual run records source/config/env; mock/unit≠`Functional PASS`; scope=>new ID/gates; implementation cannot revise",
-            "actual run records source/config/env; mock/unit≠`Functional PASS`",
-            "never expands/freezes unverified/workaround output",
-            "accepted requirement or declared future direction/evidenced domain variability/current second consumer/verified external-contract evolution)=>simplest one-owner stable/local seam",
-            "architecture before implementation",
-            "Needed designs/lifecycle; urgency no bypass; local correction=no ceremony",
-            "confidentiality/integrity/authentication/authorization/trust/injection/untrusted-execution/data-loss/corruption/irreversible/publication=>fail closed",
-            "containment/remediation only; no publication authority",
-            "smallest deterministic guards+repo-required/adjacent checks+PAO",
-            "Hardening=work beyond functional contract",
-            "mandatory nonblocking backlog/no implementation",
-            "A security-shaped label/finding does not by itself expand scope",
-            "trigger-rule/evidence/invocation table",
-            "ambiguity=>reviewer; else nonveto; no implementer/$lead waiver",
-            "new=hypothesis+material difference+falsifier+`$lead` acceptance",
-            "supersession/relabel/split/merge/derived never reset lineage/budget/gate-backlog",
-            "every gate entry/exit=>frozen PAO evidence; ambiguity=>scope/veto",
-            "**Publication safety unchanged.**",
-            "at least two independent specialist assessments",
-            "unspecified by runtime",
-            "Independently challenge premises; name accepted/rejected and better alternative+tradeoff+`Would-flip-if`",
-            "sole=PAO/veto/evidence, never majority/deference",
-            "delta=>members re-review",
-            "optional alternatives=>backlog/no reround",
-        ):
-            with self.subTest(anchor=required):
-                self.assertIn(required, spine)
+        for duty, present in functional_first_duties(spine).items():
+            with self.subTest(owner=SPINE, duty=duty):
+                self.assertTrue(present, f"{SPINE}: missing or inverted functional-first duty {duty}")
         for required in (
             "freeze a Primary Acceptance Oracle (PAO) specification",
             "every admitted acceptance criterion and external contract",
@@ -762,11 +797,11 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         required_markers = {
             "shared/AGENTS.shared.md": (
                 "**Directory-level entity separation:**",
-                "**Trash hygiene and archival:**",
+                DEAD_CODE_DISPOSITION_SECTION,
             ),
             "shared/external-prompt-governance.md": (
                 "**Directory-level entity separation:**",
-                "**Trash hygiene and archival:**",
+                DEAD_CODE_DISPOSITION_SECTION,
             ),
             "src.codex/skills/lead/subagent-contracts.md": (
                 DEAD_CODE_DISPOSITION_FIELD,
@@ -778,15 +813,15 @@ class TestWorkflowEconomyContract(unittest.TestCase):
                 DEAD_CODE_DISPOSITION_REQUIREMENT,
                 DEAD_CODE_DISPOSITION_ECHO,
             ),
-            "src.codex/skills/qa-engineer/SKILL.md": (DEAD_CODE_DISPOSITION_QA_GATE,),
-            "src.claude/agents/qa-engineer.md": (DEAD_CODE_DISPOSITION_QA_GATE,),
-            "src.codex/skills/lead/scripts/validate-skill-pack.py": (
-                DEAD_CODE_DISPOSITION_FIELD,
+            "src.codex/skills/qa-engineer/SKILL.md": (
                 DEAD_CODE_DISPOSITION_QA_GATE,
+                DEAD_CODE_DISPOSITION_QA_SUPERSESSION,
+                DEAD_CODE_DISPOSITION_QA_PASS,
             ),
-            "src.claude/agents/scripts/validate-skill-pack.py": (
-                DEAD_CODE_DISPOSITION_FIELD,
+            "src.claude/agents/qa-engineer.md": (
                 DEAD_CODE_DISPOSITION_QA_GATE,
+                DEAD_CODE_DISPOSITION_QA_SUPERSESSION,
+                DEAD_CODE_DISPOSITION_QA_PASS,
             ),
         }
         for relative, markers in required_markers.items():
@@ -794,6 +829,23 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             for marker in markers:
                 with self.subTest(relative=relative, marker=marker):
                     self.assertIn(marker, text)
+
+        for relative, target in (
+            ("src.codex/skills/lead/scripts/validate-skill-pack.py", "@ROOT/src.codex/skills/qa-engineer/SKILL.md"),
+            ("src.claude/agents/scripts/validate-skill-pack.py", "src.claude/agents/qa-engineer.md"),
+        ):
+            text = self._read(relative)
+            row = (
+                r"\(\s*'check_contains',\s*"
+                + re.escape(f"'{target}'")
+                + r",\s*"
+                + re.escape(f"'{DEAD_CODE_DISPOSITION_QA_GATE}'")
+                + r",\s*"
+                + re.escape(f"'{DEAD_CODE_DISPOSITION_VALIDATOR_PREDICATE}'")
+                + r",?\s*\)"
+            )
+            with self.subTest(relative=relative, contract="validator target and predicate share one row"):
+                self.assertRegex(text, row)
 
     def test_external_prompt_consumers_retain_only_the_wrapper_contract(self) -> None:
         """A consumer cannot revive a raw route, sidecar capture, or local V2 parser."""
