@@ -1,13 +1,13 @@
 # Repository Source Hygiene — Reference
 
-This is a reference document for the source-tree organization rules `Directory-level entity separation` and `Trash hygiene and archival` defined in `shared/AGENTS.shared.md` `### Scope and ownership discipline`. It is **NOT** installed into target projects — it is a methodology reference plus repo-local concretization for this monorepo.
+This is a reference document for the source-tree organization rule `Directory-level entity separation` and the artifact disposition rule `Artifact disposition and project hygiene`, both defined in `shared/AGENTS.shared.md` under `### Scope and ownership discipline`. It is **NOT** installed into target projects — it is a methodology reference plus repo-local concretization for this monorepo.
 
 ## Rules summary
 
 Two rules govern source-tree hygiene:
 
 1. **Directory-level entity separation** — every source directory has one primary entity type and ownership/lifecycle contract; the directory's purpose must be expressible in one sentence; new files placed by classifying owner/lifecycle + I/O contract.
-2. **Trash hygiene and archival** — delete or archive obsolete files within the admitted change surface, subject to `Worktree safety`; archival path with breadcrumb when deletion loses recoverable history.
+2. **Artifact disposition and project hygiene** — settle artifacts and resources during ordinary work under their existing owner; resolve correctable causes and genuinely missing permission through supported, authorized work before a selected preserving handoff. A refusal alone does not create authority or decide whether a distinct move is eligible; with unknown scope, prepare only until an existing host path resolves applicability before effects, with prior refusal disclosed and all other guarantees already met. Keep proved manual custody separate from physical deletion, lifecycle completion and live-resource settlement; the full preservation contract remains in `shared/AGENTS.shared.md`.
 
 ## What counts as an "entity type"
 

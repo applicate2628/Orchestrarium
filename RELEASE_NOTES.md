@@ -6,6 +6,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Read-only archived ledger checks now route ordinary filesystem paths and captured history through the same complete sealed-prefix selection and current-authority reducer. The public checker can therefore receive valid archived sealed-prefix history without misreading its frozen manifest as an ordinary projection; missing, corrupt, or revoked proof retains the existing failure and authority boundaries.
 
+- Final cross-cutting commissions now require independent substantive assessments and truthful runtime-identity disclosure; unavailable model metadata alone no longer blocks acceptance, while failed reviews, execution drift, safety, host and publication holds remain in force.
+
+- Artifact cleanup now resolves correctable causes and genuinely missing permission through supported, authorized work before using an already-selected preserving handoff. A deletion refusal creates no authority for a distinct move: when its scope is unknown, only an already-authorized move may be submitted through an existing host path that decides applicability before effects, with the refusal disclosed and every other guarantee in place because host allowance may execute immediately. Manual custody remains separate from physical deletion, lifecycle completion and live-resource settlement.
+
 ## 2026-10-20
 
 - Review closure now uses the closer's actual profession, subject, evidence and own launch/profile requirements without inheriting another run's descriptive effort. Exact unresolved historical invalidation claims can be preserved through the existing custody transaction while their referenced old closer receives no closing credit; original obligations and independent terminal/artifact evidence remain visible. Existing sealed-prefix version-1 bytes and fingerprints remain compatible through their fixed format codec, separately from current authority, including later genuine closure and qualified history disposition.
