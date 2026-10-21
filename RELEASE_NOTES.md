@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-22
+
+- Archive planning and historical receiving now share one byte-preserving projection of local references. Markdown destinations, selected query or fragment references, and independent bare paths retain their separate obligations, so valid mixed consumers can be archived and replayed without false custody failures while missing references and corrupt evidence remain rejected.
+
 ## 2026-10-21
 
 - Read-only archived ledger checks now route ordinary filesystem paths and captured history through the same complete sealed-prefix selection and current-authority reducer. The public checker can therefore receive valid archived sealed-prefix history without misreading its frozen manifest as an ordinary projection; missing, corrupt, or revoked proof retains the existing failure and authority boundaries.

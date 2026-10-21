@@ -4764,6 +4764,7 @@ def _validate_legacy_historical_links(root, archive, reference, links, custody, 
     if not isinstance(inventory, dict) or set(inventory) != {"result", "references"} or not isinstance(inventory["references"], list):
         reject()
     references, identities, physical = inventory["references"], set(), set()
+    consumer_image_keys = {}
     for row in references:
         if (not isinstance(row, dict) or set(row) != {"consumer", "kind", "value"}
                 or row["kind"] not in {"logical", "physical"} or not isinstance(row["value"], str)):
@@ -4773,8 +4774,12 @@ def _validate_legacy_historical_links(root, archive, reference, links, custody, 
         if identity in identities or (row["kind"] == "logical" and row["value"] != reference):
             reject()
         identities.add(identity)
+        consumer_image_key = consumer_image_keys.get(row["consumer"])
+        if consumer_image_key is None:
+            consumer_image_key = "work-items/" + row["consumer"]
+            consumer_image_keys[row["consumer"]] = consumer_image_key
         if row["kind"] == "physical":
-            physical.add("work-items/" + row["consumer"])
+            physical.add(consumer_image_key)
     if inventory["result"] != ("unmapped" if physical else "logical-only" if references else "clear"):
         reject()
     images = {}
@@ -4788,8 +4793,8 @@ def _validate_legacy_historical_links(root, archive, reference, links, custody, 
             reject()
         try:
             suffix = PurePosixPath(row["path"]).suffix
-            images[row["path"]] = (_IncomingConsumerImage(before, suffix).view,
-                                   _IncomingConsumerImage(after, suffix).view)
+            images[row["path"]] = (_IncomingConsumerImage(before, suffix),
+                                   _IncomingConsumerImage(after, suffix))
         except (UnicodeError, LifecycleError) as exc:
             if isinstance(exc, LifecycleError):
                 raise LifecycleError(failure, f"historical incoming consumer {row['path']}: {exc}") from exc
@@ -4799,48 +4804,92 @@ def _validate_legacy_historical_links(root, archive, reference, links, custody, 
     by_original = {root / cell["originalPath"]: cell for cell in custody}
     consumer_targets = {root / "work-items" / row["source"]: root / "work-items" / row["target"]
                         for row in bug_results if row.get("target") is not None}
-    href_obligations, literal_changes = [], {}
+    href_edits, literal_changes = {}, {}
     for row in references:
-        consumer = root / "work-items" / row["consumer"]
+        consumer_rel = row["consumer"]
+        image_key = consumer_image_keys[consumer_rel]
+        consumer = root / image_key
         if row["kind"] == "logical":
-            if consumer.relative_to(root).as_posix() in images:
-                before, after = images[consumer.relative_to(root).as_posix()]
-                if reference not in before or reference not in after:
+            image_pair = images.get(image_key)
+            if image_pair is not None:
+                before_image, after_image = image_pair
+                if reference not in before_image.view or reference not in after_image.view:
                     reject()
             continue
-        before, after = images[consumer.relative_to(root).as_posix()]
+        image_pair = images.get(image_key)
+        if image_pair is None:
+            reject()
+        before_image, _after_image = image_pair
         current_consumer = consumer_targets.get(consumer, consumer)
         try:
             parts = _local_markdown_href_parts(row["value"])
         except LifecycleError as exc:
-            raise LifecycleError(failure, f"historical incoming consumer {row['consumer']}: {exc}") from exc
-        if parts is not None and any(link.href == row["value"] for link in _markdown_local_links(before)):
+            raise LifecycleError(failure, f"historical incoming consumer {consumer_rel}: {exc}") from exc
+        matched_links = tuple(
+            link for link in _markdown_local_links(before_image.view)
+            if link.href == row["value"]
+        )
+        is_href = parts is not None and bool(matched_links)
+        if is_href:
             original = Path(os.path.abspath(consumer.parent / parts[0]))
             cell = by_original.get(original)
             if cell is None:
                 reject()
             expected = os.path.relpath(archive / cell["preservedPath"], current_consumer.parent).replace(os.sep, "/") + parts[1]
-            href_obligations.append((row["consumer"], after, expected))
-        else:
-            # The existing inventory also admits exact literal locators. Bind
-            # their original/custody association without an old OS-path lookup.
-            locator = row["value"].replace("\\", "/")
+            href_edits.setdefault(image_key, []).extend(
+                (link.href_start, link.href_end, expected) for link in matched_links
+            )
+
+        # One aggregate row may authorize both href relocation and literal
+        # handling. The shared projector distinguishes their actual occurrences.
+        locator = row["value"].replace("\\", "/")
+        candidates = [cell for path, cell in by_original.items()
+                      if locator in {path.relative_to(root).as_posix(),
+                          path.relative_to(root / "work-items").as_posix() if path.is_relative_to(root / "work-items") else None}]
+        if not is_href or candidates:
             _legacy_relative(locator)
-            candidates = [cell for path, cell in by_original.items()
-                          if locator in {path.relative_to(root).as_posix(),
-                              path.relative_to(root / "work-items").as_posix() if path.is_relative_to(root / "work-items") else None}]
-            if len(candidates) != 1 or _incoming_literal_pattern(locator).search(before) is None:
+        if len(candidates) > 1:
+            reject()
+        if candidates:
+            pattern = _incoming_literal_pattern(locator)
+            if pattern.search(before_image.view):
+                expected = (archive / candidates[0]["preservedPath"]).relative_to(root).as_posix()
+                literal_changes.setdefault(image_key, []).append((pattern, expected))
+            elif not is_href:
                 reject()
-            expected = (archive / candidates[0]["preservedPath"]).relative_to(root).as_posix()
-            literal_changes.setdefault(row["consumer"], []).append((_incoming_literal_pattern(locator), expected))
-            if _incoming_literal_pattern(expected).search(after) is None:
-                reject()
-    for consumer, after, expected in href_obligations:
-        for pattern, replacement in literal_changes.get(consumer, ()):
-            expected = pattern.sub(replacement, expected)
-        if not any(link.href == expected for link in _markdown_local_links(after)):
+        elif not is_href:
             reject()
 
+    for image_key in sorted(set(href_edits) | set(literal_changes)):
+        image_pair = images.get(image_key)
+        if image_pair is None:
+            reject()
+        _before_image, after_image = image_pair
+        rules = tuple(literal_changes.get(image_key, ()))
+        try:
+            _projected, href_obligations, literal_obligations = (
+                _project_incoming_consumer_image(
+                    images[image_key][0], PurePosixPath(image_key).suffix,
+                    href_edits.get(image_key, ()), rules,
+                )
+            )
+        except LifecycleError as exc:
+            raise LifecycleError(failure, f"historical incoming consumer {image_key}: {exc}") from exc
+        after_links = tuple(_markdown_local_links(after_image.view))
+        if any(not any(link.href == expected for link in after_links)
+               for expected in href_obligations):
+            reject()
+        observed_literal_rules = set()
+        for obligation in literal_obligations:
+            observed_literal_rules.add(obligation[0])
+            try:
+                present = _incoming_projection_obligation_present(after_image.view, obligation)
+            except LifecycleError as exc:
+                raise LifecycleError(failure, f"historical incoming consumer {image_key}: {exc}") from exc
+            if not present:
+                reject()
+        if any(index not in observed_literal_rules for index in range(len(rules))):
+            reject()
 
 @functools.partial(_lifecycle_participant, input_role="repository-root")
 def acquire_settled_work_item_history(root: Path, logical_reference: str, *, expected_references=(), _pending_plan=None, ledger_resource_budget=None):
@@ -16319,21 +16368,19 @@ def _physical_archive_link_plans(
                 continue
             value = reference["value"].replace("\\", "/")
             if value in {source.relative_to(repository).as_posix(), source.relative_to(_work_items_root(root, ledger_resource_budget=ledger_resource_budget)).as_posix()}:
-                if not any(link.href == reference["value"] and (consumer.parent / (_local_markdown_href_parts(link.href) or ("",))[0]).resolve() == source_resolved
-                           for link in _markdown_local_links(text)):
-                    pattern = _incoming_literal_pattern(value)
-                    if pattern.search(text):
-                        literal_changes.append((pattern, archive.relative_to(repository).as_posix()))
+                pattern = _incoming_literal_pattern(value)
+                if pattern.search(text):
+                    literal_changes.append((pattern, archive.relative_to(repository).as_posix()))
         if not replacements and not literal_changes:
             if image is not None and relative not in referenced_paths:
                 continue
             raise LifecycleError(failure_id, f"physical link has no safe rewrite: {relative}")
         try:
-            after = navigation.edit(replacements)
-            for pattern, replacement in literal_changes:
-                navigation = _IncomingConsumerImage(after, consumer.suffix)
-                after = navigation.edit((match.start(), match.end(), replacement)
-                                        for match in pattern.finditer(navigation.view))
+            after, _href_obligations, _literal_obligations = (
+                _project_incoming_consumer_image(
+                    navigation, consumer.suffix, replacements, literal_changes
+                )
+            )
         except LifecycleError as exc:
             raise LifecycleError(failure_id, f"incoming consumer {relative}: {exc}") from exc
         plans.append({
@@ -20549,6 +20596,107 @@ def _incoming_literal_pattern(literal_path):
     return re.compile(r"(?<![A-Za-z0-9_.\\/-]){}(?![A-Za-z0-9_.\\/-])".format(
         re.escape(literal_path).replace("/", r"[\\/]")))
 
+
+def _project_incoming_consumer_image(image, suffix, href_edits, literal_changes):
+    """Project staged href/literal edits and retain occurrence-category obligations."""
+    href_edits = tuple(href_edits)
+    literal_changes = tuple(literal_changes)
+    parsed_links = tuple(_markdown_local_links(image.view))
+    href_base_spans = []
+    href_obligations = []
+    for start, end, replacement in href_edits:
+        if not any(link.href_start == start and link.href_end == end for link in parsed_links):
+            raise LifecycleError(
+                "WI-INCOMING-LINK-REPRESENTATION",
+                "selected rewrite is not a parsed local Markdown destination",
+            )
+        parts = _local_markdown_href_parts(image.view[start:end])
+        if parts is None:
+            raise LifecycleError(
+                "WI-INCOMING-LINK-REPRESENTATION",
+                "selected rewrite is not a local Markdown destination",
+            )
+        expected = replacement
+        for pattern, literal_replacement in literal_changes:
+            expected = pattern.sub(literal_replacement, expected)
+        href_obligations.append(expected)
+        href_base_spans.append((start, start + len(parts[0]), expected))
+
+    projected = image.edit(href_edits) if href_edits else image.raw
+    literal_obligations = []
+    for index, (pattern, replacement) in enumerate(literal_changes):
+        for match in pattern.finditer(image.view):
+            for base_start, base_end, href_expected in href_base_spans:
+                if base_start <= match.start() and match.end() <= base_end:
+                    literal_obligations.append(
+                        (index, "consumed-href-base", None, href_expected)
+                    )
+        stage = _IncomingConsumerImage(projected, suffix)
+        matches = tuple(pattern.finditer(stage.view))
+        if not matches:
+            projected = stage.raw
+            continue
+        expected = replacement
+        for later_pattern, later_replacement in literal_changes[index + 1:]:
+            expected = later_pattern.sub(later_replacement, expected)
+        stage_links = tuple(_markdown_local_links(stage.view))
+        for match in matches:
+            link = next((candidate for candidate in stage_links
+                         if match.start() < candidate.href_end and match.end() > candidate.href_start), None)
+            if link is None:
+                category = "bare"
+            elif match.start() < link.href_start or match.end() > link.href_end:
+                category = "href-destination"
+            else:
+                parts = _local_markdown_href_parts(link.href)
+                if parts is None:
+                    category = "href-destination"
+                else:
+                    base_end = link.href_start + len(parts[0])
+                    if match.end() <= base_end:
+                        category = "href-base"
+                    elif match.start() >= base_end:
+                        category = "href-suffix"
+                    else:
+                        category = "href-destination"
+            literal_obligations.append((index, category, expected, None))
+        projected = stage.edit(
+            (match.start(), match.end(), replacement) for match in matches
+        )
+    return projected, tuple(href_obligations), tuple(literal_obligations)
+
+
+def _incoming_projection_obligation_present(view, obligation):
+    _index, category, expected, href_expected = obligation
+    links = tuple(_markdown_local_links(view))
+    if category == "consumed-href-base":
+        return (isinstance(href_expected, str)
+                and any(link.href == href_expected for link in links))
+    if not isinstance(expected, str):
+        return False
+    pattern = _incoming_literal_pattern(expected)
+    if category == "bare":
+        return any(
+            not any(match.start() < link.href_end and match.end() > link.href_start
+                    for link in links)
+            for match in pattern.finditer(view)
+        )
+    for link in links:
+        if category == "href-destination":
+            searchable = link.href
+        else:
+            parts = _local_markdown_href_parts(link.href)
+            if parts is None:
+                continue
+            if category == "href-base":
+                searchable = parts[0]
+            elif category == "href-suffix":
+                searchable = parts[1]
+            else:
+                return False
+        if pattern.search(searchable):
+            return True
+    return False
 
 def _incoming_link_result(
     root: Path,
