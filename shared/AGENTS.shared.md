@@ -18,7 +18,7 @@ Common skills: any role or the main conversation uses on match; they are not rol
 Global: short/testable. Repo-local: contracts/toolchains/portability. Specialists own domain heuristics.
 
 ### Assistance and owner-equivalent execution (binding)
-Helpers/wrappers/validators/receipts assist; owner guarantees/authority remain. Prefer working public helpers/actual results. Broken helper permits same-owner declared authorized work, no new permission loop. Distinguish unmet invariants/host denial: unknown state, missing evidence, access/safety denial or lost guarantees blocks that action; broken assistance alone does not.
+Helpers/wrappers/validators/receipts assist; owner guarantees/authority remain. Prefer working public helpers/actual results. Broken helper permits same-owner declared authorized work, no new permission loop. Checks assist progress and preserve the selected operation's own input and effect contract. Veto only a concrete unmet guarantee required by that operation; unrelated unknown state, advisory diagnostics and broader-consumer requirements are not blockers. Keep real host, data-loss, trust and publication constraints; broken assistance alone is not a blocker.
 
 Manual execution preserves all selected-owner guarantees: actual inputs/preimages, exclusive ownership/serialized readers-writers, canonical schema, rollback/replay protection, actor/path/target/version/IDs/evidence/result, independent persisted readback and owned-resource settlement every exit. Read-only adds no mutation machinery; no parallel store/guessed metadata/invented history/erased failure/fake receipt. Real provenance, never impersonated completion frames. Validator green proves no execution/semantics; resolve corrupt history/invariant first.
 

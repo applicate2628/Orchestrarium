@@ -6,6 +6,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Archive planning and historical receiving now share one byte-preserving projection of local references. Markdown destinations, selected query or fragment references, and independent bare paths retain their separate obligations, so valid mixed consumers can be archived and replayed without false custody failures while missing references and corrupt evidence remain rejected.
 - The current source rejects changed nested history data and contexts for another item before reading that item's status. Refusals preserve independently known unfinished work and withhold permission to close; ordinary and captured-history diagnostics report actual failures once, while malformed raw inputs receive validation errors instead of internal errors.
+- Shared guidance now ties checks to the selected operation's input and effect contract: only a concrete unmet guarantee required by that operation blocks; unrelated unknown state, advisory diagnostics, and broader-consumer requirements do not. This reduces redundant checks while preserving host, native-runtime, data-loss, trust, lifecycle, and human-publication constraints.
 
 ## 2026-10-21
 
