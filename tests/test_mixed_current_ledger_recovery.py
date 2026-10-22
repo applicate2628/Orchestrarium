@@ -1296,3 +1296,91 @@ def test_controlled_history_preserves_exact_closing_dependencies(tmp_path: Path)
     assert {row.run_id for row in states[0].open_revise}=={unrelated["runId"]}
     assert not axes[0][len(old)].closer_eligible
     assert axes[0][len(old)].terminal_eligible and axes[0][len(old)].artifact_evidence_eligible
+
+
+def test_history_disposition_proof_loss_reopens_real_target_and_preserves_raw_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    item = tmp_path / "work-items" / "active" / "usable-history"
+    original_prefix, admission = _history_fixture(item, orphan_closer=True)
+    admitted = _history_cli(item, admission)
+    assert admitted.returncode == 0, admitted.stdout + admitted.stderr
+    request = _history_disposition_request(
+        item, admission, kind="current-evidence-covered"
+    )
+    applied = _history_cli(item, request)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+
+    ledger = item / "agent-runs.jsonl"
+    raw_before = ledger.read_bytes()
+    raw_ids_before = [json.loads(line).get("runId") for line in raw_before.splitlines()]
+    validator = load_validator()
+    initial_states, initial_axes = [], []
+    initial_errors = validator.validate_work_item(
+        item,
+        validate_status_file=False,
+        obligation_state_out=initial_states,
+        authority_state_out=initial_axes,
+    )
+    assert initial_errors == []
+    assert len(initial_states) == len(initial_axes) == 1
+    assert initial_states[0].unresolved_history == ()
+    assert initial_states[0].open_revise == ()
+    assert initial_axes[0][7].closer_eligible is True
+
+    mutation = {"applied": False}
+    real_qualification = validator._qualified_history_disposition
+
+    def qualify_then_change_used_proof(*args, **kwargs):
+        result = real_qualification(*args, **kwargs)
+        if (
+            args[1] == item
+            and args[4].raw_line_ordinal == 7
+            and not mutation["applied"]
+        ):
+            payload = json.loads(
+                args[3]["historyDisposition"]["evidence"][0]["result"]
+            )
+            expected_proof_sha = payload["report"]["sha256"]
+            proof = item / "review-artifact-custody" / expected_proof_sha
+            assert proof.exists()
+            assert _sha(proof.read_bytes()) == expected_proof_sha
+            proof.write_bytes(
+                b"changed actual used digest-bound classification proof\n"
+            )
+            mutation.update(
+                applied=True,
+                proof=proof,
+                expected_sha256=expected_proof_sha,
+                actual_sha256=_sha(proof.read_bytes()),
+            )
+        return result
+
+    monkeypatch.setattr(
+        validator, "_qualified_history_disposition", qualify_then_change_used_proof
+    )
+    states, axes = [], []
+    errors = validator.validate_work_item(
+        item,
+        validate_status_file=False,
+        obligation_state_out=states,
+        authority_state_out=axes,
+    )
+
+    assert mutation["applied"]
+    assert mutation["actual_sha256"] != mutation["expected_sha256"]
+    assert mutation["proof"].exists()
+    assert errors
+    assert len(states) == len(axes) == 1
+    open_revise = {row.run_id for row in states[-1].open_revise}
+    assert "review-revise-001" in open_revise
+    unresolved_ordinals = [
+        row.raw_line_ordinal for row in states[-1].unresolved_history
+    ]
+    assert 7 in unresolved_ordinals
+    assert axes[-1][3].revise_target_eligible is True
+    assert ledger.read_bytes() == raw_before
+    assert ledger.read_bytes().startswith(original_prefix)
+    assert [json.loads(line).get("runId") for line in ledger.read_bytes().splitlines()] == raw_ids_before
+    assert "historic-orphan-pass" in raw_ids_before
+    assert "review-revise-001" in raw_ids_before

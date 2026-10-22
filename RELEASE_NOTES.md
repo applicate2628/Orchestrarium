@@ -5,6 +5,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 ## 2026-10-22
 
 - Archive planning and historical receiving now share one byte-preserving projection of local references. Markdown destinations, selected query or fragment references, and independent bare paths retain their separate obligations, so valid mixed consumers can be archived and replayed without false custody failures while missing references and corrupt evidence remain rejected.
+- The current source rejects changed nested history data and contexts for another item before reading that item's status. Refusals preserve independently known unfinished work and withhold permission to close; ordinary and captured-history diagnostics report actual failures once, while malformed raw inputs receive validation errors instead of internal errors.
 
 ## 2026-10-21
 

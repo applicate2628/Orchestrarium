@@ -1158,3 +1158,660 @@ def test_h1_observation_uses_captured_present_image_after_live_change(tmp_path, 
     assert observed["ledgerSha256"] == digest(captured)
     assert observed["obligations"] == baseline["obligations"]
     assert observed["result"] == baseline["result"]
+
+
+def test_post_derive_report_loss_reopens_exact_target_and_keeps_availability_only_edits_accepted(tmp_path):
+    def run_case(label, mutation, alias_kind="file"):
+        module = load_validator()
+        root = tmp_path / label
+        root.mkdir()
+        artifacts, items, paths, _expected = synthetic_artifacts(
+            module, root, sealed_closer_artifact="target.md"
+        )
+        item, path = items[0], paths[0]
+        target_report = item / "report.md"
+        alias = item / "alias.md"
+        artifact_name = "report.md"
+        directory_component = mutation == "retarget-alias" and alias_kind == "directory"
+        if directory_component:
+            real_directory = item / "alias-target"
+            real_directory.mkdir()
+            target_report = real_directory / "report.md"
+            alias = item / "alias-directory"
+            artifact_name = alias.name + "/report.md"
+        target_report.write_bytes(b"synthetic selected legacy report\n")
+        if mutation == "retarget-alias":
+            alias.symlink_to(target_report.parent.name if directory_component else target_report.name,
+                             target_is_directory=directory_component)
+            if not directory_component:
+                artifact_name = alias.name
+        target = event(
+            "target-review", item.name, role="security-reviewer",
+            eventKind="standalone", gate="REVISE", status="revise",
+            artifact=artifact_name, lane="implementation", effort="xhigh",
+            findingClass="security",
+        )
+        closer = event(
+            "closer-review", item.name, role="security-reviewer",
+            eventKind="standalone", gate="PASS", artifact=artifact_name,
+            lane="implementation", effort="xhigh",
+            closesRunIds=["target-review"],
+            evidence=[{"kind": "review", "ref": "synthetic independent re-verification"}],
+        )
+        ledger_bytes_by_path = dict(artifacts.ledger_bytes_by_path)
+        ledger_bytes_by_path[path] += ledger_bytes([target, closer])
+        artifacts = replace(artifacts, ledger_bytes_by_path=ledger_bytes_by_path)
+        selected = artifacts.ledger_bytes_by_path[path]
+        closer_ordinal = len(selected.splitlines())
+        materialize_live_artifacts(root, artifacts)
+        selected_ledger = root.joinpath(*path.replace("\\", "/").split("/"))
+        selected_before = selected_ledger.read_bytes()
+        report_before = target_report.read_bytes()
+
+        if mutation == "retarget-alias":
+            positive_axes, positive_states = [], []
+            positive_errors = module.validate_work_item(
+                item, validate_status_file=False, compatibility_artifacts=artifacts,
+                authority_state_out=positive_axes, obligation_state_out=positive_states,
+            )
+            assert positive_errors == []
+            assert len(positive_axes) == len(positive_states) == 1
+            assert positive_axes[0][closer_ordinal].closer_eligible is True
+            assert positive_axes[0][closer_ordinal].artifact_evidence_eligible is True
+            assert "target-review" not in {row.run_id for row in positive_states[0].open_revise}
+            assert alias.is_symlink() and (item / artifact_name).read_bytes() == report_before
+            assert target_report.read_bytes() == report_before
+            assert selected_ledger.read_bytes() == selected_before
+
+        derivation = {"calls": 0, "applied": False}
+        real_derive = module.derive_event_validity
+
+        def derive_then_change_report(*args, **kwargs):
+            result = real_derive(*args, **kwargs)
+            derivation["calls"] += 1
+            if args[1] == item and mutation is not None and not derivation["applied"]:
+                if mutation == "retarget-alias":
+                    alias.unlink()
+                    alias.symlink_to("missing-directory" if directory_component else "missing.md",
+                                     target_is_directory=directory_component)
+                elif mutation == "remove":
+                    target_report.unlink()
+                else:
+                    target_report.write_bytes(
+                        b"new bytes, same required report availability\n"
+                    )
+                derivation["applied"] = True
+            return result
+
+        real_assemble = module._CurrentLedgerEvaluationV1.assemble
+        pure_reconstructions = []
+
+        def reconstruct_from_prepared(current, *, public_derive):
+            if not current.inputs.received:
+                return real_assemble(current, public_derive=public_derive)
+            pure_reconstructions.append(True)
+            with mock.patch.object(module, "_validate_event_fields", side_effect=AssertionError("schema replay during final derivation")), \
+                 mock.patch.object(module, "_select_artifact_locator", side_effect=AssertionError("locator reselection during final derivation")), \
+                 mock.patch.object(Path, "exists", side_effect=AssertionError("filesystem query during final derivation")), \
+                 mock.patch.object(Path, "read_bytes", side_effect=AssertionError("file read during final derivation")), \
+                 mock.patch.object(Path, "resolve", side_effect=AssertionError("native resolution during final derivation")):
+                return real_assemble(current, public_derive=public_derive)
+
+        axes, states = [], []
+        with mock.patch.object(module, "derive_event_validity", derive_then_change_report), \
+             mock.patch.object(module._CurrentLedgerEvaluationV1, "assemble", reconstruct_from_prepared):
+            errors = module.validate_work_item(
+                item,
+                validate_status_file=False,
+                compatibility_artifacts=artifacts,
+                authority_state_out=axes,
+                obligation_state_out=states,
+            )
+
+        assert derivation["calls"] > 0
+        assert derivation["applied"] is (mutation is not None)
+        assert len(axes) == len(states) == 1
+        closer_axes = axes[-1][closer_ordinal]
+        open_revise = {row.run_id for row in states[-1].open_revise}
+        assert selected_ledger.read_bytes() == selected_before
+        assert selected_before == selected
+
+        if mutation in {"remove", "retarget-alias"}:
+            assert errors
+            assert pure_reconstructions
+            if mutation == "retarget-alias":
+                assert alias.is_symlink() and not alias.exists()
+                assert target_report.read_bytes() == report_before
+            else:
+                assert not target_report.exists()
+            assert closer_axes.closer_eligible is False
+            assert closer_axes.artifact_evidence_eligible is False
+            assert "target-review" in open_revise
+        else:
+            assert errors == []
+            assert target_report.exists()
+            assert closer_axes.closer_eligible is True
+            assert closer_axes.artifact_evidence_eligible is True
+            assert "target-review" not in open_revise
+            if mutation == "edit":
+                assert target_report.read_bytes() != report_before
+            else:
+                assert target_report.read_bytes() == report_before
+
+    for label, mutation in (
+        ("unchanged-report", None),
+        ("availability-only-edit", "edit"),
+        ("post-derive-removal", "remove"),
+        ("post-derive-alias-retarget", "retarget-alias"),
+    ):
+        run_case(label, mutation)
+        if mutation == "retarget-alias":
+            run_case(label + "-directory-component", mutation, alias_kind="directory")
+
+
+# Preserved failing evidence: ARCH-SIMPLER-ISSUER-STRIP-1 (fe98049d).
+def test_stripped_sealed_issuer_projections_do_not_select_raw_receiving(tmp_path):
+    from types import MappingProxyType
+
+    module = load_validator()
+    artifacts, items, paths, _ = synthetic_artifacts(module, tmp_path)
+    context = module.load_effective_ledger_view(
+        tmp_path, items[1], paths[1], compatibility_artifacts=artifacts
+    )
+    selected_before = dict(artifacts.ledger_bytes_by_path)
+    assert any(row.epoch == "sealed-prefix" for row in context.rows)
+    errors = []
+    genuine = module.derive_event_validity(context.rows, items[1], errors, context=context)
+    assert errors == []
+    assert any(row.authority.launch_eligible for row in genuine)
+    stripped_rows = tuple(replace(row, **({"_current_owner": None}
+        if "_current_owner" in row.__dataclass_fields__ else {})) for row in context.rows)
+    token_rows = dict(context.invocation_token.rows_by_path)
+    token_rows[paths[1]] = stripped_rows
+    token_updates = {"rows_by_path": MappingProxyType(token_rows)}
+    if "current_by_path" in context.invocation_token.__dataclass_fields__:
+        token_updates["current_by_path"] = MappingProxyType({})
+    stripped_token = replace(context.invocation_token, **token_updates)
+    stripped = replace(context, rows=stripped_rows, invocation_token=stripped_token,
+                       _current_owner=None)
+    errors = []
+    denied = module.derive_event_validity(stripped_rows, items[1], errors, context=stripped)
+    assert len(denied) == len(stripped_rows)
+    assert any("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS" in value for value in errors)
+    assert all(row.authority == module._NO_LEDGER_AUTHORITY for row in denied)
+    assert dict(artifacts.ledger_bytes_by_path) == selected_before
+    from collections.abc import Mapping, Sequence
+
+    def json_values(value):
+        if isinstance(value, Mapping):
+            return {key: json_values(member) for key, member in value.items()}
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            return [json_values(member) for member in value]
+        return value
+
+    for component in ("wire-authority", "reduction", "group-member", "array-shape"):
+        root = tmp_path / component
+        local_artifacts, local_items, local_paths, _ = synthetic_artifacts(module, root)
+        materialize_live_artifacts(root, local_artifacts)
+        native_before = {path: (root / path).read_bytes() for path in local_paths}
+        local_context = module.load_effective_ledger_view(root, local_items[1], local_paths[1])
+        baseline_errors = []
+        baseline = module.derive_event_validity(
+            local_context.rows, local_items[1], baseline_errors, context=local_context
+        )
+        assert baseline_errors == [] and len(baseline) == len(local_context.rows)
+        wire_before = json_values(local_context.view.wire)
+        reduction_before = json_values(local_context.view.reduction)
+        group_row = local_context.invocation_token.rows_by_path[local_paths[0]][0]
+        group_before = json_values(group_row.event)
+        retained_digest = local_context.view.projected_view_sha256
+        assert domain_digest("orchestrarium:ledger-h1:projected-view:v1", wire_before) == retained_digest
+        mutation_error = None
+        try:
+            if component == "wire-authority":
+                authority = local_context.view.wire["rows"][0]["authority"]
+                authority["launchEligible"] = not authority["launchEligible"]
+            elif component == "reduction":
+                local_context.view.reduction["openLaunchRunIds"].append("unselected-native-launch")
+            elif component == "group-member":
+                group_row.event["scope"].append("altered other selected group member")
+            else:
+                reduction = local_context.view.wire["reduction"]
+                assert isinstance(reduction["openLaunchRunIds"], list)
+                reduction["openLaunchRunIds"] = tuple(reduction["openLaunchRunIds"])
+        except Exception as exc:  # Only collection mutation; receiving below is not caught.
+            mutation_error = type(exc).__name__
+        wire_after = json_values(local_context.view.wire)
+        reduction_after = json_values(local_context.view.reduction)
+        changed = (wire_after != wire_before or reduction_after != reduction_before
+                   or json_values(group_row.event) != group_before or component == "array-shape")
+        if component == "array-shape":
+            # json.dumps coerces tuple to array; the receiving shape still differs.
+            assert wire_after == wire_before and reduction_after == reduction_before
+        errors = []
+        actual = module.derive_event_validity(
+            local_context.rows, local_items[1], errors, context=local_context
+        )
+        assert isinstance(actual, tuple) and len(actual) == len(local_context.rows)
+        if changed:
+            if wire_after != wire_before:
+                assert domain_digest("orchestrarium:ledger-h1:projected-view:v1", wire_after) != retained_digest
+            assert any("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS" in value for value in errors)
+            assert all(row.authority == module._NO_LEDGER_AUTHORITY for row in actual)
+        else:
+            assert errors == []
+            assert wire_after == wire_before and reduction_after == reduction_before
+        assert {path: (root / path).read_bytes() for path in local_paths} == native_before
+
+    # Retained custody is a separate public projection from both rows and H1 wire.
+    from tests.test_mixed_current_ledger_recovery import _history_fixture, _history_cli
+    custody_root = tmp_path / "custody-image"
+    custody_item = custody_root / "work-items/active/held-history"
+    _raw, admission = _history_fixture(custody_item)
+    acquired = _history_cli(custody_item, admission)
+    assert acquired.returncode == 0, acquired.stdout + acquired.stderr
+    custody_ledger = custody_item / "agent-runs.jsonl"
+    custody_before = custody_ledger.read_bytes()
+    custody_context = module.load_effective_ledger_view(
+        custody_root, custody_item, "work-items/active/held-history/agent-runs.jsonl")
+    assert custody_context.history_custody and custody_context.unresolved_history
+    hold = custody_context.history_custody[0]
+    assert isinstance(hold.event["scope"], list)
+    hold.event["scope"].append("altered retained custody event")
+    custody_errors = []
+    with mock.patch.object(module._CurrentLedgerEvaluationV1, "receive_again",
+                           side_effect=AssertionError("altered custody reached evaluation")):
+        refused = module.derive_event_validity(
+            custody_context.rows, custody_item, custody_errors, context=custody_context)
+    assert len(refused) == len(custody_context.rows)
+    assert any("WI-LEDGER-HISTORY-BINDING" in value for value in custody_errors)
+    assert all(row.authority == module._NO_LEDGER_AUTHORITY for row in refused)
+    assert custody_ledger.read_bytes() == custody_before
+
+
+# Preserved failing evidence: CF-SIMPLE-SEC-2-FOREIGN-ISSUER-DOWNGRADE (33112a20).
+def test_genuine_foreign_issued_context_cannot_lose_native_selection(tmp_path):
+    first = load_validator()
+    item = tmp_path / "work-items/active/native-issuer"
+    item.mkdir(parents=True)
+    (item / "report.md").write_bytes(b"unchanged current report\n")
+    (item / "status.md").write_text(closed_status(), encoding="utf-8")
+    target = event("issuer-target-review", item.name, role="security-reviewer",
+                   eventKind="standalone", gate="REVISE", status="revise",
+                   artifact="report.md", lane="implementation", effort="xhigh",
+                   findingClass="security")
+    closer = event("issuer-closer-review", item.name, role="security-reviewer",
+                   eventKind="standalone", gate="PASS", artifact="report.md",
+                   lane="implementation", effort="xhigh",
+                   closesRunIds=[target["runId"]],
+                   evidence=[{"kind": "review", "ref": "independent current re-verification"}])
+    ledger = item / "agent-runs.jsonl"
+    before = ledger_bytes([target, closer])
+    ledger.write_bytes(before)
+    selected = "work-items/active/native-issuer/agent-runs.jsonl"
+    context = first.load_effective_ledger_view(tmp_path, item, selected)
+    errors = []
+    genuine = first.derive_event_validity(context.rows, item, errors, context=context)
+    assert errors == [] and genuine[-1].authority.closer_eligible
+    original_closes = list(context.rows[-1].event["closesRunIds"])
+    mutation_error = None
+    try:
+        context.rows[-1].event["closesRunIds"].append("additional-target")
+    except Exception as exc:  # Observe mutation prevention, never a receiver exception.
+        mutation_error = type(exc).__name__
+    altered_closes = list(context.rows[-1].event["closesRunIds"])
+    if altered_closes != original_closes:
+        altered_errors = []
+        denied = first.derive_event_validity(context.rows, item, altered_errors, context=context)
+        assert isinstance(denied, tuple) and len(denied) == len(context.rows)
+        assert any("WI-LEDGER-CUSTODY-STALE-TARGET" in value for value in altered_errors)
+        assert all(row.authority == first._NO_LEDGER_AUTHORITY for row in denied)
+    else:
+        assert altered_closes == original_closes
+    assert ledger.read_bytes() == before
+    # Re-enter from the real unchanged native selection, not a repaired public projection.
+    context = first.load_effective_ledger_view(tmp_path, item, selected)
+    unchanged_errors = []
+    genuine = first.derive_event_validity(context.rows, item, unchanged_errors, context=context)
+    assert unchanged_errors == [] and genuine[-1].authority.closer_eligible
+    assert list(context.rows[-1].event["closesRunIds"]) == original_closes
+    # The receiving codec owns malformed JSON shapes before prepared evaluation.
+    for malformed in ("object-key", "cycle", "unsupported"):
+        malformed_context = first.load_effective_ledger_view(tmp_path, item, selected)
+        nested = malformed_context.rows[-1].event["evidence"][0]
+        if malformed == "object-key":
+            nested[7] = "not-a-string-key"
+        elif malformed == "cycle":
+            nested["cycle"] = nested
+        else:
+            nested["unsupported"] = object()
+        malformed_errors = []
+        with mock.patch.object(first._CurrentLedgerEvaluationV1, "receive_again",
+                               side_effect=AssertionError("malformed projection reached evaluation")):
+            denied = first.derive_event_validity(
+                malformed_context.rows, item, malformed_errors, context=malformed_context)
+        assert len(denied) == len(malformed_context.rows)
+        assert all(row.authority == first._NO_LEDGER_AUTHORITY for row in denied)
+        assert any("WI-LEDGER-CUSTODY-STALE-TARGET" in value for value in malformed_errors)
+        assert ledger.read_bytes() == before
+    helper_errors = []
+    genuine_closure = first.validate_closure(
+        context.rows, helper_errors, validity=genuine, context=context
+    )
+    assert genuine_closure == ([], []) and helper_errors == []
+    helper_errors, genuine_pending = [], []
+    genuine_inactive = first.resolve_closure_invalidations(
+        context.rows, genuine, helper_errors, context=context,
+        pending_closing_effects_out=genuine_pending,
+    )
+    assert genuine_inactive == set() and helper_errors == [] and genuine_pending == []
+    helper_errors = []
+    assert first.validate_status(
+        item, context, helper_errors, current_open_launch_ids=()
+    ) is None
+    assert helper_errors == []
+    other_item = tmp_path / "work-items/active/other-status-owner"
+    other_item.mkdir()
+    other_status = other_item / "status.md"
+    other_status.write_text(closed_status(), encoding="utf-8")
+    status_reads = []
+    real_read_text = Path.read_text
+
+    def observe_status_read(path, *args, **kwargs):
+        if path == other_status:
+            status_reads.append(path)
+        return real_read_text(path, *args, **kwargs)
+
+    wrong_item_errors = []
+    with mock.patch.object(Path, "read_text", observe_status_read):
+        refused_status = first.validate_status(
+            other_item, context, wrong_item_errors, current_open_launch_ids=()
+        )
+    assert refused_status is None
+    assert any("WI-LEDGER-" in value for value in wrong_item_errors)
+    assert status_reads == []
+    for receiver in ("derive", "reducer"):
+        target_errors = []
+        if receiver == "derive":
+            denied = first.derive_event_validity(context.rows, other_item, target_errors, context=context)
+            assert len(denied) == len(context.rows)
+            assert all(row.authority == first._NO_LEDGER_AUTHORITY for row in denied)
+        else:
+            denied = first._reduce_effective_current_state(context.rows, other_item, target_errors, None, context=context)
+            assert denied == ((), (), [], [])
+        assert any("WI-LEDGER-HISTORY-BINDING: current input owner differs" in value for value in target_errors)
+    assert ledger.read_bytes() == before
+    # Bad argument binding must leave no borrowed invocation behind.
+    with unittest.TestCase().assertRaises(TypeError):
+        first.derive_event_validity(context.rows, item, [], context=context, unexpected_argument=True)
+    with unittest.TestCase().assertRaises(TypeError):
+        first._reduce_effective_current_state(context.rows, item, [], None, context=context,
+                                               unexpected_argument=True)
+    after_bad_arguments = []
+    still_genuine = first.derive_event_validity(context.rows, item, after_bad_arguments, context=context)
+    assert after_bad_arguments == [] and still_genuine[-1].authority.closer_eligible
+    # ISSUED-SELECTION-R2-NATIVE-NEUTRAL-COLLISION: equal neutral values
+    # keep value semantics when no issued context is supplied. Observe both
+    # sides of a real native append before asserting the representation pair.
+    fresh_rows = first._runtime_rows_from_events([target, closer])
+    assert context.rows == fresh_rows
+    assert all(row.epoch == "raw" and row.projection_transformation == "raw"
+               and row.authority == first._NO_LEDGER_AUTHORITY for row in context.rows)
+    owner = first.load_lifecycle_owner()
+    real_capture = owner._capture_file_snapshot
+    omitted_native_acquisitions = []
+
+    def reject_omitted_native_capture(path, *args, **kwargs):
+        if path == ledger:
+            omitted_native_acquisitions.append(path)
+            raise AssertionError("context=None acquired the omitted native ledger")
+        return real_capture(path, *args, **kwargs)
+
+    def value_observation(rows):
+        derive_errors, reduction_errors = [], []
+        with mock.patch.object(owner, "_capture_file_snapshot", reject_omitted_native_capture):
+            validity = first.derive_event_validity(rows, item, derive_errors)
+            reduction = first._reduce_effective_current_state(
+                rows, item, reduction_errors, None, context=None)
+        emitted = getattr(reduction, "context", None)
+        if emitted is not None:
+            assert emitted.selected_ledger_path == ""
+        return (derive_errors, validity, reduction_errors, tuple(reduction))
+
+    native_before, values_before = value_observation(context.rows), value_observation(fresh_rows)
+    collision_review = {**target, "runId": "issuer-collision-new-review"}
+    collision_after = before + ledger_bytes([collision_review])
+    ledger.write_bytes(collision_after)
+    native_after, values_after = value_observation(context.rows), value_observation(fresh_rows)
+    stale_errors = []
+    stale = first.derive_event_validity(context.rows, item, stale_errors, context=context)
+    assert any("WI-LEDGER-CUSTODY-STALE-TARGET" in value for value in stale_errors)
+    assert all(not row.authority.closer_eligible and not row.authority.artifact_evidence_eligible
+               for row in stale)
+    collision_states = []
+    collision_errors = first.validate_work_item(item, validate_status_file=False,
+        strict_revise=False, obligation_state_out=collision_states)
+    assert collision_errors == [] and len(collision_states) == 1
+    assert collision_review["runId"] in {row.run_id for row in collision_states[0].open_revise}
+    assert omitted_native_acquisitions == []
+    assert native_before == values_before, (native_before, values_before)
+    assert native_after == values_after == values_before, (native_after, values_after, values_before)
+    # Restore this owned fixture's exact selected image before the foreign-module arm.
+    ledger.write_bytes(before)
+    context = first.load_effective_ledger_view(tmp_path, item, selected)
+    second = load_validator()  # same source, genuinely distinct module/classes
+    assert second is not first
+    new_review = {**target, "runId": "issuer-new-review"}
+    after = before + ledger_bytes([new_review])
+    ledger.write_bytes(after)
+    errors = []
+    denied = second.derive_event_validity(context.rows, item, errors, context=context)
+    assert len(denied) == len(context.rows)
+    assert errors
+    assert all(not row.authority.closer_eligible and not row.authority.artifact_evidence_eligible
+               for row in denied)
+    errors = []
+    result = second._reduce_effective_current_state(
+        context.rows, item, errors, None, context=context
+    )
+    assert isinstance(result, tuple) and len(result) == 4 and errors
+    assert all(not row.authority.closer_eligible and not row.authority.artifact_evidence_eligible
+               for row in result[1])
+    # Preserve the same genuine A RuntimeLedgerRow objects; supply no A context.
+    errors = []
+    rows_only_denied = second.derive_event_validity(context.rows, item, errors)
+    assert isinstance(rows_only_denied, tuple) and len(rows_only_denied) == len(context.rows)
+    assert errors
+    assert all(not row.authority.closer_eligible and not row.authority.artifact_evidence_eligible
+               for row in rows_only_denied)
+    errors = []
+    rows_only_result = second._reduce_effective_current_state(
+        context.rows, item, errors, None, context=None
+    )
+    assert isinstance(rows_only_result, tuple) and len(rows_only_result) == 4 and errors
+    assert all(not row.authority.closer_eligible and not row.authority.artifact_evidence_eligible
+               for row in rows_only_result[1])
+    states = []
+    fresh_errors = second.validate_work_item(
+        item, validate_status_file=False, strict_revise=False, obligation_state_out=states
+    )
+    assert fresh_errors == []
+    assert len(states) == 1
+    assert new_review["runId"] in {row.run_id for row in states[0].open_revise}
+    fresh_context = second.load_effective_ledger_view(tmp_path, item, selected)
+    helper_errors = []
+    fresh_validity = second.derive_event_validity(
+        fresh_context.rows, item, helper_errors, context=fresh_context
+    )
+    assert helper_errors == [] and len(fresh_validity) == len(fresh_context.rows)
+    by_run_id = {row.event["runId"]: validity
+                 for row, validity in zip(fresh_context.rows, fresh_validity)}
+    # Use B's real typed validity for matching unchanged events, so a foreign
+    # validity-class mismatch cannot masquerade as the required issuer refusal.
+    helper_validity = tuple(by_run_id[row.event["runId"]] for row in context.rows)
+    helper_errors = []
+    denied_closure = second.validate_closure(
+        context.rows, helper_errors, validity=helper_validity, context=context
+    )
+    assert isinstance(denied_closure, tuple) and len(denied_closure) == 2
+    assert all(isinstance(part, list) for part in denied_closure)
+    assert denied_closure == ([], []) and helper_errors
+    helper_errors, denied_pending = [], []
+    denied_inactive = second.resolve_closure_invalidations(
+        context.rows, helper_validity, helper_errors, context=context,
+        pending_closing_effects_out=denied_pending,
+    )
+    assert isinstance(denied_inactive, set) and denied_inactive == set()
+    assert helper_errors and denied_pending == []
+    helper_errors = []
+    denied_status = second.validate_status(
+        item, context, helper_errors, current_open_launch_ids=()
+    )
+    assert denied_status is None and helper_errors
+    assert ledger.read_bytes() == after
+
+
+@unittest.skipUnless(sys.platform == "win32", "calibrated CPython Windows pathname backend")
+# Preserved failing evidence: CF-SIMPLE-SEC-3-PRE-ADMISSION-NATIVE-QUERY (33112a20).
+def test_rejected_artifact_escape_never_queries_owned_outside_namespace(tmp_path):
+    import ntpath
+
+    outer = tmp_path / "owned-outer"
+    root = outer / "l1/l2/l3/repo"
+    root.mkdir(parents=True)
+    module = load_validator()
+    artifacts, items, paths, _ = synthetic_artifacts(module, root)
+    outside = [root.parent / "outside/report.md", outer / "outside/report.md"]
+    for path in outside:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"owned synthetic outside target\n")
+    real = ntpath._getfinalpathname
+    seen = []
+
+    def observe(path):
+        seen.append(ntpath.normcase(ntpath.abspath(path)))
+        return real(path)
+
+    with mock.patch.object(ntpath, "_getfinalpathname", observe):
+        (items[0] / "target.md").resolve()  # positive calibration of real backend
+        assert seen
+        positive = module.validate_work_item(
+            items[0], validate_status_file=False, strict_revise=False,
+            compatibility_artifacts=artifacts,
+        )
+        assert positive == []
+        bad = event("outside-selected-report", items[0].name, eventKind="standalone",
+                    gate="PASS", artifact="../../../../outside/report.md",
+                    evidence=[{"kind": "manual-check", "ref": "owned rejection fixture"}])
+        selected = dict(artifacts.ledger_bytes_by_path)
+        selected[paths[0]] += ledger_bytes([bad])
+        candidate = replace(artifacts, ledger_bytes_by_path=selected)
+        seen.clear()
+        errors = module.validate_work_item(
+            items[0], validate_status_file=False, compatibility_artifacts=candidate
+        )
+    assert any("escape" in value.lower() for value in errors)
+    prefixes = [ntpath.normcase(str(path.parent)) + ntpath.sep for path in outside]
+    assert not [path for path in seen if any(path.startswith(prefix) for prefix in prefixes)]
+
+    # The allowed alias owner must reject its outside target before querying it.
+    alias = items[0] / "outside-alias.md"
+    alias.symlink_to(outside[0])
+    seen.clear()
+    alias_errors = []
+    with mock.patch.object(ntpath, "_getfinalpathname", observe):
+        assert module.resolve_work_item_path(items[0], alias.name, "artifact", "outside-alias", alias_errors) is None
+    assert any("escape" in value.lower() for value in alias_errors)
+    assert not [path for path in seen if any(path.startswith(prefix) for prefix in prefixes)]
+    # A self-expanding directory-link cycle terminates by visited state, without a hop cap.
+    cycle = items[0] / "expanding-cycle"
+    cycle.symlink_to("expanding-cycle/tail", target_is_directory=True)
+    cycle_errors = []
+    assert module.resolve_work_item_path(items[0], cycle.name, "artifact", "cycle", cycle_errors) is None
+    assert any("cycle" in value.lower() for value in cycle_errors)
+
+
+def test_composite_status_consumes_parent_diagnostics_once(tmp_path):
+    module = load_validator()
+    item = tmp_path / "work-items/active/status-diagnostic-owner"
+    item.mkdir(parents=True)
+    (item / "status.md").write_text(closed_status(), encoding="utf-8")
+    (item / "report.md").write_text("Owned synthetic report\n", encoding="utf-8")
+    invalid = event("status-invalid-row", item.name, role="qa-engineer", eventKind="standalone",
+                    gate="PASS", artifact="report.md", lane="implementation", effort="xhigh", scope=[],
+                    evidence=[{"kind": "review", "ref": "independent synthetic verification"}])
+    raw = ledger_bytes([invalid])
+    (item / "agent-runs.jsonl").write_bytes(raw)
+    disabled = module.validate_work_item(item, validate_status_file=False)
+    enabled = module.validate_work_item(item, validate_status_file=True)
+    assert disabled == ["status-invalid-row: scope must be a non-empty list"]
+    assert enabled == disabled
+    context = module.load_effective_ledger_view(tmp_path, item,
+        "work-items/active/status-diagnostic-owner/agent-runs.jsonl")
+    standalone = []
+    assert module.validate_status(item, context, standalone, current_open_launch_ids=()) is None
+    assert standalone == disabled
+    assert (item / "agent-runs.jsonl").read_bytes() == raw
+    for state in ("active", "revoked"):
+        selected_root = tmp_path / state
+        artifacts, items, _paths, _ = synthetic_artifacts(module, selected_root)
+        if state == "revoked":
+            artifacts = revoked_artifacts(module, artifacts)
+        materialize_live_artifacts(selected_root, artifacts)
+        selected_item = items[1]
+        (selected_item / "status.md").write_text(closed_status(), encoding="utf-8")
+        selected_ledger = selected_item / "agent-runs.jsonl"
+        selected_ledger.write_bytes(selected_ledger.read_bytes() + ledger_bytes([
+            event(f"status-{state}-invalid", selected_item.name, scope=[])]))
+        if state == "revoked":
+            # A real native pre-current V3 diagnosis belongs to admission, not
+            # to replaceable current eligibility in the later receiving call.
+            selected_ledger.write_bytes(selected_ledger.read_bytes() + ledger_bytes([
+                event("status-revoked-v3-invalid", selected_item.name, schemaVersion=3)]))
+        disabled = module.validate_work_item(selected_item, validate_status_file=False, strict_revise=False)
+        enabled = module.validate_work_item(selected_item, validate_status_file=True, strict_revise=False)
+        assert sum(f"status-{state}-invalid: scope must be a non-empty list" == value for value in disabled) == 1
+        assert enabled == [*disabled, "status.md cannot be closed while ledger has running agents"]
+        if state == "revoked":
+            states = []
+            actual = module.validate_work_item(selected_item, validate_status_file=False,
+                strict_revise=False, obligation_state_out=states)
+            previous = states[-1]._current_result
+            assert actual and previous.admission_diagnostics
+            receiving_errors = []
+            received = previous.receive(selected_item, receiving_errors)
+            assert receiving_errors == []
+            assert received.admission_diagnostics == previous.admission_diagnostics
+            assert received.context.observation.diagnostics == received.diagnostics
+            assert received.context._current_owner.selected_input.diagnostics == received.admission_diagnostics
+            assert received.context._current_owner.result.admission_diagnostics == received.admission_diagnostics
+            assert received.projection_is_bound()
+            received[2].append({"runId": "untrusted-admission-projection"})
+            refusal_errors = []
+            refused = received.with_admission((), refusal_errors)
+            assert refusal_errors == [] and refused is not None
+            assert any("WI-LEDGER-" in value for value in refused.diagnostics)
+            assert "untrusted-admission-projection" not in {event["runId"] for event in refused[2]}
+            assert all(not entry.authority.closer_eligible and not entry.authority.artifact_evidence_eligible
+                       for entry in refused[1])
+            assert refused.context.observation.diagnostics == refused.diagnostics and refused.projection_is_bound()
+
+
+
+def test_raw_tuple_scope_keeps_native_failure_and_valid_neighbor(tmp_path):
+    module = load_validator()
+    item = tmp_path / "work-items/active/raw-admission-owner"
+    item.mkdir(parents=True)
+    invalid = event("tuple-invalid-row", item.name, scope=("fixture",))
+    valid = event("raw-valid-launch", item.name, eventKind="launch", status="running")
+    rows = [invalid, valid]
+    derive_errors, reduction_errors = [], []
+    validity = module.derive_event_validity(rows, item, derive_errors)
+    reduction = module._reduce_effective_current_state(rows, item, reduction_errors, None, context=None)
+    assert isinstance(reduction, tuple) and len(reduction) == 4
+    assert derive_errors == reduction_errors == ["tuple-invalid-row: scope must be a non-empty list"]
+    assert validity[0].current_schema_valid is False and validity[1].authority.launch_eligible
+    assert len(reduction[1]) == 2 and reduction[1][0].current_schema_valid is False
+    assert reduction[1][1].authority.launch_eligible
+    assert {row["runId"] for row in reduction[3]} == {"raw-valid-launch"}
+    assert type(invalid["scope"]) is tuple and invalid["scope"] == ("fixture",)
