@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import NamedTuple, get_args, get_origin, get_type_hints
 
 from hook_common import (
-    CURRENT_TURN_BYTE_CAP,
     HISTORY_STATUSES,
     STATUS_FOUND,
+    STATUS_RESOURCE_UNAVAILABLE,
     TURN_BOUNDARY_STATUSES,
     acquire_tool_input,
     extract_user_typed_text,
@@ -2855,7 +2855,10 @@ _OUTCOMES = frozenset(("ALLOW_FINAL", "ABSTAIN", "DEFER"))
 _CONTINUATIONS = frozenset(("NONE", "RENDER_DENY", "EVALUATE_HEAVY"))
 _DIALECTS = frozenset(("posix", "powershell", "unsupported"))
 _CURRENT_TURN_STATUSES = frozenset(
-    ("found", "absent", "unreadable", "invalid", "limit", "not-in-window")
+    (
+        "found", "absent", "unreadable", "invalid", "limit",
+        STATUS_RESOURCE_UNAVAILABLE, "not-in-window",
+    )
 )
 _TRANSCRIPT_NOT_RUN = "not-run"
 _TRANSCRIPT_ENVELOPE_STATUSES = frozenset(
@@ -3246,7 +3249,7 @@ def build_preflight(envelope: dict) -> PreflightResult:
                 ),
             )
         last_user, _after_user, status = scan_current_turn_boundary(
-            transcript_path, byte_cap=CURRENT_TURN_BYTE_CAP
+            transcript_path, byte_cap=None, boundary_only=True
         )
         reply = (
             extract_publication_user_reply(last_user)

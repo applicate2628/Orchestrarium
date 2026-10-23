@@ -3625,6 +3625,7 @@ class TestOracleFailClosed(unittest.TestCase):
             "test_malformed_envelope_fails_open",
             "test_empty_stdin_fails_open",
             "test_non_bash_tool_input_fails_open",
+            "test_public_entrypoint_denies_invalid_present_E_with_safe_reason",
             "test_frozen_bootstrap_injects_held_posix_helper_and_reaches_range_main",
             "test_frozen_bootstrap_injects_held_windows_job_module",
         }
@@ -5495,11 +5496,11 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
         command: str,
         *,
         tool_name: str | None = None,
-        history_line_byte_cap: int | None = None,
         omit_tool_workdir: bool = False,
         tool_workdir: str | None = None,
         sidecar_snapshots: list[dict] | None = None,
         boundary_observations: list[dict] | None = None,
+        raw_transcript: bytes | None = None,
         **oracle_changes,
     ):
         module = _load_gate_module(script, f"pr_grant_{script.parent.parent.name}_{id(entries)}")
@@ -5535,7 +5536,12 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 "generic", remote, destination, self.LOCAL_TIP, self.LOCAL_TIP
             )
 
-        with synthetic_transcript(entries) as transcript_path:
+        transcript_context = (
+            synthetic_transcript(entries)
+            if raw_transcript is None
+            else synthetic_raw_transcript(raw_transcript)
+        )
+        with transcript_context as transcript_path:
             tool_input = {"command": command}
             if not omit_tool_workdir:
                 tool_input["workdir"] = tool_workdir or str(REPO_ROOT)
@@ -5551,7 +5557,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                  mock.patch.object(module, "_resolve_generic_scan_binding", side_effect=generic_binding) as binding_owner, \
                  mock.patch.object(module, "_run_authoritative_scan", side_effect=authoritative) as scan_owner, \
                  mock.patch.object(module, "_recover_stable_pr_grant", wraps=module._recover_stable_pr_grant) as history_owner, \
-                 mock.patch.object(module, "TRANSCRIPT_HISTORY_LINE_BYTE_CAP", module.TRANSCRIPT_HISTORY_LINE_BYTE_CAP if history_line_byte_cap is None else history_line_byte_cap), \
                  mock.patch.object(module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE", dialect_override), \
                  contextlib.redirect_stdout(stdout):
                 rc = module.main()
@@ -6555,9 +6560,57 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
         stdout, observed = self._run_module(
             CANONICAL_HOOK, entries, self._literal_command(CANONICAL_HOOK)
         )
-
         self.assertFalse(denies_text(stdout), stdout)
         self.assertTrue(any(argv[1:3] == ["pr", "view"] for argv in observed))
+
+    def test_large_tool_result_markers_remain_non_authorizing_above_retired_4mib_cutoff(self) -> None:
+        # The old 4 MiB value is used only to prove this serialized synthetic
+        # record crosses that historical threshold; it is not an input cap.
+        large_tool_output = tool_result(
+            "x" * (4 * 1024 * 1024 + 256) + " [revoke-pr-publication:v1]",
+            tool_id="synthetic-large-neutral-result",
+        )
+        serialized_bytes = len(
+            (json.dumps(large_tool_output, ensure_ascii=False) + "\n").encode("utf-8")
+        )
+        self.assertGreater(serialized_bytes, 4 * 1024 * 1024)
+        entries = [user(self.GRANT), large_tool_output, user("continue")]
+
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                stdout, observed = self._run_module(
+                    script, entries, self._literal_command(script)
+                )
+                self.assertFalse(denies_text(stdout), stdout)
+                self.assertTrue(any(argv[1:3] == ["pr", "view"] for argv in observed))
+
+    def test_large_neutral_record_does_not_hide_later_revocation(self) -> None:
+        large_neutral = assistant("x" * (4 * 1024 * 1024 + 256))
+        serialized_bytes = len(
+            (json.dumps(large_neutral, ensure_ascii=False) + "\n").encode("utf-8")
+        )
+        self.assertGreater(serialized_bytes, 4 * 1024 * 1024)
+        entries = [
+            user(self.GRANT),
+            large_neutral,
+            user("[revoke-pr-publication:v1]"),
+            user("push now"),
+        ]
+        module = _load_gate_module(CANONICAL_HOOK, "large_history_revocation")
+        with synthetic_transcript(entries) as transcript_path:
+            self.assertEqual(
+                module._stream_stable_pr_grant(
+                    _heavy_preflight(module, transcript_path=str(transcript_path))
+                ),
+                ("revoked", None, "found"),
+            )
+
+        stdout, observed = self._run_module(
+            CANONICAL_HOOK, entries, self._literal_command(CANONICAL_HOOK)
+        )
+
+        self.assertTrue(denies_text(stdout), stdout)
+        self.assertEqual(observed, [])
 
     def test_complete_history_reducer_preserves_latest_grant_revoke_state(self) -> None:
         summary = user(f"summary quotes {self.GRANT}")
@@ -6609,20 +6662,33 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         self.assertIn(failure_id, stdout)
                         self.assertEqual(observed, [])
 
-    def test_streaming_history_rejects_invalid_and_oversized_lines(self) -> None:
+    def test_streaming_history_rejects_invalid_records_and_accepts_large_valid_record(self) -> None:
         module = _load_gate_module(CANONICAL_HOOK, "pr_grant_stream_invalid")
+        large_record = (
+            json.dumps(assistant("x" * (4 * 1024 * 1024 + 256)), ensure_ascii=False) + "\n"
+        ).encode("utf-8")
+        self.assertGreater(len(large_record), 4 * 1024 * 1024)
+        neutral_record = (json.dumps(assistant("neutral"), ensure_ascii=False) + "\n").encode("utf-8")
         cases = (
             (b"not-json\n", "invalid"),
             (b"\xff\n", "invalid"),
             (b"[]\n", "invalid"),
-            (b"x" * 65, "limit"),
+            (b"\xc2\xa0" + neutral_record, "invalid"),
+            (neutral_record[:-1] + b"\xe2\x80\x83\n", "invalid"),
+            (b"\x0c" + neutral_record, "invalid"),
+            (b" \t" + neutral_record[:-1] + b" \r\n", "found"),
+            (large_record, "found"),
         )
         for payload, expected_status in cases:
             with self.subTest(expected_status=expected_status):
                 with synthetic_raw_transcript(payload) as transcript_path, \
-                     mock.patch.object(module, "TRANSCRIPT_HISTORY_LINE_BYTE_CAP", 64), \
                      mock.patch.object(module, "_canonicalize_numeric_pr_grant") as canonicalize, \
-                     mock.patch.object(module, "_evaluate_active_pr_route") as active_route:
+                     mock.patch.object(module, "_evaluate_active_pr_route") as active_route, \
+                     mock.patch.object(
+                         module._PrGrantReducer,
+                         "finish",
+                         return_value=("absent", None),
+                     ) as finish:
                     preflight = _heavy_preflight(
                         module, transcript_path=str(transcript_path)
                     )
@@ -6632,6 +6698,34 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 self.assertEqual((state, grant, status), ("absent", None, expected_status))
                 canonicalize.assert_not_called()
                 active_route.assert_not_called()
+                if expected_status == "found":
+                    finish.assert_called_once()
+                else:
+                    finish.assert_not_called()
+
+    def test_public_heavy_history_rejects_non_json_whitespace_after_grant(self) -> None:
+        malformed = (
+            b"\xc2\xa0" + (json.dumps(assistant("neutral"), ensure_ascii=False) + "\n").encode("utf-8")
+        )
+        payload = (
+            (json.dumps(user(self.GRANT), ensure_ascii=False) + "\n").encode("utf-8")
+            + malformed
+            + (json.dumps(user("push now"), ensure_ascii=False) + "\n").encode("utf-8")
+        )
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                stdout, observed = self._run_module(
+                    script,
+                    [],
+                    self._literal_command(script),
+                    raw_transcript=payload,
+                )
+                self.assertIn("PRG-TRANSCRIPT-UNAVAILABLE", stdout)
+                self.assertIn(
+                    "current-turn=found; history=invalid; recovery=not-run",
+                    stdout,
+                )
+                self.assertEqual(observed, [])
 
     def test_measured_large_neutral_record_preserves_grant_state_order(self) -> None:
         neutral = codex_custom_tool_image_output(2_900_000)
@@ -6700,24 +6794,23 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 self.assertIn("PRG-AUTH-MALFORMED", stdout)
                 self.assertEqual(observed, [])
 
-    def test_record_above_measured_bound_remains_fail_closed(self) -> None:
-        oversized = codex_custom_tool_image_output(4_300_000)
+    def test_valid_record_above_retired_4mib_cutoff_remains_fully_reduced(self) -> None:
+        large_neutral = codex_custom_tool_image_output(4_300_000)
         line_bytes = len(
-            (json.dumps(oversized, ensure_ascii=False) + "\n").encode("utf-8")
+            (json.dumps(large_neutral, ensure_ascii=False) + "\n").encode("utf-8")
         )
         self.assertGreater(line_bytes, 4 * 1024 * 1024)
         for script in (CANONICAL_HOOK, *HOOKS):
             with self.subTest(script=script):
                 stdout, observed = self._run_module(
                     script,
-                    [oversized, user(self.GRANT), user("push now")],
+                    [large_neutral, user(self.GRANT), user("push now")],
                     self._literal_command(script),
                 )
-                self.assertIn("PRG-TRANSCRIPT-UNAVAILABLE", stdout)
-                self.assertIn("history=limit; recovery=not-run", stdout)
-                self.assertEqual(observed, [])
+                self.assertFalse(denies_text(stdout), stdout)
+                self.assertTrue(any(argv[1:3] == ["pr", "view"] for argv in observed))
 
-    def test_oversized_history_revocation_malformed_and_absent_deny(self) -> None:
+    def test_history_revocation_malformed_and_absent_deny(self) -> None:
         cases = (
             ([assistant("x" * 2048), user(self.GRANT), user("[revoke-pr-publication:v1]")], "generic-denial"),
             ([assistant("x" * 2048), user(self.GRANT), user("[approve-pr-publication:v1 broken]")], "PRG-AUTH-MALFORMED"),
@@ -6738,7 +6831,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         self.assertIn(failure_id, stdout)
                     self.assertEqual(observed, [])
 
-    def test_oversized_history_rejects_assistant_and_tool_injection(self) -> None:
+    def test_history_rejects_assistant_and_tool_injection(self) -> None:
         cases = (
             [assistant("x" * 2048), user("continue"), assistant(self.GRANT)],
             [assistant("x" * 2048), user("continue"), tool_result(self.GRANT, tool_id="foreign")],
@@ -7093,9 +7186,9 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 1,
             ),
             (
-                "record-limit",
-                (("absent", None, "limit"),),
-                ("absent", None, "limit"),
+                "resource-unavailable",
+                (("absent", None, "resource-unavailable"),),
+                ("absent", None, "resource-unavailable"),
                 1,
             ),
         )
@@ -7445,7 +7538,6 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
         script: Path,
         envelope: dict,
         *,
-        line_byte_cap: int | None = None,
         generic_completion=None,
     ) -> str:
         module = _load_gate_module(
@@ -7459,10 +7551,6 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
                 "read_stdin_utf8",
                 return_value=json.dumps(envelope),
             ))
-            if line_byte_cap is not None:
-                stack.enter_context(mock.patch.object(
-                    module, "TRANSCRIPT_HISTORY_LINE_BYTE_CAP", line_byte_cap
-                ))
             if generic_completion is not None:
                 stack.enter_context(mock.patch.object(
                     module, "_complete_generic_publication", side_effect=generic_completion,
@@ -7545,7 +7633,7 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
                     )
                     self.assertNotIn(canary, output)
 
-    def test_unreadable_invalid_and_limit_categories_are_distinct(self) -> None:
+    def test_unreadable_and_invalid_transcript_categories_are_distinct(self) -> None:
         canary = "PRIVATE_TRANSCRIPT_CANARY_8842"
         scratch_parent = REPO_ROOT / ".scratch"
         scratch_parent.mkdir(parents=True, exist_ok=True)
@@ -7575,67 +7663,39 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
                 )
                 self.assertNotIn(canary, output)
 
-            with self.subTest(script=script, category="limit"):
-                with synthetic_transcript([user("continue")]) as path:
-                    envelope = self._base_envelope()
-                    envelope["transcript_path"] = str(path)
-                    output = self._run_envelope(
-                        script, envelope, line_byte_cap=1
-                    )
-                self.assert_transcript_denial(
-                    output,
-                    "Transcript diagnostics: envelope=string; current-turn=found; "
-                    "history=limit; recovery=not-run.",
-                    remediation="Cannot verify historical publication permission within bounded transcript history",
-                )
+    def test_current_turn_resource_status_is_preserved_and_cannot_scan(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "current_turn_resource_status")
+        preflight_module = module._a3_preflight
+        envelope = self._base_envelope()
+        envelope["transcript_path"] = "synthetic-resource-failure.jsonl"
+        resource_status = preflight_module.STATUS_RESOURCE_UNAVAILABLE
 
-    def test_record_limit_diagnostic_preserves_readable_current_turn(self) -> None:
-        for script in (CANONICAL_HOOK, *HOOKS):
-            with self.subTest(script=script):
-                with synthetic_transcript([user("continue")]) as path:
-                    envelope = self._base_envelope()
-                    envelope["transcript_path"] = str(path)
-                    output = self._run_envelope(
-                        script,
-                        envelope,
-                        line_byte_cap=1,
-                    )
-                self.assert_transcript_denial(
-                    output,
-                    "Cannot verify historical publication permission within "
-                    "bounded transcript history; summaries cannot authorize "
-                    "publication.",
-                    remediation=(
-                        "Cannot verify historical publication permission within "
-                        "bounded transcript history"
-                    ),
-                )
-                self.assertIn(
-                    "Transcript diagnostics: envelope=string; current-turn=found; "
-                    "history=limit; recovery=not-run.",
-                    output,
-                )
-                self.assertNotIn("Retry from a readable current session transcript", output)
+        with mock.patch.object(
+            preflight_module,
+            "scan_current_turn_boundary",
+            return_value=(None, [], resource_status),
+        ), mock.patch.object(module, "_recover_stable_pr_grant", return_value=("absent", None, "found")), \
+             mock.patch.object(module, "_run_authoritative_scan") as scan, \
+             mock.patch.object(module, "_run_process") as process:
+            preflight = preflight_module.build_preflight(envelope)
+            self.assertEqual(preflight.current_turn_status, resource_status)
+            self.assertFalse(preflight.push_instruction)
+            self.assertFalse(module.evaluate_heavy(preflight))
 
-    def test_expired_generic_approval_with_record_limit_requests_fresh_latest_message(self) -> None:
+        scan.assert_not_called()
+        process.assert_not_called()
+
+    def test_expired_generic_approval_after_new_user_is_not_reused(self) -> None:
         with synthetic_transcript([
             user("push [approve-publication]"),
             user("continue"),
         ]) as path:
             envelope = self._base_envelope()
             envelope["transcript_path"] = str(path)
-            output = self._run_envelope(
-                CANONICAL_HOOK,
-                envelope,
-                line_byte_cap=1,
-            )
+            completion = mock.Mock(return_value=True)
+            output = self._run_envelope(CANONICAL_HOOK, envelope, generic_completion=completion)
         self.assertIn('"permissionDecision": "deny"', output)
-        self.assertIn("PRG-TRANSCRIPT-UNAVAILABLE", output)
-        self.assertIn(
-            "current-turn=found; history=limit; recovery=not-run", output
-        )
-        self.assertIn("fresh `[approve-publication]`", output)
-        self.assertIn("latest genuine user message", output)
+        completion.assert_not_called()
 
     def test_unknown_transcript_status_remains_a_deny_without_limit_remediation(self) -> None:
         for script in (CANONICAL_HOOK, *HOOKS):
@@ -7880,6 +7940,36 @@ class TestBoundedCurrentTurnPushGate(unittest.TestCase):
                 self.assertEqual(preflight.command, "git push origin main")
                 self.assertEqual(preflight.generic_decision.status, "PGG-ADMISSIBLE")
                 self.assertEqual(preflight.generic_decision.binding, ("origin", "main", "main"))
+
+    def test_publication_current_turn_reaches_marker_behind_large_same_turn_record(self) -> None:
+        large_entry = assistant("z" * (8 * 1024 * 1024 + 256))
+        serialized_bytes = len((json.dumps(large_entry) + "\n").encode("utf-8"))
+        self.assertGreater(serialized_bytes, 8 * 1024 * 1024)
+        entries = [user("[approve-publication] push"), large_entry]
+        authority_fixture = TestTranscriptFailureDiagnostics()
+
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                completion = mock.Mock(return_value=True)
+                with synthetic_transcript(entries) as transcript_path:
+                    envelope = {
+                        "tool_name": "Bash", "cwd": str(REPO_ROOT),
+                        "tool_input": {
+                            "command": "git push origin main",
+                            "workdir": str(REPO_ROOT),
+                        },
+                        "transcript_path": str(transcript_path),
+                    }
+                    output = authority_fixture._run_envelope(
+                        script, envelope, generic_completion=completion,
+                    )
+                self.assertEqual(output, "")
+                completion.assert_called_once()
+                preflight = completion.call_args.args[0]
+                self.assertEqual(preflight.reason_id, "PFP-CONSENT-GENERIC")
+                self.assertEqual(preflight.current_turn_status, "found")
+                self.assertTrue(preflight.push_instruction)
+                self.assertEqual(preflight.generic_decision.status, "PGG-ADMISSIBLE")
 
 class TestCrashWhileDecidingFallsThroughToDeny(unittest.TestCase):
     """2026-07-26, HIGH-severity finding, `$security-reviewer` (fable) --
@@ -8664,10 +8754,20 @@ class TestR14CooperativeOracle(unittest.TestCase):
             "consumers."
         )
         english_surfaces = (
-            REPO_ROOT / "src.codex" / "AGENTS.codex.md",
             REPO_ROOT / "src.claude" / "CLAUDE.md",
             REPO_ROOT / "references-claude" / "claude-md-structural-enforcement.md",
             REPO_ROOT / "RELEASE_NOTES.md",
+        )
+        codex_surface = REPO_ROOT / "src.codex" / "AGENTS.codex.md"
+        codex_qualification = (
+            "Cooperative captured verification is not same-user arbitrary-code containment "
+            "or native reviewer attestation; repository/remote freshness outside the selected "
+            "graph retains its existing owner."
+        )
+        codex_authority_owner = (
+            "Only actual security-reviewer execution received by Root can be promoted through "
+            "the policy owner; report/hash/role/PR labels and generic user consent cannot create "
+            "that exception authority."
         )
         russian_surface = (
             REPO_ROOT
@@ -8686,6 +8786,11 @@ class TestR14CooperativeOracle(unittest.TestCase):
                 self.assertEqual(text.count(english), 1)
                 for phrase in prohibited:
                     self.assertNotIn(phrase, text)
+        codex_text = " ".join(codex_surface.read_text(encoding="utf-8").split())
+        self.assertEqual(codex_text.count(codex_qualification), 1)
+        self.assertEqual(codex_text.count(codex_authority_owner), 1)
+        for phrase in prohibited:
+            self.assertNotIn(phrase, codex_text)
         russian_text = " ".join(russian_surface.read_text(encoding="utf-8").split())
         self.assertEqual(russian_text.count(russian), 1)
         for phrase in prohibited:
@@ -9629,17 +9734,21 @@ class TestPublicationComponentRoot(unittest.TestCase):
             capture_node = module._capture_source_node
             capture_directory = module._capture_directory
             capture_interpreter = module._capture_interpreter_handle
-            def node(path, role):
-                result = capture_node(path, role)
+            def node(path, role, *, owned_fds=None):
+                result = capture_node(path, role, owned_fds=owned_fds)
                 acquired.append(result[0])
                 if role == "scanner":
                     alias.rename(old)
                     self.link_root(alias, physical)
                 return result
-            def directory(path):
-                result = capture_directory(path); acquired.append(result[0]); return result
-            def interpreter(identity):
-                fd = capture_interpreter(identity); acquired.append(fd); return fd
+            def directory(path, *, owned_fds=None):
+                result = capture_directory(path, owned_fds=owned_fds)
+                acquired.append(result[0])
+                return result
+            def interpreter(identity, *, owned_fds=None):
+                fd = capture_interpreter(identity, owned_fds=owned_fds)
+                acquired.append(fd)
+                return fd
             binding = module.PushScanBinding("generic", "origin", "refs/heads/topic", "a" * 40, "a" * 40)
             try:
                 with mock.patch.object(module, "_capture_source_node", side_effect=node), \
@@ -10342,10 +10451,12 @@ class TestPublicationSafetyTrustedScanR4(unittest.TestCase):
         class ChaosStream:
             def __init__(self, name, fault):
                 self.name, self.fault, self.calls = name, fault, 0
+                self.closed = False
             def close(self):
                 self.calls += 1
                 if self.fault == self.name:
                     raise KeyboardInterrupt("synthetic-" + self.name)
+                self.closed = True
 
         class ChaosWorker:
             def __init__(self, fault):
@@ -10358,6 +10469,8 @@ class TestPublicationSafetyTrustedScanR4(unittest.TestCase):
                 self.observe_calls += 1
                 if self.fault == "worker-observe":
                     raise KeyboardInterrupt("synthetic-worker-observe")
+                if self.fault == "worker-join":
+                    return self.observe_calls == 1
                 return False
 
         class ChaosProcess:
@@ -10408,10 +10521,7 @@ class TestPublicationSafetyTrustedScanR4(unittest.TestCase):
             final = first if first.complete else supervisor.settle()
             with self.subTest(fault=fault):
                 self.assertGreaterEqual(process.poll_calls, 1)
-                self.assertGreaterEqual(process.stdin.calls, 1)
-                self.assertGreaterEqual(process.stdout.calls, 1)
-                self.assertGreaterEqual(process.stderr.calls, 1)
-                self.assertGreaterEqual(worker.join_calls, 1)
+                self.assertEqual(worker.join_calls, int(fault == "worker-join"))
                 self.assertGreaterEqual(worker.observe_calls, 1)
                 self.assertIsNotNone(final.certificate)
                 self.assertLessEqual(final.certificate.attempts_used, 2)
@@ -10420,6 +10530,26 @@ class TestPublicationSafetyTrustedScanR4(unittest.TestCase):
                     final.certificate.operation_errors,
                 )
                 self.assertFalse(final.execution_eligible)
+                if fault in {"wait", "worker-observe"}:
+                    self.assertEqual(process.stdin.calls, 0)
+                    self.assertEqual(process.stdout.calls, 0)
+                    self.assertEqual(process.stderr.calls, 0)
+                    self.assertFalse(process.stdin.closed)
+                    self.assertFalse(process.stdout.closed)
+                    self.assertFalse(process.stderr.closed)
+                    self.assertFalse(final.complete)
+                elif fault in {"stdin-close", "stdout-close", "stderr-close"}:
+                    for stream in (process.stdin, process.stdout, process.stderr):
+                        if stream.name == fault:
+                            self.assertGreaterEqual(stream.calls, 1)
+                            self.assertFalse(stream.closed)
+                        else:
+                            self.assertTrue(stream.closed)
+                    self.assertFalse(final.complete)
+                else:
+                    self.assertTrue(process.stdin.closed)
+                    self.assertTrue(process.stdout.closed)
+                    self.assertTrue(process.stderr.closed)
 
     def test_r4_pending_owner_is_mutable_locked_noncopyable_and_one_use(self) -> None:
         module = self._module("pending")
@@ -11253,7 +11383,7 @@ class TestFinitePrGrantRecovery(unittest.TestCase):
         fn = self.m._recover_stable_pr_grant if recover else self.m._stream_stable_pr_grant
         return fn(self._preflight())
 
-    def instrument(self, *, initial=None, line=None, read=None, seek=None):
+    def instrument(self, *, initial=None, read=None, seek=None):
         real_open = Path.open
         real_fstat = os.fstat
         owner = self
@@ -11280,11 +11410,6 @@ class TestFinitePrGrantRecovery(unittest.TestCase):
 
             def fileno(self):
                 return self.f.fileno()
-
-            def readline(self, n):
-                value = line(self, n) if line else self.f.readline(n)
-                self.events.append(('line', self.phase, n, len(value)))
-                return value
 
             def read(self, n):
                 value = read(self, n) if read else self.f.read(n)
@@ -11316,12 +11441,15 @@ class TestFinitePrGrantRecovery(unittest.TestCase):
         return stack
 
     def test_stable_frontier_requests_counts_sentinels_and_digest(self):
-        data = b'\n' + self.raw(assistant('neutral')) + self.raw(user('[approve-pr-publication]')).rstrip(b'\n')
+        large_neutral = self.raw(assistant('n' * (4 * 1024 * 1024 + 256)))
+        self.assertGreater(len(large_neutral), 4 * 1024 * 1024)
+        grant_record = self.raw(user('[approve-pr-publication]')).rstrip(b'\n')
+        data = b'\n' + self.raw(assistant('neutral')) + large_neutral + grant_record
         with self.instrument():
             r = self.result(data)
         self.assertEqual((r[0], r[2]), ('simple', 'found'))
-        self.assertEqual(r[1].record, 2)
-        self.assertEqual(r[1].sha256, hashlib.sha256(self.raw(user('[approve-pr-publication]')).rstrip(b'\n')).hexdigest())
+        self.assertEqual(r[1].record, 3)
+        self.assertEqual(r[1].sha256, hashlib.sha256(grant_record).hexdigest())
         events = self.opened[0].events
         for phase in (1, 2):
             selected = [e for e in events if e[1] == phase]
@@ -11330,7 +11458,7 @@ class TestFinitePrGrantRecovery(unittest.TestCase):
             for kind, _, requested, returned in selected[:-1]:
                 self.assertGreater(requested, 0)
                 self.assertLessEqual(requested, remaining)
-                self.assertLessEqual(requested, self.m.TRANSCRIPT_HISTORY_LINE_BYTE_CAP + 1 if kind == 'line' else 1024 * 1024)
+                self.assertLessEqual(requested, min(1024 * 1024, remaining))
                 remaining -= returned
             self.assertEqual(remaining, 0)
         self.assertEqual(sum((e[3] for e in events)), 2 * len(data))
@@ -11341,17 +11469,63 @@ class TestFinitePrGrantRecovery(unittest.TestCase):
                 self.assertEqual((lambda r: (r[0], r[2]))(self.result(payload)), (state, 'found'))
 
     def test_exact_record_guard_and_overflow(self):
-        with mock.patch.object(self.m, 'TRANSCRIPT_HISTORY_LINE_BYTE_CAP', 3):
-            self.assertEqual(self.result(b'{}\n'), ('absent', None, 'found'))
-            self.assertEqual(self.result(b'{} \n'), ('absent', None, 'limit'))
+        # The old line cutoff is retired; a valid record remains fully parsed
+        # and counted even when its exact raw bytes exceed that threshold.
+        large = self.raw(assistant('x' * (4 * 1024 * 1024 + 256)))
+        self.assertGreater(len(large), 4 * 1024 * 1024)
+        self.assertEqual(self.result(large), ('absent', None, 'found'))
 
-    def test_guard_rejects_before_decode_with_bounded_request(self):
-        with mock.patch.object(self.m, 'TRANSCRIPT_HISTORY_LINE_BYTE_CAP', 3), self.instrument(), mock.patch.object(self.m.json, 'loads', side_effect=AssertionError('decode after record overflow')):
-            self.assertEqual(self.result(b'x' * 30), ('absent', None, 'limit'))
-        self.assertEqual(self.opened[0].events, [('line', 1, 4, 4)])
+    def test_large_record_is_fully_decoded_with_frontier_bounded_requests(self):
+        large = self.raw(assistant('x' * (4 * 1024 * 1024 + 256)))
+        decoded = []
+        loads = self.m.json.loads
+        with self.instrument(), mock.patch.object(
+            self.m.json, 'loads', side_effect=lambda value: (decoded.append(len(value)), loads(value))[1]
+        ):
+            self.assertEqual(self.result(large), ('absent', None, 'found'))
+        self.assertTrue(decoded)
+        self.assertGreater(decoded[0], 4 * 1024 * 1024)
+
+    def test_decoder_memory_error_is_non_authorizing_and_closes_stream(self):
+        self.p.write_bytes(self.raw(user(self.GRANT)))
+        preflight = self._preflight()
+        with self.instrument(), \
+             mock.patch.object(self.m.json, 'loads', side_effect=MemoryError), \
+             mock.patch.object(self.m._PrGrantReducer, 'finish') as finish:
+            self.assertEqual(
+                self.m._stream_stable_pr_grant(preflight),
+                ('absent', None, 'resource-unavailable'),
+            )
+        finish.assert_not_called()
+        self.assertTrue(all(stream.closed for stream in self.opened))
+
+    def test_cancellation_during_verification_propagates_and_closes_stream(self):
+        self.p.write_bytes(self.raw(user(self.GRANT)))
+        preflight = self._preflight()
+
+        def cancel_verification(stream, requested):
+            if stream.phase == 2:
+                raise KeyboardInterrupt('synthetic cancellation')
+            return stream.f.read(requested)
+
+        with self.instrument(read=cancel_verification), \
+             mock.patch.object(self.m._PrGrantReducer, 'finish') as finish:
+            with self.assertRaises(KeyboardInterrupt):
+                self.m._stream_stable_pr_grant(preflight)
+        finish.assert_not_called()
+        self.assertTrue(all(stream.closed for stream in self.opened))
 
     def test_invalid_utf8_json_nonobject_partial_cannot_grant(self):
-        for payload in [b'\xff\n', b'not json\n', b'[]\n', b'null\n', self.raw(user(self.GRANT)) + b'{', b' ']:
+        malformed_large = (
+            b'{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"'
+            + b'x' * (4 * 1024 * 1024 + 256)
+            + b'" broken}]}}\n'
+        )
+        large_invalid_history = self.raw(user(self.GRANT)) + malformed_large
+        for payload in [
+            b'\xff\n', b'not json\n', b'[]\n', b'null\n',
+            self.raw(user(self.GRANT)) + b'{', b' ', large_invalid_history,
+        ]:
             with self.subTest(payload=payload):
                 expected = 'found' if payload == b' ' else 'invalid'
                 self.assertEqual(self.result(payload), ('absent', None, expected))
@@ -11387,7 +11561,9 @@ class TestFinitePrGrantRecovery(unittest.TestCase):
     def test_early_eof_each_pass_is_drift_without_finish(self):
         for phase in (1, 2):
             self.opened = []
-            with self.subTest(phase=phase), self.instrument(line=(lambda s, n: b'') if phase == 1 else None, read=(lambda s, n: b'' if s.phase == 2 else s.f.read(n)) if phase == 2 else None), mock.patch.object(self.m._PrGrantReducer, 'finish', side_effect=AssertionError('short finish')):
+            def stop_at_phase(stream, requested):
+                return b'' if stream.phase == phase else stream.f.read(requested)
+            with self.subTest(phase=phase), self.instrument(read=stop_at_phase), mock.patch.object(self.m._PrGrantReducer, 'finish', side_effect=AssertionError('short finish')):
                 self.assertEqual(self.result(self.raw(user(self.GRANT))), ('absent', None, 'identity-drift'))
 
     def test_verify_growth_sentinel_is_bounded(self):
@@ -11440,7 +11616,7 @@ class TestFinitePrGrantRecovery(unittest.TestCase):
 
         def fail(s, n):
             raise OSError('synthetic')
-        with self.instrument(line=fail):
+        with self.instrument(read=fail):
             self.assertEqual(self.result(b'{}\n'), ('absent', None, 'unreadable'))
         with mock.patch.object(self.m._PrGrantReducer, 'finish', side_effect=self.m.PrRouteDenied('PRG-PR-UNAVAILABLE')):
             with self.assertRaises(self.m.PrRouteDenied):

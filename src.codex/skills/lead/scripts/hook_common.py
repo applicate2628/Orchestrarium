@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import re
+import stat
 import sys
 from pathlib import Path
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 # Harness-injected spans that ride inside user-role transcript entries but are
 # NOT typed by the human (system reminders, async task notifications, captured
@@ -198,6 +201,7 @@ HISTORY_STATUS_UNREADABLE = "unreadable"
 HISTORY_STATUS_IDENTITY_DRIFT = "identity-drift"
 HISTORY_STATUS_INVALID = "invalid"
 HISTORY_STATUS_LIMIT = "limit"
+HISTORY_STATUS_RESOURCE_UNAVAILABLE = "resource-unavailable"
 HISTORY_STATUSES = (
     HISTORY_STATUS_FOUND,
     HISTORY_STATUS_ABSENT,
@@ -205,36 +209,142 @@ HISTORY_STATUSES = (
     HISTORY_STATUS_IDENTITY_DRIFT,
     HISTORY_STATUS_INVALID,
     HISTORY_STATUS_LIMIT,
+    HISTORY_STATUS_RESOURCE_UNAVAILABLE,
 )
 
 
 def read_transcript_history(
     transcript_path: str,
     *,
-    byte_cap: int,
-    record_cap: int,
-    line_byte_cap: int,
+    byte_cap: int | None,
+    record_cap: int | None,
+    line_byte_cap: int | None,
+    on_record: Callable[[dict, bytes], None] | None = None,
 ) -> tuple[list[dict], str]:
-    """Read one complete JSONL transcript under explicit resource bounds.
+    """Acquire complete JSONL history, either bounded or as a finite stream.
 
-    This strict-history reader never substitutes a current-turn snapshot for
-    complete history. It is intended for
-    authorization state whose meaning depends on original record order.  A
-    missing/unreadable path, invalid UTF-8/JSON/non-object record, oversized
-    line, or file/record cap returns no entries plus a typed status.  Existing
-    current-turn callers retain their typed non-success behavior.
+    Bounded callers keep their historical byte, record and line limits and
+    receive the decoded list. The publication reducer supplies ``on_record``
+    with all three caps set to ``None``: this mode binds one initial file
+    frontier, streams complete strict records to the callback without keeping
+    an all-history list, then verifies a second complete digest and the same
+    descriptor/path identity before reporting success. A resource failure is
+    distinct from malformed content and never returns partial authority.
     """
     if not transcript_path:
         return [], HISTORY_STATUS_ABSENT
-    if byte_cap <= 0 or record_cap <= 0 or line_byte_cap <= 0:
+    if on_record is None:
+        if (
+            type(byte_cap) is not int
+            or type(record_cap) is not int
+            or type(line_byte_cap) is not int
+            or byte_cap <= 0
+            or record_cap <= 0
+            or line_byte_cap <= 0
+        ):
+            return [], HISTORY_STATUS_LIMIT
+    elif byte_cap is not None or record_cap is not None or line_byte_cap is not None:
         return [], HISTORY_STATUS_LIMIT
 
     tp = Path(transcript_path)
+    if on_record is not None:
+        try:
+            if not tp.is_file():
+                return [], HISTORY_STATUS_UNREADABLE
+            path_before = tp.stat()
+            with tp.open("rb") as stream:
+                before = os.fstat(stream.fileno())
+                identity_fields = ("st_dev", "st_ino", "st_mode")
+                if tuple(getattr(before, name) for name in identity_fields) != tuple(
+                    getattr(path_before, name) for name in identity_fields
+                ):
+                    return [], HISTORY_STATUS_IDENTITY_DRIFT
+
+                frontier = before.st_size
+                total_bytes = 0
+                first_digest = hashlib.sha256()
+                line_buffer = bytearray()
+                def consume_line(raw_line: bytes) -> str | None:
+                    if not raw_line.strip():
+                        return None
+                    try:
+                        entry = json.loads(raw_line.decode("utf-8", errors="strict"))
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        return HISTORY_STATUS_INVALID
+                    if not isinstance(entry, dict):
+                        return HISTORY_STATUS_INVALID
+                    on_record(entry, raw_line)
+                    return None
+
+                while total_bytes < frontier:
+                    chunk = stream.read(min(1024 * 1024, frontier - total_bytes))
+                    if not chunk:
+                        return [], HISTORY_STATUS_IDENTITY_DRIFT
+                    total_bytes += len(chunk)
+                    first_digest.update(chunk)
+                    line_buffer.extend(chunk)
+                    while True:
+                        newline = line_buffer.find(b"\n")
+                        if newline < 0:
+                            break
+                        raw_line = bytes(line_buffer[: newline + 1])
+                        del line_buffer[: newline + 1]
+                        status = consume_line(raw_line)
+                        if status is not None:
+                            return [], status
+                if line_buffer:
+                    status = consume_line(bytes(line_buffer))
+                    if status is not None:
+                        return [], status
+                if stream.read(1):
+                    return [], HISTORY_STATUS_IDENTITY_DRIFT
+
+                first_stat = os.fstat(stream.fileno())
+                stream.seek(0)
+                second_digest = hashlib.sha256()
+                verified_bytes = 0
+                while verified_bytes < frontier:
+                    chunk = stream.read(min(1024 * 1024, frontier - verified_bytes))
+                    if not chunk:
+                        return [], HISTORY_STATUS_IDENTITY_DRIFT
+                    verified_bytes += len(chunk)
+                    second_digest.update(chunk)
+                if stream.read(1):
+                    return [], HISTORY_STATUS_IDENTITY_DRIFT
+                second_stat = os.fstat(stream.fileno())
+                path_after = tp.stat()
+        except (MemoryError, RecursionError):
+            return [], HISTORY_STATUS_RESOURCE_UNAVAILABLE
+        except OSError:
+            return [], HISTORY_STATUS_UNREADABLE
+
+        stable_fields = (
+            "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"
+        )
+        initial = tuple(getattr(before, name) for name in stable_fields)
+        path_initial = tuple(getattr(path_before, name) for name in stable_fields)
+        binding_fields = ("st_dev", "st_ino", "st_mode", "st_size")
+        if (
+            total_bytes != frontier
+            or verified_bytes != frontier
+            or initial != tuple(getattr(first_stat, name) for name in stable_fields)
+            or initial != tuple(getattr(second_stat, name) for name in stable_fields)
+            or path_initial
+            != tuple(getattr(path_after, name) for name in stable_fields)
+            or tuple(getattr(before, name) for name in binding_fields)
+            != tuple(getattr(path_before, name) for name in binding_fields)
+            or first_digest.digest() != second_digest.digest()
+        ):
+            return [], HISTORY_STATUS_IDENTITY_DRIFT
+        return [], HISTORY_STATUS_FOUND
+
     try:
         if not tp.is_file():
             return [], HISTORY_STATUS_UNREADABLE
         if tp.stat().st_size > byte_cap:
             return [], HISTORY_STATUS_LIMIT
+    except (MemoryError, RecursionError):
+        return [], HISTORY_STATUS_RESOURCE_UNAVAILABLE
     except Exception:
         return [], HISTORY_STATUS_UNREADABLE
 
@@ -805,6 +915,7 @@ STATUS_ABSENT = "absent"
 STATUS_UNREADABLE = "unreadable"
 STATUS_INVALID = "invalid"
 STATUS_LIMIT = "limit"
+STATUS_RESOURCE_UNAVAILABLE = "resource-unavailable"
 STATUS_NOT_IN_WINDOW = "not-in-window"
 TURN_BOUNDARY_STATUSES = (
     STATUS_FOUND,
@@ -812,12 +923,18 @@ TURN_BOUNDARY_STATUSES = (
     STATUS_UNREADABLE,
     STATUS_INVALID,
     STATUS_LIMIT,
+    STATUS_RESOURCE_UNAVAILABLE,
     STATUS_NOT_IN_WINDOW,
 )
 CURRENT_TURN_BYTE_CAP = 8 * 1024 * 1024
 
 
-def scan_current_turn_boundary(transcript_path: str, *, byte_cap: int) -> tuple[dict | None, list[dict], str]:
+def scan_current_turn_boundary(
+    transcript_path: str,
+    *,
+    byte_cap: int | None,
+    boundary_only: bool = False,
+) -> tuple[dict | None, list[dict], str]:
     """Return one bounded snapshot of the current turn.
 
     This is the only production I/O owner for current-turn evidence.
@@ -841,13 +958,19 @@ def scan_current_turn_boundary(transcript_path: str, *, byte_cap: int) -> tuple[
           STATUS_LIMIT          -- one record spans the bounded snapshot
           STATUS_NOT_IN_WINDOW  -- valid snapshot has no genuine boundary
 
-    At most ``byte_cap`` transcript bytes are read in aggregate. For a file
-    larger than the cap, one byte of that budget is a leading-boundary
-    sentinel and the remainder is the retained suffix. Any non-found result
-    returns no partial boundary or later-entry data."""
+    The normal mode reads at most ``byte_cap`` bytes and returns the existing
+    bounded current-turn slice. The publication-only ``boundary_only`` mode
+    uses input-derived reads: it reverse-selects the latest genuine user,
+    parses that user's complete suffix without retaining an ``after`` list,
+    and seals the selected range twice against one finite file frontier. Any
+    non-found result returns no partial boundary or later-entry data."""
     if not transcript_path:
         return None, [], STATUS_ABSENT
-    if byte_cap <= 0:
+    if boundary_only:
+        if byte_cap is not None:
+            return None, [], STATUS_LIMIT
+        return _scan_current_turn_boundary_only(transcript_path)
+    if type(byte_cap) is not int or byte_cap <= 0:
         return None, [], STATUS_LIMIT
     tp = Path(transcript_path)
     try:
@@ -868,6 +991,8 @@ def scan_current_turn_boundary(transcript_path: str, *, byte_cap: int) -> tuple[
                     return None, [], STATUS_UNREADABLE
                 sentinel, payload = raw[:1], raw[1:]
                 begins_at_record_boundary = sentinel == b"\n"
+    except (MemoryError, RecursionError):
+        return None, [], STATUS_RESOURCE_UNAVAILABLE
     except Exception:
         return None, [], STATUS_UNREADABLE
 
@@ -898,6 +1023,232 @@ def scan_current_turn_boundary(transcript_path: str, *, byte_cap: int) -> tuple[
     if boundary_entry is None:
         return None, [], STATUS_NOT_IN_WINDOW
     return boundary_entry, after_entries, STATUS_FOUND
+
+
+def _scan_current_turn_boundary_only(
+    transcript_path: str,
+) -> tuple[dict | None, list[dict], str]:
+    """Select and seal only the current-user suffix for publication checks.
+
+    The reverse pass stops at the latest genuine user record and never parses
+    the older prefix. The subsequent forward pass binds that selected record
+    to the complete suffix before the independent digest pass. A nonzero
+    boundary is framed by the LF immediately before it; that byte is captured
+    during reverse selection and re-read before each seal.
+    """
+    try:
+        tp = Path(transcript_path)
+        if not tp.is_file():
+            return None, [], STATUS_UNREADABLE
+        path_before = tp.stat()
+        with tp.open("rb") as stream:
+            before = os.fstat(stream.fileno())
+            identity_fields = ("st_dev", "st_ino", "st_mode")
+            if tuple(getattr(before, name) for name in identity_fields) != tuple(
+                getattr(path_before, name) for name in identity_fields
+            ) or not stat.S_ISREG(before.st_mode):
+                return None, [], STATUS_UNREADABLE
+
+            frontier = before.st_size
+            cursor = frontier
+            later_chunks: list[bytes] = []
+            boundary_entry: dict | None = None
+            boundary_offset: int | None = None
+            boundary_record_length: int | None = None
+            boundary_record_digest: bytes | None = None
+            captured_predecessor: bytes | None = None
+
+            def parse_record(raw_record: bytes) -> tuple[dict | None, str | None]:
+                if not raw_record.strip():
+                    return None, None
+                try:
+                    entry = json.loads(raw_record.decode("utf-8", errors="strict"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    return None, STATUS_INVALID
+                if not isinstance(entry, dict):
+                    return None, STATUS_INVALID
+                return entry, None
+
+            while cursor > 0 and boundary_entry is None:
+                chunk_start = max(0, cursor - 1024 * 1024)
+                stream.seek(chunk_start)
+                chunk = stream.read(cursor - chunk_start)
+                if len(chunk) != cursor - chunk_start:
+                    return None, [], STATUS_UNREADABLE
+                end = len(chunk)
+                while end > 0:
+                    separator = chunk.rfind(b"\n", 0, end)
+                    if separator < 0:
+                        if end:
+                            later_chunks.append(chunk[:end])
+                        cursor = chunk_start
+                        break
+                    raw_record = chunk[separator + 1 : end] + b"".join(
+                        reversed(later_chunks)
+                    )
+                    record_start = chunk_start + separator + 1
+                    later_chunks.clear()
+                    entry, invalid = parse_record(raw_record)
+                    if invalid is not None:
+                        return None, [], invalid
+                    if (
+                        entry is not None
+                        and is_user_message(entry)
+                        and extract_user_typed_text(entry)
+                    ):
+                        boundary_entry = entry
+                        boundary_offset = record_start
+                        boundary_record_length = len(raw_record)
+                        boundary_record_digest = hashlib.sha256(raw_record).digest()
+                        captured_predecessor = b"\n" if record_start > 0 else None
+                        break
+                    end = separator
+                    cursor = chunk_start + separator
+
+            if boundary_entry is None and later_chunks:
+                raw_record = b"".join(reversed(later_chunks))
+                entry, invalid = parse_record(raw_record)
+                if invalid is not None:
+                    return None, [], invalid
+                if (
+                    entry is not None
+                    and is_user_message(entry)
+                    and extract_user_typed_text(entry)
+                ):
+                    boundary_entry = entry
+                    boundary_offset = 0
+                    boundary_record_length = len(raw_record)
+                    boundary_record_digest = hashlib.sha256(raw_record).digest()
+                    captured_predecessor = None
+
+            if boundary_entry is None or boundary_offset is None:
+                return None, [], STATUS_NOT_IN_WINDOW
+
+            after_selection = os.fstat(stream.fileno())
+            path_after_selection = tp.stat()
+            stable_fields = (
+                "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"
+            )
+            initial = tuple(getattr(before, name) for name in stable_fields)
+            path_initial = tuple(getattr(path_before, name) for name in stable_fields)
+            binding_fields = ("st_dev", "st_ino", "st_mode", "st_size")
+            if (
+                initial != tuple(getattr(after_selection, name) for name in stable_fields)
+                or path_initial
+                != tuple(getattr(path_after_selection, name) for name in stable_fields)
+                or tuple(getattr(before, name) for name in binding_fields)
+                != tuple(getattr(path_before, name) for name in binding_fields)
+            ):
+                return None, [], STATUS_UNREADABLE
+
+            first_digest = hashlib.sha256()
+            if captured_predecessor is not None:
+                stream.seek(boundary_offset - 1)
+                predecessor = stream.read(1)
+                if predecessor != captured_predecessor:
+                    return None, [], STATUS_INVALID
+                first_digest.update(predecessor)
+            else:
+                stream.seek(0)
+
+            first_bytes = bytearray()
+            first_total = boundary_offset
+            record_start = boundary_offset
+            latest_user_offset: int | None = None
+            latest_user_entry: dict | None = None
+
+            def accept_forward_record(raw_record: bytes, start: int) -> str | None:
+                nonlocal latest_user_offset, latest_user_entry
+                if not raw_record.strip():
+                    return None
+                if start == boundary_offset and (
+                    len(raw_record) != boundary_record_length
+                    or hashlib.sha256(raw_record).digest() != boundary_record_digest
+                ):
+                    return STATUS_INVALID
+                try:
+                    entry = json.loads(raw_record.decode("utf-8", errors="strict"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    return STATUS_INVALID
+                if not isinstance(entry, dict):
+                    return STATUS_INVALID
+                if is_user_message(entry) and extract_user_typed_text(entry):
+                    latest_user_offset, latest_user_entry = start, entry
+                return None
+
+            while first_total < frontier:
+                chunk = stream.read(min(1024 * 1024, frontier - first_total))
+                if not chunk:
+                    return None, [], STATUS_UNREADABLE
+                first_total += len(chunk)
+                first_digest.update(chunk)
+                first_bytes.extend(chunk)
+                while True:
+                    newline = first_bytes.find(b"\n")
+                    if newline < 0:
+                        break
+                    raw_record = bytes(first_bytes[:newline])
+                    del first_bytes[: newline + 1]
+                    status = accept_forward_record(raw_record, record_start)
+                    if status is not None:
+                        return None, [], status
+                    record_start += newline + 1
+            if first_bytes:
+                status = accept_forward_record(bytes(first_bytes), record_start)
+                if status is not None:
+                    return None, [], status
+            if latest_user_offset != boundary_offset or latest_user_entry != boundary_entry:
+                return None, [], STATUS_INVALID
+            if stream.read(1):
+                return None, [], STATUS_UNREADABLE
+            first_stat = os.fstat(stream.fileno())
+            path_after_first = tp.stat()
+            if (
+                initial != tuple(getattr(first_stat, name) for name in stable_fields)
+                or path_initial
+                != tuple(getattr(path_after_first, name) for name in stable_fields)
+                or tuple(getattr(before, name) for name in binding_fields)
+                != tuple(getattr(path_before, name) for name in binding_fields)
+            ):
+                return None, [], STATUS_UNREADABLE
+
+            second_digest = hashlib.sha256()
+            if captured_predecessor is not None:
+                stream.seek(boundary_offset - 1)
+                predecessor = stream.read(1)
+                if predecessor != captured_predecessor:
+                    return None, [], STATUS_INVALID
+                second_digest.update(predecessor)
+            else:
+                stream.seek(0)
+            second_total = boundary_offset
+            while second_total < frontier:
+                chunk = stream.read(min(1024 * 1024, frontier - second_total))
+                if not chunk:
+                    return None, [], STATUS_UNREADABLE
+                second_total += len(chunk)
+                second_digest.update(chunk)
+            if stream.read(1):
+                return None, [], STATUS_UNREADABLE
+            second_stat = os.fstat(stream.fileno())
+            path_after_second = tp.stat()
+            if (
+                initial != tuple(getattr(second_stat, name) for name in stable_fields)
+                or path_initial
+                != tuple(getattr(path_after_second, name) for name in stable_fields)
+                or tuple(getattr(before, name) for name in binding_fields)
+                != tuple(getattr(path_before, name) for name in binding_fields)
+                or first_total != frontier
+                or second_total != frontier
+                or first_digest.digest() != second_digest.digest()
+            ):
+                return None, [], STATUS_INVALID
+
+            return boundary_entry, [], STATUS_FOUND
+    except (MemoryError, RecursionError):
+        return None, [], STATUS_RESOURCE_UNAVAILABLE
+    except OSError:
+        return None, [], STATUS_UNREADABLE
 
 
 def current_turn_entries(transcript_path: str, *, byte_cap: int) -> tuple[list[dict], str]:

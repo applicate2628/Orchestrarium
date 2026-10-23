@@ -368,6 +368,7 @@ from hook_common import (
     HISTORY_STATUS_IDENTITY_DRIFT,
     HISTORY_STATUS_INVALID,
     HISTORY_STATUS_LIMIT,
+    HISTORY_STATUS_RESOURCE_UNAVAILABLE,
     HISTORY_STATUS_UNREADABLE,
     NO_OBSERVED_FAILURE,
     STATUS_FOUND,
@@ -376,6 +377,7 @@ from hook_common import (
     extract_tool_outputs_with_ids,
     is_user_message,
     parse_envelope,
+    read_transcript_history,
     read_stdin_utf8,
     scan_current_turn_boundary,
 )
@@ -415,7 +417,6 @@ PR_URL_REGEX = re.compile(
 PR_BINDING_SIDECAR_SUFFIX = ".pr-publication-binding-v1.json"
 PR_BINDING_LOCK_SUFFIX = ".lock"
 PR_BINDING_SIDECAR_BYTE_CAP = 8192
-TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 4 * 1024 * 1024
 PROCESS_OUTPUT_BYTE_CAP = 256 * 1024
 PROCESS_TIMEOUT_SECONDS = 8.0
 ORACLE_TIMEOUT_SECONDS = 45.0
@@ -1737,84 +1738,26 @@ class _PrGrantReducer:
 def _stream_stable_pr_grant(
     preflight: PreflightResult,
 ) -> tuple[str, ActivePrGrant | SimplePrIntent | None, str]:
-    """Reduce exactly the opened descriptor's initial, identity-stable history."""
+    """Reduce the shared owner's complete, finite, identity-stable history."""
 
     transcript_path = preflight.transcript_path
     if not transcript_path:
         return "absent", None, HISTORY_STATUS_ABSENT
-    path = Path(transcript_path)
     reducer = _PrGrantReducer(preflight)
     try:
-        path_before = path.stat()
-        if not stat.S_ISREG(path_before.st_mode):
-            return "absent", None, HISTORY_STATUS_UNREADABLE
-        with path.open("rb") as stream:
-            before = os.fstat(stream.fileno())
-            identity_fields = ("st_dev", "st_ino", "st_mode")
-            if tuple(getattr(before, name) for name in identity_fields) != tuple(
-                getattr(path_before, name) for name in identity_fields
-            ):
-                return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
-            frontier = before.st_size
-            total_bytes = 0
-            content_digest = hashlib.sha256()
-            while total_bytes < frontier:
-                raw_line = stream.readline(min(
-                    TRANSCRIPT_HISTORY_LINE_BYTE_CAP + 1,
-                    frontier - total_bytes,
-                ))
-                if not raw_line:
-                    return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
-                total_bytes += len(raw_line)
-                content_digest.update(raw_line)
-                if len(raw_line) > TRANSCRIPT_HISTORY_LINE_BYTE_CAP:
-                    return "absent", None, HISTORY_STATUS_LIMIT
-                if not raw_line.strip():
-                    continue
-                try:
-                    entry = json.loads(raw_line.decode("utf-8", errors="strict"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    return "absent", None, HISTORY_STATUS_INVALID
-                if not isinstance(entry, dict):
-                    return "absent", None, HISTORY_STATUS_INVALID
-                reducer.consume(entry, raw_line)
-            if stream.read(1):
-                return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
-            first_digest = content_digest.digest()
-            after = os.fstat(stream.fileno())
-            stream.seek(0)
-            verify_digest = hashlib.sha256()
-            verify_bytes = 0
-            while verify_bytes < frontier:
-                chunk = stream.read(min(1024 * 1024, frontier - verify_bytes))
-                if not chunk:
-                    return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
-                verify_bytes += len(chunk)
-                verify_digest.update(chunk)
-            if stream.read(1):
-                return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
-            after_verify = os.fstat(stream.fileno())
-            current = path.stat()
+        _unused_entries, status = read_transcript_history(
+            transcript_path,
+            byte_cap=None,
+            record_cap=None,
+            line_byte_cap=None,
+            on_record=reducer.consume,
+        )
     except PrRouteDenied:
         raise
     except Exception:
         return "absent", None, HISTORY_STATUS_UNREADABLE
-
-    stable_fields = (
-        "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"
-    )
-    descriptor_before = tuple(getattr(before, name) for name in stable_fields)
-    if (
-        descriptor_before != tuple(getattr(after, name) for name in stable_fields)
-        or descriptor_before
-        != tuple(getattr(after_verify, name) for name in stable_fields)
-        or tuple(getattr(path_before, name) for name in stable_fields)
-        != tuple(getattr(current, name) for name in stable_fields)
-        or total_bytes != frontier
-        or verify_bytes != frontier
-        or first_digest != verify_digest.digest()
-    ):
-        return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
+    if status != HISTORY_STATUS_FOUND:
+        return "absent", None, status
     state, grant = reducer.finish()
     return state, grant, HISTORY_STATUS_FOUND
 
@@ -5281,21 +5224,6 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             reason = _format_gate_denial(failure_id)
         else:
             remediation = pr_reasons.get(failure_id, pr_reasons["PRG-INTERNAL"])
-            if (
-                failure_id == "PRG-TRANSCRIPT-UNAVAILABLE"
-                and transcript_diagnostic is not None
-                and (
-                    transcript_diagnostic.history == "limit"
-                    or transcript_diagnostic.recovery == "limit"
-                )
-            ):
-                remediation = (
-                    "Cannot verify historical publication permission within "
-                    "bounded transcript history; summaries cannot authorize "
-                    "publication. Ask the user to send a fresh "
-                    "`[approve-publication]` in their latest genuine user "
-                    "message before retrying one generic push."
-                )
             scope = _denial_scope(failure_id)
             reason = f"{failure_id}: {scope}. {remediation}"
             if (

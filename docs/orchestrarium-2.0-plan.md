@@ -1,7 +1,7 @@
 # Orchestrarium 2.0 product plan
 
 Status: proposed consolidated product plan, reconciled 2026-10-23 against main
-`a675640286f466d329a7bbd88841d93a8d1b7045`. This is not an implemented release,
+`84eefb6bbeec9ebbe032f00788f249ae59da05b5`. This is not an implemented release,
 a measured improvement, or permission to run providers, spend funds, or publish.
 
 ## Goal and boundary
@@ -34,8 +34,10 @@ cancelled, and a proposal is not a commitment to a particular implementation.
 
 ## General mechanisms, revisable plans
 
-An unfamiliar task should normally require new data and a revised plan, not a new
-core branch, status or exception list. Lead already revises sequence, grouping and
+Current shared governance already requires general solutions for unfamiliar
+contract-valid scenarios; 2.0 does not introduce that rule. An unfamiliar task should
+normally require new data and a revised plan, not a core branch, status or exception
+list. Lead already revises sequence, grouping and
 parallelism at plan checkpoints; this is not a new engine. Preserve accepted goals,
 criteria, ownership, authorized effects, budgets, useful results and unresolved
 obligations. Methods may adapt; material boundary changes use existing controls.
@@ -292,9 +294,10 @@ operations through its API, not arbitrary process operations; it is neither a
 whole-process sandbox nor a replacement for Windows access-control lists.
 
 These are upstream capabilities, not observed Orchestrarium integration guarantees.
-Installer text-ownership mistakes and Windows permission canonicalization errors
-remain application-logic issues; changing language or adding bindings does not fix
-them automatically. Before implementation, Architect and the current owner must
+Installer text ownership and permission canonicalization are application semantics,
+not automatic benefits of Rust. Current main already corrects expected Windows
+permission rendering through its native descriptor owner (see reconciliation below);
+that correction is not remaining Rust scope. Before implementation, Architect and the current owner must
 admit the language boundary against the binding Python production-owner policy.
 Retain one owner and the existing request/result contract; remove superseded logic,
 with no dual Python/Rust execution or automatic fallback after an uncertain launch.
@@ -392,16 +395,26 @@ needed, explicitly retire the mechanism rather than silently losing the outcome.
    delivered, deferred with owner/next step, or intentionally retired with rationale;
    one comparator slice is not completion of the entire product plan.
 
-Current hotfixes tracked in PRs #9, #14 and #15 were reported as taken into work by
-their current owners, not proven merged here. Keep those corrections with their
-owners; they are not new 2.0 features. Verify their actual landed state before using
-them as prerequisites or claiming the corresponding defects fixed. This includes
-installer preservation work; item 2 must consume the corrected owner, not duplicate
-its repair. Keep the known Kimi documentation drift owner-scoped as well.
+Current-source reconciliation, not a claim about PR merge state or installed behavior:
+- [b719ef77](https://github.com/applicate2628/Orchestrarium/commit/b719ef77bd2ebfad44daa7088c71595c9825403b)
+  integrates the PR #9 Russian advisory correction; the hook behavior already existed.
+- [2e91ebee](https://github.com/applicate2628/Orchestrarium/commit/2e91ebeeb4cd693c13cea714f995cc3389972268)
+  integrates the PR #14 Windows private-permission correction through native descriptor
+  rendering, preserving exact access checks. Do not carry it as a new 2.0 fix.
+- [54c11111](https://github.com/applicate2628/Orchestrarium/commit/54c11111a4fe1eb1073d2a259165edeca8a519ef) seals the
+  publication transcript input frontier; [3a542fc5](https://github.com/applicate2628/Orchestrarium/commit/3a542fc5827d3b80c3203bf94943e900a95a4ba2)
+  unifies current decision admission and native normalization custody. Reuse these
+  owner-level corrections, not new parallel guards or a new state engine. Their scoped
+  checks do not prove universal agent enforcement or installed receiving.
+PR #15's instruction-preservation status is not established by those commits; verify
+its own correction before claiming it landed. Keep any remaining repair with its
+existing owner, not duplicated under native-role lifecycle. The known Kimi comment
+drift likewise remains an owner-scoped correction.
 
 ## Design economy and verification
 
-**Generalization acceptance:** later implementation must demonstrate that:
+**Generalization acceptance under current governance:** later implementation must
+demonstrate these properties, not add another governance framework:
 - A previously unlisted task within existing capabilities can use a new plan without
   adding a task-specific core branch, status or exception; genuine new capabilities
   still require an admitted owner and contract, not a generic bypass.
