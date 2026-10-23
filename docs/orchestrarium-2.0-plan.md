@@ -32,6 +32,28 @@ future artifact, not new authority. Existing required independent reviews remain
 An unresolved decision blocks its dependent work only. Deferred does not mean
 cancelled, and a proposal is not a commitment to a particular implementation.
 
+## General mechanisms, revisable plans
+
+An unfamiliar task should normally require new data and a revised plan, not a new
+core branch, status or exception list. Use existing owners to observe actual state,
+choose an admissible next step, verify its result and revise the plan. This is a
+design principle, not a new orchestration engine or a promise to execute every task.
+
+Keep the accepted goal, acceptance criteria, ownership, authorized effects and
+budget under their existing controls. Methods and step order may adapt within those
+boundaries; changed authority, material scope/risk or acceptance criteria follow the
+existing approval and review paths. Preserve useful accepted results, causal history
+and unresolved obligations. Replanning neither resets budgets nor waives mandatory
+review, retry or safety rules; any later change to those rules needs its own admitted
+owner-scoped proposal. No runtime defect or root cause is established by this plan.
+
+Distinguish unfamiliar task content from missing permission, execution capability
+or trustworthy evidence. Lack of a scenario template is not itself a blocker when
+existing capabilities and controls suffice. A real blocker holds dependent effects;
+independent authorized work may continue unless shared-state or containment risk
+requires a wider stop. Domain-specific checks remain necessary: a common workflow
+does not make proofs, software tests and installation readback interchangeable.
+
 ## Existing foundation and known limits
 
 - Exact native profile admission, task classification, host filtering, ready-lane
@@ -93,7 +115,7 @@ on the agreed platform/target matrix; preservation of user-owned files and curre
 rollback guarantees. State which lifecycle actions remain unsupported. Publishing
 a package and any paid operation require their own applicable authorization.
 
-### 2. Safe native-role lifecycle
+### 2. Fuller native-role lifecycle
 
 **Status:** explicit 2.0 remainder, partially served by today's limited installer.
 **Owner:** Toolchain Engineer at the existing production installer.
@@ -102,12 +124,16 @@ Complete the admitted adoption, update, deletion and reclaim cases without takin
 ownership of customized or ambiguous files. Today's source manifest is validation,
 not proof of installed ownership; current narrow stock migrations do not establish
 a general lifecycle. [README](../README.md) and [INSTALL](../INSTALL.md) explicitly
-reserve the remaining work for 2.0.
+reserve the remaining work for 2.0. This is a capability gap, not evidence that
+today's conservative refusals are unsafe.
 
 **Next decision and dependencies:** define ownership evidence and each authorized
 transition before implementation, including existing-install migration and recovery.
-Reuse the current installer transaction, preservation and rollback machinery, not a
-new installer or package-specific manager. Coordinate package lifecycle with item 1.
+First assess reuse of the installer's existing canonical-skill reconciliation of
+recorded ownership, observed state and desired content for native roles, rather than
+adding a special migration for each release. Preserve transaction/rollback machinery;
+legacy installs without ownership evidence still need an explicit migration boundary.
+Coordinate item 1 through this same owner, not a package-specific state manager.
 
 **Acceptance:** agreed transitions succeed with independent installed readback;
 custom files, unrelated configuration and ambiguous ownership are preserved or
@@ -122,8 +148,8 @@ authorization contract, never by treating filename equality as ownership.
 
 Compare already-admitted exact model/effort choices for a concrete task, and compare
 whole useful routes rather than one universal model winner. Keep quality, scope
-coverage and independent challenge ahead of cost and latency. Retain useful scope
-expansion, different methods and falsification without mandatory role rosters or
+coverage and independent challenge ahead of cost and latency. Retain useful coverage
+of the admitted task, different methods and falsification without mandatory role rosters or
 provider-family quotas. Follow the [routing design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md)
 for eligibility, uncertainty, evidence and accounting semantics.
 
@@ -132,6 +158,8 @@ options through Lead into the actual resolver. Accept evidence inputs and output
 consumer before coding. Use existing Lead judgment if sufficient; a pure comparator
 is conditional. Item 4 supplies comparative evidence, not new execution permission.
 External comparison separately needs the real provider admission/availability path.
+Insufficient comparative evidence need not prevent Lead from making an explained
+admissible choice; it must not become a fabricated ranking or capability assumption.
 
 Provider follow-through stays explicit: Lead and the existing external-routing
 owner must requalify current Claude/Codex profiles before claiming measured
@@ -195,7 +223,9 @@ not permission to duplicate the Python production owner. Architect must resolve 
 language/ownership change against current repository policy before implementation.
 Separately decide whether generic POSIX execution and installation of the currently
 source-only durable store/activation registry are needed by an accepted use case.
-Their absence is not automatic admission of three new workstreams.
+Their absence is not automatic admission of three new workstreams. Reuse the existing
+process request/result contract and isolate real platform/provider differences in
+its implementations; do not create a separate execution lifecycle per task scenario.
 
 **Acceptance:** for every admitted route, prove bounded resource ownership,
 cancellation, descendant settlement and trustworthy terminal evidence at its actual
@@ -218,13 +248,16 @@ retains the required safety properties without preselecting leases or wire schem
 **Next decision and dependencies:** admit a concrete transfer scenario; map durable
 state, writer ownership, takeover and receiving boundaries. Item 5 matters only if
 that scenario needs its execution/storage extension. Existing locks or a ledger
-alone do not prove transfer safety.
+alone do not prove transfer safety. First assess whether an explicit stop, state
+handoff, verification and resume meets the user's need before proposing transparent
+live migration. This is a candidate, not a decision to remove broader continuation.
 
 **Acceptance:** restored context is complete for the admitted route; old writers
-cannot commit after takeover; stale results are rejected; cancellation and terminal
-settlement survive crashes and concurrent takeover. Independently verify restored
-state and outstanding obligations. Do not require a new lease service, registry or
-ledger merely to keep this outcome in scope.
+cannot commit after transfer; stale results are rejected; cancellation and terminal
+settlement survive admitted interruption/recovery paths. Independently verify the
+prior owner's stop or exclusion, restored state and outstanding obligations. Test
+concurrent takeover if supported; otherwise reject it without altering ownership.
+Do not require a new lease service, registry or ledger merely to retain this outcome.
 
 ### 7. Optional named policy preferences from PR #5
 
@@ -277,6 +310,23 @@ installer preservation work; item 2 must consume the corrected owner, not duplic
 its repair. Keep the known Kimi documentation drift owner-scoped as well.
 
 ## Design economy and verification
+
+**Generalization acceptance:** later implementation must demonstrate that:
+- A previously unlisted task within existing capabilities can use a new plan without
+  adding a task-specific core branch, status or exception; genuine new capabilities
+  still require an admitted owner and contract, not a generic bypass.
+- A permitted plan revision preserves accepted results, remaining obligations,
+  identity and budget, while material boundary changes reach existing controls.
+- Repeated requests and delayed results neither duplicate effects nor accept stale
+  results. Reconcile uncertain prior effects before retry; otherwise hold the affected
+  action. Event replay alone does not prove exactly-once external execution, and an
+  unknown outcome must not become success.
+- Unrelated authorized work remains possible during a local blocker unless the actual
+  dependency or containment boundary requires stopping it too.
+
+Test these properties with varied inputs and failure points at the actual owner,
+not only scripted happy paths. Retain domain-specific and integration checks; do not
+add a new schema, state service or mandatory stage just to express these properties.
 
 Earlier PR #8/#13 proposals are historical inputs, not parallel normative manuals.
 Keep exact-profile evidence, complementary work, empirical challenge, full-attempt

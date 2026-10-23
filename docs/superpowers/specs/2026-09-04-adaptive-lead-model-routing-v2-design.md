@@ -5,7 +5,9 @@ Status: proposed focused routing design; no runtime rollout or measured improvem
 The [Orchestrarium 2.0 product plan](../../orchestrarium-2.0-plan.md) owns complete
 product scope, statuses, delivery dependencies, empirical evaluation and open
 decisions. This document owns only the proposed routing comparison contract and
-the safety boundary of deferred continuation.
+the safety boundary of deferred continuation. The product plan's general-mechanism
+principle applies: task plans may adapt inside governed responsibility boundaries;
+this comparison does not introduce a scenario engine or change existing controls.
 
 ## Purpose
 
@@ -73,7 +75,9 @@ capability stays unknown until the existing host path establishes it.
 
 When evidence cannot support a preference, return incomparable alternatives or an
 explicit insufficient-evidence result to Lead. Do not force a total ranking or
-fabricate a scalar quality score. Deterministic presentation ordering must not be
+fabricate a scalar quality score. Lead may still make an explained choice under
+existing admission rules; insufficient comparison evidence is not itself execution
+unavailability. Deterministic presentation ordering must not be
 presented as evidence that a candidate is better. Exact result fields and tie
 handling remain to be defined against an admitted consumer before implementation.
 
@@ -96,8 +100,8 @@ invent a universal budget engine, arbitrary ceilings or blanket human escalation
 
 ## Complementary assignments
 
-Retain scope expansion and independent challenge as functional goals, not a
-mandatory roster of new role types. Each proposed assignment needs its existing
+Retain useful coverage of the admitted task and independent challenge as functional
+goals, not permission expansion or a mandatory roster of new role types. Each proposed assignment needs its existing
 profession, bounded scope, artifact and applicable gate. Value comes from useful
 coverage or distinct methods/failure discovery, not number of models or majority
 agreement. Required review independence remains under current governance.
@@ -119,10 +123,12 @@ owners; host mode does not introduce a stronger blanket human-escalation policy.
 Cross-host continuation remains a separate future direction. Before it is admitted,
 identify the concrete persistence/host boundary and its single writer/ownership
 contract. Restore the admitted task context, accepted artifacts, plan, open findings,
-outstanding dispatches and their evidence. Require exclusive durable ownership,
-atomic takeover, commit-time fencing
-of stale writers, crash recovery and revalidation. Existing local locks or an
-append-only ledger alone do not prove those properties.
+outstanding dispatches and their evidence. First consider explicit stop, verified
+handoff and resume. Require one active owner and prevent the previous owner from
+committing after transfer through the chosen mode's verified stop or exclusion.
+If live/concurrent takeover is admitted, prove atomic ownership change, commit-time
+fencing of stale writers and crash recovery. Existing local locks or an append-only
+ledger alone do not prove transfer safety.
 
 Preserve causal request/run/attempt identity, cancellation and terminal settlement,
 and rejection of stale results at their actual execution/receiving boundaries.
@@ -131,8 +137,9 @@ belongs at demonstrated trust boundaries; any resource bound needs its owning
 rationale, units and safe overflow without lost acquired evidence.
 
 Lead owns admission of this later scope; architect owns its boundary design.
-Resolve the missing producer/consumer and persistence contracts, then test crashes,
-concurrent takeover and delayed commits before claiming transfer safety. No lease
+Resolve the missing producer/consumer and persistence contracts, then test the
+chosen mode's interruptions, recovery and delayed commits; reject unsupported
+concurrent takeover without changing ownership. No lease
 schema, transfer protocol, generic effort-intent vocabulary or new ledger is a
 prerequisite for the comparison work above.
 
@@ -149,7 +156,8 @@ The minimum later behavioral probes are:
 - Missing/conflicting evidence and incompatible cost units remain explicit.
 - All-attempt economics includes required review and never double-counts.
 - Complementary coverage is distinguished from a correlated duplicate.
-- Identical admitted snapshots produce identical recommendations.
+- If a deterministic comparator is adopted, identical admitted snapshots produce
+  identical recommendations; this is not a constraint on Lead deliberation.
 - Comparison cannot launch, settle or accept work.
 
 No tests for a speculative schema or required prose phrases are introduced.
