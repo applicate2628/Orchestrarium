@@ -6,7 +6,7 @@ Do not implement a local special case when the requested behavior, observed prob
 
 Default to implementing the general case owned by the underlying boundary. A narrow, surface-specific implementation is allowed only when the user or accepted task explicitly defines that exact limited boundary, and the implementation records why the broader case is intentionally out of scope.
 
-This is a correctness rule, not a request to make everything abstract. The right implementation targets the correct concept/abstraction level: the smallest owner-level class that explains the verified requirement or cause. It should be general enough to keep sibling cases consistent, but not so broad that it invents future requirements or hides a simpler owner.
+This is a correctness rule, not a request to make everything abstract. The right implementation targets the correct concept/abstraction level: the smallest owner-level class that explains the verified requirement or cause. It must work for unfamiliar scenarios valid under the accepted contract, not only observed or enumerated examples, while remaining no broader than that contract or a simpler owner requires.
 
 Correctness beats development speed unless the user explicitly scopes the work as prototype, fastest-path, throwaway, or otherwise time-boxed. Here, speed means delivery speed, not application/runtime speed. Runtime speed, latency, throughput, memory, and other performance constraints remain correctness inputs for performance-sensitive work and optimization work.
 
