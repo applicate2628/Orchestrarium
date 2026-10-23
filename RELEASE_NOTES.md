@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-23
 
+- Separated SDK integration into its own design project and SDK-first backlog: preserve execution contracts, replace duplicate ACP plumbing, structure review results and qualify one bounded coordinator mode. The project names removable glue, current authority on resume and complete result-to-ledger receiving; Rust operations and npm delivery remain separate. This documentation does not install dependencies or enable provider execution.
+
 - Windows private-object verification now compares the operating system's rendered discretionary access-control list (DACL) on both sides, avoiding false rejections caused by equivalent numeric and named security identifiers while preserving exact principal, permission, and protection checks.
 - The Russian Claude typed-routing reference now describes the existing nonblocking advisory delivery through stdout and exit code 0, so operators no longer mistake a routing reminder for a failed hook. Hook behavior is unchanged.
 - Publication permission recovery now reads a finite, identity-checked transcript snapshot without fixed record-size or current-turn window cutoffs. The shared reader preserves complete history, genuine user boundaries, revocation and exact grant anchors; malformed, changed or resource-incomplete input still denies publication. Explicitly bounded sibling hooks retain their own policies.
