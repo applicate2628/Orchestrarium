@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-23
+
+- Windows private-object verification now compares the operating system's rendered discretionary access-control list (DACL) on both sides, avoiding false rejections caused by equivalent numeric and named security identifiers while preserving exact principal, permission, and protection checks.
+
 ## 2026-10-21
 
 - Read-only archived ledger checks now route ordinary filesystem paths and captured history through the same complete sealed-prefix selection and current-authority reducer. The public checker can therefore receive valid archived sealed-prefix history without misreading its frozen manifest as an ordinary projection; missing, corrupt, or revoked proof retains the existing failure and authority boundaries.
