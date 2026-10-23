@@ -4,6 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-23
 
+- Windows private-object verification now compares the operating system's rendered discretionary access-control list (DACL) on both sides, avoiding false rejections caused by equivalent numeric and named security identifiers while preserving exact principal, permission, and protection checks.
 - The Russian Claude typed-routing reference now describes the existing nonblocking advisory delivery through stdout and exit code 0, so operators no longer mistake a routing reminder for a failed hook. Hook behavior is unchanged.
 - Publication permission recovery now reads a finite, identity-checked transcript snapshot without fixed record-size or current-turn window cutoffs. The shared reader preserves complete history, genuine user boundaries, revocation and exact grant anchors; malformed, changed or resource-incomplete input still denies publication. Explicitly bounded sibling hooks retain their own policies.
 - Ledger recovery keeps original reader identities separate from current authority, carries a captured history's item context through receiving, and evaluates historical non-closer custody from its actual provenance. Completion helpers use qualified current settlement rather than the presence of a raw terminal row; duplicate completions, changed identities and missing proof still refuse. Unrelated observations remain visible without blocking a separate valid operation.

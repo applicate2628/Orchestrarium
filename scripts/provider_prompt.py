@@ -2400,7 +2400,35 @@ class WindowsPrivateObjectOwnerV1:
                 ctypes.get_last_error(),
                 "ConvertStringSecurityDescriptorToSecurityDescriptorW",
             )
-        return descriptor, sddl
+        try:
+            rendered = wintypes.LPWSTR()
+            try:
+                render = advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW
+                render.argtypes = [
+                    ctypes.c_void_p,
+                    wintypes.DWORD,
+                    wintypes.DWORD,
+                    ctypes.POINTER(wintypes.LPWSTR),
+                    ctypes.POINTER(wintypes.DWORD),
+                ]
+                render.restype = wintypes.BOOL
+                # Match actual readback, including Windows' well-known SID aliases.
+                if not render(descriptor, 1, 0x00000004, ctypes.byref(rendered), None):
+                    raise OSError(
+                        ctypes.get_last_error(),
+                        "ConvertSecurityDescriptorToStringSecurityDescriptorW",
+                    )
+                expected_sddl = rendered.value
+                if not expected_sddl:
+                    raise OSError("empty private object DACL")
+                return descriptor, expected_sddl
+            finally:
+                if rendered:
+                    kernel32.LocalFree(rendered)
+        except BaseException:
+            # Until successful return, the producer still owns the descriptor.
+            kernel32.LocalFree(descriptor)
+            raise
 
     @staticmethod
     def verify_handle_dacl(handle: int, expected_sddl: str) -> None:
