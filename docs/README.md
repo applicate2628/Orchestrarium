@@ -14,7 +14,7 @@ Use it together with:
 
 Current docs in this branch:
 
-- [orchestrarium-2.0-plan.md](orchestrarium-2.0-plan.md) for the complete proposed 2.0 product scope, owners, dependencies, acceptance criteria and unresolved decisions
+- [orchestrarium-2.0-plan.md](orchestrarium-2.0-plan.md) for the remaining 2.0 product scope, owners, dependencies and the separate distribution/runtime project
 - [focused routing design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md) for the proposed exact-profile comparison seam and deferred continuation safety boundary
 - [routing/sol-6-1-routing-proposal-2026-10-01.md](routing/sol-6-1-routing-proposal-2026-10-01.md) for the approved Sol 6.1 default-family decision, dated public evidence, compatibility scope, and offline verification boundaries
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema

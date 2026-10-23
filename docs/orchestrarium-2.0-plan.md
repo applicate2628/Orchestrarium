@@ -1,26 +1,26 @@
 # Orchestrarium 2.0 product plan
 
-Status: consolidated product plan with an admitted hybrid Python/Rust design target,
-reconciled 2026-10-23 against main
+Status: remaining 2.0 product scope after extracting npm distribution and the
+hybrid runtime into an independent project; reconciled 2026-10-23 against main
 `84eefb6bbeec9ebbe032f00788f249ae59da05b5`. This is not an implemented release,
 a measured improvement, or permission to run providers, spend funds, or publish.
 
 ## Goal and boundary
 
-Deliver an easier-to-distribute skill pack and better task-specific orchestration:
-choose sufficient admitted model/effort profiles, add complementary expertise when
-useful, learn from verified outcomes, and retain safe installation and future
-continuation across hosts. Preserve the functional ambition, not every mechanism
-from the earlier drafts. Move deterministic native operations to a cross-platform
-Rust command-line interface (CLI); retain Python coordination supported by the
-OpenAI Agents software development kit (SDK), behind a provider-neutral execution
-boundary using Agent Client Protocol (ACP) and provider-specific adapters. Codex
-integration stays inside its adapter,
-not above the other providers. This supersedes whole-Python retirement,
-not current runtime behavior. The hybrid boundary is an admitted design target;
-implementation belongs in a separate pull request and must preserve existing owners.
+Deliver better task-specific orchestration: choose sufficient admitted model/effort
+profiles, add complementary expertise when useful, learn from verified outcomes,
+complete the separately admitted native-role lifecycle, and retain safe future
+continuation across hosts. Preserve functional ambition, not every mechanism from
+earlier drafts.
 
-This is the canonical product scope, status, dependency and acceptance register.
+npm distribution and the hybrid Python/Rust runtime are now owned by the
+[independent distribution/runtime project](https://github.com/applicate2628/Orchestrarium/pull/17), not the 2.0
+release. Outcomes 1 and 5 below retain their disposition and historical numbering,
+not duplicate design or delivery obligations. Their qualified slices may ship in
+current versions; 2.0 does not wait for them unless a selected outcome demonstrates
+a concrete dependency.
+This is the canonical scope, status, dependency and acceptance register for the
+remaining 2.0 outcomes (2, 3, 4, 6 and 7), with external-project dispositions retained.
 The [focused routing design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md)
 owns the proposed comparison contract, not the whole 2.0 roadmap. Current
 [shared governance](../shared/AGENTS.shared.md), [Lead contract](../src.codex/skills/lead/SKILL.md),
@@ -30,7 +30,7 @@ and [installer](../scripts/production_installer.py) remain the live owners.
 **Change-Surface Contract**
 
 - Intended change surface: this plan, the focused routing design, docs index and release note.
-- Approved seams: product planning, the hybrid SDK-coordination/native-operation target at existing owners, and a proposed advisory comparison at existing discovery → Lead → resolver boundaries.
+- Approved seams: remaining 2.0 product planning, external-project disposition, and a proposed advisory comparison at existing discovery → Lead → resolver boundaries.
 - Protected surfaces: all runtime code, tests, schemas, installed packs, configuration, persistence, execution, review and publication gates.
 - Blast radius: documentation only; no external contract or persisted-state migration.
 
@@ -107,71 +107,22 @@ not interchangeable. No runtime root cause is established by this plan.
 - [Installation rules](../INSTALL.md) retain limited create-only/hash-pinned native
   role handling and reserve broader adoption/update/deletion/reclaim for 2.0.
   [Runtime limitations](../README.md) include unavailable generic Windows command
-  execution, a Rust implementation deferred to 2.0, unavailable generic POSIX
-  Process Runner Version 1, and a source-only durable operation store and route
-  activation registry. These are repository facts, not provider guarantees or
-  proof of behavior in a particular installed environment.
+  execution, unavailable generic POSIX Process Runner Version 1, and a source-only
+  durable operation store and route activation registry. The historical Rust-to-2.0
+  deferral in those runtime docs is superseded for sequencing by the independent
+  project, not by enabling any unavailable path. These are repository facts, not
+  provider guarantees or proof of behavior in a particular installed environment.
 
 ## Outcome register
 
 ### 1. npm skill-pack distribution
 
-**Status:** native-component delivery retained; hybrid distribution contract unresolved.
-**Owner:** Toolchain Engineer, with Product Manager defining the user-facing package.
-
-npm (the JavaScript package registry/tooling ecosystem) distribution was a separate
-`npm-skillpack-distribution` epic, not text deleted from the routing design.
-[Commit 24d0647](https://github.com/applicate2628/Orchestrarium/commit/24d064741b21e8e84dab78dfa2bfcb7091d972ce)
-names it; [commit e55b246](https://github.com/applicate2628/Orchestrarium/commit/e55b2466281ecc50ad2a940a4de14a5ea90fb98c)
-explicitly preserves NPM/2.0 scope while removing obsolete Gemini/Qwen surfaces.
-Current main has no root `package.json`. The original detailed local-only epic
-was not recovered in this review. Do not invent its package name, commands,
-registry arrangement, update semantics or runtime dependency contract.
-
-**Admitted target, not an implemented package:** versioned skill/resource payload
-and a thin npm launcher selecting the supported platform's native Rust binary.
-This is the native part of the hybrid product, not a settled delivery mechanism for
-the Python/Agents SDK coordinator or optional Codex adapter dependencies.
-Package installation/update delivers files; applying to selected projects remains
-explicit. npm uninstall is not full installed-pack removal. Do not introduce hidden
-project mutation in package installation hooks. Define operating-system/architecture
-targets, binary provenance, updates and removal with the existing installer owner;
-unsupported targets fail clearly, not by silently compiling or selecting a fallback.
-Trace all installer and installed-hook/helper resources, including dynamic validators;
-packaging only the entrypoint and skills is insufficient.
-
-Today Python 3.11+ is needed after installation by runtime helpers/hooks, not only
-during setup. The target also retains Python for SDK coordination; replacing native
-hooks/helpers does not make the product Python-free. Define Python/SDK installation,
-compatible versions and optional adapter dependencies separately, without presuming
-an npm package supplies them or adding implicit setup. Declare prerequisites per
-supported route. The current Python production-owner policy remains binding until
-an admitted implementation decision updates the relevant language boundaries and
-their owning documentation together.
-
-Minimize dependencies by actual consumer, not by a zero-dependency slogan. The
-[review ledger loader](../scripts/review_loop_state.py) already supports standard-
-library JSON; YAML ledgers require PyYAML. Prefer that existing JSON path for owned
-machine ledgers where suitable, retaining explicit legacy YAML compatibility. The
-[installed validator source](../scripts/skill_pack_validator_runtime.py) can use
-PyYAML but falls back to weaker string/regular-expression checks when absent.
-That is not equivalent validation. Retain a justified parser where supported YAML
-needs it rather than inventing a parser or silently weakening checks. The inspected
-production imports do not prove a complete dependency closure; development/test
-dependencies are separate. No dependency removal is claimed implemented.
-
-**Open decision and acceptance:** reconstruct the missing package/command contract,
-choose supported native targets and hybrid delivery layout, then prove the payload from an
-unpacked archive without a checkout. Trace runtime dependencies as well as installer ones;
-verify supported parsing with and without optional dependencies, install/reinstall,
-upgrade, explicit apply and the agreed removal scope. Preserve user files and
-rollback. Define binary/resource version binding and retention with the existing
-installer owner: npm update/removal must not silently change or break applied packs
-through mutable or disappearing shared references. Item 2 is a dependency only where
-native-role lifecycle is required; package-contract work does not wait for routing
-or cross-host work. Verify the actual dependency closure per native/SDK route; do
-not claim a Python-free product. Publication/paid operations require applicable authorization; no removed
-provider packs return implicitly.
+**Disposition:** extracted into the
+[independent distribution/runtime project](https://github.com/applicate2628/Orchestrarium/pull/17); not a 2.0
+release deliverable or prerequisite by default. Toolchain Engineer and Product
+Manager retain package ownership there, including the unresolved package contract,
+runtime prerequisites and installer-safe delivery. Consume outcome 2 only for
+package actions that actually require its expanded native-role lifecycle.
 
 ### 2. Fuller native-role lifecycle
 
@@ -207,7 +158,9 @@ after abrupt termination/power loss, reconcile partial persisted state before re
 and preserve foreign changes. Reuse the existing owner, not a new recovery service.
 New ordinary roles/releases should be data, not a migration branch each time.
 Verify global/project and provider differences where they affect the accepted contract.
-Coordinate npm through this owner, not a second package state manager.
+The independent distribution/runtime project consumes this owner only where its
+package actions require this expanded lifecycle; it does not add a second package
+state manager or make all distribution work depend on outcome 2.
 
 ### 3. Task-specific exact-profile choice and complementary work
 
@@ -284,220 +237,13 @@ checkable disagreement; majority agreement does not establish truth.
 
 ### 5. Hybrid SDK coordination, native operations and portability
 
-**Status:** strict Python/Rust separation admitted for design, not implemented;
-existing host-led execution and incomplete generic CLI/platform coverage remain.
-**Owner:** Lead for coordination admission; Platform/Toolchain Engineer with existing
-hook, helper, installer and process owners for their retained behavioral contracts.
-
-The [process runner](../scripts/process_supervision/process_runner.py) already defines request/result,
-cancellation, settlement and Windows native parsing contracts. The generic Windows
-CLI is blocked at its private request-directory boundary; generic POSIX execution
-is unavailable. Specialized POSIX supervision and native-host dispatch are not proof
-that either generic entrypoint works. A source-only store/activation registry is
-also not evidence of a live durable execution service.
-
-**Admitted sequence:** first replace small deterministic hooks/checks; then required
-deterministic helpers and the installer behind their existing ownership contracts.
-Separately qualify a bounded Python/Agents SDK coordination route. Each cutover keeps
-one canonical implementation per operation and removes the superseded production
-logic. Temporary native launch adapters may forward only; no independent Python/Rust
-state writers or automatic fallback after an uncertain effect. Preserve current supported
-runtime paths until their replacement passes parity and recovery checks. The target
-is not a new agent framework, scheduler or universal execution service. Implementation
-belongs in a separate pull request (PR). A verified simple-hook slice may ship in the
-current release independently of full 2.0 and unfinished generic process support.
-
-**Target architecture:** a thin entry dispatcher selects a direct native operation
-or the Python/Agents SDK coordinator, which invokes bounded Rust operation tools.
-Provider work uses one common execution-tool boundary with provider-specific adapters,
-not a claim that one provider's SDK supplies every provider's agent runtime.
-It does not recursively start another coordinator. Current host-led operation is a
-separate retained mode, not silently replaced; exactly one coordination owner is
-selected per run. The native component uses one Cargo package (Rust build/package
-unit) and one CLI per supported target, not one crate/service per script. This map
-names logical boundaries; implementation admission fixes names and layout:
-- [production_installer.py](../scripts/production_installer.py) → Rust installer
-  plan/apply/reconcile, retaining coupled role/configuration ownership.
-- [Universal-hook canon](../scripts/universal-hooks/) → Rust deterministic checks
-  with narrow host/CLI adapters, not general-purpose Python coordination logic;
-  pack-specific hooks retain their host semantics and consume the same canon.
-- [resolve-agents-mode.py](../scripts/resolve-agents-mode.py) → Rust configuration/
-  admission operations preserving precedence, normalization and role/profile policy;
-  Python coordinates requests and consumes decisions, without duplicating that policy.
-- [mutate-work-item.py](../scripts/mutate-work-item.py),
-  [agent-run-ledger.py](../scripts/agent-run-ledger.py),
-  [review_loop_state.py](../scripts/review_loop_state.py) and
-  [solution_attempt/reducer.py](../scripts/solution_attempt/reducer.py) → distinct Rust
-  state-operation submodules and pure reducer. Python coordinates workflow, not a
-  second project-state store; SDK session mechanics do not replace these owners.
-- [provider_prompt.py](../scripts/provider_prompt.py) and
-  [process_runner.py](../scripts/process_supervision/process_runner.py) → separate
-  Python SDK/provider coordination and Rust-owned native process operations; adapter
-  replacement is limited to actual SDK/host coverage, not a claim that all providers
-  or legacy CLI capabilities are supported.
-- [skill_pack_validator_runtime.py](../scripts/skill_pack_validator_runtime.py),
-  [publication canon](../scripts/universal-hooks/scripts/) and
-  [check-publication-gate.py](../scripts/check-publication-gate.py) → distinct
-  Rust validation and publication policy/scan/gate modules, not one universal gate.
-- [repo_transfer.py](../src.codex/skills/manual-repo-transfer/scripts/repo_transfer.py)
-  → Rust manual-transfer operations, preserving inventory/freeze/restore rather than
-  activating live cross-host takeover.
-
-**SDK boundary, not a second agent platform:** evaluate the official
-[manager-as-tools pattern](https://github.com/openai/openai-agents-python/blob/main/docs/multi_agent.md)
-for unified Python coordination that retains control over specialist results.
-The SDK supplies the agent loop and conversation/tool-call/session mechanics, not a
-new homemade scheduler, Orchestrarium policy, project-state authority or permission.
-Use one [Python ACP client](https://github.com/agentclientprotocol/python-sdk) behind
-the Agents execution tool as the common agent transport, not a new wire protocol.
-Keep the existing small domain execution contract; one ACP runtime maps it to the
-protocol without leaking full ACP/Codex types into coordination or state owners.
-Prefer stable ACP version 1; optional/draft extensions require a demonstrated need.
-The [Rust ACP SDK](https://github.com/agentclientprotocol/rust-sdk) is an alternative
-for a proven native-client requirement, not a second mandatory client. No proxy,
-conductor or daemon is required merely to unify adapters.
-
-Upstream candidates are [Codex ACP](https://github.com/agentclientprotocol/codex-acp)
-over Codex App Server, [Claude ACP](https://github.com/agentclientprotocol/claude-agent-acp)
-over Claude Agent SDK, [native Kimi ACP](https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/reference/kimi-acp.md),
-and [Grok Build ACP](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md). Protocol availability
-is not Orchestrarium admission or qualified capability/platform coverage: current
-Codex/Claude/Kimi rules remain, and Grok stays unavailable here until separately admitted.
-Codex-specific SDK/protocol extensions are adapter-local only for proven ACP gaps,
-explicitly selected rather than automatic fallback or a second transport for the same
-case. Codex is not restricted to rare tasks; existing admission selects eligible work.
-
-The tool reuses run/work-item identity, role/scope, admitted route and constraints,
-mapping required task capabilities to ACP rather than inventing parallel schemas.
-Adapters must start an admitted scoped operation and return a verified terminal
-result, using ACP requests/updates/cancellation/permission rather than parallel
-messages. Reconciliation/resume and usage coverage are negotiated capabilities;
-missing usage is unknown, not zero. Missing required capability fails typed
-unsupported before effects. Resume is not a new turn or replay of uncertain effects;
-cancel acknowledgement proves neither rollback nor descendant settlement. Permission
-callbacks use existing human authority, not self-approval or an operating-system sandbox.
-Keep capability data in existing routing, not a new registry.
-
-The [current result parser](../scripts/provider_prompt.py) requires the v2 execution
-path to be `direct-external-cli`. SDK routes therefore need a narrowly admitted
-provenance/version extension and receiving-parser tests before activation; preserve
-external nonauthority and independent verification, never mislabel an SDK path as CLI.
-This applies to ACP routes too; transport readiness does not establish receiving parity.
-Inventory obsolete prompt/launch/parsing glue per supported host before deleting
-it; retain shared semantic checks and any uncovered existing route.
-
-Application-programming-interface (API) model access, existing CLI capability,
-provider admission and account billing are separate: ACP unifies agent transport,
-not coordinator-model API access. Select and verify each adapter's authentication/
-billing lane and credential environment; no coordinator-key inheritance or default
-fallback may silently switch its intended account/billing route. Codex-specific SDK
-alternatives need particular care with [API-key inheritance](https://github.com/openai/openai-agents-python/blob/main/docs/tools.md#experimental-codex-tool).
-Explicitly configure and admit trace-export data/destinations before SDK execution;
-SDK model guardrails are not action
-permissions, and traces or session stores are not the authoritative project ledger.
-Reuse existing admission, budget and owner checks at adapter entry, not new global
-gates; a turn limit is not a monetary budget. No coordinator model is selected here.
-
-Dependencies run from adapters to existing domain owners to pure decisions/platform
-operations; the process layer grants no dispatch authority. Each child has one
-lifecycle owner: Rust supervision for Rust-created children, SDK adapter supervision
-for SDK-created children; any native containment must assign noncompeting guarantees.
-SDK bounded capture, private-path, cancellation and settlement are not yet qualified;
-a stream-reader limit alone is not a total-output bound. Missing required guarantees
-hold only that lane under existing controls, not a silent downgrade or dual manager;
-current unavailable generic Windows paths stay unavailable.
-The installer does not launch providers. Publication policy, Git-object scanner and
-gate retain distinct validity, traversal and authority/fresh-range responsibilities.
-
-Entrypoints adapt input/output/errors; domain owners retain schemas, errors and
-receipts. Pure checks/planners/reducers consume immutable inputs. The installer,
-physical work-item lifecycle, agent-run ledger and review-loop state each retain
-their own sole writer, transaction/recovery semantics and readback, not a universal
-transaction/effect manager. Replace dynamic imports/subprocesses with typed calls only where
-isolation or evidence boundaries are preserved; use per-operation consistent inputs,
-not global mutable caches. The source-only
-[operation store](../scripts/agent_run_persistence/operation_store.py) and
-[route activation registry](../scripts/process_supervision/route_activation_registry.py)
-remain disabled and nonauthorizing, including for matching supplied bindings; a Rust
-port does not activate them.
-
-Python remains the coordination implementation, not just a temporary test oracle.
-Retire superseded deterministic Python/shell implementations only after their Rust
-replacements qualify; retain useful development/test tools rather than mandate a
-whole-language purge. Reuse state/contracts, not a new framework, registry or service.
-
-Before the first production cutover, Architect and each affected owner must accept
-the implementation boundary and update the binding Python production-owner policy
-with its owning documentation. This plan changes neither that live policy nor any
-runtime. Rust supports cross-platform implementation, not identical operating-system
-semantics or verified binaries for every target. Keep real platform differences in
-their owners; admit missing generic execution boundaries against concrete use cases.
-Installation of source-only components remains a separate decision. Owner-equivalent
-manual execution retains the same guarantees and is not a host-denial bypass.
-
-**Small native component set to evaluate:** [clap](https://github.com/clap-rs/clap) for CLI
-arguments, [serde_json](https://github.com/serde-rs/json) for owned JSON data,
-[toml_edit](https://github.com/toml-rs/toml/tree/main/crates/toml_edit) for TOML edits
-retaining comments/layout where supported, not guaranteed byte preservation,
-[tempfile](https://github.com/Stebalien/tempfile) for temporary resources, and
-[walkdir](https://github.com/BurntSushi/walkdir) for filesystem traversal. Retain a
-justified parser for supported legacy YAML; changing language cannot weaken validation.
-Use [Rayon](https://github.com/rayon-rs/rayon) only for measured independent parallel
-work with bounded workers and deterministic result assembly. Filesystem traversal
-does not replace publication's complete commit/tree/blob object-graph scan; never
-apply `.gitignore` exclusions to that publication scope.
-
-For Rust-owned process operations, evaluate [process-wrap](https://github.com/watchexec/process-wrap)
-with its Rust standard-library (`std`) frontend; add no mandatory Tokio asynchronous
-runtime. Its Windows Job Object/POSIX process-group wrappers do not supply the full
-runner lifecycle. Add a small Windows-specific adapter, using
-[windows-rs](https://github.com/microsoft/windows-rs) only for proven uncovered native
-operations; avoid duplicate wrappers already supplied transitively. Pin evaluated
-revisions/features and inspect licensing, dependencies and supported targets before
-implementation. These are upstream components, not verified Orchestrarium integration.
-
-Libraries do not confer installer ownership, rollback/crash-atomicity, publication
-authority, path confinement or process settlement. Preserve those application
-contracts and their tests. Native publication needs an admitted replacement for held
-Python-code closure/trusted-interpreter custody with executable/code-identity custody,
-not erased isolation through an in-process call. Current main's Windows permission-rendering correction
-already belongs to its native descriptor owner (see reconciliation below); it is not
-new Rust scope. Count packaging, updates, bridge removal and platform/dependency
-maintenance when assessing complexity; claim no speed or reliability gain without
-matched measurements.
-
-**Acceptance per slice:** establish the current behavior and performance baseline.
-For deterministic replacements require one-for-one parity of standard-output protocol, standard-error
-output, exit codes, ordering, effects, persisted state/files and error behavior on
-the same inputs, including malformed/missing data and preserved user content. Require
-byte equality wherever the interface contract demands it. Structural comparison must
-preserve all contract-visible distinctions; normalize only specifically justified
-nondeterministic fields, never broad masking. Adjudicate known baseline defects
-separately; neither enshrine them blindly nor disguise intentional semantic changes
-as migration. SDK-native coordination improvements need separately accepted behavior
-and outcome tests; stochastic model output is not subject to byte-identical parity.
-Compare deterministic implementations only on isolated cloned fixtures/replayed
-inputs with providers stubbed, never with
-duplicate live effects or paid runs. Probe interruption/restart, partial writes and
-rollback at the existing state owners, not just successful command output. For
-parsing, preserve duplicate-key rejection or retention, strict/unknown-field rules,
-number tokens, key ordering and canonical hashes at each actual owner; TOML edits
-must retain accepted/refused configuration shapes, not merely parseable output.
-Include encoding/byte-order marks/invalid bytes, Unicode matching/case-folding and
-platform paths; preserve each hook's warn-only/fail-open/fail-closed outcomes rather
-than strengthen gates. For
-process slices also probe spawn/partial-setup failure, handles, timeout/cancellation
-races, descendant cleanup and terminal evidence, including the actual Windows CLI
-private-directory boundary. Reconcile uncertain outcomes before retry; missing
-cleanup evidence is not success. Verify required Windows permissions and path-escape
-behavior independently; unsupported routes stay typed unavailable before launch.
-Require source-to-installed/package parity, upgrade/removal and recovery evidence
-on each platform/architecture claimed by that slice, with bounded-parallel versus
-serial checks. A simple hook need not wait for every generic process target. Verify
-Windows/macOS/Linux support individually before advertising it. Verify native and
-Python/SDK route dependencies separately, including adapter version compatibility,
-auth/billing selection and trace-export behavior. No whole-product Python-free claim,
-duplicate execution owner or second authoritative state store is introduced.
+**Disposition:** extracted into the
+[independent distribution/runtime project](https://github.com/applicate2628/Orchestrarium/pull/17), together with
+outcome 1. Its admitted design target, current-runtime limits, provider-neutral
+boundary, ownership and parity/qualification requirements live there. Lead and
+existing operation owners retain their responsibilities. Qualified slices may ship
+in current versions; no runtime migration or provider activation follows from this
+2.0 plan, and no duplicate implementation is retained here.
 
 ### 6. Safe cross-host continuation
 
@@ -522,7 +268,9 @@ need. Live/concurrent takeover remains conditional and retained, not cancelled.
 If the old host could resume writes to the same authoritative target, a claimed stop
 is insufficient: require verified exclusion. Live takeover requires atomic ownership
 change and commit-time rejection of stale writers; local locks or a ledger alone do
-not prove it. Item 5 matters only when the chosen scenario needs that extension.
+not prove it. The independent distribution/runtime project is a dependency only
+if the chosen scenario requires a qualified runtime extension; extracting outcome 5
+does not admit takeover or block stopped-handoff work by default.
 
 **Acceptance:** restore accepted context and outstanding obligations; reject stale
 results and unsupported concurrent takeover without changing ownership. Verify old-
@@ -558,49 +306,40 @@ needed, explicitly retire the mechanism rather than silently losing the outcome.
 
 ## Delivery decisions and next slices
 
-The hybrid Python/SDK and Rust-operation target is admitted; implementation slices
-still need existing admission and review. Not all seven outcomes are mandatory for
-the first release. Current admission, replanning, review, recovery and generalization
-governance are the foundation, not
-new 2.0 deliverables. Product Manager and Lead must accept the release scope; an
-open optional choice holds only its dependent slice.
+Remaining 2.0 outcomes are 2, 3, 4, 6 and 7; they are not all mandatory for the
+first release. Outcomes 1 and 5 now have independent project ownership and rollout,
+not a hidden 2.0 dependency. Current admission, replanning, review, recovery and
+generalization governance are the foundation, not new deliverables. Product Manager
+and Lead must accept the release scope; an open optional choice holds only its
+dependent slice.
 
 **Next bounded work, independently where inputs and owners permit:**
-1. Toolchain Engineer: reconstruct the npm contract and trace the distributable
-   payload/runtime dependencies (item 1). Present supported targets, explicit apply
-   and removal semantics, native-binary/Python-SDK delivery and route prerequisites.
-   With the existing hook/helper owners, inventory the native-operation closure and
-   select the first simple Rust hook slice (item 5); retain current runtime until
-   implementation admission and parity checks. Package-contract investigation does
-   not wait for native-role mutation or cross-host work. Separately qualify one SDK
-   coordination use case, its existing-policy/state bindings and obsolete-glue
-   deletion scope; do not silently switch current host mode or enable providers.
-2. Toolchain Engineer with Architect: define native-role ownership transitions and
+1. Toolchain Engineer with Architect: define native-role ownership transitions and
    the legacy-adoption boundary (item 2), using the existing installer transaction.
-   Implement only after that contract is accepted; npm consumes this slice only for
-   lifecycle actions that actually need it, not as a second ownership manager.
-3. Lead and QA Engineer: trace one real admitted routing caller and select matched
+   Implement only after that contract is accepted. The external distribution/runtime
+   project consumes this owner only for package actions that need the expanded
+   lifecycle, not as a second ownership manager.
+2. Lead and QA Engineer: trace one real admitted routing caller and select matched
    evaluation tasks/oracles (items 3–4). Start from existing rationale and evidence;
    identify missing comparative evidence without launching providers. New runs need
    approved candidates, data and budget. A comparator remains a later decision based
    on demonstrated benefit, not the first implementation deliverable.
 
-**Separate conditional decisions:** item 5 fixes the language boundary, not wholesale
-Python retirement: Python/SDK coordinates, Rust owns admitted deterministic native
-operations. Select each bounded owner/contract and target platform before implementation,
-with SDK adapter, process-library and parallelism choices driven
-by evidence. Choose a concrete stopped-handoff need before item 6;
-live takeover is a separate conditional capability. Decide named preferences in
-item 7 only if ordinary instructions fail a recurring need. Neither these choices
-nor Kimi `auto`/Grok integration block the independent work above; each retains its
-own admission, owner and evidence requirement. No optional outcome is silently lost.
+**Separate conditional decisions:** choose a concrete stopped-handoff need before
+item 6; live takeover is a separate conditional capability, not an implication of
+runtime migration. Decide named preferences in item 7 only if ordinary instructions
+fail a recurring need. Neither these choices nor Kimi `auto`/Grok integration block
+independent work above. The extracted project retains its own admission, owners,
+implementation boundaries and evidence; its npm/native/SDK design is not repeated
+or selected for delivery here. No optional outcome is silently lost.
 
-After accepting a slice, implement and independently review its smallest coherent
-owner-local change against its outcome's acceptance and the failure probes below.
-For release, verify the selected installed/platform matrix and actual task outcomes;
-settle each retained outcome as delivered, deferred with owner/next step, or explicitly
-retired with rationale. A plan, library selection or comparator alone is not 2.0.
-
+After accepting a remaining 2.0 slice, implement and independently review its
+smallest coherent owner-local change against its outcome's acceptance and the
+failure probes below. For release, verify the selected installed/platform matrix
+and actual task outcomes; settle each retained 2.0 outcome as delivered, deferred
+with owner/next step, or explicitly retired with rationale. Outcomes 1 and 5 remain
+externally owned, not unfinished 2.0 obligations. A plan or comparator alone is not
+2.0.
 The separate Claude current-version research in PR #16 is outside this 2.0 package.
 Do not absorb its work or make it a release dependency without an identified shared
 contract; consume accepted findings through their existing owners when relevant.
@@ -665,20 +404,7 @@ Later implementation needs the probes under its own outcome and current gates.
 - CAD / UI / CLI: computer-aided design / user interface / command-line interface.
 - POSIX: portable operating-system interface family used by Unix-like systems.
 - PR: pull request; a proposal is not evidence that its changes have landed.
-- Differential parity: comparison of old and new implementations on the same isolated
-  inputs and effects; justified nondeterminism is not permission to mask differences.
 - Admission: existing permission and policy eligibility, distinct from ranking.
 - Empirical arbitration: settling checkable disagreement with observed evidence.
-- JSON / YAML: JavaScript Object Notation / YAML Ain't Markup Language, structured
-  data formats; PyYAML is a Python YAML parser.
-- TOML: Tom's Obvious Minimal Language, a configuration format; preserving its text
-  structure does not establish ownership of the values being edited.
-- Standard library: language-shipped facilities (Python modules or Rust `std`),
-  distinct from third-party packages.
-- API: application programming interface; a library boundary, not a host sandbox.
-- SDK: software development kit. The Python Agents SDK supports coordination;
-  provider-specific SDKs do not supply a universal cross-provider agent runtime.
-- ACP: Agent Client Protocol, the proposed common agent transport; it does not grant
-  provider admission or guarantee every adapter capability.
-- Foreign-function / interprocess bridge: calls across language / process boundaries.
-- Windows Job Object: operating-system mechanism for managing a process group.
+- SDK: software development kit; the extracted hybrid-runtime project owns the
+  Python Agents SDK design, not this remaining 2.0 roadmap.
