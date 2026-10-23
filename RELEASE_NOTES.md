@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-21
 
+- Reframe the Version 2 routing proposal as a delta over current policy, adapters, review, provenance and lifecycle owners. Retain host-transfer record shapes and their negative tests without making distributed leases mandatory for pure profile comparison. The proposal separates preserved guarantees from deferred machinery and records old-PR disposition; it does not change installed behavior, admit new models or launch providers.
+
 - Read-only archived ledger checks now route ordinary filesystem paths and captured history through the same complete sealed-prefix selection and current-authority reducer. The public checker can therefore receive valid archived sealed-prefix history without misreading its frozen manifest as an ordinary projection; missing, corrupt, or revoked proof retains the existing failure and authority boundaries.
 
 - Final cross-cutting commissions now require independent substantive assessments and truthful runtime-identity disclosure; unavailable model metadata alone no longer blocks acceptance, while failed reviews, execution drift, safety, host and publication holds remain in force.
