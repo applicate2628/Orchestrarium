@@ -156,13 +156,19 @@ contract, not a claim to reproduce missing decisions. Current main has no root
   is not an automatic missing-native fallback. Remove that implementation only
   after the Rust installer qualifies. Native hook delivery can precede this port.
 - Copy each applied executable and matching resources into the selected scope's
-  existing `.agents/runtime/<release>-<content-digest>/<target>/` directory.
+  resolved canonical agents root under `runtime/<release>-<content-digest>/<target>/`.
+  The logical layout is `.agents/runtime/...`; derive it from the installer's
+  admitted root/link authority (`production_installer.py:10977–10991`), not a
+  reconstructed path that bypasses existing symlink/junction handling.
   Registrations bind this retained pair, never npm cache, mutable `node_modules`,
   `latest` links or PATH. Extend the existing installer owner/receipts for this
   resource, not a parallel manager. Failed apply preserves the prior pair and
   recovery; identity changes retain manual host trust. Initially retain old applied
-  versions; later explicit removal requires proof that no retained configuration
-  references them. No automatic garbage collector/reference-counting service.
+  versions without native-runtime reclamation. Codex and Claude can share this
+  root; later explicit removal must inspect all retained provider registrations
+  and configured coordinator bindings in that scope. Current single-registration
+  Python retirement (`production_installer.py:10846–10877`) is not that proof.
+  Unknown references preserve the version; no garbage collector/refcount service.
 - Python SDK coordination is optional and separately provisioned in an explicitly
   selected isolated Python environment using a tested dependency lock. Record the
   exact interpreter and compatible coordinator/native/adapter versions. npm does
@@ -227,15 +233,30 @@ callbacks use existing human authority, not self-approval or an operating-system
 Keep capability data in existing routing, not a new registry.
 
 The [current result parser](../scripts/provider_prompt.py) requires the v2 execution
-path to be `direct-external-cli`. SDK routes therefore need a narrowly admitted
-provenance/version extension and receiving-parser tests before activation; preserve
-external nonauthority and independent verification, never mislabel an SDK path as CLI.
+path to be `direct-external-cli`. New SDK-owned routes need one narrowly admitted
+contract extension across producer, result parser, ledger writer, JSON schema,
+state validator and persisted readback before activation. Current bindings include
+`shared/schemas/agent-runs.schema.json:107`, `scripts/agent-run-ledger.py:2358,2389`
+and `scripts/validate-work-item-state.py:3918–3935`; changing only the adapter/parser
+would produce rejected or falsely classified records. Preserve old-record decoding
+and external nonauthority: never label SDK work as CLI or internal merely to pass.
+Reuse existing versioned owners, not a new schema/exception per provider.
 Apply this to genuinely new SDK-owned execution routes, including those using ACP.
 Replacing ACP plumbing inside the existing Kimi CLI-owned lane does not by itself
 change its execution path: retain truthful current provenance and record adapter/
 version evidence. Transport readiness never establishes receiving parity.
-Inventory obsolete prompt/launch/parsing glue per supported host before deleting
-it; retain shared semantic checks and any uncovered existing route.
+Profile and identity evidence must also survive the boundary. Current model/effort
+validation derives from actual `launchFlags` (`provider_prompt.py:1583–1601`;
+`validate-work-item-state.py:4020–4042`); SDK routes must record their actual transport
+configuration, not fabricate CLI arguments. Extend the existing versioned provenance
+owner for that representation. Map SDK/ACP session/request IDs to existing admission,
+launch, dispatch and evidence-run identities; do not replace those identities or
+inject extended fields into legacy records that forbid them. Verify the complete
+admission → launch → result → ledger write → validation/readback chain with mismatched
+profile/run/role/artifact fixtures, old records, unsupported versions and duplicate
+terminal delivery. Keep format adapters at the boundary, not provider branches in
+the domain reducer. Inventory obsolete prompt/launch/parsing glue per supported host
+before deleting it; retain shared semantic checks and any uncovered existing route.
 For Kimi, preserve its existing ACP model/effort readback, selected/observed
 capability receipts and explicit omissions, redaction, and session close/delete
 settlement. Generic ACP availability is not equivalence to this existing adapter.
@@ -467,7 +488,20 @@ The next work is bounded preparation and qualification, not a provider launch:
    Select direct-native registration; use a temporary forwarding-only adapter only
    for a verified host limitation, not a permanent extra layer. Current target
    selection, health classification and mirror membership are Python-only: update
-   those owners, registration/inventory and tests together. Generate the embedded
+   those owners, registration/inventory and tests together. Extend the existing hook
+   metadata/target descriptor so one logical marker maps to the exact retained
+   executable plus `hook <marker>` arguments, event, matcher and registration source.
+   Registration, inventory/health, replacement and retirement consume that same
+   binding, including health target extraction. Normalize only path operands, not
+   literal selectors or arbitrary argument values: current `_command_identity`
+   (`check-hook-health.py:353–358`) treats all argv as paths. Preserve argument
+   boundaries through supported host serialization rather than adding shell-specific
+   guessing. Current script-basename classification (`check-hook-health.py:1027–1117`)
+   and removal (`install-hypothesis-hook.py:343–351`) cannot identify multiple hooks
+   in one binary. Do not recognize ownership by binary name alone, arbitrary argv
+   substring matching, per-hook exceptions or one executable per hook. Test wrong
+   selector/path/source, duplicate markers, foreign commands and old Python entries.
+   Generate the embedded
    policy from `mcp_continuity_policy.py::SESSION_START_CONTEXT` at build time and
    compare the exact projection; do not hand-copy a second authored policy.
    Reuse `test_universal_reminder_hooks.py` and
