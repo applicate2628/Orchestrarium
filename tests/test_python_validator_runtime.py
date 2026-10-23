@@ -42,7 +42,7 @@ SHARED_INVARIANT_ACTIONS = (
     ),
     (
         "shared governance requires verification before trusting subagent results",
-        "verify its result before acceptance/forwarding/completion claims",
+        "verify before acceptance/forwarding/completion",
     ),
     (
         "shared governance requires measured evidence before root-cause or fix claims",
@@ -59,6 +59,83 @@ EXPECTED_SUMMARIES = (
     r"^  Checks: ([1-9][0-9]*)  \|  Passed: \1  \|  Warnings: 0  \|  Errors: 0$",
 )
 
+PACK_DELIVERY_ACTION_CASES = (
+    ("codex", VALIDATORS[0], "src.codex/skills/external-worker/SKILL.md", "external-worker requires file/stdin prompt delivery"),
+    ("codex", VALIDATORS[0], "src.codex/skills/external-reviewer/SKILL.md", "external-reviewer requires file/stdin prompt delivery"),
+    ("claude", VALIDATORS[1], "src.claude/agents/external-worker.md", "external-worker requires file/stdin prompt delivery"),
+    ("claude", VALIDATORS[1], "src.claude/agents/external-reviewer.md", "external-reviewer requires file/stdin prompt delivery"),
+)
+
+CLAUDE_ADAPTER_READ_WRITE_ACTION_CASES = (
+    (
+        "src.claude/agents/external-worker.md",
+        "external-worker normalizes agents-mode before routing",
+        "external-worker persists normalization only in an authorized write",
+    ),
+    (
+        "src.claude/agents/external-reviewer.md",
+        "external-reviewer normalizes agents-mode before routing",
+        "external-reviewer persists normalization only in an authorized write",
+    ),
+)
+
+PACK_ROUTING_READ_ACTION_CASES = (
+    (
+        "codex", VALIDATORS[0], "src.codex/skills/consultant/SKILL.md",
+        "consultant reads the Codex overlay in memory",
+        ("normalize its effective values in memory", "do not rewrite them merely to read or trust their flags"),
+        (("do not rewrite them merely to read or trust their flags", "rewrite the supplied file during the routing read"),),
+    ),
+    (
+        "codex", VALIDATORS[0], "src.codex/skills/consultant/SKILL.md",
+        "consultant preserves precedence and authorized-write boundary",
+        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only within an authorized install/configuration write"),
+        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+    ),
+    (
+        "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
+        "consultant reads the Claude overlay in memory",
+        ("normalize its effective values in memory", "do not rewrite them merely to read or trust their flags"),
+        (("do not rewrite them merely to read or trust their flags", "rewrite the supplied file during the routing read"),),
+    ),
+    (
+        "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
+        "consultant preserves precedence and authorized-write boundary",
+        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only within an authorized install/configuration write"),
+        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+    ),
+    (
+        "codex", VALIDATORS[0], "src.codex/skills/lead/subagent-contracts.md",
+        "subagent contracts preserve Codex in-memory routing",
+        ("Read the effective Codex overlay and normalize its effective values in memory", "Each key resolves to the highest layer that defines it", "a routing read does not rewrite its input"),
+        (("Each key resolves to the highest layer that defines it", "All keys take one shared global value"), ("a routing read does not rewrite its input", "a routing read rewrites its input to canonical YAML")),
+    ),
+    (
+        "codex", VALIDATORS[0], "src.codex/skills/lead/subagent-contracts.md",
+        "subagent contracts restrict Codex writes to authorization",
+        ("Do not recreate a legacy file or synthesize a local override on read alone", "Persist canonical formatting only within an authorized install/configuration write", "removing retired canonical keys"),
+        (("Do not recreate a legacy file or synthesize a local override on read alone", "Recreate legacy files and synthesize local overrides on routing reads"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+    ),
+    (
+        "claude", VALIDATORS[1], "src.claude/agents/contracts/subagent-contracts.md",
+        "subagent contracts preserve Claude in-memory key restrictions",
+        ("Read the effective Claude overlay and normalize its effective values in memory", "On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode.yaml` file; it remains Codex-line only"),
+        (("normalize its effective values in memory", "write normalized values to disk while routing"), ("do not write `externalClaudeProfile`", "write `externalClaudeProfile`")),
+    ),
+    (
+        "claude", VALIDATORS[1], "src.claude/agents/contracts/subagent-contracts.md",
+        "subagent contracts preserve Claude precedence and read-only routing",
+        ("read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`", "Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "a read does not rewrite its input"),
+        (("pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global", "pack-local global legacy `~/.claude/.agents-mode`, then pack-local global `~/.claude/.agents-mode.yaml`"), ("a read does not rewrite its input", "a read rewrites its input to canonical YAML")),
+    ),
+    (
+        "claude", VALIDATORS[1], "src.claude/agents/contracts/subagent-contracts.md",
+        "subagent contracts restrict Claude writes to authorization",
+        ("Do not recreate a legacy file or synthesize a local override on read alone", "Persist canonical formatting only within an authorized install/configuration write", "removing retired canonical keys"),
+        (("Do not recreate a legacy file or synthesize a local override on read alone", "Recreate legacy files and synthesize local overrides on routing reads"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+    ),
+)
+
 
 def _load(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -71,6 +148,167 @@ def _load(path: Path, name: str):
     finally:
         sys.path.pop(0)
     return module
+
+
+def _run_single_action(
+    runtime,
+    validator: Path,
+    provider: str,
+    action: tuple,
+    candidate: Path,
+    content: str | None,
+):
+    if content is None:
+        candidate.unlink(missing_ok=True)
+    else:
+        candidate.write_text(content, encoding="utf-8")
+    selected = (action[0], str(candidate), *action[2:])
+    return runtime.validate_pack(
+        script=validator,
+        provider=provider,
+        actions=(selected,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    PACK_DELIVERY_ACTION_CASES,
+    ids=("codex-worker", "codex-reviewer", "claude-worker", "claude-reviewer"),
+)
+def test_pack_provider_prompt_actions_require_file_stdin_and_reject_argv_loss(
+    tmp_path: Path,
+    case: tuple[str, Path, str, str],
+) -> None:
+    provider, validator, relative_source, label = case
+    module = _load(validator, f"file_stdin_{provider}_{relative_source.rsplit('/', 1)[-1]}")
+    runtime = module._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(runtime._applicable_actions(module.ACTIONS, layout))
+    matches = tuple(action for action in actions if action[-1] == label)
+    assert len(matches) == 1
+    action = matches[0]
+    assert action[0] == "check_contains"
+    assert action[2] == "file/stdin delivery"
+    assert action[1].replace("@ROOT/", "").endswith(relative_source)
+
+    source = (ROOT / relative_source).read_text(encoding="utf-8")
+    assert "file-based prompt delivery" not in source
+    assert action[2] in source
+    direct_launch = tuple(
+        candidate for candidate in actions
+        if candidate[1] == action[1]
+        and candidate[0] == "check_contains"
+        and candidate[2] == "direct external launch contract"
+    )
+    assert len(direct_launch) == 1
+    assert direct_launch[0][2] == "direct external launch contract"
+
+    candidate = tmp_path / "adapter.md"
+    accepted = _run_single_action(runtime, validator, provider, action, candidate, source)
+    assert accepted.checks == 1
+    assert accepted.errors == 0
+
+    mutated = source.replace(action[2], "argv-only prompt delivery", 1)
+    assert mutated != source
+    rejected = _run_single_action(runtime, validator, provider, action, candidate, mutated)
+    assert rejected.errors == 1
+
+
+@pytest.mark.parametrize(
+    "case",
+    CLAUDE_ADAPTER_READ_WRITE_ACTION_CASES,
+    ids=("claude-worker", "claude-reviewer"),
+)
+def test_claude_adapter_actions_keep_reads_memory_only_and_writes_authorized(
+    tmp_path: Path,
+    case: tuple[str, str, str],
+) -> None:
+    relative_source, read_label, write_label = case
+    validator = VALIDATORS[1]
+    provider = "claude"
+    module = _load(validator, f"claude_read_write_{relative_source.rsplit('/', 1)[-1]}")
+    runtime = module._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(runtime._applicable_actions(module.ACTIONS, layout))
+    read_matches = tuple(action for action in actions if action[-1] == read_label)
+    write_matches = tuple(action for action in actions if action[-1] == write_label)
+    assert len(read_matches) == 1
+    assert len(write_matches) == 1
+    read_action = read_matches[0]
+    write_action = write_matches[0]
+    assert read_action[0] == write_action[0] == "check_contains"
+    assert "consume effective values in memory" in read_action[2]
+    assert "do not rewrite configuration on a routing read" in read_action[2]
+    assert "Persisted normalization belongs only to an authorized install/configuration write" in write_action[2]
+
+    source = (ROOT / relative_source).read_text(encoding="utf-8")
+    assert read_action[2] in source
+    assert write_action[2] in source
+    assert "Read and normalize `.claude/.agents-mode.yaml` to the current canonical format before trusting its flags." not in source
+
+    candidate = tmp_path / "adapter.md"
+    for action, content in ((read_action, read_action[2]), (write_action, source)):
+        accepted = _run_single_action(runtime, validator, provider, action, candidate, content)
+        assert accepted.checks == 1
+        assert accepted.errors == 0
+
+    boundary_mutations = (
+        (read_action, "consume effective values in memory", "write effective values to disk"),
+        (read_action, "do not rewrite configuration on a routing read", "rewrite configuration during a routing read"),
+        (write_action, "Persisted normalization belongs only to an authorized install/configuration write", "Persisted normalization belongs to every routing read"),
+    )
+    for action, old, new in boundary_mutations:
+        assert old in action[2]
+        mutated = source.replace(old, new, 1)
+        assert mutated != source
+        rejected = _run_single_action(runtime, validator, provider, action, candidate, mutated)
+        assert rejected.errors == 1
+
+
+@pytest.mark.parametrize(
+    "case",
+    PACK_ROUTING_READ_ACTION_CASES,
+    ids=tuple(case[3] for case in PACK_ROUTING_READ_ACTION_CASES),
+)
+def test_pack_routing_read_actions_bind_current_paragraphs_and_reject_boundary_loss(
+    tmp_path: Path,
+    case: tuple,
+) -> None:
+    provider, validator, relative_source, label, markers, mutations = case
+    module = _load(validator, f"routing_boundary_{provider}_{label.replace(' ', '_')}")
+    runtime = module._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(runtime._applicable_actions(module.ACTIONS, layout))
+    matches = tuple(action for action in actions if action[-1] == label)
+    assert len(matches) == 1
+    action = matches[0]
+    assert action[0] == "check_contains"
+    assert action[1].replace("@ROOT/", "").endswith(relative_source)
+    for marker in markers:
+        assert marker in action[2]
+
+    source = (ROOT / relative_source).read_text(encoding="utf-8")
+    assert source.count(action[2]) == 1
+    candidate = tmp_path / "contract.md"
+    accepted = _run_single_action(runtime, validator, provider, action, candidate, source)
+    assert accepted.checks == 1
+    assert accepted.errors == 0
+
+    for old, new in mutations:
+        assert old in action[2]
+        mutated_action = action[2].replace(old, new, 1)
+        mutated_source = source.replace(action[2], mutated_action, 1)
+        assert mutated_source != source
+        rejected = _run_single_action(runtime, validator, provider, action, candidate, mutated_source)
+        assert rejected.errors == 1
+
+    if label == "consultant reads the Codex overlay in memory":
+        assert _run_single_action(runtime, validator, provider, action, candidate, "").errors == 1
+        assert _run_single_action(runtime, validator, provider, action, candidate, None).errors == 1
 
 
 def test_work_items_checker_consumes_canonical_slug_predicate_explicitly(

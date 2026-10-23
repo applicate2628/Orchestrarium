@@ -68,17 +68,17 @@ class TestOwnerEquivalentExecutionContract(unittest.TestCase):
         start = text.index("### Assistance and owner-equivalent execution (binding)")
         contract = text[start:text.index("## Artifact persistence", start)]
         for guarantee in (
-            "accepted inputs and actual preimages", "exclusive ownership",
-            "serialize affected readers/writers", "existing canonical schema",
-            "rollback and replay protection", "independently read back",
-            "settle owned resources on every exit", "actual observed launch and terminal identities",
-            "exact open obligations and typed closers", "failed attempt never gains a result",
-            "strict terminal instant", "exact dispositions and all incoming links",
-            "archive identity, active absence, dispositions, links, receipt and README together",
-            "never impersonates a reserved engine/wrapper completion frame",
-            "cannot retry or bypass an actual host-denied action",
-            "weaken exact-runtime/model corridors or commission diversity",
-            "replace human publication review/approval",
+            "actual inputs/preimages", "exclusive ownership",
+            "serialized readers-writers", "canonical schema",
+            "rollback/replay protection", "independent persisted readback",
+            "owned-resource settlement every exit", "immutable launch/terminal target/role/lane/observed IDs",
+            "exact obligations/typed closers", "failed attempt≠result",
+            "bound source/destination/link/board pre/post bytes",
+            "joint archive/active-absence/disposition/link/receipt/README readback",
+            "never impersonated completion frames",
+            "No new scope/host-denial bypass/retry",
+            "No new scope/host-denial bypass/retry/external-only-to-native switch/corridor/model/commission weakening",
+            "No new scope/host-denial bypass/retry/external-only-to-native switch/corridor/model/commission weakening/trust-publication bypass/human-review replacement",
         ):
             with self.subTest(guarantee=guarantee):
                 self.assertIn(guarantee, contract)

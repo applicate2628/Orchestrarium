@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import runpy
 import subprocess
 import sys
@@ -29,18 +30,18 @@ NON_BINDING_SIZE_CAP = 1_000_000
 
 EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
     "structural-overview": (
-        1_265,
-        "488c41acb051ccf6100422b28b3d4ded846e8d9cdd88fb937fb9b383f8d70319",
+        1_309,
+        "1f2ab534399851a99b5f39caadec703b8ddf5118c73ea60bd27a3023c0a5209d",
     ),
     "hook-behavior-contracts": (
-        18_711,
-        "29084ee4acac9d075291b3d9180f3d78c3f3d77251d4a60463949855b74bf14a",
+        19_387,
+        "49304999e8668edbf3d697ec6a66c01faea27cb46905e02136e4efa434a55c37",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.
     "hook-entrypoints-placement": (
-        924,
-        "98017e791601949a09f1d0ba4e32c7a429195dcdff99cca1b7f0df52a66d45ee",
+        984,
+        "0398b801e77a3bcdd96d22818272e57d61446ffeeac526fc15612a42f519a5d1",
     ),
     "installer-removal-json-path": (
         5_254,
@@ -48,7 +49,7 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
     ),
 }
 
-EXPECTED_SHARED_MANIFEST: dict[str, tuple[str, ...]] = {
+EXPECTED_SHARED_MANIFEST: dict[str, tuple[str | re.Pattern[str], ...]] = {
     "shared owners": (
         "# Shared Governance",
         "## Role index",
@@ -60,8 +61,11 @@ EXPECTED_SHARED_MANIFEST: dict[str, tuple[str, ...]] = {
         "## Publication safety",
     ),
     "shared gates": (
-        "`quick-fix`: target+steps",
-        "Before cross-phase/specialist QA, assign one integration owner",
+        re.compile(r"`quick-fix`:[ \t]*target[ \t]*[+/][ \t]*steps\b"),
+        re.compile(
+            r"Before cross-phase/specialist QA,?[ \t]+assign[ \t]+"
+            r"(?:one[ \t]+)?integration[ \t]+owner\b"
+        ),
         "**Repository orientation; Mechanism inventory before new paths:**",
         "REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>",
         "**Hypothesis disclosure discipline:**",
@@ -71,7 +75,7 @@ EXPECTED_SHARED_MANIFEST: dict[str, tuple[str, ...]] = {
     ),
 }
 
-EXPECTED_CLAUDE_MANIFEST: dict[str, tuple[str, ...]] = {
+EXPECTED_CLAUDE_MANIFEST: dict[str, tuple[str | re.Pattern[str], ...]] = {
     "Claude tool mapping": (
         "## Claude tool mapping",
         "`Bash|PowerShell`",
@@ -87,7 +91,12 @@ EXPECTED_CLAUDE_MANIFEST: dict[str, tuple[str, ...]] = {
         "Passive verdicts and the leaf/re-entry skips remain unchanged",
         "[skip-bugfix-discipline]",
         "[approve-publication]",
-        "[approve-mcp-fallback:v1]",
+        "MCP control.",
+        "discovery reminders are advisory in `auto` and subagent contexts.",
+        "Root `force` still requires runtime discovery, the relevant tool schema, fitting MCP use",
+        "selected-root/currentness checks and the existing restricted alternatives.",
+        "The source-navigation heuristic emits a nonblocking reminder and does not determine compliance",
+        "transcript text grants no permission or override of host refusals.",
         "[acknowledge-passive-stop]",
     ),
     "Claude delegation": (
@@ -136,7 +145,8 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _production_manifests() -> tuple[
-    dict[str, tuple[str, ...]], dict[str, tuple[str, ...]]
+    dict[str, tuple[str | re.Pattern[str], ...]],
+    dict[str, tuple[str | re.Pattern[str], ...]],
 ]:
     _require_validator()
     namespace = runpy.run_path(str(VALIDATOR))
@@ -273,11 +283,20 @@ def test_unchanged_pair_passes_and_each_owner_fails_on_semantic_removal(
         tokens = [token for group in manifest.values() for token in group]
         assert len(tokens) == len(set(tokens)), f"{owner} manifest tokens must be unique"
         for index, token in enumerate(tokens):
-            assert token in source, f"live {owner} owner lacks manifest token {token!r}"
+            if isinstance(token, str):
+                marker = token
+                assert token in source, f"live {owner} owner lacks manifest token {token!r}"
+                mutated_source = source.replace(token, "")
+            else:
+                marker = token.pattern
+                assert token.search(source) is not None, (
+                    f"live {owner} owner lacks manifest pattern {marker!r}"
+                )
+                mutated_source = token.sub("", source)
             shared_copy.write_text(shared_source, encoding="utf-8")
             claude_copy.write_text(claude_source, encoding="utf-8")
             candidate = shared_copy if owner == "shared" else claude_copy
-            candidate.write_text(source.replace(token, ""), encoding="utf-8")
+            candidate.write_text(mutated_source, encoding="utf-8")
             result = _run(
                 "--claude-md",
                 str(claude_copy),
@@ -290,7 +309,7 @@ def test_unchanged_pair_passes_and_each_owner_fails_on_semantic_removal(
                 f"removing {owner} token {token!r} did not fail closed:\n"
                 f"{result.stdout}\n{result.stderr}"
             )
-            assert token in result.stdout
+            assert marker in result.stdout
 
 
 def test_import_and_duplicate_common_owners_fail_closed(tmp_path: Path) -> None:

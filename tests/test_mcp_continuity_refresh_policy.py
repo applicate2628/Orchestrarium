@@ -116,8 +116,8 @@ class StatefulMcpRefreshPolicyTests(unittest.TestCase):
         ):
             self.assertNotIn(marker, policy.TURN_ANCHOR_CONTEXT)
         for marker in (
-            "resume the current primary task",
-            "run useful independent ready work now",
+            "keep the admitted primary outcome and next authorized action explicit",
+            "continue useful independent ready work",
             "keep mandatory gates",
             "settle every owned process/resource",
             "preserve pre-existing user state",

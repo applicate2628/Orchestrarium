@@ -182,18 +182,138 @@ class CapturedHistoryBindingTests(unittest.TestCase):
             self.item, validate_status_file=False, obligation_state_out=baseline_states,
             authority_state_out=baseline_masks,
         )
-        observation = v.observe_captured_work_item_history(binding)
-        self.assertTrue(any("C3-reviewed-role-fail" in error for error in observation.diagnostics))
+        original_validate = v.validate_work_item
+        inner_calls = []
+
+        def observe_inner(*args, **kwargs):
+            inner_calls.append(True)
+            return original_validate(*args, **kwargs)
+
+        v.validate_work_item = observe_inner
+        try:
+            observation = v.observe_captured_work_item_history(binding)
+        finally:
+            v.validate_work_item = original_validate
+        self.assertEqual(len(inner_calls), 1)
+        self.assertEqual(sum("C3-reviewed-role-fail" in error for error in observation.diagnostics), 1)
+        self.assertEqual(sum(error == "WI-LEGACY-COMPLETION-HISTORY: original history has unresolved obligations"
+                             for error in observation.diagnostics), 1)
         self.assertEqual(observation.authority_by_raw_line, baseline_masks[-1])
         self.assertEqual(observation.obligations, baseline_states[-1])
         self.assertTrue(all(error in observation.diagnostics for error in baseline))
         self.assertEqual(observation, v.observe_captured_work_item_history(self.relocate(binding)))
 
+    def test_standalone_relation_helpers_project_acquired_failure_once(self):
+        self.ledger()
+        context = v.load_effective_ledger_view(self.root, self.item,
+            self.item.relative_to(self.root).as_posix() + "/agent-runs.jsonl")
+        derive_errors = []
+        validity = v.derive_event_validity(context.rows, self.item, derive_errors, context=context)
+        self.assertEqual(sum("C3-reviewed-role-fail" in error for error in derive_errors), 1)
+        closure_errors = []
+        revises, _launches = v.validate_closure(context.rows, closure_errors, validity=validity, context=context)
+        self.assertEqual(sum("C3-reviewed-role-fail" in error for error in closure_errors), 1)
+        self.assertEqual({event["runId"] for event in revises}, {"run-lead-main-revise"})
+        invalidation_errors = []
+        self.assertEqual(v.resolve_closure_invalidations(context.rows, validity, invalidation_errors, context=context), set())
+        self.assertEqual(sum("C3-reviewed-role-fail" in error for error in invalidation_errors), 1)
+
     def test_valid_current_contract_is_preserved(self):
+        from test_ledger_h1_effective_view import closed_status
+
         self.ledger(modern=True)
-        observation = v.observe_captured_work_item_history(self.binding(contract="current"))
+        (self.item / "status.md").write_text(closed_status(), encoding="utf-8")
+        binding = self.binding(contract="current")
+        observation = v.observe_captured_work_item_history(binding)
         self.assertEqual(observation.diagnostics, ())
         self.assertFalse(observation.obligations.open_revise)
+        captured = v._acquire_captured_history_item(binding)
+        context = v.load_effective_ledger_view(
+            v.repo_root_for(captured), captured, binding.original_ledger_path
+        )
+        logical_same_item = captured._at(captured.path)
+        errors = []
+        self.assertIsNone(v.validate_status(logical_same_item, context, errors,
+                                            current_open_launch_ids=()))
+        self.assertEqual(errors, [])
+
+    def test_captured_refusal_selects_one_conservative_or_unavailable_generation(self):
+        for mutation in ("context-event", "result-only", "missing-issuer"):
+            with self.subTest(mutation=mutation):
+                raw = self.ledger(modern=True)
+                binding = self.binding(contract="current")
+                genuine = v.observe_captured_work_item_history(binding)
+                self.assertEqual(genuine.diagnostics, ())
+                self.assertTrue(genuine.authority_by_raw_line[3].closer_eligible)
+                original_validate = v.validate_work_item
+                inner_calls = []
+
+                def validate_then_alter_outward_projection(*args, **kwargs):
+                    errors = original_validate(*args, **kwargs)
+                    inner_calls.append(tuple(errors))
+                    result = kwargs["obligation_state_out"][-1]._current_result
+                    if mutation == "context-event":
+                        result.context.rows[-1].event["closesRunIds"].append("untrusted-target")
+                    elif mutation == "result-only":
+                        result[2].append({"runId": "untrusted-target"})
+                    else:
+                        result.context = replace(result.context, _current_owner=None)
+                    return errors
+
+                v.validate_work_item = validate_then_alter_outward_projection
+                try:
+                    observation = v.observe_captured_work_item_history(binding)
+                finally:
+                    v.validate_work_item = original_validate
+                self.assertEqual(inner_calls, [()])
+                self.assertTrue(observation.acquisition_complete)
+                self.assertEqual(observation.ledger_sha256, sha(raw))
+                self.assertEqual((self.item / "agent-runs.jsonl").read_bytes(), raw)
+                self.assertTrue(any("WI-LEDGER-" in error for error in observation.diagnostics))
+                if mutation == "missing-issuer":
+                    self.assertIsNone(observation.obligations)
+                    self.assertIsNone(observation.authority_by_raw_line)
+                else:
+                    self.assertIsNotNone(observation.obligations)
+                    self.assertEqual({row.run_id for row in observation.obligations.open_revise},
+                                     {"run-lead-main-revise"})
+                    self.assertEqual(observation.obligations.open_revise[0].raw_line_ordinal, 2)
+                    self.assertTrue(observation.authority_by_raw_line[2].revise_target_eligible)
+                    self.assertFalse(observation.authority_by_raw_line[3].closer_eligible)
+                    self.assertFalse(observation.authority_by_raw_line[3].artifact_evidence_eligible)
+                    self.assertEqual(sum(error == "WI-LEGACY-COMPLETION-HISTORY: original history has unresolved obligations"
+                                         for error in observation.diagnostics), 1)
+
+    def test_acquired_inner_role_failure_survives_required_outer_source_loss(self):
+        raw = self.ledger()
+        binding = self.binding(contract="current")
+        original_validate = v.validate_work_item
+        inner_diagnostics = []
+
+        def validate_then_change_required_source(*args, **kwargs):
+            errors = original_validate(*args, **kwargs)
+            inner_diagnostics.append(tuple(errors))
+            self.source.write_bytes(b"Changed after the actual inner bad-closer diagnosis.\n")
+            return errors
+
+        v.validate_work_item = validate_then_change_required_source
+        try:
+            observation = v.observe_captured_work_item_history(binding)
+        finally:
+            v.validate_work_item = original_validate
+        self.assertEqual(len(inner_diagnostics), 1)
+        self.assertEqual(sum("C3-reviewed-role-fail" in error for error in inner_diagnostics[0]), 1)
+        self.assertEqual(sum("C3-reviewed-role-fail" in error for error in observation.diagnostics), 1)
+        self.assertTrue(any("WI-LEGACY-COMPLETION-DRIFT" in error for error in observation.diagnostics))
+        self.assertTrue(observation.acquisition_complete)
+        self.assertEqual(observation.ledger_sha256, sha(raw))
+        self.assertEqual((self.item / "agent-runs.jsonl").read_bytes(), raw)
+        self.assertEqual({row.run_id for row in observation.obligations.open_revise}, {"run-lead-main-revise"})
+        self.assertTrue(observation.authority_by_raw_line[2].revise_target_eligible)
+        self.assertFalse(observation.authority_by_raw_line[3].closer_eligible)
+        self.assertFalse(observation.authority_by_raw_line[3].artifact_evidence_eligible)
+        self.assertEqual(sum(error == "WI-LEGACY-COMPLETION-HISTORY: original history has unresolved obligations"
+                             for error in observation.diagnostics), 1)
 
     def test_absent_required_unknown_and_acquired_empty_are_distinct(self):
         (self.item / "closure.md").unlink()
@@ -703,6 +823,17 @@ class CapturedHistoryBindingTests(unittest.TestCase):
         selected = v._acquire_captured_history_item(retained)
         self.assertTrue(self.owner._retained_preimage_consumer(payload, self.root / "work-items",
             scan_preparation=self.owner._RetainedConsumerScanPreparation(selected)))
+        # Without the actual selected acquisition the absent original cannot qualify.
+        self.assertFalse(self.owner._retained_preimage_consumer(payload, self.root / "work-items"))
+        current = selected.owner_input.files[payload].current
+        self.assertNotEqual(current.path, payload)
+        replacement = current.path.with_name(current.path.name + ".equal-bytes-replacement")
+        self.assertFalse(replacement.exists())
+        replacement.write_bytes(current.data)
+        self.assertNotEqual(replacement.stat().st_ino, current.path.stat().st_ino)
+        os.replace(replacement, current.path)
+        self.assertFalse(self.owner._retained_preimage_consumer(payload, self.root / "work-items",
+            scan_preparation=self.owner._RetainedConsumerScanPreparation(selected)))
 
     def test_genuine_h1_receipt_corruption_and_partial_set_refuse(self):
         spec = importlib.util.spec_from_file_location("history_binding_h1_negative_fixture",
@@ -746,6 +877,105 @@ class CapturedHistoryBindingTests(unittest.TestCase):
             self.assertTrue(any("SET-TOPOLOGY" in error for error in partial.diagnostics), partial.diagnostics)
             self.assertIsNone(partial.obligations)
 
+
+
+    def test_captured_outer_verifier_failure_withholds_closer_and_reopens_target(self):
+        raw = self.ledger(modern=True)
+        ledger = self.item / "agent-runs.jsonl"
+        binding = self.binding(contract="current")
+        initial = v.observe_captured_work_item_history(binding)
+        self.assertEqual(initial.diagnostics, ())
+        self.assertTrue(initial.acquisition_complete)
+        self.assertEqual(initial.obligations.open_revise, ())
+        self.assertEqual(initial.obligations.unresolved_history, ())
+        self.assertTrue(initial.authority_by_raw_line[3].closer_eligible)
+
+        proof = self.item / "design.md"
+        original_validate = v.validate_work_item
+        inner = {"calls": 0, "mutated": False}
+
+        def validate_then_change_captured_proof(*args, **kwargs):
+            errors = original_validate(*args, **kwargs)
+            inner["calls"] += 1
+            inner["errors"] = tuple(errors)
+            if not inner["mutated"]:
+                before = proof.read_bytes()
+                proof.write_bytes(
+                    b"changed after actual inner current validation\n"
+                )
+                inner["before_sha256"] = sha(before)
+                inner["after_sha256"] = sha(proof.read_bytes())
+                inner["mutated"] = True
+            return errors
+
+        v.validate_work_item = validate_then_change_captured_proof
+        try:
+            observation = v.observe_captured_work_item_history(binding)
+        finally:
+            v.validate_work_item = original_validate
+
+        self.assertEqual(inner["calls"], 1)
+        self.assertEqual(inner["errors"], ())
+        self.assertTrue(inner["mutated"])
+        self.assertNotEqual(inner["before_sha256"], inner["after_sha256"])
+        self.assertTrue(observation.acquisition_complete)
+        diagnostics = "\n".join(observation.diagnostics)
+        self.assertIn("WI-LEGACY-COMPLETION-DRIFT", diagnostics)
+        self.assertIn("captured-size-differs", diagnostics)
+        self.assertEqual(observation.ledger_sha256, sha(raw))
+        self.assertEqual(ledger.read_bytes(), raw)
+        self.assertIsNotNone(observation.obligations)
+        self.assertTrue(observation.authority_by_raw_line[2].revise_target_eligible)
+        self.assertFalse(observation.authority_by_raw_line[3].closer_eligible)
+        open_revise = {row.run_id for row in observation.obligations.open_revise}
+        self.assertIn("run-lead-main-revise", open_revise)
+
+
+    # Preserved failing evidence: ARCH-SIMPLER-CAPTURED-SELECTION-1 (fe98049d).
+    def test_required_outer_selection_loss_cannot_publish_clean_current_authority(self):
+        raw = self.ledger(modern=True)
+        ledger = self.item / "agent-runs.jsonl"
+        for label, selected_path in (("criteria", self.item / "criteria.md"),
+                                     ("source", self.source),
+                                     ("acquisition-reference", self.item / "acquisition.md")):
+            with self.subTest(selected_role=label):
+                binding = self.binding(contract="current")
+                genuine = v.observe_captured_work_item_history(binding)
+                self.assertEqual(genuine.diagnostics, ())
+                self.assertTrue(genuine.acquisition_complete)
+                self.assertTrue(genuine.authority_by_raw_line[3].closer_eligible)
+                before = selected_path.read_bytes()
+                original = v.validate_work_item
+                inner = {"calls": 0, "errors": None}
+
+                def validate_then_change_required_selection(*args, **kwargs):
+                    errors = original(*args, **kwargs)
+                    inner["calls"] += 1
+                    inner["errors"] = tuple(errors)
+                    if inner["calls"] == 1:
+                        selected_path.write_bytes(b"changed required selected input after inner validation\n")
+                    return errors
+
+                v.validate_work_item = validate_then_change_required_selection
+                try:
+                    observed = v.observe_captured_work_item_history(binding)
+                finally:
+                    v.validate_work_item = original
+                    selected_path.write_bytes(before)  # this fixture only; next arm captures anew
+                self.assertEqual(inner["calls"], 1)
+                self.assertEqual(inner["errors"], ())
+                self.assertIn("WI-LEGACY-COMPLETION-DRIFT", "\n".join(observed.diagnostics))
+                self.assertEqual(observed.selection, "present")
+                self.assertTrue(observed.acquisition_complete)
+                self.assertEqual(observed.ledger_sha256, sha(raw))
+                self.assertIsNotNone(observed.obligations)
+                self.assertIn("run-lead-main-revise", {row.run_id for row in observed.obligations.open_revise})
+                if observed.authority_by_raw_line is not None:
+                    self.assertFalse(any(row.closer_eligible or row.artifact_evidence_eligible
+                                         for row in observed.authority_by_raw_line.values()))
+                self.assertEqual(ledger.read_bytes(), raw)
+                # Acquisition completeness and unavailable obligation shape stay
+                # truthful under the accepted owner model. No invented hold is required.
 
 if __name__ == "__main__":
     unittest.main()
