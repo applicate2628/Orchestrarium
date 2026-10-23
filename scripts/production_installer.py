@@ -9731,29 +9731,79 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
         _write_owned_text(target, content, mutable_owner)
 
 
+_CLAUDE_DOC_MARKER_PREFIXES = tuple(
+    f"<!-- {edge} ORCHESTRARIUM {kind} MANAGED"
+    for kind in ("CLAUDE", "SHARED") for edge in ("BEGIN", "END")
+)
+
+
+def _render_claude_document(existing: str | None, payload: str, *, claude: bool) -> str:
+    """Replace only proven body ownership; unknown legacy extent is not ownership."""
+    kind, name = ("CLAUDE", "CLAUDE.md") if claude else ("SHARED", "AGENTS.md")
+    begin = f"<!-- BEGIN ORCHESTRARIUM {kind} MANAGED -->\n"
+    end = f"<!-- END ORCHESTRARIUM {kind} MANAGED -->\n"
+    anchor = "@AGENTS.md\n"
+    if (not payload or not payload.endswith("\n")
+            or any(prefix in payload for prefix in _CLAUDE_DOC_MARKER_PREFIXES)
+            or (claude and re.search(r"(?m)^@AGENTS\.md$", payload))):
+        raise ValueError(f"E_CLAUDE_DOC_SOURCE_SHAPE: {name}")
+    owned = (anchor if claude else "") + begin + payload + end
+    if existing is None:
+        return owned
+
+    anchors = list(re.finditer(r"(?m)^@AGENTS\.md$", existing)) if claude else []
+
+    def import_area_valid(body_start: int) -> bool:
+        if len(anchors) != 1 or not existing.startswith(anchor, anchors[0].start()):
+            return False
+        start = anchors[0].start() + len(anchor)
+        if start > body_start:
+            return False
+        area = existing[start:body_start]
+        return all(not line.strip() or (line.startswith("@") and line[1:].strip())
+                   for line in area.split("\n"))
+
+    markers = list(re.finditer("|".join(map(re.escape, _CLAUDE_DOC_MARKER_PREFIXES)), existing))
+    if markers:
+        # Every reserved-prefix occurrence must be one of these two complete lines.
+        if (len(markers) != 2
+                or any(match.start() and existing[match.start() - 1] != "\n" for match in markers)
+                or not existing.startswith(begin, markers[0].start())
+                or not existing.startswith(end, markers[1].start())
+                or (claude and not import_area_valid(markers[0].start()))):
+            raise ValueError(f"E_CLAUDE_DOC_MARKERS_INVALID: {name}")
+        start = markers[0].start() + len(begin)
+        return existing[:start] + payload + existing[markers[1].start():]
+
+    signatures = r"(?m)^(?:@AGENTS\.md|# Claude Code Pack|# Claudestrator)$" if claude else r"(?m)^# Shared Governance$"
+    if re.search(signatures, existing):
+        # Lookahead counts every line-aligned exact payload, including overlapping matches.
+        matches = list(re.finditer(r"(?m)^(?=" + re.escape(payload) + ")", existing))
+        if len(matches) != 1 or (claude and not import_area_valid(matches[0].start())):
+            raise ValueError(f"E_CLAUDE_DOC_LEGACY_AMBIGUOUS: {name}")
+        start = matches[0].start()
+        return existing[:start] + begin + payload + end + existing[start + len(payload):]
+    return owned + "\n" + existing
+
+
 def _merge_claude_docs(root: Path, source: Path, target: Path, dry_run: bool, *,
                        mutable_owner: _CreateOnlyMutablePath | None = None) -> None:
     claude_source = (source / "CLAUDE.md").read_text(encoding="utf-8")
-    existing = _read_owned_text(target, mutable_owner)
-    if existing is not None:
-        starts = [
-            position
-            for marker in ("\n@AGENTS.md", "\n# Claude Code Pack", "\n# Claudestrator")
-            if (position := ("\n" + existing).find(marker)) >= 0
-        ]
-        content = existing[: min(starts)] + claude_source if starts else claude_source + "\n" + existing
-    else:
-        content = claude_source
+    anchor = "@AGENTS.md\n"
+    if not claude_source.startswith(anchor):
+        raise ValueError("E_CLAUDE_DOC_SOURCE_SHAPE: CLAUDE.md")
     shared = (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
     agents_target = target.parent / "AGENTS.md"
+    # Classify both documents before publishing either, including on dry-run.
+    content = _render_claude_document(_read_owned_text(target, mutable_owner),
+                                     claude_source[len(anchor):], claude=True)
+    shared_content = _render_claude_document(_read_owned_text(agents_target, mutable_owner),
+                                            shared, claude=False)
     if dry_run:
         print(f"    [dry-run] would merge {target} and {agents_target}")
     else:
-        agents_existing = _read_owned_text(agents_target, mutable_owner)
-        if agents_existing is not None and "# Shared Governance" not in agents_existing:
-            shared = shared.rstrip() + "\n\n" + agents_existing
         _write_owned_text(target, content, mutable_owner)
-        _write_owned_text(agents_target, shared, mutable_owner)
+        _write_owned_text(agents_target, shared_content, mutable_owner)
 
 
 def _load_claude_settings(settings_path: Path, *,
