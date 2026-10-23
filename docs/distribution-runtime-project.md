@@ -119,8 +119,9 @@ names logical boundaries; implementation admission fixes names and layout:
   [check-publication-gate.py](../scripts/check-publication-gate.py) → distinct
   Rust validation and publication policy/scan/gate modules, not one universal gate.
 - [repo_transfer.py](../src.codex/skills/manual-repo-transfer/scripts/repo_transfer.py)
-  → Rust manual-transfer operations, preserving inventory/freeze/restore rather than
-  activating live cross-host takeover.
+  → Rust inventory/bundle, distinct archive-integrity/payload-source/trusted
+  verification, and preview-only cleanup. Freeze and receiver restore remain with
+  their workflow owners; this adds neither automatic restore/deletion nor live takeover.
 
 ## npm package and runtime-dependency contract
 
@@ -226,6 +227,9 @@ external nonauthority and independent verification, never mislabel an SDK path a
 This applies to ACP routes too; transport readiness does not establish receiving parity.
 Inventory obsolete prompt/launch/parsing glue per supported host before deleting
 it; retain shared semantic checks and any uncovered existing route.
+For Kimi, preserve its existing ACP model/effort readback, selected/observed
+capability receipts and explicit omissions, redaction, and session close/delete
+settlement. Generic ACP availability is not equivalence to this existing adapter.
 
 Application-programming-interface (API) model access, existing CLI capability,
 provider admission and account billing are separate: ACP unifies agent transport,
@@ -249,8 +253,12 @@ SDK bounded capture, private-path, cancellation and settlement are not yet quali
 a stream-reader limit alone is not a total-output bound. Missing required guarantees
 hold only that lane under existing controls, not a silent downgrade or dual manager;
 current unavailable generic Windows paths stay unavailable.
-The installer does not launch providers. Publication policy, Git-object scanner and
-gate retain distinct validity, traversal and authority/fresh-range responsibilities.
+The installer does not launch provider tasks/model inference. Preserve its existing
+read-only Codex host health query (`hooks/list` through App Server), including CLI
+availability, hook inventory and the separate manual-trust receiving step. Such a
+query starts the host process; it is not an agent-task launch or proof of hook trust.
+Publication policy, Git-object scanner and gate retain distinct validity, traversal
+and authority/fresh-range responsibilities.
 
 Entrypoints adapt input/output/errors; domain owners retain schemas, errors and
 receipts. Pure checks/planners/reducers consume immutable inputs. The installer,
@@ -374,6 +382,10 @@ The next work is bounded preparation and qualification, not a provider launch:
    platform, recovery and source-to-installed checks qualify the replacement. Before
    production cutover, obtain the existing owner/Architect acceptance and update the
    binding language-owner policy and owning documentation together.
+   Select direct-native registration or a forwarding-only adapter explicitly: current
+   hook target selection, health classification and mirror membership are Python-only.
+   Update those owners, registration/inventory and relevant tests together; changed
+   hook identity requires the existing manual host-trust and strict health receiving.
 3. Separately specify one bounded SDK coordination use case, the existing domain
    contract/receiving-version change and obsolete-glue deletion scope. Use fixtures
    and stubbed adapters first to probe capability rejection, authentication/billing
@@ -397,6 +409,16 @@ and next step, or explicitly retired with rationale. Count native distribution,
 Python/SDK updates, adapter/version compatibility, temporary-bridge removal and
 platform maintenance in the cost of the change. No speed, reliability or dependency
 reduction is established by selecting libraries or writing this project document.
+
+Carry the existing regression probes at the affected owner, not only new happy-path
+fixtures: `test_hook_runtime_installers.py` / `test_hook_runtime_transactions.py` /
+`test_universal_hook_surfaces.py` for installed hooks; `test_kimi_transport.py` for
+ACP receipts/cleanup; `test_manual_repo_transfer_security_contracts.py` for transfer;
+`test_agent_run_ledger.py`, `test_review_loop_state_v2.py` and
+`test_solution_attempt_reducer.py` for state/retry lineage. These files live under
+`tests/`. Compare the same selected probes on the pinned baseline and candidate,
+separating existing failures from new regressions; a source review or stub-only
+suite does not qualify live SDK/provider/platform behavior.
 
 This documentation extraction requires scope/coverage review, local-link and
 cross-reference checks and diff-surface inspection. Those checks do not establish
