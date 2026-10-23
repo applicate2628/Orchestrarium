@@ -272,16 +272,50 @@ also not evidence of a live durable execution service.
 only the existing boundary required by a concrete command/platform use case. Keep
 one request/result contract, with real platform differences inside its owners.
 Decide optional POSIX support and installation of source-only components separately.
-Rust remains a deferred alternative only if an evidenced limitation warrants the
-language/ownership change; neither a rewrite nor duplicate Python/Rust owners is a
-prerequisite for npm or routing. Owner-equivalent manual execution must retain the
-selected operation's guarantees; it is not a host-denial bypass.
+The unavailable boundaries do not establish that Python cannot implement them.
+Owner-equivalent manual execution retains the selected operation's guarantees;
+it is not a host-denial bypass.
 
-**Acceptance:** at each admitted entrypoint prove resource ownership, cancellation,
-descendant settlement and trustworthy terminal evidence, including the real Windows
-CLI boundary. Unsupported routes remain typed unavailable before launch. Replace
-an unavailable expectation only with demonstrated contract coverage; source-to-
-installed parity and lifecycle evidence are required where installation changes.
+**Conditional Rust-library alternative:** compare an owner-local Python completion
+against replacing the smallest low-level process-ownership component with existing
+libraries, not rewriting the orchestrator. [process-wrap](https://github.com/watchexec/process-wrap)
+provides composable Windows Job Object and POSIX group/session wrappers, not the
+complete runner lifecycle. Its `std` and Tokio frontends are alternatives; do not
+add the Tokio asynchronous runtime without a demonstrated need. Check the selected
+features and transitive dependencies: the current upstream manifest already uses
+Unix `nix` and Windows bindings. Add [windows-rs](https://github.com/microsoft/windows-rs)
+bindings or [rustix](https://github.com/bytecodealliance/rustix) Unix primitives only
+for a proven uncovered operation, not as duplicate ownership layers.
+[cap-std](https://github.com/sunfishcode/cap-std) is a separate directory-relative
+capability candidate where path confinement is needed. Its protection applies to
+operations through its API, not arbitrary process operations; it is neither a
+whole-process sandbox nor a replacement for Windows access-control lists.
+
+These are upstream capabilities, not observed Orchestrarium integration guarantees.
+Installer text-ownership mistakes and Windows permission canonicalization errors
+remain application-logic issues; changing language or adding bindings does not fix
+them automatically. Before implementation, Architect and the current owner must
+admit the language boundary against the binding Python production-owner policy.
+Retain one owner and the existing request/result contract; remove superseded logic,
+with no dual Python/Rust execution or automatic fallback after an uncertain launch.
+
+Choose this alternative only if total complexity falls after counting any foreign-
+function or interprocess bridge, failure handling, build/platform matrix, binary
+packaging, updates and dependency maintenance. Pin the evaluated library revisions
+and features in implementation evidence. A thin native component does not remove
+Python from unrelated installed helpers; npm delivery is not blocked on this choice.
+No speed, safety or maintenance improvement is claimed without comparative evidence.
+
+**Acceptance:** compare both options against the same admitted contract. Probe spawn
+and partial-setup failure, handle ownership/closure, timeout/cancellation races,
+descendant cleanup and trustworthy terminal evidence at each supported entrypoint,
+including the actual Windows CLI private-directory boundary. Reconcile uncertain
+outcomes before retry; missing cleanup evidence is not success. For any directory
+capability, test path escape and alternate access paths; separately verify required
+Windows permissions. Unsupported routes stay typed unavailable before launch.
+Require source-to-installed/package parity, upgrade/removal evidence and no duplicate
+execution owner. Measured net simplification, not library presence or an unavailable
+Python route alone, decides whether this alternative earns implementation.
 
 ### 6. Safe cross-host continuation
 
@@ -412,4 +446,8 @@ Later implementation needs the probes under its own outcome and current gates.
 - Empirical arbitration: settling checkable disagreement with observed evidence.
 - JSON / YAML: JavaScript Object Notation / YAML Ain't Markup Language, structured
   data formats; PyYAML is a Python YAML parser.
-- Standard library: modules shipped with Python, distinct from third-party packages.
+- Standard library: language-shipped facilities (Python modules or Rust `std`),
+  distinct from third-party packages.
+- API: application programming interface; a library boundary, not a host sandbox.
+- Foreign-function / interprocess bridge: calls across language / process boundaries.
+- Windows Job Object: operating-system mechanism for managing a process group.
