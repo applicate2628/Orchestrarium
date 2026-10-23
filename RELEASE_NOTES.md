@@ -2,6 +2,11 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-24
+
+- Lead can use matching installed plugin methods, including Software Architect for architecture work and Ponytail for reuse and simplification, within the existing assigned role. Reuse guidance checks for already-satisfied behavior, follows a short ready-solution sequence, and preserves required fit; material architecture choices record determining quality priorities from accepted scenarios and constraints. Discovery follows the current host catalog; optional plugins add no installation requirement, mandatory stage, duplicate report or replacement for independent review, and conflicting or unrelated plugin requirements do not expand the task.
+
+
 ## 2026-10-23
 
 - Claude document reinstallation now uses a bundled Markdown parser to distinguish real installer ownership from quoted user examples, including list and quote continuations. Custom instructions and imports remain in position, failed classification stays write-free, and existing Python installation commands require no additional package setup. Missing private packages refuse before ambient code can run, and Windows file metadata changes retain the held object on Python 3.11 and newer.
