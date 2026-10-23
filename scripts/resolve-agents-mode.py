@@ -1819,7 +1819,7 @@ def resolve_external_dispatch(
         ordinary_role_admitted = (
             isinstance(eligible, list)
             and role_name in eligible
-            and role_lane != "consultant"
+            and role_lane in {"external-worker", "external-reviewer"}
         )
         task_mutation = task.get("mutationClass") if isinstance(task, dict) else None
         mutation_policy = realization["requiredMutationClass"]

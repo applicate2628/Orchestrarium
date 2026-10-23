@@ -20,7 +20,7 @@ For an enrolled native Goal, first apply the shared same-task/native-binding aut
    - If no `work-items/active/` directory or active item exists for the admitted work: create the work-item folder stub under `work-items/active/<date>-<slug>/`. Step 3 populates lead-owned artifacts.
    - Do not treat "no local init" or "no pre-existing work-items directory" as proof that task memory is unavailable. Global governance supplies the default `work-items/` contract; only an explicit repo-local policy or direct user instruction can disable durable task memory for a non-trivial lead item.
    - Lead CANNOT proceed to step 3 until required selected-item and dependency state is verified current or the new stub is created.
-   - **Admission source (ENFORCED):** every `roadmap.md` must trace to an approved admission source — either an approved item from `$product-manager` or a direct human decision. Lead CANNOT generate a roadmap item on its own authority. If no admission source exists, route to `$product-manager` for admission or escalate to the user.
+    - **Admission source (ENFORCED):** every `roadmap.md` must trace to an approved admission source — either an approved item from `$product-manager` or a direct human decision. A Product Manager recommendation does not provide user consent for new or unrelated functionality; keep that scope proposed until the user explicitly agrees to it. Lead CANNOT generate a roadmap item on its own authority. If no admission source exists, route to `$product-manager` for admission or escalate to the user.
 3. **Restore or create lead-owned task memory only**: `roadmap.md`, `brief.md`, `status.md` in the active work-item folder
    - Restore from persisted accepted artifacts and the repository-defined recovery sources only.
    - Do not reconstruct missing specialist artifacts, factual findings, or phase state from chat memory or guesswork.
@@ -362,8 +362,8 @@ When an accepted artifact asserts a root cause, a fix verification, or `diagnosi
 
 ## Re-intake rule
 
-- If an in-flight item no longer fits its admitted scope, priority, or milestone intent, stop delivery progression and route the item back to `$product-manager` for re-intake.
-- Do not silently redefine the item inside the delivery lane or compensate by stretching the phase plan.
+- If an in-flight item no longer fits its admitted scope, priority, or milestone intent, stop the affected progression and route it back to `$product-manager` for re-intake. Keep newly discovered extra functionality proposed until the user explicitly agrees to its bounded scope; continue independent work within the existing admission.
+- Do not silently redefine the item inside the delivery lane or compensate by stretching the phase plan. A clear direct user request and necessary causal fixes, required checks, and technical choices within that admitted outcome do not need a repeated Product Manager or consent step.
 - Use re-intake when the work itself has changed; use `REVISE` when the current role can still fix the artifact without changing the admitted item.
 - Re-intake cap: a single item may be re-intaked at most 2 times. On the 3rd re-intake request, the lead must escalate to the user with all prior re-intake reasons and ask for a final decision (reduce scope, defer, or cancel).
 

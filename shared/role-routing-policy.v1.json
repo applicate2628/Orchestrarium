@@ -241,6 +241,10 @@
       "defaultProfile": "frontier-high",
       "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
+    "product-manager": {
+      "defaultProfile": "frontier-high",
+      "allowedProfiles": ["balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
     "product-analyst": {
       "defaultProfile": "frontier-high",
       "allowedProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
@@ -353,7 +357,7 @@
     "mechanical": ["mechanical-worker"],
     "exploration": ["explorer", "analyst", "product-analyst"],
     "engineering": ["worker", "backend-engineer", "platform-engineer", "scientific-software-engineer", "knowledge-archivist", "frontend-engineer", "qt-ui-engineer", "model-view-engineer", "data-engineer", "toolchain-engineer", "geometry-engineer", "graphics-engineer", "visualization-engineer"],
-    "planning": ["analyst", "planner", "architect", "ux-designer", "consultant"],
+    "planning": ["analyst", "planner", "architect", "ux-designer", "consultant", "product-manager"],
     "review": ["qa-engineer", "architecture-reviewer", "security-reviewer", "performance-reviewer", "accessibility-reviewer", "ux-reviewer", "ui-test-engineer", "consultant"],
     "critical-design": ["architect", "architecture-reviewer", "algorithm-scientist", "computational-scientist", "performance-engineer", "reliability-engineer", "consultant"],
     "critical-security": ["security-engineer", "security-reviewer"],
