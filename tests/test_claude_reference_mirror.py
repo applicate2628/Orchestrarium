@@ -43,8 +43,8 @@ def test_current_claude_reference_mirror_is_contract_complete() -> None:
     assert ok, "\n".join(messages)
     assert "PASS: Claude reference mirror payloads 4/4" in messages
     assert "PASS: Claude reference mirror hooks 11/11" in messages
-    assert "PASS: Claude reference mirror status IDs 2/2" in messages
-    assert "PASS: Claude reference mirror user markers 4/4" in messages
+    assert "PASS: Claude reference mirror status IDs 1/1" in messages
+    assert "PASS: Claude reference mirror user markers 3/3" in messages
     assert "PASS: Russian hook-behavior-contracts payload pin" in messages
 
 

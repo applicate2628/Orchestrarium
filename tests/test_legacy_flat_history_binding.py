@@ -823,6 +823,17 @@ class CapturedHistoryBindingTests(unittest.TestCase):
         selected = v._acquire_captured_history_item(retained)
         self.assertTrue(self.owner._retained_preimage_consumer(payload, self.root / "work-items",
             scan_preparation=self.owner._RetainedConsumerScanPreparation(selected)))
+        # Without the actual selected acquisition the absent original cannot qualify.
+        self.assertFalse(self.owner._retained_preimage_consumer(payload, self.root / "work-items"))
+        current = selected.owner_input.files[payload].current
+        self.assertNotEqual(current.path, payload)
+        replacement = current.path.with_name(current.path.name + ".equal-bytes-replacement")
+        self.assertFalse(replacement.exists())
+        replacement.write_bytes(current.data)
+        self.assertNotEqual(replacement.stat().st_ino, current.path.stat().st_ino)
+        os.replace(replacement, current.path)
+        self.assertFalse(self.owner._retained_preimage_consumer(payload, self.root / "work-items",
+            scan_preparation=self.owner._RetainedConsumerScanPreparation(selected)))
 
     def test_genuine_h1_receipt_corruption_and_partial_set_refuse(self):
         spec = importlib.util.spec_from_file_location("history_binding_h1_negative_fixture",

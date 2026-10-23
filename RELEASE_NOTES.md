@@ -2,6 +2,12 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-23
+
+- Ledger recovery keeps original reader identities separate from current authority, carries a captured history's item context through receiving, and evaluates historical non-closer custody from its actual provenance. Completion helpers use qualified current settlement rather than the presence of a raw terminal row; duplicate completions, changed identities and missing proof still refuse. Unrelated observations remain visible without blocking a separate valid operation.
+- Existing review, retry, epic and external-execution instructions now follow their canonical shared owners, including substantive independent review without an unsupported model-diversity veto. External prompts receive the current artifact-disposition rules through the existing capsule, compiled digest and manifest; publication, provider and host safeguards remain enforced. Consultant and subagent routing reads normalize values in memory; configuration files change only during an authorized installation or same-scope configuration write. Pack checks enforce current file/stdin prompt delivery and retained manual-execution guarantees.
+- Claude's source-navigation hook now delivers a mandatory-duty reminder in force mode instead of treating a transcript marker as permission. The fitting-MCP obligation, current-root and freshness requirements, restricted alternatives and actual host decisions remain binding; advisory output does not establish compliance.
+
 ## 2026-10-22
 
 - Archive planning and historical receiving now share one byte-preserving projection of local references. Markdown destinations, selected query or fragment references, and independent bare paths retain their separate obligations, so valid mixed consumers can be archived and replayed without false custody failures while missing references and corrupt evidence remain rejected.

@@ -824,11 +824,16 @@ def test_mixed_candidate_reduction_is_linear(tmp_path: Path, monkeypatch: pytest
     assert large[0] <= small[0] * 5 // 2
 
 
-def _history_fixture(item: Path, *, extra: bool = False, orphan_closer: bool = False):
+def _history_fixture(item: Path, *, extra: bool = False, orphan_closer: bool = False,
+                     review_launch_effort: str | None = "high"):
     """Declared synthetic malformed history; never a normal producer recipe."""
     before, _candidate, _revise, _orphan = _mixed_candidate(item)
     (item / "status.md").write_text(minimal_staged_status(), encoding="utf-8")
     base = [json.loads(line) for line in before.splitlines()]
+    if review_launch_effort is None:
+        base[1].pop("effort", None)
+    else:
+        base[1]["effort"] = review_launch_effort
     base[2]["findingClass"] = "correctness"
     malformed_launch = {**base[1], "runId": "historic-launch-opaque", "scope": []}
     malformed_launch.pop("startedAt")
@@ -927,16 +932,26 @@ def test_history_custody_public_recording_preserves_obligations(tmp_path: Path, 
     assert (item / "agent-runs.jsonl").read_bytes() == current
 
 
-def test_history_custody_preserves_legitimate_orphan_closer(tmp_path: Path):
+@pytest.mark.parametrize("review_launch_effort", ["high", None], ids=["matching-effort", "omitted-effort"])
+def test_history_custody_preserves_legitimate_orphan_closer(tmp_path: Path, review_launch_effort):
     """Suppressing orphan relation diagnostics must not erase its legitimate closure axis."""
     item = tmp_path / "work-items" / "active" / "orphan-axis"
-    raw, request = _history_fixture(item, orphan_closer=True)
+    raw, request = _history_fixture(item, orphan_closer=True, review_launch_effort=review_launch_effort)
     applied = _history_cli(item, request)
     assert applied.returncode == 0, applied.stdout + applied.stderr
     validator = load_validator()
     states, axes = [], []
-    assert validator.validate_work_item(item, strict_revise=False, validate_status_file=False,
-                                      obligation_state_out=states, authority_state_out=axes) == []
+    errors = validator.validate_work_item(item, strict_revise=False, validate_status_file=False,
+                                         obligation_state_out=states, authority_state_out=axes)
+    if review_launch_effort == "high":
+        assert errors == []
+        assert states[0].open_launches == ()
+    else:
+        assert "effort" not in json.loads(raw.splitlines()[1])
+        assert errors == ["WI-LEDGER-LAUNCH-BINDING: review-revise-001: own launch review-launch-001 differs in effort"]
+        assert {row.run_id for row in states[0].open_launches} == {"review-launch-001"}
+        assert states[0]._current_result[1][2].current_schema_valid is True
+        assert axes[0][3] == validator.LedgerAuthorityV1(False, False, True, False, False)
     assert states[0].open_revise == ()
     assert axes[0][7] == validator.LedgerAuthorityV1(False, False, False, True, True)
     receipt = json.loads((item / "agent-runs.mixed.history-admission.receipt.json").read_bytes())
@@ -1384,3 +1399,116 @@ def test_history_disposition_proof_loss_reopens_real_target_and_preserves_raw_ro
     assert [json.loads(line).get("runId") for line in ledger.read_bytes().splitlines()] == raw_ids_before
     assert "historic-orphan-pass" in raw_ids_before
     assert "review-revise-001" in raw_ids_before
+
+
+@pytest.mark.parametrize("field,value,populated", [
+    ("runId", [], False),
+    ("artifact", {"opaque": "not-a-path"}, False),
+    ("runId", 17, True),
+    ("artifact", ["not-a-path"], True),
+    ("artifact", 17, True),
+], ids=["list-run-id-empty", "object-artifact-empty", "scalar-run-id-populated",
+        "list-artifact-populated", "scalar-artifact-populated"])
+def test_malformed_optional_custody_identity_preserves_real_rows_and_valid_launch(tmp_path, field, value, populated):
+    from tests.test_mutate_work_item import historical_pass_fixture, run_cli
+
+    owner, root, item, _original, _source, accepted, before, args = historical_pass_fixture(tmp_path)
+    validator = owner._load_agent_run_ledger().load_validator()
+    if populated:
+        applied = run_cli(*args, "--apply")
+        assert applied.returncode == 0, applied.stdout + applied.stderr
+    launch = {**accepted, "runId": "typed-key-valid-launch", "eventKind": "launch",
+              "status": "running", "gate": "none"}
+    launch.pop("artifact")
+    launch.pop("evidence")
+    ledger = item / "agent-runs.jsonl"
+    clean = before + _line(launch)
+    ledger.write_bytes(clean)
+    assert validator.validate_work_item(item, strict_revise=False, validate_status_file=False) == []
+    malformed = {**accepted, "runId": "typed-key-invalid-row", field: value}
+    raw = clean + _line(malformed)
+    ledger.write_bytes(raw)
+    states, axes, acquisition = [], [], []
+    errors = validator.validate_work_item(item, strict_revise=False, validate_status_file=False,
+        obligation_state_out=states, authority_state_out=axes, ledger_acquisition_complete_out=acquisition)
+    assert errors and any(field in message for message in errors)
+    assert acquisition == [True]
+    assert ledger.read_bytes() == raw and raw.startswith(before)
+    result = states[0]._current_result
+    assert len(result.context.rows) == len(result[1]) == 3
+    assert dict(result.context.rows[-1].event) == malformed
+    assert result[1][-1].current_schema_valid is False
+    assert axes[0][4] == validator._NO_LEDGER_AUTHORITY
+    assert result[1][1].current_schema_valid is True and axes[0][3].launch_eligible is True
+    assert axes[0][2].artifact_evidence_eligible is True
+    assert bool(result.context.historical_pass_custody) is populated
+    assert {row.run_id for row in states[0].open_launches} == {launch["runId"]}
+    parse_errors, metadata = [], []
+    events = validator.load_jsonl(ledger, parse_errors, metadata, source_bytes=raw)
+    assert parse_errors == []
+    locators, custody_errors = validator.resolve_historical_pass_custody(item, raw, events, metadata)
+    assert custody_errors == () and len(locators) == int(populated)
+    archive = root / "work-items/archive/2026-10" / item.name
+    archive.parent.mkdir(parents=True)
+    item.rename(archive)
+    archived_errors, _open_revise, open_launches = validator.validate_archived_ledger_obligations(archive)
+    assert archived_errors and any(field in message for message in archived_errors)
+    assert {row["runId"] for row in open_launches} == {launch["runId"]}
+    assert (archive / "agent-runs.jsonl").read_bytes() == raw
+
+
+def test_received_raw_controls_and_transformed_origins_keep_required_effects(tmp_path, monkeypatch):
+    """Raw publication identity survives projection without granting a denied effect."""
+    lifecycle = load_script(LIFECYCLE, "mixed_raw_projection_receiver")
+    item = tmp_path / "work-items/active/mixed-item"
+    original, request = _raw_mixed_request(item)
+    writer = lifecycle._load_agent_run_ledger()
+    validator = writer.load_validator()
+    events, controls, _facts = lifecycle._mixed_recovery_controls(item, original, request, writer, validator)
+    ordinary = _neutral_terminal(events[1], runId="raw-request-ordinary")
+    ordinary.pop("launchRunId")
+    ordinary["eventKind"] = "standalone"
+    requested = (*controls, ordinary)
+    candidate = original + b"".join((writer.serialize_event(row) + "\n").encode("utf-8") for row in requested)
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_bytes(candidate)
+    states, acquisition = [], []
+    diagnostics = validator.validate_work_item(item, strict_revise=False, validate_status_file=False,
+        obligation_state_out=states, ledger_acquisition_complete_out=acquisition)
+    assert diagnostics == [] and acquisition == [True]
+    strict_errors = validator.validate_work_item(item, validate_status_file=False)
+    assert any("\u2014" in message for message in strict_errors)
+    assert all("\u0420\u0406\u0420\u201a\u0432\u0402\u045c" not in message for message in strict_errors)
+    result, positions = writer._receive_append_operation(item, validator, states, acquisition,
+        diagnostics, original, candidate, requested)
+    assert [result.context.rows[pos].raw_line_ordinal for pos in positions] == [6, 7]
+    assert 5 not in [row.raw_line_ordinal for row in result.context.rows]
+    for invalid in (requested[1:], (*requested, ordinary), (requested[1], requested[0], ordinary),
+                    (*controls, {**ordinary, "scope": ["different requested bytes"]})):
+        with pytest.raises(ValueError, match="WI-LEDGER-OPERATION-RESULT"):
+            writer._receive_append_operation(item, validator, states, acquisition,
+                diagnostics, original, candidate, invalid)
+    replay, replay_positions = writer._receive_append_operation(item, validator, states, acquisition,
+        diagnostics, candidate, candidate, requested)
+    assert [replay.context.rows[pos].raw_line_ordinal for pos in replay_positions] == [6, 7]
+    for invalid in ((controls[0], controls[0]), ({**ordinary, "runId": "not-in-raw-selection"},)):
+        with pytest.raises(ValueError, match="WI-LEDGER-OPERATION-RESULT"):
+            writer._receive_append_operation(item, validator, states, acquisition,
+                diagnostics, candidate, candidate, invalid)
+    # The migration changes the source event's value. Raw replay still associates
+    # ordinal3, then the actual effect owner denies claiming it as a settlement.
+    transformed = next(row for row in result.context.rows if row.raw_line_ordinal == 3)
+    assert dict(transformed.event) != events[2]
+    assert transformed.raw_body_sha256 == _sha(original.splitlines()[2])
+    observed = []
+    project = validator._CurrentReductionV1.operation_diagnostics
+    def observe(self, *, requested_positions, strict, history=False):
+        if requested_positions:
+            observed.append(tuple(self.context.rows[pos].raw_line_ordinal for pos in requested_positions))
+        return project(self, requested_positions=requested_positions, strict=strict, history=history)
+    monkeypatch.setattr(validator._CurrentReductionV1, "operation_diagnostics", observe)
+    with pytest.raises(ValueError, match="WI-LEDGER-OPERATION-EFFECT"):
+        writer._receive_append_operation(item, validator, states, acquisition,
+            diagnostics, candidate, candidate, (events[2],))
+    assert observed[0] == (3,)
+    assert ledger.read_bytes() == candidate

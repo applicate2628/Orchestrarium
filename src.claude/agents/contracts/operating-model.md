@@ -89,7 +89,7 @@ For lead-managed work, consultant input at closeout is optional unless a repo-lo
 
 - The check uses `$consultant` as an advisory-only closure sweep; it does not replace reviewers, QA, or human/CI gates.
 - Follow the configured `consultantMode` honestly for any requested closure check.
-- If the selected consultant path is unavailable, disabled, or would downgrade in a way the current mode does not allow, do not mark the batch closed; record the miss and escalate to the user instead.
+- When an explicitly requested or repo-policy-required consultant check remains an admitted obligation under an enabled mode, report an unavailable or incompatible selected path as that scoped miss; do not switch routes or fabricate consultant output. `consultantMode: disabled` waives consultant closeout and creates no unused consultant deliverable or batch blocker.
 - The memo must end with both:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
   - The continuation prompt must begin with a direct imperative to continue and name the next concrete action.

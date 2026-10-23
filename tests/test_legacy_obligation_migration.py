@@ -433,10 +433,23 @@ def native_transfer_fixture(tmp_path: Path):
         json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()
     ]
     native_events[1]["findingClass"] = "correctness"
+    native_events[0]["scope"] = list(native_events[1]["scope"])
+    native_events[0]["effort"] = native_events[1]["effort"]
     ledger_path.write_bytes(b"".join(
         json.dumps(event, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8") + b"\n"
         for event in native_events
     ))
+    states = []
+    assert load_validator().validate_work_item(item, strict_revise=False, validate_status_file=False,
+        obligation_state_out=states) == []
+    current = states[0]._current_result
+    assert [event["runId"] for event in current[2]] == [expected["targetRunId"]]
+    assert not current[3] and current.context.history_custody == ()
+    target_authority = next(valid.authority for row, valid in zip(current.context.rows, current[1])
+                            if row.event["runId"] == expected["targetRunId"])
+    assert (target_authority.launch_eligible, target_authority.terminal_eligible,
+            target_authority.revise_target_eligible, target_authority.closer_eligible,
+            target_authority.artifact_evidence_eligible) == (False, True, True, False, True)
     ledger_before = ledger_path.read_bytes()
     instant = "2026-08-18T00:03:00Z"
     (item / "bug-dispositions.json").write_text(json.dumps({

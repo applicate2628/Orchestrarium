@@ -1546,6 +1546,14 @@ def _ordinary_custody_snapshot(item: Path, snapshot: str, digest: str) -> bool:
         return False
 
 
+def _historical_pass_custody_key(raw_ordinal, raw_digest, run_id, artifact) -> tuple[int, str, str, str] | None:
+    """Return only identities in the existing historical-pass association domain."""
+    if (type(raw_ordinal) is int and isinstance(raw_digest, str)
+        and isinstance(run_id, str) and isinstance(artifact, str)):
+        return raw_ordinal, raw_digest, run_id, artifact
+    return None
+
+
 def _resolve_historical_pass_custody_from_inputs(
     item: Path, selected_ledger_bytes: bytes, events: Sequence[Mapping[str, object]],
     raw_metadata: Sequence[Mapping[str, object]], *,
@@ -1594,9 +1602,10 @@ def _resolve_historical_pass_custody_from_inputs(
         if not isinstance(selected_ledger_bytes, bytes):
             raise ValueError(f"{stale}: selected ledger is not captured bytes")
         identities = {
-            (metadata.get("line"), metadata.get("sha256"), event.get("runId"), event.get("artifact")): event
+            key: event
             for event, metadata in zip(events, raw_metadata)
-            if isinstance(event.get("runId"), str) and isinstance(event.get("artifact"), str)
+            if (key := _historical_pass_custody_key(metadata.get("line"), metadata.get("sha256"),
+                                                   event.get("runId"), event.get("artifact"))) is not None
         }
         fields = {
             "kind", "sourcePrefixSha256", "sourcePrefixBytes", "rawLineOrdinal",
@@ -1625,18 +1634,21 @@ def _resolve_historical_pass_custody_from_inputs(
                 prefix = selected_ledger_bytes[:envelope["sourcePrefixBytes"]]
                 if hashlib.sha256(prefix).hexdigest() != envelope["sourcePrefixSha256"]:
                     raise ValueError(f"{stale}: captured source prefix differs")
-                identity = (
+                identity = _historical_pass_custody_key(
                     envelope["rawLineOrdinal"], envelope["rawLineSha256"],
                     envelope["runId"], envelope["originalArtifact"],
                 )
+                if identity is None:
+                    raise ValueError(f"{stale}: captured raw completed PASS identity differs")
                 event = identities.get(identity)
                 prefix_errors: list[str] = []
                 prefix_metadata: list[dict[str, object]] = []
                 prefix_events = load_jsonl(item / "agent-runs.jsonl", prefix_errors, prefix_metadata, prefix, ledger_resource_budget=ledger_resource_budget)
                 prefix_identities = {
-                    (metadata["line"], metadata["sha256"], row.get("runId"), row.get("artifact"))
+                    key
                     for row, metadata in zip(prefix_events, prefix_metadata)
-                    if isinstance(row.get("runId"), str) and isinstance(row.get("artifact"), str)
+                    if (key := _historical_pass_custody_key(metadata["line"], metadata["sha256"],
+                                                           row.get("runId"), row.get("artifact"))) is not None
                 }
                 if (
                     (prefix_errors and selected_association is None) or identity not in prefix_identities or event is None
@@ -2230,6 +2242,7 @@ class LedgerCompatibilityArtifactSetV1:
     receipt_bytes_by_path: Mapping[str, bytes]
     participant_locations_by_path: Mapping[str, object] = field(default_factory=dict)
     _selected_inputs: tuple[object, ...] = field(default=(), compare=False, repr=False)
+    historical_wire_bytes_by_path: Mapping[str, bytes] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -2391,7 +2404,8 @@ class _CurrentPredicateV1:
             elif self.kind == "custody":
                 good = _ordinary_custody_snapshot(self.item, self.locator, self.digest)
             elif self.kind == "retained":
-                owner._verify_captured_file(self.snapshot, "WI-RETAINED-PREIMAGE")
+                owner._verify_captured_file(self.snapshot, "WI-RETAINED-PREIMAGE",
+                    acquired_input=self.item if isinstance(self.item, _CapturedHistoryPath) else None)
                 good = True
             else:
                 if self.snapshot is not None:
@@ -2758,11 +2772,12 @@ class _CurrentReductionV1(tuple):
             [_current_object(event) for event in values[2]], [_current_object(event) for event in values[3]])
         result = super().__new__(cls, detached)
         result.context = context
-        result.diagnostics = tuple(diagnostics)
         result.admission_diagnostics = tuple(admission_diagnostics)
         result.current_diagnostics = tuple(diagnostics if current_diagnostics is None else current_diagnostics)
         result.relation_diagnostics = tuple(relation_diagnostics)
         result.closure_diagnostics = tuple(closure_diagnostics)
+        result.diagnostics = (*result.admission_diagnostics, *result.current_diagnostics,
+                              *result.relation_diagnostics, *result.closure_diagnostics)
         result.telemetry = dict(getattr(values, "telemetry", {}) if telemetry is None else telemetry)
         result._semantic_image = result.semantic_image()
         return result
@@ -2810,6 +2825,40 @@ class _CurrentReductionV1(tuple):
             return None
         return owner.receive_again(retain_relations=True) if qualify else self
 
+    def operation_diagnostics(self, *, requested_positions: tuple[int, ...], strict: bool,
+                              history: bool = False) -> tuple[str, ...]:
+        """Project actual operation requirements without changing authority or observations."""
+        if (type(requested_positions) is not tuple or type(strict) is not bool or type(history) is not bool
+            or any(type(position) is not int or position < 0 or position >= len(self.context.rows)
+                   for position in requested_positions)
+            or len(set(requested_positions)) != len(requested_positions)
+            or len(self[1]) != len(self.context.rows) or not self.projection_is_bound()):
+            return (*self.diagnostics, "WI-LEDGER-OPERATION-RESULT: requested result binding is invalid")
+        failures = []
+        open_revises = {event.get("runId") for event in self[2]}
+        open_launches = {event.get("runId") for event in self[3]}
+        for position in requested_positions:
+            event = self.context.rows[position].event
+            entry = self[1][position]
+            run_id = event.get("runId")
+            if not entry.current_schema_valid:
+                fail(failures, f"WI-LEDGER-OPERATION-EFFECT: {run_id}: requested row lacks current individual validity")
+            control = history_owner_control(event)
+            if event.get("eventKind") == "launch" and not entry.authority.launch_eligible:
+                fail(failures, f"WI-LEDGER-OPERATION-EFFECT: {run_id}: requested launch is not eligible")
+            if event.get("eventKind") == "terminal" or ("launchRunId" in event and not control):
+                if not entry.authority.terminal_eligible or event.get("launchRunId") in open_launches:
+                    fail(failures, f"WI-LEDGER-OPERATION-EFFECT: {run_id}: requested launch settlement was not qualified")
+            if event.get("closesRunIds") and (not entry.authority.closer_eligible
+                                              or any(target in open_revises for target in event["closesRunIds"])):
+                fail(failures, f"WI-LEDGER-OPERATION-EFFECT: {run_id}: requested review closure was not qualified")
+        obligations = self.obligation_diagnostics(strict=strict, history=history)
+        if failures:
+            return (*self.diagnostics, *failures, *obligations)
+        return (*self.admission_diagnostics, *self.current_diagnostics, *self.relation_diagnostics,
+                *(self.closure_diagnostics if strict else ()), *obligations)
+
+
     def consume_status(self, item, errors, current_open_launch_ids):
         result = self.receive(item, errors, qualify=False)
         if result is None:
@@ -2817,13 +2866,18 @@ class _CurrentReductionV1(tuple):
         owner = _context_evaluation(result.context)
         previous = owner.borrowed_context
         owner.borrowed_context = result.context
+        status_errors = []
         try:
-            validate_status(item, result.context, errors,
+            validate_status(item, result.context, status_errors,
                 current_open_launch_ids=current_open_launch_ids if result is self else tuple(
                     event["runId"] for event in result[3] if isinstance(event.get("runId"), str)))
         finally:
             owner.borrowed_context = previous
-        return result.receive(item, errors, qualify=False)
+        result = result.receive(item, errors, qualify=False)
+        if result is not None and status_errors:
+            result = result.with_admission(tuple(status_errors), errors)
+        errors.extend(status_errors)
+        return result
 
     def publish(self, obligation_state_out, authority_state_out):
         _capture_obligation_state(obligation_state_out, self.context.rows, self[2], self[3],
@@ -2873,7 +2927,7 @@ class _CurrentLedgerEvaluationV1:
     """Issuer-owned retained selection, prepared facts, and completed result."""
 
     def __init__(self, item, selected_path, raw, rows, custody=None, candidate_blobs=None,
-                 *, inputs=None, prefix_lines=0, raw_v2=True, context=None,
+                 *, native_rows, inputs=None, prefix_lines=0, raw_v2=True, context=None,
                  archive_rows=None, archive_authorizations=None, normalized_rows=False,
                  selection_diagnostics=()):
         self.item, self.selected_path, self.raw = item, selected_path, raw
@@ -2899,8 +2953,11 @@ class _CurrentLedgerEvaluationV1:
         self.result = None
         if isinstance(item, _CapturedHistoryPath) and not normalized_rows:
             self.inputs.bind_captured_selection(item)
-        self.selected_input = None
         self._admission_diagnostics = tuple(selection_diagnostics)
+        self.selected_input = _CurrentLedgerSelectionV1(self.item, self.selected_path, self.raw,
+            _current_rows_copy(native_rows), self.custody, self.candidate_blobs, (),
+            self.inputs.captured_selection, self._admission_diagnostics, b"", self.target_key)
+        self.selected_input = replace(self.selected_input, semantic_image=self.selection_image())
 
     def admission_diagnostics(self):
         return self.selected_input.diagnostics if self.selected_input is not None else self._admission_diagnostics
@@ -2914,7 +2971,7 @@ class _CurrentLedgerEvaluationV1:
             and context.historical_pass_custody is issued.historical_pass_custody
             and context.history_custody is issued.history_custody
             and context.unresolved_history is issued.unresolved_history
-            and (self.borrowed_context is context or self.selected_input is not None))
+            and (self.borrowed_context is context or (self.selected_input is not None and self.result is not None)))
         if structural:
             # Ordered receiving: structural association, actual operation target,
             # then the independent semantic image. No target I/O has occurred.
@@ -2966,6 +3023,7 @@ class _CurrentLedgerEvaluationV1:
             [[record.original_path, record.byte_length, record.sha256] for record in captured.files],
             list(captured.absent_paths), [[path, list(members)] for path, members in captured.directory_members.items()]]
         return _canonical_projection_bytes([self.selected_path, hashlib.sha256(self.raw).hexdigest(),
+            _current_rows_image(self.selected_input.rows if self.selected_input is not None else ()),
             _current_rows_image(self.base_rows), _current_custody_image(self.custody),
             [[key, hashlib.sha256(value).hexdigest()] for key, value in self.candidate_blobs.items()], archive, captured_image])
 
@@ -3000,11 +3058,10 @@ class _CurrentLedgerEvaluationV1:
             template.group_open_launch_ids if template is not None else (), token,
             self.custody, _unresolved_history(holds), tuple(holds), self)
         self.seal(_current_context_copy(context, self))
-        if not temporary and self.selected_input is None:
-            self.selected_input = _CurrentLedgerSelectionV1(self.item, self.selected_path, self.raw,
-                self.base_rows, self.custody, self.candidate_blobs, self.inputs.freeze_selection_keys(),
-                self.inputs.captured_selection, self._admission_diagnostics, self.selection_image(), self.target_key)
-            self._admission_diagnostics = ()
+        if not temporary:
+            self.selected_input = replace(self.selected_input,
+                required_keys=self.inputs.freeze_selection_keys(),
+                captured_binding=self.inputs.captured_selection, semantic_image=self.selection_image())
         return self.context
 
     def assemble(self, *, public_derive):
@@ -3030,10 +3087,11 @@ class _CurrentLedgerEvaluationV1:
                                    if row.event.get("invalidationMode") == _INVALID_CURRENT_DISPOSITION_MODE
                                    and type(row.event.get("invalidatesRawLineOrdinal")) is int)
             for row in self.base_rows:
-                if row.epoch in {"manifest-profile", "transferred"}:
+                if row.epoch == "manifest-profile":
                     continue
-                snapshot = self.custody.get((row.raw_line_ordinal, row.raw_body_sha256,
-                    row.event.get("runId"), row.event.get("artifact")))
+                key = _historical_pass_custody_key(row.raw_line_ordinal, row.raw_body_sha256,
+                    row.event.get("runId"), row.event.get("artifact"))
+                snapshot = self.custody.get(key) if key is not None else None
                 if snapshot is None or row.raw_line_ordinal in default_targets:
                     _validate_event(dict(row.event), self.item, set(), [], _inputs=self.inputs)
                 if snapshot is not None:
@@ -3111,6 +3169,74 @@ class _CurrentLedgerEvaluationV1:
         return _CurrentReductionV1(self.result, context, result.diagnostics, result.telemetry,
             admission_diagnostics=result.admission_diagnostics, current_diagnostics=result.current_diagnostics,
             relation_diagnostics=result.relation_diagnostics, closure_diagnostics=result.closure_diagnostics)
+
+    def admission_preimage(self, original_bytes):
+        """Evaluate original physical rows under this operation's authenticated admissions."""
+        if (type(original_bytes) is not bytes or not original_bytes or not original_bytes.endswith(b"\n")
+            or not self.private_selection_is_bound(self.item) or not self.inputs.authority_qualified()
+            or not self.selected_input.raw.startswith(original_bytes)):
+            raise ValueError("WI-LEDGER-HISTORY-BINDING: admitted preimage selection differs")
+        physical = original_bytes.splitlines(keepends=True)
+        original_rows = []
+        for ordinal, line in enumerate(physical, 1):
+            digest = hashlib.sha256(line.rstrip(b"\r\n")).hexdigest()
+            matches = [row for row in self.base_rows
+                       if row.raw_line_ordinal == ordinal and row.raw_body_sha256 == digest]
+            if len(matches) != 1:
+                raise ValueError("WI-LEDGER-HISTORY-BINDING: original physical row association differs")
+            original_rows.append(matches[0])
+        admissions = []
+        for hold in self.result.context.history_custody:
+            if hold.raw_line_ordinal > len(physical):
+                continue
+            controls = [row for row in self.base_rows
+                        if row.event.get("runId") == hold.admission_run_id]
+            if (len(controls) != 1 or controls[0].event.get("custodyAction") != "admit"
+                or controls[0].event.get("rawLineOrdinal") != hold.raw_line_ordinal
+                or controls[0].event.get("sourcePrefixSha256") != hold.source_prefix_sha256
+                or controls[0].event.get("sourcePrefixBytes") != hold.source_prefix_bytes
+                or controls[0].event.get("physicalLineSha256") != hold.raw_line_sha256
+                or hold.source_prefix_bytes > len(original_bytes)
+                or hashlib.sha256(original_bytes[:hold.source_prefix_bytes]).hexdigest() != hold.source_prefix_sha256
+                or hashlib.sha256(physical[hold.raw_line_ordinal - 1]).hexdigest() != hold.raw_line_sha256
+                or original_rows[hold.raw_line_ordinal - 1].event != hold.event):
+                raise ValueError("WI-LEDGER-HISTORY-BINDING: authenticated admission does not bind original rows")
+            # Only validated identity/classification enters this view. Candidate
+            # masks, authority_before and later disposal/proof effects are not inputs.
+            admissions.append(HistoricalLedgerHoldV1(hold.source_prefix_sha256, hold.source_prefix_bytes,
+                hold.raw_line_ordinal, hold.raw_line_sha256, hold.admission_run_id,
+                original_rows[hold.raw_line_ordinal - 1].event, _NO_LEDGER_AUTHORITY))
+        if not admissions:
+            raise ValueError("WI-LEDGER-HISTORY-BINDING: selected admission unavailable")
+        current = copy.copy(self)
+        current.inputs = copy.copy(self.inputs)
+        current.inputs.relation_diagnostics = current.inputs.closure_diagnostics = None
+        current.inputs.borrowed_disposition = None
+        current.raw, current.base_rows = original_bytes, tuple(original_rows)
+        current.selected_input = current.result = current.context = current.borrowed_context = None
+        current.predecessor = self.result.context
+        rows, notices, suffix_errors = _apply_active_suffix_dispositions(current.base_rows, self.item,
+            self.selected_path, self.prefix_lines, raw_v2=self.raw_v2,
+            allow_orphan=any(row.event.get("schemaVersion") == 1 for row in original_rows), _inputs=current.inputs)
+        context = current.issue(rows, (), suffix_errors, notices, temporary=True)
+        current.borrowed_context = context
+        try:
+            rows, previous_holds, _errors = _apply_history_custody(context.rows, self.item, original_bytes,
+                self.custody, self.candidate_blobs, context=context, _inputs=current.inputs)
+        finally:
+            current.borrowed_context = None
+        by_ordinal = {hold.raw_line_ordinal: hold for hold in admissions}
+        by_ordinal.update({hold.raw_line_ordinal: hold for hold in previous_holds})
+        context = current.issue(rows, tuple(by_ordinal.values()), suffix_errors, notices, temporary=True)
+        current.borrowed_context = context
+        try:
+            _positions, validity, _revises, _launches = _reduce_current_state_from_inputs(
+                context.rows, self.item, [], None, context=context, _inputs=current.inputs,
+                public_derive=False, _admission_rows=self.base_rows)
+        finally:
+            current.borrowed_context = None
+        return validity
+
 
     def extend_admission(self, diagnostics):
         retained = self.result
@@ -3542,8 +3668,10 @@ def _validate_event_fields(
                     or hashlib.sha256(snapshot.data).hexdigest() != profile["sha256"]):
                     raise ValueError("WI-RETAINED-PREIMAGE: captured payload binding differs")
                 key = ("retained", expected_path, profile["byteCount"], profile["sha256"])
+                if isinstance(item, _CapturedHistoryPath):
+                    key += (item,)
                 predicate = _inputs.predicates.setdefault(key, _CurrentPredicateV1(
-                    "retained", expected_path, True, snapshot=snapshot))
+                    "retained", expected_path, True, item=item, snapshot=snapshot))
                 _evidence.require(predicate, "WI-RETAINED-PREIMAGE: captured payload changed")
             except (ValueError, OSError, load_lifecycle_owner().LifecycleError) as exc:
                 fail(errors, str(exc) if str(exc).startswith("WI-RETAINED-PREIMAGE") else f"WI-RETAINED-PREIMAGE: {exc}")
@@ -4039,20 +4167,68 @@ def _launch_profile_is_exact(event: Mapping[str, object]) -> bool:
     )
 
 
+def launch_terminal_binding_mismatches(launch, terminal) -> tuple[str, ...]:
+    """Compare the existing commission with exact JSON presence and values."""
+    def equal(left, right):
+        if type(left) is not type(right):
+            return False
+        if type(left) is list:
+            return len(left) == len(right) and all(equal(a, b) for a, b in zip(left, right))
+        if type(left) is dict:
+            return left.keys() == right.keys() and all(equal(left[key], right[key]) for key in left)
+        return left == right
+
+    binding_fields = (
+        "workItem", "role", "executionRole", "assignedRole", "provider", "model",
+        "scope", "promptFile", "effort", "launchFlags",
+    )
+    return tuple(key for key in binding_fields
+                 if (key in launch) != (key in terminal)
+                 or (key in launch and not equal(launch[key], terminal[key])))
+
+
+def _current_admitted_orphan(row, current_ok, admission, known_run_ids):
+    """Authenticated physical admission plus acquired absence; never a failed pair."""
+    launch_id = row.event.get("launchRunId")
+    return bool(current_ok and admission is not None
+        and admission.raw_line_ordinal == row.raw_line_ordinal and admission.event == row.event
+        and row.event.get("eventKind") == "terminal" and isinstance(launch_id, str)
+        and launch_id.casefold() not in known_run_ids)
+
+
+def _current_row_authority(row, current_ok, launch, terminal, revise, admitted_orphan, proof_failed):
+    """One current owner derives independent and launch-dependent row permissions."""
+    event = row.event
+    launch_bound = event.get("eventKind") == "terminal" or "launchRunId" in event
+    dependent = (not launch_bound or terminal or admitted_orphan) and not proof_failed
+    eligible = current_ok and row.epoch != "migration-replaced"
+    return LedgerAuthorityV1(launch, terminal, revise,
+        bool(eligible and dependent and event.get("gate") in CLOSURE_GATES
+             and isinstance(event.get("closesRunIds"), list) and event["closesRunIds"]),
+        bool(eligible and dependent and ("artifact" in event or "evidence" in event)))
+
+
 def _derive_authority_masks(
     rows: Sequence[RuntimeLedgerRowV1], current_validity: Sequence[bool], item: Path,
     historical_pass_custody: Mapping[tuple[int, str, str, str], str] | None = None,
     *,
+    _definition: Literal["current", "historical"],
     policy: Literal["current", "archive"] = "current",
+    _diagnostics: list[str] | None = None,
+    _telemetry: dict[str, int] | None = None,
     _inputs: _CurrentEvidenceV1 | None = None,
     _history_custody: Sequence[HistoricalLedgerHoldV1] = (),
+    _admission_rows: Sequence[RuntimeLedgerRowV1] | None = None,
     _selection_qualified: bool = True,
 ) -> tuple[LedgerAuthorityV1, ...]:
     """Derive five axes from validated eligibility under one internal policy."""
 
     if policy not in {"current", "archive"}:
         raise ValueError("unsupported internal ledger authority policy")
+    if _definition not in {"current", "historical"}:
+        raise ValueError("unsupported internal ledger authority definition")
     current_policy = policy == "current"
+    historical_definition = _definition == "historical"
 
     positions: dict[str, list[int]] = {}
     for pos, row in enumerate(rows):
@@ -4060,12 +4236,18 @@ def _derive_authority_masks(
         if isinstance(run_id, str) and run_id:
             positions.setdefault(run_id, []).append(pos)
 
+    admissions = {hold.raw_line_ordinal: hold for hold in _history_custody}
+    known_run_ids = {row.event["runId"].casefold() for row in (_admission_rows if _admission_rows is not None else rows)
+                     if isinstance(row.event.get("runId"), str)}
+    admitted_orphans = tuple(_current_admitted_orphan(row,
+        pos < len(current_validity) and current_validity[pos], admissions.get(row.raw_line_ordinal), known_run_ids)
+        for pos, row in enumerate(rows))
     launch_eligible = [False] * len(rows)
     for pos, row in enumerate(rows):
         event = row.event
         run_id = event.get("runId")
         current_ok = pos < len(current_validity) and current_validity[pos]
-        historical_ok = current_policy and row.epoch in {"sealed-prefix", "transferred"}
+        historical_ok = historical_definition and current_policy and row.epoch in {"sealed-prefix", "transferred"}
         launch_eligible[pos] = bool(
             (current_ok or historical_ok)
             and isinstance(run_id, str)
@@ -4081,22 +4263,26 @@ def _derive_authority_masks(
             launch_eligible[pos] = row.authority.launch_eligible
 
     terminal_eligible = [False] * len(rows)
-    settled: set[str] = set()
+    settled: dict[str, str] = {}
     for pos, row in enumerate(rows):
         event = row.event
         run_id = event.get("runId")
         launch_id = event.get("launchRunId")
         current_ok = pos < len(current_validity) and current_validity[pos]
-        historical_ok = current_policy and row.epoch in {"sealed-prefix", "transferred"}
+        historical_ok = historical_definition and current_policy and row.epoch in {"sealed-prefix", "transferred"}
         launch_positions = positions.get(launch_id, ()) if isinstance(launch_id, str) else ()
         target_pos = launch_positions[0] if len(launch_positions) == 1 else None
         target = rows[target_pos].event if target_pos is not None else None
-        flags_match = False
+        binding_matches = False
+        mismatches = ()
         if target is not None:
-            if "launchFlags" not in target:
-                flags_match = "launchFlags" not in event
+            if not historical_definition:
+                mismatches = launch_terminal_binding_mismatches(target, event)
+                binding_matches = not mismatches
+            elif "launchFlags" not in target:
+                binding_matches = "launchFlags" not in event
             else:
-                flags_match = (
+                binding_matches = (
                     event.get("launchFlags") == target.get("launchFlags")
                     and _launch_profile_is_exact(event)
                 )
@@ -4114,21 +4300,50 @@ def _derive_authority_masks(
             and target_pos < pos
             and launch_eligible[target_pos]
             and launch_id not in settled
-            and flags_match
+            and binding_matches
         )
         terminal_eligible[pos] = eligible
-        if current_policy and row.epoch == "historical-custody":
+        if historical_definition and current_policy and row.epoch == "historical-custody":
             terminal_eligible[pos] = row.authority.terminal_eligible
             eligible = terminal_eligible[pos]
+        if not historical_definition and current_ok and row.epoch != "migration-replaced" \
+            and not admitted_orphans[pos] and event.get("eventKind") == "terminal" \
+            and _diagnostics is not None:
+            current_relation_diagnostic = True
+            def bump(rule):
+                if _telemetry is not None:
+                    _telemetry[rule] = _telemetry.get(rule, 0) + 1
+            if current_relation_diagnostic or eligible:
+                bump("lifecycle-terminal-checked")
+            if target_pos is None or target_pos >= pos:
+                if current_relation_diagnostic:
+                    fail(_diagnostics, f"{run_id}: launchRunId {launch_id} does not reference an earlier event")
+                    bump("lifecycle-dangling-launch")
+            elif target.get("eventKind") != "launch":
+                if current_relation_diagnostic:
+                    fail(_diagnostics, f"{run_id}: launchRunId {launch_id} references a non-launch event")
+                    bump("lifecycle-nonlaunch-ref")
+            elif not launch_eligible[target_pos]:
+                if current_relation_diagnostic:
+                    fail(_diagnostics, f"{run_id}: launchRunId {launch_id} references an invalid launch event")
+                    bump("lifecycle-invalid-launch-ref")
+            elif not binding_matches:
+                fields = ", ".join(mismatches)
+                fail(_diagnostics, f"WI-LEDGER-LAUNCH-BINDING: {run_id}: own launch {launch_id} differs in {fields}")
+                bump("lifecycle-launch-flags-mismatch" if "launchFlags" in mismatches
+                     else "lifecycle-launch-binding-mismatch")
+            elif current_relation_diagnostic and launch_id in settled:
+                fail(_diagnostics, f"{run_id}: duplicate terminal for launch {launch_id} (first: {settled[launch_id]})")
+                bump("lifecycle-duplicate-terminal")
         if eligible:
-            settled.add(launch_id)
+            settled[launch_id] = run_id
 
     failed_custody_ordinals = {hold.raw_line_ordinal for hold in _history_custody if hold._disposition_failed}
     masks: list[LedgerAuthorityV1] = []
     for pos, row in enumerate(rows):
         event = row.event
         current_ok = pos < len(current_validity) and current_validity[pos]
-        if current_policy and row.epoch == "historical-custody":
+        if historical_definition and current_policy and row.epoch == "historical-custody":
             proof_failed = row.raw_line_ordinal in failed_custody_ordinals
             masks.append(replace(row.authority, closer_eligible=False, artifact_evidence_eligible=False)
                          if proof_failed else row.authority)
@@ -4136,14 +4351,13 @@ def _derive_authority_masks(
         if event.get("eventKind") == "closure-invalidation":
             masks.append(_NO_LEDGER_AUTHORITY)
             continue
-        if current_policy and row.epoch == "sealed-prefix":
+        if historical_definition and current_policy and row.epoch == "sealed-prefix":
             isolated_errors: list[str] = []
+            key = _historical_pass_custody_key(row.raw_line_ordinal, row.raw_body_sha256,
+                                             event.get("runId"), event.get("artifact"))
             individually_current = _validate_event(
                 dict(event), item, set(), isolated_errors,
-                historical_pass_snapshot=(historical_pass_custody or {}).get((
-                    row.raw_line_ordinal, row.raw_body_sha256,
-                    event.get("runId"), event.get("artifact"),
-                )),
+                historical_pass_snapshot=(historical_pass_custody or {}).get(key) if key is not None else None,
                 _inputs=_inputs,
             )
         else:
@@ -4151,7 +4365,7 @@ def _derive_authority_masks(
         revise = bool(
             (current_policy and row.authority.revise_target_eligible)
             or (
-                (current_ok or (current_policy and row.epoch in {"sealed-prefix", "transferred"}))
+                (current_ok or (historical_definition and current_policy and row.epoch in {"sealed-prefix", "transferred"}))
                 and event.get("schemaVersion") == 2
                 and event.get("gate") == "REVISE"
                 and isinstance(event.get("runId"), str)
@@ -4169,11 +4383,10 @@ def _derive_authority_masks(
             individually_current and row.epoch != "migration-replaced"
             and ("artifact" in event or "evidence" in event)
         )
-        masks.append(
-            LedgerAuthorityV1(
-                launch_eligible[pos], terminal_eligible[pos], revise, closer, artifact
-            )
-        )
+        masks.append(LedgerAuthorityV1(launch_eligible[pos], terminal_eligible[pos], revise, closer, artifact)
+                     if historical_definition else _current_row_authority(row, individually_current,
+                         launch_eligible[pos], terminal_eligible[pos], revise, admitted_orphans[pos],
+                         row.raw_line_ordinal in failed_custody_ordinals))
     return tuple(masks) if _selection_qualified else tuple(
         replace(mask, terminal_eligible=False, closer_eligible=False, artifact_evidence_eligible=False)
         for mask in masks)
@@ -4187,6 +4400,8 @@ def _derive_event_validity_from_inputs(
     validate_schema_version: int | None = None,
     context: LedgerValidationContextV1 | None = None,
     _inputs: _CurrentEvidenceV1 | None = None,
+    _qualification_diagnostics: list[str] | None = None,
+    _admission_rows: Sequence[RuntimeLedgerRowV1] | None = None,
 ) -> tuple[LedgerEventValidityV1, ...]:
     """Validate current epochs and retain sealed-prefix authority independently."""
 
@@ -4202,14 +4417,18 @@ def _derive_event_validity_from_inputs(
     # The resolver has checked the exact digest against captured bytes; only its
     # own context rows may consume that locator, never projected/inherited rows.
     custody = {
-        (ordinal, run_id, artifact): snapshot
-        for (ordinal, _digest, run_id, artifact), snapshot in (
+        (key[0], key[2], key[3]): snapshot
+        for (ordinal, digest, run_id, artifact), snapshot in (
             context.historical_pass_custody.items()
             if context is not None and context.rows is rows else ()
         )
+        if (key := _historical_pass_custody_key(ordinal, digest, run_id, artifact)) is not None
     }
     for row in rows:
         event = row.event
+        key = _historical_pass_custody_key(row.raw_line_ordinal, row.raw_body_sha256,
+                                          event.get("runId"), event.get("artifact"))
+        reduced_key = (key[0], key[2], key[3]) if key is not None else None
         if row.epoch == "historical-custody":
             isolated_errors: list[str] = []
             current.append(_validate_event(dict(event), item, set(), isolated_errors, _inputs=_inputs))
@@ -4223,17 +4442,20 @@ def _derive_event_validity_from_inputs(
             and "invalidationMode" not in event:
             current.append(_validate_event(dict(event), item, seen, errors, _inputs=_inputs))
             continue
-        if row.epoch in {
-            "manifest-profile", "sealed-prefix", "disposed-suffix", "disposed-raw", "transferred"
-        } or (
+        if row.epoch in {"sealed-prefix", "transferred"}:
+            isolated_errors: list[str] = []
+            snapshot = custody.get(reduced_key) if reduced_key is not None else None
+            current.append(_validate_event(dict(event), item, set(), isolated_errors,
+                historical_pass_snapshot=snapshot, _inputs=_inputs))
+            continue
+        if row.epoch in {"manifest-profile", "disposed-suffix", "disposed-raw"} or (
             validate_schema_version is not None
             and event.get("schemaVersion") != validate_schema_version
         ):
             current.append(False)
             continue
-        snapshot = custody.get((row.raw_line_ordinal, event.get("runId"), event.get("artifact"))) \
-            if row.epoch in {"raw", "strict-suffix"} and isinstance(event.get("runId"), str) \
-            and isinstance(event.get("artifact"), str) else None
+        snapshot = (custody.get(reduced_key)
+                    if row.epoch in {"raw", "strict-suffix"} and reduced_key is not None else None)
         current.append(_validate_event(
             dict(event), item, seen, errors, historical_pass_snapshot=snapshot, _inputs=_inputs
         ))
@@ -4243,6 +4465,9 @@ def _derive_event_validity_from_inputs(
         _inputs=_inputs,
         _history_custody=context.history_custody if context is not None else (),
         _selection_qualified=_inputs.authority_qualified() if _inputs is not None else True,
+        _diagnostics=_qualification_diagnostics, _definition="current",
+        _admission_rows=(_admission_rows if _admission_rows is not None else
+            _context_evaluation(context).base_rows if context is not None else rows),
     )
     return tuple(
         LedgerEventValidityV1(current_schema_valid=value, authority=mask)
@@ -4274,11 +4499,13 @@ def derive_event_validity(
     inputs = _CurrentEvidenceV1()
     initial_errors: list[str] = []
     result = _derive_event_validity_from_inputs(rows, item, initial_errors,
-        validate_schema_version=validate_schema_version, context=context, _inputs=inputs)
+        validate_schema_version=validate_schema_version, context=context, _inputs=inputs,
+        _qualification_diagnostics=initial_errors)
     if inputs.receive():
         initial_errors = []
         result = _derive_event_validity_from_inputs(rows, item, initial_errors,
-            validate_schema_version=validate_schema_version, context=context, _inputs=inputs)
+            validate_schema_version=validate_schema_version, context=context, _inputs=inputs,
+            _qualification_diagnostics=initial_errors)
     errors.extend(initial_errors)
     return result
 
@@ -4334,16 +4561,16 @@ def _derive_archived_event_validity_from_inputs(
             and len(artifact_parts) > 2
             and artifact_parts[:2] == (".scratch", "reviews")
         )
+        key = _historical_pass_custody_key(row.raw_line_ordinal, row.raw_line_sha256,
+                                          event.get("runId"), event.get("artifact"))
         event_is_valid = _validate_event(
             event,
             item,
             seen,
             errors,
             historical_artifact_authorization=authorization,
-            historical_pass_snapshot=(historical_pass_custody or {}).get((
-                row.raw_line_ordinal, row.raw_line_sha256,
-                event.get("runId"), event.get("artifact"),
-            )) if row.transformation == "raw" else None,
+            historical_pass_snapshot=(historical_pass_custody or {}).get(key)
+                if row.transformation == "raw" and key is not None else None,
             legacy_archived_review_pointer_compat=legacy_archived_review_pointer_compat,
             telemetry=telemetry, _inputs=_inputs,
         )
@@ -4403,6 +4630,7 @@ def _reduce_closure_relations(
     event_validity: Sequence[LedgerEventValidityV1] | Sequence[bool] | None = None,
     _archived_preclose_v2_rows: frozenset[int] = frozenset(),
     _format1_effort: bool = False,
+    _definition: Literal["current", "historical"],
 ) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]]]:
     """Ledger-level REVISE-closure validation (decision 2026-07-16-review-verdict-closure,
     minimal slice). Returns (open_v2_revise_events, open_launch_events) — obligations never discharged/settled events (never discharged by a valid
@@ -4434,63 +4662,72 @@ def _reduce_closure_relations(
             if rid not in index:
                 index[rid] = (pos, event)
 
-    # Lifecycle integrity (only when eventKind is used): one terminal per launch,
-    # terminal references an earlier launch.
     terminals_by_launch: dict[str, str] = {}
-    relation_terminals_by_launch: dict[str, str] = {}
-    for pos, event in enumerate(events):
-        terminal_eligible = axis(pos, "terminal_eligible")
-        launch_id = event.get("launchRunId")
-        current_relation_diagnostic = bool(
-            validity[pos].current_schema_valid
-            and rows[pos].epoch in {"raw", "strict-suffix"}
-            and event.get("eventKind") == "terminal"
-        )
-        if not terminal_eligible and not current_relation_diagnostic:
-            continue
-        if event.get("eventKind") != "terminal":
-            continue
-        rid = event.get("runId")
-        if not isinstance(launch_id, str):
-            continue  # per-event check already failed it
-        bump("lifecycle-terminal-checked")
-        target = index.get(launch_id)
-        if target is None or target[0] >= pos:
-            fail(errors, f"{rid}: launchRunId {launch_id} does not reference an earlier event")
-            bump("lifecycle-dangling-launch")
-            continue
-        if target[1].get("eventKind") != "launch":
-            fail(errors, f"{rid}: launchRunId {launch_id} references a non-launch event")
-            bump("lifecycle-nonlaunch-ref")
-            continue
-        target_is_valid_launch = (
-            axis(target[0], "launch_eligible")
-            if not current_relation_diagnostic
-            or rows[target[0]].epoch == "sealed-prefix"
-            else validity[target[0]].current_schema_valid
-        )
-        if not target_is_valid_launch:
-            fail(errors, f"{rid}: launchRunId {launch_id} references an invalid launch event")
-            bump("lifecycle-invalid-launch-ref")
-            continue
-        launch_flags = target[1].get("launchFlags")
-        terminal_flags = event.get("launchFlags")
-        if launch_flags is not None or terminal_flags is not None:
-            if launch_flags is None or terminal_flags is None or launch_flags != terminal_flags:
-                fail(errors, f"{rid}: launchFlags must equal the referenced launch binding")
-                bump("lifecycle-launch-flags-mismatch")
+    if _definition == "current":
+        for pos, event in enumerate(events):
+            if axis(pos, "terminal_eligible"):
+                terminals_by_launch[event["launchRunId"]] = event["runId"]
+    elif _definition == "historical":
+        # Lifecycle integrity (only when eventKind is used): one terminal per launch,
+        # terminal references an earlier launch.
+        terminals_by_launch: dict[str, str] = {}
+        relation_terminals_by_launch: dict[str, str] = {}
+        for pos, event in enumerate(events):
+            terminal_eligible = axis(pos, "terminal_eligible")
+            launch_id = event.get("launchRunId")
+            current_relation_diagnostic = bool(
+                validity[pos].current_schema_valid
+                and rows[pos].epoch in {"raw", "strict-suffix"}
+                and event.get("eventKind") == "terminal"
+            )
+            if not terminal_eligible and not current_relation_diagnostic:
                 continue
-        if launch_id in relation_terminals_by_launch:
-            fail(errors, f"{rid}: duplicate terminal for launch {launch_id} (first: {relation_terminals_by_launch[launch_id]})")
-            bump("lifecycle-duplicate-terminal")
-            continue
-        relation_terminals_by_launch[launch_id] = (
-            rid if isinstance(rid, str) else "<invalid>"
-        )
-        if terminal_eligible:
-            terminals_by_launch[launch_id] = (
+            if event.get("eventKind") != "terminal":
+                continue
+            rid = event.get("runId")
+            if not isinstance(launch_id, str):
+                continue  # per-event check already failed it
+            bump("lifecycle-terminal-checked")
+            target = index.get(launch_id)
+            if target is None or target[0] >= pos:
+                fail(errors, f"{rid}: launchRunId {launch_id} does not reference an earlier event")
+                bump("lifecycle-dangling-launch")
+                continue
+            if target[1].get("eventKind") != "launch":
+                fail(errors, f"{rid}: launchRunId {launch_id} references a non-launch event")
+                bump("lifecycle-nonlaunch-ref")
+                continue
+            target_is_valid_launch = (
+                axis(target[0], "launch_eligible")
+                if not current_relation_diagnostic
+                or rows[target[0]].epoch == "sealed-prefix"
+                else validity[target[0]].current_schema_valid
+            )
+            if not target_is_valid_launch:
+                fail(errors, f"{rid}: launchRunId {launch_id} references an invalid launch event")
+                bump("lifecycle-invalid-launch-ref")
+                continue
+            launch_flags = target[1].get("launchFlags")
+            terminal_flags = event.get("launchFlags")
+            if launch_flags is not None or terminal_flags is not None:
+                if launch_flags is None or terminal_flags is None or launch_flags != terminal_flags:
+                    fail(errors, f"{rid}: launchFlags must equal the referenced launch binding")
+                    bump("lifecycle-launch-flags-mismatch")
+                    continue
+            if launch_id in relation_terminals_by_launch:
+                fail(errors, f"{rid}: duplicate terminal for launch {launch_id} (first: {relation_terminals_by_launch[launch_id]})")
+                bump("lifecycle-duplicate-terminal")
+                continue
+            relation_terminals_by_launch[launch_id] = (
                 rid if isinstance(rid, str) else "<invalid>"
             )
+            if terminal_eligible:
+                terminals_by_launch[launch_id] = (
+                    rid if isinstance(rid, str) else "<invalid>"
+                )
+
+    else:
+        raise ValueError("unsupported internal closure definition")
 
     discharged: dict[str, str] = {}  # target runId -> closer runId
     for pos, event in enumerate(events):
@@ -4701,17 +4938,14 @@ def _reduce_closure_relations(
                                 and set(target_tuple) == {
                                     "workItem", "assignedInternalRole", "artifactIdentity"
                                 }
-                                and len(launch_positions) == 1
-                                and launch_positions[0][0] < evidence_pos
-                                and launch_positions[0][1].get("eventKind") == "launch"
-                                and launch_positions[0][1].get("workItem")
-                                == evidence_event.get("workItem")
-                                and launch_positions[0][1].get("provider")
-                                == evidence_event.get("provider")
-                                and launch_positions[0][1].get("assignedRole")
-                                == evidence_event.get("assignedRole")
-                                and launch_positions[0][1].get("executionRole")
-                                == evidence_event.get("executionRole")
+                                and (axis(evidence_pos, "terminal_eligible") if _definition == "current" else (
+                                    len(launch_positions) == 1
+                                    and launch_positions[0][0] < evidence_pos
+                                    and launch_positions[0][1].get("eventKind") == "launch"
+                                    and launch_positions[0][1].get("workItem") == evidence_event.get("workItem")
+                                    and launch_positions[0][1].get("provider") == evidence_event.get("provider")
+                                    and launch_positions[0][1].get("assignedRole") == evidence_event.get("assignedRole")
+                                    and launch_positions[0][1].get("executionRole") == evidence_event.get("executionRole")))
                             )
                         else:
                             typed_close_ok = typed_close_ok and (
@@ -4873,7 +5107,7 @@ def _validate_closure_authority(
     """Current authority; descriptive cross-run effort grants no mandate."""
     return _reduce_closure_relations(
         rows, errors, telemetry, validity=validity, event_validity=event_validity,
-        _archived_preclose_v2_rows=_archived_preclose_v2_rows,
+        _archived_preclose_v2_rows=_archived_preclose_v2_rows, _definition="current",
     )
 
 
@@ -4885,6 +5119,8 @@ def _validate_closure_from_inputs(
     validity: Sequence[LedgerEventValidityV1] | None = None,
     event_validity: Sequence[LedgerEventValidityV1] | Sequence[bool] | None = None,
     context: LedgerValidationContextV1 | None = None,
+    _item: Path | None = None,
+    _inputs: _CurrentEvidenceV1 | None = None,
 ) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]]]:
     """Reduce authority only from raw rows or their exact receipt-minted context."""
 
@@ -4894,10 +5130,20 @@ def _validate_closure_from_inputs(
         return [], []
     pending: list = []
     inactive = _resolve_closure_invalidations_from_inputs(rows, selected_validity, errors, telemetry,
-        context=context, pending_closing_effects_out=pending)
+        context=context, pending_closing_effects_out=pending, _item=_item, _inputs=_inputs)
     available = _withhold_pending_closers(rows, selected_validity, pending)
-    return _validate_closure_authority(tuple(row for i, row in enumerate(rows) if i not in inactive),
-        errors, telemetry, validity=tuple(entry for i, entry in enumerate(available) if i not in inactive))
+    active_rows = tuple(row for i, row in enumerate(rows) if i not in inactive)
+    active_validity = tuple(entry for i, entry in enumerate(available) if i not in inactive)
+    if _item is not None:
+        masks = _derive_authority_masks(active_rows,
+            tuple(entry.current_schema_valid for entry in active_validity), _item,
+            _definition="current", _inputs=_inputs, _diagnostics=errors, _telemetry=telemetry,
+            _history_custody=context.history_custody if context is not None else (),
+            _selection_qualified=_inputs.authority_qualified() if _inputs is not None else True)
+        active_validity = _qualified_validity(active_rows, active_validity,
+            tuple(LedgerEventValidityV1(entry.current_schema_valid, mask)
+                  for entry, mask in zip(active_validity, masks)), errors)
+    return _validate_closure_authority(active_rows, errors, telemetry, validity=active_validity)
 
 def validate_closure(
     rows: Sequence[RuntimeLedgerRowV1], errors: list[str], telemetry: dict[str, int] | None = None, *,
@@ -4912,12 +5158,16 @@ def validate_closure(
         return [], []
     rows, context, qualified, received_result = received
     if received_result is not None:
-        errors.extend((*received_result.admission_diagnostics, *received_result.current_diagnostics))
+        errors.extend(received_result.diagnostics)
     selected = validity if validity is not None else event_validity
     selected = _qualified_validity(rows, selected, qualified, errors)
     if selected is None:
         return [], []
-    return _validate_closure_from_inputs(rows, errors, telemetry, validity=selected, context=context)
+    owner = _context_evaluation(context)
+    # Caller restrictions narrow returned effects; the received source already owns its full observations.
+    return _validate_closure_from_inputs(rows, [] if received_result is not None else errors,
+        telemetry, validity=selected, context=context,
+        _item=owner.item if owner is not None else None, _inputs=owner.inputs if owner is not None else None)
 
 
 
@@ -4977,16 +5227,12 @@ def classify_migrated_launch_terminals(
         if any(pos != neutral_pos for pos in event_positions)
     }
     validate_event(dict(neutral), item, other_run_ids, neutral_errors)
-    binding_fields = (
-        "workItem", "role", "executionRole", "assignedRole", "provider", "model",
-        "scope", "promptFile", "effort", "launchFlags",
-    )
     if (
         neutral_errors or neutral.get("schemaVersion") != 2
         or neutral.get("status") != "completed" or neutral.get("gate") != "none"
         or "findingClass" in neutral or neutral.get("closesRunIds", []) != []
         or neutral.get("authorizing") is True
-        or any(neutral.get(key) != launch.get(key) for key in binding_fields)
+        or launch_terminal_binding_mismatches(launch, neutral)
     ):
         return (), failure
     return (neutral_pos,), None
@@ -5069,14 +5315,24 @@ def _ledger_h1_digest(domain: str, value: object) -> str:
     ).hexdigest()
 
 
+_LEDGER_H1_AUTHORITY_FIELDS_V1 = (
+    "launchEligible",
+    "terminalEligible",
+    "reviseTargetEligible",
+    "closerEligible",
+    "artifactEvidenceEligible",
+)
+
+
 def _ledger_h1_authority_wire(authority: LedgerAuthorityV1) -> dict[str, bool]:
-    return {
-        "launchEligible": authority.launch_eligible,
-        "terminalEligible": authority.terminal_eligible,
-        "reviseTargetEligible": authority.revise_target_eligible,
-        "closerEligible": authority.closer_eligible,
-        "artifactEvidenceEligible": authority.artifact_evidence_eligible,
-    }
+    values = (
+        authority.launch_eligible,
+        authority.terminal_eligible,
+        authority.revise_target_eligible,
+        authority.closer_eligible,
+        authority.artifact_evidence_eligible,
+    )
+    return dict(zip(_LEDGER_H1_AUTHORITY_FIELDS_V1, values))
 
 
 def _ledger_h1_parse_lines(
@@ -5172,7 +5428,7 @@ def _ledger_h1_runtime_rows(
     if historical_pass_custody_out is not None:
         historical_pass_custody_out.append(custody)
     current = [False] * len(rows)
-    masks = _derive_authority_masks(rows, current, item, custody, _inputs=_inputs)
+    masks = _derive_authority_masks(rows, current, item, custody, _inputs=_inputs, _definition="historical")
     return tuple(
         RuntimeLedgerRowV1(
             row.event,
@@ -5207,7 +5463,7 @@ def _ledger_h1_view_wire(
     )
     reduction_errors: list[str] = []
     open_revise_rows, _ = _reduce_closure_relations(
-        prefix_rows, reduction_errors, validity=validity, _format1_effort=True
+        prefix_rows, reduction_errors, validity=validity, _format1_effort=True, _definition="historical"
     )
     open_revises = {
         row["runId"]
@@ -5249,6 +5505,106 @@ def _ledger_h1_view_wire(
         "reduction": reduction,
     }
     return wire, tuple(reduction["openReviseRunIds"]), tuple(reduction["openLaunchRunIds"])
+
+
+def _ledger_h1_historical_wire(
+    entry: Mapping[str, object], rows: Sequence[RuntimeLedgerRowV1], raw: bytes,
+) -> tuple[dict[str, object], tuple[str, ...], tuple[str, ...]] | None:
+    if not isinstance(raw, bytes) or not raw:
+        return None
+    errors: list[str] = []
+    wire = _projection_json_object(raw, f"H1 historical wire {entry['ledgerPath']}", errors)
+    if wire is None:
+        return None
+    try:
+        if _canonical_projection_bytes(wire) != raw:
+            return None
+    except (TypeError, ValueError, UnicodeEncodeError, RecursionError):
+        return None
+    wire_fields = {
+        "schemaVersion", "profileId", "profileVersion", "ledgerPath",
+        "prefixLineCount", "prefixByteLength", "prefixSha256", "rows", "reduction",
+    }
+    if not _strict_shape(wire, wire_fields, wire_fields, errors, "H1 historical wire"):
+        return None
+    prefix_count = entry["prefixLineCount"]
+    if (
+        type(prefix_count) is not int
+        or type(wire["schemaVersion"]) is not int or wire["schemaVersion"] != 1
+        or wire["profileId"] != _LEDGER_H1_PROFILE
+        or type(wire["profileVersion"]) is not int or wire["profileVersion"] != 1
+        or wire["ledgerPath"] != entry["ledgerPath"]
+        or type(wire["prefixLineCount"]) is not int
+        or wire["prefixLineCount"] != prefix_count
+        or type(wire["prefixByteLength"]) is not int
+        or wire["prefixByteLength"] != entry["prefixByteLength"]
+        or wire["prefixSha256"] != entry["prefixSha256"]
+        or not isinstance(wire["rows"], list)
+        or len(rows) < prefix_count
+        or len(wire["rows"]) != prefix_count
+    ):
+        return None
+    row_fields = {
+        "ledgerPath", "rawLineOrdinal", "rawLineSha256",
+        "projectedEventSha256", "authority", "authorityMaskSha256",
+    }
+    mask_fields = set(_LEDGER_H1_AUTHORITY_FIELDS_V1)
+    for actual, source in zip(wire["rows"], rows[:prefix_count]):
+        if (
+            not isinstance(actual, dict)
+            or not _strict_shape(actual, row_fields, row_fields, errors, "H1 historical row")
+            or actual["ledgerPath"] != entry["ledgerPath"]
+            or type(actual["rawLineOrdinal"]) is not int
+            or actual["rawLineOrdinal"] != source.raw_line_ordinal
+            or actual["rawLineSha256"] != source.raw_line_sha256
+            or actual["projectedEventSha256"] != source.projected_event_sha256
+            or not isinstance(actual["authority"], dict)
+            or not _strict_shape(
+                actual["authority"], mask_fields, mask_fields, errors,
+                "H1 historical authority mask",
+            )
+            or any(type(value) is not bool for value in actual["authority"].values())
+            or actual["authorityMaskSha256"] != _ledger_h1_digest(
+                "orchestrarium:ledger-h1:authority-mask:v1", actual["authority"]
+            )
+        ):
+            return None
+    reduction_fields = {
+        "effectiveRowCount", "eligibleLaunchRunIds", "settledLaunchRunIds",
+        "openLaunchRunIds", "openReviseRunIds",
+    }
+    reduction = wire["reduction"]
+    if (
+        not isinstance(reduction, dict)
+        or not _strict_shape(
+            reduction, reduction_fields, reduction_fields, errors,
+            "H1 historical reduction",
+        )
+        or type(reduction["effectiveRowCount"]) is not int
+        or reduction["effectiveRowCount"] != prefix_count
+    ):
+        return None
+    def sorted_ids(value: object) -> tuple[str, ...] | None:
+        if not isinstance(value, list) or any(type(item) is not str for item in value):
+            return None
+        try:
+            ordered = sorted(set(value), key=lambda item: item.encode("utf-8"))
+        except UnicodeEncodeError:
+            return None
+        return tuple(value) if value == ordered else None
+    eligible = sorted_ids(reduction["eligibleLaunchRunIds"])
+    settled = sorted_ids(reduction["settledLaunchRunIds"])
+    open_launches = sorted_ids(reduction["openLaunchRunIds"])
+    open_revises = sorted_ids(reduction["openReviseRunIds"])
+    if (
+        eligible is None or settled is None or open_launches is None
+        or open_revises is None
+        or open_launches != tuple(sorted(
+            set(eligible) - set(settled), key=lambda item: item.encode("utf-8")
+        ))
+    ):
+        return None
+    return wire, open_revises, open_launches
 
 
 def _ledger_h1_invalid_contexts(
@@ -6079,6 +6435,54 @@ def _ledger_h1_candidate_group(
         )
     entries = partition.entries
     ledger_paths = [entry["ledgerPath"] for entry in entries]
+    supplied_historical_wires = artifacts.historical_wire_bytes_by_path
+    if not isinstance(supplied_historical_wires, Mapping):
+        reject(
+            "WI-LEDGER-COMPAT-ACTIVATION-PARTIAL",
+            "historical wire members are not a mapping",
+        )
+        return _ledger_h1_invalid_contexts(
+            root, artifacts, failures, diagnostics, ledger_resource_budget=budget
+        )
+    try:
+        historical_wire_bytes_by_path = dict(supplied_historical_wires)
+    except (RuntimeError, TypeError, ValueError):
+        reject(
+            "WI-LEDGER-COMPAT-ACTIVATION-PARTIAL",
+            "historical wire membership could not be snapshotted",
+        )
+        return _ledger_h1_invalid_contexts(
+            root, artifacts, failures, diagnostics, ledger_resource_budget=budget
+        )
+    if any(
+        not isinstance(path, str) or not _safe_repo_relative(path)
+        or not isinstance(raw, bytes) or not raw
+        for path, raw in historical_wire_bytes_by_path.items()
+    ):
+        reject(
+            "WI-LEDGER-COMPAT-ACTIVATION-PARTIAL",
+            "historical wire members are unsafe, empty, or mistyped",
+        )
+        return _ledger_h1_invalid_contexts(
+            root, artifacts, failures, diagnostics, ledger_resource_budget=budget
+        )
+    if historical_wire_bytes_by_path and set(historical_wire_bytes_by_path) != set(ledger_paths):
+        reject(
+            "WI-LEDGER-COMPAT-ACTIVATION-PARTIAL",
+            "historical wire keys differ from the complete manifest participant group",
+        )
+        return _ledger_h1_invalid_contexts(
+            root, artifacts, failures, diagnostics, ledger_resource_budget=budget
+        )
+    if historical_wire_bytes_by_path and (
+        total_bytes + sum(len(raw) for raw in historical_wire_bytes_by_path.values())
+        > budget.max_ledger_bytes
+    ):
+        message = "WI-LEDGER-RESOURCE-INCOMPLETE: complete H1 input demand exceeds allowance"
+        return _ledger_h1_invalid_contexts(
+            root, artifacts, ["WI-LEDGER-RESOURCE-INCOMPLETE"], [message],
+            ledger_resource_budget=budget,
+        )
     if set(artifacts.ledger_bytes_by_path) != set(ledger_paths):
         reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "candidate ledger keys differ from manifest entries")
     location_records = artifacts.participant_locations_by_path
@@ -6185,7 +6589,19 @@ def _ledger_h1_candidate_group(
         if not rows:
             continue
         custody_by_path[path] = captured_custody[0] if captured_custody else MappingProxyType({})
-        wire, open_revises, open_launches = _ledger_h1_view_wire(entry, rows)
+        if historical_wire_bytes_by_path:
+            historical = _ledger_h1_historical_wire(
+                entry, rows, historical_wire_bytes_by_path[path]
+            )
+            if historical is None:
+                reject(
+                    "WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH",
+                    f"historical wire differs from the selected original prefix for {path}",
+                )
+                continue
+            wire, open_revises, open_launches = historical
+        else:
+            wire, open_revises, open_launches = _ledger_h1_view_wire(entry, rows)
         projected_digest = _ledger_h1_digest(
             "orchestrarium:ledger-h1:projected-view:v1", wire
         )
@@ -6259,7 +6675,7 @@ def _ledger_h1_candidate_group(
                 entry_rows[path], custody_by_path.get(path),
                 (historical_pass_custody_blobs_by_item or {}).get(item),
                 inputs=inputs_by_path[path], prefix_lines=entry["prefixLineCount"], raw_v2=False,
-                context=base_context)
+                context=base_context, native_rows=entry_rows[path])
             result = current.complete()
             current_by_path[path] = current
             entry_rows[path] = result.context.rows
@@ -6277,7 +6693,7 @@ def _ledger_h1_candidate_group(
             current = _CurrentLedgerEvaluationV1(physical_items_by_path[path], path,
                 artifacts.ledger_bytes_by_path[path], raw_rows, custody_by_path.get(path),
                 (historical_pass_custody_blobs_by_item or {}).get(physical_items_by_path[path]),
-                inputs=inputs_by_path[path])
+                inputs=inputs_by_path[path], native_rows=entry_rows[path])
             result = current.complete()
             current_by_path[path] = current
             revoked_rows[path], history_by_path[path] = result.context.rows, result.context.history_custody
@@ -6879,6 +7295,15 @@ def _qualified_history_disposition_from_inputs(
     classifier_position = packet["records"][0][0]
     required_by_id = {requirement["requirementId"]: requirement for requirement in packet["requirements"]}
     covered: set[str] = set()
+    borrowed = _inputs.borrowed_disposition
+    shares_owner = borrowed is not None and borrowed[0] is rows and borrowed[1] == item \
+        and borrowed[2] == control_position and borrowed[3] is event and borrowed[4] is hold
+    if shares_owner and len(current_validity) == len(rows):
+        proof_current = [entry.current_schema_valid for entry in current_validity]
+    else:
+        # An independent receiver prepares its own facts; supplied masks are no proof.
+        proof_current = [_validate_event(dict(row.event), item, set(), [], _inputs=_inputs)
+                         for row in rows[:control_position]]
     for number, ((position, record), payload) in enumerate(zip(packet["records"], packet["payloads"])):
         if position in historical_positions or position >= control_position or rows[position].epoch not in {"raw", "strict-suffix"}:
             raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: proof is not an earlier current record")
@@ -6887,6 +7312,7 @@ def _qualified_history_disposition_from_inputs(
         # Candidate bytes were hash-checked above; the existing exact artifact
         # association supplies this same locator after the operation commits.
         current = _validate_event(dict(record), item, set(), errors, historical_pass_snapshot=snapshot, _inputs=_inputs)
+        proof_current[position] = current
         if (not current or errors or position >= control_position
             or rows[position].epoch not in {"raw", "strict-suffix"}
             or record.get("workItem") != item.name or record.get("status") != "completed" or record.get("gate") != "PASS"
@@ -6914,16 +7340,27 @@ def _qualified_history_disposition_from_inputs(
             covered.add(requirement_id)
     if covered != set(required_by_id):
         raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: resolution requirement coverage is incomplete")
+    proof_rows = rows[:control_position]
+    qualification_errors = []
+    proof_masks = _derive_authority_masks(proof_rows, proof_current[:control_position], item,
+        _definition="current", _inputs=_inputs, _diagnostics=qualification_errors,
+        _selection_qualified=_inputs.authority_qualified())
+    proof_validity = tuple(LedgerEventValidityV1(ok, mask)
+                           for ok, mask in zip(proof_current[:control_position], proof_masks))
+    for position, record in packet["records"]:
+        authority = proof_validity[position].authority
+        if (not authority.artifact_evidence_eligible
+            or ((record.get("eventKind") == "terminal" or "launchRunId" in record)
+                and not authority.terminal_eligible)):
+            raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: proof record lacks complete current launch authority")
     dependent = [closer for control, closer in pending_closing_effects
                  if control.raw_line_ordinal == hold.raw_line_ordinal]
     if dependent:
         if proof["kind"] != "current-evidence-covered":
             raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: controlled review obligations require current evidence coverage")
         required_targets = {run_id for closer in dependent for run_id in closer.event["closesRunIds"]}
-        available = _withhold_pending_closers(rows, current_validity, pending_closing_effects)
-        proof_rows = tuple(row for i, row in enumerate(rows) if i < control_position)
-        proof_validity = tuple(entry for i, entry in enumerate(available) if i < control_position)
-        relation_errors = []
+        proof_validity = _withhold_pending_closers(proof_rows, proof_validity, pending_closing_effects)
+        relation_errors = qualification_errors
         open_targets, _launches = _validate_closure_authority(proof_rows, relation_errors, validity=proof_validity)
         if relation_errors or required_targets & {row["runId"] for row in open_targets}:
             raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: exact dependent current obligations remain unresolved")
@@ -6979,6 +7416,12 @@ def _apply_history_custody(
     if not controls:
         return rows, (), ()
     errors: list[str] = []
+    if not _sealed_context_is_bound(rows, context, errors, target=item):
+        return rows, (), tuple(errors)
+    source_owner = _context_evaluation(context)
+    native_originals = {row.raw_line_ordinal: row for row in source_owner.selected_input.rows
+                        if row.projection_transformation == "raw"} if (
+                            source_owner is not None and source_owner.selected_input is not None) else {}
     physical = ledger_bytes.splitlines(keepends=True)
     offsets = [0]
     for line in physical:
@@ -6994,19 +7437,19 @@ def _apply_history_custody(
     current: list[bool] = []
     for row in rows:
         individual_errors: list[str] = []
-        snapshot = (historical_pass_custody or {}).get((row.raw_line_ordinal, row.raw_body_sha256,
-                    row.event.get("runId"), row.event.get("artifact"))) \
-            if isinstance(row.event.get("runId"), str) and isinstance(row.event.get("artifact"), str) else None
+        key = _historical_pass_custody_key(row.raw_line_ordinal, row.raw_body_sha256,
+                                         row.event.get("runId"), row.event.get("artifact"))
+        snapshot = (historical_pass_custody or {}).get(key) if key is not None else None
         current.append(_validate_event(dict(row.event), item, set(), individual_errors,
                                        historical_pass_snapshot=snapshot, _inputs=_inputs))
     masks = _derive_authority_masks(rows, current, item, historical_pass_custody, _inputs=_inputs,
-        _selection_qualified=_inputs.authority_qualified() if _inputs is not None else True)
+        _selection_qualified=_inputs.authority_qualified() if _inputs is not None else True, _definition="current")
     pending: list = []
-    resolve_closure_invalidations(rows, tuple(LedgerEventValidityV1(ok, mask) for ok, mask in zip(current, masks)),
-        [], context=context, pending_closing_effects_out=pending)
+    _resolve_closure_invalidations_from_inputs(rows,
+        tuple(LedgerEventValidityV1(ok, mask) for ok, mask in zip(current, masks)),
+        [], context=context, pending_closing_effects_out=pending, _item=item, _inputs=_inputs)
     unresolved_controls = {id(control) for control, _closer in pending}
     admissions: dict[int, HistoricalLedgerHoldV1] = {}
-    relation_events = tuple(row.event for row in rows)
     by_run: dict[str, list[int]] = {}
     for pos, row in enumerate(rows):
         run_id = row.event.get("runId")
@@ -7057,24 +7500,43 @@ def _apply_history_custody(
             admissions[target_position] = replace(hold, disposition_run_id=event["runId"])
             continue
         controlled_relation = id(target) in unresolved_controls
+        launch_id = target.event.get("launchRunId")
+        launch_positions = run_positions.get(launch_id.casefold(), ()) if isinstance(launch_id, str) else ()
+        known_failure = False
+        if current[target_position] and target.event.get("eventKind") == "terminal" and len(launch_positions) == 1:
+            launch_position = launch_positions[0]
+            launch = rows[launch_position]
+            if (launch_position < target_position and launch.event.get("runId") == launch_id
+                and launch.event.get("eventKind") == "launch" and current[launch_position]
+                and masks[launch_position].launch_eligible):
+                known_failure = bool(launch_terminal_binding_mismatches(launch.event, target.event))
+        original = native_originals.get(target.raw_line_ordinal)
+        original_known_failure = bool(known_failure and original is not None
+            and original.raw_body_sha256 == target.raw_body_sha256 and original.event == target.event)
         if (
             target_position in admissions
-            or (target.epoch not in {"raw", "strict-suffix"} and not (controlled_relation and target.epoch == "sealed-prefix"))
+            or (target.epoch not in {"raw", "strict-suffix"}
+                and not (target.epoch == "sealed-prefix" and (controlled_relation or original_known_failure)))
             or (history_owner_control(target.event) and not controlled_relation)
             or (isinstance(target.event.get("workItem"), str)
                 and target.event["workItem"] != item.name)
         ):
             fail(errors, "WI-LEDGER-HISTORY-TARGET: history target is repeated, projected or owner-controlled")
             continue
-        orphan = bool(target.event.get("eventKind") == "terminal" and not
-                      terminal_has_valid_earlier_launch(relation_events, target_position, item, run_positions))
-        if current[target_position] and not orphan and not controlled_relation:
+        orphan = bool(target.event.get("eventKind") == "terminal" and isinstance(launch_id, str)
+                      and launch_id.casefold() not in run_positions)
+        if current[target_position] and not orphan and not controlled_relation and not known_failure:
             fail(errors, "WI-LEDGER-HISTORY-TARGET: target has no historical validation failure")
             continue
-        admissions[target_position] = HistoricalLedgerHoldV1(
+        admission = HistoricalLedgerHoldV1(
             event["sourcePrefixSha256"], boundary, ordinal, event["physicalLineSha256"],
-            event["runId"], target.event, masks[target_position],
+            event["runId"], target.event, _NO_LEDGER_AUTHORITY,
         )
+        before = masks[target_position]
+        authority_before = _current_row_authority(target, current[target_position],
+            before.launch_eligible, before.terminal_eligible, before.revise_target_eligible,
+            _current_admitted_orphan(target, current[target_position], admission, run_positions), False)
+        admissions[target_position] = replace(admission, authority_before=authority_before)
     effective = tuple(
         replace(row, epoch="historical-custody", raw_line_sha256=admissions[pos].raw_line_sha256,
                 authority=admissions[pos].authority_before) if pos in admissions else row
@@ -7173,6 +7635,7 @@ def _ordinary_raw_v2_effective_context(
         ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
     )
     projection_rows = _ledger_projection_rows(events, metadata, diagnostics)
+    native_rows = _runtime_rows_from_projection(projection_rows)
     shape_rows, _shape_counters, shape_errors = _project_manifest_rows(
         projection_rows, item, selected, raw,
         validated_h1_partition=h1_partition.h1_projection_partition if h1_partition is not None else None,
@@ -7190,7 +7653,7 @@ def _ordinary_raw_v2_effective_context(
     diagnostics.extend(custody_errors)
     current = _CurrentLedgerEvaluationV1(item, selected_ledger_path, raw,
         _runtime_rows_from_projection(migrated_rows), custody, historical_pass_custody_blobs, inputs=inputs,
-        selection_diagnostics=diagnostics)
+        selection_diagnostics=diagnostics, native_rows=native_rows)
     result = current.complete()
     return result.context
 
@@ -9225,6 +9688,7 @@ def validate_archived_ledger_obligations(
     )
     errors.extend(custody_errors)
     rows = _ledger_projection_rows(events, raw_metadata, errors)
+    native_rows = _runtime_rows_from_projection(rows)
     shaped_rows, projection_counters, projection_errors = _project_manifest_rows(
         rows, item, ledger, ledger_bytes
     )
@@ -9235,7 +9699,8 @@ def validate_archived_ledger_obligations(
     runtime_rows = _runtime_rows_from_projection(effective_rows)
     if any(row.event.get("invalidationMode") == _HISTORY_CUSTODY_MODE for row in runtime_rows):
         current = _CurrentLedgerEvaluationV1(item, f"{relative_item}/agent-runs.jsonl",
-            ledger_bytes, runtime_rows, historical_pass_custody, inputs=inputs, selection_diagnostics=tuple(errors))
+            ledger_bytes, runtime_rows, historical_pass_custody, inputs=inputs, selection_diagnostics=tuple(errors),
+            native_rows=native_rows)
         reduction = current.complete()
         errors = list(reduction.diagnostics)
         context = reduction.context
@@ -9255,6 +9720,7 @@ def validate_archived_ledger_obligations(
     current = _CurrentLedgerEvaluationV1(item, f"{relative_item}/agent-runs.jsonl",
         ledger_bytes, runtime_rows, historical_pass_custody, inputs=inputs,
         archive_rows=effective_rows, archive_authorizations=historical_authorizations,
+        native_rows=native_rows,
         selection_diagnostics=tuple(errors))
     reduction = current.complete()
     errors = list(reduction.diagnostics)
@@ -9320,22 +9786,13 @@ def _reduce_archived_current_state(item, effective_rows, runtime_rows, historica
         historical_pass_custody=historical_pass_custody,
         telemetry=telemetry, _inputs=inputs,
     )
-    projected_archive = any(
-        row.transformation != "raw" or row.projection_profile is not None
-        for row in effective_rows
+    archive_masks = _derive_authority_masks(
+        runtime_rows, closure_validity, item, policy="archive", _definition="current",
     )
-    if projected_archive:
-        archive_masks = _derive_authority_masks(
-            runtime_rows, closure_validity, item, policy="archive"
-        )
-        typed_closure_validity = tuple(
-            LedgerEventValidityV1(eligible, mask)
-            for eligible, mask in zip(closure_validity, archive_masks)
-        )
-    else:
-        typed_closure_validity = _validity_from_boolean_events(
-            runtime_rows, closure_validity
-        )
+    typed_closure_validity = tuple(
+        LedgerEventValidityV1(eligible, mask)
+        for eligible, mask in zip(closure_validity, archive_masks)
+    )
     archived_validity = list(typed_closure_validity)
     historical_target_positions: set[int] = set()
     for position, row in enumerate(runtime_rows):
@@ -9394,12 +9851,12 @@ def _reduce_archived_current_state(item, effective_rows, runtime_rows, historica
     typed_closure_validity = tuple(archived_validity)
     relation_errors = []
     pending: list = []
-    inactive = resolve_closure_invalidations(
+    inactive = _resolve_closure_invalidations_from_inputs(
         runtime_rows,
         typed_closure_validity,
         relation_errors,
         telemetry,
-        context=context, pending_closing_effects_out=pending,
+        context=context, pending_closing_effects_out=pending, _item=item, _inputs=inputs,
     )
     active_positions = [
         pos
@@ -9410,20 +9867,18 @@ def _reduce_archived_current_state(item, effective_rows, runtime_rows, historica
     active_validity = tuple(
         typed_closure_validity[pos] for pos in active_positions
     )
-    if projected_archive:
-        active_masks = _derive_authority_masks(
-            active_rows, [closure_validity[pos] for pos in active_positions],
-            item, policy="archive",
-        )
-        # Preserve the exact target-only proofs established above, including
-        # a target whose faulty closer was invalidated. Recompute all other
-        # axes so removed settlements cannot suppress a surviving terminal.
-        active_validity = tuple(
-            typed_closure_validity[pos]
-            if pos in historical_target_positions
-            else LedgerEventValidityV1(closure_validity[pos], mask)
-            for pos, mask in zip(active_positions, active_masks)
-        )
+    qualification_errors = []
+    active_masks = _derive_authority_masks(
+        active_rows, [closure_validity[pos] for pos in active_positions],
+        item, policy="archive", _definition="current", _diagnostics=qualification_errors, _telemetry=telemetry,
+    )
+    # Preserve exact target-only proofs; every dependent grant uses the active view.
+    active_validity = tuple(
+        typed_closure_validity[pos]
+        if pos in historical_target_positions
+        else LedgerEventValidityV1(closure_validity[pos], mask)
+        for pos, mask in zip(active_positions, active_masks)
+    )
     active_validity = _withhold_pending_closers(active_rows, active_validity, pending)
     # Only this read-only monthly-archive reader may preserve the old C3 meaning
     # of raw V2 relations recorded before the lifecycle owner's terminal instant.
@@ -9479,10 +9934,12 @@ def _reduce_archived_current_state(item, effective_rows, runtime_rows, historica
     validity = tuple(by_position.get(position, LedgerEventValidityV1(False, _NO_LEDGER_AUTHORITY))
                      for position in range(len(runtime_rows)))
     if inputs.closure_diagnostics is None:
-        inputs.closure_diagnostics = tuple(closure_errors)
+        inputs.closure_diagnostics = tuple(qualification_errors)
     if inputs.relation_diagnostics is None:
-        inputs.relation_diagnostics = (*relation_errors, *inputs.closure_diagnostics)
+        inputs.relation_diagnostics = (*relation_errors, *closure_errors)
     (errors if _relation_diagnostics_out is None else _relation_diagnostics_out).extend(inputs.relation_diagnostics)
+    if _relation_diagnostics_out is None:
+        errors.extend(inputs.closure_diagnostics)
     return (tuple(active_positions), validity, open_revise, open_launches), tuple(errors)
 
 
@@ -9561,16 +10018,19 @@ def observe_captured_work_item_history(
             fail(errors, "WI-LEDGER-CUSTODY-STALE-TARGET: current history result unavailable")
     states.clear()
     masks.clear()
-    if final_result is not None:
-        final_result.publish(states, masks)
     for operation, locator, failure_id, cause in required_acquisition_failures:
         fail(outer_errors, f"{failure_id}: required captured {operation} acquisition failed: {locator}: {cause}")
-    if states and isinstance(states[-1]._current_result, _CurrentReductionV1) and final_result is not None:
-        errors = [*errors, *final_result.admission_diagnostics, *outer_errors,
-            *final_result.current_diagnostics, *final_result.relation_diagnostics,
-            *final_result.obligation_diagnostics(strict=binding.criteria.owner_contract == "current", history=True)]
-        if final_result[2] or final_result[3] or final_result.context.unresolved_history:
-            fail(errors, "WI-LEGACY-COMPLETION-HISTORY: original history has unresolved obligations")
+    if final_result is not None:
+        composition_errors = []
+        final_result = final_result.with_admission((*errors, *outer_errors), composition_errors)
+        if final_result is None:
+            errors = [*errors, *inner_errors, *outer_errors, *composition_errors]
+        else:
+            final_result.publish(states, masks)
+            errors = [*final_result.diagnostics,
+                *final_result.obligation_diagnostics(strict=binding.criteria.owner_contract == "current", history=True)]
+            if final_result[2] or final_result[3] or final_result.context.unresolved_history:
+                fail(errors, "WI-LEGACY-COMPLETION-HISTORY: original history has unresolved obligations")
     else:
         errors = [*errors, *inner_errors, *outer_errors]
     return CapturedWorkItemHistoryObservationV1(
@@ -9935,8 +10395,7 @@ def _bind_ordinary_invalidation(rows, validity, pos, inactive, errors, *, requir
         or target.get("eventKind") == "launch" or not isinstance(target.get("closesRunIds"), list)):
         fail(errors, f"{recovery_id}: ledger-recovery:target-ineligible {target_id}")
         return None
-    individually_valid = legacy_revise or (validity[target_pos].authority.closer_eligible
-        if target_row.epoch == "sealed-prefix" else validity[target_pos].current_schema_valid)
+    individually_valid = legacy_revise or validity[target_pos].current_schema_valid
     if not individually_valid:
         fail(errors, f"{recovery_id}: ledger-recovery:target-per-event-invalid {target_id}")
         return None
@@ -9970,6 +10429,8 @@ def _resolve_closure_invalidations_from_inputs(
     errors: list[str], telemetry: dict[str, int] | None = None, *,
     context: LedgerValidationContextV1 | None = None,
     pending_closing_effects_out: list[tuple[RuntimeLedgerRowV1, RuntimeLedgerRowV1]] | None = None,
+    _item: Path | None = None,
+    _inputs: _CurrentEvidenceV1 | None = None,
 ) -> set[int]:
     """Resolve warranted invalidations and exact nonauthorizing dependencies."""
     if len(rows) != len(validity):
@@ -10002,10 +10463,19 @@ def _resolve_closure_invalidations_from_inputs(
         before_positions = [index for index in range(target_pos) if index not in inactive]
         with_positions = before_positions + [target_pos]
         before_errors, with_errors = [], []
-        _validate_closure_authority(tuple(rows[i] for i in before_positions), before_errors,
-                                    validity=tuple(available[i] for i in before_positions))
-        _validate_closure_authority(tuple(rows[i] for i in with_positions), with_errors,
-                                    validity=tuple(available[i] for i in with_positions))
+        for positions, observations in ((before_positions, before_errors), (with_positions, with_errors)):
+            view_rows = tuple(rows[i] for i in positions)
+            view_validity = tuple(available[i] for i in positions)
+            if _item is not None:
+                masks = _derive_authority_masks(view_rows,
+                    tuple(validity[i].current_schema_valid for i in positions), _item,
+                    _definition="current", _inputs=_inputs, _diagnostics=observations,
+                    _history_custody=context.history_custody if context is not None else (),
+                    _selection_qualified=_inputs.authority_qualified() if _inputs is not None else True)
+                view_validity = tuple(LedgerEventValidityV1(validity[i].current_schema_valid, mask)
+                                      for i, mask in zip(positions, masks))
+                view_validity = _withhold_pending_closers(view_rows, view_validity, pending)
+            _validate_closure_authority(view_rows, observations, validity=view_validity)
         introduced = with_errors[len(before_errors):] if with_errors[:len(before_errors)] == before_errors else with_errors
         if preserved or not introduced:
             if _bind_ordinary_invalidation(rows, validity, pos, inactive, errors, require_obligations=True) is None:
@@ -10025,7 +10495,12 @@ def _receive_helper_context(rows, context, errors, *, target):
     if not _sealed_context_is_bound(rows, context, errors, target=target):
         return None
     owner = _context_evaluation(context)
-    if owner is None or owner.borrowed_context is context:
+    if owner is None:
+        if any(row.event.get("eventKind") in {"launch", "terminal"} or "launchRunId" in row.event for row in rows):
+            fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: launch-bound current authority requires an issued context")
+            return None
+        return rows, context, None, None
+    if owner.borrowed_context is context:
         return rows, context, None, None
     result = owner.receive_again(fresh=True)
     return result.context.rows, result.context, result[1], result
@@ -10033,6 +10508,10 @@ def _receive_helper_context(rows, context, errors, *, target):
 
 def _qualified_validity(rows, supplied, qualified, errors):
     supplied = _closure_validity(rows, supplied, errors)
+    if qualified is None and any(row.event.get("eventKind") in {"launch", "terminal"}
+                                 or "launchRunId" in row.event for row in rows):
+        fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: launch-bound current authority lacks owned qualification")
+        return None
     if supplied is None or qualified is None:
         return supplied
     return tuple(LedgerEventValidityV1(left.current_schema_valid and right.current_schema_valid,
@@ -10054,13 +10533,15 @@ def resolve_closure_invalidations(
         return set()
     rows, context, qualified, received_result = received
     if received_result is not None:
-        errors.extend((*received_result.admission_diagnostics, *received_result.current_diagnostics,
-            *received_result.closure_diagnostics))
+        errors.extend(received_result.diagnostics)
     validity = _qualified_validity(rows, validity, qualified, errors)
     if validity is None:
         return set()
-    return _resolve_closure_invalidations_from_inputs(rows, validity, errors, telemetry,
-        context=context, pending_closing_effects_out=pending_closing_effects_out)
+    owner = _context_evaluation(context)
+    return _resolve_closure_invalidations_from_inputs(rows, validity,
+        [] if received_result is not None else errors, telemetry,
+        context=context, pending_closing_effects_out=pending_closing_effects_out,
+        _item=owner.item if owner is not None else None, _inputs=owner.inputs if owner is not None else None)
 
 
 def _reduce_current_state_from_inputs(
@@ -10073,6 +10554,7 @@ def _reduce_current_state_from_inputs(
     _inputs: _CurrentEvidenceV1,
     public_derive: bool = True,
     _relation_diagnostics_out: list[str] | None = None,
+    _admission_rows: Sequence[RuntimeLedgerRowV1] | None = None,
 ) -> tuple[
     tuple[int, ...],
     tuple[LedgerEventValidityV1, ...],
@@ -10084,15 +10566,17 @@ def _reduce_current_state_from_inputs(
     if not _sealed_context_is_bound(rows, context, errors, target=item):
         return (), (), [], []
     validity = (derive_event_validity(rows, item, errors, context=context) if public_derive else
-        _derive_event_validity_from_inputs(rows, item, errors, context=context, _inputs=_inputs))
+        _derive_event_validity_from_inputs(rows, item, errors, context=context, _inputs=_inputs,
+                                          _admission_rows=_admission_rows))
     baseline_errors: list[str] = []
     baseline_revise, baseline_launches = _validate_closure_authority(
         rows, baseline_errors, validity=validity
     )
     relation_errors = []
     pending: list = []
-    inactive = resolve_closure_invalidations(
-        rows, validity, relation_errors, telemetry, context=context, pending_closing_effects_out=pending
+    inactive = _resolve_closure_invalidations_from_inputs(
+        rows, validity, relation_errors, telemetry, context=context, pending_closing_effects_out=pending,
+        _item=item, _inputs=_inputs,
     )
     active_positions = tuple(
         position for position in range(len(rows)) if position not in inactive
@@ -10101,12 +10585,18 @@ def _reduce_current_state_from_inputs(
     active_current_validity = tuple(
         validity[position].current_schema_valid for position in active_positions
     )
+    qualification_errors = []
     active_masks = _derive_authority_masks(
         active_rows, active_current_validity, item,
         context.historical_pass_custody if context is not None else None,
         _inputs=_inputs,
         _history_custody=context.history_custody if context is not None else (),
         _selection_qualified=_inputs.authority_qualified(),
+        _diagnostics=qualification_errors,
+        _telemetry=telemetry,
+        _admission_rows=(_admission_rows if _admission_rows is not None else
+            _context_evaluation(context).base_rows if context is not None else rows),
+        _definition="current",
     )
     active_validity = tuple(
         LedgerEventValidityV1(current_schema_valid, authority)
@@ -10137,10 +10627,12 @@ def _reduce_current_state_from_inputs(
                 telemetry.get("recovery-reopened-launch", 0) + reopened_launch
             )
     if _inputs.closure_diagnostics is None:
-        _inputs.closure_diagnostics = tuple(closure_errors)
+        _inputs.closure_diagnostics = tuple(qualification_errors)
     if _inputs.relation_diagnostics is None:
-        _inputs.relation_diagnostics = (*relation_errors, *_inputs.closure_diagnostics)
+        _inputs.relation_diagnostics = (*relation_errors, *closure_errors)
     (errors if _relation_diagnostics_out is None else _relation_diagnostics_out).extend(_inputs.relation_diagnostics)
+    if _relation_diagnostics_out is None:
+        errors.extend(_inputs.closure_diagnostics)
     return active_positions, tuple(effective_validity), open_revise, open_launches
 
 
@@ -10181,7 +10673,7 @@ def _reduce_effective_current_state(
     current = _CurrentLedgerEvaluationV1(item,
         context.selected_ledger_path if context is not None else "", b"", rows,
         context.historical_pass_custody if context is not None else None,
-        context=context, normalized_rows=True, inputs=inputs)
+        context=context, normalized_rows=True, inputs=inputs, native_rows=())
     result = current.complete()
     errors.extend(result.diagnostics)
     if telemetry is not None:
@@ -10336,8 +10828,7 @@ def validate_work_item(
                             event["runId"] for event in reduction[3] if isinstance(event.get("runId"), str)))
                     if reduction is None:
                         return [*errors, *status_errors]
-                    errors = [*reduction.diagnostics, *reduction.obligation_diagnostics(strict=strict_revise),
-                        *status_errors]
+                    errors = [*reduction.diagnostics, *reduction.obligation_diagnostics(strict=strict_revise)]
                     reduction.publish(obligation_state_out, authority_state_out)
             return errors
         admission_diagnostics = tuple(errors)
@@ -10358,8 +10849,7 @@ def validate_work_item(
                     event["runId"] for event in reduction[3] if isinstance(event.get("runId"), str)))
             if reduction is None:
                 return [*errors, *status_errors]
-            errors = [*reduction.diagnostics, *reduction.obligation_diagnostics(strict=strict_revise),
-                *status_errors]
+            errors = [*reduction.diagnostics, *reduction.obligation_diagnostics(strict=strict_revise)]
             reduction.publish(obligation_state_out, authority_state_out)
         return errors
     status_path = item / "status.md"
@@ -10408,6 +10898,7 @@ def validate_work_item(
     )
     errors.extend(custody_errors)
     rows = _ledger_projection_rows(events, raw_metadata, errors)
+    native_rows = _runtime_rows_from_projection(rows)
     shape_rows, projection_counters, projection_errors = _project_manifest_rows(
         rows, item, selected_ledger, ledger_bytes,
         manifest_blobs=projection_manifest_blobs,
@@ -10437,7 +10928,8 @@ def validate_work_item(
         fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: inherited rows cannot share recovery")
     current = _CurrentLedgerEvaluationV1(item, root_relative, ledger_bytes,
         _runtime_rows_from_projection(effective_rows), historical_pass_custody,
-        historical_pass_custody_blobs, inputs=inputs, selection_diagnostics=tuple(errors))
+        historical_pass_custody_blobs, inputs=inputs, selection_diagnostics=tuple(errors),
+        native_rows=native_rows)
     reduction = current.complete()
     errors = list(reduction.diagnostics)
     if telemetry is not None:
@@ -10478,7 +10970,7 @@ def validate_work_item(
         if reduction is None:
             return [*errors, *status_errors]
     reduction.publish(obligation_state_out, authority_state_out)
-    return [*reduction.diagnostics, *reduction.obligation_diagnostics(strict=strict_revise), *status_errors]
+    return [*reduction.diagnostics, *reduction.obligation_diagnostics(strict=strict_revise)]
 
 
 def _serialize_obligations(state: WorkItemObligationStateV1) -> dict[str, object]:

@@ -26078,35 +26078,54 @@ def recover_mixed_current_ledger(
             stage_identity = writer._write_exact_staging_file(stage_path, validation_candidate)
             obligations: list = []
             authority: list = []
+            acquisition: list = []
             validation_errors = validator.validate_work_item(
                 item, ledger_path=stage_path, strict_revise=False,
                 validate_status_file=False, obligation_state_out=obligations,
-                authority_state_out=authority,
+                authority_state_out=authority, ledger_acquisition_complete_out=acquisition,
                 historical_pass_custody_blobs=evidence_blobs or None, ledger_resource_budget=ledger_resource_budget
             , transition_resource_budget=_transition_resource_budget())
-            if validation_errors or len(obligations) != 1 or len(authority) != 1:
+            try:
+                received, requested_positions = writer._receive_append_operation(item, validator, obligations,
+                    acquisition, validation_errors, original, validation_candidate, tuple(controls))
+                if len(authority) != 1 or authority[0] != {
+                    row.raw_line_ordinal: entry.authority
+                    for row, entry in zip(received.context.rows, received[1])}:
+                    _mixed_recovery_fail("AUTHORITY", "candidate authority output differs from its received result")
+                holds = {hold.raw_line_ordinal: hold for hold in received.context.history_custody}
+                for control in controls:
+                    if control.get("invalidationMode") == validator._HISTORY_CUSTODY_MODE:
+                        hold = holds.get(control["rawLineOrdinal"])
+                        if hold is None or (control["custodyAction"] == "admit"
+                            and hold.admission_run_id != control["runId"]) or (
+                            control["custodyAction"] == "dispose" and hold.disposition_run_id != control["runId"]):
+                            _mixed_recovery_fail("CANDIDATE", "selected custody effect was not received")
+            except (ValueError, LifecycleError) as exc:
                 if not stage_preexisting and not writer.remove_exact_mixed_owned_file(
                     stage_path, candidate, stage_identity
                 ):
                     _mixed_recovery_fail("RESIDUE", "invalid candidate and changed owned staging")
-                _mixed_recovery_fail("CANDIDATE", "; ".join(validation_errors) or "candidate reduction incomplete")
-            open_revise = [row.run_id for row in obligations[0].open_revise]
-            open_launches = [row.run_id for row in obligations[0].open_launches]
+                if isinstance(exc, LifecycleError):
+                    raise
+                _mixed_recovery_fail("CANDIDATE", str(exc))
+            open_revise = [event["runId"] for event in received[2]]
+            open_launches = [event["runId"] for event in received[3]]
             before_axes = {}
             if request["schemaVersion"] == 2:
-                before_context = validator.load_effective_ledger_view(root, item,
-                    ledger.relative_to(root).as_posix(), selected_ledger_bytes=original,
-                    historical_pass_custody_blobs=evidence_blobs or None,
-                    ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
-                before_errors: list[str] = []
-                _active, before_validity, before_revise, before_launches = validator._reduce_effective_current_state(
-                    before_context.rows, item, before_errors, None, context=before_context
-                )
-                before_axes = {row.raw_line_ordinal: entry.authority
-                               for row, entry in zip(before_context.rows, before_validity)}
-                raw_revise = {row.event["runId"] for row, entry in zip(before_context.rows, before_validity)
+                # beforeAuthority is this operation's independently evaluated
+                # CURRENT admitted preimage, not a claim of former raw grants.
+                try:
+                    before_validity = validator._context_evaluation(received.context).admission_preimage(original)
+                except ValueError as exc:
+                    if not stage_preexisting:
+                        writer.remove_exact_mixed_owned_file(stage_path, validation_candidate, stage_identity)
+                    _mixed_recovery_fail("AUTHORITY", str(exc))
+                if len(before_validity) != len(events):
+                    _mixed_recovery_fail("AUTHORITY", "admitted preimage row cardinality differs")
+                before_axes = {ordinal: entry.authority for ordinal, entry in enumerate(before_validity, 1)}
+                raw_revise = {event["runId"] for event, entry in zip(events, before_validity)
                               if entry.authority.revise_target_eligible}
-                raw_launches = {row.event["runId"] for row, entry in zip(before_context.rows, before_validity)
+                raw_launches = {event["runId"] for event, entry in zip(events, before_validity)
                                 if entry.authority.launch_eligible}
             else:
                 raw_revise = {str(event["runId"]) for event in events if event.get("schemaVersion") == 2 and event.get("gate") == "REVISE"}
@@ -26152,6 +26171,8 @@ def recover_mixed_current_ledger(
                     mask.revise_target_eligible, mask.closer_eligible,
                     mask.artifact_evidence_eligible,
                 )))
+            for observation in received.closure_diagnostics:
+                print(f"OBSERVATION: {observation}", file=sys.stderr)
             result = {
                 "applied": False, "replay": replay,
                 "operationId": request["operationId"],
@@ -26193,13 +26214,19 @@ def recover_mixed_current_ledger(
                 if history != original or not current.startswith(candidate):
                     _mixed_recovery_fail("REPLAY", "history or committed suffix differs")
                 if current != candidate:
+                    later_states, later_acquisition = [], []
                     later_errors = validator.validate_work_item(
-                        item, selected_ledger_bytes=current, strict_revise=False, validate_status_file=False, ledger_resource_budget=ledger_resource_budget
-                    , transition_resource_budget=_transition_resource_budget())
-                    if later_errors:
+                        item, selected_ledger_bytes=current, strict_revise=False, validate_status_file=False,
+                        obligation_state_out=later_states, ledger_acquisition_complete_out=later_acquisition,
+                        ledger_resource_budget=ledger_resource_budget,
+                        transition_resource_budget=_transition_resource_budget())
+                    try:
+                        writer._receive_append_operation(item, validator, later_states, later_acquisition,
+                            later_errors, current, current, tuple(controls))
+                    except ValueError as exc:
                         if not stage_preexisting:
                             writer.remove_exact_mixed_owned_file(stage_path, candidate, stage_identity)
-                        _mixed_recovery_fail("REPLAY", "later suffix is invalid: " + "; ".join(later_errors))
+                        _mixed_recovery_fail("REPLAY", str(exc))
                 if apply_admitted:
                     _projection_create_or_exact(receipt_path, receipt_bytes, "WI-MIXED-LEDGER-RECEIPT")
                 if not stage_preexisting and not writer.remove_exact_mixed_owned_file(stage_path, validation_candidate, stage_identity):
@@ -26243,10 +26270,24 @@ def recover_mixed_current_ledger(
                                     _mixed_recovery_fail("RESIDUE", "new proof snapshot creator identity changed")
                                 owned_evidence.append((owned["snapshot"], data, writer._noncanonical_file_identity(info)))
                 if evidence_blobs:
+                    final_states, final_acquisition = [], []
                     final_errors = validator.validate_work_item(item, ledger_path=stage_path, strict_revise=False,
-                                                               validate_status_file=False, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
-                    if final_errors:
-                        _mixed_recovery_fail("CANDIDATE", "; ".join(final_errors))
+                        validate_status_file=False, obligation_state_out=final_states,
+                        ledger_acquisition_complete_out=final_acquisition, ledger_resource_budget=ledger_resource_budget,
+                        transition_resource_budget=_transition_resource_budget())
+                    try:
+                        final_received, _positions = writer._receive_append_operation(item, validator,
+                            final_states, final_acquisition, final_errors, original, validation_candidate, tuple(controls))
+                    except ValueError as exc:
+                        _mixed_recovery_fail("CANDIDATE", str(exc))
+                    # Actual published proof material must preserve the qualification
+                    # and selected custody effects already checked for conservation.
+                    if (final_received[1:] != received[1:]
+                        or tuple((hold.raw_line_ordinal, hold.admission_run_id, hold.disposition_run_id)
+                                 for hold in final_received.context.history_custody)
+                           != tuple((hold.raw_line_ordinal, hold.admission_run_id, hold.disposition_run_id)
+                                    for hold in received.context.history_custody)):
+                        _mixed_recovery_fail("CANDIDATE", "published proof changed the qualified custody result")
                 published_path, history_created, history_identity = writer.publish_mixed_current_history_blob(
                     item, before_sha, original, ledger_resource_budget=ledger_resource_budget
                 )

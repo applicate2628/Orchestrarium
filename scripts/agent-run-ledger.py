@@ -1457,10 +1457,83 @@ def _capture_ledger_preimage(path: Path, validator: Any, ledger_resource_budget=
     return owner, snapshot, data
 
 
+def _receive_append_operation(item, validator, states, acquisition, diagnostics,
+                              previous, candidate, requested_events):
+    """Bind the transaction's exhaustive requested rows to one received result."""
+    if acquisition != [True] or len(states) != 1 or type(states[0]) is not validator.WorkItemObligationStateV1:
+        raise ValueError("; ".join((*diagnostics, "WI-LEDGER-OPERATION-RESULT: complete current result unavailable")))
+    initial = states[0]._current_result
+    if type(initial) is not validator._CurrentReductionV1 or tuple(diagnostics) != initial.diagnostics:
+        raise ValueError("; ".join((*diagnostics, "WI-LEDGER-OPERATION-RESULT: diagnostic/result association differs")))
+    receiving_errors = []
+    result = initial.receive(item, receiving_errors)
+    if result is None:
+        raise ValueError("; ".join((*diagnostics, *receiving_errors,
+                                     "WI-LEDGER-OPERATION-RESULT: current receiving unavailable")))
+    owner = validator._context_evaluation(result.context)
+    if owner is None or owner.selected_input.raw != candidate:
+        raise ValueError("WI-LEDGER-OPERATION-RESULT: selected candidate bytes differ")
+    native_rows = owner.selected_input.rows
+    if candidate != previous:
+        suffix = b"".join((serialize_event(event) + "\n").encode("utf-8") for event in requested_events)
+        separator = b"" if not previous or previous.endswith(b"\n") else b"\n"
+        if not requested_events or candidate != previous + separator + suffix:
+            raise ValueError("WI-LEDGER-OPERATION-RESULT: requested rows do not exhaust the exact candidate suffix")
+        selected = native_rows[-len(requested_events):]
+        if len(selected) != len(requested_events) or any(
+            serialize_event(dict(row.event)) != serialize_event(event)
+            for row, event in zip(selected, requested_events)
+        ):
+            raise ValueError("WI-LEDGER-OPERATION-RESULT: requested native row count or order differs")
+    else:
+        requested = {}
+        for event in requested_events:
+            serialized = serialize_event(event)
+            if serialized in requested:
+                raise ValueError("WI-LEDGER-OPERATION-RESULT: replay reuses a requested raw identity")
+            requested[serialized] = None
+        for row in native_rows:
+            serialized = serialize_event(dict(row.event))
+            if serialized in requested:
+                if requested[serialized] is not None:
+                    raise ValueError("WI-LEDGER-OPERATION-RESULT: replay does not bind one exact requested raw event")
+                requested[serialized] = row
+        if any(row is None for row in requested.values()):
+            raise ValueError("WI-LEDGER-OPERATION-RESULT: replay requested raw event is absent")
+        selected = tuple(requested.values())
+    ordinals = tuple(row.raw_line_ordinal for row in selected)
+    if len(set(ordinals)) != len(ordinals):
+        raise ValueError("WI-LEDGER-OPERATION-RESULT: publication reuses a physical raw identity")
+    raw_identities = {row.raw_line_ordinal: row.raw_body_sha256 for row in selected}
+
+    # Only native descendants belong to this publication. A source-authenticated
+    # transform may change its value; its original ordinal/body digest remain.
+    native_positions = {}
+    for position, row in enumerate(result.context.rows):
+        if row.projection_transformation == "transferred":
+            continue
+        ordinal = row.raw_line_ordinal
+        if ordinal not in raw_identities:
+            continue
+        if ordinal in native_positions or row.raw_body_sha256 != raw_identities[ordinal]:
+            raise ValueError("WI-LEDGER-OPERATION-RESULT: native semantic origin is ambiguous or differs")
+        native_positions[ordinal] = position
+    positions = tuple(native_positions[ordinal] for ordinal in ordinals if ordinal in native_positions)
+    veto = result.operation_diagnostics(requested_positions=tuple(positions), strict=False)
+    if veto:
+        # A record-only projection distinguishes existing blocking failures from
+        # refusal of the selected effect, solely for rendering this same result.
+        if veto == result.operation_diagnostics(requested_positions=(), strict=False):
+            for observation in result.closure_diagnostics:
+                print(f"OBSERVATION: {observation}")
+        raise ValueError("; ".join(veto))
+    return result, tuple(positions)
+
+
 def _append_event_transaction(
     item: Path, validator: Any, event_factory: Any, on_abort: Any = None,
     *, candidate_custody_blobs: dict[str, bytes] | None = None, before_replace: Any = None, ledger_resource_budget=None,
-    transition_resource_budget=None,
+    transition_resource_budget=None, _replay_run_id: str | None = None,
 ) -> bool:
     """Append one validator-approved event, or report an idempotent no-op.
 
@@ -1507,13 +1580,21 @@ def _append_event_transaction(
         previous = previous_bytes.decode("utf-8")
         event = event_factory(previous)
         if event is None:
+            states, acquisition = [], []
             errors = validator.validate_work_item(
                 item, selected_ledger_bytes=previous_bytes, strict_revise=False,
                 ledger_resource_budget=ledger_resource_budget,
                 transition_resource_budget=transition_resource_budget,
+                obligation_state_out=states, ledger_acquisition_complete_out=acquisition,
             )
-            if errors:
-                raise ValueError("; ".join(errors))
+            requested = tuple(json.loads(line) for line in previous.splitlines() if line.strip()
+                              and json.loads(line).get("runId") == _replay_run_id) if _replay_run_id is not None else ()
+            if _replay_run_id is not None and len(requested) != 1:
+                raise ValueError("WI-LEDGER-OPERATION-RESULT: replay effect identity is absent or repeated")
+            result, _positions = _receive_append_operation(item, validator, states, acquisition, errors,
+                                      previous_bytes, previous_bytes, requested)
+            for observation in result.closure_diagnostics:
+                print(f"OBSERVATION: {observation}")
             return False
         budget = validator._ledger_resource_budget(ledger_resource_budget)
         demand = validator.inspect_ledger_resource_demand(
@@ -1528,12 +1609,15 @@ def _append_event_transaction(
             record = publication.create_qualified_candidate(candidate, _append_candidate_bytes(previous_bytes, event))
             # The logical writer qualifies this actual native object exactly once.
             custody_args = {"historical_pass_custody_blobs": candidate_custody_blobs} if candidate_custody_blobs is not None else {}
-            errors = validator.validate_work_item(item, ledger_path=record.locator, strict_revise=False, **custody_args, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
-            if errors:
-                for error in errors:
-                    print(f"FAIL: {error}", file=sys.stderr)
-                print(f"RESULT: FAIL ({len(errors)} errors)", file=sys.stderr)
-                raise ValueError("; ".join(errors))
+            states, acquisition = [], []
+            errors = validator.validate_work_item(item, ledger_path=record.locator, strict_revise=False,
+                **custody_args, ledger_resource_budget=ledger_resource_budget,
+                transition_resource_budget=transition_resource_budget,
+                obligation_state_out=states, ledger_acquisition_complete_out=acquisition)
+            result, _positions = _receive_append_operation(item, validator, states, acquisition, errors,
+                previous_bytes, _append_candidate_bytes(previous_bytes, event), (event,))
+            for observation in result.closure_diagnostics:
+                print(f"OBSERVATION: {observation}")
             if before_replace is not None:
                 before_replace()
             publication.place_qualified_candidate(record, original)
@@ -1862,44 +1946,17 @@ def _settle_launch_from_ledger(
         raise ValueError(
             "WI-LEDGER-SETTLE-TARGET: launch must identify one V2 launch event"
         )
-    terminal_positions = [
-        pos
-        for pos, event in enumerate(events)
-        if event.get("eventKind") == "terminal"
-        and event.get("launchRunId") == args.launch_run_id
-    ]
-    if terminal_positions and any(
-        event.get("eventKind") == validator.LEGACY_MIGRATION_KIND for event in events
-    ):
-        active_migrations: dict[str, tuple[int, int]] = {}
-        metadata = [{"sha256": hashlib.sha256(line.encode("utf-8")).hexdigest()} for line in lines]
-        _effective, _counters, migration_errors = validator.project_legacy_obligation_migrations(
-            events, metadata, args.work_item, active_migrations_out=active_migrations,
-        )
-        if migration_errors:
-            raise ValueError("; ".join(migration_errors))
-        for target_pos, migration_pos in active_migrations.values():
-            if events[target_pos].get("launchRunId") != args.launch_run_id:
-                continue
-            positions, relation_error = validator.classify_migrated_launch_terminals(
-                events, target_pos, args.work_item, migration_pos=migration_pos,
-            )
-            if relation_error is not None:
-                raise ValueError(relation_error)
-            terminal_positions = list(positions)
-            break
-    terminals = [events[pos] for pos in terminal_positions]
-    if len(terminals) > 1:
-        raise ValueError(
-            "WI-LEDGER-SETTLE-TARGET: launch has multiple terminal events"
-        )
-
     event = _settlement_event(args, launches[0], validator)
-    if terminals:
-        if terminals[0] == event:
+    requested = [value for value in events if value.get("runId") == args.run_id]
+    if len(requested) > 1:
+        raise ValueError(
+            "WI-LEDGER-SETTLE-TARGET: requested runId identifies multiple events"
+        )
+    if requested:
+        if requested[0] == event:
             return None
         raise ValueError(
-            "WI-LEDGER-SETTLE-CONFLICT: launch already has a different terminal event"
+            "WI-LEDGER-SETTLE-CONFLICT: requested runId already has a different event"
         )
     return event
 
@@ -1915,7 +1972,7 @@ def command_settle_launch(args: argparse.Namespace, *, ledger_resource_budget=No
             item,
             validator,
             lambda previous: _settle_launch_from_ledger(previous, args, validator), ledger_resource_budget=ledger_resource_budget,
-            transition_resource_budget=transition_resource_budget,
+            transition_resource_budget=transition_resource_budget, _replay_run_id=args.run_id,
         )
     except (ValueError, LedgerWriteLockError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
@@ -1958,11 +2015,21 @@ def command_recover_invalid_closure(args: argparse.Namespace, *, ledger_resource
         print("FAIL: legacy V1/V2 writer refuses a ledger containing schemaVersion 3")
         return 1
 
-    def validate_candidate(candidate: Path, _expected: bytes) -> list[str]:
-        return validator.validate_work_item(
-            item, ledger_path=candidate, strict_revise=False, ledger_resource_budget=ledger_resource_budget,
-            transition_resource_budget=transition_resource_budget,
-        )
+    def validate_candidate(candidate: Path, previous: bytes, candidate_bytes: bytes) -> list[str]:
+        states, acquisition = [], []
+        diagnostics = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False,
+            obligation_state_out=states, ledger_acquisition_complete_out=acquisition,
+            ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+        result, _positions = _receive_append_operation(item, validator, states, acquisition, diagnostics,
+                                                       previous, candidate_bytes, (event,))
+        targets = [position for position, row in enumerate(result.context.rows)
+                   if row.event.get("runId") == event["invalidatesRunId"]]
+        if len(targets) != 1 or targets[0] in result[0]:
+            raise ValueError("; ".join((*result.diagnostics,
+                "WI-LEDGER-RECOVERY-EFFECT: selected invalidation was not accepted")))
+        for observation in result.closure_diagnostics:
+            print(f"OBSERVATION: {observation}")
+        return []
 
     return _commit_recovery_append(
         item,
@@ -1977,7 +2044,7 @@ def command_recover_invalid_closure(args: argparse.Namespace, *, ledger_resource
 def _commit_recovery_append(
     item: Path,
     event: dict[str, Any],
-    validate_candidate: Callable[[Path, bytes], list[str] | tuple[str, ...]],
+    validate_candidate: Callable[[Path, bytes, bytes], list[str] | tuple[str, ...]],
     success_marker: str,
     inject_failure: str | None,
     *,
@@ -1986,6 +2053,9 @@ def _commit_recovery_append(
 ) -> int:
     """Commit one validated recovery row through the existing atomic append path."""
 
+    if not callable(validate_candidate):
+        print("FAIL: ledger-recovery: selected semantic validator is required")
+        return 1
     validator = load_validator()
     lifecycle = validator.load_lifecycle_owner()
     ledger_path = item / "agent-runs.jsonl"
@@ -2010,11 +2080,9 @@ def _commit_recovery_append(
         if any("WI-LEDGER-RESOURCE-" in error for error in complete_errors):
             raise ValueError("; ".join(complete_errors))
         if replay_detector is not None and replay_detector(previous):
-            errors = validator.validate_work_item(
-                item, selected_ledger_bytes=previous, strict_revise=False,
-                ledger_resource_budget=ledger_resource_budget,
-                transition_resource_budget=transition_resource_budget,
-            )
+            errors = validate_candidate(ledger_path, previous, previous)
+            if not isinstance(errors, (list, tuple)) or any(not isinstance(error, str) for error in errors):
+                raise ValueError("ledger-recovery: semantic validator must return a list or tuple of diagnostics")
             if errors:
                 raise ValueError("; ".join(errors))
             print(f"{success_marker} ({ledger_path})")
@@ -2028,7 +2096,9 @@ def _commit_recovery_append(
         validator.resolve_ledger_resource_budget(budget.max_events, budget.max_ledger_bytes, demand=demand)
         with lifecycle.qualified_ledger_publication(ledger_path, original) as publication:
             record = publication.create_qualified_candidate(candidate, expected)
-            errors = validate_candidate(record.locator, expected)
+            errors = validate_candidate(record.locator, previous, expected)
+            if not isinstance(errors, (list, tuple)) or any(not isinstance(error, str) for error in errors):
+                raise ValueError("ledger-recovery: semantic validator must return a list or tuple of diagnostics")
             if errors:
                 for error in errors:
                     print(f"FAIL: {error}")
@@ -2114,7 +2184,7 @@ def command_dispose_invalid_current(args: argparse.Namespace, *, ledger_resource
         "updatedAt": updated_at,
     }
 
-    def validate_candidate(_candidate: Path, expected: bytes) -> tuple[str, ...]:
+    def validate_candidate(_candidate: Path, _previous: bytes, expected: bytes) -> tuple[str, ...]:
         return validator.validate_invalid_current_disposition_candidate(
             item,
             expected,
@@ -2129,16 +2199,7 @@ def command_dispose_invalid_current(args: argparse.Namespace, *, ledger_resource
         current = validator.load_jsonl(
             item / "agent-runs.jsonl", replay_errors, None, previous, ledger_resource_budget=ledger_resource_budget
         )
-        return not replay_errors and any(candidate == event for candidate in current) and not (
-            validator.validate_invalid_current_disposition_candidate(
-                item,
-                previous,
-                event,
-                ledger_manifest_bytes=manifest_bytes,
-                expected_ledger_sha256=args.expected_ledger_sha256, ledger_resource_budget=ledger_resource_budget,
-                transition_resource_budget=transition_resource_budget,
-            )
-        )
+        return not replay_errors and any(candidate == event for candidate in current)
 
     return _commit_recovery_append(
         item,
