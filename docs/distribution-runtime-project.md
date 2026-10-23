@@ -17,8 +17,9 @@ other providers. Python stays the coordination implementation, not a temporary
 migration oracle. The target supersedes whole-Python retirement.
 
 This project is independent of an Orchestrarium 2.0 release. Qualified bounded
-slices may ship in the current version; packaging, native operations and SDK
-coordination have their own admission and evidence, not an all-or-nothing cutover.
+slices may ship in the current version; SDK tasks come first, then common-hook
+replacement and distribution. This is not an all-or-nothing product cutover, but
+each shared hook is replaced for all its current supported consumers together.
 Historical outcomes 1 and 5 in [planning PR #13](https://github.com/applicate2628/Orchestrarium/pull/13)
 are its provenance, recorded at commit `40b67327e086c0b5908549358e1b2af91f933b0c`.
 That planning PR is not an implementation or merge prerequisite for this project.
@@ -139,7 +140,10 @@ contract, not a claim to reproduce missing decisions. Current main has no root
 - Ship a thin JavaScript dispatcher, versioned rules/resources and exact-version
   native platform packages selected through npm `optionalDependencies`. No
   `postinstall` downloads, compilation, Python setup, providers or project mutation.
-  Missing native binaries fail clearly; no implicit compilation or Python fallback.
+  Resolve prerequisites for the selected operation/route only. A selected native
+  operation with a missing binary fails clearly; no implicit compilation or Python
+  fallback. An explicitly selected legacy-Python apply route does not require an
+  unrelated native hook or an unavailable Rust installer.
 - `orchestrarium apply --provider codex|claude --global` selects global application;
   `orchestrarium apply --provider codex|claude --target PATH --allow-unsafe-target`
   selects an explicit project. Preserve current target admission, exact-digest
@@ -179,7 +183,10 @@ contract, not a claim to reproduce missing decisions. Current main has no root
   (`x86_64-pc-windows-msvc`). Subsequent candidates: Linux x64 GNU
   (`x86_64-unknown-linux-gnu`) and macOS arm64 (`aarch64-apple-darwin`). All are
   currently unqualified for the new native product; no other architecture is
-  implicitly supported. Qualify hooks, installer and process runner independently.
+  implicitly supported. This is qualification order, not permission to drop any
+  currently supported hook consumer. Before each shared-hook cutover verify all
+  existing supported provider/host routes; qualify installer and process runner
+  independently.
 
 Prove the complete payload from an unpacked archive without a checkout, including
 validators and dynamic resources. Check dependency closure, explicit apply,
@@ -280,7 +287,7 @@ new duplicate mechanism. These are implementation choices, not qualified live ro
 No blanket hook-count reduction follows; host-mode hooks and foreign registrations
 (including Graft) remain outside SDK-owned-lane deletion.
 
-1. **First SDK slice: structured read-only review.**
+1. **Structured read-only review.**
    `scripts/provider_prompt.py:6139–6208` already extracts Codex JSONL but then
    interprets a prose final line (`GATE: PASS` / `GATE: REVISE`). For a separately
    admitted SDK-owned reviewer, use [Agents SDK output types](https://github.com/openai/openai-agents-python/blob/main/docs/agents.md#output-types)
@@ -322,7 +329,13 @@ No blanket hook-count reduction follows; host-mode hooks and foreign registratio
    instead of writing a new history/replay/pause loop. This prevents new glue, not
    deletion of authoritative work-item/review/agent-run ledgers. Test same-session
    resume, stale state, restart, missing resume capability and no duplicate tool
-   effects. An uncertain effect is reconciled, not replayed as a new user turn.
+   effects. Before a resumed new effect, reuse existing admission, ownership, budget
+   and approval checks against current authoritative state and the original
+   run/profile/artifact/account binding. A serialized approval is not fresh authority:
+   changed or revoked bindings stop the dependent call under existing controls,
+   without silent rebinding or new statuses. Test revoked approval and changed
+   artifact/profile/account with no effect. An uncertain prior effect is reconciled,
+   not replayed as a new user turn.
 5. **Coordinator loop and approval mechanics, not new authority.**
    The [manager-as-tools pattern](https://github.com/openai/openai-agents-python/blob/main/docs/multi_agent.md)
    owns model/tool iteration and specialist returns in SDK mode; remove mechanical
@@ -455,103 +468,131 @@ Python/SDK route dependencies separately, including adapter version compatibilit
 auth/billing selection and trace-export behavior. No whole-product Python-free claim,
 duplicate execution owner or second authoritative state store is introduced.
 
-## Delivery sequence and first bounded implementation
+## Delivery plan: SDK first, then common Rust replacement and npm
 
-**Admitted sequence:** first replace small deterministic hooks/checks; then required
-deterministic helpers and the installer behind their existing ownership contracts.
-Separately qualify a bounded Python/Agents SDK coordination route. Each cutover keeps
-one canonical implementation per operation and removes the superseded production
-logic. Temporary native launch adapters may forward only; no independent Python/Rust
-state writers or automatic fallback after an uncertain effect. Preserve current supported
-runtime paths until their replacement passes parity and recovery checks. The target
-is not a new agent framework, scheduler or universal execution service. Implementation
-belongs in a separate pull request (PR). A verified simple-hook slice may ship in the
-current release independently of full 2.0 and unfinished generic process support.
+This is the implementation backlog, not authorization to launch providers or
+publish packages. SDK tasks are separate from Rust/npm tasks; no task requires a
+new scheduler, registry or second state owner. Start with fixtures and existing
+contracts. Each implementation PR names the exact deleted glue and receiving proof.
 
-The next work is bounded preparation and qualification, not a provider launch:
+### SDK workstream — start here
 
-1. Toolchain Engineer implements the selected package/command contract and verifies
-   the complete distributable and runtime dependency closure, including retained
-   version binding, explicit apply and per-route Python/SDK prerequisites.
-   Package-contract work can proceed without expanded native-role lifecycle, routing
-   evaluation, generic process support or cross-host continuation.
-2. First native slice: `orchestrarium hook mcp-usage-reminder`, owned by the existing
-   hook/helper owner. Its 34-line current entrypoint emits unconditional SessionStart
-   context without reading stdin, scanning transcripts, changing project state or
-   spawning children. Freeze that contract and implement its Rust replacement
-   against isolated cloned fixtures/replayed inputs. Stub providers;
-   do not execute paid models, duplicate live effects or introduce packaging-driven
-   project mutation. Keep the production Python path until the slice's parity,
-   platform, recovery and source-to-installed checks qualify the replacement. Before
-   production cutover, obtain the existing owner/Architect acceptance and update the
-   binding language-owner policy and owning documentation together.
-   Select direct-native registration; use a temporary forwarding-only adapter only
-   for a verified host limitation, not a permanent extra layer. Current target
-   selection, health classification and mirror membership are Python-only: update
-   those owners, registration/inventory and tests together. Extend the existing hook
-   metadata/target descriptor so one logical marker maps to the exact retained
-   executable plus `hook <marker>` arguments, event, matcher and registration source.
-   Registration, inventory/health, replacement and retirement consume that same
-   binding, including health target extraction. Normalize only path operands, not
-   literal selectors or arbitrary argument values: current `_command_identity`
-   (`check-hook-health.py:353–358`) treats all argv as paths. Preserve argument
-   boundaries through supported host serialization rather than adding shell-specific
-   guessing. Current script-basename classification (`check-hook-health.py:1027–1117`)
-   and removal (`install-hypothesis-hook.py:343–351`) cannot identify multiple hooks
-   in one binary. Do not recognize ownership by binary name alone, arbitrary argv
-   substring matching, per-hook exceptions or one executable per hook. Test wrong
-   selector/path/source, duplicate markers, foreign commands and old Python entries.
-   Generate the embedded
-   policy from `mcp_continuity_policy.py::SESSION_START_CONTEXT` at build time and
-   compare the exact projection; do not hand-copy a second authored policy.
-   Reuse `test_universal_reminder_hooks.py` and
-   `test_sessionstart_reminder_python_hooks.py`: verify exact JSON/UTF-8/order/newline,
-   stdout/stderr/exit, startup/resume/clear/compaction/subagent inputs, malformed or
-   open stdin (must not block), and output-failure fail-open behavior. Embedding
-   removes Python sibling-import failure; record that packaging difference instead
-   of claiming impossible failure parity. Missing/corrupt native payload remains an
-   installer-integrity failure. Verify build-to-installed identity, reinstall,
-   rollback, owned membership and preservation of foreign hooks. Changed identities
-   require existing manual host trust and strict health receiving, not fixed total
-   installed counts.
-3. First SDK slice: the structured read-only review case above, with an explicit
-   domain receiving-version change and format-only glue deletion. Use provider-native
-   structured output instead if the same result needs no SDK coordinator. Use fixtures
-   and stubbed adapters first to probe capability rejection, authentication/billing
-   selection, trace-export configuration, result provenance and cancellation ownership.
-   Live qualification requires its own accepted route, data, budget and permissions;
-   it does not silently switch current host-led mode or enable providers.
-4. Expand only to admitted deterministic helpers and installer operations whose
-   consumer/owner evidence warrants the migration. Preserve one canonical production
-   implementation per cutover; retain uncovered routes until replacements qualify.
-   Release only the platform/architecture matrix actually verified for that slice.
+1. **SDK-1: freeze the existing execution boundary and fixtures.**
+   Owner: provider integration/QA with Lead. Trace admitted task, role, profile,
+   artifact and run identity through the actual adapter/result/ledger/readback
+   owners named above. Reuse existing fixtures; add only uncovered mismatch,
+   cancellation, approval-resume and historical-record cases. Define one domain
+   execution boundary implemented by adapters, not a new generic framework or
+   duplicate schema. Deliverable: executable acceptance fixtures and exact migration
+   map; production behavior and provider admission unchanged.
+2. **SDK-2: replace ACP wire plumbing in the existing Kimi adapter.**
+   Owner: provider integration. Use the official Python ACP client to remove only
+   serialization/request multiplexing/schema boilerplate it actually replaces.
+   Retain fixed profile, observed capability/readback, permissions, redaction,
+   bounds and close/delete settlement. Same CLI-owned route retains truthful
+   provenance; do not manufacture a new execution path. Deliverable: old/new
+   fixture parity, then one selected production transport with superseded wire
+   plumbing removed. This is protocol reuse, not Agents SDK orchestration or a
+   new Kimi capability. Do not enable additional providers to complete this task.
+3. **SDK-3: remove prose-only review verdict formatting.**
+   Owner: review-result/provider owner. First use native structured output if the
+   admitted provider route supports it without adding a coordinator. Use Agents
+   SDK output types only for an explicitly SDK-owned review route. Map the closed
+   verdict/evidence result through the existing receiving owner; retain semantic
+   review and external nonauthority. Deliverable: malformed/refused/incomplete/
+   mismatched-result tests and removal of the qualified route's format-only prompt
+   and final-line parser. No extra model call to translate prose, no silent model,
+   account or billing change, and no removal of parsers still used by other routes.
+4. **SDK-4: one bounded Agents SDK coordination mode.**
+   Owner: Lead/provider integration. Use manager-as-tools, typed execution events,
+   Sessions and RunState for one agreed workflow, replacing the corresponding
+   model/tool loop, transcript reconstruction and pause/history glue. Reuse the
+   common execution tool from SDK-1/2; provider SDKs stay inside their adapters.
+   Complete the versioned result/ledger chain before activation. Retain one
+   coordinator, current authority on resume, exact operation identity and the
+   existing state/process owners. Deliverable: restart/cancellation/permission/
+   incomplete-stream fixtures and explicit route/dependency configuration. This
+   mode does not run alongside the existing host Lead. If a smaller existing-host
+   solution covers the case, do not add the SDK coordinator just to use the library.
 
-The native-role lifecycle project is a dependency only for a package action that
-actually requires its broader ownership transitions; consume that installer's
-accepted operation rather than creating a second ownership manager. A concrete
-future cross-host use case may consume qualified runtime operations, but neither
-project blocks unrelated packaging or hook work by default.
+SDK-1 is preparation for the following changes, not a stand-alone abstraction layer.
+SDK-2 and SDK-3 can be separate bounded PRs after their affected contract fixtures;
+SDK-4 depends on the common boundary and its own qualified use case, not Rust/npm.
+No live qualification occurs without the required route, data, budget and permissions.
 
-Implementation acceptance and independent review remain with the existing owners.
-For each rollout, state what is delivered, still unsupported, deferred with owner
-and next step, or explicitly retired with rationale. Count native distribution,
-Python/SDK updates, adapter/version compatibility, temporary-bridge removal and
-platform maintenance in the cost of the change. No speed, reliability or dependency
-reduction is established by selecting libraries or writing this project document.
+### Rust workstream — replace shared operations, not provider copies
 
-Carry the existing regression probes at the affected owner, not only new happy-path
-fixtures: `test_hook_runtime_installers.py` / `test_hook_runtime_transactions.py` /
-`test_universal_hook_surfaces.py` for installed hooks; `test_kimi_transport.py` for
-ACP receipts/cleanup; `test_manual_repo_transfer_security_contracts.py` for transfer;
-`test_agent_run_ledger.py`, `test_review_loop_state_v2.py` and
-`test_solution_attempt_reducer.py` for state/retry lineage. These files live under
-`tests/`. Compare the same selected probes on the pinned baseline and candidate,
-separating existing failures from new regressions; a source review or stub-only
-suite does not qualify live SDK/provider/platform behavior.
+The unit of hook migration is one shared hook across all its current supported
+consumers. Build one common Rust implementation with narrow host adapters where
+registration/input/output genuinely differs. Do not fork its logic for Codex and
+Claude or add a production Python/Rust switch. Python stays the current implementation
+while the Rust candidate is tested on isolated fixtures. In the cutover PR, update
+all affected registrations/consumers and remove the replaced Python canon and its
+mirrors together. If a required consumer is not qualified, the common hook stays on
+Python until the replacement is ready; other independent tasks continue. Migrate
+hook by hook, not all hooks or the whole product at once. Retained installed old
+versions for rollback are not a second maintained source implementation.
 
-This documentation extraction requires scope/coverage review, local-link and
-cross-reference checks and diff-surface inspection. Those checks do not establish
-runtime behavior, package availability, installed compatibility or benchmarks.
+First hook: `orchestrarium hook mcp-usage-reminder`. Its current 34-line entrypoint
+emits unconditional SessionStart context without reading stdin, scanning transcripts,
+changing project state or spawning children. Generate the embedded policy from
+`mcp_continuity_policy.py::SESSION_START_CONTEXT` during candidate development and
+check the exact projection; no hand-copied policy. At cutover, remove the Python
+entrypoint/mirrors. Keep the policy module only while other live Python consumers
+use it; once its last consumer moves, move authored policy to one neutral resource
+and remove the obsolete module rather than preserve a Python runtime dependency.
+
+Select direct-native registration, not a permanent forwarding layer. Extend the
+existing hook metadata/target descriptor: logical marker maps to retained executable
+plus exact `hook <marker>` arguments, event, matcher and source. Registration,
+inventory, health target extraction, replacement and retirement consume the same
+binding. Current script-basename classification (`check-hook-health.py:1027–1117`)
+and removal (`install-hypothesis-hook.py:343–351`) cannot identify multiple hooks in
+one binary. `_command_identity` (`check-hook-health.py:353–358`) currently treats all
+argv as paths: normalize path operands only, preserving selectors and argument
+boundaries under supported host serialization. No binary-name-only ownership,
+substring matching, per-hook exceptions or separate executable per hook.
+
+Reuse `test_universal_reminder_hooks.py`, `test_sessionstart_reminder_python_hooks.py`
+and hook installer/transaction/surface suites. Verify JSON/UTF-8/order/newline,
+stdout/stderr/exit, startup/resume/clear/compaction/subagent inputs, malformed/open
+stdin (no blocking), output-failure fail-open behavior and exact policy projection.
+Embedding removes Python sibling-import failure; record that packaging difference,
+not false byte-for-byte failure parity. Qualify native payload integrity, all current
+supported consumers, wrong selector/path/source, duplicate/foreign entries, native
+manual trust, reinstall/rollback and build-to-installed identity. Total installed
+hook count is not managed membership. Update the current Python-owner source policy
+and affected documentation together before cutover.
+
+Then migrate justified deterministic helpers and installer operations using the same
+owner-level parity/recovery discipline. Python remains for SDK coordination and
+unmigrated operations, not as a fallback copy of a migrated operation.
+
+### npm workstream — delivery, not a second installer
+
+Implement the selected CLI/payload/retained-version contract above. Packaging can
+use the explicitly selected current Python installer until the Rust installer is
+qualified; hook migration does not require that larger port. Verify complete runtime
+resource/dependency closure from an unpacked package without a checkout, npm
+update/uninstall survival of applied packs and explicit apply/recovery. Publish only
+qualified target binaries; package identity/locks/builds are release evidence, not
+new architecture decisions. No full-pack removal or automatic reclamation is added.
+Expanded native-role lifecycle or cross-host work blocks only actions actually
+requiring those separately owned features.
+
+### Receiving and remaining evidence
+
+Implementation acceptance stays with affected owners and independent reviewers.
+For each PR identify delivered behavior, deleted glue, unchanged obligations and
+unqualified targets. Carry existing regression probes at the affected owner:
+`test_hook_runtime_installers.py`, `test_hook_runtime_transactions.py`,
+`test_universal_hook_surfaces.py`, `test_kimi_transport.py`,
+`test_manual_repo_transfer_security_contracts.py`, `test_agent_run_ledger.py`,
+`test_review_loop_state_v2.py` and `test_solution_attempt_reducer.py`, all under
+`tests/`. Compare selected probes against the pinned main baseline; source review
+and stub-only tests do not prove live provider/platform behavior. No speed or
+reliability gain is established until measured. This plan includes a narrow
+manual-trust documentation/test correction, not the new runtime implementation.
 
 ## Terms and Abbreviations
 
