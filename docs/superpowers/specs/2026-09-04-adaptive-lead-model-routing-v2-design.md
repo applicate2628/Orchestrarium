@@ -1,6 +1,7 @@
 # Adaptive Provider-Neutral Lead and Model Routing — Version 2 Design
 
-Baseline: main `68ad6e733e049ad3f86b37af59ea806e8d1a5b25`, 2026-10-21.
+Historical audit baseline: main 68ad6e733e049ad3f86b37af59ea806e8d1a5b25 (2026-10-21).
+Integration base: main cc570f2df858b7ab34a7922becc10fbc53f32b76; scope reconciled 2026-10-23.
 Status: main-aligned design revision; not implemented runtime acceptance.
 The [ownership map](../../model-routing-v2/current-main-delta.md) and
 [replacement plan](../plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md)
@@ -121,7 +122,7 @@ Uncontrolled peer chat is not the debate mechanism. The Lead manages an artifact
 
 Additional workers are selected by expected **marginal information gain**: new scope, a distinct approach, or a new failure class. Another highly correlated answer has lower value than a qualified worker with different approach tags and evidence independence.
 
-Majority agreement is not truth. In the current machine contracts, every unresolved contradiction prevents `selected` status and requires `humanGateRequired = true` in a degraded or blocked decision; the operational envelope also requires the human-gate contract. This is stricter than a critical-only rule. A gate request is not acceptance or execution permission; the trusted owner must verify the corresponding evidence.
+Majority agreement is not truth. In the retained deferred host-protocol contracts, every unresolved contradiction prevents `selected` status and requires `humanGateRequired = true` in a degraded or blocked decision; the operational envelope also requires the human-gate contract. This retained rule is stricter than a critical-only rule. It is not the escalation policy of the initial comparator: that comparator reports evidence conflicts to the existing Lead/review owners, resolves missing facts where possible, and requests user intervention only when current governance requires it. A gate request is not acceptance or execution permission; the trusted owner must verify the corresponding evidence.
 
 ## 7. Adaptive selection
 

@@ -62,10 +62,3 @@ def test_outcome_rule_matches_existing_resource_budget_rule(records):
     assert list(validator(schema,"resourceBudget").iter_errors(budget))
     budget["currency"] = "USD"
     validator(schema, "resourceBudget").validate(budget)
-
-
-@pytest.mark.parametrize("name", ["routeControl", "dispatchControl", "writeDispatchControl", "decisionControl", "routeOutcome", "workerResultControl"])
-def test_all_published_operational_examples_still_validate(records, name):
-    schema, examples = records
-    definition = "dispatchControl" if name == "writeDispatchControl" else name
-    validator(schema, definition).validate(examples[name])

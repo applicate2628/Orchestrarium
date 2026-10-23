@@ -51,13 +51,16 @@ def test_implementation_plan_reuses_owners_and_keeps_launch_revalidation():
     assert "cross-host failover" in deferred
 
 
-def test_normative_spec_uses_the_existing_all_contradictions_gate():
+def test_normative_spec_scopes_the_retained_host_contract_contradictions_gate():
     root = V2.parents[1]
     spec = (root / "docs/superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md").read_text(encoding="utf-8")
     section = spec.split("## 6. Structured disagreement\n", 1)[1].split("\n## 7.", 1)[0]
     assert "every unresolved contradiction" in section
     assert "`humanGateRequired = true`" in section
     assert "`selected`" in section
+    assert "retained deferred host-protocol contracts" in section
+    assert "initial comparator" in section
+    assert "only when current governance requires it" in section
 
 
 
@@ -76,3 +79,20 @@ def test_current_policy_keeps_exact_model_identity_authority():
     assert "Exact model generations live only in immutable registry" not in doc
     assert "It does not claim independent review of this revised candidate" in doc
     assert "The initial pure comparison" in doc
+
+
+def test_schema_metadata_keeps_current_policy_identity_ownership():
+    schema = json.loads((V2 / "adaptive-routing-contracts.v2.schema.json").read_text(encoding="utf-8"))
+    description = schema["description"]
+    assert "Current role/task policy owns admitted identities" in description
+    assert "identities live only in registry snapshots" not in description
+
+
+def test_profile_validation_and_acceptance_distinguish_feature_boundaries():
+    doc = (V2 / "effort-profile-evidence.md").read_text(encoding="utf-8")
+    validation = doc.split("## 5. Semantic validation\n", 1)[1].split("\n## 6.", 1)[0]
+    acceptance = doc.split("## 7. Migration and acceptance\n", 1)[1].split("\n## 8.", 1)[0]
+    assert "pure comparator validates only its consumed input and evidence" in validation
+    assert "Lead fence applies only to the deferred host-transfer protocol" in validation
+    assert "Provider installation and snapshot-projection checks apply only" in acceptance
+    assert "does not require a provider installation or a lease subsystem" in acceptance

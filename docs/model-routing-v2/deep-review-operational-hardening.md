@@ -232,10 +232,15 @@ Outcome data updates future evaluation snapshots only through a reviewed evaluat
 
 ## 11. Cross-record validator obligations
 
-Schema validation is necessary but insufficient. The runtime validator and persistence owner must additionally prove:
+Schema validation is necessary but insufficient. Apply the following obligations
+at their existing owners when the corresponding records and effects are consumed.
+The initial pure comparator checks only input/evidence and recommendation
+consistency; it creates no persistence, launch or lease subsystem. Execution
+obligations apply at later admitted integration, and host-transfer checks only
+when that deferred protocol is enabled:
 
-1. one active Lead lease per work item;
-2. monotonic epochs and valid lease transitions;
+1. current work-item ownership; one active Lead lease additionally applies to enabled host transfer;
+2. monotonic epochs and valid lease transitions for that host-transfer protocol;
 3. snapshot existence, content identity, digest profile, freshness, and trust source;
 4. unique runtime entries, profile evaluations, slots, effort bindings, dispatches, attempts, terminal results, and outcomes;
 5. `admittedEfforts` is a subset of `supportedEfforts`;
@@ -249,7 +254,7 @@ Schema validation is necessary but insufficient. The runtime validator and persi
 13. required slots are filled exactly once;
 14. required independence and approach coverage are actually achieved;
 15. budgets are internally consistent and not exceeded;
-16. every dispatch, attempt, and outcome binds its applicable Lead ownership and exact digests; terminal results preserve execution ownership and validate current admitting ownership, with explicit evidence for the `revalidated-after-transfer` path;
+16. every dispatch, attempt, and outcome binds its applicable Lead ownership and exact digests; terminal results preserve execution ownership and validate current admitting ownership, with explicit evidence for the `revalidated-after-transfer` path only when host transfer is enabled;
 17. write preconditions, postconditions, rollback, allowed paths, cancellation, and idempotency rules hold;
 18. every launched process reaches a terminal receipt and is reaped or quarantined;
 19. unresolved contradictions, quality failures, and human gates have consistent status;

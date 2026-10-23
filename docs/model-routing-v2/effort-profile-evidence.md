@@ -130,8 +130,14 @@ request; a short-context price ratio must not be reused for that request.
 
 ## 5. Semantic validation
 
-The future cross-record validator is a mandatory gate, not implemented by these
-JSON Schema documents. It must reject all of the following before scheduling:
+The pure comparator validates only its consumed input and evidence: identity,
+policy membership, task/context applicability, freshness and comparable units.
+It reports unresolved evidence gaps without launching or accepting work. Existing
+execution and receiving owners validate dispatch, attempts and terminal results
+when that integration is admitted; the retained host protocol additionally
+requires its cross-record joins. These are obligations of the corresponding
+owners, not a new validator service or one universal pre-comparison gate.
+The following rejection cases apply when their records are consumed:
 
 | Obligation | Rejection condition |
 |---|---|
@@ -150,9 +156,11 @@ JSON Schema documents. It must reject all of the following before scheduling:
 | Quality | Capability score borrowed from another effort or acceptance contract |
 | Runtime result | Returned profile identity differs from the admitted dispatch |
 
-The receipt and current Lead fence remain authoritative for attempt identity and
-settlement. A worker's `profileEvaluationId`, `gateClaim`, or cost report cannot
-self-authorize acceptance. Shape-valid records with broken joins are still invalid.
+Existing attempt identity and settlement remain with their current receiving
+owner. A Lead fence applies only to the deferred host-transfer protocol; pure
+comparison must not fabricate one. A worker's `profileEvaluationId`, `gateClaim`,
+or cost report cannot self-authorize acceptance. Shape-valid records with broken
+joins are still invalid when that protocol is consumed.
 
 ## 6. Selection and escalation
 
@@ -195,11 +203,15 @@ readable as history, but cannot acquire new measured authority. Do not backfill
 profile scores from old aggregate maxima. Existing V1 profile aliases retain their
 historical meaning; changing model bindings requires its separate explicit migration.
 
-Before runtime admission, complete the semantic tests in section 5, run the full
-existing V2 suite, validate provider installation and snapshot projections, and
-obtain independent review. Examples are synthetic, individually shape-valid
-records; placeholder digests and separate illustrative fences are not an
-end-to-end execution witness. Schema tests alone cannot close these gates.
+Before accepting a runtime slice, execute its applicable semantic and regression
+tests and obtain the review required by current governance. The initial pure
+comparison does not require a provider installation or a lease subsystem.
+Provider installation and snapshot-projection checks apply only to a slice that
+changes or consumes those boundaries. Host-transfer activation additionally
+requires the retained fence, concurrency and recovery checks. Examples are
+synthetic, individually shape-valid records; placeholder digests and separate
+illustrative fences are not an end-to-end execution witness. Schema tests alone
+cannot close execution or host-transfer gates.
 
 ## 8. Terms
 

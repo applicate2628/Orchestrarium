@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-23
+
+- Reconcile the draft V2 proposal with current governance: keep policy identity ownership explicit, separate pure-comparison checks from execution and deferred host-transfer obligations, and use current escalation rules rather than imposing legacy human gates on every comparison. Consolidate duplicate positive tests without removing negative contract checks; normalize JSON trailing whitespace without changing validation or example records. This improves the proposal and its verification, not installed routing behavior.
+
 ## 2026-10-21
 
 - Reframe the Version 2 routing proposal as a delta over current policy, adapters, review, provenance and lifecycle owners. Retain host-transfer record shapes and their negative tests without making distributed leases mandatory for pure profile comparison. The proposal separates preserved guarantees from deferred machinery and records old-PR disposition; it does not change installed behavior, admit new models or launch providers.

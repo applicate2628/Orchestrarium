@@ -68,6 +68,7 @@ def test_all_operational_examples_validate() -> None:
         "writeDispatchControl": "dispatchControl",
         "decisionControl": "decisionControl",
         "routeOutcome": "routeOutcome",
+        "workerResultControl": "workerResultControl",
     }
     for example_name, definition in mapping.items():
         _validate(schema, definition, examples[example_name])

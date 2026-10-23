@@ -139,7 +139,7 @@ The resolver must prove:
 - family and approach counts are recomputed from the selected portfolio;
 - preferred diversity is not less than minimum diversity;
 - claimed independence is checked against all configured independence groups and known error-correlation evidence;
-- critical degraded diversity follows the declared human gate; every unresolved contradiction follows the current operational decision-control rule, which is stricter than a critical-only rule;
+- critical degraded diversity follows the declared human gate; every unresolved contradiction in retained host-protocol decisions follows their stricter decision-control rule; initial comparison reports conflicts through the existing Lead/review owners and current escalation policy;
 - reviewer/challenger independence is checked against the active Lead as well as referenced worker slots;
 - every important or critical finding receives an accepted, evidence-rejected, re-intake/deferred, or blocking Lead disposition before synthesis can close; deferral cannot waive a mandatory acceptance criterion;
 - a critical synthesis artifact is reviewed in a later stage; reviewing only its component worker artifacts cannot close synthesis risk.
@@ -161,10 +161,11 @@ The resolver and scheduler must prove:
 
 ## 8. Execution and result settlement
 
-The scheduler and adapters must prove:
+For admitted execution integration, the existing Lead and adapters must prove the
+applicable obligations below; pure comparison performs no launch or settlement:
 
 - dispatch creation and launch are idempotent;
-- launch rechecks the active lease epoch and current provider admission;
+- launch rechecks current provider admission and work-item ownership; the active lease epoch is additionally checked only when the deferred host-transfer protocol is enabled;
 - execution settlement is verified for the actual execution kind: local processes require descendant cleanup/reaping; in-process and remote runs require the corresponding trusted terminal receipt rather than fictitious local process evidence;
 - secrets do not enter prompts, logs, artifacts, or provenance;
 - worker output is parsed as untrusted data; repository text and worker artifacts cannot inject system, developer, routing, tool, or publication authority;
@@ -177,7 +178,7 @@ The scheduler and adapters must prove:
 - test/build evidence records the exact command, working root, toolchain/runtime versions, environment policy, exit status, and log or report digest; a worker summary is not test evidence;
 - generated source and dependency changes pass repository license, provenance, attribution, vulnerability, and dependency-policy checks; a model assertion that code is original or compatible is not evidence;
 - unresolved important or critical contradictions are surfaced to Lead;
-- integration rechecks the lease immediately before durable mutation;
+- integration rechecks current ownership immediately before durable mutation; a lease recheck additionally applies when host transfer is enabled;
 - duplicate or late terminal events cannot settle another dispatch;
 - provider launch uses a shell-free argument vector, retains a provider-request digest and provider response/run identity when exposed, and scans bounded output without persisting credentials or secrets;
 - provider-native internal orchestration cannot issue Orchestrarium dispatches, escape the declared tool/data boundary, or evade the route's model-call and parallelism budgets;

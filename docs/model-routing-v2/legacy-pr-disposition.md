@@ -1,6 +1,7 @@
 # Legacy PR disposition for the current-main V2 proposal
 
-Baseline: main 68ad6e733e049ad3f86b37af59ea806e8d1a5b25 (2026-10-21).
+Historical audit baseline: main 68ad6e733e049ad3f86b37af59ea806e8d1a5b25 (2026-10-21).
+Integration base: main cc570f2df858b7ab34a7922becc10fbc53f32b76; scope reconciled 2026-10-23.
 This is a design consolidation, not a claim that all legacy production changes
 are merged or verified. No old PR is closed by this proposal.
 

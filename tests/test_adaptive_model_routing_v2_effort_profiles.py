@@ -116,28 +116,6 @@ def metrics_validator():
     return validator('#/$defs/modelRegistrySnapshot/$defs/routeMetrics')
 
 
-def test_both_schema_bundles_are_well_formed():
-    for operational in (False,True):
-        jsonschema.Draft202012Validator.check_schema(bundle(operational))
-
-
-def test_existing_core_examples_remain_shape_valid():
-    data=examples()
-    names={'leadLease':'leadLease','registrySnapshot':'modelRegistrySnapshot',
-           'routeRequest':'routeRequest','routeDecision':'routeDecision','workerResult':'workerResult'}
-    for key,name in names.items():
-        validator('#/$defs/'+name).validate(data[key])
-    for dispatch in data['routeDecision']['selectedPortfolio']:
-        validator('#/$defs/dispatchSpec').validate(dispatch)
-
-
-def test_existing_operational_examples_remain_shape_valid():
-    data=json.loads((SURFACE/'operational-examples.v2.json').read_text(encoding="utf-8"))
-    for name,value in data.items():
-        pointer='dispatchControl' if name=='writeDispatchControl' else name
-        validator('#/$defs/'+pointer,operational=True).validate(value)
-
-
 @pytest.mark.parametrize('key',('profileEvaluationId','effort','executionClass','taskClass',
                                 'evaluationContext','capabilities','evidenceSnapshotId',
                                 'recordedAt','expiresAt'))

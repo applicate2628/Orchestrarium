@@ -65,6 +65,8 @@ def test_all_examples_validate_against_their_contracts() -> None:
     }
     for example_name, definition in mapping.items():
         _validate_definition(schema, definition, examples[example_name])
+    for dispatch in examples["routeDecision"]["selectedPortfolio"]:
+        _validate_definition(schema, "dispatchSpec", dispatch)
 
 
 def test_stable_contract_does_not_hardcode_model_generation_numbers() -> None:

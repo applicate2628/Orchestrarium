@@ -1,7 +1,8 @@
 # Adaptive Lead and Model Routing — Version 2
 
 Status: main-aligned design and contract draft, not runtime implementation.
-Baseline: main 68ad6e733e049ad3f86b37af59ea806e8d1a5b25, 2026-10-21.
+Historical audit baseline: main 68ad6e733e049ad3f86b37af59ea806e8d1a5b25 (2026-10-21).
+Integration base: main cc570f2df858b7ab34a7922becc10fbc53f32b76; scope reconciled 2026-10-23.
 
 ## 1. Extend existing owners
 
@@ -47,8 +48,9 @@ and field to its responsibility and activation conditions.
   keep all required lease/fence and settlement fields. They are NOT the
   input/output schema of the initial pure comparison function.
 
-Validation keywords and example record bodies are preserved; schema comments
-only annotate scope. Never remove a fence to make lease-free input validate.
+Validation keywords and parsed example records are preserved. Schema descriptive
+metadata clarifies scope and current policy ownership; JSON cleanup only removes
+trailing blank lines. Never remove a fence to make lease-free input validate.
 Local locking is not proof of cross-host exclusivity. Future activation requires
 lease acquisition, stale-epoch rejection, cancellation/revalidation, durable
 recovery and independent concurrency tests. These guarantees are deferred, not
