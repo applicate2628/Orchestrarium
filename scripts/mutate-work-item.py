@@ -95,7 +95,7 @@ DECISION_REQUIRED_FIELDS = (
     "superseded-by",
 )
 DECISION_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-DECISION_LIST_FIELD_RE = re.compile(r"^- ([a-z][a-z0-9-]*):\s*(.*?)\s*$")
+DECISION_LIST_FIELD_RE = re.compile(r"^- ([A-Za-z][A-Za-z0-9-]*):\s*(.*?)\s*$")
 DECISION_V0_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9 _-]*):(?: (.*))?$")
 DECISION_V0_ACTIVE_VALUE_PREFIXES = ("&", "*", "!", "[", "{", "|", ">")
 DECISION_V0_MANIFEST = "decision-v0-compatibility.json"
@@ -4379,7 +4379,7 @@ def _close_legacy_flat(root, slug, closure_data, instant, evidence_data, *, appl
         image = by_bug.get(link["path"])
         descriptor = _close_link_consumer_descriptor(relative)
         if descriptor is not None or image is not None:
-            permission = _close_link_authority(root, link["path"], link["before"], image, authority,
+            permission = _close_link_authority(root, link["path"], link["before"], link["after"], image, authority,
                                                json.loads(manifest_data)["schemaVersion"], ledger_resource_budget=ledger_resource_budget)
             if image is not None:
                 by_bug[image.source] = replace(image, after=link["after"])
@@ -6701,6 +6701,36 @@ def _validate_current_decision_record(
             "WI-DECISION-SCHEMA-INVALID",
             f"decision:{slug} has unsupported current status '{record.raw_status}'",
         )
+    return record
+
+
+def _selected_decision_record(
+    root: Path, path: Path, slug: str, data: bytes, *, ledger_resource_budget=None,
+) -> CurrentDecisionRecord:
+    """Admit captured or prospective current bytes under their selected identity."""
+    expected = _work_items_root(root, ledger_resource_budget=ledger_resource_budget) / "decisions" / f"{slug}.md"
+    if path != expected:
+        raise LifecycleError("WI-DECISION-IDENTITY-MISMATCH", "selected decision path differs from its expected current identity")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise LifecycleError("WI-DECISION-SCHEMA-INVALID", f"decision:{slug} must be UTF-8") from exc
+    record = _parse_decision_record_text(text, slug)
+    if record.legacy_read_only:
+        owner = (_preflight_current_decision_v0 if record.format == DECISION_FORMAT_V0
+                 else _preflight_current_decision_h1)
+        admitted = owner(root, ledger_resource_budget=ledger_resource_budget)
+        if path.name not in admitted or _input_bytes(path) != data:
+            raise LifecycleError("WI-DECISION-IDENTITY-MISMATCH", "selected legacy decision differs from its admitted current bytes")
+        return admitted[path.name]
+    admission = _admission_for("decision")
+    terminal_fields = ("status", admission.utc_field.casefold(),
+                       admission.detail_field.casefold(), admission.evidence_field.casefold())
+    occurrences = _authoritative_field_occurrences(text)
+    for name in terminal_fields:
+        if sum(field == name for _line, field, _value, _raw in occurrences) > 1:
+            raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING",
+                                 f"decision terminal record has ambiguous '{name}' evidence")
     return record
 
 
@@ -13310,7 +13340,7 @@ def _close_link_active_owner_evidence(root: Path, path: Path, before: bytes,
     return tuple(evidence)
 
 
-def _close_link_authority(root: Path, path: Path, before: bytes,
+def _close_link_authority(root: Path, path: Path, before: bytes, after: bytes,
                           image: BugDispositionPlan | None, allow_protected: bool,
                           schema_version: int, ledger_resource_budget=None,) -> str:
     if image is not None:
@@ -13339,9 +13369,10 @@ def _close_link_authority(root: Path, path: Path, before: bytes,
         if _category_locations(root, category, path.stem, ledger_resource_budget=ledger_resource_budget) != [path]:
             raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"consumer has no unique current owner: {label}")
         if category.name == "decision":
-            decision = _parse_decision_record_text(text, path.stem)
+            decision = _selected_decision_record(root, path, path.stem, before, ledger_resource_budget=ledger_resource_budget)
             if decision.legacy_read_only:
                 raise LifecycleError("WI-CLOSE-LINK-AUTHORITY", f"decision consumer format is read-only: {label}")
+            _selected_decision_record(root, path, path.stem, after, ledger_resource_budget=ledger_resource_budget)
             status = decision.raw_status
         else:
             fields = _parse_fields(text)
@@ -13779,7 +13810,7 @@ def _plan_parent_archive_links(
             raise LifecycleError("WI-CLOSE-LINK-DRIFT", "consumer changed after link preflight")
         consumer_captures[consumer] = snapshot
         authority = _close_link_authority(
-            root, consumer, row["before"], image, allow_protected_uri_updates,
+            root, consumer, row["before"], row["after"], image, allow_protected_uri_updates,
             bug_manifest["schemaVersion"] if bug_manifest is not None else 1, ledger_resource_budget=ledger_resource_budget
         )
         descriptor = _close_link_consumer_descriptor(consumer.relative_to(work_items).as_posix())
@@ -14381,7 +14412,8 @@ def audit_categories(root: Path, *, ledger_resource_budget=None) -> tuple[str, .
                     and not archived
                     and status in category.current_statuses
                 ):
-                    decision = decision_v0 or decision_h1 or _validate_current_decision_record(path, slug)
+                    decision = decision_v0 or decision_h1 or _selected_decision_record(
+                        root, path, slug, path.read_bytes(), ledger_resource_budget=ledger_resource_budget)
                     if decision.format in {DECISION_FORMAT_V0, DECISION_FORMAT_H1}:
                         legacy_read_compatible.append(
                             path.relative_to(work_items).as_posix()
@@ -19015,25 +19047,29 @@ def archive_with_successor(
     return _recover_transition(root, intent_path, inject_failure_at=inject_failure_at, ledger_resource_budget=ledger_resource_budget)
 
 
-def _validate_flat_terminal(category: Category, data: bytes) -> str:
+def _validate_flat_terminal(
+    category: Category,
+    data: bytes,
+) -> str:
     try:
-        fields = _parse_fields(data.decode("utf-8"))
+        text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise LifecycleError(
-            "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", "terminal record must be UTF-8"
+            "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING",
+            "terminal record must be UTF-8",
         ) from exc
+    admission = _admission_for(category.name)
+    utc_field = admission.utc_field.casefold()
+    detail_field = admission.detail_field.casefold()
+    evidence_field = admission.evidence_field.casefold()
+    fields = _parse_fields(text)
     status = fields.get("status", "")
     if status not in category.terminal_statuses:
         raise LifecycleError(
             "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING",
             f"{category.name} status {status!r} is not terminal",
         )
-    admission = _admission_for(category.name)
-    utc_field = admission.utc_field.casefold()
-    evidence_fields = (
-        admission.detail_field.casefold(),
-        admission.evidence_field.casefold(),
-    )
+    evidence_fields = (detail_field, evidence_field)
     missing = [name for name in (utc_field, *evidence_fields) if not fields.get(name)]
     if missing:
         raise LifecycleError(
@@ -19234,6 +19270,13 @@ def _normalization_snapshot(
         if live_count:
             kinds.setdefault(path, set()).add("live-reference")
         if after.encode("utf-8") != before:
+            if path.parent == work_items / "decisions":
+                selected_path = target if path == source else path
+                record = _selected_decision_record(
+                    root, selected_path, selected_path.stem, after.encode("utf-8"),
+                    ledger_resource_budget=ledger_resource_budget)
+                if record.legacy_read_only or record.raw_status not in CATEGORIES["decision"].current_statuses:
+                    raise _normalization_fail("WI-IDENTITY-NORMALIZE-SOURCE", "decision normalization requires writable current structure")
             planned[path] = after.encode("utf-8")
 
     if source not in planned:
@@ -19416,6 +19459,10 @@ def _normalization_replay(
         path = _terminalization_bound_path(work_items, row["afterPath"], label="normalization replay")
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != row.get("afterSha256"):
             raise _normalization_fail("WI-IDENTITY-NORMALIZE-RECOVERY", "normalization settled bytes differ")
+        if path.parent == work_items / "decisions":
+            record = _selected_decision_record(root, path, path.stem, path.read_bytes(), ledger_resource_budget=ledger_resource_budget)
+            if record.legacy_read_only or record.raw_status not in CATEGORIES["decision"].current_statuses:
+                raise _normalization_fail("WI-IDENTITY-NORMALIZE-RECOVERY", "settled decision is not writable current structure")
     readme = work_items / "README.md"
     if not readme.is_file() or hashlib.sha256(readme.read_bytes()).hexdigest() != payload.get("readmeSha256"):
         raise _normalization_fail("WI-IDENTITY-NORMALIZE-RECOVERY", "normalization README differs")
@@ -19484,6 +19531,10 @@ def normalize_current_identity(
     readme_before = readme.read_bytes() if readme.is_file() else None
     preimages = {path: path.read_bytes() for path in planned}
     inventory_sha = hashlib.sha256(inventory_bytes).hexdigest()
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+    stage_creations: list[_OwnedNativeCreation] = []
+    retiring_stage: _OwnedNativeCreation | None = None
     moved = False
     move_temp: Path | None = None
     try:
@@ -19491,13 +19542,19 @@ def normalize_current_identity(
             _atomic_write(path, planned[path])
         if inject_failure_at == "after-rewrites":
             raise RuntimeError("injected normalization failure after rewrites")
-        temp_dir = Path(tempfile.mkdtemp(prefix=f".{target_slug}.normalize.", dir=source.parent))
+        temp_dir = source.parent / f".{target_slug}.normalize.{uuid.uuid4().hex}"
+        created = LifecycleWriteTarget.make_directories(temp_dir, transaction, created=stage_creations)
+        if len(created) != 1 or created[0].locator != temp_dir:
+            raise _normalization_fail("WI-IDENTITY-NORMALIZE-ROLLBACK", "normalization stage was not created by this invocation")
+        _replace_lifecycle_directory(source, temp_dir / source.name, directory=False)
         move_temp = temp_dir / source.name
-        _replace_lifecycle_directory(source, move_temp, directory=False)
         _replace_lifecycle_directory(move_temp, target, directory=False)
-        temp_dir.rmdir()
         move_temp = None
         moved = True
+        retiring_stage = stage_creations.pop()
+        LifecycleWriteTarget.remove_created_directory(retiring_stage, transaction,
+            failure_id="WI-IDENTITY-NORMALIZE-ROLLBACK")
+        retiring_stage = None
         if inject_failure_at == "after-move":
             raise RuntimeError("injected normalization failure after move")
         readme_sha = refresh_readme(root, ledger_resource_budget=ledger_resource_budget)
@@ -19536,16 +19593,31 @@ def normalize_current_identity(
             raise RuntimeError("normalization settled receipt verification failed")
         return target, False
     except BaseException as exc:
+        primary = _normalization_fail("WI-IDENTITY-NORMALIZE-ROLLBACK", str(exc))
+        primary.__cause__ = exc
+        composer.capture_primary(primary)
+        incomplete = retiring_stage is not None
+        if retiring_stage is not None:
+            composer.record_rollback_action(failure_id="WI-IDENTITY-NORMALIZE-ROLLBACK",
+                resource=retiring_stage.locator.relative_to(root).as_posix(),
+                diagnostic="normalization stage retirement failed; retained without retry", cause=exc)
         try:
+            if _lifecycle_cleanup_intersects_unsettled(source, target, *(record.locator for record in stage_creations)):
+                raise _normalization_fail("WI-IDENTITY-NORMALIZE-ROLLBACK", "normalization compensation intersects unsettled custody")
             if move_temp is not None and move_temp.exists():
                 _replace_lifecycle_directory(move_temp, source, directory=False)
-                move_temp.parent.rmdir()
+                move_temp = None
             elif moved and _normalization_exact_file(target) and not _normalization_exact_file(source):
-                temp_dir = Path(tempfile.mkdtemp(prefix=f".{source.stem}.rollback.", dir=source.parent))
+                temp_dir = source.parent / f".{source.stem}.rollback.{uuid.uuid4().hex}"
+                created = LifecycleWriteTarget.make_directories(temp_dir, transaction, created=stage_creations)
+                if len(created) != 1 or created[0].locator != temp_dir:
+                    raise _normalization_fail("WI-IDENTITY-NORMALIZE-ROLLBACK", "rollback stage was not created by this invocation")
                 rollback_temp = temp_dir / target.name
                 _replace_lifecycle_directory(target, rollback_temp, directory=False)
+                moved = False
+                move_temp = rollback_temp
                 _replace_lifecycle_directory(rollback_temp, source, directory=False)
-                temp_dir.rmdir()
+                move_temp = None
             for path, before in preimages.items():
                 _atomic_write(path, before)
             if readme_before is None:
@@ -19556,10 +19628,30 @@ def normalize_current_identity(
             if receipt.exists():
                 _CURRENT_LIFECYCLE_TRANSACTION.get().restore_owned_file(receipt, None)
         except BaseException as rollback_exc:
-            raise _normalization_fail(
-                "WI-IDENTITY-NORMALIZE-ROLLBACK", f"rollback failed: {rollback_exc}"
-            ) from exc
-        raise _normalization_fail("WI-IDENTITY-NORMALIZE-ROLLBACK", str(exc)) from exc
+            incomplete = True
+            composer.record_rollback_action(failure_id="WI-IDENTITY-NORMALIZE-ROLLBACK",
+                resource=(move_temp or source).relative_to(root).as_posix(),
+                diagnostic="normalization compensation failed; actual custody preserved", cause=rollback_exc)
+        composer.set_rollback("incomplete" if incomplete else "completed")
+        raise primary from exc
+    finally:
+        for record in reversed(stage_creations):
+            if not record.creation_published:
+                continue  # Unpublished acquisition remains with its native creator abort owner.
+            if _lifecycle_cleanup_intersects_unsettled(record.locator, source, target):
+                composer.set_rollback("incomplete")
+                composer.record_rollback_action(failure_id="WI-IDENTITY-NORMALIZE-ROLLBACK",
+                    resource=record.locator.relative_to(root).as_posix(),
+                    diagnostic="normalization stage retained because custody is unsettled")
+                continue
+            try:
+                LifecycleWriteTarget.remove_created_directory(record, transaction,
+                    failure_id="WI-IDENTITY-NORMALIZE-ROLLBACK")
+            except BaseException as cleanup:
+                composer.set_rollback("incomplete")
+                composer.record_rollback_action(failure_id="WI-IDENTITY-NORMALIZE-ROLLBACK",
+                    resource=record.locator.relative_to(root).as_posix(),
+                    diagnostic="release empty native normalization stage", cause=cleanup)
 
 
 CATEGORY_ADMISSION_TABLE = (
@@ -19685,7 +19777,11 @@ def _move_terminal_category(root: Path, reference: str, *,
         status = source / "status.md"
         terminal_status = _terminalize_status(status.read_bytes())
     else:
-        instant = _validate_flat_terminal(category, source.read_bytes())
+        source_data = source.read_bytes()
+        current = _work_items_root(root, ledger_resource_budget=ledger_resource_budget) / category.current_root / f"{slug}.md"
+        if category.name == "decision" and source == current:
+            _selected_decision_record(root, source, slug, source_data, ledger_resource_budget=ledger_resource_budget)
+        instant = _validate_flat_terminal(category, source_data)
         target = (
             _work_items_root(root, ledger_resource_budget=ledger_resource_budget)
             / category.current_root
@@ -20270,7 +20366,11 @@ def _validated_migration_payload_target(
         _validate_item_before_close(payload, ledger_resource_budget=ledger_resource_budget)
         target = _work_items_root(root, ledger_resource_budget=ledger_resource_budget) / "archive" / archive_month(instant) / slug
     else:
-        instant = _validate_flat_terminal(category, payload.read_bytes())
+        data = payload.read_bytes()
+        current = _work_items_root(root, ledger_resource_budget=ledger_resource_budget) / category.current_root / f"{slug}.md"
+        if category.name == "decision" and payload == current:
+            _selected_decision_record(root, payload, slug, data, ledger_resource_budget=ledger_resource_budget)
+        instant = _validate_flat_terminal(category, data)
         target = (
             _work_items_root(root, ledger_resource_budget=ledger_resource_budget)
             / category.current_root
@@ -22181,6 +22281,12 @@ def _terminalization_replay(
             raise _terminalization_fail(
                 f"terminalized payload differs from receipt: {row.get('reference')}"
             )
+        if source_exists and category.name == "decision":
+            record = _selected_decision_record(root, source, slug, source.read_bytes(), ledger_resource_budget=ledger_resource_budget)
+            if record.legacy_read_only:
+                raise _terminalization_fail("terminalized current decision format is read-only")
+            if _validate_flat_terminal(category, source.read_bytes()) != terminal_at:
+                raise _terminalization_fail("terminalized current decision evidence differs")
         receipt_pairs.add((row["source"], row["target"]))
     receipt_link_rows = [
         (receipt_row, receipt_row["physicalRelocation"])
@@ -22402,6 +22508,10 @@ def _preflight_v1_terminalization_rows(
             raise _terminalization_fail(
                 f"input payload hash changed for {row.get('reference')}"
             )
+        if category.name == "decision":
+            record = _selected_decision_record(root, source, slug, before, ledger_resource_budget=ledger_resource_budget)
+            if record.legacy_read_only:
+                raise _terminalization_fail("terminal evidence appending requires a writable current decision")
         try:
             text = before.decode("utf-8")
         except UnicodeError as exc:
@@ -22462,6 +22572,10 @@ def _preflight_v1_terminalization_rows(
         appended_lines.append(f"V1-Migration-Evidence: {proof}")
         appended = ("\n".join(appended_lines) + "\n").encode("utf-8")
         after = before + separator + appended
+        if category.name == "decision":
+            _selected_decision_record(root, source, slug, after, ledger_resource_budget=ledger_resource_budget)
+        if _validate_flat_terminal(category, after) != terminal_at:
+            raise _terminalization_fail("prospective terminal evidence differs")
         planned.append(
             {
                 "reference": row["reference"],
@@ -24200,8 +24314,12 @@ def reopen_category_record(
             "WI-CATEGORY-STATUS-INVALID",
             f"successor must declare Reopens: {archived_slug}",
         )
-    _preflight_readme(root, ledger_resource_budget=ledger_resource_budget)
     target = _work_items_root(root, ledger_resource_budget=ledger_resource_budget) / category.current_root / f"{successor_slug}.md"
+    if category.name == "decision":
+        record = _selected_decision_record(root, target, successor_slug, current_data, ledger_resource_budget=ledger_resource_budget)
+        if record.legacy_read_only or record.raw_status not in category.current_statuses:
+            raise LifecycleError("WI-CATEGORY-STATUS-INVALID", "decision successor requires writable current structure")
+    _preflight_readme(root, ledger_resource_budget=ledger_resource_budget)
     _atomic_write(target, current_data)
     try:
         refresh_readme(root, ledger_resource_budget=ledger_resource_budget)

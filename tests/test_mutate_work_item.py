@@ -2636,20 +2636,20 @@ def test_close_link_owner_refuses_missing_duplicate_status_and_native_bytes(tmp_
     consumer = owner / "result.md"
     before = b"[Proof](../other/status.md)\n"
     consumer.write_bytes(before)
-    assert module._close_link_authority(root, consumer, before, None, False, 1) == "current-metadata"
+    assert module._close_link_authority(root, consumer, before, before, None, False, 1) == "current-metadata"
     with pytest.raises(module.LifecycleError) as native:
-        module._close_link_authority(root, consumer, b"%PDF-1.7\n" + before, None, False, 1)
+        module._close_link_authority(root, consumer, b"%PDF-1.7\n" + before, before, None, False, 1)
     assert native.value.failure_id == "WI-CLOSE-LINK-AUTHORITY"
     duplicate = root / "work-items" / "backlog" / f"{owner_slug}.md"
     duplicate.write_bytes(b"Task: duplicate\n")
     with pytest.raises(module.LifecycleError) as dual:
-        module._close_link_authority(root, consumer, before, None, False, 1)
+        module._close_link_authority(root, consumer, before, before, None, False, 1)
     assert dual.value.failure_id == "WI-CLOSE-LINK-AUTHORITY"
     duplicate.unlink()
     status = owner / "status.md"
     status.unlink()
     with pytest.raises(module.LifecycleError) as missing:
-        module._close_link_authority(root, consumer, before, None, False, 1)
+        module._close_link_authority(root, consumer, before, before, None, False, 1)
     assert missing.value.failure_id == "WI-CATEGORY-STATUS-INVALID"
 
 
@@ -3021,8 +3021,8 @@ def test_close_uri_failure_after_receipt_restores_preimages(tmp_path: Path) -> N
     module.refresh_readme(root)
     readme_before = (root / "work-items" / "README.md").read_bytes()
     original_verify = module._verify_archived_bug_dispositions
-    def reject_written_receipt(*args):
-        original_verify(*args)
+    def reject_written_receipt(*args, **kwargs):
+        original_verify(*args, **kwargs)
         assert (args[1] / module.BUG_DISPOSITIONS_RECEIPT).is_file()
         raise module.LifecycleError("WI-CLOSE-LINK-VERIFY", "controlled failure after verified receipt")
     module._verify_archived_bug_dispositions = reject_written_receipt
@@ -7699,6 +7699,29 @@ def _terminal_record(
     )
 
 
+def _terminal_decision_record(
+    slug: str,
+    instant: str,
+    *,
+    status: str = "dropped",
+) -> str:
+    return (
+        f"- id: {slug}\n"
+        f"- status: {status}\n"
+        f"- date: {slug[:10]}\n"
+        "- decided-by: lifecycle test\n"
+        "- context: terminal-lifecycle-test\n"
+        "- supersedes: none\n"
+        "- superseded-by: none\n"
+        "\n"
+        f"# Decision: {slug}\n\n"
+        "Historical decision body.\n"
+        f"Terminal-at: {instant}\n"
+        "Rationale: accepted terminal evidence\n"
+        "Evidence: focused lifecycle test\n"
+    )
+
+
 def _current_decision_record(
     slug: str,
     *,
@@ -7771,7 +7794,11 @@ def test_flat_categories_archive_replay_and_reopen_successor(tmp_path: Path) -> 
     }
     for category_name in ("bug", "decision", "lesson", "roadmap", "epic"):
         category = module.CATEGORIES[category_name]
-        slug = f"{category_name}-original"
+        slug = (
+            f"2026-08-01-{category_name}-original"
+            if category_name == "decision"
+            else f"{category_name}-original"
+        )
         reference = f"{category_name}:{slug}"
         source = (
             root
@@ -7779,7 +7806,11 @@ def test_flat_categories_archive_replay_and_reopen_successor(tmp_path: Path) -> 
             / category.current_root
             / f"{slug}.md"
         )
-        terminal = _terminal_record(category_name, instant).encode()
+        terminal = (
+            _terminal_decision_record(slug, instant)
+            if category_name == "decision"
+            else _terminal_record(category_name, instant)
+        ).encode()
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(terminal)
         inventory = root / f"{category_name}-incoming.json"
@@ -7830,6 +7861,228 @@ def test_flat_categories_archive_replay_and_reopen_successor(tmp_path: Path) -> 
     module.audit(root)
 
 
+def test_decision_v1_terminal_migration_preflights_schema_before_effects(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    instant = "2026-08-01T00:00:00Z"
+    cases = (
+        (
+            "wrong-id",
+            "WI-DECISION-IDENTITY-MISMATCH",
+            lambda text, slug: text.replace(
+                f"- id: {slug}\n", "- id: 2026-08-01-other\n"
+            ),
+        ),
+        (
+            "wrong-date",
+            "WI-DECISION-IDENTITY-MISMATCH",
+            lambda text, _slug: text.replace("- date: 2026-08-01\n", "- date: 2026-08-02\n"),
+        ),
+        (
+            "missing-required-field",
+            "WI-DECISION-SCHEMA-INVALID",
+            lambda text, _slug: text.replace(
+                "- context: terminal-lifecycle-test\n", ""
+            ),
+        ),
+        (
+            "mixed-case-duplicate",
+            "WI-DECISION-FIELD-DUPLICATE",
+            lambda text, slug: text.replace(
+                f"- id: {slug}\n", f"- id: {slug}\n- ID: {slug}\n"
+            ),
+        ),
+        (
+            "duplicate-terminal-evidence",
+            "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING",
+            lambda text, _slug: text + "- terminal-at: 2026-08-02T00:00:00Z\n",
+        ),
+    )
+    for name, expected_failure, mutate in cases:
+        root = tmp_path / name
+        slug = f"2026-08-01-preflight-{name}"
+        reference = f"decision:{slug}"
+        work_items = root / "work-items"
+        source = work_items / "decisions" / f"{slug}.md"
+        original = _terminal_decision_record(slug, instant)
+        source_bytes = mutate(original, slug).encode("utf-8")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(source_bytes)
+        readme = work_items / "README.md"
+        readme_bytes = b"# Human-owned lifecycle notes\n\nPreserve these bytes.\n"
+        readme.parent.mkdir(parents=True, exist_ok=True)
+        readme.write_bytes(readme_bytes)
+        consumer = work_items / "lessons" / "consumer.md"
+        consumer_bytes = (
+            f"# Consumer\n\n[decision](../decisions/{slug}.md)\n"
+        ).encode("utf-8")
+        consumer.parent.mkdir(parents=True, exist_ok=True)
+        consumer.write_bytes(consumer_bytes)
+        inventory = root / "incoming.json"
+        write(inventory, json.dumps({"reference": reference, "incomingLinks": []}))
+
+        planned = module.build_migration_inventory(root)
+        planned_row = next(
+            row for row in planned["rows"] if row["reference"] == reference
+        )
+        assert planned_row["admission"]["result"] == "denied", name
+        assert planned_row["admission"]["failureId"] == expected_failure, name
+
+        with pytest.raises(module.LifecycleError) as caught:
+            module.migrate_legacy(
+                root,
+                reference,
+                incoming_links_inventory=inventory,
+            )
+
+        assert caught.value.failure_id == expected_failure, name
+        assert source.read_bytes() == source_bytes
+        assert not (work_items / "decisions" / "archive").exists()
+        assert readme.read_bytes() == readme_bytes
+        assert consumer.read_bytes() == consumer_bytes
+
+
+@pytest.mark.parametrize("shape", ("leading-blank", "non-list-id", "fenced-id"))
+def test_selected_decision_unsupported_format_refuses_public_migration(tmp_path, shape):
+    module = load_module()
+    slug = f"2026-08-01-{shape}"
+    text = _terminal_decision_record(slug, "2026-08-01T00:00:00Z")
+    if shape == "leading-blank":
+        text = "\n" + text
+    elif shape == "non-list-id":
+        text = text.replace("- id:", "id:", 1)
+    else:
+        first, rest = text.split("\n", 1)
+        text = f"```text\n{first}\n```\n{rest}"
+    root = tmp_path / "repo"
+    source = root / "work-items/decisions" / f"{slug}.md"
+    write(source, text)
+    readme = root / "work-items/README.md"
+    write(readme, module._default_static_guide() + module.README_BEGIN + "\n" + module.README_END + "\n")
+    incoming = root / "incoming.json"
+    write(incoming, json.dumps({"reference": f"decision:{slug}", "incomingLinks": []}))
+    before = {p.relative_to(root / "work-items"): p.read_bytes()
+              for p in (root / "work-items").rglob("*") if p.is_file()}
+    row, = module.build_migration_inventory(root)["rows"]
+    assert row["admission"]["failureId"] == "WI-DECISION-FORMAT-UNSUPPORTED"
+    assert row["target"] is None and row["terminalInstant"] is None
+    with pytest.raises(module.LifecycleError) as caught:
+        module.migrate_legacy(root, f"decision:{slug}", incoming_links_inventory=incoming)
+    assert caught.value.failure_id == "WI-DECISION-FORMAT-UNSUPPORTED"
+    assert {p.relative_to(root / "work-items"): p.read_bytes()
+            for p in (root / "work-items").rglob("*") if p.is_file()} == before
+    assert not (source.parent / "archive").exists()
+
+
+def test_selected_decision_terminalization_preflights_all_rows_before_writing(tmp_path):
+    module = load_module()
+    root = tmp_path / "repo"
+    sources = []
+    for suffix in ("a-valid", "z-invalid"):
+        slug = f"2026-08-01-{suffix}"
+        source = root / "work-items/decisions" / f"{slug}.md"
+        text = _current_decision_record(slug, status="dropped")
+        if suffix == "z-invalid":
+            text = text.replace("- context: lifecycle-test\n", "")
+        write(source, text)
+        sources.append(source)
+    inventory = module.build_migration_inventory(root)
+    # Even matching hashes and a plausible caller-supplied missing-evidence label
+    # cannot stand in for current structure admission.
+    for row in inventory["rows"]:
+        row["admission"] = {"result": "denied", "failureId": module.V1_TERMINALIZATION_FAILURE}
+    inventory_path = root / ".scratch/inventory.json"
+    receipt = root / ".scratch/receipt.json"
+    write(inventory_path, json.dumps(inventory))
+    before = {path: path.read_bytes() for path in sources}
+    with pytest.raises(module.LifecycleError) as caught:
+        module.terminalize_v1_inventory(root, inventory_path,
+            terminal_at="2026-08-01T00:00:00Z",
+            authorization_marker=module.V1_TERMINALIZATION_AUTHORIZATION,
+            receipt_path=receipt)
+    assert caught.value.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    assert all(path.read_bytes() == data for path, data in before.items())
+    assert not receipt.exists()
+
+
+def test_selected_decision_terminalization_appends_after_body_and_replays(tmp_path):
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-08-01-supported-append"
+    source = root / "work-items/decisions" / f"{slug}.md"
+    write(source, _current_decision_record(slug, status="superseded", body="Body stays exact.\n"))
+    before = source.read_bytes()
+    inventory_path = root / ".scratch/inventory.json"
+    receipt = root / ".scratch/receipt.json"
+    write(inventory_path, json.dumps(module.build_migration_inventory(root)))
+    kwargs = dict(terminal_at="2026-08-01T00:00:00Z",
+                  authorization_marker=module.V1_TERMINALIZATION_AUTHORIZATION,
+                  receipt_path=receipt)
+    with pytest.raises(module.LifecycleError) as injected:
+        module.terminalize_v1_inventory(root, inventory_path, inject_failure_after=1, **kwargs)
+    assert "injected terminalization failure after row 1" in str(injected.value)
+    assert source.read_bytes() == before and not receipt.exists()
+    assert module.terminalize_v1_inventory(root, inventory_path, **kwargs) == (1, False)
+    after = source.read_bytes()
+    assert after.startswith(before) and b"Terminal-at: 2026-08-01T00:00:00Z\n" in after[len(before):]
+    receipt_before = receipt.read_bytes()
+    assert module.terminalize_v1_inventory(root, inventory_path, **kwargs) == (1, True)
+    assert source.read_bytes() == after and receipt.read_bytes() == receipt_before
+    # A forged self-consistent hash cannot certify malformed still-current bytes.
+    invalid = b"".join(line for line in after.splitlines(keepends=True)
+                       if not line.startswith(b"- context:"))
+    assert invalid != after
+    source.write_bytes(invalid)
+    payload = json.loads(receipt_before)
+    payload["rows"][0]["afterSha256"] = hashlib.sha256(invalid).hexdigest()
+    write(receipt, json.dumps(payload))
+    with pytest.raises(module.LifecycleError) as caught:
+        module.terminalize_v1_inventory(root, inventory_path, **kwargs)
+    assert caught.value.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    assert source.read_bytes() == invalid
+
+
+def test_selected_decision_reopen_validates_prospective_structure(tmp_path):
+    module = load_module()
+    root = tmp_path / "repo"
+    predecessor = "2026-08-01-predecessor"
+    archived = root / "work-items/decisions/archive/2026-08" / f"{predecessor}.md"
+    write(archived, _terminal_decision_record(predecessor, "2026-08-01T00:00:00Z"))
+    successor = "2026-08-02-successor"
+    text = _current_decision_record(successor) + f"Reopens: {predecessor}\n"
+    invalid = text.replace("- decided-by: lifecycle test\n", "")
+    with pytest.raises(module.LifecycleError) as caught:
+        module.reopen_category_record(root, f"decision:{predecessor}", successor, invalid.encode())
+    assert caught.value.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    assert not (root / "work-items/decisions" / f"{successor}.md").exists()
+    target = module.reopen_category_record(root, f"decision:{predecessor}", successor, text.encode())
+    assert target.read_bytes() == text.encode()
+
+
+def test_selected_decision_identity_plan_admits_target_without_waiving_other_structure(tmp_path):
+    module = load_module()
+    root = tmp_path / "repo"
+    old, new = "2026-08-01-Identity", "2026-08-01-identity"
+    source = root / "work-items/decisions" / f"{old}.md"
+    write(source, _current_decision_record(old, status="accepted"))
+    inventory = root / ".scratch/identity.json"
+    planned = module.write_current_identity_normalization_inventory(
+        root, "decision", source.relative_to(root).as_posix(), new, inventory)
+    assert planned["oldIdentity"] == f"decision:{old}"
+    assert planned["newIdentity"] == f"decision:{new}"
+    before_inventory = inventory.read_bytes()
+    invalid = _current_decision_record(old, status="accepted").replace("- date: 2026-08-01\n", "- date: 2026-08-02\n")
+    write(source, invalid)
+    before_source = source.read_bytes()
+    with pytest.raises(module.LifecycleError) as caught:
+        module.write_current_identity_normalization_inventory(
+            root, "decision", source.relative_to(root).as_posix(), new, inventory)
+    assert caught.value.failure_id == "WI-DECISION-IDENTITY-MISMATCH"
+    assert source.read_bytes() == before_source and inventory.read_bytes() == before_inventory
+    assert not module._normalization_exact_file(source.parent / f"{new}.md")
+
+
 def test_every_category_terminal_status_and_missing_evidence_fixture(
     tmp_path: Path,
 ) -> None:
@@ -7839,7 +8092,12 @@ def test_every_category_terminal_status_and_missing_evidence_fixture(
     for category_name in ("bug", "decision", "lesson", "roadmap", "epic"):
         category = module.CATEGORIES[category_name]
         for status in sorted(category.terminal_statuses):
-            slug = f"{category_name}-{status}"
+            base_slug = f"{category_name}-{status}"
+            slug = (
+                f"2026-08-01-{base_slug}"
+                if category_name == "decision"
+                else base_slug
+            )
             reference = f"{category_name}:{slug}"
             source = (
                 root
@@ -7848,13 +8106,16 @@ def test_every_category_terminal_status_and_missing_evidence_fixture(
                 / f"{slug}.md"
             )
             source.parent.mkdir(parents=True, exist_ok=True)
-            source.write_bytes(
-                _terminal_record(
+            terminal_record = (
+                _terminal_decision_record(slug, instant, status=status)
+                if category_name == "decision"
+                else _terminal_record(
                     category_name,
                     instant,
                     status_override=status,
-                ).encode()
+                )
             )
+            source.write_bytes(terminal_record.encode())
             inventory = root / f"incoming-{slug}.json"
             write(
                 inventory,
@@ -7867,10 +8128,7 @@ def test_every_category_terminal_status_and_missing_evidence_fixture(
             )
             assert archived.parent.name == "2026-08"
 
-        missing = _terminal_record(
-            category_name,
-            instant,
-        ).replace("Evidence: focused lifecycle test\n", "")
+        missing = terminal_record.replace("Evidence: focused lifecycle test\n", "")
         try:
             module._validate_flat_terminal(category, missing.encode())
         except module.LifecycleError as exc:
@@ -7949,14 +8207,15 @@ def test_interrupted_category_moves_preserve_current_bytes(tmp_path: Path) -> No
     )
     status_before = (active / "status.md").read_bytes()
     readme_before = (work_root / "work-items" / "README.md").read_bytes()
-    original_replace = module.os.replace
+    move_api = "rename" if module.os.name == "nt" else "replace"
+    original_move = getattr(module.os, move_api)
 
     def fail_work_item_move(source, target):
         if Path(source) == active:
             raise OSError("injected directory move interruption")
-        return original_replace(source, target)
+        return original_move(source, target)
 
-    module.os.replace = fail_work_item_move
+    setattr(module.os, move_api, fail_work_item_move)
     try:
         try:
             module.migrate_legacy(
@@ -7969,7 +8228,7 @@ def test_interrupted_category_moves_preserve_current_bytes(tmp_path: Path) -> No
         else:
             raise AssertionError("interrupted work-item move returned success")
     finally:
-        module.os.replace = original_replace
+        setattr(module.os, move_api, original_move)
     assert active.is_dir()
     assert (active / "status.md").read_bytes() == status_before
     assert (work_root / "work-items" / "README.md").read_bytes() == readme_before
@@ -7977,11 +8236,20 @@ def test_interrupted_category_moves_preserve_current_bytes(tmp_path: Path) -> No
     for category_name in ("bug", "decision", "lesson", "roadmap", "epic"):
         category = module.CATEGORIES[category_name]
         root = tmp_path / category_name
-        slug = f"interrupted-{category_name}"
+        slug = (
+            f"2026-07-31-interrupted-{category_name}"
+            if category_name == "decision"
+            else f"interrupted-{category_name}"
+        )
         reference = f"{category_name}:{slug}"
         source = root / "work-items" / category.current_root / f"{slug}.md"
         source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_bytes(_terminal_record(category_name, instant).encode())
+        terminal_record = (
+            _terminal_decision_record(slug, instant)
+            if category_name == "decision"
+            else _terminal_record(category_name, instant)
+        )
+        source.write_bytes(terminal_record.encode())
         before = source.read_bytes()
         inventory = root / "incoming.json"
         write(inventory, json.dumps({"reference": reference, "incomingLinks": []}))
@@ -7989,9 +8257,9 @@ def test_interrupted_category_moves_preserve_current_bytes(tmp_path: Path) -> No
         def fail_flat_move(candidate, target):
             if Path(candidate) == source:
                 raise OSError("injected flat move interruption")
-            return original_replace(candidate, target)
+            return original_move(candidate, target)
 
-        module.os.replace = fail_flat_move
+        setattr(module.os, move_api, fail_flat_move)
         try:
             try:
                 module.migrate_legacy(
@@ -8004,7 +8272,7 @@ def test_interrupted_category_moves_preserve_current_bytes(tmp_path: Path) -> No
             else:
                 raise AssertionError(f"interrupted {category_name} move returned success")
         finally:
-            module.os.replace = original_replace
+            setattr(module.os, move_api, original_move)
         assert source.read_bytes() == before
 
 
@@ -8915,12 +9183,12 @@ def test_v1_terminalization_mixed_records_exact_evidence_and_replay(
     root = tmp_path / "repo"
     work_items = root / "work-items"
     bug = work_items / "bugs" / "historic-bug.md"
-    decision = work_items / "decisions" / "historic-decision.md"
+    decision = work_items / "decisions" / "2026-08-01-historic-decision.md"
     bug.parent.mkdir(parents=True, exist_ok=True)
     decision.parent.mkdir(parents=True, exist_ok=True)
     original = {
         bug: _pre_v1_terminal_record("fixed", "Historic bug"),
-        decision: _pre_v1_terminal_record("dropped", "Historic decision"),
+        decision: _current_decision_record(decision.stem, status="dropped").encode(),
     }
     for path, data in original.items():
         path.write_bytes(data)
@@ -9173,13 +9441,13 @@ def test_v1_terminalization_rejects_degenerate_authoritative_field_occurrences(
         work_items = root / "work-items"
         sources = [
             work_items / "bugs" / "first.md",
-            work_items / "decisions" / "second.md",
+            work_items / "decisions" / "2026-08-01-second.md",
         ]
         sources[0].parent.mkdir(parents=True, exist_ok=True)
         sources[1].parent.mkdir(parents=True, exist_ok=True)
         sources[0].write_bytes(_pre_v1_terminal_record("fixed", "first"))
         sources[1].write_bytes(
-            _pre_v1_terminal_record("dropped", "second")
+            _current_decision_record(sources[1].stem, status="dropped").encode()
             + b"\n"
             + conflicting_fields
         )
@@ -9215,7 +9483,7 @@ def test_v1_terminalization_preserves_existing_detail_and_evidence_fields(
     root = tmp_path / "repo"
     work_items = root / "work-items"
     bug = work_items / "bugs" / "historic-bug.md"
-    decision = work_items / "decisions" / "historic-decision.md"
+    decision = work_items / "decisions" / "2026-08-01-historic-decision.md"
     bug.parent.mkdir(parents=True, exist_ok=True)
     decision.parent.mkdir(parents=True, exist_ok=True)
     originals = {
@@ -9224,7 +9492,7 @@ def test_v1_terminalization_preserves_existing_detail_and_evidence_fields(
             + b"\nResolution: Historical issue was corrected.\n"
         ),
         decision: (
-            _pre_v1_terminal_record("dropped", "Historic decision")
+            _current_decision_record(decision.stem, status="dropped").encode()
             + b"\nEvidence: Historical decision record.\n"
         ),
     }
@@ -9280,11 +9548,12 @@ def test_v1_terminalization_mid_batch_failure_rolls_back_every_byte(
     work_items = root / "work-items"
     sources = [
         work_items / "bugs" / "first.md",
-        work_items / "decisions" / "second.md",
+        work_items / "decisions" / "2026-08-01-second.md",
     ]
     for path, status in zip(sources, ("fixed", "dropped")):
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(_pre_v1_terminal_record(status, path.stem))
+        path.write_bytes(_current_decision_record(path.stem, status=status).encode()
+                         if path.parent.name == "decisions" else _pre_v1_terminal_record(status, path.stem))
     inventory = root / ".scratch" / "inventory.json"
     receipt = root / ".scratch" / "receipt.json"
     _denied_terminalization_inventory(work_items, inventory)
@@ -10561,10 +10830,18 @@ def test_normalize_current_identity_success_links_and_replay(tmp_path: Path) -> 
     assert f"../decisions/{new}.md?view=full#d1" in physical.read_text(encoding="utf-8")
     assert module.resolve_category(root, f"decision:{new}") == target.resolve()
     module.audit(root)
-    replay_target, replay = module.normalize_current_identity(
-        root, "decision", source.relative_to(root).as_posix(), new, inventory, receipt
-    )
+    for row in json.loads(inventory.read_text(encoding="utf-8"))["rows"]:
+        path = target if row["path"] == source.relative_to(work_items).as_posix() else work_items / row["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == row["afterSha256"]
+    settled = {path.relative_to(work_items): path.read_bytes() for path in work_items.rglob("*") if path.is_file()}
+    assert not [path for path in source.parent.iterdir() if path.is_dir() and (".normalize." in path.name or ".rollback." in path.name)]
+    with patch.object(module.LifecycleWriteTarget, "make_directories", wraps=module.LifecycleWriteTarget.make_directories) as create:
+        replay_target, replay = module.normalize_current_identity(
+            root, "decision", source.relative_to(root).as_posix(), new, inventory, receipt
+        )
+        create.assert_not_called()
     assert replay is True and replay_target == target
+    assert {path.relative_to(work_items): path.read_bytes() for path in work_items.rglob("*") if path.is_file()} == settled
 
 
 def test_normalize_current_identity_rollback_matrix(tmp_path: Path) -> None:
@@ -10583,6 +10860,127 @@ def test_normalize_current_identity_rollback_matrix(tmp_path: Path) -> None:
             raise AssertionError(f"injected failure settled: {injection}")
         assert {path.relative_to(work_items).as_posix(): path.read_bytes() for path in work_items.rglob("*") if path.is_file()} == before
         assert source.is_file() and not receipt.exists()
+        assert module._normalization_exact_file(source)
+        assert not module._normalization_exact_file(source.parent / f"{new}.md")
+        assert not [path for path in source.parent.iterdir() if path.is_dir() and (".normalize." in path.name or ".rollback." in path.name)]
+
+
+@pytest.mark.parametrize("boundary", ("before-first", "before-second"))
+def test_normalize_current_identity_owned_stage_prefixes(tmp_path, monkeypatch, boundary):
+    root = tmp_path / "repo"
+    module, work_items, _old, new, source, _lineage, _physical, inventory, receipt = _identity_normalization_fixture(root)
+    before = {path.relative_to(work_items): path.read_bytes() for path in work_items.rglob("*") if path.is_file()}
+    move = module.LifecycleTransaction.replace_directory
+    moves = []
+    def intercept(transaction, origin, destination, **kwargs):
+        first = origin == source and ".normalize." in destination.parent.name
+        second = ".normalize." in origin.parent.name and destination.name == f"{new}.md"
+        if (boundary == "before-first" and first) or (boundary == "before-second" and second):
+            if second:
+                assert moves and origin.is_file() and not module._normalization_exact_file(source)
+            raise module.LifecycleError("TEST-NORMALIZATION-PREFIX", boundary)
+        result = move(transaction, origin, destination, **kwargs)
+        moves.append((origin.name, destination.name))
+        return result
+    monkeypatch.setattr(module.LifecycleTransaction, "replace_directory", intercept)
+    observer = module.LifecycleDiagnosticObserver()
+    with pytest.raises(module.LifecycleError) as failure:
+        module.normalize_current_identity(root, "decision", source.relative_to(root).as_posix(), new, inventory, receipt,
+                                          diagnostic_observer=observer)
+    assert failure.value.failure_id == "WI-IDENTITY-NORMALIZE-ROLLBACK"
+    assert boundary in str(failure.value) and observer.snapshot.rollback == "completed"
+    assert {path.relative_to(work_items): path.read_bytes() for path in work_items.rglob("*") if path.is_file()} == before
+    assert module._normalization_exact_file(source) and not receipt.exists()
+    assert not [path for path in source.parent.iterdir() if path.is_dir() and (".normalize." in path.name or ".rollback." in path.name)]
+    print(json.dumps({"probe": "native-normalization-prefix", "boundary": boundary, "actualMoves": moves,
+                      "failureId": failure.value.failure_id, "rollback": observer.snapshot.rollback,
+                      "exactPreimages": True, "stageResidue": False}), flush=True)
+
+
+def test_normalize_current_identity_retirement_failure_retains_target_progress(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    module, work_items, _old, new, source, _lineage, _physical, inventory, receipt = _identity_normalization_fixture(root)
+    before = {path.relative_to(work_items): path.read_bytes() for path in work_items.rglob("*") if path.is_file()}
+    remove = module.LifecycleWriteTarget.remove_created_directory
+    observed = []
+    sentinel = OSError("controlled stage retirement failure after target placement")
+    def intercept(cls, record, transaction, **kwargs):
+        if ".normalize." in record.locator.name:
+            assert not observed and record.creator and record.acquired and record.creation_published
+            assert record.finished and record.release_complete
+            assert module._normalization_exact_file(source.parent / f"{new}.md")
+            assert not module._normalization_exact_file(source)
+            observed.append(record)
+            raise sentinel
+        return remove(record, transaction, **kwargs)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "remove_created_directory", classmethod(intercept))
+    observer = module.LifecycleDiagnosticObserver()
+    with pytest.raises(module.LifecycleError) as failure:
+        module.normalize_current_identity(root, "decision", source.relative_to(root).as_posix(), new, inventory, receipt,
+                                          diagnostic_observer=observer)
+    assert observed and sentinel.args[0] in str(failure.value)
+    assert observer.snapshot.rollback == "incomplete" and observer.snapshot.cleanupFailures
+    assert {path.relative_to(work_items): path.read_bytes() for path in work_items.rglob("*") if path.is_file()} == before
+    assert module._normalization_exact_file(source) and not receipt.exists()
+    stage, = observed
+    assert stage.locator.is_dir() and not list(stage.locator.iterdir())
+    assert module._lifecycle_file_identity(stage.locator.lstat()) == stage.identity
+    assert not [path for path in source.parent.iterdir() if path.is_dir() and ".rollback." in path.name]
+    print(json.dumps({"probe": "native-normalization-retirement-refusal", "retainedStage": stage.locator.name,
+                      "creatorIdentity": list(stage.identity), "nativeResult": stage.native_result,
+                      "retirementAttempts": len(observed), "rollback": observer.snapshot.rollback,
+                      "exactPreimages": True, "receiptAbsent": True}), flush=True)
+
+
+@pytest.mark.parametrize("mutation", ("collision", "replacement", "foreign-member"))
+def test_normalize_current_identity_stage_ownership_refusals(tmp_path, monkeypatch, mutation):
+    root = tmp_path / "repo"
+    module, work_items, _old, new, source, _lineage, _physical, inventory, receipt = _identity_normalization_fixture(root)
+    remove = module.LifecycleWriteTarget.remove_created_directory
+    observed = {}
+    foreign = b"synthetic foreign stage member; preserve exact bytes"
+    if mutation == "collision":
+        fixed = type("FixedStageName", (), {"hex": "0123456789abcdef0123456789abcdef"})()
+        monkeypatch.setattr(module.uuid, "uuid4", lambda: fixed)
+        stage = source.parent / f".{new}.normalize.{fixed.hex}"
+        stage.mkdir()
+        member = stage / "foreign.bin"
+        member.write_bytes(foreign)
+        observed.update(stage=stage, member=member, identity=module._lifecycle_file_identity(member.lstat()))
+    def intercept(cls, record, transaction, **kwargs):
+        if ".normalize." in record.locator.name:
+            assert "record" not in observed
+            observed["record"] = record
+            observed["stage"] = record.locator
+            if mutation == "replacement":
+                preserved = record.locator.with_name(record.locator.name + ".preserved")
+                record.locator.rename(preserved)
+                record.locator.mkdir()
+                observed["preserved"] = preserved
+            member = record.locator / "foreign.bin"
+            member.write_bytes(foreign)
+            observed.update(member=member, identity=module._lifecycle_file_identity(member.lstat()))
+        return remove(record, transaction, **kwargs)
+    monkeypatch.setattr(module.LifecycleWriteTarget, "remove_created_directory", classmethod(intercept))
+    observer = module.LifecycleDiagnosticObserver()
+    with pytest.raises(module.LifecycleError):
+        module.normalize_current_identity(root, "decision", source.relative_to(root).as_posix(), new, inventory, receipt,
+                                          diagnostic_observer=observer)
+    assert observed["member"].read_bytes() == foreign
+    assert module._lifecycle_file_identity(observed["member"].lstat()) == observed["identity"]
+    assert not receipt.exists()
+    if mutation == "collision":
+        assert "record" not in observed and module._normalization_exact_file(source)
+    else:
+        assert observer.snapshot.rollback == "incomplete" and observer.snapshot.cleanupFailures
+        assert module._normalization_exact_file(source.parent / f"{new}.md")
+    if mutation == "replacement":
+        assert module._lifecycle_file_identity(observed["preserved"].lstat()) == observed["record"].identity
+        assert module._lifecycle_file_identity(observed["stage"].lstat()) != observed["record"].identity
+    print(json.dumps({"probe": "native-normalization-stage-ownership", "mutation": mutation,
+                      "foreignIdentity": list(observed["identity"]), "foreignBytesPreserved": True,
+                      "rollback": observer.snapshot.rollback, "receiptAbsent": True,
+                      "retirementAttempts": int("record" in observed)}), flush=True)
 
 
 def test_normalize_current_identity_inventory_collision_and_source_gates(tmp_path: Path) -> None:
@@ -13427,10 +13825,6 @@ def test_decision_schema_rejects_noncanonical_current_records(tmp_path: Path) ->
             canonical.replace(f"- id: {slug}\n", f"- **id**: {slug}\n"),
             "WI-DECISION-SCHEMA-INVALID",
         ),
-        "uppercase-leading-field": (
-            canonical.replace(f"- id: {slug}\n", f"- ID: {slug}\n"),
-            "WI-DECISION-SCHEMA-INVALID",
-        ),
         "empty-context": (
             canonical.replace("- context: schema-test\n", "- context:\n"),
             "WI-DECISION-SCHEMA-INVALID",
@@ -13445,6 +13839,82 @@ def test_decision_schema_rejects_noncanonical_current_records(tmp_path: Path) ->
             assert exc.failure_id == failure_id, (name, exc.failure_id, str(exc))
         else:
             raise AssertionError(f"noncanonical current decision passed: {name}")
+
+
+def test_decision_v1_list_keys_accept_ascii_case_variants_without_rewriting(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    slug = "2026-08-11-ascii-case-keys"
+    body = "# Decision: case fixture\n\nBody bytes stay exact.\n"
+    canonical = _current_decision_record(slug, body=body).replace(
+        "- superseded-by: none\n",
+        "- superseded-by: none\n"
+        "- terminal-at: 2026-08-11T12:00:00Z\n"
+        "- rationale: keep terminal authority\n"
+        "- evidence: preserve exact body\n"
+        "- custom-field: Keep This Value\n",
+    )
+    variants = {
+        "id": "ID",
+        "status": "StAtUs",
+        "date": "DATE",
+        "decided-by": "Decided-By",
+        "context": "CONTEXT",
+        "supersedes": "SuperSedes",
+        "superseded-by": "Superseded-By",
+        "terminal-at": "TeRmInAl-At",
+        "rationale": "Rationale",
+        "evidence": "Evidence",
+        "custom-field": "Custom-Field",
+    }
+    variant = canonical
+    for old_name, new_name in variants.items():
+        variant = variant.replace(f"- {old_name}:", f"- {new_name}:")
+
+    canonical_record = module._parse_decision_record_text(canonical, slug)
+    variant_record = module._parse_decision_record_text(variant, slug)
+    assert dict(variant_record.fields) == dict(canonical_record.fields)
+    assert variant_record.body_offset == canonical_record.body_offset
+    assert variant.encode("utf-8")[variant_record.body_offset :] == canonical.encode(
+        "utf-8"
+    )[canonical_record.body_offset :]
+    assert variant_record.fields["custom-field"] == "Keep This Value"
+    terminal_variant = variant.replace(
+        "- StAtUs: proposed\n", "- StAtUs: dropped\n"
+    )
+    assert module._validate_flat_terminal(
+        module.CATEGORIES["decision"], terminal_variant.encode("utf-8")
+    ) == "2026-08-11T12:00:00Z"
+
+    root = tmp_path / "current"
+    decision = root / "work-items" / "decisions" / f"{slug}.md"
+    write(decision, variant)
+    decision_before = decision.read_bytes()
+    current_record = module._validate_current_decision_record(decision, slug)
+    assert dict(current_record.fields) == dict(variant_record.fields)
+    assert decision.read_bytes() == decision_before
+
+    for malformed_key in ("id_name", "ïd", "id name", "id.name"):
+        malformed = canonical.replace("- id:", f"- {malformed_key}:")
+        with pytest.raises(module.LifecycleError) as caught:
+            module._parse_decision_record_text(malformed, slug)
+        assert caught.value.failure_id == "WI-DECISION-SCHEMA-INVALID"
+
+    duplicate = canonical.replace(
+        f"- id: {slug}\n", f"- id: {slug}\n- ID: {slug}\n"
+    )
+    with pytest.raises(module.LifecycleError) as duplicate_failure:
+        module._parse_decision_record_text(duplicate, slug)
+    assert duplicate_failure.value.failure_id == "WI-DECISION-FIELD-DUPLICATE"
+
+    duplicate_body = canonical.replace(
+        "# Decision: case fixture\n\n",
+        f"# Decision: case fixture\n\n- DATE: {slug[:10]}\n\n",
+    )
+    with pytest.raises(module.LifecycleError) as body_duplicate_failure:
+        module._parse_decision_record_text(duplicate_body, slug)
+    assert body_duplicate_failure.value.failure_id == "WI-DECISION-FIELD-DUPLICATE"
 
 
 def test_decision_v1_list_metadata_accepts_exact_h2_decision_body_heading(
@@ -13959,6 +14429,49 @@ def test_decision_h1_manifest_admits_exact_heading_list_metadata(
     assert normalized[record.body_offset :].decode("utf-8") == body
     assert decision.read_bytes() == decision_before
     assert manifest.read_bytes() == manifest_before
+
+    variant_root = tmp_path / "ascii-case"
+    variant_slug = "2026-07-19-external-owned-vcpkg-roots"
+    variant = _legacy_h1_list_decision_record(variant_slug, body=body)
+    for old_name, new_name in (
+        ("id", "ID"),
+        ("status", "STATUS"),
+        ("work-item", "WORK-ITEM"),
+        ("owner", "Owner"),
+    ):
+        variant = variant.replace(f"- {old_name}:", f"- {new_name}:")
+    variant_decision = (
+        variant_root
+        / "work-items"
+        / "decisions"
+        / f"{variant_slug}.md"
+    )
+    write(variant_decision, variant)
+    variant_before = variant_decision.read_bytes()
+    variant_manifest = _write_decision_h1_manifest(
+        variant_root,
+        [
+            {
+                "path": variant_decision.name,
+                "sha256": hashlib.sha256(variant_before).hexdigest().upper(),
+                "state": "admitted",
+            }
+        ],
+    )
+    variant_manifest_before = variant_manifest.read_bytes()
+
+    assert module.audit_categories(variant_root) == (
+        f"decisions/{variant_slug}.md",
+    )
+    variant_record = module._preflight_current_decision_h1(variant_root)[
+        variant_decision.name
+    ]
+    assert variant_record.fields["ID"] == variant_slug
+    assert variant_record.fields["STATUS"] == "accepted"
+    assert variant_record.fields["WORK-ITEM"] == "legacy-work-item"
+    assert variant_record.fields["Owner"] == "architecture-reviewer"
+    assert variant_decision.read_bytes() == variant_before
+    assert variant_manifest.read_bytes() == variant_manifest_before
 
 
 def test_decision_h1_list_metadata_requires_manifest_and_exact_identity_fields(

@@ -99,11 +99,26 @@ line, a prose bullet on the Codex line). Full role rules: `skills/lead/SKILL.md`
 
 ## Known limitation
 
-The lifecycle audit validates every mutable current decision's leading schema:
-the seven required list fields must be unique, non-empty, and consistent with
-the filename identity and date. Historical monthly archives retain their legacy
-reader and immutable bytes. Semantic drift remains governance-enforced: no hook
-decides when a proposal should be accepted or dropped, and the lifecycle audit
+The lifecycle audit validates every mutable current V1 decision's leading
+schema: the seven required list fields must be unique, non-empty, and consistent
+with the filename identity and date. V1 list-field identifiers accept ASCII
+letter case variants and normalize in memory; values and record bytes are
+preserved. Every current-decision operation uses one structural admission owner
+bound to the selected current path, expected filename identity, and captured or
+prospective bytes. Unrecognized formats fail closed; discovery labels and
+matching inventory hashes do not admit a record. Planning, evidence appending,
+migration, replay, identity normalization, successor creation, and semantic
+metadata upkeep validate the relevant current images before their effects.
+Structure admission is separate from terminal-evidence completeness: a valid
+terminal record may lack proof before its authorized writer appends that proof
+after the body, but the complete afterimage must validate before writing. All
+selected rows preflight before the first write. Explicit identity repair validates
+its planned target identity; exact rollback restores owned preimages without
+new forward admission. Legacy compatibility still requires its existing
+manifest, hash, cutover, and read-only capability. Historical monthly
+archives retain their legacy reader and immutable bytes. Semantic drift remains
+governance-enforced: no hook decides when a proposal should be accepted or
+dropped, and the lifecycle audit
 does not yet prove that `supersedes:` / `superseded-by:` targets exist or form a
 consistent two-way edge. Surfacing the proposed-list remains the standing prompt
 to resolve a dangling proposal.
