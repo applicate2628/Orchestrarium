@@ -14,8 +14,7 @@ Use it together with:
 
 Current docs in this branch:
 
-- [model-routing-v2/README.md](model-routing-v2/README.md) for the main-aligned V2 design, owner reuse and deferred host-transfer contracts; no runtime rollout
-- [adaptive-model-routing-v2-audit-2026-09-04.md](adaptive-model-routing-v2-audit-2026-09-04.md) for the historical prototype audit, superseded for integration sequencing
+- [Adaptive routing: remaining comparison and continuation design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md) for the proposed remaining goals and existing owners; no runtime rollout
 
 - [routing/sol-6-1-routing-proposal-2026-10-01.md](routing/sol-6-1-routing-proposal-2026-10-01.md) for the approved Sol 6.1 default-family decision, dated public evidence, compatibility scope, and offline verification boundaries
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
