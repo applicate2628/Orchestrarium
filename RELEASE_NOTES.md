@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-23
+
+- Claude installs now replace explicitly bounded document bodies while retaining custom imports, project policies, and other outside text across reinstalls. Exact current-stock documents migrate automatically; ambiguous legacy or malformed marked documents refuse before either file is written. Keep customization outside the managed bodies and back up documents before downgrading to an older installer, which does not understand these boundaries.
+
 ## 2026-10-21
 
 - Read-only archived ledger checks now route ordinary filesystem paths and captured history through the same complete sealed-prefix selection and current-authority reducer. The public checker can therefore receive valid archived sealed-prefix history without misreading its frozen manifest as an ordinary projection; missing, corrupt, or revoked proof retains the existing failure and authority boundaries.

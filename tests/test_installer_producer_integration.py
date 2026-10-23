@@ -996,24 +996,160 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertEqual(original, target.read_bytes())
         self.assert_clean()
 
+    def test_claude_missing_documents_create_bounded_source(self):
+        pack = self.documentation_fixture()
+        target, agents = self.target / "CLAUDE.md", self.target / "AGENTS.md"
+        with self.transaction([target, agents]) as transaction:
+            PI._merge_claude_docs(self.source, pack, target, True, mutable_owner=self.owner(transaction))
+            self.assertFalse(target.exists())
+            self.assertFalse(agents.exists())
+            PI._merge_claude_docs(self.source, pack, target, False, mutable_owner=self.owner(transaction))
+            transaction.commit()
+        self.assertEqual("@AGENTS.md\n<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n# Claude Code Pack\n<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n", target.read_text())
+        self.assertEqual("<!-- BEGIN ORCHESTRARIUM SHARED MANAGED -->\n# Shared Governance\nnew shared\n<!-- END ORCHESTRARIUM SHARED MANAGED -->\n", agents.read_text())
+        self.assert_clean()
+
+    def test_claude_documents_preserve_foreign_text_across_commits(self):
+        pack = self.documentation_fixture()
+        target, agents = self.target / "CLAUDE.md", self.target / "AGENTS.md"
+        originals = {target: "@foreign.md\nlocal Claude rules\n", agents: "local shared rules\n"}
+        for path, text in originals.items():
+            path.write_text(text, encoding="utf-8")
+        for cycle in range(2):
+            with self.transaction([target, agents]) as transaction:
+                PI._merge_claude_docs(self.source, pack, target, False, mutable_owner=self.owner(transaction))
+                transaction.commit()
+            for path, text in originals.items():
+                self.assertTrue(path.read_text().endswith("\n" + text), (cycle, path))
+        for path in originals:
+            self.assertEqual(1, path.read_text().count("<!-- BEGIN ORCHESTRARIUM"))
+        self.assert_clean()
+
+    def test_claude_current_stock_imports_and_policies_survive_migration(self):
+        target, agents = self.target / "CLAUDE.md", self.target / "AGENTS.md"
+        source = (ROOT / "src.claude/CLAUDE.md").read_text()
+        anchor, body = source.split("\n", 1)
+        shared = (ROOT / "shared/AGENTS.shared.md").read_text()
+        prefix = "@before.md\n" + anchor + "\n@my-notes.md\n@second-notes.md  \n\n"
+        suffix = "\n## Project policies\nKeep my rule.\n@after.md\n"
+        target.write_text(prefix + body + suffix)
+        agents.write_text("local prefix\n" + shared + "local suffix\n")
+        expected = prefix + "<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n" + body + "<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n" + suffix
+        for _ in range(2):
+            with self.transaction([target, agents]) as transaction:
+                PI._merge_claude_docs(ROOT, ROOT / "src.claude", target, False, mutable_owner=self.owner(transaction))
+                transaction.commit()
+            self.assertEqual(expected, target.read_text())
+            self.assertEqual("local prefix\n<!-- BEGIN ORCHESTRARIUM SHARED MANAGED -->\n" + shared + "<!-- END ORCHESTRARIUM SHARED MANAGED -->\nlocal suffix\n", agents.read_text())
+        self.assert_clean()
+
+    def test_claude_managed_update_changes_only_bodies(self):
+        pack = self.documentation_fixture()
+        target, agents = self.target / "CLAUDE.md", self.target / "AGENTS.md"
+        for path in (target, agents):
+            path.write_text("foreign tail\n")
+        with self.transaction([target, agents]) as transaction:
+            PI._merge_claude_docs(self.source, pack, target, False, mutable_owner=self.owner(transaction))
+            transaction.commit()
+        before = {p: p.read_text() for p in (target, agents)}
+        (pack / "CLAUDE.md").write_text("@AGENTS.md\nupdated Claude body\n")
+        (self.source / "shared/AGENTS.shared.md").write_text("updated shared body\n")
+        with self.transaction([target, agents]) as transaction:
+            PI._merge_claude_docs(self.source, pack, target, False, mutable_owner=self.owner(transaction))
+            transaction.commit()
+        self.assertEqual(before[target].replace("# Claude Code Pack\n", "updated Claude body\n"), target.read_text())
+        self.assertEqual(before[agents].replace("# Shared Governance\nnew shared\n", "updated shared body\n"), agents.read_text())
+        self.assert_clean()
+
+    def test_claude_refuses_uncertain_documents_before_either_write(self):
+        pack = self.documentation_fixture()
+        target, agents = self.target / "CLAUDE.md", self.target / "AGENTS.md"
+        begin = "<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n"
+        end = "<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n"
+        marked = "@AGENTS.md\n" + begin + "old body\n" + end
+        cases = [
+            (target, "user prefix\n@AGENTS.md\nold pack\n", "LEGACY_AMBIGUOUS"),
+            (agents, "# Shared Governance\nedited shared\n", "LEGACY_AMBIGUOUS"),
+            (target, "@AGENTS.md\ninstruction\n# Claude Code Pack\n", "LEGACY_AMBIGUOUS"),
+            (target, "@AGENTS.md\n@AGENTS.md\n# Claude Code Pack\n", "LEGACY_AMBIGUOUS"),
+            (target, "@AGENTS.md\n# Claude Code Pack\n# Claude Code Pack\n", "LEGACY_AMBIGUOUS"),
+            (target, marked + begin + end, "MARKERS_INVALID"),
+            (target, marked.replace(begin, begin.rstrip() + " extra\n"), "MARKERS_INVALID"),
+            (target, marked.rstrip("\n"), "MARKERS_INVALID"),
+            (target, marked.replace(begin, "inline " + begin), "MARKERS_INVALID"),
+            (target, "@AGENTS.md\n" + end + begin, "MARKERS_INVALID"),
+            (agents, begin + end, "MARKERS_INVALID"),
+            (target, marked.replace("@AGENTS.md\n", ""), "MARKERS_INVALID"),
+            (target, marked.replace(begin, "instruction\n" + begin), "MARKERS_INVALID"),
+        ]
+        for bad_path, text, code in cases:
+            for dry_run in (False, True):
+                with self.subTest(file=bad_path.name, text=text, dry_run=dry_run):
+                    target.write_bytes(b"foreign Claude\r\n")
+                    agents.write_bytes(b"foreign shared\r\n")
+                    bad_path.write_bytes(text.replace("\n", "\r\n").encode())
+                    original = {p: p.read_bytes() for p in (target, agents)}
+                    with self.transaction([target, agents]) as transaction:
+                        with patch.object(PI, "_write_owned_text", wraps=PI._write_owned_text) as write:
+                            with self.assertRaisesRegex(ValueError, "E_CLAUDE_DOC_" + code + ": " + bad_path.name):
+                                PI._merge_claude_docs(self.source, pack, target, dry_run, mutable_owner=self.owner(transaction))
+                            write.assert_not_called()
+                        self.assertEqual(original, {p: p.read_bytes() for p in original})
+                        transaction.commit()
+        self.assert_clean()
+
+    def test_claude_dryrun_and_source_shape_are_write_free(self):
+        pack = self.documentation_fixture()
+        target, agents = self.target / "CLAUDE.md", self.target / "AGENTS.md"
+        target.write_bytes(b"foreign Claude\r\n")
+        agents.write_bytes(b"foreign shared\r\n")
+        original = {p: p.read_bytes() for p in (target, agents)}
+        with self.transaction([target, agents]) as transaction:
+            with patch.object(PI, "_write_owned_text", wraps=PI._write_owned_text) as write:
+                PI._merge_claude_docs(self.source, pack, target, True, mutable_owner=self.owner(transaction))
+                (pack / "CLAUDE.md").write_text("changed source anchor\n")
+                with self.assertRaisesRegex(ValueError, "E_CLAUDE_DOC_SOURCE_SHAPE"):
+                    PI._merge_claude_docs(self.source, pack, target, True, mutable_owner=self.owner(transaction))
+                (pack / "CLAUDE.md").write_text("@AGENTS.md\nvalid body\n")
+                (self.source / "shared/AGENTS.shared.md").write_text("<!-- BEGIN ORCHESTRARIUM SHARED MANAGED -->\n")
+                with self.assertRaisesRegex(ValueError, "E_CLAUDE_DOC_SOURCE_SHAPE: AGENTS.md"):
+                    PI._merge_claude_docs(self.source, pack, target, False, mutable_owner=self.owner(transaction))
+                write.assert_not_called()
+            transaction.commit()
+        self.assertEqual(original, {p: p.read_bytes() for p in original})
+        self.assert_clean()
+
     def test_claude_two_documents_share_parent_inverse(self):
         pack = self.documentation_fixture()
-        target = self.target / "CLAUDE.md"
-        agents = self.target / "AGENTS.md"
-        target.write_bytes(b"user prefix\r\n@AGENTS.md\r\nold pack\r\n")
+        target, agents = self.target / "CLAUDE.md", self.target / "AGENTS.md"
+        target.write_bytes(b"user prefix\r\n@AGENTS.md\r\n# Claude Code Pack\r\nuser tail\r\n")
         agents.write_bytes(b"local agent instructions\r\n")
         original = {p: p.read_bytes() for p in (target, agents)}
+        identities = {p: PI._CreateOnlyMutablePath._identity(p) for p in original}
         primary = RuntimeError("later")
-        transaction = self.transaction([target, agents])
-        with self.assertRaises(RuntimeError) as caught:
-            with transaction:
-                PI._merge_claude_docs(self.source, pack, target, False, mutable_owner=self.owner(transaction))
-                self.assertIn(b"user prefix", target.read_bytes())
-                self.assertIn(b"local agent instructions", agents.read_bytes())
-                self.assertIn(b"new shared", agents.read_bytes())
-                raise primary
-        self.assertIs(primary, caught.exception)
-        self.assertEqual(original, {p: p.read_bytes() for p in original})
+        for fail_after_first in (True, False):
+            written = []
+            real_write = PI._write_owned_text
+
+            def write(path, content, owner):
+                real_write(path, content, owner)
+                written.append(path)
+                self.assertEqual(identities[path], PI._CreateOnlyMutablePath._identity(path))
+                self.assertNotIn(b"\r", path.read_bytes())
+                if fail_after_first:
+                    raise primary
+
+            with self.assertRaises(RuntimeError) as caught:
+                with self.transaction([target, agents]) as transaction:
+                    with patch.object(PI, "_write_owned_text", side_effect=write):
+                        PI._merge_claude_docs(self.source, pack, target, False, mutable_owner=self.owner(transaction))
+                    self.assertIn(b"user prefix", target.read_bytes())
+                    self.assertIn(b"local agent instructions", agents.read_bytes())
+                    self.assertIn(b"new shared", agents.read_bytes())
+                    raise primary
+            self.assertEqual([target] if fail_after_first else [target, agents], written)
+            self.assertIs(primary, caught.exception)
+            self.assertEqual(original, {p: p.read_bytes() for p in original})
         self.assert_clean()
 
     def helper_loader(self, name, path):
