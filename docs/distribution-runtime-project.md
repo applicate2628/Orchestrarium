@@ -1,75 +1,49 @@
-# Distribution and hybrid runtime project
+# Distribution and native runtime project
 
-Status: standalone documentation/design project, extracted 2026-10-23 from the
-2.0 roadmap. The npm distribution and hybrid Python/Rust target are retained;
-package/command design and qualification targets are specified below; implementation
-and live native/SDK routes are not delivered or qualified. This document grants no provider launch, payment,
-publication, installation or runtime activation authority.
+Status: standalone npm/native design project extracted from the 2.0 roadmap.
+SDK integration now has its own [PR #18](https://github.com/applicate2628/Orchestrarium/pull/18),
+extracted from this project's `b67b150f197aa53fcf7a088aa67eecaec80e0cf6` revision.
+This PR retains native operations, common-hook replacement, npm delivery and the
+narrow manual-trust documentation/test repair. No new runtime is implemented.
 
 ## Purpose, source baseline and scope
 
-Make Orchestrarium easier to distribute and maintain through a versioned skill and
-resource payload, a thin npm launcher, deterministic Rust operations, and Python
-coordination using the OpenAI Agents software development kit (SDK). Provider work
-crosses a provider-neutral execution-tool boundary using Agent Client Protocol
-(ACP) and provider-specific adapters. Codex remains inside its adapter, not above
-other providers. Python stays the coordination implementation, not a temporary
-migration oracle. The target supersedes whole-Python retirement.
+Distribute versioned rules/resources and native deterministic operations with a thin
+npm launcher, while preserving current installation, state and receiving contracts.
+Current-source baseline is [main 84eefb6b](https://github.com/applicate2628/Orchestrarium/commit/84eefb6bbeec9ebbe032f00788f249ae59da05b5).
+Source observations are not verified installed behavior. Future component versions,
+builds and supported targets require implementation qualification.
 
-This project is independent of an Orchestrarium 2.0 release. Qualified bounded
-slices may ship in the current version; SDK tasks come first, then common-hook
-replacement and distribution. This is not an all-or-nothing product cutover, but
-each shared hook is replaced for all its current supported consumers together.
-Historical outcomes 1 and 5 in [planning PR #13](https://github.com/applicate2628/Orchestrarium/pull/13)
-are its provenance, recorded at commit `40b67327e086c0b5908549358e1b2af91f933b0c`.
-That planning PR is not an implementation or merge prerequisite for this project.
+[PR #18](https://github.com/applicate2628/Orchestrarium/pull/18) owns the SDK-1…4 backlog,
+common provider execution boundary, ACP/adapters, coordinator sessions/events,
+SDK provenance and its Python dependency contract. SDK work starts first but does
+not require this PR or a Rust port. This project consumes those declared boundaries
+without copying the SDK design. [PR #13](https://github.com/applicate2628/Orchestrarium/pull/13)
+retains ranking/evaluation, expanded native-role lifecycle, cross-host continuation
+and optional policy preferences. No blanket merge dependency joins these projects.
 
-Current-source baseline: [main at 84eefb6b](https://github.com/applicate2628/Orchestrarium/commit/84eefb6bbeec9ebbe032f00788f249ae59da05b5).
-Repository observations below are source facts, not verified installed behavior.
-Upstream references identify official component/protocol candidates, not qualified
-Orchestrarium integrations; recheck versions and supported capabilities before
-implementation. The [installation contract](../INSTALL.md) and [runtime overview](../README.md)
-still describe live Python-owned behavior and unavailable generic execution. Their
-historical Rust-to-2.0 deferral is superseded for project sequencing here, not a claim
-that an unavailable runtime path is now enabled.
-
-The Windows permission-rendering correction already belongs to its native descriptor
-owner at [2e91ebee](https://github.com/applicate2628/Orchestrarium/commit/2e91ebeeb4cd693c13cea714f995cc3389972268),
-not new Rust scope. Preserve the publication transcript frontier at
-[54c11111](https://github.com/applicate2628/Orchestrarium/commit/54c11111a4fe1eb1073d2a259165edeca8a519ef)
-and decision-admission/native-normalization custody at
-[3a542fc5](https://github.com/applicate2628/Orchestrarium/commit/3a542fc5827d3b80c3203bf94943e900a95a4ba2).
-These scoped corrections do not prove universal agent enforcement or installed receiving.
-
-**Ownership and change surface:** Product Manager owns package/product scope;
-Lead owns coordination admission and sequencing; Architect and affected existing
-hook, helper, installer, process and state owners accept implementation boundaries.
-Toolchain/Platform Engineer owns the admitted delivery work. This project changes documentation and its narrow manual-trust contract tests,
-not production runtime code, schemas, installed files, configuration, state,
-provider policy or gates. Later runtime implementation belongs in separate PRs.
-
-The existing [shared governance](../shared/AGENTS.shared.md),
-[Lead contract](../src.codex/skills/lead/SKILL.md),
+Product Manager owns package scope; Toolchain/Platform Engineer owns delivery;
+Architect and existing installer/hook/process/state owners accept implementation
+boundaries. [Shared governance](../shared/AGENTS.shared.md),
+[Lead](../src.codex/skills/lead/SKILL.md),
 [role policy](../shared/role-routing-policy.v1.json),
-[external dispatch contract](../src.codex/skills/lead/external-dispatch.md),
+[external dispatch](../src.codex/skills/lead/external-dispatch.md),
 [installer](../scripts/production_installer.py) and
-[publication-safety contract](../shared/references/repository-publication-safety.md)
-remain canonical. Reuse their admission, review, recovery, permissions and budget
-controls instead of copying a second governance framework into this project.
-Keep a short invariant core: one owner per effect/state/process lifecycle; immutable
-operation inputs; verified readback; preserved obligations and retry lineage;
-reconciliation before retry of uncertain effects; and no expansion of authority by
-changing a language, transport or entrypoint. Instructions are not host enforcement.
-Unsupported or uncontrolled paths remain explicit limits. A real blocker holds its
-dependent lane, not unrelated authorized work.
+[publication safety](../shared/references/repository-publication-safety.md) remain
+canonical. Reuse one owner per operation/state/process, immutable inputs, verified
+readback, preserved recovery obligations and reconciliation of uncertain effects.
+Do not create another governance framework, universal transaction manager or daemon.
 
-**Non-goals:** the 2.0 routing comparator, new exact-profile rankings, empirical
-model-evaluation program, expanded native-role adoption/update/deletion/reclaim,
-live cross-host takeover and named policy preferences remain separately scoped.
-No new provider admission, Kimi `auto`, Grok activation, removed provider packs,
-autonomous learning, universal scheduler, state service, approval gate, daemon or
-whole-product Python-free promise follows. Manual-transfer parity is within the
-operation map below; new cross-host continuation semantics are not.
+The [installation contract](../INSTALL.md) and [runtime overview](../README.md)
+still describe live Python-owned behavior. Their Rust-to-2.0 deferral is superseded
+for project sequencing, not runtime activation. The Windows descriptor correction
+[2e91ebee](https://github.com/applicate2628/Orchestrarium/commit/2e91ebeeb4cd693c13cea714f995cc3389972268)
+already belongs to its source owner, not new Rust scope. Preserve publication
+frontier [54c11111](https://github.com/applicate2628/Orchestrarium/commit/54c11111a4fe1eb1073d2a259165edeca8a519ef)
+and decision custody [3a542fc5](https://github.com/applicate2628/Orchestrarium/commit/3a542fc5827d3b80c3203bf94943e900a95a4ba2).
+This project changes documentation and narrow documentation tests, not production
+scripts, schemas, installed state, provider admission or permissions. No provider
+launch, payment, package publication or installation follows from this design.
 
 ## Existing behavior and target architecture
 
@@ -87,15 +61,12 @@ is unavailable. Specialized POSIX supervision and native-host dispatch are not p
 that either generic entrypoint works. A source-only store/activation registry is
 also not evidence of a live durable execution service.
 
-a thin entry dispatcher selects a direct native operation
-or the Python/Agents SDK coordinator, which invokes bounded Rust operation tools.
-Provider work uses one common execution-tool boundary with provider-specific adapters,
-not a claim that one provider's SDK supplies every provider's agent runtime.
-It does not recursively start another coordinator. Current host-led operation is a
-separate retained mode, not silently replaced; exactly one coordination owner is
-selected per run. The native component uses one Cargo package (Rust build/package
-unit) and one CLI per supported target, not one crate/service per script. This map
-names logical boundaries; implementation admission fixes names and layout:
+The native entry dispatcher exposes deterministic operation commands. Optional
+coordination uses PR18's separately owned interface; it can consume current Python
+operations before their native replacement and does not require Rust to start.
+The native component uses one Cargo package (Rust build/package unit) and one CLI
+per supported target, not one crate/service per script. This map names logical
+boundaries; implementation admission fixes names and layout:
 - [production_installer.py](../scripts/production_installer.py) → Rust installer
   plan/apply/reconcile, retaining coupled role/configuration ownership.
 - [Universal-hook canon](../scripts/universal-hooks/) → Rust deterministic checks
@@ -173,12 +144,11 @@ contract, not a claim to reproduce missing decisions. Current main has no root
   and configured coordinator bindings in that scope. Current single-registration
   Python retirement (`production_installer.py:10846–10877`) is not that proof.
   Unknown references preserve the version; no garbage collector/refcount service.
-- Python SDK coordination is optional and separately provisioned in an explicitly
-  selected isolated Python environment using a tested dependency lock. Record the
-  exact interpreter and compatible coordinator/native/adapter versions. npm does
-  not provision it; missing/incompatible dependencies fail without hidden pip,
-  environment search, account switch or fallback. Native hooks do not load Python
-  or SDK. Legacy operations still require Python until their replacements qualify.
+- npm does not provision Python or SDK dependencies. Optional coordination follows
+  [PR #18's dependency contract](https://github.com/applicate2628/Orchestrarium/pull/18).
+  Native hooks do not load Python/SDK; legacy operations keep their declared Python
+  prerequisite until replaced. Retained-runtime removal must still account for any
+  configured coordinator consumer, as required above.
 - First native qualification target: Windows x64 MSVC
   (`x86_64-pc-windows-msvc`). Subsequent candidates: Linux x64 GNU
   (`x86_64-unknown-linux-gnu`) and macOS arm64 (`aarch64-apple-darwin`). All are
@@ -202,160 +172,14 @@ fallback in `skill_pack_validator_runtime.py` is not equivalent validation: reta
 an adequate parser rather than silently weakening checks. Test dependencies remain
 separate. Python coordination is retained; there is no whole-product Python-free claim.
 
-## Python SDK and generic provider execution boundary
+## SDK project boundary
 
-Evaluate the official
-[manager-as-tools pattern](https://github.com/openai/openai-agents-python/blob/main/docs/multi_agent.md)
-for unified Python coordination that retains control over specialist results.
-The SDK supplies the agent loop and conversation/tool-call/session mechanics, not a
-new homemade scheduler, Orchestrarium policy, project-state authority or permission.
-Use one [Python ACP client](https://github.com/agentclientprotocol/python-sdk) behind
-the Agents execution tool as the common agent transport, not a new wire protocol.
-Keep the existing small domain execution contract; one ACP runtime maps it to the
-protocol without leaking full ACP/Codex types into coordination or state owners.
-Prefer stable ACP version 1; optional/draft extensions require a demonstrated need.
-The [Rust ACP SDK](https://github.com/agentclientprotocol/rust-sdk) is an alternative
-for a proven native-client requirement, not a second mandatory client. No proxy,
-conductor or daemon is required merely to unify adapters.
-
-Upstream candidates are [Codex ACP](https://github.com/agentclientprotocol/codex-acp)
-over Codex App Server, [Claude ACP](https://github.com/agentclientprotocol/claude-agent-acp)
-over Claude Agent SDK, [native Kimi ACP](https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/reference/kimi-acp.md),
-and [Grok Build ACP](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md). Protocol availability
-is not Orchestrarium admission or qualified capability/platform coverage: current
-Codex/Claude/Kimi rules remain, and Grok stays unavailable here until separately admitted.
-Codex-specific SDK/protocol extensions are adapter-local only for proven ACP gaps,
-explicitly selected rather than automatic fallback or a second transport for the same
-case. Codex is not restricted to rare tasks; existing admission selects eligible work.
-
-The tool reuses run/work-item identity, role/scope, admitted route and constraints,
-mapping required task capabilities to ACP rather than inventing parallel schemas.
-Adapters must start an admitted scoped operation and return a verified terminal
-result, using ACP requests/updates/cancellation/permission rather than parallel
-messages. Reconciliation/resume and usage coverage are negotiated capabilities;
-missing usage is unknown, not zero. Missing required capability fails typed
-unsupported before effects. Resume is not a new turn or replay of uncertain effects;
-cancel acknowledgement proves neither rollback nor descendant settlement. Permission
-callbacks use existing human authority, not self-approval or an operating-system sandbox.
-Keep capability data in existing routing, not a new registry.
-
-The [current result parser](../scripts/provider_prompt.py) requires the v2 execution
-path to be `direct-external-cli`. New SDK-owned routes need one narrowly admitted
-contract extension across producer, result parser, ledger writer, JSON schema,
-state validator and persisted readback before activation. Current bindings include
-`shared/schemas/agent-runs.schema.json:107`, `scripts/agent-run-ledger.py:2358,2389`
-and `scripts/validate-work-item-state.py:3918–3935`; changing only the adapter/parser
-would produce rejected or falsely classified records. Preserve old-record decoding
-and external nonauthority: never label SDK work as CLI or internal merely to pass.
-Reuse existing versioned owners, not a new schema/exception per provider.
-Apply this to genuinely new SDK-owned execution routes, including those using ACP.
-Replacing ACP plumbing inside the existing Kimi CLI-owned lane does not by itself
-change its execution path: retain truthful current provenance and record adapter/
-version evidence. Transport readiness never establishes receiving parity.
-Profile and identity evidence must also survive the boundary. Current model/effort
-validation derives from actual `launchFlags` (`provider_prompt.py:1583–1601`;
-`validate-work-item-state.py:4020–4042`); SDK routes must record their actual transport
-configuration, not fabricate CLI arguments. Extend the existing versioned provenance
-owner for that representation. Map SDK/ACP session/request IDs to existing admission,
-launch, dispatch and evidence-run identities; do not replace those identities or
-inject extended fields into legacy records that forbid them. Verify the complete
-admission → launch → result → ledger write → validation/readback chain with mismatched
-profile/run/role/artifact fixtures, old records, unsupported versions and duplicate
-terminal delivery. Keep format adapters at the boundary, not provider branches in
-the domain reducer. Inventory obsolete prompt/launch/parsing glue per supported host
-before deleting it; retain shared semantic checks and any uncovered existing route.
-For Kimi, preserve its existing ACP model/effort readback, selected/observed
-capability receipts and explicit omissions, redaction, and session close/delete
-settlement. Generic ACP availability is not equivalence to this existing adapter.
-
-Application-programming-interface (API) model access, existing CLI capability,
-provider admission and account billing are separate: ACP unifies agent transport,
-not coordinator-model API access. Select and verify each adapter's authentication/
-billing lane and credential environment; no coordinator-key inheritance or default
-fallback may silently switch its intended account/billing route. Codex-specific SDK
-alternatives need particular care with [API-key inheritance](https://github.com/openai/openai-agents-python/blob/main/docs/tools.md#experimental-codex-tool).
-Explicitly configure and admit trace-export data/destinations before SDK execution;
-SDK model guardrails are not action
-permissions, and traces or session stores are not the authoritative project ledger.
-Reuse existing admission, budget and owner checks at adapter entry, not new global
-gates; a turn limit is not a monetary budget. No coordinator model is selected here.
-
-## Concrete SDK cases: replacement, deletion and proof
-
-Use ready components only where their ownership removes existing glue or avoids a
-new duplicate mechanism. These are implementation choices, not qualified live routes.
-No blanket hook-count reduction follows; host-mode hooks and foreign registrations
-(including Graft) remain outside SDK-owned-lane deletion.
-
-1. **Structured read-only review.**
-   `scripts/provider_prompt.py:6139–6208` already extracts Codex JSONL but then
-   interprets a prose final line (`GATE: PASS` / `GATE: REVISE`). For a separately
-   admitted SDK-owned reviewer, use [Agents SDK output types](https://github.com/openai/openai-agents-python/blob/main/docs/agents.md#output-types)
-   with a closed verdict and required evidence fields, mapped into the existing
-   receiving owner. Remove that lane's format-only prompt and final-line parser;
-   retain independent evidence checks, nonauthority, size bounds, failures and
-   cleanup. Structured output alone does not require Agents SDK: a provider-native
-   schema is the smaller alternative when the existing adapter already supports it.
-   An SDK tool wrapping arbitrary ACP prose does not structure the inner result;
-   do not add a model call merely to translate prose into JSON. Qualification covers
-   missing/extra fields, refusal, truncation, unsupported schema, contradictory
-   evidence, wrong run identity and incomplete execution. Legacy parsers/tests stay
-   for uncovered routes (`tests/test_kimi_transport.py` contains existing verdict cases).
-2. **Typed observations instead of rendered-transcript recovery.**
-   `scripts/universal-hooks/scripts/hook_common.py:53–70,695–824` reconstructs call/result
-   correlation and recognizes text such as `Exit code: N`;
-   `check-passive-polling-stop.py:54–105` classifies waiting/probing prose.
-   Use [SDK stream events](https://github.com/openai/openai-agents-python/blob/main/docs/streaming.md),
-   call IDs and lifecycle callbacks for its own operations, or negotiated ACP
-   updates inside adapters. Remove only that lane's transcript-shape reconstruction;
-   feed existing semantic checks explicit observations, not a new policy engine.
-   The executing tool must expose validated exit status: a generic output event is
-   not proof. Test interleaved/duplicate/unknown IDs, missing output, cancellation,
-   late events and incomplete streams; drain required events before completion.
-   Preserve genuine-user provenance, host-mode parsing and external CI/reply waits.
-   Reuse `tests/test_hook_common.py` and `tests/test_passive_polling_stop.py`.
-3. **ACP transport plumbing, not another Kimi feature.**
-   Current `scripts/provider_prompt.py:952–1446` already implements Kimi ACP.
-   Replace only demonstrated duplicate serialization, request/response multiplexing
-   and schema plumbing with the [official Python ACP SDK](https://github.com/agentclientprotocol/python-sdk).
-   Replay `tests/test_kimi_transport.py` fixtures through both transports. Preserve
-   strict message policy, fixed profile, model/effort readback, selected/observed
-   capabilities and omissions, permissions, bounds, redaction and close/delete
-   settlement. Unknown/malformed messages, capability refusal, cancellation and
-   cleanup failures must remain distinguishable. No second ACP stack is retained.
-4. **Conversation and paused-call continuation.**
-   In the new coordinator mode, use [Sessions](https://github.com/openai/openai-agents-python/blob/main/docs/sessions/index.md)
-   and [RunState](https://github.com/openai/openai-agents-python/blob/main/docs/results.md)
-   instead of writing a new history/replay/pause loop. This prevents new glue, not
-   deletion of authoritative work-item/review/agent-run ledgers. Test same-session
-   resume, stale state, restart, missing resume capability and no duplicate tool
-   effects. Before a resumed new effect, reuse existing admission, ownership, budget
-   and approval checks against current authoritative state and the original
-   run/profile/artifact/account binding. A serialized approval is not fresh authority:
-   changed or revoked bindings stop the dependent call under existing controls,
-   without silent rebinding or new statuses. Test revoked approval and changed
-   artifact/profile/account with no effect. An uncertain prior effect is reconciled,
-   not replayed as a new user turn.
-5. **Coordinator loop and approval mechanics, not new authority.**
-   The [manager-as-tools pattern](https://github.com/openai/openai-agents-python/blob/main/docs/multi_agent.md)
-   owns model/tool iteration and specialist returns in SDK mode; remove mechanical
-   dispatch narration only where code actually tracks it. Role selection, scope,
-   budget, independent review and completion obligations stay with their owners.
-   Never run this coordinator alongside a host Lead or substitute API subagents for
-   coding runtimes. [SDK approval interruptions](https://github.com/openai/openai-agents-python/blob/main/docs/human_in_the_loop.md)
-   can retain an exact pending call; they do not grant consent. Local shell/apply-patch
-   approvals are opt-in, and sticky tool-name/type approvals can cross agents or
-   skip destination-policy re-evaluation. Configure per-call decisions without
-   automatic sticky scope widening; test changed arguments/destination, rejection,
-   nested tools, restart and replay, with no effect before required approval.
-
-Do not replace publication/path/ownership checks with SDK guardrails, operating-system
-isolation with permission callbacks, or process settlement with stream cancellation.
-Tool discovery does not prove appropriate MCP use; reminders cannot be removed on
-that basis. Trace/session storage is not project-state authority. For each replacement,
-record actual deleted source and retained route coverage; a new dependency plus all
-old glue is not a completed simplification. Upstream interfaces were inspected through
-GitHub on 2026-10-23; implementation must pin and qualify compatible revisions.
+The detailed SDK/ACP design, concrete glue-removal cases, four implementation tasks,
+result-to-ledger migration and live-route qualification belong solely to
+[PR #18](https://github.com/applicate2628/Orchestrarium/pull/18). Native operations
+retain existing interfaces and one state/process owner; Python coordination calls
+those operations rather than replacing their authority. Neither project silently
+activates an unavailable route or requires the other's full implementation.
 
 ## State, process and cutover ownership
 
@@ -363,10 +187,9 @@ Dependencies run from adapters to existing domain owners to pure decisions/platf
 operations; the process layer grants no dispatch authority. Each child has one
 lifecycle owner: Rust supervision for Rust-created children, SDK adapter supervision
 for SDK-created children; any native containment must assign noncompeting guarantees.
-SDK bounded capture, private-path, cancellation and settlement are not yet qualified;
-a stream-reader limit alone is not a total-output bound. Missing required guarantees
-hold only that lane under existing controls, not a silent downgrade or dual manager;
-current unavailable generic Windows paths stay unavailable.
+SDK-side qualification is owned by PR18. Native operations must preserve their own
+capture, private-path, cancellation and settlement contracts; an SDK caller cannot
+bypass them. Current unavailable generic Windows paths stay unavailable.
 The installer does not launch provider tasks/model inference. Preserve its existing
 read-only Codex host health query (`hooks/list` through App Server), including CLI
 availability, hook inventory and the separate manual-trust receiving step. Such a
@@ -443,8 +266,8 @@ byte equality wherever the interface contract demands it. Structural comparison 
 preserve all contract-visible distinctions; normalize only specifically justified
 nondeterministic fields, never broad masking. Adjudicate known baseline defects
 separately; neither enshrine them blindly nor disguise intentional semantic changes
-as migration. SDK-native coordination improvements need separately accepted behavior
-and outcome tests; stochastic model output is not subject to byte-identical parity.
+as migration. SDK behavior/outcome criteria are owned by PR18; native parity here concerns
+deterministic operations, not stochastic model prose.
 Compare deterministic implementations only on isolated cloned fixtures/replayed
 inputs with providers stubbed, never with
 duplicate live effects or paid runs. Probe interruption/restart, partial writes and
@@ -463,62 +286,16 @@ behavior independently; unsupported routes stay typed unavailable before launch.
 Require source-to-installed/package parity, upgrade/removal and recovery evidence
 on each platform/architecture claimed by that slice, with bounded-parallel versus
 serial checks. A simple hook need not wait for every generic process target. Verify
-Windows/macOS/Linux support individually before advertising it. Verify native and
-Python/SDK route dependencies separately, including adapter version compatibility,
-auth/billing selection and trace-export behavior. No whole-product Python-free claim,
+Windows/macOS/Linux support individually before advertising it. Verify native dependencies and interface compatibility with declared SDK consumers
+without duplicating PR18's adapter/account/tracing qualification. No whole-product Python-free claim,
 duplicate execution owner or second authoritative state store is introduced.
 
-## Delivery plan: SDK first, then common Rust replacement and npm
+## Native and npm delivery plan
 
-This is the implementation backlog, not authorization to launch providers or
-publish packages. SDK tasks are separate from Rust/npm tasks; no task requires a
-new scheduler, registry or second state owner. Start with fixtures and existing
-contracts. Each implementation PR names the exact deleted glue and receiving proof.
-
-### SDK workstream — start here
-
-1. **SDK-1: freeze the existing execution boundary and fixtures.**
-   Owner: provider integration/QA with Lead. Trace admitted task, role, profile,
-   artifact and run identity through the actual adapter/result/ledger/readback
-   owners named above. Reuse existing fixtures; add only uncovered mismatch,
-   cancellation, approval-resume and historical-record cases. Define one domain
-   execution boundary implemented by adapters, not a new generic framework or
-   duplicate schema. Deliverable: executable acceptance fixtures and exact migration
-   map; production behavior and provider admission unchanged.
-2. **SDK-2: replace ACP wire plumbing in the existing Kimi adapter.**
-   Owner: provider integration. Use the official Python ACP client to remove only
-   serialization/request multiplexing/schema boilerplate it actually replaces.
-   Retain fixed profile, observed capability/readback, permissions, redaction,
-   bounds and close/delete settlement. Same CLI-owned route retains truthful
-   provenance; do not manufacture a new execution path. Deliverable: old/new
-   fixture parity, then one selected production transport with superseded wire
-   plumbing removed. This is protocol reuse, not Agents SDK orchestration or a
-   new Kimi capability. Do not enable additional providers to complete this task.
-3. **SDK-3: remove prose-only review verdict formatting.**
-   Owner: review-result/provider owner. First use native structured output if the
-   admitted provider route supports it without adding a coordinator. Use Agents
-   SDK output types only for an explicitly SDK-owned review route. Map the closed
-   verdict/evidence result through the existing receiving owner; retain semantic
-   review and external nonauthority. Deliverable: malformed/refused/incomplete/
-   mismatched-result tests and removal of the qualified route's format-only prompt
-   and final-line parser. No extra model call to translate prose, no silent model,
-   account or billing change, and no removal of parsers still used by other routes.
-4. **SDK-4: one bounded Agents SDK coordination mode.**
-   Owner: Lead/provider integration. Use manager-as-tools, typed execution events,
-   Sessions and RunState for one agreed workflow, replacing the corresponding
-   model/tool loop, transcript reconstruction and pause/history glue. Reuse the
-   common execution tool from SDK-1/2; provider SDKs stay inside their adapters.
-   Complete the versioned result/ledger chain before activation. Retain one
-   coordinator, current authority on resume, exact operation identity and the
-   existing state/process owners. Deliverable: restart/cancellation/permission/
-   incomplete-stream fixtures and explicit route/dependency configuration. This
-   mode does not run alongside the existing host Lead. If a smaller existing-host
-   solution covers the case, do not add the SDK coordinator just to use the library.
-
-SDK-1 is preparation for the following changes, not a stand-alone abstraction layer.
-SDK-2 and SDK-3 can be separate bounded PRs after their affected contract fixtures;
-SDK-4 depends on the common boundary and its own qualified use case, not Rust/npm.
-No live qualification occurs without the required route, data, budget and permissions.
+SDK work is first in the overall sequence and is specified only in
+[PR #18](https://github.com/applicate2628/Orchestrarium/pull/18). The native/npm
+workstreams below are independently scoped; neither starts an SDK/provider task.
+Each implementation PR names removed code, preserved contracts and receiving proof.
 
 ### Rust workstream — replace shared operations, not provider copies
 
@@ -586,7 +363,7 @@ Implementation acceptance stays with affected owners and independent reviewers.
 For each PR identify delivered behavior, deleted glue, unchanged obligations and
 unqualified targets. Carry existing regression probes at the affected owner:
 `test_hook_runtime_installers.py`, `test_hook_runtime_transactions.py`,
-`test_universal_hook_surfaces.py`, `test_kimi_transport.py`,
+`test_universal_hook_surfaces.py`,
 `test_manual_repo_transfer_security_contracts.py`, `test_agent_run_ledger.py`,
 `test_review_loop_state_v2.py` and `test_solution_attempt_reducer.py`, all under
 `tests/`. Compare selected probes against the pinned main baseline; source review
