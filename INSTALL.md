@@ -146,7 +146,7 @@ Notes:
 
 - Project-level Claude installs create or update `.claude/AGENTS.md` and `.claude/CLAUDE.md`.
 - Claude keeps `.claude/CLAUDE.md` short. Leaf role instructions remain under `.claude/agents/*.md`, with five curated exceptions whose canonical contracts live at `.claude/skills/<role>/SKILL.md`: `lead` is selected as the main agent only when Claude resolves `settings.json.agent: lead` or the operator supplies `--agent lead`; its documented `initialPrompt: /lead` loads the inline Lead contract, while a stale `subagent_type: lead` dispatch still fails closed. The four duals `product-manager`, `analyst`, `architect`, `planner` each keep a thin delegate wrapper that loads the same-named skill.
-- User-side Claude imports (for example `@my-notes.md`) are preserved across reinstalls when they live in the installed `.claude/CLAUDE.md` import block alongside `@AGENTS.md`.
+- User-side Claude imports (for example `@my-notes.md`) are preserved across reinstalls when they live after the required `@AGENTS.md` line and before the Claude managed-body begin marker.
 - The canonical Claude-line operator file is `.claude/.agents-mode.yaml` for project installs and `~/.claude/.agents-mode.yaml` for global installs.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
 - Decision-driving reads should resolve through the Claude read order (highest to lowest precedence, per-key): `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, built-in defaults. Normalize whichever file supplied the effective config to the current canonical format in the same scope and never recreate any legacy file or synthesize a local override on read alone.
@@ -202,10 +202,22 @@ Reference directories are development-only and are not installed:
 Customize each platform in the place that platform actually reads:
 
 - Codex: append project-specific rules below the installed section in the project root `AGENTS.md`.
-- Claude Code: append project-specific rules below the installed section in `.claude/CLAUDE.md`.
-- Claude Code: user-side `@...` imports in `.claude/CLAUDE.md` may live in the import block near `@AGENTS.md`; the installer preserves those imports on reinstall.
+- Claude Code: append project-specific rules after `<!-- END ORCHESTRARIUM CLAUDE MANAGED -->` in `.claude/CLAUDE.md`.
+- Claude Code: keep an active standalone `@AGENTS.md` outside the managed body. User imports and prose may appear before or after that body and remain in order, including repeated user imports. An import inside a code example does not supply the active shared-governance dependency.
 - Configure consultant and external-dispatch preferences in `.agents/.agents-mode.yaml` for Codex or `.claude/.agents-mode.yaml` for Claude Code.
 - Shared design references in `shared/references/` are repository-maintainer documentation only; they are not copied into target projects and should not be treated as installed runtime docs.
+
+### Claude document ownership and migration
+
+This is an Orchestrarium installer convention for both global and project installs, not a provider-native ownership format. `CLAUDE.md` has one body bounded by the complete standalone lines `<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->` and `<!-- END ORCHESTRARIUM CLAUDE MANAGED -->`. The required `@AGENTS.md` anchor stays outside that body. `AGENTS.md` uses the corresponding `SHARED` markers. Reinstall replaces only each managed body; edits inside it are overwritten. Foreign text outside it remains in position, with the existing normalization to line feed (LF) endings.
+
+Unmarked current-stock documents migrate automatically only when the complete unchanged source body can be matched exactly once. Outside imports, prose, whitespace, and project policies are retained without a separate import-area layout rule. An ordinary `@AGENTS.md` import alone is user text, not proof of an old pack body. A foreign document receives the bounded body beside an existing active shared-governance import, or receives the required import and bounded body before its original text when none is active. Reinstall keeps those outside slices unchanged under the existing LF normalization. Some older or internally edited unmarked pack bodies have no provable boundary and require explicit migration; duplicate body matches, missing active shared governance, and malformed reserved markers fail safely. Both documents are classified before either is written, including during dry-run.
+
+Code examples in either document confer no ownership: quoted imports, markers, headings, and complete source bodies remain user text. The Source installer bundles markdown-it-py 4.0.0 and mdurl 0.1.2 with their original licenses to determine code context using its CommonMark dialect. Existing Python 3.11+ installation commands are unchanged; no pip, network fetch, virtual environment, or extra user setup is needed for this parser. Actual code spans can continue across lazy list or quote paragraph lines, while true block boundaries keep separate paragraphs independent. Exact legacy migration requires an active pack heading in that same source-body occurrence, while allowing code examples inside the genuine body. An additional active unproved pack body remains ambiguous even when a quoted current body is present. This local parser convention does not establish an exact match to a provider's undisclosed import parser.
+
+On `E_CLAUDE_DOC_LEGACY_AMBIGUOUS` or `E_CLAUDE_DOC_MARKERS_INVALID`, the diagnostic names the affected document and neither document is changed. Back up both documents, identify and preserve your custom imports and rules, then explicitly restore a complete current-stock body or repair the marker boundaries around only the content you intend the installer to replace. Put custom imports and rules outside that body as described above, and rerun dry-run before reinstalling. Do not mark uncertain user text as installer-owned. `E_CLAUDE_DOC_SOURCE_SHAPE` instead means the source layout is unsupported; use a consistent supported installer/source revision rather than editing user documents to bypass it.
+
+A failed new install restores original document bytes through the existing transaction. Downgrading the installer executable is different: older installers do not understand these boundaries and can truncate retained content. Back up both documents before a downgrade and explicitly restore/preserve their custom content; rerunning an old installer is not a safe document rollback.
 
 ### Structural enforcement hooks (auto-installed)
 

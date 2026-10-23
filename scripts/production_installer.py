@@ -29,6 +29,13 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from installer_markdown import document_context as _markdown_document_context
+except ModuleNotFoundError as error:
+    if error.name != "installer_markdown":
+        raise
+    from scripts.installer_markdown import document_context as _markdown_document_context
+
+try:
     from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
 except ModuleNotFoundError:
     from scripts.provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
@@ -2633,7 +2640,8 @@ class _InstallTransaction:
                     return self._read_copy_metadata(os.fstat(descriptor), descriptor, None)
             progress(operation, projected, label="timestamps", sets_times=True)
             requested_identity = self._chmod_identity(node.python_identity, mode)
-            progress(lambda: self._chmod_owned(path, node.python_identity, mode, descriptor=descriptor),
+            progress(lambda: self._chmod_owned(path, node.python_identity, mode, descriptor=descriptor,
+                                               native_proof=node.native_proof),
                       current, identity=requested_identity, label="mode")
             if desired.flags is not None and desired.flags != current.flags:
                 if not hasattr(os, "fchflags"):
@@ -3654,7 +3662,8 @@ class _InstallTransaction:
                 if fsync != "best-effort":
                     raise
         if mode is not None:
-            changed = self._chmod_owned(target, node.python_identity, mode, descriptor=descriptor)
+            changed = self._chmod_owned(target, node.python_identity, mode, descriptor=descriptor,
+                                        native_proof=node.native_proof)
             node = replace(node, python_identity=changed)
             record(target, node)
         if digest.hexdigest() != expected_digest:
@@ -3847,13 +3856,25 @@ class _InstallTransaction:
         expected = _InstallTransaction._chmod_identity(before, requested)
         if _CreateOnlyMutablePath._identity(path) != before:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal permission beforeimage")
-        if os.name == "nt" and descriptor is None:
+        if os.name == "nt":
             if native_proof is None:
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: missing permission native proof")
-            with _WindowsBoundNode(path, purpose="attributes") as bound:
-                if bound.proof != native_proof:
+            if descriptor is None:
+                with _WindowsBoundNode(path, purpose="attributes") as bound:
+                    if bound.proof != native_proof:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: permission native identity")
+                    bound.set_readonly(not bool(requested & stat.S_IWRITE))
+            else:
+                bound = _WindowsBoundNode(path)
+                bound.descriptor = descriptor  # Borrowed; caller alone owns closure.
+                metadata = bound.python_metadata()
+                identity = (metadata.st_dev, metadata.st_ino, metadata.st_mode,
+                            getattr(metadata, "st_file_attributes", 0))
+                if identity != before or bound.proof != native_proof:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: permission native identity")
                 bound.set_readonly(not bool(requested & stat.S_IWRITE))
+                if bound.proof != native_proof:
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: permission native transition")
         elif descriptor is None:
             path.chmod(requested)
         else:
@@ -9731,29 +9752,89 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
         _write_owned_text(target, content, mutable_owner)
 
 
+_CLAUDE_DOC_MARKER_PREFIXES = tuple(
+    f"<!-- {edge} ORCHESTRARIUM {kind} MANAGED"
+    for kind in ("CLAUDE", "SHARED") for edge in ("BEGIN", "END")
+)
+
+
+def _claude_document_context(text: str) -> tuple[str, list[tuple[int, int]]]:
+    """Delegate code status and original-offset transport to the pinned parser."""
+    return _markdown_document_context(text)
+
+
+def _render_claude_document(existing: str | None, payload: str, *, claude: bool) -> str:
+    """Replace only proven body ownership; unknown legacy extent is not ownership."""
+    kind, name = ("CLAUDE", "CLAUDE.md") if claude else ("SHARED", "AGENTS.md")
+    begin = f"<!-- BEGIN ORCHESTRARIUM {kind} MANAGED -->\n"
+    end = f"<!-- END ORCHESTRARIUM {kind} MANAGED -->\n"
+    anchor = "@AGENTS.md\n"
+    if (not payload or not payload.endswith("\n")
+            or any(prefix in payload for prefix in _CLAUDE_DOC_MARKER_PREFIXES)
+            or (claude and re.search(r"(?m)^@AGENTS\.md$", payload))):
+        raise ValueError(f"E_CLAUDE_DOC_SOURCE_SHAPE: {name}")
+    owned = (anchor if claude else "") + begin + payload + end
+    if existing is None:
+        return owned
+
+    visible, code = _claude_document_context(existing)
+    anchors = list(re.finditer(r"(?m)^@AGENTS\.md$", visible)) if claude else []
+
+    markers = list(re.finditer("|".join(map(re.escape, _CLAUDE_DOC_MARKER_PREFIXES)), visible))
+    if markers:
+        # Every reserved-prefix occurrence must be one of these two complete lines.
+        if (len(markers) != 2
+                or any(match.start() and existing[match.start() - 1] != "\n" for match in markers)
+                or not existing.startswith(begin, markers[0].start())
+                or not existing.startswith(end, markers[1].start())
+                or (claude and not any(match.end() <= markers[0].start()
+                    or match.start() >= markers[1].start() + len(end) for match in anchors))):
+            raise ValueError(f"E_CLAUDE_DOC_MARKERS_INVALID: {name}")
+        start = markers[0].start() + len(begin)
+        return existing[:start] + payload + existing[markers[1].start():]
+
+    signatures = r"(?m)^(?:# Claude Code Pack|# Claudestrator)$" if claude else r"(?m)^# Shared Governance$"
+    active_signatures = {match.start() for match in re.finditer(signatures, visible)}
+    if active_signatures:
+        source_visible, _ = _claude_document_context(payload)
+        source_signatures = {match.start() for match in re.finditer(signatures, source_visible)}
+        # Exact original bodies may contain their own code. Only a signature at
+        # this occurrence can prove ownership; outside code cannot supply it.
+        matches = [match for match in re.finditer(r"(?m)^(?=" + re.escape(payload) + ")", existing)
+                   if not any(start < match.start() < stop for start, stop in code)
+                   and any(match.start() + relative in active_signatures for relative in source_signatures)]
+        if (len(matches) != 1
+                or any(not matches[0].start() <= position < matches[0].start() + len(payload)
+                       for position in active_signatures)
+                or (claude and not any(match.end() <= matches[0].start()
+                or match.start() >= matches[0].start() + len(payload) for match in anchors))):
+            raise ValueError(f"E_CLAUDE_DOC_LEGACY_AMBIGUOUS: {name}")
+        start = matches[0].start()
+        return existing[:start] + begin + payload + end + existing[start + len(payload):]
+    if anchors:
+        offset = anchors[0].start()
+        return existing[:offset] + begin + payload + end + existing[offset:]
+    return owned + "\n" + existing
+
+
 def _merge_claude_docs(root: Path, source: Path, target: Path, dry_run: bool, *,
                        mutable_owner: _CreateOnlyMutablePath | None = None) -> None:
     claude_source = (source / "CLAUDE.md").read_text(encoding="utf-8")
-    existing = _read_owned_text(target, mutable_owner)
-    if existing is not None:
-        starts = [
-            position
-            for marker in ("\n@AGENTS.md", "\n# Claude Code Pack", "\n# Claudestrator")
-            if (position := ("\n" + existing).find(marker)) >= 0
-        ]
-        content = existing[: min(starts)] + claude_source if starts else claude_source + "\n" + existing
-    else:
-        content = claude_source
+    anchor = "@AGENTS.md\n"
+    if not claude_source.startswith(anchor):
+        raise ValueError("E_CLAUDE_DOC_SOURCE_SHAPE: CLAUDE.md")
     shared = (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
     agents_target = target.parent / "AGENTS.md"
+    # Classify both documents before publishing either, including on dry-run.
+    content = _render_claude_document(_read_owned_text(target, mutable_owner),
+                                     claude_source[len(anchor):], claude=True)
+    shared_content = _render_claude_document(_read_owned_text(agents_target, mutable_owner),
+                                            shared, claude=False)
     if dry_run:
         print(f"    [dry-run] would merge {target} and {agents_target}")
     else:
-        agents_existing = _read_owned_text(agents_target, mutable_owner)
-        if agents_existing is not None and "# Shared Governance" not in agents_existing:
-            shared = shared.rstrip() + "\n\n" + agents_existing
         _write_owned_text(target, content, mutable_owner)
-        _write_owned_text(agents_target, shared, mutable_owner)
+        _write_owned_text(agents_target, shared_content, mutable_owner)
 
 
 def _load_claude_settings(settings_path: Path, *,
