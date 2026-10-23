@@ -14,6 +14,7 @@ Use it together with:
 
 Current docs in this branch:
 
+- [claude-instruction-unification.md](claude-instruction-unification.md) for current-line Claude instruction research, shared-default versus provider-specific ownership, runtime projection alternatives, and the bounded development handoff
 - [routing/sol-6-1-routing-proposal-2026-10-01.md](routing/sol-6-1-routing-proposal-2026-10-01.md) for the approved Sol 6.1 default-family decision, dated public evidence, compatibility scope, and offline verification boundaries
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
