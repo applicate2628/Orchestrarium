@@ -35,24 +35,35 @@ cancelled, and a proposal is not a commitment to a particular implementation.
 ## General mechanisms, revisable plans
 
 An unfamiliar task should normally require new data and a revised plan, not a new
-core branch, status or exception list. Use existing owners to observe actual state,
-choose an admissible next step, verify its result and revise the plan. This is a
-design principle, not a new orchestration engine or a promise to execute every task.
+core branch, status or exception list. Lead already revises sequence, grouping and
+parallelism at plan checkpoints; this is not a new engine. Preserve accepted goals,
+criteria, ownership, authorized effects, budgets, useful results and unresolved
+obligations. Methods may adapt; material boundary changes use existing controls.
+Replanning never resets retry lineage or waives required review and safety rules.
 
-Keep the accepted goal, acceptance criteria, ownership, authorized effects and
-budget under their existing controls. Methods and step order may adapt within those
-boundaries; changed authority, material scope/risk or acceptance criteria follow the
-existing approval and review paths. Preserve useful accepted results, causal history
-and unresolved obligations. Replanning neither resets budgets nor waives mandatory
-review, retry or safety rules; any later change to those rules needs its own admitted
-owner-scoped proposal. No runtime defect or root cause is established by this plan.
+Instructions are not enforcement, and adding prose is not a reliability fix. The
+recommended design is a short invariant core with task-relevant detail, without
+hiding mandatory constraints, arbitrary token limits or a new context service.
+For each critical property, distinguish within its existing design and acceptance:
+- What the actual operation/host owner enforces before the effect, on which paths.
+- What independent result readback or domain verification establishes afterward.
+- What remains agent judgment or an uncontrolled-path limitation.
 
-Distinguish unfamiliar task content from missing permission, execution capability
-or trustworthy evidence. Lack of a scenario template is not itself a blocker when
-existing capabilities and controls suffice. A real blocker holds dependent effects;
-independent authorized work may continue unless shared-state or containment risk
-requires a wider stop. Domain-specific checks remain necessary: a common workflow
-does not make proofs, software tests and installation readback interchangeable.
+Prefer an existing operation that makes the valid path straightforward over manual
+step lists, a hook per rule or new states. A supported alternate entrypoint must
+preserve the same effect contract; a bypassable helper, advisory resolver or prompt
+cannot establish machine enforcement. Direct host calls, shell or edits outside a
+controlled boundary remain explicit limitations, not guarantees supplied by a
+wrapper. The [Codex addendum](../src.codex/AGENTS.codex.md) explicitly records
+incomplete edit-hook coverage and behavioral, not host-enforced, tool isolation.
+Admit a concrete missing boundary separately if needed; do not prescribe a universal
+gate or claim all semantic judgment can be automated.
+
+Missing a scenario template is not itself a blocker when capability, permission
+and evidence suffice. A real blocker holds dependent effects; independent work
+continues unless actual shared-state or containment risk requires a wider stop.
+Domain checks remain essential: proofs, software tests and installed readback are
+not interchangeable. No runtime root cause is established by this plan.
 
 ## Existing foundation and known limits
 
@@ -102,18 +113,41 @@ Current main has no root `package.json`. The original detailed local-only epic
 was not recovered in this review. Do not invent its package name, commands,
 registry arrangement, update semantics or runtime dependency contract.
 
-**Next decision and dependencies:** recover or reconstruct that contract with the
-user, choose supported install targets and upgrade/removal behavior, then use the
-existing installer and ownership boundaries. Coordinate with item 2 only where
-package lifecycle actually depends on native-role lifecycle; packaging research
-need not wait for routing or cross-host continuation. No resurrection of removed
-provider packs is implied.
+**Recommended option, not an accepted implementation:** versioned source payload
+and a thin npm launcher into the current Python installer, preserving its resource
+layout and explicit apply. Package installation/update delivers files; applying to
+selected projects remains explicit. npm uninstall is not full installed-pack removal.
+Do not introduce hidden project mutation in package installation hooks. Trace all
+installer reads/imports, including dynamic validators and installed helper resources;
+packaging only the entrypoint and skills is insufficient.
 
-**Acceptance:** an agreed package/command contract; a reproducible package with
-only intended payload; clean-install, repeat-install, upgrade and removal evidence
-on the agreed platform/target matrix; preservation of user-owned files and current
-rollback guarantees. State which lifecycle actions remain unsupported. Publishing
-a package and any paid operation require their own applicable authorization.
+Python 3.11+ is needed after installation by runtime helpers/hooks, not only during
+setup. Prefer an external interpreter initially; the dependency decision remains
+open. Bundling a maintained interpreter removes the user's Python-install step,
+not Python code or platform/security maintenance. A frozen installer alone does
+not satisfy installed hooks. A JavaScript/Rust rewrite is not the default: current
+repository policy gives Python sole production-script ownership, and changing that
+requires a separate admitted architecture decision.
+
+Minimize dependencies by actual consumer, not by a zero-dependency slogan. The
+[review ledger loader](../scripts/review_loop_state.py) already supports standard-
+library JSON; YAML ledgers require PyYAML. Prefer that existing JSON path for owned
+machine ledgers where suitable, retaining explicit legacy YAML compatibility. The
+[installed validator source](../scripts/skill_pack_validator_runtime.py) can use
+PyYAML but falls back to weaker string/regular-expression checks when absent.
+That is not equivalent validation. Retain a justified parser where supported YAML
+needs it rather than inventing a parser or silently weakening checks. The inspected
+production imports do not prove a complete dependency closure; development/test
+dependencies are separate. No dependency removal is claimed implemented.
+
+**Open decision and acceptance:** reconstruct the missing package/command contract,
+choose targets and interpreter delivery, then prove the payload from an unpacked
+archive without a checkout. Trace runtime dependencies as well as installer ones;
+verify supported parsing with and without optional dependencies, install/reinstall,
+upgrade, explicit apply and the agreed removal scope. Preserve user files and
+rollback. Item 2 is a dependency only where native-role lifecycle is required;
+packaging does not wait for routing or cross-host work. Publication/paid operations
+require applicable authorization; no removed provider packs return implicitly.
 
 ### 2. Fuller native-role lifecycle
 
@@ -127,19 +161,26 @@ a general lifecycle. [README](../README.md) and [INSTALL](../INSTALL.md) explici
 reserve the remaining work for 2.0. This is a capability gap, not evidence that
 today's conservative refusals are unsafe.
 
-**Next decision and dependencies:** define ownership evidence and each authorized
-transition before implementation, including existing-install migration and recovery.
-First assess reuse of the installer's existing canonical-skill reconciliation of
-recorded ownership, observed state and desired content for native roles, rather than
-adding a special migration for each release. Preserve transaction/rollback machinery;
-legacy installs without ownership evidence still need an explicit migration boundary.
-Coordinate item 1 through this same owner, not a package-specific state manager.
+**Recommended option:** extend the existing native-role planner and transaction
+with recorded ownership reconciled against observed and desired state. Reuse the
+canonical-skill reconciliation principle, not its skill-specific function or
+receipt assumptions. Role files, configuration registrations and ownership evidence
+form one coupled change; retain current rollback/readback. Update or remove only
+proven-owned, unchanged content within the authorized transition. Foreign files
+and unrelated configuration remain intact; filenames do not prove ownership.
 
-**Acceptance:** agreed transitions succeed with independent installed readback;
-custom files, unrelated configuration and ambiguous ownership are preserved or
-refused visibly; interruption, rollback, reinstall and legacy-install cases retain
-current guarantees. Test deletion/reclaim only within the accepted ownership and
-authorization contract, never by treating filename equality as ownership.
+**Alternatives and open decision:** continuing stock-hash migrations is the smallest
+short-term bridge, not the general lifecycle. Legacy installs need explicit adoption
+or refusal where evidence is missing. Versioned directories with pointer switching
+would change provider paths, overrides and cleanup; do not prefer that larger design
+without evidence. Define adoption/update/deletion/reclaim semantics with the existing
+owner. Native-role removal is not whole-pack uninstall or shared-skill ownership.
+
+**Acceptance:** independently read back files, registrations and ownership together;
+probe interruption/rollback, customized or foreign roles, legacy adoption and repeated
+apply. New ordinary roles/releases should be data, not a migration branch each time.
+Verify global/project and provider differences where they affect the accepted contract.
+Coordinate npm through this owner, not a second package state manager.
 
 ### 3. Task-specific exact-profile choice and complementary work
 
@@ -155,8 +196,9 @@ for eligibility, uncertainty, evidence and accounting semantics.
 
 **Next decision and dependencies:** identify a real caller and walk its discovered
 options through Lead into the actual resolver. Accept evidence inputs and output
-consumer before coding. Use existing Lead judgment if sufficient; a pure comparator
-is conditional. Item 4 supplies comparative evidence, not new execution permission.
+consumer before coding. Prefer existing Lead judgment and its recorded rationale;
+a pure comparator is conditional on demonstrated repeated comparison needs. Item 4
+supplies comparative evidence, not new execution permission.
 External comparison separately needs the real provider admission/availability path.
 Insufficient comparative evidence need not prevent Lead from making an explained
 admissible choice; it must not become a fabricated ranking or capability assumption.
@@ -200,9 +242,11 @@ verified results to judge whether a comparison mechanism earns its complexity.
 
 **Acceptance:** reproducible matched evidence, unsuccessful and abandoned attempts
 included, with uncertainty and limitations visible. Curate accepted outcomes into
-later decisions through current evidence/lesson owners, with provenance and expiry
-or invalidation after model, harness, tool, permission or material task changes. Negative
-results must not disappear through success-only selection. No autonomous policy
+later decisions through the existing run journal and [curated lessons](lessons.md),
+not a new learning subsystem. Keep run facts distinct from generalizable lessons,
+with provenance and expiry or invalidation after model, harness, tool, permission
+or material task changes. Negative results must not disappear through success-only
+selection. No autonomous policy
 promotion, background learning service or universal provider ranking follows.
 
 Optional independent blind proposals, named-artifact cross-critique, Lead synthesis
@@ -213,26 +257,31 @@ checkable disagreement; majority agreement does not establish truth.
 
 ### 5. Generic execution portability
 
-**Status:** generic Windows command-line interface (CLI), including a possible Rust
-implementation, remains deferred 2.0 work. Other limitations require scope decisions.
+**Status:** existing execution contracts and native-host routes; incomplete generic
+command-line interface (CLI)/platform coverage, not a missing universal runner.
 **Owner:** Platform/Toolchain Engineer at current process-supervision owners.
 
-**Next decision and dependencies:** choose the actual supported commands/platforms
-and containment oracle for the retained Windows goal. Rust is a deferred direction,
-not permission to duplicate the Python production owner. Architect must resolve any
-language/ownership change against current repository policy before implementation.
-Separately decide whether generic POSIX execution and installation of the currently
-source-only durable store/activation registry are needed by an accepted use case.
-Their absence is not automatic admission of three new workstreams. Reuse the existing
-process request/result contract and isolate real platform/provider differences in
-its implementations; do not create a separate execution lifecycle per task scenario.
+The [process runner](../scripts/process_supervision/process_runner.py) already defines request/result,
+cancellation, settlement and Windows native parsing contracts. The generic Windows
+CLI is blocked at its private request-directory boundary; generic POSIX execution
+is unavailable. Specialized POSIX supervision and native-host dispatch are not proof
+that either generic entrypoint works. A source-only store/activation registry is
+also not evidence of a live durable execution service.
 
-**Acceptance:** for every admitted route, prove bounded resource ownership,
-cancellation, descendant settlement and trustworthy terminal evidence at its actual
-boundary; unsupported routes stay typed unavailable before launch. Installation
-changes require source-to-installed parity and lifecycle evidence. Implement only
-prerequisites actually needed by a selected item, not a platform rewrite before
-native comparison or npm planning can proceed.
+**Recommended option:** use existing supported paths where sufficient, then finish
+only the existing boundary required by a concrete command/platform use case. Keep
+one request/result contract, with real platform differences inside its owners.
+Decide optional POSIX support and installation of source-only components separately.
+Rust remains a deferred alternative only if an evidenced limitation warrants the
+language/ownership change; neither a rewrite nor duplicate Python/Rust owners is a
+prerequisite for npm or routing. Owner-equivalent manual execution must retain the
+selected operation's guarantees; it is not a host-denial bypass.
+
+**Acceptance:** at each admitted entrypoint prove resource ownership, cancellation,
+descendant settlement and trustworthy terminal evidence, including the real Windows
+CLI boundary. Unsupported routes remain typed unavailable before launch. Replace
+an unavailable expectation only with demonstrated contract coverage; source-to-
+installed parity and lifecycle evidence are required where installation changes.
 
 ### 6. Safe cross-host continuation
 
@@ -240,24 +289,30 @@ native comparison or npm planning can proceed.
 **Owner:** Lead for admission; Architect and existing persistence/receiving owners
 for the eventual boundary.
 
-Restore task context, accepted artifacts, open findings, plans, dispatches and
-evidence under one active logical owner when moving between hosts. The
-[routing design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md)
-retains the required safety properties without preselecting leases or wire schemas.
+The existing [manual repository transfer](../src.codex/skills/manual-repo-transfer/SKILL.md)
+contract already covers portable/local inventory, writer freeze and verified restore;
+Lead already has a recovery contract. Preserve dirty/staged/local-only state as applicable,
+without forcing a clean commit or copying credentials as project state. The gap is
+verified orchestration-aware continuation, not inventing archive transfer.
 
-**Next decision and dependencies:** admit a concrete transfer scenario; map durable
-state, writer ownership, takeover and receiving boundaries. Item 5 matters only if
-that scenario needs its execution/storage extension. Existing locks or a ledger
-alone do not prove transfer safety. First assess whether an explicit stop, state
-handoff, verification and resume meets the user's need before proposing transparent
-live migration. This is a candidate, not a decision to remove broader continuation.
+**Recommended first option:** connect existing transfer and Lead recovery for an
+explicitly stopped handoff: verify prior writer stop/exclusion, received artifacts,
+open obligations/dispatches, current host capabilities and the next admissible step.
+Reuse existing records; do not add a transfer service by default. An unknown external
+job outcome must be reconciled before retry, not interpreted as a fresh start.
 
-**Acceptance:** restored context is complete for the admitted route; old writers
-cannot commit after transfer; stale results are rejected; cancellation and terminal
-settlement survive admitted interruption/recovery paths. Independently verify the
-prior owner's stop or exclusion, restored state and outstanding obligations. Test
-concurrent takeover if supported; otherwise reject it without altering ownership.
-Do not require a new lease service, registry or ledger merely to retain this outcome.
+**Alternative and open decision:** decide whether stopped handoff meets the actual
+need. Live/concurrent takeover remains conditional and retained, not cancelled.
+If the old host could resume writes to the same authoritative target, a claimed stop
+is insufficient: require verified exclusion. Live takeover requires atomic ownership
+change and commit-time rejection of stale writers; local locks or a ledger alone do
+not prove it. Item 5 matters only when the chosen scenario needs that extension.
+
+**Acceptance:** restore accepted context and outstanding obligations; reject stale
+results and unsupported concurrent takeover without changing ownership. Verify old-
+writer exclusion, capability changes, interruption/recovery, cancellation and terminal
+settlement at actual owners. The [routing design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md)
+retains this boundary without imposing a new lease, registry or ledger service.
 
 ### 7. Optional named policy preferences from PR #5
 
@@ -270,7 +325,8 @@ and independent architecture review already belong to mandatory governance. They
 must not become optional switches. Ordinary scoped instructions can already request
 extra review focus.
 
-The distinct missing capability is persistent named opt-in preferences, narrowed by
+The recommended option now is ordinary task-specific instructions, not a selector.
+The unresolved distinct capability is persistent named opt-in preferences, narrowed by
 project restrictions and applicable task/provider context. Decide whether that
 convenience solves a recurring need before retaining a selector. Persistence and
 context filtering are not equivalent to generic prompt text; do not call them
@@ -317,6 +373,9 @@ its repair. Keep the known Kimi documentation drift owner-scoped as well.
   still require an admitted owner and contract, not a generic bypass.
 - A permitted plan revision preserves accepted results, remaining obligations,
   identity and budget, while material boundary changes reach existing controls.
+- Skipped instructions or omitted manual steps do not bypass claimed machine
+  guarantees on supported effect paths. Test alternative entrypoints and stale state;
+  report uncontrolled paths and semantic judgment limits, not false enforcement.
 - Repeated requests and delayed results neither duplicate effects nor accept stale
   results. Reconcile uncertain prior effects before retry; otherwise hold the affected
   action. Event replay alone does not prove exactly-once external execution, and an
@@ -351,3 +410,6 @@ Later implementation needs the probes under its own outcome and current gates.
 - PR: pull request; a proposal is not evidence that its changes have landed.
 - Admission: existing permission and policy eligibility, distinct from ranking.
 - Empirical arbitration: settling checkable disagreement with observed evidence.
+- JSON / YAML: JavaScript Object Notation / YAML Ain't Markup Language, structured
+  data formats; PyYAML is a Python YAML parser.
+- Standard library: modules shipped with Python, distinct from third-party packages.

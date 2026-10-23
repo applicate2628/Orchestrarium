@@ -47,6 +47,12 @@ and applicable evidence. It returns a recommendation to Lead, not an invocation.
 Lead supplies the chosen exact model/effort pair, rationale and unchanged approved
 scope to the existing resolver. Omission/default behavior is unchanged. Resolution,
 host invocation and trusted receiving retain their existing checks and owners.
+This caller contract does not itself force every native host invocation through
+resolution. Distinguish resolver checks, actual host enforcement, independent
+receiving verification and residual Lead judgment. Prompt compliance or an advisory
+helper is not a machine guarantee for direct calls outside its boundary; examine
+supported alternate entrypoints before claiming enforcement. Reuse actual owners,
+not a new global gate or a longer instruction checklist.
 Native discovery does not establish external-provider admission; any later external
 comparison must trace that provider's actual existing admission path first.
 
@@ -123,8 +129,10 @@ owners; host mode does not introduce a stronger blanket human-escalation policy.
 Cross-host continuation remains a separate future direction. Before it is admitted,
 identify the concrete persistence/host boundary and its single writer/ownership
 contract. Restore the admitted task context, accepted artifacts, plan, open findings,
-outstanding dispatches and their evidence. First consider explicit stop, verified
-handoff and resume. Require one active owner and prevent the previous owner from
+outstanding dispatches and their evidence. First reuse the existing manual repository
+transfer and Lead recovery contracts for explicit stop, verified handoff and resume;
+the missing work is their orchestration-aware connection, not a new freeze/restore
+mechanism. Require one active owner and prevent the previous owner from
 committing after transfer through the chosen mode's verified stop or exclusion.
 If live/concurrent takeover is admitted, prove atomic ownership change, commit-time
 fencing of stale writers and crash recovery. Existing local locks or an append-only
@@ -159,6 +167,10 @@ The minimum later behavioral probes are:
 - If a deterministic comparator is adopted, identical admitted snapshots produce
   identical recommendations; this is not a constraint on Lead deliberation.
 - Comparison cannot launch, settle or accept work.
+- Skipped instructions/steps, stale state and alternate entrypoints do not bypass
+  any claimed machine-enforced property within its declared effect boundary.
+  Unknown outcomes are reconciled before retry; uncontrolled paths and remaining
+  semantic judgment are explicit rather than hidden behind a helper.
 
 No tests for a speculative schema or required prose phrases are introduced.
 Existing runtime tests remain untouched. Add behavioral tests at the actual
