@@ -4764,6 +4764,7 @@ def _validate_legacy_historical_links(root, archive, reference, links, custody, 
     if not isinstance(inventory, dict) or set(inventory) != {"result", "references"} or not isinstance(inventory["references"], list):
         reject()
     references, identities, physical = inventory["references"], set(), set()
+    consumer_image_keys = {}
     for row in references:
         if (not isinstance(row, dict) or set(row) != {"consumer", "kind", "value"}
                 or row["kind"] not in {"logical", "physical"} or not isinstance(row["value"], str)):
@@ -4773,8 +4774,12 @@ def _validate_legacy_historical_links(root, archive, reference, links, custody, 
         if identity in identities or (row["kind"] == "logical" and row["value"] != reference):
             reject()
         identities.add(identity)
+        consumer_image_key = consumer_image_keys.get(row["consumer"])
+        if consumer_image_key is None:
+            consumer_image_key = "work-items/" + row["consumer"]
+            consumer_image_keys[row["consumer"]] = consumer_image_key
         if row["kind"] == "physical":
-            physical.add("work-items/" + row["consumer"])
+            physical.add(consumer_image_key)
     if inventory["result"] != ("unmapped" if physical else "logical-only" if references else "clear"):
         reject()
     images = {}
@@ -4788,8 +4793,8 @@ def _validate_legacy_historical_links(root, archive, reference, links, custody, 
             reject()
         try:
             suffix = PurePosixPath(row["path"]).suffix
-            images[row["path"]] = (_IncomingConsumerImage(before, suffix).view,
-                                   _IncomingConsumerImage(after, suffix).view)
+            images[row["path"]] = (_IncomingConsumerImage(before, suffix),
+                                   _IncomingConsumerImage(after, suffix))
         except (UnicodeError, LifecycleError) as exc:
             if isinstance(exc, LifecycleError):
                 raise LifecycleError(failure, f"historical incoming consumer {row['path']}: {exc}") from exc
@@ -4799,48 +4804,92 @@ def _validate_legacy_historical_links(root, archive, reference, links, custody, 
     by_original = {root / cell["originalPath"]: cell for cell in custody}
     consumer_targets = {root / "work-items" / row["source"]: root / "work-items" / row["target"]
                         for row in bug_results if row.get("target") is not None}
-    href_obligations, literal_changes = [], {}
+    href_edits, literal_changes = {}, {}
     for row in references:
-        consumer = root / "work-items" / row["consumer"]
+        consumer_rel = row["consumer"]
+        image_key = consumer_image_keys[consumer_rel]
+        consumer = root / image_key
         if row["kind"] == "logical":
-            if consumer.relative_to(root).as_posix() in images:
-                before, after = images[consumer.relative_to(root).as_posix()]
-                if reference not in before or reference not in after:
+            image_pair = images.get(image_key)
+            if image_pair is not None:
+                before_image, after_image = image_pair
+                if reference not in before_image.view or reference not in after_image.view:
                     reject()
             continue
-        before, after = images[consumer.relative_to(root).as_posix()]
+        image_pair = images.get(image_key)
+        if image_pair is None:
+            reject()
+        before_image, _after_image = image_pair
         current_consumer = consumer_targets.get(consumer, consumer)
         try:
             parts = _local_markdown_href_parts(row["value"])
         except LifecycleError as exc:
-            raise LifecycleError(failure, f"historical incoming consumer {row['consumer']}: {exc}") from exc
-        if parts is not None and any(link.href == row["value"] for link in _markdown_local_links(before)):
+            raise LifecycleError(failure, f"historical incoming consumer {consumer_rel}: {exc}") from exc
+        matched_links = tuple(
+            link for link in _markdown_local_links(before_image.view)
+            if link.href == row["value"]
+        )
+        is_href = parts is not None and bool(matched_links)
+        if is_href:
             original = Path(os.path.abspath(consumer.parent / parts[0]))
             cell = by_original.get(original)
             if cell is None:
                 reject()
             expected = os.path.relpath(archive / cell["preservedPath"], current_consumer.parent).replace(os.sep, "/") + parts[1]
-            href_obligations.append((row["consumer"], after, expected))
-        else:
-            # The existing inventory also admits exact literal locators. Bind
-            # their original/custody association without an old OS-path lookup.
-            locator = row["value"].replace("\\", "/")
+            href_edits.setdefault(image_key, []).extend(
+                (link.href_start, link.href_end, expected) for link in matched_links
+            )
+
+        # One aggregate row may authorize both href relocation and literal
+        # handling. The shared projector distinguishes their actual occurrences.
+        locator = row["value"].replace("\\", "/")
+        candidates = [cell for path, cell in by_original.items()
+                      if locator in {path.relative_to(root).as_posix(),
+                          path.relative_to(root / "work-items").as_posix() if path.is_relative_to(root / "work-items") else None}]
+        if not is_href or candidates:
             _legacy_relative(locator)
-            candidates = [cell for path, cell in by_original.items()
-                          if locator in {path.relative_to(root).as_posix(),
-                              path.relative_to(root / "work-items").as_posix() if path.is_relative_to(root / "work-items") else None}]
-            if len(candidates) != 1 or _incoming_literal_pattern(locator).search(before) is None:
+        if len(candidates) > 1:
+            reject()
+        if candidates:
+            pattern = _incoming_literal_pattern(locator)
+            if pattern.search(before_image.view):
+                expected = (archive / candidates[0]["preservedPath"]).relative_to(root).as_posix()
+                literal_changes.setdefault(image_key, []).append((pattern, expected))
+            elif not is_href:
                 reject()
-            expected = (archive / candidates[0]["preservedPath"]).relative_to(root).as_posix()
-            literal_changes.setdefault(row["consumer"], []).append((_incoming_literal_pattern(locator), expected))
-            if _incoming_literal_pattern(expected).search(after) is None:
-                reject()
-    for consumer, after, expected in href_obligations:
-        for pattern, replacement in literal_changes.get(consumer, ()):
-            expected = pattern.sub(replacement, expected)
-        if not any(link.href == expected for link in _markdown_local_links(after)):
+        elif not is_href:
             reject()
 
+    for image_key in sorted(set(href_edits) | set(literal_changes)):
+        image_pair = images.get(image_key)
+        if image_pair is None:
+            reject()
+        _before_image, after_image = image_pair
+        rules = tuple(literal_changes.get(image_key, ()))
+        try:
+            _projected, href_obligations, literal_obligations = (
+                _project_incoming_consumer_image(
+                    images[image_key][0], PurePosixPath(image_key).suffix,
+                    href_edits.get(image_key, ()), rules,
+                )
+            )
+        except LifecycleError as exc:
+            raise LifecycleError(failure, f"historical incoming consumer {image_key}: {exc}") from exc
+        after_links = tuple(_markdown_local_links(after_image.view))
+        if any(not any(link.href == expected for link in after_links)
+               for expected in href_obligations):
+            reject()
+        observed_literal_rules = set()
+        for obligation in literal_obligations:
+            observed_literal_rules.add(obligation[0])
+            try:
+                present = _incoming_projection_obligation_present(after_image.view, obligation)
+            except LifecycleError as exc:
+                raise LifecycleError(failure, f"historical incoming consumer {image_key}: {exc}") from exc
+            if not present:
+                reject()
+        if any(index not in observed_literal_rules for index in range(len(rules))):
+            reject()
 
 @functools.partial(_lifecycle_participant, input_role="repository-root")
 def acquire_settled_work_item_history(root: Path, logical_reference: str, *, expected_references=(), _pending_plan=None, ledger_resource_budget=None):
@@ -16319,21 +16368,19 @@ def _physical_archive_link_plans(
                 continue
             value = reference["value"].replace("\\", "/")
             if value in {source.relative_to(repository).as_posix(), source.relative_to(_work_items_root(root, ledger_resource_budget=ledger_resource_budget)).as_posix()}:
-                if not any(link.href == reference["value"] and (consumer.parent / (_local_markdown_href_parts(link.href) or ("",))[0]).resolve() == source_resolved
-                           for link in _markdown_local_links(text)):
-                    pattern = _incoming_literal_pattern(value)
-                    if pattern.search(text):
-                        literal_changes.append((pattern, archive.relative_to(repository).as_posix()))
+                pattern = _incoming_literal_pattern(value)
+                if pattern.search(text):
+                    literal_changes.append((pattern, archive.relative_to(repository).as_posix()))
         if not replacements and not literal_changes:
             if image is not None and relative not in referenced_paths:
                 continue
             raise LifecycleError(failure_id, f"physical link has no safe rewrite: {relative}")
         try:
-            after = navigation.edit(replacements)
-            for pattern, replacement in literal_changes:
-                navigation = _IncomingConsumerImage(after, consumer.suffix)
-                after = navigation.edit((match.start(), match.end(), replacement)
-                                        for match in pattern.finditer(navigation.view))
+            after, _href_obligations, _literal_obligations = (
+                _project_incoming_consumer_image(
+                    navigation, consumer.suffix, replacements, literal_changes
+                )
+            )
         except LifecycleError as exc:
             raise LifecycleError(failure_id, f"incoming consumer {relative}: {exc}") from exc
         plans.append({
@@ -20549,6 +20596,107 @@ def _incoming_literal_pattern(literal_path):
     return re.compile(r"(?<![A-Za-z0-9_.\\/-]){}(?![A-Za-z0-9_.\\/-])".format(
         re.escape(literal_path).replace("/", r"[\\/]")))
 
+
+def _project_incoming_consumer_image(image, suffix, href_edits, literal_changes):
+    """Project staged href/literal edits and retain occurrence-category obligations."""
+    href_edits = tuple(href_edits)
+    literal_changes = tuple(literal_changes)
+    parsed_links = tuple(_markdown_local_links(image.view))
+    href_base_spans = []
+    href_obligations = []
+    for start, end, replacement in href_edits:
+        if not any(link.href_start == start and link.href_end == end for link in parsed_links):
+            raise LifecycleError(
+                "WI-INCOMING-LINK-REPRESENTATION",
+                "selected rewrite is not a parsed local Markdown destination",
+            )
+        parts = _local_markdown_href_parts(image.view[start:end])
+        if parts is None:
+            raise LifecycleError(
+                "WI-INCOMING-LINK-REPRESENTATION",
+                "selected rewrite is not a local Markdown destination",
+            )
+        expected = replacement
+        for pattern, literal_replacement in literal_changes:
+            expected = pattern.sub(literal_replacement, expected)
+        href_obligations.append(expected)
+        href_base_spans.append((start, start + len(parts[0]), expected))
+
+    projected = image.edit(href_edits) if href_edits else image.raw
+    literal_obligations = []
+    for index, (pattern, replacement) in enumerate(literal_changes):
+        for match in pattern.finditer(image.view):
+            for base_start, base_end, href_expected in href_base_spans:
+                if base_start <= match.start() and match.end() <= base_end:
+                    literal_obligations.append(
+                        (index, "consumed-href-base", None, href_expected)
+                    )
+        stage = _IncomingConsumerImage(projected, suffix)
+        matches = tuple(pattern.finditer(stage.view))
+        if not matches:
+            projected = stage.raw
+            continue
+        expected = replacement
+        for later_pattern, later_replacement in literal_changes[index + 1:]:
+            expected = later_pattern.sub(later_replacement, expected)
+        stage_links = tuple(_markdown_local_links(stage.view))
+        for match in matches:
+            link = next((candidate for candidate in stage_links
+                         if match.start() < candidate.href_end and match.end() > candidate.href_start), None)
+            if link is None:
+                category = "bare"
+            elif match.start() < link.href_start or match.end() > link.href_end:
+                category = "href-destination"
+            else:
+                parts = _local_markdown_href_parts(link.href)
+                if parts is None:
+                    category = "href-destination"
+                else:
+                    base_end = link.href_start + len(parts[0])
+                    if match.end() <= base_end:
+                        category = "href-base"
+                    elif match.start() >= base_end:
+                        category = "href-suffix"
+                    else:
+                        category = "href-destination"
+            literal_obligations.append((index, category, expected, None))
+        projected = stage.edit(
+            (match.start(), match.end(), replacement) for match in matches
+        )
+    return projected, tuple(href_obligations), tuple(literal_obligations)
+
+
+def _incoming_projection_obligation_present(view, obligation):
+    _index, category, expected, href_expected = obligation
+    links = tuple(_markdown_local_links(view))
+    if category == "consumed-href-base":
+        return (isinstance(href_expected, str)
+                and any(link.href == href_expected for link in links))
+    if not isinstance(expected, str):
+        return False
+    pattern = _incoming_literal_pattern(expected)
+    if category == "bare":
+        return any(
+            not any(match.start() < link.href_end and match.end() > link.href_start
+                    for link in links)
+            for match in pattern.finditer(view)
+        )
+    for link in links:
+        if category == "href-destination":
+            searchable = link.href
+        else:
+            parts = _local_markdown_href_parts(link.href)
+            if parts is None:
+                continue
+            if category == "href-base":
+                searchable = parts[0]
+            elif category == "href-suffix":
+                searchable = parts[1]
+            else:
+                return False
+        if pattern.search(searchable):
+            return True
+    return False
 
 def _incoming_link_result(
     root: Path,
@@ -25930,35 +26078,54 @@ def recover_mixed_current_ledger(
             stage_identity = writer._write_exact_staging_file(stage_path, validation_candidate)
             obligations: list = []
             authority: list = []
+            acquisition: list = []
             validation_errors = validator.validate_work_item(
                 item, ledger_path=stage_path, strict_revise=False,
                 validate_status_file=False, obligation_state_out=obligations,
-                authority_state_out=authority,
+                authority_state_out=authority, ledger_acquisition_complete_out=acquisition,
                 historical_pass_custody_blobs=evidence_blobs or None, ledger_resource_budget=ledger_resource_budget
             , transition_resource_budget=_transition_resource_budget())
-            if validation_errors or len(obligations) != 1 or len(authority) != 1:
+            try:
+                received, requested_positions = writer._receive_append_operation(item, validator, obligations,
+                    acquisition, validation_errors, original, validation_candidate, tuple(controls))
+                if len(authority) != 1 or authority[0] != {
+                    row.raw_line_ordinal: entry.authority
+                    for row, entry in zip(received.context.rows, received[1])}:
+                    _mixed_recovery_fail("AUTHORITY", "candidate authority output differs from its received result")
+                holds = {hold.raw_line_ordinal: hold for hold in received.context.history_custody}
+                for control in controls:
+                    if control.get("invalidationMode") == validator._HISTORY_CUSTODY_MODE:
+                        hold = holds.get(control["rawLineOrdinal"])
+                        if hold is None or (control["custodyAction"] == "admit"
+                            and hold.admission_run_id != control["runId"]) or (
+                            control["custodyAction"] == "dispose" and hold.disposition_run_id != control["runId"]):
+                            _mixed_recovery_fail("CANDIDATE", "selected custody effect was not received")
+            except (ValueError, LifecycleError) as exc:
                 if not stage_preexisting and not writer.remove_exact_mixed_owned_file(
                     stage_path, candidate, stage_identity
                 ):
                     _mixed_recovery_fail("RESIDUE", "invalid candidate and changed owned staging")
-                _mixed_recovery_fail("CANDIDATE", "; ".join(validation_errors) or "candidate reduction incomplete")
-            open_revise = [row.run_id for row in obligations[0].open_revise]
-            open_launches = [row.run_id for row in obligations[0].open_launches]
+                if isinstance(exc, LifecycleError):
+                    raise
+                _mixed_recovery_fail("CANDIDATE", str(exc))
+            open_revise = [event["runId"] for event in received[2]]
+            open_launches = [event["runId"] for event in received[3]]
             before_axes = {}
             if request["schemaVersion"] == 2:
-                before_context = validator.load_effective_ledger_view(root, item,
-                    ledger.relative_to(root).as_posix(), selected_ledger_bytes=original,
-                    historical_pass_custody_blobs=evidence_blobs or None,
-                    ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
-                before_errors: list[str] = []
-                _active, before_validity, before_revise, before_launches = validator._reduce_effective_current_state(
-                    before_context.rows, item, before_errors, None, context=before_context
-                )
-                before_axes = {row.raw_line_ordinal: entry.authority
-                               for row, entry in zip(before_context.rows, before_validity)}
-                raw_revise = {row.event["runId"] for row, entry in zip(before_context.rows, before_validity)
+                # beforeAuthority is this operation's independently evaluated
+                # CURRENT admitted preimage, not a claim of former raw grants.
+                try:
+                    before_validity = validator._context_evaluation(received.context).admission_preimage(original)
+                except ValueError as exc:
+                    if not stage_preexisting:
+                        writer.remove_exact_mixed_owned_file(stage_path, validation_candidate, stage_identity)
+                    _mixed_recovery_fail("AUTHORITY", str(exc))
+                if len(before_validity) != len(events):
+                    _mixed_recovery_fail("AUTHORITY", "admitted preimage row cardinality differs")
+                before_axes = {ordinal: entry.authority for ordinal, entry in enumerate(before_validity, 1)}
+                raw_revise = {event["runId"] for event, entry in zip(events, before_validity)
                               if entry.authority.revise_target_eligible}
-                raw_launches = {row.event["runId"] for row, entry in zip(before_context.rows, before_validity)
+                raw_launches = {event["runId"] for event, entry in zip(events, before_validity)
                                 if entry.authority.launch_eligible}
             else:
                 raw_revise = {str(event["runId"]) for event in events if event.get("schemaVersion") == 2 and event.get("gate") == "REVISE"}
@@ -26004,6 +26171,8 @@ def recover_mixed_current_ledger(
                     mask.revise_target_eligible, mask.closer_eligible,
                     mask.artifact_evidence_eligible,
                 )))
+            for observation in received.closure_diagnostics:
+                print(f"OBSERVATION: {observation}", file=sys.stderr)
             result = {
                 "applied": False, "replay": replay,
                 "operationId": request["operationId"],
@@ -26045,13 +26214,19 @@ def recover_mixed_current_ledger(
                 if history != original or not current.startswith(candidate):
                     _mixed_recovery_fail("REPLAY", "history or committed suffix differs")
                 if current != candidate:
+                    later_states, later_acquisition = [], []
                     later_errors = validator.validate_work_item(
-                        item, selected_ledger_bytes=current, strict_revise=False, validate_status_file=False, ledger_resource_budget=ledger_resource_budget
-                    , transition_resource_budget=_transition_resource_budget())
-                    if later_errors:
+                        item, selected_ledger_bytes=current, strict_revise=False, validate_status_file=False,
+                        obligation_state_out=later_states, ledger_acquisition_complete_out=later_acquisition,
+                        ledger_resource_budget=ledger_resource_budget,
+                        transition_resource_budget=_transition_resource_budget())
+                    try:
+                        writer._receive_append_operation(item, validator, later_states, later_acquisition,
+                            later_errors, current, current, tuple(controls))
+                    except ValueError as exc:
                         if not stage_preexisting:
                             writer.remove_exact_mixed_owned_file(stage_path, candidate, stage_identity)
-                        _mixed_recovery_fail("REPLAY", "later suffix is invalid: " + "; ".join(later_errors))
+                        _mixed_recovery_fail("REPLAY", str(exc))
                 if apply_admitted:
                     _projection_create_or_exact(receipt_path, receipt_bytes, "WI-MIXED-LEDGER-RECEIPT")
                 if not stage_preexisting and not writer.remove_exact_mixed_owned_file(stage_path, validation_candidate, stage_identity):
@@ -26095,10 +26270,24 @@ def recover_mixed_current_ledger(
                                     _mixed_recovery_fail("RESIDUE", "new proof snapshot creator identity changed")
                                 owned_evidence.append((owned["snapshot"], data, writer._noncanonical_file_identity(info)))
                 if evidence_blobs:
+                    final_states, final_acquisition = [], []
                     final_errors = validator.validate_work_item(item, ledger_path=stage_path, strict_revise=False,
-                                                               validate_status_file=False, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
-                    if final_errors:
-                        _mixed_recovery_fail("CANDIDATE", "; ".join(final_errors))
+                        validate_status_file=False, obligation_state_out=final_states,
+                        ledger_acquisition_complete_out=final_acquisition, ledger_resource_budget=ledger_resource_budget,
+                        transition_resource_budget=_transition_resource_budget())
+                    try:
+                        final_received, _positions = writer._receive_append_operation(item, validator,
+                            final_states, final_acquisition, final_errors, original, validation_candidate, tuple(controls))
+                    except ValueError as exc:
+                        _mixed_recovery_fail("CANDIDATE", str(exc))
+                    # Actual published proof material must preserve the qualification
+                    # and selected custody effects already checked for conservation.
+                    if (final_received[1:] != received[1:]
+                        or tuple((hold.raw_line_ordinal, hold.admission_run_id, hold.disposition_run_id)
+                                 for hold in final_received.context.history_custody)
+                           != tuple((hold.raw_line_ordinal, hold.admission_run_id, hold.disposition_run_id)
+                                    for hold in received.context.history_custody)):
+                        _mixed_recovery_fail("CANDIDATE", "published proof changed the qualified custody result")
                 published_path, history_created, history_identity = writer.publish_mixed_current_history_blob(
                     item, before_sha, original, ledger_resource_budget=ledger_resource_budget
                 )

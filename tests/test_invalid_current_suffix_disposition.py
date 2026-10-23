@@ -734,6 +734,8 @@ class InvalidCurrentSuffixDispositionTests(unittest.TestCase):
                 {**base, "runId": "forbidden-migration", "eventKind": "legacy-obligation-migration"},
                 {**base, "runId": "forbidden-disposition", "eventKind": "closure-invalidation"},
             )
+            before = dict(artifacts.ledger_bytes_by_path)
+            baseline = module._load_effective_ledger_group(root, compatibility_artifacts=artifacts)
             ordinal = len(artifacts.ledger_bytes_by_path[path].splitlines()) + 1
             for target in forbidden:
                 with self.subTest(kind=target["eventKind"]):
@@ -761,9 +763,50 @@ class InvalidCurrentSuffixDispositionTests(unittest.TestCase):
                     active = module._load_effective_ledger_group(
                         root, compatibility_artifacts=candidate
                     )
-                    self.assertTrue(
-                        all(context.observation.activation_state == "invalid" for context in active.values())
-                    )
+                    for selected_path, context in active.items():
+                        self.assertEqual(context.observation.activation_state, "active")
+                        self.assertEqual(context.view.wire, baseline[selected_path].view.wire)
+                        self.assertEqual(context.group_open_revise_ids, baseline[selected_path].group_open_revise_ids)
+                        self.assertEqual(context.group_open_launch_ids, baseline[selected_path].group_open_launch_ids)
+                        self.assertEqual(context.observation.disposition_notices, ())
+                    context = active[path]
+                    refusal = "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: target control/lifecycle kind is ineligible"
+                    self.assertIn(refusal, context.observation.diagnostics)
+                    target_row, control_row = context.rows[-2:]
+                    self.assertEqual((target_row.epoch, control_row.epoch), ("strict-suffix", "strict-suffix"))
+                    self.assertEqual(dict(target_row.event), target)
+                    self.assertEqual(dict(control_row.event), recovery)
+                    self.assertEqual(target_row.raw_line_ordinal, ordinal)
+                    self.assertEqual(target_row.raw_line_sha256, digest(target_line))
+                    self.assertEqual(control_row.raw_line_ordinal, ordinal + 1)
+                    self.assertEqual(control_row.raw_line_sha256, digest(canonical(recovery) + b"\n"))
+                    validity_errors = []
+                    validity = module.derive_event_validity(context.rows, item, validity_errors, context=context)
+                    self.assertIn(refusal, validity_errors)
+                    self.assertTrue(validity[-1].current_schema_valid)
+                    self.assertEqual(validity[-1].authority, module._NO_LEDGER_AUTHORITY)
+                    states, axes, acquisition = [], [], []
+                    errors = module.validate_work_item(item, strict_revise=False, validate_status_file=False,
+                        compatibility_artifacts=candidate, obligation_state_out=states,
+                        authority_state_out=axes, ledger_acquisition_complete_out=acquisition)
+                    self.assertIn(refusal, errors)
+                    self.assertEqual(acquisition, [True])
+                    self.assertEqual({row.run_id for row in states[0].open_revise}, {"revise-a-0001"})
+                    self.assertEqual(axes[0][ordinal + 1], module._NO_LEDGER_AUTHORITY)
+                    if target["eventKind"] == "launch":
+                        self.assertTrue(validity[-2].current_schema_valid)
+                        expected = module.LedgerAuthorityV1(True, False, False, False, True)
+                        self.assertEqual(validity[-2].authority, expected)
+                        self.assertEqual(axes[0][ordinal], expected)
+                        self.assertEqual({row.run_id for row in states[0].open_launches}, {target["runId"]})
+                    else:
+                        self.assertFalse(validity[-2].current_schema_valid)
+                        self.assertEqual(validity[-2].authority, module._NO_LEDGER_AUTHORITY)
+                        self.assertEqual(axes[0][ordinal], module._NO_LEDGER_AUTHORITY)
+                        self.assertTrue(any(target["runId"] in message for message in errors))
+                        self.assertEqual(states[0].open_launches, ())
+                    self.assertEqual(dict(candidate.ledger_bytes_by_path), ledgers)
+                    self.assertEqual(dict(artifacts.ledger_bytes_by_path), before)
 
 if __name__ == "__main__":
     unittest.main()

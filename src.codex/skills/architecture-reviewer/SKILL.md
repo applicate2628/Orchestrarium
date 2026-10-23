@@ -94,7 +94,7 @@ Run this check only inside an already-triggered Architecture Reviewer gate; it c
 - **Per-class verdicts:** `CLEAN-SINGLE-OWNER` (one owner, no residual guards) / `JUSTIFIED-DEPTH` (duplication crosses a TRUST boundary — untrusted input / third-party / corruptible artifact, not a mere process or network hop — with agreed thresholds; re-applying a trusted producer's result is fine, re-checking it is layering — record the justification) / `PILED` (layered patches — name the consolidation refactor).
 - **Gate mapping:** any `PILED` class maps to `REVISE` and blocks push until the consolidation lands or the operator explicitly parks it as a `WORKAROUND` with a tracked root-cause item (spine no-kostyl rule).
 - **Failure-idiom check:** run law D1's idiom-uniformity probe over the batch — two failure idioms for one failure class within one layer is a finding.
-- **Distinct engine:** this lane runs on an engine distinct from the batch's author/implementer, resolved through the normal routing surface (external-reviewer adapter or a model override per the active `.agents-mode.yaml` profile) — never a hardcoded model name.
+- **Independent review:** this lane supplies a substantive assessment from a nonauthoring reviewer. Apply the shared commission rule when that commission is required; prefer a different supported model selection where admissible, but missing actual identity or unproved model-family diversity alone is not a veto. Preserve any explicit task-specific engine requirement and actual host rejection or execution drift.
 
 ## REVISE routing
 

@@ -116,7 +116,7 @@ def _mcp_only_config() -> dict:
     }
 
 
-def test_hook_health_uses_force_mode_and_requires_claude_deny_decision(
+def test_hook_health_uses_force_mode_and_accepts_claude_advisory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = tmp_path / "mcp-health.json"
@@ -149,13 +149,73 @@ def test_hook_health_uses_force_mode_and_requires_claude_deny_decision(
         verify_fires=True,
     )
     assert messages == ["PASS claude PreToolUse check-mcp-momentum"]
-    assert "[MCP-FORCE-1]" in str(observed.get("stdout", ""))
+    payload = json.loads(str(observed.get("stdout", "")))
+    specific = payload["hookSpecificOutput"]
+    assert specific["hookEventName"] == "PreToolUse"
+    assert "[MCP-FORCE-ADVISORY]" in specific["additionalContext"]
+    assert "permissionDecision" not in specific
     assert observed.get("mcp_config_exists") is False
     assert observed.get("mode") == "mcpMode: force\n"
 
 
-def test_hook_health_rejects_silent_mcp_positive_probe(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "stdout",
+    (
+        "",
+        "{",
+        "[]",
+        '{"hookSpecificOutput": []}',
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "Stop",
+                    "additionalContext": "[MCP-FORCE-ADVISORY]",
+                }
+            }
+        ),
+        '{"hookSpecificOutput": {"hookEventName": "PreToolUse"}}',
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": "ordinary reminder",
+                }
+            }
+        ),
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": "[MCP-FORCE-ADVISORY] force duty",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "[MCP-FORCE-1]",
+                }
+            }
+        ),
+        json.dumps(
+            {
+                "permissionDecision": "deny",
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": "[MCP-FORCE-ADVISORY] force duty",
+                },
+            }
+        ),
+    ),
+    ids=(
+        "silence",
+        "malformed-json",
+        "non-object-root",
+        "non-object-hook-specific-output",
+        "wrong-event",
+        "missing-context",
+        "wrong-context",
+        "retired-deny-output",
+        "top-level-deny-output",
+    ),
+)
+def test_hook_health_rejects_invalid_mcp_positive_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout: str
 ) -> None:
     target = tmp_path / "silent-mcp-health.json"
     target.write_text(json.dumps(_mcp_only_config()), encoding="utf-8")
@@ -165,7 +225,7 @@ def test_hook_health_rejects_silent_mcp_positive_probe(
     monkeypatch.setattr(
         CHECKER.subprocess,
         "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", ""),
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout, ""),
     )
     with pytest.raises(ValueError, match="check-mcp-momentum.*decision"):
         CHECKER.verify_config(

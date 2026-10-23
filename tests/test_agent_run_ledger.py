@@ -2359,7 +2359,7 @@ def test_public_settle_accepts_independent_decision_h1_after_launch(tmp_path: Pa
     assert replay.returncode == 0 and "already-settled" in replay.stdout
     assert ledger.read_bytes() == terminal_bytes
     conflict = _decision_public_settlement(item, result_id="decision-h1-conflicting-result")
-    assert conflict.returncode != 0 and "WI-LEDGER-SETTLE-CONFLICT" in conflict.stderr
+    assert conflict.returncode != 0 and "WI-LEDGER-OPERATION-EFFECT" in conflict.stderr
     assert ledger.read_bytes() == terminal_bytes
     _assert_decision_public_custody(root, item, frozen)
 
