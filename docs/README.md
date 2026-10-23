@@ -14,8 +14,8 @@ Use it together with:
 
 Current docs in this branch:
 
-- [Adaptive routing: remaining comparison and continuation design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md) for the proposed remaining goals and existing owners; no runtime rollout
-
+- [orchestrarium-2.0-plan.md](orchestrarium-2.0-plan.md) for the complete proposed 2.0 product scope, owners, dependencies, acceptance criteria and unresolved decisions
+- [focused routing design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md) for the proposed exact-profile comparison seam and deferred continuation safety boundary
 - [routing/sol-6-1-routing-proposal-2026-10-01.md](routing/sol-6-1-routing-proposal-2026-10-01.md) for the approved Sol 6.1 default-family decision, dated public evidence, compatibility scope, and offline verification boundaries
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes

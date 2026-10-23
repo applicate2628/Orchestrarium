@@ -1,6 +1,11 @@
 # Adaptive routing: remaining comparison and continuation design
 
-Status: proposed design; no runtime rollout or measured improvement.
+Status: proposed focused routing design; no runtime rollout or measured improvement.
+
+The [Orchestrarium 2.0 product plan](../../orchestrarium-2.0-plan.md) owns complete
+product scope, statuses, delivery dependencies, empirical evaluation and open
+decisions. This document owns only the proposed routing comparison contract and
+the safety boundary of deferred continuation.
 
 ## Purpose
 
@@ -12,7 +17,7 @@ authoritative; their implementation is not part of this proposal.
 
 ## Change-Surface Contract
 
-- Intended change surface: this proposed spec, its documentation-index link and release note.
+- Intended change surface: the product plan, this focused spec, their documentation-index links and release note.
 - Approved extension seam: describe an advisory comparison between existing option discovery and existing dispatch resolution.
 - Protected surfaces: current policy, resolver, installed roles, adapters, scheduler, run ledger, review state, receiving, installer and publication gates; all existing runtime tests.
 - Declared blast radius: documentation only; no runtime, public API or persisted-state change.
@@ -58,8 +63,8 @@ bound that possible extension rather than establishing that it is needed now.
 
 Use an explicit input snapshot and a side-effect-free comparison. Do not discover
 providers, launch workers, retry, persist state or create a mutable model registry.
-Compare only exact admitted candidates; resolve quality and required capabilities
-before trading cost or latency. Preserve reasons for rejection and uncertainty.
+Compare only exact admitted candidates; resolve required capabilities, quality, useful scope coverage and independent
+challenge before trading cost or latency. Preserve reasons for rejection and uncertainty.
 
 Evidence must identify the relevant model, effort, task/context, source and
 observation time/applicability. Missing, stale or conflicting evidence remains
@@ -79,6 +84,16 @@ accepted conversion policy. Public pricing/capability documentation is a prior,
 not proof of runtime availability, entitlement or measured task performance.
 No performance, cost saving or universal profile ranking is established here.
 
+Keep cumulative approved task budgets and causal request/run/attempt lineage across
+retries, replanning and model/effort changes; changing a profile never resets the
+budget. Existing execution/receiving owners distinguish ordinary unavailability,
+authorization failure, contract/safety failure, quality failure and exhausted
+budget. Comparison records those facts, not a new retry or fallback policy.
+Data eligibility, redaction and destination restrictions apply at the actual
+external transmission boundary through current policy/prompt/adapter owners.
+A candidate's score cannot authorize sending data or bypass host denial. Do not
+invent a universal budget engine, arbitrary ceilings or blanket human escalation.
+
 ## Complementary assignments
 
 Retain scope expansion and independent challenge as functional goals, not a
@@ -86,6 +101,12 @@ mandatory roster of new role types. Each proposed assignment needs its existing
 profession, bounded scope, artifact and applicable gate. Value comes from useful
 coverage or distinct methods/failure discovery, not number of models or majority
 agreement. Required review independence remains under current governance.
+
+Where useful, independent blind proposals can reduce anchoring; named-artifact
+cross-critique can expose missed assumptions; Lead synthesis separates facts,
+deductions, observations and hypotheses. Empirical arbitration uses appropriate
+tests, proofs, counterexamples or measurements. These are optional uses of existing
+assignments and independent review, not a mandatory debate graph or added stages.
 
 Lead's current ready-lane and capacity rules decide whether an additional assignment
 is useful and admissible. A one-worker comparison is an initial slice, not removal
@@ -97,7 +118,9 @@ owners; host mode does not introduce a stronger blanket human-escalation policy.
 
 Cross-host continuation remains a separate future direction. Before it is admitted,
 identify the concrete persistence/host boundary and its single writer/ownership
-contract. Require exclusive durable ownership, atomic takeover, commit-time fencing
+contract. Restore the admitted task context, accepted artifacts, plan, open findings,
+outstanding dispatches and their evidence. Require exclusive durable ownership,
+atomic takeover, commit-time fencing
 of stale writers, crash recovery and revalidation. Existing local locks or an
 append-only ledger alone do not prove those properties.
 
@@ -135,7 +158,7 @@ implementation owner only when its contract and implementation are admitted.
 
 ## Claims
 
-1. { guarantee: no runtime or persisted-state change; single-owner: Change-Surface Contract; enforcement-probe: the change contains only this spec, index and release note. }
+1. { guarantee: no runtime or persisted-state change; single-owner: Change-Surface Contract; enforcement-probe: the change contains only the product plan, focused spec, index and release note. }
 2. { guarantee: no second admission authority; single-owner: existing resolver and policy; enforcement-probe: the producer-to-selector walk preserves exact tuple membership, host controls and approved scope. }
 3. { guarantee: no invented evidence advantage; single-owner: proposed comparison; enforcement-probe: unknown/conflicting/incompatible inputs cannot yield an unsupported preference. }
 4. { guarantee: complementarity and future continuation are retained without being claimed implemented; single-owner: this spec; enforcement-probe: review the respective goals, admission owners and unresolved boundary tests above. }
@@ -156,3 +179,4 @@ output walk and independent review; this text does not authorize execution.
 - Fencing: preventing an obsolete owner from committing after ownership changes.
 - Incomparable: available evidence does not justify preferring either alternative.
 - API: application programming interface.
+- Empirical arbitration: resolving checkable disagreement through observed evidence.

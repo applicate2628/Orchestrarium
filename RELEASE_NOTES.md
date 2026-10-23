@@ -4,7 +4,16 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-23
 
-- Consolidate the adaptive routing proposal into one residual design, replacing draft schemas, examples, duplicate guides and their proposal-only tests. Maintainers now have one entry point for evidence-based profile comparison, complementary assignments and deferred cross-host continuation, while existing policy and execution owners remain authoritative. This is documentation cleanup, not a routing implementation or measured improvement.
+- Consolidated the proposed Orchestrarium 2.0 product plan so operators can see npm distribution, native-role lifecycle, evidence-based routing and evaluation, portability, deferred host continuation and optional policy preferences together, with explicit owners, dependencies and acceptance criteria. The focused routing design reuses current authority and preserves useful remaining goals without adding runtime machinery; this is planning, not a shipped feature or benchmark claim.
+- Ledger recovery keeps original reader identities separate from current authority, carries a captured history's item context through receiving, and evaluates historical non-closer custody from its actual provenance. Completion helpers use qualified current settlement rather than the presence of a raw terminal row; duplicate completions, changed identities and missing proof still refuse. Unrelated observations remain visible without blocking a separate valid operation.
+- Existing review, retry, epic and external-execution instructions now follow their canonical shared owners, including substantive independent review without an unsupported model-diversity veto. External prompts receive the current artifact-disposition rules through the existing capsule, compiled digest and manifest; publication, provider and host safeguards remain enforced. Consultant and subagent routing reads normalize values in memory; configuration files change only during an authorized installation or same-scope configuration write. Pack checks enforce current file/stdin prompt delivery and retained manual-execution guarantees.
+- Claude's source-navigation hook now delivers a mandatory-duty reminder in force mode instead of treating a transcript marker as permission. The fitting-MCP obligation, current-root and freshness requirements, restricted alternatives and actual host decisions remain binding; advisory output does not establish compliance.
+
+## 2026-10-22
+
+- Archive planning and historical receiving now share one byte-preserving projection of local references. Markdown destinations, selected query or fragment references, and independent bare paths retain their separate obligations, so valid mixed consumers can be archived and replayed without false custody failures while missing references and corrupt evidence remain rejected.
+- The current source rejects changed nested history data and contexts for another item before reading that item's status. Refusals preserve independently known unfinished work and withhold permission to close; ordinary and captured-history diagnostics report actual failures once, while malformed raw inputs receive validation errors instead of internal errors.
+- Shared guidance now ties checks to the selected operation's input and effect contract: only a concrete unmet guarantee required by that operation blocks; unrelated unknown state, advisory diagnostics, and broader-consumer requirements do not. This reduces redundant checks while preserving host, native-runtime, data-loss, trust, lifecycle, and human-publication constraints.
 
 ## 2026-10-21
 
@@ -13,6 +22,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - Final cross-cutting commissions now require independent substantive assessments and truthful runtime-identity disclosure; unavailable model metadata alone no longer blocks acceptance, while failed reviews, execution drift, safety, host and publication holds remain in force.
 
 - Artifact cleanup now resolves correctable causes and genuinely missing permission through supported, authorized work before using an already-selected preserving handoff. A deletion refusal creates no authority for a distinct move: when its scope is unknown, only an already-authorized move may be submitted through an existing host path that decides applicability before effects, with the refusal disclosed and every other guarantee in place because host allowance may execute immediately. Manual custody remains separate from physical deletion, lifecycle completion and live-resource settlement.
+
+- Artifact disposition now requires producers and Root to assess the next authorized route before handoff or retaining owned disposable residue as blocked, then record a verified action or exact hold. This makes the existing preserving-trash path usable when eligible while keeping refusal, authority, host and physical-deletion boundaries intact.
 
 ## 2026-10-20
 

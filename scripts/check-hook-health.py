@@ -1341,23 +1341,32 @@ def verify_config(
                 if stem == "check-mcp-momentum":
                     try:
                         payload = json.loads(completed.stdout)
-                        specific = payload["hookSpecificOutput"]
-                    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+                    except json.JSONDecodeError as exc:
                         raise ValueError(
                             "check-mcp-momentum fired without its expected decision"
                         ) from exc
+                    if not isinstance(payload, dict):
+                        raise ValueError(
+                            "check-mcp-momentum fired without its expected decision"
+                        )
+                    specific = payload.get("hookSpecificOutput")
+                    if not isinstance(specific, dict):
+                        raise ValueError(
+                            "check-mcp-momentum fired without its expected decision"
+                        )
                     event_ok = specific.get("hookEventName") == "PreToolUse"
+                    context = specific.get("additionalContext")
                     if platform == "claude":
-                        decision_ok = (
-                            specific.get("permissionDecision") == "deny"
-                            and "[MCP-FORCE-1]"
-                            in str(specific.get("permissionDecisionReason"))
+                        response_ok = (
+                            isinstance(context, str)
+                            and "[MCP-FORCE-ADVISORY]"
+                            in context
+                            and "permissionDecision" not in specific
+                            and "permissionDecision" not in payload
                         )
                     else:
-                        decision_ok = "mcp-momentum" in str(
-                            specific.get("additionalContext")
-                        )
-                    if not event_ok or not decision_ok:
+                        response_ok = "mcp-momentum" in str(context)
+                    if not event_ok or not response_ok:
                         raise ValueError(
                             "check-mcp-momentum fired without its expected decision"
                         )

@@ -136,6 +136,117 @@ def test_public_settle_and_exact_replay_skip_publication_query(ledger_item, monk
     assert not (item / 'agent-runs.jsonl.lock').exists()
 
 
+def test_settle_requires_current_first_settlement_and_exact_request_identity(ledger_item, capsys):
+    writer, item = ledger_item
+    assert invoke(writer, item, launch_args()) == 0
+    assert invoke(writer, item, settle_args()) == 0
+    path = item / 'agent-runs.jsonl'
+    committed = path.read_bytes()
+    capsys.readouterr()
+    second = settle_args()
+    second[second.index('--run-id') + 1] = 'different-qualified-terminal'
+    assert invoke(writer, item, second) == 1
+    assert 'WI-LEDGER-OPERATION-EFFECT' in capsys.readouterr().err
+    assert path.read_bytes() == committed
+    changed = settle_args()
+    changed[changed.index('--notes') + 1] = 'different outcome for the same request identity'
+    assert invoke(writer, item, changed) == 1
+    assert 'WI-LEDGER-SETTLE-CONFLICT' in capsys.readouterr().err
+    assert path.read_bytes() == committed
+    repeated = committed + committed.splitlines(keepends=True)[-1]
+    path.write_bytes(repeated)
+    assert invoke(writer, item, settle_args()) == 1
+    assert 'WI-LEDGER-SETTLE-TARGET' in capsys.readouterr().err
+    assert path.read_bytes() == repeated
+    ambiguous = committed + committed.splitlines(keepends=True)[0]
+    path.write_bytes(ambiguous)
+    assert invoke(writer, item, settle_args()) == 1
+    assert 'launch must identify one V2 launch event' in capsys.readouterr().err
+    assert path.read_bytes() == ambiguous
+    launch = json.loads(committed.splitlines()[0])
+    del launch['scope']
+    missing_metadata = (writer.serialize_event(launch) + '\n').encode('utf-8')
+    path.write_bytes(missing_metadata)
+    assert invoke(writer, item, settle_args()) == 1
+    assert 'launch lacks immutable event metadata' in capsys.readouterr().err
+    assert path.read_bytes() == missing_metadata
+    assert not (item / 'agent-runs.jsonl.tmp').exists()
+    assert not (item / 'agent-runs.jsonl.lock').exists()
+
+
+def test_settle_exact_replay_requalifies_nonempty_request_after_proof_loss(ledger_item, monkeypatch, capsys):
+    writer, item = ledger_item
+    validator, owner = pin_validator(writer, monkeypatch)
+    assert invoke(writer, item, launch_args()) == 0
+    request = settle_args()
+    request[request.index('--gate') + 1] = 'PASS'
+    request += ['--artifact', 'reviews/qa.md']
+    proof = item / 'reviews/qa.md'
+    assert proof.is_file()
+    assert invoke(writer, item, request) == 0
+    path = item / 'agent-runs.jsonl'
+    committed = path.read_bytes()
+    received = []
+    receive = writer._receive_append_operation
+    def observed(*args):
+        received.append((args[-3], args[-2], args[-1]))
+        return receive(*args)
+    def forbidden(self):
+        raise AssertionError('publication backend queried during exact settlement replay')
+    monkeypatch.setattr(writer, '_receive_append_operation', observed)
+    monkeypatch.setattr(owner.LifecycleWriteTarget, '_select_qualified_backend', forbidden)
+    assert invoke(writer, item, request) == 0
+    assert path.read_bytes() == committed
+    capsys.readouterr()
+    proof.unlink()
+    assert invoke(writer, item, request) == 1
+    failure = capsys.readouterr().err
+    assert 'WI-LEDGER-OPERATION-EFFECT' in failure
+    assert len(received) == 2
+    for previous, candidate, requested in received:
+        assert previous == candidate == committed
+        assert len(requested) == 1 and requested[0]['runId'] == 'late-observed-terminal'
+    states, acquired = [], []
+    errors = validator.validate_work_item(item, strict_revise=False, validate_status_file=False,
+        obligation_state_out=states, ledger_acquisition_complete_out=acquired)
+    assert errors and acquired == [True]
+    assert [launch['runId'] for launch in states[0]._current_result[3]] == ['late-observed-launch']
+    assert path.read_bytes() == committed
+    assert not (item / 'agent-runs.jsonl.tmp').exists()
+    assert not (item / 'agent-runs.jsonl.lock').exists()
+
+
+@pytest.mark.parametrize(('blank', 'ending'), [
+    (' \t\u00a0\u2003\u2028\u2029\n', b'\n'),
+    ('\t\r\n', b'\r'),
+], ids=['decoded-unicode-blank', 'lone-cr-body-digest'])
+def test_public_exact_replay_preserves_canonical_raw_line_identity(ledger_item, monkeypatch, blank, ending):
+    import hashlib
+    writer, item = ledger_item
+    validator, owner = pin_validator(writer, monkeypatch)
+    assert invoke(writer, item, launch_args()) == 0
+    assert invoke(writer, item, settle_args()) == 0
+    path = item / 'agent-runs.jsonl'
+    bodies = path.read_bytes().splitlines()
+    committed = blank.encode('utf-8') + b'\n'.join(bodies) + ending
+    path.write_bytes(committed)
+    errors, metadata, acquired = [], [], []
+    events = validator.load_jsonl(path, errors, raw_metadata=metadata,
+                                 ledger_acquisition_complete_out=acquired)
+    assert errors == [] and acquired == [True]
+    assert [event['runId'] for event in events] == ['late-observed-launch', 'late-observed-terminal']
+    assert [record['line'] for record in metadata] == [2, 3]
+    digest_body = bodies[-1] + (b'\r' if ending == b'\r' else b'')
+    assert metadata[-1]['sha256'] == hashlib.sha256(digest_body).hexdigest()
+    def forbidden(self):
+        raise AssertionError('native publication query during exact replay')
+    monkeypatch.setattr(owner.LifecycleWriteTarget, '_select_qualified_backend', forbidden)
+    assert invoke(writer, item, settle_args()) == 0
+    assert path.read_bytes() == committed
+    assert not (item / 'agent-runs.jsonl.tmp').exists()
+    assert not (item / 'agent-runs.jsonl.lock').exists()
+
+
 def test_recovery_public_command_under_reader_and_valid_replay_no_query(tmp_path, monkeypatch):
     fixture = load_script('tests/test_agent_run_ledger.py', 'native_recovery_fixture')
     item, previous, digest = fixture._prepare_recovery_writer_item(tmp_path)
@@ -155,7 +266,12 @@ def test_recovery_public_command_under_reader_and_valid_replay_no_query(tmp_path
     committed = path.read_bytes()
     def refuse(self): raise AssertionError('publication admission on exact replay')
     monkeypatch.setattr(owner.LifecycleWriteTarget, '_select_qualified_backend', refuse)
-    assert writer._commit_recovery_append(item, {}, lambda *a: [], 'own replay', None, replay_detector=lambda raw: raw == committed) == 0
+    actual_commit = writer._commit_recovery_append
+    def exact_replay(selected_item, requested, callback, marker, injection, **kwargs):
+        return actual_commit(selected_item, requested, callback, marker, injection,
+                             replay_detector=lambda raw: raw == committed, **kwargs)
+    monkeypatch.setattr(writer, '_commit_recovery_append', exact_replay)
+    assert invoke(writer, item, args) == 0
     assert path.read_bytes() == committed
 
 
@@ -364,7 +480,16 @@ def test_invalid_exact_replay_still_refuses_existing_state(ledger_item, monkeypa
     path = item / 'agent-runs.jsonl'; path.write_bytes(b'{}\n')
     def forbidden(self): raise AssertionError('publication admission before invalid replay validation')
     monkeypatch.setattr(owner.LifecycleWriteTarget, '_select_qualified_backend', forbidden)
-    assert writer._commit_recovery_append(item, {}, lambda *a: [], 'own replay', None, replay_detector=lambda raw: True) == 1
+    actual_commit = writer._commit_recovery_append
+    def invalid_replay(selected_item, requested, callback, marker, injection, **kwargs):
+        return actual_commit(selected_item, requested, callback, marker, injection,
+                             replay_detector=lambda raw: True, **kwargs)
+    monkeypatch.setattr(writer, '_commit_recovery_append', invalid_replay)
+    args = ['recover-invalid-closure', '--run-id', 'invalid-replay-control',
+            '--target-run-id', 'missing-replay-target', '--target-event-sha256', '0' * 64,
+            '--evidence', 'manual-check:missing-replay-target ' + '0' * 64,
+            '--started-at', '2026-10-22T00:00:00Z', '--updated-at', '2026-10-22T00:00:00Z']
+    assert invoke(writer, item, args) == 1
     assert path.read_bytes() == b'{}\n' and not (item / 'agent-runs.jsonl.tmp').exists()
 
 @pytest.mark.skipif(os.name != 'nt', reason='native effect receiving in a held transaction')
@@ -771,3 +896,119 @@ def test_native_cleanup_origin_survives_optional_delivery_and_later_release(ledg
         assert thrown is native_delete or thrown.__cause__ is native_delete
     if not composed:
         assert sum('diagnostic delivery' in note for note in actual['notes']) == (3 if origin == 'standalone-formatting' else 2)
+
+
+@pytest.mark.parametrize('callback_kind', ['missing', 'not-callable', 'none-result', 'invalid-sequence', 'failure', 'raises'])
+def test_recovery_requires_selected_semantic_owner(tmp_path, callback_kind):
+    fixture = load_script('tests/test_agent_run_ledger.py', 'required_semantic_owner_fixture')
+    item, before, digest = fixture._prepare_recovery_writer_item(tmp_path)
+    writer = fixture.load_ledger_module()
+    requested = {
+        'schemaVersion': 2, 'runId': 'required-semantic-owner-control', 'workItem': item.name,
+        'role': 'lead', 'executionRole': 'main', 'status': 'completed', 'gate': 'none',
+        'scope': ['ledger-recovery:closure-invalidation'], 'eventKind': 'closure-invalidation',
+        'invalidatesRunId': 'run-writer-invalid-closer', 'invalidatesEventSha256': digest,
+        'evidence': [{'kind': 'manual-check', 'ref': f'run-writer-invalid-closer {digest}'}],
+        'startedAt': '2026-08-17T00:02:00Z', 'updatedAt': '2026-08-17T00:02:00Z',
+    }
+    def raises(*args):
+        raise ValueError('WI-OWNED-SEMANTIC-REFUSAL: actual selected owner refused')
+    callbacks = {'missing': None, 'not-callable': 7, 'none-result': lambda *args: None,
+                 'invalid-sequence': lambda *args: [7],
+                 'failure': lambda *args: ['WI-OWNED-SEMANTIC-REFUSAL: actual selected owner refused'],
+                 'raises': raises}
+    assert writer._commit_recovery_append(item, requested, callbacks[callback_kind],
+        'own selected-owner test', None) == 1
+    assert (item / 'agent-runs.jsonl').read_bytes() == before
+    assert not (item / 'agent-runs.jsonl.tmp').exists()
+    assert not (item / 'agent-runs.jsonl.lock').exists()
+
+
+def test_manifest_scoped_public_disposition_uses_actual_candidate_without_full_item(tmp_path, monkeypatch):
+    fixture = load_script('tests/test_invalid_current_suffix_disposition.py', 'selected_manifest_scope_fixture')
+    writer = fixture.load_writer()
+    validator, owner = pin_validator(writer, monkeypatch)
+    artifacts, _unused, item, logical_path, target_line, recovery = fixture.fixture(validator, tmp_path)
+    path = item / 'agent-runs.jsonl'
+    before = artifacts.ledger_bytes_by_path[logical_path] + target_line
+    path.write_bytes(before)
+    manifest = tmp_path / 'selected-suffix-manifest.json'
+    manifest.write_bytes(artifacts.ledger_manifest_bytes)
+    assert not (item / 'status.md').exists()
+    assert not validator._ledger_h1_live_participants_exist(tmp_path)
+    captured = []
+    actual_commit = writer._commit_recovery_append
+    def observe_commit(selected_item, requested, callback, *args, **kwargs):
+        def observe(candidate_path, previous, candidate):
+            assert validator.read_ledger_bytes(candidate_path) == candidate
+            captured.append((previous, candidate))
+            if len(captured) == 1:
+                (tmp_path / 'actual-candidate.jsonl').write_bytes(candidate)
+                assert previous == before
+            return callback(candidate_path, previous, candidate)
+        return actual_commit(selected_item, requested, observe, *args, **kwargs)
+    monkeypatch.setattr(writer, '_commit_recovery_append', observe_commit)
+    argv = ['dispose-invalid-current', '--run-id', str(recovery['runId']),
+        '--target-run-id', 'invalid-suffix-target', '--target-raw-line-ordinal', str(recovery['invalidatesRawLineOrdinal']),
+        '--target-event-sha256', str(recovery['invalidatesEventSha256']), '--ledger-manifest', str(manifest),
+        '--evidence', recovery['evidence'][0]['kind'] + ':' + recovery['evidence'][0]['ref'],
+        '--started-at', '2026-10-22T00:00:00Z', '--updated-at', '2026-10-22T00:00:00Z']
+    assert invoke(writer, item, argv) == 0
+    committed = path.read_bytes()
+    assert len(captured) == 1 and captured[0][1] == committed
+    assert committed.startswith(before) and len(committed.splitlines()) == len(before.splitlines()) + 1
+    assert (tmp_path / 'actual-candidate.jsonl').read_bytes() == committed
+    def forbidden(self):
+        raise AssertionError('native publication query during selected exact replay')
+    monkeypatch.setattr(owner.LifecycleWriteTarget, '_select_qualified_backend', forbidden)
+    assert invoke(writer, item, argv) == 0
+    assert len(captured) == 2 and captured[1] == (committed, committed)
+    assert path.read_bytes() == committed
+    errors = validator.validate_work_item(item, strict_revise=False, validate_status_file=False)
+    assert any('invalid-suffix-target:' in value for value in errors)
+    context = validator.load_effective_ledger_view(tmp_path, item, logical_path)
+    assert context.view is None and context.observation.activation_state == 'inactive'
+    assert not (item / 'status.md').exists()
+    assert not (item / 'agent-runs.jsonl.tmp').exists()
+    assert not (item / 'agent-runs.jsonl.lock').exists()
+
+
+def test_h1_public_exact_replay_uses_issued_native_identity(tmp_path, monkeypatch):
+    from tests.test_mixed_current_ledger_recovery import minimal_staged_status
+    producer = load_script('tests/test_ledger_h1_activation_writer.py', 'native_identity_h1_fixture')
+    root = tmp_path / 'repo'
+    lifecycle, _reader, request, items, paths = producer.fixture(root)
+    receipt = lifecycle.apply_sealed_prefix_activation(root, request)
+    assert receipt['state'] == 'apply' and receipt['replay'] is False
+    writer = load_script('scripts/agent-run-ledger.py', 'native_identity_h1_writer')
+    validator, owner = pin_validator(writer, monkeypatch)
+    item = items[0]
+    (item / 'status.md').write_text(minimal_staged_status(), encoding='utf-8')
+    path = item / 'agent-runs.jsonl'
+    prefix = path.read_bytes()
+    before = validator.load_effective_ledger_view(root, item, paths[0])
+    assert before.observation.activation_state == 'active' and before.view is not None
+    assert invoke(writer, item, launch_args()) == 0
+    assert invoke(writer, item, settle_args()) == 0
+    committed = path.read_bytes()
+    changed = committed[:-1] + b'\r\r\n'
+    path.write_bytes(changed)
+    states, acquired = [], []
+    assert validator.validate_work_item(item, strict_revise=False, validate_status_file=False,
+        obligation_state_out=states, ledger_acquisition_complete_out=acquired) == []
+    assert acquired == [True]
+    result = states[0]._current_result
+    context = result.context
+    assert context.observation.activation_state == 'active' and context.view == before.view
+    native = validator._context_evaluation(context).selected_input.rows
+    assert native[-1].event['runId'] == 'late-observed-terminal'
+    assert native[-1].raw_line_ordinal == 5
+    assert native[-1].raw_body_sha256 == context.rows[-1].raw_body_sha256
+    assert result[1][-1].authority.terminal_eligible is True
+    def forbidden(self):
+        raise AssertionError('publication backend queried on genuine H1 replay')
+    monkeypatch.setattr(owner.LifecycleWriteTarget, '_select_qualified_backend', forbidden)
+    assert invoke(writer, item, settle_args()) == 0
+    assert path.read_bytes() == changed and changed.startswith(prefix)
+    assert not (item / 'agent-runs.jsonl.tmp').exists()
+    assert not (item / 'agent-runs.jsonl.lock').exists()

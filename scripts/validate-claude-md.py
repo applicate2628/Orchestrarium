@@ -24,8 +24,8 @@ USER_CONTROL_MARKER = re.compile(
     r"\[(?:approve|skip|acknowledge|revoke)[^\]\r\n]*\]"
 )
 RU_HOOK_BEHAVIOR_PAYLOAD_PIN = (
-    24_742,
-    "e0c62c36535f8be8922bf5274f513740003953defd7eb88331094c320a5abf0b",
+    24_600,
+    "f870d78be219bcf5c6c442a121347dd47bc19e3edb38be5fbaeef583b996b983",
 )
 
 SHARED_MANIFEST: dict[str, tuple[str | re.Pattern[str], ...]] = {
@@ -70,7 +70,12 @@ CLAUDE_MANIFEST: dict[str, tuple[str, ...]] = {
         "Passive verdicts and the leaf/re-entry skips remain unchanged",
         "[skip-bugfix-discipline]",
         "[approve-publication]",
-        "[approve-mcp-fallback:v1]",
+        "MCP control.",
+        "discovery reminders are advisory in `auto` and subagent contexts.",
+        "Root `force` still requires runtime discovery, the relevant tool schema, fitting MCP use",
+        "selected-root/currentness checks and the existing restricted alternatives.",
+        "The source-navigation heuristic emits a nonblocking reminder and does not determine compliance",
+        "transcript text grants no permission or override of host refusals.",
         "[acknowledge-passive-stop]",
     ),
     "Claude delegation": (

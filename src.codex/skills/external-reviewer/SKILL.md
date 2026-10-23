@@ -25,13 +25,12 @@ description: "Review or QA run on external CLI provider; read-only."
 
 ## External execution
 
-- Read and normalize `.agents/.agents-mode.yaml` to the current canonical format before trusting its flags.
 - Honor the contract-resolved `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`; this role does not reimplement their resolution.
-- Resolve config, provider, model/profile, workdir, fallback, and transport under the shared external-dispatch contract; do not reproduce its resolution logic here.
+- Resolve config, provider, model/profile, workdir, fallback, and transport through the shared external-dispatch owner; consume effective values in memory and do not rewrite configuration on a routing read. Persisted normalization belongs only to an authorized install/configuration write.
 - Honor `reserve` only as a supplemental review or QA candidate after primary `claude` / `codex`; it is not a primary-Claude retry and never grants edit or implementation ownership.
 - Keep explicit-only and unavailable providers out of shipped and repo-local `auto` profiles.
 - Never select `gpt-6.1-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
-- Use file-based prompt delivery for substantive task prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
+- For substantive prompts, prefer the working approved wrapper and its file/stdin delivery. If a helper is defective, use only the declared owner-equivalent route under shared Assistance and external-dispatch when every selected provider/capability, input, creator-resource, real-terminal, independent-receiving, and provenance guarantee remains satisfied. A helper failure alone does not establish provider unavailability; report any unmet guarantee without automatic fallback, internal relay, host-denial bypass, or fabricated wrapper frame.
 - If the selected primary Claude CLI path fails, do not silently convert that same run to the wrapper. A review lane may later collect `reserve` as a separate profile candidate when enabled; otherwise stop with the provider reason.
 - This adapter is a direct external launch contract. Do not spawn it as an internal specialist or helper; the orchestrator must launch the selected external provider directly or fail closed.
 - Do not silently fall back to an internal reviewer or to `$consultant`.

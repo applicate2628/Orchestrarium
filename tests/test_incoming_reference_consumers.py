@@ -671,6 +671,73 @@ def test_archive_composes_selected_literal_inside_href_suffix(module, tmp_path, 
     assert consumer.read_bytes() == before
 
 
+@pytest.mark.parametrize("include_bare", (False, True))
+@pytest.mark.parametrize("suffix", ("", "?rev=4#backlog/old-item.md"))
+def test_archive_projects_href_base_before_selected_literal(module, tmp_path, include_bare, suffix):
+    work_items = tmp_path / "work-items"
+    source = work_items / "backlog/old-item.md"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"original task\n")
+    consumer = work_items / "ordinary-consumer.MD"
+    consumer.parent.mkdir(parents=True, exist_ok=True)
+    literal = source.relative_to(work_items).as_posix()
+    href = literal + suffix
+    before = b"\xef\xbb\xbfResults\r\n\r\n" + f"[proof]({href})\r\n".encode()
+    if include_bare:
+        before += f"Independent literal: `{literal}`\r\n".encode()
+    consumer.write_bytes(before)
+
+    inventory = module._incoming_link_result(
+        tmp_path, {source}, "work-item:old-item", strict_consumer_reads=True,
+        literal_path_references=(literal,),
+    )
+    self_rows = inventory["references"]
+    assert inventory["result"] == "unmapped"
+    assert self_rows == [
+        {"consumer": "ordinary-consumer.MD", "kind": "physical", "value": value}
+        for value in sorted({literal, href})
+    ]
+    archive = work_items / "archive/2026-10/old-item/legacy-source/old-item.md"
+    plans = module._physical_archive_link_plans(
+        tmp_path, source, archive, self_rows, failure_id="WI-LEGACY-COMPLETION-LINKS",
+    )
+    retained_target = archive.relative_to(tmp_path).as_posix()
+    expected_suffix = suffix.replace(literal, retained_target)
+    expected_href = archive.relative_to(work_items).as_posix() + expected_suffix
+    expected = before.replace(f"[proof]({href})".encode(), f"[proof]({expected_href})".encode())
+    if include_bare:
+        expected = expected.replace(
+            f"`{literal}`".encode(), f"`{retained_target}`".encode(),
+        )
+    assert plans[0]["before"] == before
+    assert plans[0]["after"] == expected
+    assert consumer.read_bytes() == before
+
+
+def test_projection_obligations_keep_bare_separate_when_href_spelling_matches(module):
+    before = b"[proof](old.md)\nIndependent literal: `old.md`\n"
+    image = module._IncomingConsumerImage(before, ".md")
+    link = next(iter(module._markdown_local_links(image.view)))
+    pattern = module._incoming_literal_pattern("old.md")
+    projected, hrefs, obligations = module._project_incoming_consumer_image(
+        image, ".md", [(link.href_start, link.href_end, "new.md")],
+        [(pattern, "new.md")],
+    )
+    self_check = module._IncomingConsumerImage(projected, ".md")
+    assert projected == b"[proof](new.md)\nIndependent literal: `new.md`\n"
+    assert hrefs == ("new.md",)
+    assert {row[1] for row in obligations} == {"consumed-href-base", "bare"}
+    assert all(module._incoming_projection_obligation_present(self_check.view, row)
+               for row in obligations)
+
+    missing_bare = module._IncomingConsumerImage(b"[proof](new.md)\n", ".md")
+    bare = next(row for row in obligations if row[1] == "bare")
+    consumed = next(row for row in obligations if row[1] == "consumed-href-base")
+    assert module._incoming_literal_pattern("new.md").search(missing_bare.view)
+    assert module._incoming_projection_obligation_present(missing_bare.view, consumed)
+    assert not module._incoming_projection_obligation_present(missing_bare.view, bare)
+
+
 @pytest.mark.parametrize("opaque", (False, True))
 def test_successor_composes_selected_logical_inside_href_suffix(module, tmp_path, monkeypatch, opaque):
     work_items = tmp_path / "work-items"

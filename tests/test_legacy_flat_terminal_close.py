@@ -1474,28 +1474,94 @@ print(json.dumps({'moduleSha256':hashlib.sha256(source.read_bytes()).hexdigest()
         m._verify_captured_file(after[3], failure_id="WI-COMPONENT-CURRENT", acquired_input=port)
         self.assertFalse(payload.exists())
 
-    def test_historical_physical_link_images_and_later_consumer_edits(self):
+    def test_historical_physical_link_images_keep_href_suffix_and_independent_literal(self):
         consumer = self.root / "work-items/design.md"
-        original_path = self.source.relative_to(self.root).as_posix()
-        consumer.write_bytes((f"Logical work-item:{self.slug}\n[original](backlog/{self.slug}.md#original)\n"
-                              f"Literal `{original_path}`\n").encode())
-        inventory = m._incoming_link_result(self.root, {self.source}, f"work-item:{self.slug}", strict_consumer_reads=True,
-                                           literal_path_references=(original_path,))
+        literal = self.source.relative_to(self.root / "work-items").as_posix()
+        suffix_href = f"{literal}?rev=4#{literal}"
+        consumer.write_bytes((f"Logical work-item:{self.slug}\n"
+                              f"[exact]({literal})\n[suffixed]({suffix_href})\n"
+                              f"Literal `{literal}`\n").encode())
+        inventory = m._incoming_link_result(
+            self.root, {self.source}, f"work-item:{self.slug}", strict_consumer_reads=True,
+            literal_path_references=(literal,),
+        )
         self.assertEqual(inventory["result"], "unmapped")
+        self.assertEqual([row["value"] for row in inventory["references"] if row["kind"] == "physical"],
+                         [literal, suffix_href])
         before = consumer.read_bytes()
         archive, metadata, action = self.component_settled_record()
         target = archive / metadata["source"]["preservedPath"]
-        after = before.replace(f"backlog/{self.slug}.md".encode(), target.relative_to(self.root / "work-items").as_posix().encode())
+        href_after = m.os.path.relpath(target, consumer.parent).replace(m.os.sep, "/")
+        literal_after = target.relative_to(self.root).as_posix()
+        after = before.replace(
+            f"[exact]({literal})".encode(), f"[exact]({href_after})".encode()
+        ).replace(
+            f"[suffixed]({suffix_href})".encode(),
+            f"[suffixed]({href_after}?rev=4#{literal_after})".encode(),
+        ).replace(
+            f"Literal `{literal}`".encode(), f"Literal `{literal_after}`".encode(),
+        )
         action["links"] = {"inventory": inventory, "consumers": [{"path": "work-items/design.md",
             "before": m._b64(before), "after": m._b64(after), "beforeSha256": digest(before), "afterSha256": digest(after)}]}
         receipt = archive / m.LEGACY_COMPLETION_RECEIPT
         receipt.write_bytes(m._legacy_work_item_action_receipt_bytes(action))
+        valid_receipt = receipt.read_bytes()
         consumer.write_bytes(after + b"Lawful later consumer edit.\n")
         m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}").verify()
-        action["links"]["consumers"][0]["afterSha256"] = "0" * 64
+
+        # The suffixed href still contains the expected path spelling; it cannot
+        # satisfy the separate bare occurrence from the same aggregate row.
+        bad_action = json.loads(json.dumps(action))
+        bad_after = after.replace(f"Literal `{literal_after}`\n".encode(), b"")
+        bad_row = bad_action["links"]["consumers"][0]
+        bad_row["after"] = m._b64(bad_after)
+        bad_row["afterSha256"] = digest(bad_after)
+        receipt.write_bytes(m._legacy_work_item_action_receipt_bytes(bad_action))
+        with self.assertRaises(m.LifecycleError):
+            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}").verify()
+        receipt.write_bytes(valid_receipt)
+
+        bad_action = json.loads(json.dumps(action))
+        bad_after = after.replace(f"Logical work-item:{self.slug}\n".encode(), b"")
+        bad_row = bad_action["links"]["consumers"][0]
+        bad_row["after"] = m._b64(bad_after)
+        bad_row["afterSha256"] = digest(bad_after)
+        receipt.write_bytes(m._legacy_work_item_action_receipt_bytes(bad_action))
+        with self.assertRaises(m.LifecycleError):
+            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}").verify()
+        receipt.write_bytes(valid_receipt)
+
+        bad_action = json.loads(json.dumps(action))
+        bad_action["links"]["consumers"][0]["path"] = "design.md"
+        receipt.write_bytes(m._legacy_work_item_action_receipt_bytes(bad_action))
+        with self.assertRaises(m.LifecycleError) as caught:
+            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}").verify()
+        self.assertEqual(caught.exception.failure_id, "WI-LEGACY-COMPLETION-CUSTODY")
+
+    def test_historical_link_base_overlap_needs_no_separate_literal_afterimage(self):
+        consumer = self.root / "work-items/ordinary-consumer.MD"
+        literal = self.source.relative_to(self.root / "work-items").as_posix()
+        href = f"{literal}?rev=4#evidence"
+        before = (b"\xef\xbb\xbf" + f"Logical work-item:{self.slug}\r\n\r\n".encode()
+                  + f"[proof]({href})\r\n".encode())
+        consumer.write_bytes(before)
+        inventory = m._incoming_link_result(
+            self.root, {self.source}, f"work-item:{self.slug}", strict_consumer_reads=True,
+            literal_path_references=(literal,),
+        )
+        self.assertEqual(inventory["result"], "unmapped")
+        self.assertEqual([row["value"] for row in inventory["references"] if row["kind"] == "physical"],
+                         [literal, href])
+        archive, metadata, action = self.component_settled_record()
+        target = archive / metadata["source"]["preservedPath"]
+        href_after = m.os.path.relpath(target, consumer.parent).replace(m.os.sep, "/") + "?rev=4#evidence"
+        after = before.replace(href.encode(), href_after.encode())
+        action["links"] = {"inventory": inventory, "consumers": [{"path": "work-items/ordinary-consumer.MD",
+            "before": m._b64(before), "after": m._b64(after), "beforeSha256": digest(before), "afterSha256": digest(after)}]}
+        receipt = archive / m.LEGACY_COMPLETION_RECEIPT
         receipt.write_bytes(m._legacy_work_item_action_receipt_bytes(action))
-        with self.assertRaisesRegex(m.LifecycleError, "consumer images differ"):
-            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}")
+        consumer.write_bytes(after + b"Lawful later consumer edit.\r\n")
+        m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}").verify()
 
     def test_settled_raw_origin_keeps_original_closer_authority(self):
         # The same historical producing fixture supplies valid and late-bad
