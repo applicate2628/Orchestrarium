@@ -310,7 +310,7 @@ class TestSharedProjectionsAgree(unittest.TestCase):
         # second hand-typed literal set.
         self.assertEqual(
             set(hook_common.TURN_BOUNDARY_STATUSES),
-            {"found", "absent", "unreadable", "invalid", "limit", "not-in-window"},
+            {"found", "absent", "unreadable", "invalid", "limit", "resource-unavailable", "not-in-window"},
         )
         _after, status = hook_common.current_turn_entries("", byte_cap=1024)
         self.assertIn(status, hook_common.TURN_BOUNDARY_STATUSES)
@@ -473,6 +473,199 @@ class TestBoundedCurrentTurnContract(unittest.TestCase):
             self.assertLessEqual(observed["bytes"], hook_common.CURRENT_TURN_BYTE_CAP)
         finally:
             tp.unlink(missing_ok=True)
+
+
+class TestPublicationBoundaryOnly(unittest.TestCase):
+    def test_latest_user_is_found_past_large_suffix_without_decoding_old_prefix(self) -> None:
+        prefix = b"not-json\n"
+        boundary = _user_entry("[approve-publication] push")
+        boundary_line = (json.dumps(boundary, ensure_ascii=False) + "\n").encode("utf-8")
+        large_after = _assistant_text_entry("x" * (8 * 1024 * 1024 + 256))
+        large_line = (json.dumps(large_after, ensure_ascii=False) + "\n").encode("utf-8")
+        self.assertGreater(len(large_line), 8 * 1024 * 1024)
+        tp = Path(tempfile.mktemp(suffix=".jsonl"))
+        try:
+            tp.write_bytes(prefix + boundary_line + large_line)
+            with mock.patch.object(hook_common.json, "loads", wraps=json.loads) as loads:
+                boundary_entry, after, status = hook_common.scan_current_turn_boundary(
+                    str(tp), byte_cap=None, boundary_only=True
+                )
+            self.assertEqual(status, hook_common.STATUS_FOUND)
+            self.assertEqual(boundary_entry, boundary)
+            self.assertEqual(after, [])
+            # The invalid older prefix is outside the current-user projection.
+            self.assertEqual(loads.call_count, 4)
+        finally:
+            tp.unlink(missing_ok=True)
+
+    def test_zero_start_accepts_final_user_record_without_newline(self) -> None:
+        boundary = _user_entry("[approve-publication] push")
+        tp = Path(tempfile.mktemp(suffix=".jsonl"))
+        try:
+            tp.write_bytes(json.dumps(boundary, ensure_ascii=False).encode("utf-8"))
+            self.assertEqual(
+                hook_common.scan_current_turn_boundary(
+                    str(tp), byte_cap=None, boundary_only=True
+                ),
+                (boundary, [], hook_common.STATUS_FOUND),
+            )
+        finally:
+            tp.unlink(missing_ok=True)
+
+    def test_large_malformed_suffix_cannot_return_an_earlier_user_boundary(self) -> None:
+        boundary = (json.dumps(_user_entry("[approve-publication] push")) + "\n").encode("utf-8")
+        malformed = (
+            b'{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"'
+            + b"x" * (8 * 1024 * 1024 + 256)
+            + b'" broken}]}}\n'
+        )
+        tp = Path(tempfile.mktemp(suffix=".jsonl"))
+        try:
+            tp.write_bytes(boundary + malformed)
+            self.assertEqual(
+                hook_common.scan_current_turn_boundary(
+                    str(tp), byte_cap=None, boundary_only=True
+                ),
+                (None, [], hook_common.STATUS_INVALID),
+            )
+        finally:
+            tp.unlink(missing_ok=True)
+
+    def test_resource_failure_is_nonauthorizing_and_closes_reader(self) -> None:
+        tp = _write_transcript([_user_entry("[approve-publication] push")])
+        original_open = Path.open
+        opened = []
+
+        def tracking_open(path, *args, **kwargs):
+            stream = original_open(path, *args, **kwargs)
+            if path == tp:
+                opened.append(stream)
+            return stream
+
+        try:
+            with mock.patch.object(hook_common.Path, "open", tracking_open), \
+                 mock.patch.object(hook_common.json, "loads", side_effect=MemoryError):
+                result = hook_common.scan_current_turn_boundary(
+                    str(tp), byte_cap=None, boundary_only=True
+                )
+            self.assertEqual(
+                result,
+                (None, [], hook_common.STATUS_RESOURCE_UNAVAILABLE),
+            )
+            self.assertEqual(len(opened), 1)
+            self.assertTrue(opened[0].closed)
+        finally:
+            tp.unlink(missing_ok=True)
+
+    def test_predecessor_lf_is_revalidated_before_first_and_second_seals(self) -> None:
+        from unittest.mock import patch
+
+        prefix = b"not-json\n"
+        boundary = (json.dumps(_user_entry("boundary")) + "\n").encode("utf-8")
+        same_value_boundary = boundary.replace(b": ", b":\t", 1)
+        self.assertEqual(len(same_value_boundary), len(boundary))
+        self.assertEqual(json.loads(same_value_boundary), json.loads(boundary))
+        chunk = 1024 * 1024
+        target_size = 9 * chunk
+        empty_suffix = (json.dumps(_assistant_text_entry("")) + "\n").encode("utf-8")
+        filler_size = target_size - len(prefix) - len(boundary) - len(empty_suffix)
+        self.assertGreater(filler_size, 8 * 1024 * 1024)
+        suffix = (json.dumps(_assistant_text_entry("z" * filler_size)) + "\n").encode("utf-8")
+        source = prefix + boundary + suffix
+        self.assertEqual(len(source), target_size)
+        boundary_start = len(prefix)
+        predecessor_offset = boundary_start - 1
+
+        mutations = (
+            ("predecessor-before-first-seal", "lf", 1),
+            ("predecessor-before-second-seal", "lf", 2),
+            ("selected-record-before-first-seal", "selected-record", 1),
+        )
+        test_case = self
+        for name, mutation_kind, mutation_ordinal in mutations:
+            with self.subTest(mutation=name):
+                tp = Path(tempfile.mktemp(suffix=".jsonl"))
+                tp.write_bytes(source)
+                original_stat = tp.stat()
+                original_open = Path.open
+                opened = []
+
+                class MutatingReader:
+                    def __init__(self, inner):
+                        self.inner = inner
+                        self.predecessor_seeks = 0
+
+                    @property
+                    def closed(self):
+                        return self.inner.closed
+
+                    def __enter__(self):
+                        self.inner.__enter__()
+                        return self
+
+                    def __exit__(self, *args):
+                        return self.inner.__exit__(*args)
+
+                    def fileno(self):
+                        return self.inner.fileno()
+
+                    def seek(self, offset, whence=0):
+                        result = self.inner.seek(offset, whence)
+                        if offset == predecessor_offset and whence == 0:
+                            self.predecessor_seeks += 1
+                            if self.predecessor_seeks == mutation_ordinal:
+                                with open(tp, "r+b") as writer:
+                                    if mutation_kind == "lf":
+                                        writer.seek(predecessor_offset)
+                                        writer.write(b" ")
+                                    else:
+                                        writer.seek(boundary_start)
+                                        original = writer.read(len(boundary))
+                                        test_case.assertEqual(original, boundary)
+                                        writer.seek(boundary_start)
+                                        writer.write(same_value_boundary)
+                        return result
+
+                    def read(self, size=-1):
+                        return self.inner.read(size)
+
+                    def tell(self):
+                        return self.inner.tell()
+
+                def wrapped_open(path, *args, **kwargs):
+                    inner = original_open(path, *args, **kwargs)
+                    if path == tp and args and args[0] == "rb":
+                        reader = MutatingReader(inner)
+                        opened.append(reader)
+                        return reader
+                    return inner
+
+                real_stat = Path.stat
+                real_fstat = os.fstat
+
+                def stable_path_stat(path, *args, **kwargs):
+                    return original_stat if path == tp else real_stat(path, *args, **kwargs)
+
+                def stable_descriptor_stat(fd):
+                    if any(reader.fileno() == fd and not reader.closed for reader in opened):
+                        return original_stat
+                    return real_fstat(fd)
+
+                try:
+                    with patch.object(hook_common.Path, "open", wrapped_open), \
+                         patch.object(hook_common.Path, "stat", stable_path_stat), \
+                         patch.object(os, "fstat", stable_descriptor_stat):
+                        result = hook_common.scan_current_turn_boundary(
+                            str(tp), byte_cap=None, boundary_only=True
+                        )
+                    self.assertEqual(
+                        result,
+                        (None, [], hook_common.STATUS_INVALID),
+                    )
+                    self.assertEqual(opened[0].predecessor_seeks, mutation_ordinal)
+                    self.assertTrue(opened[0].closed)
+                finally:
+                    tp.unlink(missing_ok=True)
 
 
 class TestBoundedTranscriptHistory(unittest.TestCase):
