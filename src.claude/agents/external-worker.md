@@ -21,12 +21,11 @@ description: "External worker: run eligible worker roles externally."
 
 ## External execution
 
-- Read and normalize `.claude/.agents-mode.yaml` to the current canonical format before trusting its flags.
 - Honor the contract-resolved `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`; this role does not reimplement their resolution.
-- Resolve config, provider, model/profile, workdir, fallback, and transport under the shared external-dispatch contract; do not reproduce its resolution logic here.
+- Resolve config, provider, model/profile, workdir, fallback, and transport through the shared external-dispatch owner; consume effective values in memory and do not rewrite configuration on a routing read. Persisted normalization belongs only to an authorized install/configuration write.
 - Do not honor `reserve` for worker-side lanes. It is a supplemental read-only candidate only in `advisory.*` and `review.*` profile orders after primary `claude`/`codex`, and `reserveResolver` must not turn it into a worker transport, primary-Claude retry, or implementation/editing fallback.
-- Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
-- Use file-based prompt delivery for substantive task prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
+- Never select `gpt-6.1-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
+- For substantive prompts, prefer the working approved wrapper and its file/stdin delivery. If a helper is defective, use only the declared owner-equivalent route under shared Assistance and external-dispatch when every selected provider/capability, input, creator-resource, real-terminal, independent-receiving, and provenance guarantee remains satisfied. A helper failure alone does not establish provider unavailability; report any unmet guarantee without automatic fallback, internal relay, host-denial bypass, or fabricated wrapper frame.
 - If the selected primary Claude path fails for worker-side work, report Claude unavailable or reroute honestly instead of converting the same run to the secret-backed wrapper.
 - This adapter is a direct external launch contract. Do not spawn it as an internal Claude agent/helper host for another provider.
 - A spawned internal subagent is still internal even if its prompt labels it as an external provider; that is a routing violation, not external-worker execution.
@@ -36,6 +35,7 @@ description: "External worker: run eligible worker roles externally."
 ## Execution recipe
 
 - Use the approved thin wrapper owned by `contracts/external-dispatch.md`; that owner supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. Do not retype the schema, consume wrapper-private captures, or substitute a direct closure/manual sidecar path.
+- When explicit Kimi engineering is policy-admitted, require the `engineering` mutation class and a taxonomy mapping from the assigned profession to `external-worker`. A validated capability file may select only the caller-scoped worker tools, cwd, and artifact needed by that assignment; cwd selection is not a sandbox, the result remains nonauthorizing, and the integration owner independently verifies every change. Omission of the file preserves empty tools, Model Context Protocol servers, and subagents with permission `reject`.
 - Set the wrapper-owned timeout, await its terminal return, and apply the owner's tracked-ledger rules before accepting the worker result. Never duplicate a launch; independent standalone watcher polling applies only to caller-managed background captures outside the wrapper.
 - Accept completion only when the shared run-completion oracle passes; a failed oracle is `UNVERIFIED`, not a worker artifact.
 

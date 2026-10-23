@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared semantic policy for MCP continuity across the three hook events.
 
-This module is dependency-free and side-effect-free.  It classifies untrusted
+This module shares hook_common's input acquisition and is side-effect-free. It classifies untrusted
 hook input as data; it never executes shell text and never emits configuration
 values.  Event adapters own envelope parsing and delivery.
 """
@@ -17,54 +17,43 @@ import stat
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple
 
+from hook_common import acquire_tool_input
+
 
 SESSION_START_CONTEXT = "\n".join(
     (
-        "[MCP / tools reminder - re-shown at session start and after every compaction]",
-        "MCP servers may be connected in this environment. For codebase, architecture, API/docs, search, browser, debugger, profiler, or repository-understanding tasks, make MCP/tool-discovery an explicit checkpoint before falling back to ad-hoc shell reads.",
-        "MCP tools load on demand: use the platform's runtime tool discovery to see the connected servers and load a tool's schema, then call the relevant tool. Non-normative interface example only: ToolSearch may provide that discovery on some hosts; its name never selects a tool. If a relevant MCP is unavailable or broken, say so briefly instead of silently substituting a weaker path.",
-        'CONNECTED but uninitialized is not unavailable: do NOT skip a connected MCP reporting "not initialized", "no index", "empty", or "no data yet". Many servers require or build their own index/state on first use — when they report no index, INITIALIZE them per the server\'s own instructions and use or await the result — never silently substitute ad-hoc shell/grep. Only a genuinely absent server (not connected, not installed, or absent from runtime tool discovery) may be skipped with an explanation.',
-        "When mcpMode: force is active, relevant MCP use is a standing instruction. Under mcpMode: auto, still consider MCP first when it fits the task and record why it was skipped if the task explicitly asked for MCP.",
-        "For any stateful or indexed repository-understanding tool - whether MCP, CLI, or skill-backed - repository/project/branch/worktree/indexed-input changes invalidate any earlier answer: use the tool's own status/freshness probe; when it reports stale or pending, run its documented sync/update/reindex, confirm fresh, then repeat the intended query. Non-normative workflow examples only: Graphify follows `status/freshness -> sync/update/reindex -> confirm fresh -> repeat intended query`; CodeGraph follows `status -> sync -> fresh status -> repeat query`. These names never select a tool. If the tool is needed now, stale state does not justify skipping it or deferring refresh to an authorizer or later concurrent work. If refresh fails, report it explicitly. Use an alternate tool only when refresh genuinely fails, the tool is unavailable, the user forbids it, or refresh exceeds an explicit approved resource bound; report the reason; do not present stale output as current or any stale evidence as current. Stateless or live MCPs need no refresh. Other stateless or live tools likewise need no refresh.",
-        "Non-normative capability examples only, never selection logic: semantic code navigation and code-graph, Repomix or repository packers, language-server / LSP, current library / framework / API docs (use these instead of answering API questions from memory), debuggers and profilers, browser automation, memory, search, and fetch utilities.",
-        "This STILL APPLIES AFTER COMPACTION - do not forget MCP just because the context was summarized.",
-        "SUBAGENTS: dispatched agents inherit the runtime tool surface. In the dispatch prompt, explicitly allow relevant MCP discovery/use within the assigned role, scope, and safety limits; do not accidentally hide MCP availability, but keep any deliberate tool limits honest.",
+        "[MCP/tools reminder - session start and compaction]",
+        "For codebase, architecture, API/docs, search, browser, debugger, profiler, or repository-understanding work, discover connected MCP/tools at runtime, load the relevant schema, and use the fitting tool before ad-hoc shell reads. Under mcpMode: force this is mandatory; under mcpMode: auto, consider MCP first and explain a skip when MCP was explicitly requested.",
+        "A connected but uninitialized, empty, or unindexed tool is not unavailable: initialize it by its own instructions and use or await the result.",
+        "Before using stateful or indexed repository evidence after repository, project, branch, worktree, or indexed-input changes, check status/freshness; when stale or pending, sync/update/reindex, confirm fresh, and repeat the intended query. When selecting/changing a project or recovering stale state, verify the reported project/index identity matches the selected root before use. Report known omitted coverage. When instructions conflict with an installed tool, inspect its own supported entrypoint/help/version; do not invent or reimplement its pipeline. Before treating graph call, dependency, or blast-radius output as exact decision evidence, match the qualified symbol plus declaring type/file where applicable to the requested target; distinguish direct calls, callback/indirect reachability, and fuzzy suggestions. Ambiguous/unmatched rows require source verification; do not declare them exact. This is not a per-call version check. Never present stale evidence. Use another path only if refresh fails, the tool is unavailable, the user forbids it, or an explicit resource bound is exceeded; state why. Stateless or live tools need no refresh.",
+        "For dispatched work, give each lane only needed MCP/tools and context; keep its role, scope, safety limits, and mandatory gates unchanged.",
     )
 )
 
 TURN_ANCHOR_CONTEXT = (
-    "[turn anchor - re-shown every turn because a once-per-session reminder is overwritten"
-    " by whatever you did last]\n"
-    "Root main conversation (as Lead): continue until blocked; a passed slice is not completion."
-    " Record it, take the next unchecked action, and dispatch the next admitted role. A final-"
-    "style summary while a known next action remains IS the defect. If you genuinely need the"
-    " operator, name the blocker or decision as the reason for stopping.\n"
-    "Dispatched subagent: continue only the bounded work for your assigned profession, artifact,"
-    " and gate; then return evidence and an optional non-binding recommended next role to the"
-    " root, and stop. Never adopt $lead, dispatch a peer or downstream stage, advance the"
-    " pipeline, or write agent-runs.jsonl.\n"
-    "Universal no-self-residue checkpoint: before completion, commit, push, or handoff, settle"
-    " every agent-owned process/resource and remove dead or temporary alternatives; preserve"
-    " pre-existing user state, and treat ambiguous ownership as a destructive-action blocker.\n"
-    "Root-only delegation: at the first decision point of non-trivial work, the root main"
-    " conversation holding $lead classifies and routes to the matching specialist role/skill via"
-    " the host delegation surface; take external-launch flags from the external-dispatch contract,"
-    " never from memory. The root may directly launch a configured external wrapper; no provider"
-    " or leaf may recursively launch another wrapper.\n"
-    "MCP checkpoint: for repository navigation or understanding, discover and use the"
-    " relevant configured MCP before an ad-hoc shell search; if shell is genuinely the"
-    " right instrument, state why. Repository-understanding freshness: any stateful/indexed"
-    " tool (MCP, CLI, or skill-backed) is invalidated by repository/"
-    "project/branch/worktree/indexed-input changes; use status/freshness, then sync/update/"
-    "reindex, fresh recheck, then repeat the query. Non-normative workflow example only:"
-    " Graphify follows `status/freshness -> sync/update/reindex -> confirm fresh -> repeat"
-    " intended query`; this name never selects a tool. If the"
-    " tool is needed now, stale does not justify skipping or deferring refresh to an"
-    " authorizer or later concurrent work. Use"
-    " an alternate only after refresh genuinely fails, the tool is unavailable, the user"
-    " forbids it, or refresh exceeds an explicit approved resource bound; report why and"
-    " never present stale evidence; stateless/live MCPs are exempt. Other stateless/live"
-    " tools need no refresh."
+    "[turn anchor]\n"
+    "Root Lead: after compaction or a side question, keep the admitted primary outcome "
+    "and next authorized action explicit. "
+    "For brief side questions, status, and clarifications, answer briefly in commentary, then "
+    "continue the next ready primary action in the same turn. Promptly delegate admitted "
+    "substantive side work to the matching specialist when existing authority, gates, full "
+    "resource surfaces, and capacity permit; then continue ready primary work without waiting "
+    "for the side result. Fast independent side completion is fine. On conflict, preserve the "
+    "side owner's resume point and hold only dependent actions. Explicit user stop, pause, "
+    "cancel, or reprioritization wins; preserve original scope and resume point. Native Goal "
+    "PAUSED remains held for its user/native owner. When primary work is blocked, continue "
+    "useful independent ready work. Stop only when complete, explicitly stopped, or all "
+    "remaining authorized work is concretely blocked. Earlier progress is not completion. "
+    "A standalone question with no active "
+    "task may end normally.\n"
+    "Before choosing a new design/mechanism, doing nontrivial implementation yourself, or assigning it, check the current owner and ready existing solutions; reuse adequate architecture and carry only a verified gap.\n"
+    "Delegate useful ready work by task to the matching specialist. Under the current default,"
+    " Root owns dispatch; provider and leaf agents do not spawn or recursively launch wrappers."
+    " Give each lane only needed tools and context; keep mandatory gates.\n"
+    "Universal no-self-residue checkpoint: before completion, commit, push, or handoff, and"
+    " before transfer, settle every owned process/resource and remove temporary or dead"
+    " alternatives; preserve pre-existing user state and treat ambiguous ownership as a"
+    " destructive-action blocker. Do not invent work."
 )
 
 ADMITTED_TOOLS = frozenset(
@@ -394,7 +383,7 @@ def classify_tool_choice(
     raw_cwd: object = None,
 ) -> bool:
     """Classify one admitted PreToolUse choice as code navigation or not."""
-    if tool_name not in ADMITTED_TOOLS or not isinstance(tool_input, Mapping):
+    if not isinstance(tool_input, Mapping):
         return False
     coordinate = _ScopeCoordinate.from_cwd(raw_cwd)
     if tool_name == "Grep":
@@ -412,10 +401,10 @@ def classify_tool_choice(
             return False
         return bool(CODE_PATTERN_RE.search(pattern) or (path and _scope_is_source_like(path)))
 
-    command_key = "cmd" if tool_name == "exec_command" and tool_input.get("cmd") else "command"
-    command = tool_input.get(command_key)
-    if not isinstance(command, str) or not command.strip():
+    acquired = acquire_tool_input(tool_name, tool_input)
+    if not acquired.resolved or acquired.command is None:
         return False
+    command = acquired.command
     return any(
         _shell_search_is_navigation(executable, args, coordinate, relative_ambiguous)
         for executable, args, relative_ambiguous in _search_invocations(command)

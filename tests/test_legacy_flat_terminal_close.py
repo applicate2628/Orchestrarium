@@ -1,0 +1,1624 @@
+"""Physical legacy terminal owner oracles; Goal integration is a separate slice."""
+import contextlib
+import hashlib
+import importlib.util
+import io
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location("legacy_flat_terminal_owner", ROOT / "scripts/mutate-work-item.py")
+m = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = m
+SPEC.loader.exec_module(m)
+v = m._validator_module()
+
+
+def digest(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+class TestLifecycleValidatorReuse(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="validator-reuse-test-", dir=ROOT / ".scratch")
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name)
+        self.scripts = self.base / "source/scripts"; self.scripts.mkdir(parents=True)
+        for name in ("mutate-work-item.py", "validate-work-item-state.py"):
+            shutil.copy2(ROOT / "scripts" / name, self.scripts / name)
+        self.schema = self.base / "source/shared/schemas/agent-runs.schema.json"
+        self.schema.parent.mkdir(parents=True)
+        shutil.copy2(ROOT / "shared/schemas/agent-runs.schema.json", self.schema)
+        spec = importlib.util.spec_from_file_location("actual_validator_reuse_owner", self.scripts / "mutate-work-item.py")
+        self.owner = importlib.util.module_from_spec(spec); sys.modules[spec.name] = self.owner; spec.loader.exec_module(self.owner)
+        self.repo = self.base / "repo"; self.repo.mkdir()
+        (self.repo / "work-items").mkdir()
+
+    def transaction(self):
+        return self.owner.LifecycleTransaction(self.repo, input_role="repository-root")
+
+    def validate_independently(self, validator):
+        good = "---\ntemplate: quick-fix\nstatus: active\nstarted: 2026-10-11T00:00:00Z\nupdated: 2026-10-11T00:00:00Z\n---\n- **Task**: Actual useful result.\n- **Current step**: Implement.\n- **Last result**: Accepted.\n- **Next action**: Verify.\n"
+        accepted, refused = [], []
+        validator.validate_quick_fix_status(good, accepted)
+        validator.validate_quick_fix_status("template: quick-fix\nstatus: active\n", refused)
+        self.assertEqual(accepted, [])
+        self.assertTrue(refused)
+
+    def test_actual_transaction_results_nested_standalone_and_failure(self):
+        owner = self.owner
+        fresh_a, fresh_b = owner._validator_module(), owner._validator_module()
+        self.assertIsNot(fresh_a, fresh_b)
+        self.validate_independently(fresh_a)
+        observed = []
+        @owner._lifecycle_participant
+        def nested(root):
+            value = owner._validator_module(); observed.append(value)
+            self.validate_independently(value)
+            return value
+        @owner._lifecycle_participant
+        def operation(root, fail=False):
+            transaction = owner._CURRENT_LIFECYCLE_TRANSACTION.get()
+            observed.append(transaction)
+            first = owner._validator_module()
+            self.assertIs(first, nested(root))
+            self.assertIs(first, owner._validator_module())
+            child_owner = first.load_lifecycle_owner()
+            self.assertIsNot(child_owner, owner)
+            self.assertIsNone(child_owner._CURRENT_LIFECYCLE_TRANSACTION.get())
+            self.assertIs(owner._CURRENT_LIFECYCLE_TRANSACTION.get(), transaction)
+            self.assertEqual(first.AGENT_RUN_SCHEMA, json.loads(self.schema.read_bytes()))
+            if fail:
+                raise owner.LifecycleError("WI-TEST-VALIDATOR-PRIMARY", "real operation primary")
+            return first
+        first = operation(self.repo)
+        transaction = observed[0]
+        self.assertIsNone(transaction._validator_reuse)
+        self.assertIsNone(owner._CURRENT_LIFECYCLE_TRANSACTION.get())
+        second = operation(self.repo)
+        self.assertIsNot(first, second)
+        with self.assertRaisesRegex(owner.LifecycleError, "real operation primary"):
+            operation(self.repo, True)
+        for value in observed:
+            if isinstance(value, owner.LifecycleTransaction):
+                self.assertIsNone(value._validator_reuse)
+                self.assertIsNone(value._file)
+        self.assertIsNot(second, owner._validator_module())
+
+    def test_source_schema_and_initialization_failure_epochs(self):
+        owner = self.owner
+        source = self.scripts / "validate-work-item-state.py"
+        original_source, original_schema = source.read_bytes(), self.schema.read_bytes()
+        # These are independent initial-acquisition failures, not fake validators.
+        for path, replacement in ((source, None), (self.schema, None), (self.schema, b"{bad schema"),
+                                  (source, original_source + b"\nraise RuntimeError('actual initialization failure')\n")):
+            saved = self.base / "held-initial-input"
+            path.rename(saved)
+            if replacement is not None:
+                path.write_bytes(replacement)
+            transaction = self.transaction()
+            with transaction:
+                token = owner._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+                try:
+                    with self.assertRaises((owner.LifecycleError, OSError, ValueError, RuntimeError)):
+                        owner._validator_module()
+                    self.assertIsNone(transaction._validator_reuse)
+                finally:
+                    owner._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+            if path.exists(): path.unlink()
+            saved.rename(path)
+        for path in (source, self.schema):
+            transaction = self.transaction(); transaction.__enter__()
+            token = owner._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            replaced = False
+            try:
+                value = owner._validator_module(); self.validate_independently(value)
+                held = self.base / "held-original-input"
+                image, _parents = owner._legacy_local_image(path)
+                # The fixture actor owns this copied input; production mutation
+                # rightly refuses to move a retained transaction participant.
+                path.rename(held)
+                path.write_bytes(held.read_bytes())
+                replaced = True
+                self.assertNotEqual(owner._lifecycle_file_identity(path.lstat()), tuple(image["identity"]["value"]))
+                with self.assertRaisesRegex(owner.LifecycleError, "changed"):
+                    owner._validator_module()
+                self.assertIs(transaction._validator_reuse, value)
+            finally:
+                owner._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+                if replaced:
+                    with self.assertRaises(owner.LifecycleError):
+                        transaction.__exit__(None, None, None)
+                else:
+                    transaction.__exit__(None, None, None)
+                self.assertIsNone(transaction._validator_reuse)
+                self.assertIsNone(transaction._file)
+            path.unlink(); held.rename(path)
+        self.assertEqual(source.read_bytes(), original_source)
+        self.assertEqual(self.schema.read_bytes(), original_schema)
+
+
+class LegacyFlatTerminalTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="flat-terminal-test-", dir=ROOT / ".scratch")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.slug = "original-flat-task"
+        self.source = self.root / "work-items/backlog" / f"{self.slug}.md"
+        self.source.parent.mkdir(parents=True)
+        self.source.write_bytes(
+            b"# Original completed flat task\r\n\r\n"
+            b"Original completion: 2026-09-01T10:00:00Z\r\n"
+            b"Required proof: [accepted result](../../evidence/proof.md?revision=1#accepted)\r\n"
+        )
+        self.accepted = self.root / "evidence/acceptance.md"
+        self.accepted.parent.mkdir()
+        self.accepted.write_bytes(
+            b"# Accepted original task facts\n"
+            b"Admission: The original flat task was authorized before its recorded completion.\n"
+            b"Completion: Its useful result is the exact required proof.\n"
+            b"Criteria: The original task did not require an agent ledger.\n"
+            b"History acquisition: Same-item source, proof, criteria and actual bounded ledger absence.\n"
+        )
+        (self.accepted.parent / "proof.md").write_bytes(b"# accepted\nOriginal useful result bytes.\n")
+        self.instant = "2026-10-11T10:00:00Z"
+        self.closure = (
+            f"Closed: {self.instant}\nOutcome: Delivered the originally accepted result.\n"
+            "Evidence: accepted original completion and retained required proof\nResidual risk: none\n"
+        ).encode()
+        self.closure_file = self.root / "closure-input.md"
+        self.closure_file.write_bytes(self.closure)
+        self.bug_manifest = self.root / "evidence/bug-dispositions.json"
+        self.bug_manifest.write_bytes((json.dumps({"schemaVersion": 1, "workItem": self.slug,
+            "closedAt": self.instant, "bugs": []}, sort_keys=True, indent=2) + "\n").encode())
+        m.refresh_readme(self.root, allow_marker_bootstrap=True)
+
+    def reference(self, path):
+        raw = path.read_bytes()
+        return {"path": path.relative_to(self.root).as_posix(), "byteLength": len(raw), "sha256": digest(raw)}
+
+    def canonical_images(self):
+        return {path.relative_to(self.root).as_posix(): path.read_bytes() for path in self.root.rglob("*")
+                if path.is_file() and ".scratch" not in path.relative_to(self.root).parts}
+
+    def captured_history(self, required):
+        owner = v.load_lifecycle_owner()
+        directories = [self.root, *(path for path in self.root.rglob("*")
+                        if path.is_dir() and ".scratch" not in path.relative_to(self.root).parts)]
+        records = []
+        for path in self.root.rglob("*"):
+            if path.is_file() and ".scratch" not in path.relative_to(self.root).parts:
+                snapshot = owner._capture_file_snapshot(path, failure_id="WI-TEST-ORIGINAL-CAPTURE")
+                records.append(v.CapturedHistoryFileV1(path.relative_to(self.root).as_posix(),
+                              snapshot, snapshot.length, digest(snapshot.data)))
+        proofs = [owner._capture_directory_snapshot(path, failure_id="WI-TEST-ORIGINAL-DIRECTORY") for path in directories]
+        acquired = owner.AcquiredWorkItemInputV1(self.root,
+            tuple(owner.CapturedInputAssociationV1(row.snapshot, row.snapshot) for row in records),
+            tuple(owner.CapturedInputAssociationV1(proof, proof) for proof in proofs))
+        ledger = self.source.parent / "agent-runs.jsonl"
+        relative = ledger.relative_to(self.root).as_posix()
+        absent = () if ledger.exists() else (relative,)
+        criteria = self.accepted.relative_to(self.root).as_posix()
+        return v.CapturedWorkItemHistoryBindingV1(self.root, self.slug,
+            self.source.relative_to(self.root).as_posix(), self.source.parent.relative_to(self.root).as_posix(),
+            relative, v.HistoricalLedgerCriteriaV1(criteria, criteria, required, "current"),
+            tuple(records), absent,
+            {proof.path.relative_to(self.root).as_posix(): tuple(name for name, _metadata in proof.members) for proof in proofs},
+            acquired)
+
+    def test_existing_flat_close_is_directory_only_and_preserves_canonical_bytes(self):
+        before = self.canonical_images()
+        with self.assertRaisesRegex(m.LifecycleError, "close requires one active item"):
+            m.close_item(self.root, self.slug, self.closure, self.instant)
+        self.assertEqual(before, self.canonical_images())
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "open")
+        self.assertEqual(m.resolve_category(self.root, f"work-item:{self.slug}"), self.source)
+
+    def test_actual_flat_native_history_accepts_evidenced_absence_and_real_settled_rows(self):
+        optional = v.observe_captured_work_item_history(self.captured_history(False))
+        self.assertTrue(optional.acquisition_complete, optional.diagnostics)
+        self.assertEqual(optional.selection, "absent")
+        self.assertEqual(optional.diagnostics, ())
+        self.assertIsNone(optional.obligations)
+        self.accepted.write_bytes(self.accepted.read_bytes().replace(b"did not require", b"required"))
+        writer = m._load_agent_run_ledger()
+        event = {"schemaVersion": 2, "runId": "original-verification-complete", "workItem": self.slug,
+            "role": "analyst", "executionRole": "internal", "eventKind": "standalone",
+            "status": "completed", "gate": "PASS", "scope": ["original required proof"],
+            "artifact": "../../evidence/proof.md", "lane": "implementation", "effort": "high",
+            "evidence": [{"kind": "artifact", "ref": "../../evidence/proof.md"}],
+            "startedAt": "2026-09-01T09:00:00Z", "updatedAt": "2026-09-01T10:00:00Z"}
+        # Keep the producer's admitted artifact namespace ordinary and exact.
+        proof = self.source.parent / "proof.md"
+        proof.write_bytes((self.root / "evidence/proof.md").read_bytes())
+        event["artifact"] = "proof.md"
+        event["evidence"][0]["ref"] = "proof.md"
+        raw = (writer.serialize_event(event) + "\n").encode()
+        (self.source.parent / "agent-runs.jsonl").write_bytes(raw)
+        settled = v.observe_captured_work_item_history(self.captured_history(True))
+        self.assertTrue(settled.acquisition_complete, settled.diagnostics)
+        self.assertEqual(settled.diagnostics, ())
+        self.assertEqual(settled.obligations.open_revise, ())
+        self.assertEqual(settled.obligations.open_launches, ())
+        self.assertEqual((self.source.parent / "agent-runs.jsonl").read_bytes(), raw)
+
+    def legacy_request(self):
+        accepted = self.reference(self.accepted)
+        evidence = {"schemaVersion": 1, "kind": "legacy-work-item-evidence", "operationId": "flat-terminal-001",
+            "source": self.reference(self.source),
+            "acceptedEvidence": {role: accepted for role in ("admission", "completion", "criteria", "historyAcquisition")},
+            "historySelection": {"originalItemBase": "work-items/backlog", "originalLedgerPath": "work-items/backlog/agent-runs.jsonl",
+                "ledgerRequired": False, "ownerContract": "current", "artifacts": [self.reference(self.root / "evidence/proof.md")],
+                "absentPaths": ["work-items/backlog/agent-runs.jsonl"]},
+            "bugDispositions": self.reference(self.bug_manifest),
+            "expectedReadmeSha256": digest((self.root / "work-items/README.md").read_bytes())}
+        request = self.root / "legacy-evidence.json"
+        request.write_bytes((json.dumps(evidence, indent=2, sort_keys=True) + "\n").encode())
+        arguments = ["close", "--root", str(self.root), "--slug", self.slug,
+            "--closure-file", str(self.closure_file), "--terminal-instant", self.instant,
+            "--legacy-evidence-file", str(request)]
+        return request.read_bytes(), arguments
+
+    def test_pending_progress_accepts_both_directory_parent_wire_forms_and_refuses_drift(self):
+        evidence, _arguments = self.legacy_request()
+        with self.assertRaisesRegex(m.LifecycleError, "interruption after promotion"):
+            m.close_item(self.root, self.slug, self.closure, self.instant,
+                legacy_evidence_data=evidence, apply=True, inject_failure_at="after-promotion",
+                transition_read_admission="selected-native")
+        intent_path = m._transition_intent_path(self.root, "flat-terminal-001")
+        with m.LifecycleTransaction(self.root, transition_read_admission="selected-native") as transaction:
+            token = m._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+            try:
+                intent = m._load_transition_intent(self.root, intent_path)
+                plan = m._PendingLegacyCompletionPlan.admit(self.root, intent_path, intent)
+                plan.check_progress(intent)
+                ancestors = json.loads(m._migration_receipt_bytes(intent))
+                inclusive = json.loads(m._migration_receipt_bytes(intent))
+                for row in ancestors["capturedBindings"]:
+                    if row["nodeKind"] == "directory":
+                        own = {"path": row["path"], "identity": row["identity"]["value"]}
+                        if row["parentChain"][-1] == own:
+                            row["parentChain"] = row["parentChain"][:-1]
+                for row, ancestor in zip(inclusive["capturedBindings"], ancestors["capturedBindings"]):
+                    if row["nodeKind"] == "directory":
+                        row["parentChain"] = ancestor["parentChain"] + [
+                            {"path": row["path"], "identity": row["identity"]["value"]}]
+                plan.check_progress(ancestors)
+                plan.check_progress(inclusive)
+                different = json.loads(m._migration_receipt_bytes(ancestors))
+                directory = next(row for row in different["capturedBindings"] if row["nodeKind"] == "directory")
+                directory["parentChain"][-1]["identity"][1] += 1
+                with self.assertRaisesRegex(m.LifecycleError, "producer parent proof differs"):
+                    plan.check_progress(different)
+                different = json.loads(m._migration_receipt_bytes(inclusive))
+                directory = next(row for row in different["capturedBindings"] if row["nodeKind"] == "directory")
+                directory["parentChain"][-1]["identity"][1] += 1
+                with self.assertRaisesRegex(m.LifecycleError, "directory identity and captured ancestry disagree"):
+                    plan.check_progress(different)
+                different = json.loads(m._migration_receipt_bytes(intent))
+                file = next(row for row in different["capturedBindings"] if row["nodeKind"] == "file")
+                file["parentChain"].append({"path": file["path"], "identity": file["image"]["identity"]["value"]})
+                with self.assertRaisesRegex(m.LifecycleError, "ordered native ancestry differs"):
+                    plan.check_progress(different)
+                plan.check_progress(intent)
+                transaction.verify()
+            finally:
+                m._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+
+    def test_public_legacy_close_requires_the_additive_evidence_and_apply_surface(self):
+        _evidence, arguments = self.legacy_request()
+        before = self.canonical_images()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(m.main(arguments), 0)
+        self.assertEqual(before, self.canonical_images())
+        diagnostic = io.StringIO()
+        with contextlib.redirect_stdout(diagnostic), contextlib.redirect_stderr(diagnostic):
+            result = m.main([*arguments, "--apply"])
+        self.assertEqual(result, 0, diagnostic.getvalue())
+        archive = self.root / "work-items/archive/2026-10" / self.slug
+        self.assertFalse(self.source.exists())
+        self.assertEqual((archive / "legacy-source" / self.source.name).read_bytes(), before[self.source.relative_to(self.root).as_posix()])
+        self.assertEqual(m.resolve_category(self.root, f"work-item:{self.slug}"), archive)
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
+        self.assertNotEqual((archive / "lifecycle-transition-receipt.json").read_bytes(),
+                            (archive / "bug-dispositions-receipt.json").read_bytes())
+
+    def exercise_incoming_byte_images(self, opaque=True):
+        """Public synthetic oracle; return actual wire keys for baseline comparison."""
+        document = self.root / "work-items/design.md"
+        first = f"backlog/{self.slug}.md?rev=1#work-items/backlog/{self.slug}.md".encode()
+        second = f"./backlog/{self.slug}.md#other".encode()
+        body = (b"\xef\xbb\xbfmultibyte \xc3\xa9 " + (b"\x97" if opaque else b"prose") + b"\r\n"
+                + b"[First](" + first + b") [Repeat](" + first + b")\r\n"
+                + b"[Second](" + second + b")\r\n"
+                + f"Literal work-items/backlog/{self.slug}.md\r\n".encode()
+                + (b"\x81" if opaque else b"tail"))
+        document.write_bytes(body)
+        _evidence, arguments = self.legacy_request()
+        before = self.canonical_images()
+        for invocation in (arguments, [*arguments, "--apply"], [*arguments, "--apply"]):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                result = m.main(invocation)
+            self.assertEqual(result, 0, output.getvalue())
+            if invocation is arguments:
+                self.assertEqual(self.canonical_images(), before)
+        archive = self.root / "work-items/archive/2026-10" / self.slug
+        target = f"archive/2026-10/{self.slug}/legacy-source/{self.slug}.md".encode()
+        expected = body.replace(first, target + f"?rev=1#work-items/backlog/{self.slug}.md".encode()).replace(second, target + b"#other")
+        expected = expected.replace(f"work-items/backlog/{self.slug}.md".encode(), b"work-items/" + target)
+        self.assertEqual(document.read_bytes(), expected)
+        action = json.loads((archive / m.LEGACY_COMPLETION_RECEIPT).read_bytes())
+        row = next(row for row in action["links"]["consumers"] if row["path"] == "work-items/design.md")
+        self.assertEqual(m._unb64(row["before"]), body)
+        self.assertEqual(m._unb64(row["after"]), expected)
+        self.assertEqual(row["beforeSha256"], digest(body))
+        self.assertEqual(row["afterSha256"], digest(expected))
+        wire = m._migration_receipt_bytes(action)
+        self.assertEqual(json.loads(wire.decode("utf-8")), action)
+        self.assertFalse(any(0xD800 <= ord(character) <= 0xDFFF for character in wire.decode("utf-8")))
+        self.assertEqual(m.resolve_category(self.root, f"work-item:{self.slug}"), archive)
+        observation = m.observe_work_item_terminal(self.root, f"work-item:{self.slug}")
+        observation.verify()
+        m.check_readme(self.root)
+        return {"action": sorted(action), "links": sorted(action["links"]),
+                "inventory": sorted(action["links"]["inventory"]),
+                "referenceRows": sorted({tuple(sorted(row)) for row in action["links"]["inventory"]["references"]}),
+                "consumerRows": sorted({tuple(sorted(row)) for row in action["links"]["consumers"]})}
+
+    def test_public_opaque_markdown_dryrun_apply_replay_and_receiving(self):
+        self.exercise_incoming_byte_images()
+    def test_selected_active_status_afterimage_is_used_by_public_close(self):
+        from test_mutate_work_item import seed_active
+
+        owner_slug = "unselected-owner"
+        seed_active(m, self.root, owner_slug)
+        owner = self.root / "work-items" / "active" / owner_slug
+        status = owner / "status.md"
+        original_status = status.read_bytes()
+        line_ending = b"\r\n" if b"\r\n" in original_status else b"\n"
+        old_action = b"- **Next action**: Run the oracle." + line_ending
+        new_action = b"- **Next action**: [source](../../backlog/original-flat-task.md)" + line_ending
+        self.assertEqual(original_status.count(old_action), 1)
+        selected_status = original_status.replace(old_action, new_action)
+        status.write_bytes(selected_status)
+        backlog_consumer = self.root / "work-items" / "backlog" / "backlog-consumer.md"
+        backlog_consumer.write_bytes(
+            b"- **Task**: Backlog source consumer\n"
+            b"- **Status**: candidate\n"
+            b"- **Next action**: [original source](original-flat-task.md#accepted)\n"
+        )
+        original_backlog_consumer = backlog_consumer.read_bytes()
+        unrelated_markdown = self.root / "docs" / "unrelated.md"
+        unrelated_markdown.parent.mkdir(parents=True)
+        unrelated_bytes = b"# Unrelated Markdown\n\nThis is outside the work-items README read model.\n"
+        unrelated_markdown.write_bytes(unrelated_bytes)
+        proof = owner / "proof.md"
+        proof.write_bytes(b"# Accepted\nOne bounded standalone result.\n")
+        event = {
+            "schemaVersion": 2,
+            "runId": "selected-status-owner-complete",
+            "workItem": owner_slug,
+            "role": "analyst",
+            "executionRole": "internal",
+            "eventKind": "standalone",
+            "status": "completed",
+            "gate": "PASS",
+            "scope": ["selected close status consumer"],
+            "artifact": "proof.md",
+            "lane": "implementation",
+            "effort": "high",
+            "evidence": [{"kind": "artifact", "ref": "proof.md"}],
+            "startedAt": "2026-10-10T09:00:00Z",
+            "updatedAt": "2026-10-10T09:30:00Z",
+        }
+        serialized = m._load_agent_run_ledger().serialize_event(event)
+        (owner / "agent-runs.jsonl").write_bytes((serialized + "\n").encode("utf-8"))
+        validation = m._validator_module().validate_work_item(owner)
+        self.assertEqual(validation, [], validation)
+        m.refresh_readme(self.root)
+        m.check_readme(self.root)
+        _evidence, arguments = self.legacy_request()
+        before = self.canonical_images()
+        public = subprocess.run(
+            [sys.executable, "-B", str(ROOT / "scripts/mutate-work-item.py"), *arguments, "--apply"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=240,
+            check=False,
+        )
+        self.assertEqual(public.returncode, 0, public.stdout + public.stderr)
+        archive = self.root / "work-items/archive/2026-10" / self.slug
+        self.assertFalse(self.source.exists())
+        self.assertEqual((archive / "legacy-source" / self.source.name).read_bytes(), before[self.source.relative_to(self.root).as_posix()])
+        expected_status = selected_status.replace(
+            b"../../backlog/original-flat-task.md",
+            b"../../archive/2026-10/original-flat-task/legacy-source/original-flat-task.md",
+        )
+        self.assertEqual(status.read_bytes(), expected_status)
+        expected_backlog_consumer = original_backlog_consumer.replace(
+            b"(original-flat-task.md#accepted)",
+            b"(../archive/2026-10/original-flat-task/legacy-source/original-flat-task.md#accepted)",
+        )
+        self.assertEqual(backlog_consumer.read_bytes(), expected_backlog_consumer)
+        self.assertEqual(unrelated_markdown.read_bytes(), unrelated_bytes)
+        board = self.root / "work-items/README.md"
+        m.check_readme(self.root)
+        board_bytes = board.read_bytes()
+        self.assertIn(
+            b"[Backlog source consumer](backlog/backlog-consumer.md)", board_bytes
+        )
+        self.assertIn(
+            b"[original source](../archive/2026-10/original-flat-task/legacy-source/original-flat-task.md#accepted)",
+            board_bytes,
+        )
+        action_bytes = (archive / m.LEGACY_COMPLETION_RECEIPT).read_bytes()
+        replay = subprocess.run(
+            [sys.executable, "-B", str(ROOT / "scripts/mutate-work-item.py"), *arguments, "--apply"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=240,
+            check=False,
+        )
+        self.assertEqual(replay.returncode, 0, replay.stdout + replay.stderr)
+        self.assertEqual(board.read_bytes(), board_bytes)
+        self.assertEqual(backlog_consumer.read_bytes(), expected_backlog_consumer)
+        self.assertEqual(unrelated_markdown.read_bytes(), unrelated_bytes)
+        self.assertEqual((archive / m.LEGACY_COMPLETION_RECEIPT).read_bytes(), action_bytes)
+        code = """import importlib.util,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location('fresh_selected_owner',sys.argv[1]);m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)
+root=Path(sys.argv[2]);slug=sys.argv[3]
+assert m.work_item_dependency_state(root,slug)=='done'
+assert m.resolve_category(root,'work-item:'+slug).is_dir()
+m.check_readme(root)
+assert m.audit(root)==(),m.audit(root)
+print('FRESH_SELECTED_READERS_OK')
+"""
+        reader = subprocess.run(
+            [sys.executable, "-B", "-c", code, str(ROOT / "scripts/mutate-work-item.py"), str(self.root), self.slug],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=240,
+            check=False,
+        )
+        self.assertEqual(reader.returncode, 0, reader.stdout + reader.stderr)
+        self.assertIn("FRESH_SELECTED_READERS_OK", reader.stdout)
+
+
+
+    def test_public_cli_fresh_process_readers_and_historical_replay(self):
+        evidence, arguments = self.legacy_request()
+        # Genuine new public helper frame, no inherited native objects.
+        producer = subprocess.run([sys.executable, "-B", str(ROOT / "scripts/mutate-work-item.py"), *arguments, "--apply"],
+                                  capture_output=True, text=True, timeout=240, check=False)
+        self.assertEqual(producer.returncode, 0, producer.stdout + producer.stderr)
+        archive = self.root / "work-items/archive/2026-10" / self.slug
+        self.assertFalse(self.source.exists())
+        action_bytes = (archive / m.LEGACY_COMPLETION_RECEIPT).read_bytes()
+        metadata = json.loads((archive / m.LEGACY_COMPLETION_METADATA).read_bytes())
+        self.assertEqual(metadata["schemaVersion"], 2)
+        self.assertNotIn("identity", metadata["historyBinding"]["origin"])
+        self.assertIn("evidence/proof.md", (archive / "closure.md").read_text())
+        code = """import importlib.util,sys
+from pathlib import Path
+s=importlib.util.spec_from_file_location('public_flat_reader',sys.argv[1]);m=importlib.util.module_from_spec(s);sys.modules[s.name]=m;s.loader.exec_module(m)
+root=Path(sys.argv[2]);slug=sys.argv[3]
+assert m.main(['resolve','--root',str(root),'--reference','work-item:'+slug])==0
+assert m.work_item_dependency_state(root,slug)=='done'
+assert m.resolve_legacy_path(root,'work-items/backlog/'+slug+'.md').name==slug+'.md'
+m.check_readme(root)
+assert m.audit(root)==(), m.audit(root)
+print('FRESH_PUBLIC_READERS_OK')
+"""
+        reader = subprocess.run([sys.executable, "-B", "-c", code, str(ROOT / "scripts/mutate-work-item.py"),
+                                 str(self.root), self.slug], capture_output=True, text=True, timeout=240, check=False)
+        self.assertEqual(reader.returncode, 0, reader.stdout + reader.stderr)
+        self.assertIn("FRESH_PUBLIC_READERS_OK", reader.stdout)
+        board = self.root / "work-items/README.md"
+        board.write_bytes(b"Lawful later guide update.\n\n" + board.read_bytes())
+        m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+        self.assertEqual(action_bytes, (archive / m.LEGACY_COMPLETION_RECEIPT).read_bytes())
+        observed = m.observe_work_item_terminal(self.root, f"work-item:{self.slug}")
+        self.assertTrue(observed.acquisition_complete)
+        self.assertEqual(observed.terminal_instant, self.instant)
+        observed.verify()
+        with self.assertRaises(m.LifecycleError):
+            m.WorkItemTerminalObservation()
+        altered = json.loads(evidence); altered["operationId"] = "different-operation"
+        with self.assertRaisesRegex(m.LifecycleError, "replay request differs"):
+            m.close_item(self.root, self.slug, self.closure, self.instant,
+                         legacy_evidence_data=m._migration_receipt_bytes(altered), apply=True)
+        (archive / m.LEGACY_COMPLETION_METADATA).unlink()
+        with self.assertRaises(m.LifecycleError):
+            m.resolve_category(self.root, f"work-item:{self.slug}")
+        with self.assertRaises(m.LifecycleError):
+            m.resolve_legacy_path(self.root, (archive / "closure.md").relative_to(self.root).as_posix())
+
+    def test_board_before_action_receipt_is_pending_and_matching_reentry_recovers(self):
+        evidence, _arguments = self.legacy_request()
+        with self.assertRaisesRegex(m.LifecycleError, "interruption after derived board"):
+            m.close_item(self.root, self.slug, self.closure, self.instant,
+                         legacy_evidence_data=evidence, apply=True, inject_failure_at="after-board")
+        archive = self.root / "work-items/archive/2026-10" / self.slug
+        self.assertFalse(self.source.exists())
+        self.assertFalse((archive / m.LEGACY_COMPLETION_RECEIPT).exists())
+        for reader in (lambda: m.resolve_category(self.root, f"work-item:{self.slug}"),
+                       lambda: m.work_item_dependency_state(self.root, self.slug),
+                       lambda: m.render_readme_bytes(self.root)):
+            with self.assertRaises(m.LifecycleError):
+                reader()
+        observed = m.observe_work_item_terminal(self.root, f"work-item:{self.slug}")
+        self.assertFalse(observed.acquisition_complete)
+        self.assertIsNone(observed.terminal_disposition)
+        self.assertIsNone(observed.terminal_instant)
+        self.assertTrue(any("PENDING" in diagnostic for diagnostic in observed.diagnostics))
+        m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
+        self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+        m.check_readme(self.root)
+
+    def _finalization_cut(self, cut, *, caught=False):
+        evidence, _arguments = self.legacy_request()
+        intent_path = m._transition_intent_path(self.root, "flat-terminal-001")
+        save, remove = m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned
+        fired = []
+        def saved(path, intent, **kwargs):
+            result = save(path, intent, **kwargs)
+            source = next((b for b in intent["capturedBindings"] if b.get("imageIndex") is not None
+                and intent["preparedImages"][b["imageIndex"]]["disposition"] == "source"), None)
+            if not fired and cut == "saved-null" and source is not None and "holdPath" in source and source["holdPath"] is None:
+                fired.append(cut)
+                raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
+            return result
+        def removed(owner, name, image):
+            if cut == "last-cleanup" and owner.path == intent_path and name == intent_path.name:
+                fired.append(cut)
+                raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
+            result = remove(owner, name, image)
+            if cut == "remove-before-save" and name.startswith(f".{self.source.name}.") and name.endswith(".hold"):
+                fired.append(cut)
+                raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
+            return result
+        m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned = saved, removed
+        try:
+            with self.assertRaisesRegex(m.LifecycleError, cut):
+                m.close_item(self.root, self.slug, self.closure, self.instant,
+                    legacy_evidence_data=evidence, apply=True, inject_failure_at=None if caught else "b1-owned-fixture")
+        finally:
+            m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned = save, remove
+        self.assertEqual(fired, [cut])
+        return evidence, intent_path
+
+    def _assert_finalization_recovery(self, cut):
+        original = self.source.read_bytes()
+        _evidence, intent_path = self._finalization_cut(cut)
+        archive = self.root / "work-items/archive/2026-10" / self.slug
+        immutable = {path: path.read_bytes() for path in archive.rglob("*") if path.is_file()}
+        self.assertFalse(self.source.exists())
+        self.assertEqual((archive / "legacy-source" / self.source.name).read_bytes(), original)
+        with self.assertRaises(m.LifecycleError):
+            m.work_item_dependency_state(self.root, self.slug)
+        action = m.recover_transition(self.root, "flat-terminal-001")
+        self.assertEqual(action["status"], "settled")
+        self.assertFalse(intent_path.exists())
+        self.assertFalse(self.source.exists())
+        self.assertEqual(immutable, {path: path.read_bytes() for path in archive.rglob("*") if path.is_file()})
+        self.assertFalse(list(self.root.rglob("*.hold")))
+        self.assertFalse((self.root / ".scratch/work-items/legacy-flat-terminal").exists())
+        self.assertEqual(m.resolve_category(self.root, f"work-item:{self.slug}"), archive)
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
+        m.check_readme(self.root)
+
+    def test_b1_saved_null_hold_resumes_only_finalization(self):
+        self._assert_finalization_recovery("saved-null")
+
+    def test_b1_image_observation_never_creates_namespace_and_absence_has_complete_parents(self):
+        def namespace():
+            return {str(p.relative_to(self.root)): (p.is_dir(), m._lifecycle_file_identity(p.lstat()))
+                    for p in self.root.rglob("*")}
+        before = namespace()
+        missing = self.root / "missing-parent/deeper/leaf.bin"
+        with self.assertRaisesRegex(m.LifecycleError, "existing-parent acquisition failed"):
+            m._legacy_local_image(missing, maximum_bytes=0)
+        self.assertEqual(namespace(), before)
+        absent = self.root / "evidence/genuinely-absent.bin"
+        image, parents = m._legacy_local_image(absent, maximum_bytes=0)
+        self.assertIsNone(image)
+        self.assertEqual([p["path"] for p in parents], [str(p) for p in reversed(absent.parents)])
+        self.assertEqual(parents[-1]["identity"], list(m._lifecycle_file_identity(absent.parent.lstat())))
+        self.assertEqual(namespace(), before)
+        actual = self.root / "evidence/native-image.bin"
+        actual.write_bytes(b"real native image bytes\n")
+        image, parents = m._legacy_local_image(actual, maximum_bytes=len(b"real native image bytes\n"))
+        self.assertEqual(m._unb64(image["data"]), actual.read_bytes())
+        self.assertEqual(image["sha256"], digest(actual.read_bytes()).upper())
+        self.assertEqual(image["identity"]["value"], list(m._lifecycle_file_identity(actual.lstat())))
+
+    def test_b1_image_observation_drift_read_and_release_failures_are_not_absence(self):
+        owners = []
+        acquire, owned, read, close = (m.LifecycleWriteTarget._acquire_existing_parents,
+            m.LifecycleWriteTarget.owned_image, m.LifecycleWriteTarget._read_handle, m.LifecycleWriteTarget._close)
+        def retained(target):
+            owners.append(target)
+            return acquire(target)
+        m.LifecycleWriteTarget._acquire_existing_parents = retained
+        parent = self.root / "observation-parent"; parent.mkdir()
+        leaf = parent / "absent.bin"
+        moved = self.root / "fixture-held-parent"
+        def parent_drift(target, *args, **kwargs):
+            result = owned(target, *args, **kwargs)
+            if target.path == leaf:
+                parent.rename(moved); parent.mkdir()
+            return result
+        try:
+            unsafe = self.root / "non-directory-parent"
+            unsafe.write_bytes(b"an ordinary file cannot be a native parent\n")
+            before_unsafe = tuple((str(p.relative_to(self.root)), m._lifecycle_file_identity(p.lstat()))
+                                  for p in self.root.rglob("*"))
+            with self.assertRaisesRegex(m.LifecycleError, "existing-parent acquisition failed"):
+                m._legacy_local_image(unsafe / "leaf.bin", maximum_bytes=0)
+            self.assertEqual(before_unsafe, tuple((str(p.relative_to(self.root)), m._lifecycle_file_identity(p.lstat()))
+                                                  for p in self.root.rglob("*")))
+            m.LifecycleWriteTarget.owned_image = parent_drift
+            with self.assertRaisesRegex(m.LifecycleError, "existing-parent acquisition failed") as denied_parent:
+                m._legacy_local_image(leaf, maximum_bytes=0)
+            # The observed NT sharing contract prevents replacement while this
+            # parent is held. Preserve that guard, expose its cause, never mint a
+            # replacement or relax native access merely to force a drift fixture.
+            self.assertIsInstance(denied_parent.exception.__cause__, PermissionError)
+            self.assertTrue(parent.exists())
+            self.assertFalse(moved.exists())
+            self.assertFalse(leaf.exists())
+            m.LifecycleWriteTarget.owned_image = owned
+            current = parent / "present.bin"; current.write_bytes(b"present before native read\n")
+            replacement = parent / "replacement.bin"; replacement.write_bytes(current.read_bytes())
+            held = self.root / "fixture-held-leaf.bin"
+            fired = []
+            def leaf_drift(target, handle, maximum_bytes):
+                result = read(target, handle, maximum_bytes)
+                if target.path == current and not fired:
+                    fired.append(True); current.rename(held); replacement.rename(current)
+                return result
+            m.LifecycleWriteTarget._read_handle = leaf_drift
+            with self.assertRaisesRegex(m.LifecycleError, "changed during readback"):
+                m._legacy_local_image(current, maximum_bytes=len(b"present before native read\n"))
+            self.assertEqual(held.read_bytes(), current.read_bytes())
+            m.LifecycleWriteTarget._read_handle = read
+            def read_failure(target, handle, maximum_bytes):
+                raise OSError("fixture actual read failure")
+            m.LifecycleWriteTarget._read_handle = read_failure
+            with self.assertRaisesRegex(m.LifecycleError, "actual read failure"):
+                m._legacy_local_image(current, maximum_bytes=len(b"present before native read\n"))
+            m.LifecycleWriteTarget._read_handle = read
+            released = []
+            def release_failure(target, handle):
+                result = close(target, handle)
+                if not released:
+                    released.append(True)
+                    raise OSError("fixture release failure after real native close")
+                return result
+            m.LifecycleWriteTarget._close = release_failure
+            with self.assertRaisesRegex(m.LifecycleError, "handle release.*existing-parent acquisition failed.*release failure"):
+                m._legacy_local_image(self.root / "another-missing-parent/leaf.bin", maximum_bytes=0)
+        finally:
+            m.LifecycleWriteTarget._acquire_existing_parents = acquire
+            m.LifecycleWriteTarget.owned_image = owned
+            m.LifecycleWriteTarget._read_handle = read
+            m.LifecycleWriteTarget._close = close
+        self.assertTrue(owners)
+        self.assertTrue(all(not target._open and not target._directories for target in owners))
+
+    def test_b1_removed_hold_before_save_resumes_only_finalization(self):
+        self._assert_finalization_recovery("remove-before-save")
+
+    def test_b1_last_cleanup_resumes_without_expired_parent_identity(self):
+        self._assert_finalization_recovery("last-cleanup")
+
+    def test_b1_caught_late_failure_keeps_primary_and_never_claims_completed_rollback(self):
+        rollbacks = []
+        composer_type = m.LifecycleOutcomeComposer
+        original = composer_type.set_rollback
+        def recorded(composer, state):
+            rollbacks.append(state)
+            return original(composer, state)
+        composer_type.set_rollback = recorded
+        try:
+            _evidence, intent_path = self._finalization_cut("saved-null", caught=True)
+        finally:
+            composer_type.set_rollback = original
+        self.assertIn("incomplete", rollbacks)
+        self.assertNotIn("completed", rollbacks)
+        self.assertFalse(intent_path.exists())
+        self.assertFalse(self.source.exists())
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
+
+    def test_b1_remaining_native_objects_and_incomplete_proof_never_falsely_settle(self):
+        evidence, intent_path = self._finalization_cut("saved-null")
+        archive = self.root / "work-items/archive/2026-10" / self.slug
+        intent = json.loads(intent_path.read_bytes())
+        bindings = intent["capturedBindings"]
+        readme_binding = next(b for b in bindings if b.get("imageIndex") is not None
+            and intent["preparedImages"][b["imageIndex"]]["disposition"] == "readme")
+        hold = Path(readme_binding["holdPath"])
+        receipt = archive / m.LEGACY_COMPLETION_RECEIPT
+
+        def refusal(pattern):
+            before = intent_path.read_bytes()
+            with self.assertRaisesRegex(m.LifecycleError, pattern):
+                m.recover_transition(self.root, "flat-terminal-001")
+            self.assertEqual(intent_path.read_bytes(), before)
+            with self.assertRaises(m.LifecycleError):
+                m.work_item_dependency_state(self.root, self.slug)
+
+        def replace_file(path, raw, label, pattern):
+            image, _ = m._legacy_local_image(path, maximum_bytes=path.stat().st_size)
+            original = self.root / f"fixture-original-{label}.bin"
+            preserved = self.root / f"fixture-foreign-{label}.bin"
+            path.rename(original)
+            m._atomic_write(path, raw)
+            foreign, _ = m._legacy_local_image(path, maximum_bytes=len(raw))
+            self.assertNotEqual(foreign["identity"], image["identity"])
+            refusal(pattern)
+            self.assertEqual(path.read_bytes(), raw)
+            path.rename(preserved)
+            original.rename(path)
+            self.assertEqual(preserved.read_bytes(), raw)
+
+        # Each replacement keeps the original native object alive, so equal bytes
+        # cannot accidentally reuse its file ID. The fixture actor reconciles its
+        # own replacement; the lifecycle owner must preserve it and the intent.
+        replace_file(hold, hold.read_bytes(), "hold", "owned|image|native")
+        retained = archive / "legacy-source" / self.source.name
+        replace_file(retained, retained.read_bytes(), "postimage", "indeterminate finalization")
+        replace_file(receipt, b"{corrupt action bytes\n", "receipt", "indeterminate finalization")
+
+        # Missing binding plus absent current leaf must not pass None == None.
+        board = self.root / "work-items/README.md"
+        board_image, _ = m._legacy_local_image(board, maximum_bytes=board.stat().st_size)
+        board_saved = self.root / "fixture-current-board.bin"
+        board.rename(board_saved)
+        readme_binding["postImage"] = None
+        # The fixture actor changes its synthetic disk input; this is not a
+        # producer publication and conveys no plan or native-output authority.
+        intent_path.write_bytes(m._migration_receipt_bytes(intent))
+        refusal("indeterminate finalization")
+        board_saved.rename(board)
+        readme_binding["postImage"] = board_image
+        intent_path.write_bytes(m._migration_receipt_bytes(intent))
+        changed_request = json.loads(evidence)
+        changed_request["expectedReadmeSha256"] = "0" * 64
+        with self.assertRaisesRegex(m.LifecycleError, "pending replay request differs"):
+            m.close_item(self.root, self.slug, self.closure, self.instant,
+                legacy_evidence_data=json.dumps(changed_request).encode(), apply=True)
+
+        created = next(b for b in reversed(bindings) if b["nodeKind"] == "directory"
+            and b["role"] == "actually-created" and Path(b["path"]).is_relative_to(self.root / ".scratch")
+            and Path(b["path"]).exists())
+        parent = Path(created["path"])
+        original_parent = self.root / "fixture-original-parent"
+        foreign_parent = self.root / "fixture-foreign-parent"
+        parent.rename(original_parent)
+        foreign_binding = m._legacy_create_directory(parent)
+        self.assertNotEqual(foreign_binding["identity"], created["identity"])
+        with self.assertRaisesRegex(m.LifecycleError, "parent identity changed|stage parent changed"):
+            m.recover_transition(self.root, "flat-terminal-001")
+        self.assertTrue(parent.exists())
+        self.assertTrue(intent_path.exists())
+        parent.rename(foreign_parent)
+        original_parent.rename(parent)
+        foreign_child = parent / "fixture-foreign-child.bin"
+        foreign_child.write_bytes(b"fixture-owned child must survive recovery refusal\n")
+        with self.assertRaises((m.LifecycleError, OSError)):
+            m.recover_transition(self.root, "flat-terminal-001")
+        self.assertEqual(foreign_child.read_bytes(), b"fixture-owned child must survive recovery refusal\n")
+        self.assertTrue(intent_path.exists())
+        foreign_child.rename(self.root / "fixture-preserved-child.bin")
+        m.recover_transition(self.root, "flat-terminal-001")
+        self.assertFalse(intent_path.exists())
+        self.assertFalse(self.source.exists())
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
+        m.check_readme(self.root)
+
+    def test_creator_rollback_and_foreign_replacement_preserve_then_real_recovery(self):
+        evidence, _arguments = self.legacy_request()
+        before = self.canonical_images()
+        move = m.LifecycleTransaction.replace_directory
+        def refuse_promotion(transaction, path, destination, *, directory=True, **kwargs):
+            if directory:
+                raise m.LifecycleError("WI-TEST-PROMOTION", "actual pre-promotion fault")
+            return move(transaction, path, destination, directory=directory, **kwargs)
+        m.LifecycleTransaction.replace_directory = refuse_promotion
+        try:
+            with self.assertRaisesRegex(m.LifecycleError, "actual pre-promotion fault"):
+                m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+        finally:
+            m.LifecycleTransaction.replace_directory = move
+        self.assertEqual(before, self.canonical_images())
+        self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "open")
+        archive = self.root / "work-items/archive/2026-10" / self.slug
+        retained = archive / "legacy-source" / self.source.name
+        foreign = b"caller-owned replacement must be preserved\n"
+        def replace_after_promotion(transaction, path, destination, *, directory=True, **kwargs):
+            result = move(transaction, path, destination, directory=directory, **kwargs)
+            if directory:
+                m._atomic_write(retained, foreign)
+            return result
+        m.LifecycleTransaction.replace_directory = replace_after_promotion
+        try:
+            with self.assertRaisesRegex(m.LifecycleError, "compensation"):
+                m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+        finally:
+            m.LifecycleTransaction.replace_directory = move
+        self.assertEqual(retained.read_bytes(), foreign)
+        self.assertTrue(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+        with self.assertRaises(m.LifecycleError):
+            m.work_item_dependency_state(self.root, self.slug)
+        # The fixture actor reconciles its own injected object through a retained
+        # native image; the lifecycle owner never removes the foreign replacement.
+        foreign_image, _parents = m._legacy_local_image(retained, maximum_bytes=len(foreign))
+        preserved = self.root / "foreign-preserved.bin"
+        retained.rename(preserved)
+        action = m.recover_transition(self.root, "flat-terminal-001")
+        self.assertEqual(action["status"], "settled")
+        self.assertEqual(preserved.read_bytes(), foreign)
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
+        m.check_readme(self.root)
+
+    def test_shared_relocation_observation_excludes_both_actual_custodians(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        scan = m.os.scandir
+        probes = []
+        def observe(path):
+            transaction = m._CURRENT_LIFECYCLE_TRANSACTION.get()
+            movement = transaction._active_relocation if transaction is not None else None
+            if movement is not None and movement.directory and movement.handle is not None and movement._creation_observation_active and not probes:
+                source, target = movement.source_owner, movement.target_owner
+                self.assertIsNot(source, target)
+                self.assertEqual(source._creations, [])
+                identity = source._identity(movement.handle)
+                for action in (lambda: source._close(movement.handle),
+                               lambda: source._windows_delete(movement.handle),
+                               lambda: target._windows_rename(movement.handle, "fixture-refused", replace=False),
+                               lambda: target._close(target._parent),
+                               lambda: target.__exit__(None, None, None)):
+                    with self.assertRaisesRegex(m.LifecycleError, "active observation"):
+                        action()
+                self.assertEqual(source._identity(movement.handle), identity)
+                target._verify_owned()
+                probes.append(identity)
+            return scan(path)
+        with patch.object(m.os, "scandir", observe):
+            m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+        self.assertEqual(len(probes), 1)
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
+
+    def test_reconciled_placement_precedes_fallible_domain_receiving(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        before = self.canonical_images()
+        primary = m.LifecycleError("WI-TEST-PROGRESS", "first actual native progress receiving failure")
+        fired, writers, received = [], [], []
+        reconcile = m._PendingLegacyCompletionPlan.reconcile_progress_writer
+        check = m._PendingLegacyCompletionPlan.check_progress
+        class ReceivingFault:
+            def __get__(descriptor, plan, owner):
+                if plan is None:
+                    return descriptor
+                if "native_progress" not in plan.__dict__:
+                    raise AttributeError("native_progress")
+                return plan.__dict__["native_progress"]
+            def __set__(descriptor, plan, value):
+                transaction = getattr(plan, "transaction", None)
+                movement = transaction._active_relocation if transaction is not None else None
+                if (movement is not None and movement.directory and movement.handle is not None and not fired):
+                    fired.append(True)
+                    raise primary
+                plan.__dict__["native_progress"] = value
+        def receive_writer(plan, writer, failure):
+            writers.append(writer)
+            return reconcile(plan, writer, failure)
+        def check_actual_placement(plan, candidate):
+            if writers and writers[-1]._operation_owner is plan:
+                active = [record for record in writers[-1]._creations if not record.finished and record.placement is not None]
+                for record in active:
+                    self.assertEqual(record.phase, "final-placed")
+                    self.assertEqual(writers[-1]._identity(record.handle), record.identity)
+                    self.assertFalse(record.release_attempted)
+                    received.append(record)
+            return check(plan, candidate)
+        with patch.object(m._PendingLegacyCompletionPlan, "native_progress", ReceivingFault(), create=True), patch.object(
+                m._PendingLegacyCompletionPlan, "reconcile_progress_writer", receive_writer), patch.object(
+                m._PendingLegacyCompletionPlan, "check_progress", check_actual_placement):
+            with self.assertRaises(m.LifecycleError) as caught:
+                m.close_item(self.root, self.slug, self.closure, self.instant,
+                    legacy_evidence_data=evidence, apply=True)
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(fired, [True])
+        self.assertTrue(received)
+        self.assertEqual(self.canonical_images(), before)
+        self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+
+    def test_shared_relocation_progress_failures_use_real_outer_compensation(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        before = self.canonical_images()
+        # Each field is an actual distinct receiving prefix, all exercised at
+        # the same real directory advancement rather than an epoch/kind matrix.
+        fields = ("native_progress", "intent", "durable", "durable_image", "original_bindings")
+        for field in fields:
+            for boundary in ("before", "after"):
+                with self.subTest(field=field, boundary=boundary):
+                    primary = m.LifecycleError("WI-TEST-PROGRESS", f"actual {field} {boundary} receiving fault")
+                    fired = []
+                    class ReceivingFault:
+                        def __get__(descriptor, plan, owner):
+                            if plan is None:
+                                return descriptor
+                            if field not in plan.__dict__:
+                                raise AttributeError(field)
+                            return plan.__dict__[field]
+                        def __set__(descriptor, plan, value):
+                            movement = plan.transaction._active_relocation
+                            selected = movement is not None and movement.directory and movement.handle is not None and not fired
+                            if selected and boundary == "before":
+                                fired.append(True)
+                                raise primary
+                            plan.__dict__[field] = value
+                            if selected and boundary == "after":
+                                fired.append(True)
+                                raise primary
+                    with patch.object(m._PendingLegacyCompletionPlan, field, ReceivingFault(), create=True):
+                        with self.assertRaisesRegex(m.LifecycleError, "actual .* receiving fault"):
+                            m.close_item(self.root, self.slug, self.closure, self.instant,
+                                legacy_evidence_data=evidence, apply=True)
+                    self.assertEqual(fired, [True])
+                    self.assertEqual(self.canonical_images(), before)
+                    self.assertTrue(self.source.is_file())
+                    self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+        derive = m._PendingLegacyCompletionPlan._derive_relocation_progress
+        primary = m.LifecycleError("WI-TEST-PROGRESS", "actual progress derivation fault")
+        fired = []
+        def fail_derivation(plan, candidate, movement, binding, field, **kwargs):
+            if movement.directory and not fired:
+                self.assertFalse(movement.source.exists())
+                self.assertTrue(movement.destination.exists())
+                fired.append(True)
+                raise primary
+            return derive(plan, candidate, movement, binding, field, **kwargs)
+        with patch.object(m._PendingLegacyCompletionPlan, "_derive_relocation_progress", fail_derivation):
+            with self.assertRaisesRegex(m.LifecycleError, "actual progress derivation fault"):
+                m.close_item(self.root, self.slug, self.closure, self.instant,
+                    legacy_evidence_data=evidence, apply=True)
+        self.assertEqual(fired, [True])
+        self.assertEqual(self.canonical_images(), before)
+        self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+
+    def test_shared_relocation_actual_publication_prefixes_keep_joint_receiving(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        before = self.canonical_images()
+        prepared_fields = ("forward_evidence", "forward_observations", "forward_observation_values")
+        live_fields = ("_binding_evidence", "_retained_observations")
+        for field in (*prepared_fields, *live_fields):
+            for boundary in ("before", "after"):
+                with self.subTest(field=field, boundary=boundary):
+                    primary = m.LifecycleError("WI-TEST-PREFIX", f"actual {field} {boundary} publication fault")
+                    fired, placed = [], []
+                    class PreparedPrefix:
+                        def __init__(descriptor, name):
+                            descriptor.name = name
+                        def __get__(descriptor, effect, owner):
+                            return descriptor if effect is None else effect.__dict__.get(descriptor.name)
+                        def __set__(descriptor, effect, value):
+                            owner = effect.owner
+                            plan = getattr(owner, "_operation_owner", None)
+                            movement = effect.transaction._active_relocation
+                            selected = (isinstance(plan, m._PendingLegacyCompletionPlan) and movement is not None
+                                and movement.directory and effect.destination == plan.intent_path)
+                            reject = selected and descriptor.name == field and not fired
+                            if reject and boundary == "before":
+                                fired.append(True); raise primary
+                            effect.__dict__[descriptor.name] = value
+                            if selected and descriptor.name == "forward_observation_values":
+                                placed[:] = [effect]
+                            if reject and boundary == "after":
+                                fired.append(True); raise primary
+                    setter = m.LifecycleTransaction.__setattr__
+                    def live_prefix(transaction, name, value):
+                        reject = name == field and placed and not fired
+                        if reject and boundary == "before":
+                            fired.append(True); raise primary
+                        setter(transaction, name, value)
+                        if reject and boundary == "after":
+                            fired.append(True); raise primary
+                    with contextlib.ExitStack() as stack:
+                        for name in prepared_fields:
+                            stack.enter_context(patch.object(m._PreparedLifecycleEffect, name, PreparedPrefix(name)))
+                        stack.enter_context(patch.object(m.LifecycleTransaction, "__setattr__", live_prefix))
+                        with self.assertRaisesRegex(m.LifecycleError, "actual .* publication fault"):
+                            m.close_item(self.root, self.slug, self.closure, self.instant,
+                                legacy_evidence_data=evidence, apply=True)
+                    self.assertEqual(fired, [True])
+                    self.assertEqual(self.canonical_images(), before)
+                    self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+
+    def test_shared_relocation_real_save_fsync_retain_and_unavailable_recovery(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        before = self.canonical_images()
+        save = m._legacy_save_intent
+        fsync = m._transition_fsync_directory
+        retain = m._PendingLegacyCompletionPlan.retain_progress
+        for boundary in ("placed", "fsync", "retain"):
+            with self.subTest(boundary=boundary):
+                primary = m.LifecycleError("WI-TEST-PROGRESS", f"actual {boundary} progress failure")
+                fired = []
+                def selected():
+                    transaction = m._CURRENT_LIFECYCLE_TRANSACTION.get()
+                    movement = transaction._active_relocation if transaction is not None else None
+                    return movement is not None and movement.directory and movement.progress_before is not None and not fired
+                def after_save(path, intent, **kwargs):
+                    result = save(path, intent, **kwargs)
+                    if boundary == "placed" and selected():
+                        fired.append(True); raise primary
+                    return result
+                def fail_fsync(path):
+                    if boundary == "fsync" and selected():
+                        fired.append(True); raise primary
+                    return fsync(path)
+                def fail_retain(plan, intent):
+                    if boundary == "retain" and selected():
+                        fired.append(True); raise primary
+                    return retain(plan, intent)
+                with patch.object(m, "_legacy_save_intent", after_save), patch.object(m, "_transition_fsync_directory", fail_fsync), patch.object(m._PendingLegacyCompletionPlan, "retain_progress", fail_retain):
+                    with self.assertRaisesRegex(m.LifecycleError, "actual .* progress failure"):
+                        m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+                self.assertEqual(fired, [True])
+                self.assertEqual(self.canonical_images(), before)
+                self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+        primary = m.LifecycleError("WI-TEST-PROGRESS", "actual placed progress with unavailable restoring writer")
+        source_identity = m._lifecycle_file_identity(self.source.lstat())
+        source_bytes = self.source.read_bytes()
+        bundles = []
+        finalize = m.LifecycleOutcomeComposer.finalize
+        def capture_outcome(composer):
+            bundle = finalize(composer)
+            bundles.append(bundle)
+            return bundle
+        failed = []
+        def unavailable_restore(path, intent, **kwargs):
+            transaction = m._CURRENT_LIFECYCLE_TRANSACTION.get()
+            movement = transaction._active_relocation if transaction is not None else None
+            if movement is not None and movement.directory and movement.progress_before is not None:
+                if failed:
+                    raise m.LifecycleError("WI-TEST-RESTORE", "restoring writer unavailable")
+                result = save(path, intent, **kwargs)
+                failed.append(True)
+                raise primary
+            return save(path, intent, **kwargs)
+        with patch.object(m, "_legacy_save_intent", unavailable_restore), patch.object(m.LifecycleOutcomeComposer, "finalize", capture_outcome):
+            with self.assertRaisesRegex(m.LifecycleError, "actual placed progress") as caught:
+                m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+        self.assertIs(caught.exception, primary)
+        self.assertIs(bundles[-1].primary, primary)
+        self.assertEqual(bundles[-1].rollback, "incomplete")
+        self.assertEqual(failed, [True])
+        self.assertTrue(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+        self.assertTrue(self.source.is_file())
+        intent_path = m._transition_intent_path(self.root, "flat-terminal-001")
+        pending_bytes = intent_path.read_bytes()
+        pending = json.loads(pending_bytes)
+        stage = self.root / ".scratch/work-items/legacy-flat-terminal" / pending["operationId"] / "archive"
+        archive = self.root / pending["archivePath"]
+        self.assertTrue(stage.is_dir())
+        stage_identity = m._lifecycle_file_identity(stage.lstat())
+        self.assertFalse(archive.exists())
+        self.assertTrue((stage / m.LEGACY_COMPLETION_METADATA).is_file())
+        self.assertFalse((stage / m.LEGACY_COMPLETION_RECEIPT).exists())
+        self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "open")
+        self.assertEqual(intent_path.read_bytes(), pending_bytes)
+        self.assertEqual(self.source.read_bytes(), source_bytes)
+        self.assertEqual(m._lifecycle_file_identity(self.source.lstat()), source_identity)
+        self.assertEqual(m._lifecycle_file_identity(stage.lstat()), stage_identity)
+        self.assertFalse(archive.exists())
+
+    def test_shared_relocation_failed_close_keeps_outer_rollback_incomplete(self):
+        from unittest.mock import patch
+        if m.os.name != "nt":
+            self.skipTest("held-source close receiving is the selected Windows contract")
+        evidence, _arguments = self.legacy_request()
+        derive = m._PendingLegacyCompletionPlan._derive_relocation_progress
+        close = m.LifecycleWriteTarget._close
+        rollback = m.LifecycleOutcomeComposer.set_rollback
+        primary = m.LifecycleError("WI-TEST-PROGRESS", "actual progress primary before failed close")
+        failed = []
+        retained = []
+        states = []
+        def fail_derivation(plan, candidate, movement, binding, field, **kwargs):
+            if movement.directory and not failed:
+                failed.append(plan.transaction)
+                raise primary
+            return derive(plan, candidate, movement, binding, field, **kwargs)
+        def fail_close(owner, handle):
+            transaction = owner._operation_transaction()
+            movement = transaction._active_relocation if transaction is not None else None
+            if (movement is not None and owner is movement.source_owner
+                    and handle == movement.handle and not retained):
+                retained.append((owner, handle, owner._identity(handle)))
+                raise OSError("actual held native close refusal")
+            return close(owner, handle)
+        def receive_rollback(composer, state):
+            states.append(state)
+            return rollback(composer, state)
+        try:
+            with patch.object(m._PendingLegacyCompletionPlan, "_derive_relocation_progress", fail_derivation), patch.object(m.LifecycleWriteTarget, "_close", fail_close), patch.object(m.LifecycleOutcomeComposer, "set_rollback", receive_rollback):
+                with self.assertRaisesRegex(m.LifecycleError, "actual progress primary before failed close"):
+                    m.close_item(self.root, self.slug, self.closure, self.instant,
+                        legacy_evidence_data=evidence, apply=True)
+            self.assertEqual(len(failed), 1)
+            self.assertEqual(len(retained), 1)
+            self.assertTrue(failed[0]._unsettled_relocations)
+            self.assertEqual(retained[0][0]._identity(retained[0][1]), retained[0][2])
+            self.assertIn("incomplete", states)
+            self.assertNotIn("completed", states)
+            self.assertTrue(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+            self.assertTrue(self.source.is_file())
+        finally:
+            for owner, handle, _identity in retained:
+                close(owner, handle)
+
+    def test_real_bug_incoming_documents_and_distinct_same_basename_targets(self):
+        spec = importlib.util.spec_from_file_location("flat_terminal_bug_producer", ROOT / "tests/test_mutate_work_item.py")
+        producer = importlib.util.module_from_spec(spec); sys.modules[spec.name] = producer; spec.loader.exec_module(producer)
+        bug = producer.seed_context_bug(self.root, self.slug, "2026-10-11-flat-bug")
+        bug.write_bytes(bug.read_bytes() + f"[Source](../backlog/{self.slug}.md#accepted)\n".encode())
+        bug_before = bug.read_bytes()
+        manifest = {"schemaVersion": 1, "workItem": self.slug, "closedAt": self.instant, "bugs": [{
+            "id": bug.stem, "action": "terminalize", "inputSha256": digest(bug_before),
+            "status": "fixed", "resolution": "Accepted original resolution", "evidence": "Original proof"}]}
+        self.bug_manifest.write_bytes(m._migration_receipt_bytes(manifest))
+        second = self.root / "evidence/second/proof.md"; second.parent.mkdir(); second.write_bytes(b"Distinct second proof bytes\n")
+        self.source.write_bytes(self.source.read_bytes() + b"[Second](../../evidence/second/proof.md#second)\n")
+        document = self.root / "work-items/design.md"
+        document.write_bytes((f"Logical work-item:{self.slug}\n[Source](backlog/{self.slug}.md#accepted)\n"
+                              f"Literal work-items/backlog/{self.slug}.md\n").encode())
+        m.refresh_readme(self.root)
+        evidence, _arguments = self.legacy_request()
+        payload = json.loads(evidence); payload["historySelection"]["artifacts"].append(self.reference(second))
+        evidence = m._migration_receipt_bytes(payload)
+        archive = m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+        metadata = json.loads((archive / m.LEGACY_COMPLETION_METADATA).read_bytes())
+        rows = [row for row in metadata["custodyMap"] if row["originalPath"].endswith("proof.md")]
+        self.assertEqual(len(rows), 2)
+        self.assertNotEqual(rows[0]["preservedPath"], rows[1]["preservedPath"])
+        self.assertNotEqual(rows[0]["sha256"], rows[1]["sha256"])
+        for row in rows:
+            self.assertEqual(digest((archive / row["preservedPath"]).read_bytes()), row["sha256"])
+        final_bug = self.root / "work-items/bugs/archive/2026-10" / bug.name
+        self.assertFalse(bug.exists())
+        self.assertIn("legacy-source", final_bug.read_text())
+        self.assertIn("legacy-source", document.read_text())
+        bug_receipt = json.loads((archive / m.BUG_DISPOSITIONS_RECEIPT).read_bytes())
+        self.assertEqual(bug_receipt["schemaVersion"], 1)
+        self.assertEqual(bug_receipt["bugs"][0]["afterSha256"], digest(final_bug.read_bytes()))
+        self.assertEqual(bug_receipt["linkMaintenance"]["consumers"][0]["authority"], "selected-terminalize")
+        self.assertTrue(any("work-item:" in row["value"] for row in json.loads(
+            (archive / m.LEGACY_COMPLETION_RECEIPT).read_bytes())["links"]["inventory"]["references"]))
+        m.check_readme(self.root)
+
+    def test_ordinary_close_terminalized_link_overlap_contract_remains(self):
+        spec = importlib.util.spec_from_file_location("flat_terminal_ordinary_guard", ROOT / "tests/test_mutate_work_item.py")
+        guard = importlib.util.module_from_spec(spec); sys.modules[spec.name] = guard; spec.loader.exec_module(guard)
+        guard.test_close_terminalize_link_overlap_uses_final_consumer_location(self.root / "ordinary-guard")
+
+    def component_settled_record(self, binding=None):
+        # Explicit component data, not a public physical-close or helper frame.
+        supplied_history = binding is not None
+        binding = binding or self.captured_history(False)
+        selected_paths = ({self.root / row.original_path for row in binding.files} if supplied_history
+                          else {self.source, self.accepted, self.root / "evidence/proof.md"})
+        # Recapture through the exact emitting owner, before effects. Module
+        # aliases used by genuine fixture builders retain their own seal tokens.
+        files = [m._capture_file_snapshot(path, failure_id="WI-COMPONENT-ORIGINAL") for path in selected_paths]
+        directories = [m._capture_directory_snapshot(self.root / relative, failure_id="WI-COMPONENT-ORIGINAL")
+                       for relative in binding.directory_members]
+        live = m.AcquiredWorkItemInputV1(self.root,
+            tuple(m.CapturedInputAssociationV1(row, row) for row in files),
+            tuple(m.CapturedInputAssociationV1(row, row) for row in directories))
+        cells = []
+        for index, path in enumerate(sorted(selected_paths)):
+            reference = self.reference(path)
+            preserved = (f"legacy-source/{path.name}" if path == self.source else
+                         f"history/{index}/{path.name}" if supplied_history else path.relative_to(self.root).as_posix())
+            cells.append({"originalPath": reference["path"], "preservedPath": preserved,
+                          "byteLength": reference["byteLength"], "sha256": reference["sha256"]})
+        source = next(row for row in cells if row["originalPath"] == self.source.relative_to(self.root).as_posix())
+        accepted = {}
+        for role in ("admission", "completion", "criteria", "historyAcquisition"):
+            locator = (binding.criteria.acquisition_reference if role == "historyAcquisition" else binding.criteria.criteria_reference)
+            cell = next(row for row in cells if row["originalPath"] == locator)
+            accepted[role] = {"originalPath": cell["originalPath"], "path": cell["preservedPath"],
+                              "byteLength": cell["byteLength"], "sha256": cell["sha256"]}
+        history = {"originalSourcePath": source["originalPath"], "originalItemBase": binding.original_item_base,
+            "originalLedgerPath": binding.original_ledger_path,
+            "criteria": {"criteriaReference": binding.criteria.criteria_reference,
+                         "acquisitionReference": binding.criteria.acquisition_reference,
+                         "ledgerRequired": binding.criteria.ledger_required, "ownerContract": binding.criteria.owner_contract},
+            "absentPaths": list(binding.absent_paths)}
+        proof = next((row for row in cells if row["originalPath"] == "evidence/proof.md"), None)
+        required = [] if supplied_history else [{"sourcePath": source["preservedPath"], "sourceSha256": source["sha256"],
+            "originalHref": "../../evidence/proof.md?revision=1#accepted", "originalTarget": "evidence/proof.md",
+            "retainedTarget": proof["preservedPath"], "targetByteLength": proof["byteLength"], "targetSha256": proof["sha256"],
+            "suffix": "?revision=1#accepted", "acceptanceEvidence": {key: accepted["completion"][key] for key in ("path", "byteLength", "sha256")}}]
+        metadata_bytes = m._legacy_work_item_metadata_bytes(live, operation_id="component-origin-001", work_item=self.slug,
+            terminal_instant=self.instant, source=source, accepted_evidence=accepted, history_binding=history,
+            custody_map=cells, required_evidence_links=required)
+        metadata = json.loads(metadata_bytes)
+        archive = self.root / "work-items/archive/2026-10" / self.slug
+        archive.mkdir(parents=True)
+        for cell in cells:
+            destination = archive / cell["preservedPath"]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(live.files[self.root / cell["originalPath"]].original.data)
+        (archive / m.LEGACY_COMPLETION_METADATA).write_bytes(metadata_bytes)
+        (archive / "closure.md").write_bytes(self.closure)
+        manifest = m._migration_receipt_bytes({"schemaVersion": 1, "workItem": self.slug, "closedAt": self.instant, "bugs": []})
+        (archive / m.BUG_DISPOSITIONS_MANIFEST).write_bytes(manifest)
+        board_hash = digest((self.root / "work-items/README.md").read_bytes())
+        bug_receipt = m._bug_disposition_receipt_bytes(self.root, self.slug, self.instant, manifest, self.closure, (), board_hash)
+        (archive / m.BUG_DISPOSITIONS_RECEIPT).write_bytes(bug_receipt)
+        snapshots = [m._capture_file_snapshot(path, failure_id="WI-COMPONENT-CURRENT") for path in archive.rglob("*") if path.is_file()]
+        action = {"schemaVersion": 1, "owner": m.LEGACY_COMPLETION_OWNER, "kind": m.LEGACY_COMPLETION_KIND,
+            "status": "settled", "operationId": "component-origin-001", "workItem": self.slug, "terminalInstant": self.instant,
+            "requestSha256": digest(b"explicit synthetic component record"), "metadataSha256": digest(metadata_bytes),
+            "archivePath": archive.relative_to(self.root).as_posix(), "archiveMembershipSha256": m._legacy_archive_membership(snapshots, archive),
+            "closureInputSha256": digest(self.closure), "closureSha256": digest(self.closure), "bugDispositionReceiptSha256": digest(bug_receipt),
+            "historySelectionSha256": digest(m._projection_json(metadata["historyBinding"])),
+            "links": {"inventory": {"result": "clear", "references": []}, "consumers": []},
+            "readme": {"beforeSha256": board_hash, "afterSha256": board_hash},
+            "provenance": {"actor": "explicit synthetic component fixture", "actualExecutionPath": "manual-equivalent",
+                           "targetImplementationSha256": None, "runtimeMetadata": "unspecified by runtime"}}
+        (archive / m.LEGACY_COMPLETION_RECEIPT).write_bytes(m._legacy_work_item_action_receipt_bytes(action))
+        for path in selected_paths:
+            path.unlink()
+        for path in sorted((path for path in self.root.rglob("*") if path.is_dir() and not path.is_relative_to(archive)),
+                           key=lambda path: len(path.parts), reverse=True):
+            if not any(path.iterdir()):
+                path.rmdir()
+        return archive, metadata, action
+
+    def test_settled_constructor_protocol_and_actual_observer_after_originals_disappear(self):
+        archive, metadata, _action = self.component_settled_record()
+        port = m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}")
+        self.assertEqual(port.metadata["schemaVersion"], 2)
+        self.assertFalse(self.source.exists())
+        self.assertEqual(port.origin_entry(self.source).kind, "file")
+        self.assertIsNone(port.origin_entry(self.source.parent / "agent-runs.jsonl"))
+        with self.assertRaisesRegex(m.LifecycleError, "topology was not acquired"):
+            port.origin_entry(self.root / ".scratch/unobserved/file")
+        binding = v.bind_settled_work_item_history(port)
+        observed = v.observe_captured_work_item_history(binding)
+        self.assertTrue(observed.acquisition_complete, observed.diagnostics)
+        self.assertEqual(observed.diagnostics, ())
+        self.assertEqual(observed.selection, "absent")
+        self.assertIsNone(observed.obligations)
+        with self.assertRaises(m.LifecycleError):
+            m.SettledWorkItemHistoryInputV1()
+        copied = object.__new__(m.SettledWorkItemHistoryInputV1)
+        for key in port.__dataclass_fields__:
+            object.__setattr__(copied, key, getattr(port, key))
+        with self.assertRaisesRegex(m.LifecycleError, "not minted for this acquisition"):
+            copied.verify()
+        source = port.current_snapshot(self.source)
+        self.assertEqual(source.path, archive / metadata["source"]["preservedPath"])
+
+    def test_fresh_process_origin_constructor_and_held_native_replacement(self):
+        archive, metadata, _action = self.component_settled_record()
+        code = """import hashlib,importlib.util,json,sys
+from pathlib import Path
+source=Path(sys.argv[1]);spec=importlib.util.spec_from_file_location('fresh_settled_owner',source)
+m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)
+root=Path(sys.argv[2]);port=m.acquire_settled_work_item_history(root,sys.argv[3]);v=m._validator_module()
+observed=v.observe_captured_work_item_history(v.bind_settled_work_item_history(port))
+assert observed.acquisition_complete and not observed.diagnostics, observed.diagnostics
+assert not (root/port.metadata['source']['originalPath']).exists()
+print(json.dumps({'moduleSha256':hashlib.sha256(source.read_bytes()).hexdigest(),'metadataVersion':port.metadata['schemaVersion'],
+ 'selection':observed.selection,'acquisitionComplete':observed.acquisition_complete,'originalAbsent':True}))
+"""
+        result = subprocess.run([sys.executable, "-B", "-c", code, str(ROOT / "scripts/mutate-work-item.py"),
+            str(self.root), f"work-item:{self.slug}"], capture_output=True, text=True, timeout=90, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["moduleSha256"], digest((ROOT / "scripts/mutate-work-item.py").read_bytes()))
+        self.assertEqual(payload["metadataVersion"], 2)
+        self.assertEqual(payload["selection"], "absent")
+        self.assertTrue(payload["originalAbsent"])
+        port = m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}")
+        retained_source = archive / metadata["source"]["preservedPath"]
+        temporary = retained_source.with_name("same-byte-native-replacement")
+        temporary.write_bytes(retained_source.read_bytes())
+        retained_source.unlink()
+        temporary.replace(retained_source)
+        with self.assertRaisesRegex(m.LifecycleError, "changed"):
+            port.verify()
+        current = m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}")
+        current.verify()
+
+    def test_pending_partial_tampered_origin_and_independent_reference_refuse(self):
+        archive, metadata, _action = self.component_settled_record()
+        expected = {"path": metadata["acceptedEvidence"]["completion"]["path"],
+                    "byteLength": metadata["acceptedEvidence"]["completion"]["byteLength"], "sha256": "0" * 64}
+        with self.assertRaisesRegex(m.LifecycleError, "independently bound"):
+            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}", expected_references=[expected])
+        receipt = archive / m.LEGACY_COMPLETION_RECEIPT
+        raw_receipt = receipt.read_bytes()
+        receipt.unlink()
+        with self.assertRaisesRegex(m.LifecycleError, "settlement receipt is missing"):
+            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}")
+        receipt.write_bytes(raw_receipt)
+        pending = m._transition_intent_path(self.root, "component-origin-001")
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        pending.write_bytes(b"explicit component pending marker\n")
+        with self.assertRaisesRegex(m.LifecycleError, "pending action"):
+            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}")
+        pending.unlink()
+        path = archive / m.LEGACY_COMPLETION_METADATA
+        raw_metadata = path.read_bytes()
+        changed = json.loads(raw_metadata)
+        changed["historyBinding"]["origin"]["directories"][0]["members"] = []
+        path.write_bytes(m._migration_receipt_bytes(changed))
+        with self.assertRaisesRegex(m.LifecycleError, "immutable metadata differs"):
+            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}")
+        path.write_bytes(raw_metadata)
+        (archive / metadata["acceptedEvidence"]["criteria"]["path"]).unlink()
+        with self.assertRaises(m.LifecycleError):
+            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}")
+
+    def historical_fixture(self):
+        spec = importlib.util.spec_from_file_location("settled_origin_history_fixtures",
+                                                    ROOT / "tests/test_legacy_flat_history_binding.py")
+        producer = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = producer
+        spec.loader.exec_module(producer)
+        fixture = producer.CapturedHistoryBindingTests()
+        self.root = self.root / "genuine-owner-history"
+        self.root.mkdir()
+        fixture.root, fixture.owner = self.root, producer.v.load_lifecycle_owner()
+        return fixture
+
+    def local_binding(self, binding):
+        criteria = binding.criteria
+        return v.CapturedWorkItemHistoryBindingV1(binding.repository_root, binding.work_item,
+            binding.original_source_path, binding.original_item_base, binding.original_ledger_path,
+            v.HistoricalLedgerCriteriaV1(criteria.criteria_reference, criteria.acquisition_reference,
+                                         criteria.ledger_required, criteria.owner_contract),
+            tuple(v.CapturedHistoryFileV1(row.original_path, row.snapshot, row.byte_length, row.sha256)
+                  for row in binding.files), binding.absent_paths, binding.directory_members, binding.acquired_input)
+
+    def test_settled_origin_preserves_genuine_archived_h1_group_and_old_closed(self):
+        fixture = self.historical_fixture()
+        paths, _receipt = fixture.settled_archived_h1()
+        binding = self.local_binding(fixture.binding())
+        self.source, self.slug = fixture.source, binding.work_item
+        original = v._acquire_captured_history_item(binding)
+        original_closed = (original / "closure.md").read_bytes()
+        self.assertIn(b"Closed: 2026-09-10T01:00:00Z", original_closed)
+        before = v.observe_captured_work_item_history(binding)
+        group_before = v._load_effective_ledger_group(v.repo_root_for(original))
+        self.assertTrue(before.acquisition_complete, before.diagnostics)
+        self.assertTrue(before.obligations.open_revise)
+        self.component_settled_record(binding)
+        for row in binding.files:
+            self.assertFalse((self.root / row.original_path).exists(), row.original_path)
+        port = m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}")
+        settled = v.bind_settled_work_item_history(port)
+        selected = v._acquire_captured_history_item(settled)
+        self.assertEqual((selected / "closure.md").read_bytes(), original_closed)
+        after = v.observe_captured_work_item_history(settled)
+        self.assertEqual(before, after)
+        group_after = v._load_effective_ledger_group(v.repo_root_for(selected))
+        for path in paths:
+            self.assertEqual(group_before[path].rows, group_after[path].rows)
+            self.assertEqual(group_before[path].view, group_after[path].view)
+        port.verify()
+
+    def test_settled_origin_actual_transfer_and_native_retained_preimage_consumers(self):
+        fixture = self.historical_fixture()
+        spec = importlib.util.spec_from_file_location("settled_origin_transfer_producer",
+                                                    ROOT / "tests/test_legacy_obligation_migration.py")
+        producer = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = producer
+        spec.loader.exec_module(producer)
+        request = producer.native_transfer_fixture(self.root)
+        receipt = producer.run_transfer(request)
+        self.assertEqual(receipt["status"], "settled")
+        fixture.item = self.root / receipt["archivePath"]
+        fixture.source = self.root / "evidence" / f"{request['slug']}.md"
+        fixture.source.parent.mkdir()
+        fixture.source.write_bytes(b"Original transfer source identity evidence\n")
+        (fixture.item / "acquisition.md").write_bytes(b"Actual public owner settled transfer acquisition\n")
+        payload = fixture.item / "retained/payload.bin"
+        payload.parent.mkdir()
+        payload.write_bytes(b"actual retained native preimage\n")
+        binding = self.local_binding(fixture.binding())
+        self.source, self.slug = fixture.source, binding.work_item
+        def consume(selected):
+            item = v._acquire_captured_history_item(selected)
+            root, errors = v.repo_root_for(item), []
+            receipts = v._transfer_receipts(root, errors)
+            pointer = v.resolve_scratch_pointer(item, "retained/payload.bin", "canonicalPointer", "retained-run", errors)
+            self.assertEqual(errors, [])
+            native = v.capture_retained_preimage_payload(item, {"ref": "retained/payload.bin"},
+                {"byteCount": len(b"actual retained native preimage\n"), "sha256": digest(b"actual retained native preimage\n")})
+            return ({operation: (path.relative_to(root).as_posix(), value, archive.relative_to(root).as_posix())
+                     for operation, (path, value, archive) in receipts.items()}, pointer.read_bytes(), native.data, native)
+        before = consume(binding)
+        self.assertIn(request["operationId"], before[0])
+        self.component_settled_record(binding)
+        port = m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}")
+        after = consume(v.bind_settled_work_item_history(port))
+        self.assertEqual(before[:3], after[:3])
+        self.assertEqual(after[3].path, port.current_snapshot(payload).path)
+        m._verify_captured_file(after[3], failure_id="WI-COMPONENT-CURRENT", acquired_input=port)
+        self.assertFalse(payload.exists())
+
+    def test_historical_physical_link_images_keep_href_suffix_and_independent_literal(self):
+        consumer = self.root / "work-items/design.md"
+        literal = self.source.relative_to(self.root / "work-items").as_posix()
+        suffix_href = f"{literal}?rev=4#{literal}"
+        consumer.write_bytes((f"Logical work-item:{self.slug}\n"
+                              f"[exact]({literal})\n[suffixed]({suffix_href})\n"
+                              f"Literal `{literal}`\n").encode())
+        inventory = m._incoming_link_result(
+            self.root, {self.source}, f"work-item:{self.slug}", strict_consumer_reads=True,
+            literal_path_references=(literal,),
+        )
+        self.assertEqual(inventory["result"], "unmapped")
+        self.assertEqual([row["value"] for row in inventory["references"] if row["kind"] == "physical"],
+                         [literal, suffix_href])
+        before = consumer.read_bytes()
+        archive, metadata, action = self.component_settled_record()
+        target = archive / metadata["source"]["preservedPath"]
+        href_after = m.os.path.relpath(target, consumer.parent).replace(m.os.sep, "/")
+        literal_after = target.relative_to(self.root).as_posix()
+        after = before.replace(
+            f"[exact]({literal})".encode(), f"[exact]({href_after})".encode()
+        ).replace(
+            f"[suffixed]({suffix_href})".encode(),
+            f"[suffixed]({href_after}?rev=4#{literal_after})".encode(),
+        ).replace(
+            f"Literal `{literal}`".encode(), f"Literal `{literal_after}`".encode(),
+        )
+        action["links"] = {"inventory": inventory, "consumers": [{"path": "work-items/design.md",
+            "before": m._b64(before), "after": m._b64(after), "beforeSha256": digest(before), "afterSha256": digest(after)}]}
+        receipt = archive / m.LEGACY_COMPLETION_RECEIPT
+        receipt.write_bytes(m._legacy_work_item_action_receipt_bytes(action))
+        valid_receipt = receipt.read_bytes()
+        consumer.write_bytes(after + b"Lawful later consumer edit.\n")
+        m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}").verify()
+
+        # The suffixed href still contains the expected path spelling; it cannot
+        # satisfy the separate bare occurrence from the same aggregate row.
+        bad_action = json.loads(json.dumps(action))
+        bad_after = after.replace(f"Literal `{literal_after}`\n".encode(), b"")
+        bad_row = bad_action["links"]["consumers"][0]
+        bad_row["after"] = m._b64(bad_after)
+        bad_row["afterSha256"] = digest(bad_after)
+        receipt.write_bytes(m._legacy_work_item_action_receipt_bytes(bad_action))
+        with self.assertRaises(m.LifecycleError):
+            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}").verify()
+        receipt.write_bytes(valid_receipt)
+
+        bad_action = json.loads(json.dumps(action))
+        bad_after = after.replace(f"Logical work-item:{self.slug}\n".encode(), b"")
+        bad_row = bad_action["links"]["consumers"][0]
+        bad_row["after"] = m._b64(bad_after)
+        bad_row["afterSha256"] = digest(bad_after)
+        receipt.write_bytes(m._legacy_work_item_action_receipt_bytes(bad_action))
+        with self.assertRaises(m.LifecycleError):
+            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}").verify()
+        receipt.write_bytes(valid_receipt)
+
+        bad_action = json.loads(json.dumps(action))
+        bad_action["links"]["consumers"][0]["path"] = "design.md"
+        receipt.write_bytes(m._legacy_work_item_action_receipt_bytes(bad_action))
+        with self.assertRaises(m.LifecycleError) as caught:
+            m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}").verify()
+        self.assertEqual(caught.exception.failure_id, "WI-LEGACY-COMPLETION-CUSTODY")
+
+    def test_historical_link_base_overlap_needs_no_separate_literal_afterimage(self):
+        consumer = self.root / "work-items/ordinary-consumer.MD"
+        literal = self.source.relative_to(self.root / "work-items").as_posix()
+        href = f"{literal}?rev=4#evidence"
+        before = (b"\xef\xbb\xbf" + f"Logical work-item:{self.slug}\r\n\r\n".encode()
+                  + f"[proof]({href})\r\n".encode())
+        consumer.write_bytes(before)
+        inventory = m._incoming_link_result(
+            self.root, {self.source}, f"work-item:{self.slug}", strict_consumer_reads=True,
+            literal_path_references=(literal,),
+        )
+        self.assertEqual(inventory["result"], "unmapped")
+        self.assertEqual([row["value"] for row in inventory["references"] if row["kind"] == "physical"],
+                         [literal, href])
+        archive, metadata, action = self.component_settled_record()
+        target = archive / metadata["source"]["preservedPath"]
+        href_after = m.os.path.relpath(target, consumer.parent).replace(m.os.sep, "/") + "?rev=4#evidence"
+        after = before.replace(href.encode(), href_after.encode())
+        action["links"] = {"inventory": inventory, "consumers": [{"path": "work-items/ordinary-consumer.MD",
+            "before": m._b64(before), "after": m._b64(after), "beforeSha256": digest(before), "afterSha256": digest(after)}]}
+        receipt = archive / m.LEGACY_COMPLETION_RECEIPT
+        receipt.write_bytes(m._legacy_work_item_action_receipt_bytes(action))
+        consumer.write_bytes(after + b"Lawful later consumer edit.\r\n")
+        m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}").verify()
+
+    def test_settled_raw_origin_keeps_original_closer_authority(self):
+        # The same historical producing fixture supplies valid and late-bad
+        # counterpart bytes. Today's action closure cannot repair old authority.
+        for bad in (False, True):
+            with self.subTest(bad=bad):
+                fixture = self.historical_fixture()
+                fixture.item = self.root / "work-items/archive/2026-07/fixture-item"
+                fixture.item.mkdir(parents=True)
+                fixture.source = self.root / "evidence/fixture-item.md"
+                fixture.source.parent.mkdir(parents=True)
+                fixture.source.write_bytes(b"Original raw archive identity evidence\n")
+                fixture.closure = (b"Closed: 2026-07-16T10:00:01Z\nOutcome: fixture complete\n"
+                                   b"Evidence: design.md\nResidual risk: none\n")
+                for name, raw in (("closure.md", fixture.closure), ("design.md", b"Original design evidence\n"),
+                                  ("acquisition.md", b"Original selected historical raw acquisition\n")):
+                    (fixture.item / name).write_bytes(raw)
+                fixture.ledger(bad=bad)
+                m.refresh_readme(self.root, allow_marker_bootstrap=True)
+                binding = self.local_binding(fixture.binding())
+                self.source, self.slug = fixture.source, binding.work_item
+                before = v.observe_captured_work_item_history(binding)
+                self.assertEqual(bool(before.obligations.open_revise), bad)
+                self.component_settled_record(binding)
+                port = m.acquire_settled_work_item_history(self.root, f"work-item:{self.slug}")
+                after = v.observe_captured_work_item_history(v.bind_settled_work_item_history(port))
+                self.assertEqual(before, after)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+def test_candidate_verify_uses_settled_custody_after_original_path_disappears():
+    from unittest.mock import patch
+
+    case = LegacyFlatTerminalTests()
+    case.setUp()
+    try:
+        case.component_settled_record()
+        port = m.acquire_settled_work_item_history(
+            case.root, f"work-item:{case.slug}"
+        )
+        assert not case.source.exists()
+        current = port.files[case.source].current
+        assert current.path != case.source
+        real_lstat = Path.lstat
+
+        def refuse_original_path(path):
+            if path == case.source:
+                raise AssertionError("settled diagnostic path reread the absent original")
+            return real_lstat(path)
+
+        with patch.object(Path, "lstat", refuse_original_path):
+            m._verify_captured_file(
+                current,
+                "WI-TEST-SETTLED-ORIGINAL",
+                acquired_input=port,
+            )
+    finally:
+        case.doCleanups()

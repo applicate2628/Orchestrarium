@@ -34,29 +34,51 @@ inline as `[spine: <rule>]`; an item with no tag is net-new.
 
 ## The abstraction-level meta-law (anchors the structural laws A1–C5)
 
-**M — Right abstraction level: abstract by default, concretize ONLY where genuinely required.** Every
-owner — a type, contract, function, module, registry, scenario, or even a law — is defined at the MOST
-GENERAL level its responsibility allows; a concrete specific (a particular value, method, case type,
-scenario, parameter, variant) lives ONLY in the leaf / adapter / instance / injected-config that
-genuinely needs it, and is NEVER lifted into the general owner. Where concreteness is not needed the
-form stays ABSTRACT and PARAMETERIZED (a type/strategy parameter, a contract port, a registry entry, an
-injected config field) so a new concrete case is a NEW INSTANCE, not an owner edit. This is the
-discipline behind the structural laws below — e.g. a generic engine names no consumer, the adapter is
-the edit surface while the backend stays stable, a new variant is a plugin not a silo, config is
-injected not read (the A/C laws are its instances; read it as the frame, the forward names are
-illustrative not load-bearing). M ANCHORS the structural laws A1–C5 — the laws whose shape it explains
-(C6 is a stability/live-tree-consistency law, NOT a structural one M anchors); faithful to source L16
-(anchors only the structural laws), M does NOT extend its anchor over the runtime group D. FALSIFIABLE
-TEST: if adding or changing a concrete case FORCES editing a GENERAL owner, the abstraction level is
-WRONG — push the specific DOWN and keep the owner general (an owner edit forced by a new instance is the
-churn metric). NOT "abstract everything": OVER-ABSTRACTION — an indirection layer with no second
-instance and no churn-test justification (a one-implementation interface, a strategy with one strategy,
-a config knob nobody varies) — is the OPPOSITE, equally-flagged failure. Abstract EXACTLY to the level
-the responsibility needs. OWNER: the author of each general owner (its abstraction level) + the reviewer
-(the abstraction-level judgment). PROBE (partial, review-bound): the extension-churn budget mechanically
-catches the under-abstraction side — a new concrete instance that forces a general-owner edit FAILS; the
-over-abstraction side and the abstraction-level judgment are a review verdict, not a grep. [spine:
-General-case over local symptoms, SOLID reminder]
+**M — Right abstraction level: correct the current owner directly unless variation earns a seam.** A
+stable local seam is justified only by an accepted current requirement, accepted declared future direction,
+concrete second consumer, evidenced domain variability, or verified external-contract evolution. A second
+consumer is evidence, not a prerequisite. Without that evidence, correct the current owner directly; do
+not introduce a speculative interface, strategy, registry, or configuration surface. When variation does
+justify a seam, define it at the most general level the responsibility needs: a generic engine names no
+consumer, the adapter is the edit surface while the backend stays stable, a new variant is a plugin not a
+silo, and config is injected not read. M ANCHORS the structural laws A1–C5 — the laws whose shape it
+explains (C6 is a stability/live-tree-consistency law, NOT a structural one M anchors); faithful to source
+L16 (anchors only the structural laws), M does NOT extend its anchor over the runtime group D. FALSIFIABLE
+TEST: a scenario-specific variation in a general owner FAILS when it lacks the stated variation evidence
+or the smallest stable seam; a direct current-owner correction without such variation does not. NOT
+"abstract everything": OVER-ABSTRACTION — an indirection layer with no variation justification — is the
+opposite, equally-flagged failure. OWNER: the author of each owner (its abstraction level) + the reviewer
+(the abstraction-level judgment). PROBE (partial, review-bound): extension churn catches an unjustified
+scenario-specific general-owner edit; right-level and over-abstraction remain a review verdict, not a
+grep. [spine: General-case over local symptoms, SOLID reminder]
+
+### Represent a meaningful structure as a whole
+
+An incidental data structure is defined as follows:
+
+> incidental data structure is a data structure that occurs within a system when there is no object representing the structure as a whole
+
+When related parts form a meaningful domain whole, represent that whole with a
+coherent object, value or aggregate that owns the parts and their relationships,
+shared invariants and lifecycle where those belong to the whole. Reuse an existing
+owner if it already represents that whole; otherwise place the smallest meaningful
+whole abstraction at the owning boundary. Its identity, operations and constraints
+come from the domain or accepted contract, not a fixture name or current layout.
+Whole representation needs no hypothetical future variant or second consumer.
+
+This is an abstraction and ownership judgment, not a requirement to turn every
+local array, tuple or dictionary into a class. A container or existing object can
+already be the complete representation needed by its caller. An empty wrapper
+that owns no relationship, invariant, operation or lifetime adds no useful whole.
+Do not introduce a reflection framework, mandatory helper, schema, hook or universal
+review veto merely to satisfy this guideline.
+
+OWNER: the existing domain/structure owner. PROBE (review-bound): identify the
+whole, its related parts and whole-level contract; verify that one representation
+owns the relationships and applicable invariants/lifecycle. If an existing owner
+already does so, keep it. If no whole-level responsibility exists, preserve the
+simple local representation. This sharpens M and the shared General-case rule;
+it does not create another workflow stage. [spine: General-case over local symptoms]
 
 ## A. Generalization & scaling
 
@@ -86,31 +108,30 @@ dependency edges. It takes an abstract input (an assembled structure, an `apply`
 typed request) and returns a result. A new consumer becomes a thin script by SUPPLYING that input —
 never by adding a variant of the engine or a method branch inside it. [spine: SOLID reminder]
 
-**A4 — A new variant is a plugin + thin scenario, never a parallel silo.** A new feature / method /
-variant extends the EXISTING modules via a plugin at the right layer plus a thin scenario over the
-existing seams. It must NOT spawn a parallel copy of the whole stack. If a "new variant" needs its
-own copy of shared infrastructure (its own parse / storage / transport / geometry copy), the layering
-is wrong — the seam it should have composed is missing. [spine: Blast-radius test, Reuse before
-hand-rolling, Mechanism inventory before new paths]
+**A4 — An admitted variant is a plugin + thin scenario, never a parallel silo.** When accepted or
+evidenced variation earns a seam under M, extend the existing modules via a plugin at the right layer plus
+a thin scenario over that seam. Otherwise correct the current owner directly. Neither path may spawn a
+parallel copy of the whole stack. If an admitted variant needs its own parse / storage / transport /
+geometry copy, the layering is wrong — the seam it should have composed is missing. [spine: Blast-radius
+test, Reuse before hand-rolling, Mechanism inventory before new paths]
 
-**A5 — "Thin" is defined against a layer, not line count: the second-consumer test.** An entry point
-(CLI / app / handler / job) owns PROCESS-BINDING only — argument / env / file / exit / IO policy.
-Every decision that survives a change of entry point — selection, sizing, strategy choice, sweep /
-retry control, result gating — is library capability and lives in a library. The test: if a SECOND
-entry point (a tool, a test, a future GUI) would need the same decision, it is NOT wiring — it belongs
-in a library. [spine: Change-surface minimization, Ownership /
-extension-seam hygiene]
+**A5 — "Thin" is defined against a layer, not line count: the conditional reuse test.** An entry point
+(CLI / app / handler / job) owns PROCESS-BINDING only — argument / env / file / exit / IO policy. Move a
+decision to a library only when M's accepted or evidenced variation shows it must survive a change of
+entry point; a second entry point is evidence, not a prerequisite. Without that evidence, keep the
+current decision with its current owner rather than extracting speculative reuse. [spine:
+Change-surface minimization, Ownership / extension-seam hygiene]
 
-**A6 — Dependency inversion: the contract goes on a stable surface, never reversed.** When a lower
-module must be INVOKED by, but cannot DEPEND ON, a higher module, define the narrow CONTRACT on a
-STABLE surface that both sides may depend on without reversing dependency direction — the lower module
-itself, or a neutral contract / interface module below both — and INJECT the implementation from
-above. The contract does NOT always live "in the lowest module": service contracts, plugin APIs,
-schema registries, and role/agent contracts often live on a neutral stable surface both sides import.
-The invariant that DOES hold everywhere: implementation-heavy / private modules must NOT be imported
-across layers — cross-layer consume is legal only against an interface leaf with no downward edges; an
-edge into a sibling's private/internal module across a band is presumptively a silo leak. [spine:
-Interface and encapsulation hygiene, SOLID reminder]
+**A6 — Dependency inversion: invert the dependency that requires it.** When a lower-level capability
+needs behavior supplied by a higher-level policy/implementation but must not depend on that higher
+module, keep the narrow contract on an existing STABLE surface both sides may depend on and INJECT
+the implementation from above. An accepted replaceability requirement can justify the same seam.
+Reuse the lower module's public contract or an existing neutral contract; create a neutral surface
+only when the dependency contract requires it. Ordinary downward calls through an adequate public
+API do not require an injected interface. Cross-layer access must respect the public contract and
+dependency direction; private/internal implementation imports remain prohibited. A public module
+can have legitimate lower dependencies; an interface leaf is an available shape, not the only public
+call shape. [spine: Interface and encapsulation hygiene, SOLID reminder]
 
 **A7 — Split a capability by level BEFORE calling anything a copy (graduate-the-core).** Decompose a
 capability by abstraction level. The lowest pure, dependency-light CORE (no feature / transport /
@@ -165,7 +186,14 @@ values DOWN. A lower module reading `getenv` / command-line policy / a global sc
 UPWARD CONTROL-FLOW LEAK even when no dependency edge exists. The only exception is documented
 diagnostic / observability instrumentation with no business, semantic, output, persistence, security,
 or control-flow effect, owned by a support / observability layer — never ordinary lower-layer domain
-logic. [spine: Determinism and ambient-input control, Anti-hardcoding]
+logic. Limits follow the same ownership: justify count, size, depth, duration, iteration and evidence
+bounds by an actual contract, algorithm invariant, evidenced reachable risk or accepted resource
+budget, not convenience or labels. Explain owner, scope, units, value/default, required function,
+evidence retention and safe overflow in the existing work or review; derive variable bounds from
+valid inputs or owned configuration without arbitrary refusals or silent truncation. Preserve
+justified safeguards and acquired outcomes; reassess task-implicated limits without a universal
+constants rewrite or a new artifact, approval or gate. [spine: Determinism and ambient-input control,
+Anti-hardcoding and justified limits]
 
 **C3 — Backend stability is a stability property (same seam as A2).** Backend modules (foundation,
 generic engines, storage, transport) absorb new scenarios through adapters / composition (A2); a
@@ -229,22 +257,29 @@ reports about itself, records provenance, owns lifetime, and shares data across 
 Same form as A-C: decidable tests with a named owner + enforcement probe, defaults with named
 exceptions, SHARPENING the tagged spine rules.
 
-**D1 — Failure is a typed RETURNED value; process termination is composition-root-owned.** A reusable
-module (library, leaf, engine, service component) reports failure as a typed RETURNED status/error value
-carrying SEVERITY, a STABLE failure ID, and an optional CAUSE CHAIN — never by invoking a
-process-termination primitive (`exit`/`abort`/`_exit`/`std::terminate`/`os.Exit`/`System.exit`/a panic
-that aborts the process). ONLY the composition root / app entry point owns process termination; on a
-fatal-severity returned failure IT makes an EXPLICIT termination / degradation / recovery decision (the
-severity is the input to that decision, not an implicit exit). A leaf that kills the process is
-UNEMBEDDABLE (in-process UI, API host, test harness, a second instance in one process) and erases the
-caller's diagnostic context. This is fail-loud UP the call chain, not by killing every other caller. The failure idiom is chosen per LAYER and is uniform within it: process exit at the composition root; typed returned status from libraries/leaves; an in-band poison value (e.g. NaN-poison) ONLY where no status channel exists (a numeric kernel with no side-band), documented at the contract. The
-three fields are load-bearing: severity → response choice; stable failure-id → a machine key for
-tooling/tests; cause chain → originating context. The severity must distinguish at minimum the response
-classes the composition root can select (e.g. recoverable / degrade / fatal). (Source L11: leaves NEVER
-terminate; only the composition root does — a genuine fail-stop on detected state corruption /
-memory-safety violation is the composition root's decision on a returned typed failure, or an explicit
-documented composition-root contract, never a leaf license.) OWNER: the composition root (process
-lifetime + the recovery decision) + the caller (diagnostic context). PROBE: grep the reusable-module
+**D1 — Failure uses the accepted typed channel; process termination is composition-root-owned.** A
+reusable module (library, leaf, engine, service component) reports failure through the accepted typed
+error mechanism of its language, framework and layer, such as returned status or typed exception.
+Preserve the originating cause/context and every distinction callers need to choose recovery,
+degradation or termination. A reusable leaf must not independently invoke a process-termination
+primitive (`exit`/`abort`/`_exit`/`std::terminate`/`os.Exit`/`System.exit`/a panic that aborts the process).
+ONLY the composition root / app entry point owns process termination and makes an EXPLICIT termination /
+degradation / recovery decision. A leaf that kills the process is UNEMBEDDABLE (in-process UI, API host,
+test harness, a second instance in one process) and erases the caller's diagnostic context. This is
+fail-loud UP the call chain. Keep one failure idiom for each failure class in each LAYER; translate only
+at an actual owning boundary and preserve meaning. An in-band poison value (e.g. NaN-poison) is allowed
+ONLY where no status channel exists (a numeric kernel with no side-band), documented at the contract.
+Severity/status codes, stable failure IDs and cause fields remain mandatory where an existing API,
+binary/wire contract, operational consumer or accepted requirement requires them; do not manufacture
+parallel fields when the existing mechanism already expresses the required distinctions. Severity
+distinguishes required response classes (e.g. recoverable / degrade / fatal); stable IDs preserve
+machine identity and cause fields preserve originating context where that contract requires them.
+Exceptions must not cross a boundary that forbids them. Never swallow failure, turn it into success,
+lower severity, change exit/retry behavior or relabel contract failures as optional diagnostics.
+(Source L11: leaves NEVER terminate; only the composition root does — a genuine fail-stop on detected
+state corruption / memory-safety violation is the composition root's decision on a typed failure, or an
+explicit documented composition-root contract, never a leaf license.) OWNER: the composition root
+(process lifetime + the recovery decision) + the caller (diagnostic context). PROBE: grep the reusable-module
 tree — the modules/libraries/packages explicitly DESIGNATED reusable (not composition roots, app entry
 points, or test-binary harnesses; the repo-local governance defines the boundary, as A1's probe defers
 to "the repo-standard gate"; where no boundary is declared, the scope is every source file NOT at an
@@ -254,28 +289,37 @@ the existing baseline is a frozen debt that only decreases — a repo CI counter
 else the probe is review-bound (the reviewer counts new termination primitives in the diff); idiom-uniformity: two failure idioms for one failure class within one layer is a finding (review-bound). [spine:
 Failure transparency and diagnosability, Operational-contract scope discipline]
 
-**D2 — Observability is one support-owned, injected diagnostic port with stable event IDs and a
+**D2 — Observability uses one appropriate diagnostic owner and the existing facility first, with a
 zero-cost disabled path on measured loops.** Diagnostics (trace, progress, profiling, correlation,
-structured logging) flow through ONE support-layer-owned diagnostic PORT, INJECTED from above (dependency
-inversion, A6-shaped) and threaded at a COARSE boundary, never re-passed per inner iteration on a
-measured loop (B3); it carries STRUCTURED events whose IDs come from a single CONST registry. The IDs are
-a VERSIONED API CONTRACT — downstream log/trace/alert tooling depends on them. On a MEASURED/hot path the
+structured logging) use the existing repository/framework observability facility under its owning
+contract, preserving causal context, routing, severity, redaction and operational visibility.
+Introduce an injected diagnostic PORT only where actual dependency direction, admitted variability or
+the boundary contract requires one; reuse an existing port when it already owns that concern. A
+supported logger or existing output contract can suffice without an extra wrapper. Stable event IDs,
+structured fields, registry ownership and version compatibility are required when actual log/trace/alert
+consumers or an accepted diagnostic contract depend on them; keep that owner and do not duplicate its
+registry. An existing structured framework event contract can suffice without a bespoke registry.
+Emitting diagnostics alone requires neither a custom port nor a versioned registry. Existing mandatory
+diagnostic channels remain mandatory; caller convenience cannot bypass them. Thread the diagnostic
+facility at a COARSE boundary, never re-pass it per inner iteration on a measured loop (B3).
+On a MEASURED/hot path the
 disabled path is COMPILE-TIME-ELIDABLE — when off, the hot path carries NO residual branch, call, or flag
 load. A per-iteration check on a RUNTIME variable flag is insufficient there (it costs the flag load and
 can block vectorization); a build-time-constant-false guard the optimizer folds away, or a compose-time
 non-instrumented path, is fine — the requirement is ZERO RESIDUE in the measured loop body, however
 achieved. Off measured loops a runtime-gated no-op is fine. This is the positive shape of C2's
-diagnostic-instrumentation exception — it does NOT restate C2's ambient-read ban nor C1's
-single-owner-registry rule (cross-reference both); its net-new delta is the single injected port + const
-ID registry + versioned-ID contract + compile-elision-on-a-measured-loop (adjacent to but not a
-restatement of B1/B3). EXCEPTION: a non-performance-critical module may use a runtime-gated port
-everywhere; a runtime that cannot elide (interpreted / JIT with no zero-cost abstraction) hoists the
-enable-check OUT of the hot loop or selects a compose-time non-instrumented path and records the
-limitation. OWNER: the support/observability layer (single diagnostic channel + versioned event-ID
-registry; the PROBE is facet-split across slices — impl owns the structural route-through-the-port part,
-perf owns the compile-elision residue check — mirroring how D3's OWNER flags its security-engineer
-facet). PROBE: (1) no diagnostic free-text emit or ambient env read for diagnostics outside the support
-owner (grep); (2) every emitted ID resolves in the const registry (fail-closed); (3) on a compiled
+diagnostic-instrumentation exception; C2's ambient business/policy-read ban and C1's single-owner
+constraints remain binding. Its diagnostic ownership/contract obligations and compile-elision on a
+measured loop are adjacent to, not a restatement of, B1/B3. EXCEPTION: a non-performance-critical module
+may use a runtime-gated port everywhere; a runtime that cannot elide (interpreted / JIT with no zero-cost
+abstraction) hoists the enable-check OUT of the hot loop or selects a compose-time non-instrumented path
+and records the limitation. OWNER: the support/observability layer (the owned diagnostic channel + its
+required event-ID registry; the PROBE is facet-split across slices — impl owns conformance to the actual
+diagnostic contract, perf owns the compile-elision residue check — mirroring D3's security-engineer
+facet). PROBE: (1) diagnostic routing, cause/context, severity, redaction and operational visibility
+conform to the actual owned contract; inspect unknown consumers before deciding what it requires, and
+preserve C2's ambient-read restriction; (2) when that contract has an ID registry, every emitted ID
+resolves in it (fail-closed); (3) on a compiled
 measured path the disabled-residue check is STRUCTURAL first — the diagnostic owner is NOT in the
 link/import set of the measured unit, OR the disabled path is a build-time constant the compiler provably
 folds (both checkable from the build/link graph); ONLY where the perf budget explicitly demands the
@@ -289,8 +333,10 @@ the measured unit's INCLUDE/macro-expansion set (no header-injected diagnostic),
 in a repo with NO machine-readable build/link graph (interpreted, no static import graph) the check is
 review-bound. [spine: Determinism and ambient-input control, Interface and encapsulation hygiene]
 
-**D3 — Reproducibility is a publication-safe manifest contract (run provenance), broader than output
-equivalence.** Every result-producing run EMITS a machine-readable MANIFEST recording the run PROVENANCE
+**D3 — Reproducibility is a triggered publication-safe manifest contract (run provenance), broader than
+output equivalence.** A manifest is required for published, packaged, golden, cross-environment-comparison,
+or accepted scientific/performance reproducibility work. When D3 is triggered, the result-producing run
+EMITS a machine-readable MANIFEST recording the run PROVENANCE
 needed to reproduce it: toolchain + build flags; PINNED dependency versions (an exact version/hash, never
 a moving tag/branch/`latest`); host/runtime platform identity (OS + math/standard-library version + CPU
 ISA/microarchitecture class where numeric output depends on it); determinism / numeric mode (including
@@ -299,7 +345,7 @@ for any stochastic step; parallel/concurrency configuration (worker count, sched
 reduction partitioning — grain/chunking — that determines a floating-point reduction tree, so a
 bit-identical FP result reproduces only within a fixed partitioning, per D5); input identities (labels +
 content HASHES); a config/environment SNAPSHOT; contract/schema versions; the selected strategy/algorithm.
-Result-producing, golden, and validation/release artifacts MUST carry it; a MISSING manifest, a DIVERGENT
+Triggered artifacts MUST carry it; a MISSING manifest, a DIVERGENT
 manifest (from the prior accepted baseline — the first manifest establishes the baseline), or one
 SILENTLY OMITTING a required field, FAILS packaging — an EXPLICITLY-ABSENT field (recorded
 absent-with-reason) passes (the discriminator: silent omission fails, declared-absent passes). Manifest
@@ -321,12 +367,11 @@ verify a redaction is complete. NEVER a raw environment dump. It does NOT re-aut
 list — it reuses the project publication-safety rule by reference and enforces it as a HARD
 packaging-fail. The manifest is ALSO the post-incident provenance record (an operator reconstructing a
 misbehaving released run depends on it). EXCEPTION: a throwaway / local-only run that produces NO durable
-artifact need not emit; but any run whose output COULD be promoted, shared, or kept as a
-golden/validation/release artifact MUST emit a manifest BEFORE promotion (no retroactive manifest
+artifact need not emit; but a D3-triggered run MUST emit a manifest BEFORE promotion (no retroactive manifest
 fabrication); a genuinely-unavailable field is recorded as explicitly-absent, not omitted silently. OWNER:
 the packaging/release owner (run provenance) + the publication-safety owner (the allowlist trust boundary
-+ the dual value-scan + the HARD fail — the security-engineer slice's facet). PROBE: each
-golden/validation/release artifact carries a full-field manifest, diffed at packaging — a pinned-dep
++ the dual value-scan + the HARD fail — the security-engineer slice's facet). PROBE: each D3-triggered
+artifact carries a full-field manifest, diffed at packaging — a pinned-dep
 change without a re-baseline decision FAILS; layer-1 fails on a non-allowlisted key; layer-2 runs both
 detectors and fails (or verified-redacts) on a machine-local path or credential value. [spine:
 Determinism and ambient-input control, Publication safety, Sensitive-data handling and redaction,
@@ -366,31 +411,26 @@ integer add; bitwise and/or/xor; integer min/max — a floating-point accumulato
 associative, and FP min/max carry NaN/signed-zero edge cases, so an FP reduction is a merge-owner datum,
 not an atomic-summary), or REDUCED by a MERGE-OWNER in a CANONICAL merge order that is a C1-OWNED
 invariant, not a per-region free choice (a fixed, order-deterministic combine, not whichever-finishes-
-first). A non-associative reduction reordered across workers does not merely vary nondeterministically —
-it produces a DIFFERENT numeric result, so the merge order MUST be the C1-owned canonical order (this is
-the parallel reading of B2's "an order-sensitive reduction can change results — see C1"). Shared mutable
-state is NEVER clobbered by concurrent workers, and NEVER guarded by a SERIALIZING LOCK on a measured/hot
-parallel loop — a lock there is BOTH a performance hazard (serializes the region) AND a determinism
-hazard (nondeterministic acquisition order changes an order-sensitive accumulation). A new parallel
-region DECLARES, PER DATUM, its class (immutable / worker-owned / atomic-summary / merge-owner); the
-per-datum requirement is load-bearing — one region may mix all four. EXCEPTION: an embarrassingly-parallel
-region with no shared mutable state; a genuinely exactly-associative atomic summary; or a coarse
-low-contention lock OFF the measured path guarding an ORDER-INSENSITIVE update on already-classified data
-(the 4-class classification is universal; only the LOCK BAN is measured-loop-specific; an order-sensitive
-accumulation under a lock stays a determinism hazard even off the hot path — route it through the
-C1-canonical merge instead). OWNER: the parallel region's author (per-datum ownership) + C1 (the canonical
-merge order). PROBE: each datum crossing a parallel boundary is classified; no shared mutable state
-(process-global OR heap/captured) is written by concurrent workers outside its declared class — the
-per-datum classification is UNIVERSAL and unconditional (every region declares it); any mutable state
-reachable across the parallel boundary with NO declared class FAILS (fail-closed default); and no
-lock/mutex is acquired inside a parallel region the author classifies hot — where a region counts as
-reviewer-verified hot when EITHER (a) a repo-defined performance-critical marker tags it OR (b) a
-profiling measurement PRESERVED at the repo-standard performance-evidence location (a repo-local
-policy/checklist names the concrete path) and CITED in the commit/PR shows it on a measured-critical path
-— an unarchived verbal claim is insufficient; ABSENT both (a) and (b), the lock-ban applies FAIL-CLOSED
-to every parallel region as a candidate — opting OUT of the lock-ban requires (a) or (b) as positive
-evidence (FAIL). [spine: Determinism and ambient-input control] (sharpens B2 toward the parallel case;
-specializes D4)
+first). A non-associative reduction reordered across workers produces a DIFFERENT numeric result, so the
+merge order MUST be the C1-owned canonical order; LOCK ACQUISITION ORDER never supplies numerical merge
+order. Shared mutable state is NEVER clobbered by concurrent workers. A correctness-required lock MAY
+guard already-classified ORDER-INSENSITIVE state; it is not a substitute for the C1-canonical merge of a
+floating-point or other order-sensitive reduction. A new parallel region DECLARES, PER DATUM, its class
+(immutable / worker-owned / atomic-summary / merge-owner); the per-datum requirement is load-bearing —
+one region may mix all four.
+
+A COLD correctness-required lock needs no automatic profile. In a REVIEWER-VERIFIED HOT region, measure
+the lock against the ACCEPTED performance budget: it passes only when correctness and the budget both
+pass, and fails when the budget fails; D5 imposes no blanket lock-free mandate. A region is reviewer-
+verified hot when either a repo-defined performance-critical marker tags it or a profiling measurement
+preserved at the repo-standard performance-evidence location and cited in the commit/PR shows it on a
+measured-critical path; an unarchived verbal claim is insufficient. OWNER: the parallel region's author
+(per-datum ownership and any correctness-required lock) + C1 (the canonical merge order). PROBE: every
+datum crossing a parallel boundary is classified; no process-global, heap, or captured mutable state is
+written concurrently outside its declared class; every floating-point or other order-sensitive reduction
+uses the C1-owned canonical merge rather than lock acquisition order; a cold lock requires no profile;
+and every reviewer-verified hot lock has measured evidence that it meets the accepted budget. [spine:
+Determinism and ambient-input control] (sharpens B2 toward the parallel case; specializes D4)
 
 ## Protected properties (must not regress)
 
@@ -415,30 +455,32 @@ a regression in any is a blocking finding:
   applied.
 - **No untracked duplicate representations** (A7, C1) — probe: duplicates only behind a codegen source
   or a drift gate.
-- **Entry points hold no second-consumer decision** (A5) — probe: each decision in an app/tool has no
-  twin a second entry point would need.
+- **Entry points hold no admitted-reuse decision** (A5) — probe: each decision in an app/tool stays with
+  its current owner unless accepted or evidenced variation requires reusable capability.
 - **Test support deletes cleanly** (C4) — probe: removing an implementation edits no other tests.
-- **No leaf process-termination** (D1) — probe: termination-primitive grep over the repo-defined
-  reusable-module boundary (where none is declared: the non-entry-point/non-test tree, review-bound); NEW
-  hit in the change FAILS; existing baseline a frozen debt.
-- **Diagnostics through one injected port with registered IDs** (D2) — probe: no ad-hoc sink/env-read
-  outside the support owner; every ID resolves; disabled-path residue check is STRUCTURAL-LINK FIRST
-  (owner absent from the measured unit's link/import/macro-expansion set, or disabled path a build-time
-  constant — checkable from the build/link graph), release-build asm/IR ONLY where the perf budget demands
-  the zero-residue proof; review-bound on interpreted/JIT.
-- **Every result artifact carries a publication-safe full-field manifest** (D3) — probe: packaging
+- **No leaf process-termination; accepted typed failure channel** (D1) — probe: preserve caller
+  decision information and originating cause, contract-required fields and per-layer failure uniformity;
+  termination-primitive grep over the repo-defined reusable-module boundary (where none is declared:
+  the non-entry-point/non-test tree, review-bound); NEW hit in the change FAILS; existing baseline a frozen debt.
+- **Diagnostics conform to their existing owned contract** (D2) — probe: routing, context, severity,
+  redaction and visibility preserved; required IDs resolve in their owned registry; unknown consumers
+  inspected. Disabled-path residue check is STRUCTURAL-LINK FIRST (owner absent from the measured unit's
+  link/import/macro-expansion set, or disabled path a build-time constant — checkable from the build/link
+  graph), release-build asm/IR ONLY where the perf budget demands the zero-residue proof; review-bound on interpreted/JIT.
+- **Every D3-triggered artifact carries a publication-safe full-field manifest** (D3) — probe: packaging
   emits+diffs the manifest (toolchain/flags, pinned deps, platform identity, determinism/FP mode, seed,
   parallel config + reduction partitioning, input hashes, config snapshot, contract/schema versions,
   strategy/algorithm); a missing field FAILS; layer-1 allowlist + layer-2 two-detector value-scan
   fail/verified-redact on machine-local path / credential.
 - **No mutable process-global in a leaf; cleanup on all exit paths** (D4) — probe: no-mutable-global lint;
   handle contracts document free rules; cleanup-path coverage judgment-bound (cancel + timeout traced).
-- **Parallel data owned + deterministic C1-canonical merge** (D5) — probe: per-datum classification; no
-  shared-mutable clobber by concurrent workers; no lock on a (reviewer-verified) hot parallel loop.
+- **Parallel data owned + deterministic C1-canonical merge** (D5) — probe: apply D5's canonical OWNER/PROBE
+  above, including per-datum classification, race freedom, canonical order-sensitive merge, cold-lock
+  allowance, and accepted-budget evidence for a reviewer-verified hot lock.
 - **No stale-relation residue after a superseding change** (C6) — probe: post-change grep for the old name
   + stale-relation phrases returns only LIVE relations (discrimination review-bound).
-- **No general owner edited to add a single concrete instance** (M) — probe: the extension-churn budget
-  (mechanical for under-abstraction); over-abstraction / right-level is review-bound.
+- **No general owner carries unjustified scenario-specific variation** (M) — probe: extension churn catches
+  the unsupported variation; over-abstraction / right-level is review-bound.
 
 ## Falsifiable checklist (every structural change passes; a NO is a blocking finding)
 
@@ -447,11 +489,14 @@ check that catches a violation):
 
 - [ ] New capability lands in its single owning module; no second copy (grep the symbol/operation, not
       the name).
-- [ ] Every dependency edge points strictly down the graph or to an interface leaf; no edge into a
-      sibling's private/internal module across a band; no upward or cyclic edge — caught by the
-      repo-standard build/lint/import-graph/validator/CI gate (A1).
+- [ ] Every dependency edge respects the adequate public contract and points strictly down the graph
+      or to a stable contract surface; no private/internal cross-layer import, upward or cyclic edge —
+      caught by the repo-standard build/lint/import-graph/validator/CI gate (A1). Injection is required
+      for an actual inverted dependency or accepted replaceability requirement, not an ordinary adequate
+      public downward call (A6).
 - [ ] No generic engine include/symbol/edge names a specific consumer/feature/method (A3).
-- [ ] No entry-point unit holds a decision a second entry point would also need (A5).
+- [ ] No entry-point unit holds a decision that admitted or evidenced variation requires another entry
+      point to reuse; otherwise the current owner remains direct (A5).
 - [ ] Any capability defined in ≥2 places where the lowest core could be reused is decomposed: core
       reused, only glue per-consumer (A7) — no copy-to-dodge-a-dependency.
 - [ ] A new scenario was added by editing an adapter/composition/interface, NOT by a scenario-specific
@@ -468,45 +513,52 @@ check that catches a violation):
       judgment-bound — it asks whether the cited measurement is adequate.)
 - [ ] Generic test support is under a test-only tree, parameterized over a contract, not homed in one
       implementation (C4); each implementation deletes with zero edits to other tests.
-- [ ] A new feature could be added as plugin + thin scenario without a new parallel silo (A4).
+- [ ] An admitted variant could be added as plugin + thin scenario without a new parallel silo (A4);
+      absent admitted variation, the current owner is corrected directly.
 - [ ] Accepted debt is a tracked grandfathering entry (owner/scope/expiry/no-expansion), not a silent
       re-bless or a license for new violations (C5).
-- [ ] No reusable module terminates the process; failure is a typed RETURNED value (severity+id+cause);
-      the composition root owns termination + the recovery decision (D1).
-- [ ] Diagnostics route through one injected support-owned port (coarse-threaded); IDs resolve in the
-      const registry (versioned contract); disabled-path residue check is structural-link-first (owner
-      absent from the measured unit's link/import/macro-expansion set, or build-time constant), asm/IR only
-      on perf-budget demand, review-bound on JIT (D2).
-- [ ] Every result/golden/validation/release artifact carries a publication-safe, allowlist-built run
+- [ ] No reusable module independently terminates the process; failure propagates through the accepted
+      typed channel with cause and caller decision information, contract-required fields and per-layer
+      uniformity; the composition root owns termination + the recovery decision (D1).
+- [ ] Diagnostics use the existing owned facility; an injected port and stable registered/versioned
+      IDs are required where the actual dependency/consumer contract requires them. Routing, context,
+      severity, redaction and visibility are preserved; disabled-path residue check is structural-link-first
+      (owner absent from the measured unit's link/import/macro-expansion set, or build-time constant),
+      asm/IR only on perf-budget demand, review-bound on JIT (D2).
+- [ ] Every D3-triggered published/packaged/golden/cross-environment-comparison/scientific-or-performance
+      reproducibility artifact carries a publication-safe, allowlist-built run
       manifest — toolchain/flags, pinned deps, platform identity, determinism/FP mode, seed, parallel
       config, input hashes, config snapshot, contract/schema versions, strategy/algorithm;
       missing/divergent/incomplete fails packaging (D3).
 - [ ] No mutable process-global state in a leaf (only const registries / documented safely-published
       immutables); every resource has an owner with cleanup on all exit paths (judgment-bound: cancel +
       timeout); handle contracts document free rules (D4).
-- [ ] Mutable state crossing a parallel boundary is classified per datum (immutable / worker-owned /
-      exactly-associative-integer/bitwise-atomic-summary / merge-owner) and merged in the C1-canonical
-      order; no shared-mutable clobber; no serializing lock on a parallel loop — verified-hot by (a) a
-      perf-marker or (b) a preserved profiling artifact; absent both, the lock-ban applies fail-closed to
-      all parallel regions (D5).
+- [ ] D5's canonical OWNER/PROBE above passes: its per-datum classification, race-freedom, and canonical
+      order-sensitive-merge requirements are universal, while correctness-required locks follow its
+      stated cold-lock allowance and reviewer-verified-hot accepted-budget treatment (D5).
 - [ ] A superseding change left ONLY the correct current state; the old name + stale-relation phrases were
       grepped and erased, keeping only LIVE relations (C6) — the stale-vs-live discrimination is
       review-bound (grep surfaces candidates; a reviewer verifies each before erasing).
-- [ ] No general owner was edited to add a single concrete instance (M) — churn is mechanical; the
-      over-abstraction / right-abstraction-level judgment is a reviewer verdict, not a grep.
+- [ ] No general owner gained unsupported scenario-specific variation (M) — churn is mechanical; direct
+      current-owner correction is allowed when no variation earned a seam, while over-abstraction /
+      right-level is review-bound.
 - [ ] Every binding doc/rule reference resolves to an existing in-tree artifact (no folklore refs).
 
 ## Terms and Abbreviations
 
+- **incidental data structure** — related system data without an object representing its whole.
+- **whole object / aggregate** — a coherent domain representation owning related parts and their
+  applicable relationships, invariants and lifecycle; not a mandated programming-language class.
 - **layer / module** — a single-abstraction-level unit with a narrow interface and one owner.
 - **silo** — a feature implemented as a big independent program with private copies of shared layers
   (the anti-pattern).
 - **core / glue (A7)** — the lowest pure single-owner unit (reused, never re-typed) vs the
   per-consumer orchestration over it.
-- **dependency inversion (A6)** — contract defined on a stable surface both sides may depend on,
-  implementation injected from above.
-- **interface leaf** — an interface / protocol / contract module with no downward dependency edges,
-  safe to depend on across layers.
+- **dependency inversion (A6)** — a lower capability needs higher-supplied behavior without depending
+  on that higher module; a shared stable contract and implementation injected from above satisfy that
+  dependency or an accepted replaceability requirement. An adequate public downward call needs no new interface.
+- **interface leaf** — an interface / protocol / contract module with no downward dependency edges;
+  one available stable contract shape, not the sole legal public cross-layer call shape.
 - **adapter / binding / composition (A2)** — the thin edit surface where new scenarios are wired, on
   top of stable backends.
 - **dependency graph / DAG** — the directed graph of module dependencies (imports / requires / link
@@ -519,23 +571,23 @@ check that catches a violation):
   boundary across which a derived-from-one-source or drift-gated duplicate representation is tolerated.
 - **composition root / outer ring** — the app/entry layer that owns process termination + the recovery
   decision (D1) and resource/global lifetime (D4).
-- **diagnostic port (D2)** — the single support-owned, injected, coarse-threaded channel all diagnostics
-  flow through.
-- **event-ID registry / versioned diagnostic IDs (D2)** — the const registry of stable diagnostic event
-  IDs tooling depends on as an API contract.
-- **run manifest / run provenance (D3)** — the machine-readable record of everything needed to reproduce
-  a run (toolchain, pinned deps, platform identity, determinism/FP mode, seed, parallel config, input
-  hashes, contract/schema versions, strategy/algorithm).
+- **diagnostic port (D2)** — an injected, coarse-threaded diagnostic channel where the actual
+  dependency, admitted variability or boundary contract requires it; reuse the existing owned facility.
+- **event-ID registry / versioned diagnostic IDs (D2)** — the single owned registry of stable
+  diagnostic IDs where consumers or an accepted diagnostic contract require their API identity and compatibility.
+- **run manifest / run provenance (D3)** — the machine-readable record required for a D3-triggered run:
+  toolchain, pinned deps, platform identity, determinism/FP mode, seed, parallel config, input hashes,
+  contract/schema versions, strategy/algorithm.
 - **pinned dependency (D3)** — an exact version/hash, never a moving tag/branch/`latest`.
 - **allowlist-built snapshot (D3)** — a config/env capture that is default-closed (only listed keys) with
   a two-detector value-scan backstop, never a raw dump.
 - **worker-owned / atomic-summary / merge-owner (D5)** — the per-datum classes for state crossing a
   parallel boundary; atomic-summary is exactly-associative integer/bitwise only; the merge order is the
   C1-owned canonical order.
-- **abstraction-level meta-law (M)** — abstract by default, concretize only at the leaf that needs it; an
-  owner edit forced by a new instance is the violation.
-- **over-abstraction (M)** — a one-instance indirection layer with no churn justification; the opposite
-  failure to under-abstraction.
+- **abstraction-level meta-law (M)** — correct the current owner directly unless accepted or evidenced
+  variation earns the smallest stable local seam.
+- **over-abstraction (M)** — a speculative indirection layer without variation justification; the opposite
+  failure to unsupported scenario-specific variation.
 - **stale relation vs live relation (C6)** — a stale relation asserts an obsolete relationship (erase); a
   live relation asserts a current fact (keep).
 - **stale-relation residue (C6)** — a name/alias/comment/registry entry/pointer in the live tree that

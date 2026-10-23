@@ -43,9 +43,22 @@ def test_current_claude_reference_mirror_is_contract_complete() -> None:
     assert ok, "\n".join(messages)
     assert "PASS: Claude reference mirror payloads 4/4" in messages
     assert "PASS: Claude reference mirror hooks 11/11" in messages
-    assert "PASS: Claude reference mirror status IDs 2/2" in messages
-    assert "PASS: Claude reference mirror user markers 4/4" in messages
+    assert "PASS: Claude reference mirror status IDs 1/1" in messages
+    assert "PASS: Claude reference mirror user markers 3/3" in messages
     assert "PASS: Russian hook-behavior-contracts payload pin" in messages
+
+
+def test_russian_typed_routing_documents_nonblocking_delivery() -> None:
+    paragraph = next(
+        paragraph
+        for paragraph in RU_REFERENCE.read_text(encoding="utf-8").split("\n\n")
+        if paragraph.startswith("**Аудит Typed-routing.**")
+    )
+
+    for required in ("hookSpecificOutput.additionalContext", "stdout", "кодом 0"):
+        assert required in paragraph
+    for stale in ("stderr", "кодом 1"):
+        assert stale not in paragraph
 
 
 @pytest.mark.parametrize(
@@ -91,17 +104,3 @@ def test_reference_mirror_refuses_unreviewed_russian_payload_byte_drift(
 
     assert not ok
     assert any("CRM-RU-HOOK-PAYLOAD-PIN" in message for message in messages), messages
-
-
-@pytest.mark.parametrize("heading", ("Аудит Repository-orientation", "Аудит Typed-routing"))
-def test_russian_audits_describe_the_shipped_nonblocking_delivery(heading: str) -> None:
-    """A literal pin must not preserve the retired stderr/exit-one contract."""
-    paragraph = next(
-        part for part in RU_REFERENCE.read_text(encoding="utf-8").split("\n\n")
-        if part.startswith(f"**{heading}.**")
-    )
-    assert "hookSpecificOutput.additionalContext" in paragraph
-    assert "stdout" in paragraph
-    assert "кодом 0" in paragraph
-    assert "кодом 1" not in paragraph
-    assert "строку stderr" not in paragraph

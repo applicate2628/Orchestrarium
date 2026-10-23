@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import shutil
 import stat
 import subprocess
@@ -13,8 +14,6 @@ import tarfile
 from pathlib import Path
 
 import pytest
-
-from tests.fixtures.git_history import archive_revision
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -131,6 +130,34 @@ CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS = {
         "scripts/validate-work-item-state.py",
     ),
 }
+GPT6_STOCK_PRIOR_REVISION = "3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa"
+GPT6_STOCK_SKILL_PRIORS = (
+    pytest.param(
+        "consultant",
+        "63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a",
+        id="consultant",
+    ),
+    pytest.param(
+        "external-reviewer",
+        "4623816c87f9d1b017472011601951eab8bc8e4ceeea2d13911e29a876c853e8",
+        id="external-reviewer",
+    ),
+    pytest.param(
+        "external-worker",
+        "ca74db54391a1994c30a2da6d80021261556db9f75ac89ec8878ee1a5c50f32c",
+        id="external-worker",
+    ),
+    pytest.param(
+        "init-project",
+        "21dc5adc3f4ccb8e646546cd0d3ccf979c37d4e4e8dcefcc9620122f500dadb4",
+        id="init-project",
+    ),
+    pytest.param(
+        "lead",
+        "95eadefb2069546027bbaa59497212a42e9177cce80ad729a869f64f93784635",
+        id="lead",
+    ),
+)
 PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS = {
     "external-dispatch.md": ("8f92dc73", "src.codex/skills/lead/external-dispatch.md"),
     "scripts/provider_prompt.py": ("8f92dc73", "scripts/provider_prompt.py"),
@@ -452,7 +479,12 @@ def _load_installer():
 
 def _seed_revision_staged_lead(revision: str, destination: Path) -> Path:
     source = destination.parent / "historical-source"
-    archive = archive_revision(ROOT, revision)
+    archive = subprocess.run(
+        ["git", "archive", "--format=tar", revision],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(source, filter="data")
 
@@ -537,7 +569,12 @@ def _remove_historical_members(lead: Path, relatives: tuple[str, ...]) -> None:
 
 def _extract_8521_skill(name: str, destination: Path) -> Path:
     if name == "lead":
-        archive = archive_revision(ROOT, "8521b638")
+        archive = subprocess.run(
+            ["git", "archive", "--format=tar", "8521b638"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        ).stdout
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
             package.extractall(destination, filter="data")
         target = destination / "installed"
@@ -557,7 +594,12 @@ def _extract_8521_skill(name: str, destination: Path) -> Path:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         return target / ".agents" / "skills" / "lead"
-    archive = archive_revision(ROOT, "8521b638", f"src.codex/skills/{name}")
+    archive = subprocess.run(
+        ["git", "archive", "--format=tar", "8521b638", f"src.codex/skills/{name}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(destination, filter="data")
     return destination / "src.codex" / "skills" / name
@@ -881,6 +923,25 @@ def _assert_exact_stock_skill_is_accepted_and_drift_refused(
         installer._preflight_canonical_skills(
             ROOT / "src.codex" / "skills", drift_root, root=ROOT
         )
+
+
+@pytest.mark.parametrize(("name", "expected_prior"), GPT6_STOCK_SKILL_PRIORS)
+def test_gpt6_exact_stock_skill_upgrades_and_one_byte_drift_is_rejected(
+    tmp_path: Path, name: str, expected_prior: str
+) -> None:
+    installer = _load_installer()
+    historical = (
+        _seed_revision_staged_lead(
+            GPT6_STOCK_PRIOR_REVISION, tmp_path / "historical" / "lead"
+        )
+        if name == "lead"
+        else _extract_additional_stock_skill(
+            name, GPT6_STOCK_PRIOR_REVISION, tmp_path / "historical"
+        )
+    )
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
+        installer, tmp_path, name, expected_prior, historical
+    )
 
 
 def _copy_current_staged_lead(installer, destination: Path) -> Path:
@@ -1841,3 +1902,527 @@ def test_only_exact_observed_global_lead_tree_is_an_accepted_prior(
         installer._preflight_canonical_skills(
             ROOT / "src.codex" / "skills", skills_root, root=ROOT
         )
+
+
+def test_receipted_lead_two_source_versions_upgrade(tmp_path: Path) -> None:
+    """A matching installed receipt, not a new pinned constant, admits B and C."""
+    installer = _load_installer()
+    source = tmp_path / "source"
+    source.mkdir()
+    shutil.copytree(ROOT / "src.codex" / "skills" / "lead", source / "lead")
+    anchor = tmp_path / "home"
+    skills = anchor / ".agents" / "skills"
+    skills.mkdir(parents=True)
+    receipt = skills / ".orchestrarium-lead-receipt.v1.json"
+    observed = []
+    for version in (b"A", b"B", b"C"):
+        (source / "lead" / "SKILL.md").write_bytes(
+            (ROOT / "src.codex" / "skills" / "lead" / "SKILL.md").read_bytes()
+            + b"\nsynthetic-version=" + version + b"\n"
+        )
+        plan = installer._preflight_canonical_skills(
+            source, skills, root=ROOT, global_install=True
+        )
+        try:
+            with installer._InstallTransaction([skills], enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(
+                    anchor, transaction, dry_run=False
+                )
+                installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+                installer._finalize_canonical_lead_receipt(plan, skills, owner)
+                transaction.commit()
+            lead = next(skill for skill in plan.skills if skill.name == "lead")
+            digest = installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
+            assert digest == lead.source_digest
+            assert json.loads(receipt.read_bytes()) == {
+                "schema": "orchestrarium.canonical-lead-install.v1",
+                "treeSha256": digest,
+            }
+            observed.append(digest)
+        finally:
+            installer._discard_canonical_skills_plan(plan)
+    assert len(set(observed)) == 3
+
+
+def _receipt_fixture(tmp_path: Path):
+    installer = _load_installer()
+    source = tmp_path / "source"
+    source.mkdir()
+    shutil.copytree(ROOT / "src.codex" / "skills" / "lead", source / "lead")
+    anchor = tmp_path / "home"
+    skills = anchor / ".agents" / "skills"
+    skills.mkdir(parents=True)
+    return installer, source, anchor, skills, skills / ".orchestrarium-lead-receipt.v1.json"
+
+
+def _write_directory_attributes(installer, path: Path, attributes: int) -> None:
+    ctypes_api, _wintypes, kernel, *_rest = installer._WindowsBoundNode._api()
+    with installer._WindowsBoundNode(path, purpose="attributes") as bound:
+        basic = bound.basic()
+        basic.attributes = attributes
+        if not kernel.SetFileInformationByHandle(
+            bound.live_handle, 0, ctypes_api.byref(basic), ctypes_api.sizeof(basic)
+        ):
+            raise ctypes_api.WinError(ctypes_api.get_last_error())
+
+
+def _flip_directory_binding_attributes(installer, path: Path):
+    before = installer._InstallTransaction._capture_node(path)
+    raw_change_bits = stat.FILE_ATTRIBUTE_ARCHIVE | stat.FILE_ATTRIBUTE_READONLY
+    attributes = before.python_identity[3] ^ raw_change_bits
+    _write_directory_attributes(installer, path, attributes)
+    requested = stat.S_IMODE(before.python_identity[2])
+    if attributes & stat.FILE_ATTRIBUTE_READONLY:
+        requested &= ~stat.S_IWRITE
+    else:
+        requested |= stat.S_IWRITE
+    path.chmod(requested)
+    after = installer._InstallTransaction._capture_node(path)
+    assert before.kind == after.kind == "directory"
+    assert before.python_identity[:2] == after.python_identity[:2]
+    assert before.native_proof == after.native_proof
+    assert before.python_identity[3] ^ after.python_identity[3] == raw_change_bits
+    assert after.python_identity[2] == installer._InstallTransaction._chmod_identity(
+        before.python_identity, requested
+    )[2]
+    return before, after
+
+
+def _apply_receipted(installer, source: Path, anchor: Path, skills: Path,
+                     *, dry_run: bool = False) -> None:
+    plan = installer._preflight_canonical_skills(
+        source, skills, root=ROOT, global_install=True
+    )
+    try:
+        with installer._InstallTransaction([skills], enabled=not dry_run) as transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=dry_run)
+            installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+            installer._finalize_canonical_lead_receipt(plan, skills, owner)
+            transaction.commit()
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+@pytest.mark.parametrize("drift", ["byte", "extra"])
+def test_receipted_lead_refuses_tree_drift(tmp_path: Path, drift: str) -> None:
+    installer, source, anchor, skills, _receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    if drift == "byte":
+        with (skills / "lead" / "SKILL.md").open("ab") as stream:
+            stream.write(b"x")
+    else:
+        (skills / "lead" / "extra.txt").write_bytes(b"x")
+    (source / "lead" / "SKILL.md").write_bytes(b"next version")
+    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_RECEIPT_DRIFT"):
+        installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+
+
+def test_receipted_lead_refuses_installed_only_hook_health_drift(tmp_path: Path) -> None:
+    installer, source, anchor, skills, _receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    installed = skills / "lead" / "scripts" / "check-hook-health.py"
+    assert installed.is_file()
+    installed.write_bytes(installed.read_bytes() + b"\n# fixture-only drift\n")
+    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_RECEIPT_DRIFT"):
+        installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+
+
+@pytest.mark.parametrize("invalid", [
+    b"{", b"{}\n", b'{"schema":"wrong","treeSha256":"' + b"0" * 64 + b'"}\n',
+    b'{"schema":"orchestrarium.canonical-lead-install.v1","treeSha256":"' + b"A" * 64 + b'"}\n',
+    b'{"schema":"orchestrarium.canonical-lead-install.v1","treeSha256":"' + b"0" * 64 + b'","extra":1}\n',
+    b'{ "schema":"orchestrarium.canonical-lead-install.v1","treeSha256":"' + b"0" * 64 + b'"}\n',
+])
+def test_lead_receipt_invalid_forms_refuse(tmp_path: Path, invalid: bytes) -> None:
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    receipt.write_bytes(invalid)
+    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_RECEIPT_INVALID"):
+        installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+
+
+def test_lead_receipt_exact_current_reentry(tmp_path: Path) -> None:
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    original = receipt.read_bytes()
+    lead_identity = (skills / "lead").stat().st_ino
+    _apply_receipted(installer, source, anchor, skills)
+    assert receipt.read_bytes() == original
+    assert (skills / "lead").stat().st_ino == lead_identity
+    receipt.unlink()
+    _apply_receipted(installer, source, anchor, skills)
+    assert receipt.read_bytes() == original
+    assert (skills / "lead").stat().st_ino == lead_identity
+    receipt.write_bytes(original.replace(
+        json.loads(original)["treeSha256"].encode("ascii"), b"0" * 64
+    ))
+    _apply_receipted(installer, source, anchor, skills)
+    assert receipt.read_bytes() == original
+    assert (skills / "lead").stat().st_ino == lead_identity
+
+
+@pytest.mark.parametrize("failpoint", ["lead", "receipt"])
+def test_lead_receipt_transaction_failpoints(tmp_path: Path, monkeypatch, failpoint: str) -> None:
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    before = _tree_bytes(skills)
+    (source / "lead" / "SKILL.md").write_bytes(b"new version")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+    try:
+        if failpoint == "lead":
+            method = installer._CreateOnlyMutablePath.replace_exact_tree
+        else:
+            method = installer._CreateOnlyMutablePath.replace_exact_file
+        def abort_after(self, *args, **kwargs):
+            result = method(self, *args, **kwargs)
+            raise RuntimeError("injected after " + failpoint)
+        monkeypatch.setattr(installer._CreateOnlyMutablePath, method.__name__, abort_after)
+        with pytest.raises(RuntimeError, match="injected after"):
+            with installer._InstallTransaction([skills], enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+                installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+                installer._finalize_canonical_lead_receipt(plan, skills, owner)
+                transaction.commit()
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+    assert _tree_bytes(skills) == before
+    assert receipt.read_bytes() == before[Path(".orchestrarium-lead-receipt.v1.json")]
+
+
+def test_lead_receipt_commit_accepts_published_directory_metadata_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows directory attribute binding")
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    monkeypatch.setattr(installer.tempfile, "tempdir", str(tmp_path))
+    created_temporaries = []
+    real_mkdtemp = installer.tempfile.mkdtemp
+
+    def record_mkdtemp(*args, **kwargs):
+        path = Path(real_mkdtemp(*args, **kwargs))
+        created_temporaries.append(path)
+        return str(path)
+
+    monkeypatch.setattr(installer.tempfile, "mkdtemp", record_mkdtemp)
+    _apply_receipted(installer, source, anchor, skills)
+    sibling = skills / "protected-sibling.bin"
+    sibling.write_bytes(b"protected sibling")
+    before = _tree_bytes(skills)
+    receipt_before = receipt.read_bytes()
+    (source / "lead" / "SKILL.md").write_bytes(b"new version")
+    plan = installer._preflight_canonical_skills(
+        source, skills, root=ROOT, global_install=True
+    )
+    lead = skills / "lead"
+    changed = []
+    original_replace = installer._CreateOnlyMutablePath.replace_exact_tree
+
+    def publish_then_drift(owner, relative, *args, **kwargs):
+        result = original_replace(owner, relative, *args, **kwargs)
+        if owner.anchor / relative == lead:
+            changed.append((lead, _flip_directory_binding_attributes(installer, lead)))
+            nested = lead / "scripts"
+            changed.append((nested, _flip_directory_binding_attributes(installer, nested)))
+        return result
+
+    monkeypatch.setattr(
+        installer._CreateOnlyMutablePath, "replace_exact_tree", publish_then_drift
+    )
+    try:
+        with installer._InstallTransaction([skills], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+            installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+            installer._finalize_canonical_lead_receipt(plan, skills, owner)
+            transaction.commit()
+        assert len(changed) == 2
+        assert (lead / "SKILL.md").read_bytes() == b"new version"
+        assert receipt.read_bytes() != receipt_before
+        assert json.loads(receipt.read_text(encoding="utf-8"))["treeSha256"] == installer._tree_sha256(lead)
+        assert sibling.read_bytes() == b"protected sibling"
+        assert _tree_bytes(skills) != before
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+        for path, _observations in reversed(changed):
+            if path.exists():
+                path.chmod(stat.S_IMODE(path.stat().st_mode) | stat.S_IWRITE)
+    assert transaction._temporary is None
+    assert all(not path.exists() for path in created_temporaries)
+
+
+def test_lead_receipt_rollback_restores_after_published_directory_metadata_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows directory attribute binding")
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    monkeypatch.setattr(installer.tempfile, "tempdir", str(tmp_path))
+    created_temporaries = []
+    real_mkdtemp = installer.tempfile.mkdtemp
+
+    def record_mkdtemp(*args, **kwargs):
+        path = Path(real_mkdtemp(*args, **kwargs))
+        created_temporaries.append(path)
+        return str(path)
+
+    monkeypatch.setattr(installer.tempfile, "mkdtemp", record_mkdtemp)
+    _apply_receipted(installer, source, anchor, skills)
+    sibling = skills / "protected-sibling.bin"
+    sibling.write_bytes(b"protected sibling")
+    before = _tree_bytes(skills)
+    receipt_before = receipt.read_bytes()
+    old_metadata = (skills / "lead").stat()
+    old_mode_and_attributes = old_metadata.st_mode, old_metadata.st_file_attributes
+    (source / "lead" / "SKILL.md").write_bytes(b"new version")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+    lead = skills / "lead"
+    changed = []
+    original_replace = installer._CreateOnlyMutablePath.replace_exact_tree
+
+    def fail_after_publish_then_drift(owner, relative, *args, **kwargs):
+        result = original_replace(owner, relative, *args, **kwargs)
+        if owner.anchor / relative == lead:
+            changed.append((lead, _flip_directory_binding_attributes(installer, lead)))
+            raise RuntimeError("injected after lead metadata drift")
+        return result
+
+    monkeypatch.setattr(
+        installer._CreateOnlyMutablePath,
+        "replace_exact_tree",
+        fail_after_publish_then_drift,
+    )
+    try:
+        transaction = installer._InstallTransaction([skills], enabled=True)
+        with pytest.raises(RuntimeError, match="injected after lead metadata drift"):
+            with transaction:
+                owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+                installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+                installer._finalize_canonical_lead_receipt(plan, skills, owner)
+                transaction.commit()
+        assert changed
+        assert _tree_bytes(skills) == before
+        assert receipt.read_bytes() == receipt_before
+        restored = installer._InstallTransaction([], enabled=False)._capture_node(lead)
+        assert (restored.python_identity[2], restored.python_identity[3]) == old_mode_and_attributes
+        assert sibling.read_bytes() == b"protected sibling"
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+        if (lead.exists() and changed
+                and (lead.stat().st_dev, lead.stat().st_ino) == changed[-1][1][1].python_identity[:2]):
+            lead.chmod(stat.S_IMODE(lead.stat().st_mode) | stat.S_IWRITE)
+    assert transaction._temporary is None
+    assert all(not path.exists() for path in created_temporaries)
+
+
+def test_unreceipted_lead_adoption_is_digest_bound_global_only(tmp_path: Path) -> None:
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    receipt.unlink()
+    (source / "lead" / "SKILL.md").write_bytes(b"next version")
+    observed = installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
+    assert observed is not None
+    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_REQUIRED") as failure:
+        installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+    assert observed in str(failure.value)
+    for supplied in ("0" * 64, observed.upper()):
+        with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_MISMATCH"):
+            installer._preflight_canonical_skills(
+                source, skills, root=ROOT, global_install=True,
+                replace_unreceipted_lead_sha256=supplied,
+            )
+    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_MISMATCH"):
+        installer._preflight_canonical_skills(
+            source, skills, root=ROOT, replace_unreceipted_lead_sha256=observed,
+        )
+    assert installer._parser("codex").parse_args(["--global", "--force"]).force
+    plan = installer._preflight_canonical_skills(
+        source, skills, root=ROOT, global_install=True,
+        replace_unreceipted_lead_sha256=observed,
+    )
+    try:
+        with installer._InstallTransaction([skills], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+            installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+            installer._finalize_canonical_lead_receipt(plan, skills, owner)
+            transaction.commit()
+        assert json.loads(receipt.read_bytes())["treeSha256"] == installer._tree_sha256(
+            skills / "lead", ignore_runtime_cache=True
+        )
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_MISMATCH"):
+        installer._preflight_canonical_skills(
+            source, skills, root=ROOT, global_install=True,
+            replace_unreceipted_lead_sha256=observed,
+        )
+
+
+def test_unreceipted_lead_adoption_dry_run_is_read_only(tmp_path: Path) -> None:
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    receipt.unlink()
+    (source / "lead" / "SKILL.md").write_bytes(b"next version")
+    before = _tree_bytes(skills)
+    digest = installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
+    plan = installer._preflight_canonical_skills(
+        source, skills, root=ROOT, global_install=True,
+        replace_unreceipted_lead_sha256=digest,
+    )
+    try:
+        owner = installer._CreateOnlyMutablePath(
+            anchor, installer._InstallTransaction([], enabled=False), dry_run=True
+        )
+        installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+    assert _tree_bytes(skills) == before
+    assert not receipt.exists()
+
+
+@pytest.mark.parametrize("changed", ["source", "lead", "receipt"])
+def test_lead_receipt_preflight_drift(tmp_path: Path, changed: str) -> None:
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    (source / "lead" / "SKILL.md").write_bytes(b"next version")
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+    try:
+        if changed == "source":
+            (source / "lead" / "SKILL.md").write_bytes(b"later version")
+        elif changed == "lead":
+            (skills / "lead" / "SKILL.md").write_bytes(b"drift")
+        else:
+            receipt.write_bytes(receipt.read_bytes().replace(
+                json.loads(receipt.read_bytes())["treeSha256"].encode("ascii"), b"0" * 64
+            ))
+        before = _tree_bytes(skills)
+        owner = installer._CreateOnlyMutablePath(
+            anchor, installer._InstallTransaction([], enabled=False), dry_run=False
+        )
+        with pytest.raises(ValueError, match="preflight drift|E_CANONICAL_LEAD_RECEIPT_DRIFT"):
+            installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+        assert _tree_bytes(skills) == before
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+def test_lead_receipt_nonordinary_refuses(tmp_path: Path) -> None:
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    payload = receipt.read_bytes()
+    receipt.unlink()
+    receipt.mkdir()
+    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_RECEIPT_INVALID"):
+        installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+    receipt.rmdir()
+    foreign = tmp_path / "foreign.json"
+    foreign.write_bytes(payload)
+    try:
+        receipt.symlink_to(foreign)
+    except OSError:
+        pytest.skip("file symlinks unavailable")
+    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_RECEIPT_INVALID"):
+        installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+
+
+@pytest.mark.parametrize("order", [("codex", "claude"), ("claude", "codex")])
+def test_receipted_lead_provider_orders_without_git_keep_links_and_hooks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, order: tuple[str, str]
+) -> None:
+    installer = _load_installer()
+    receiver = tmp_path / "receiver"
+    receiver.mkdir()
+    archive = subprocess.run(
+        ["git", "archive", "--format=tar", "HEAD"], cwd=ROOT,
+        check=True, capture_output=True,
+    ).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
+        package.extractall(receiver, filter="data")
+    assert not (receiver / ".git").exists()
+    monkeypatch.setattr(installer, "_repo_root", lambda _script: receiver)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    assert installer.install(order[0], ["--global", "--no-hypothesis-hook"]) == 0
+    skills = home / ".agents" / "skills"
+    receipt = skills / ".orchestrarium-lead-receipt.v1.json"
+    first_digest = json.loads(receipt.read_bytes())["treeSha256"]
+    assert first_digest == installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
+    first_links = {
+        provider: (home / f".{provider}" / "skills" / "lead").lstat().st_ino
+        for provider in ("codex", "claude")
+        if (home / f".{provider}" / "skills" / "lead").exists()
+    }
+    hook_files = (home / ".codex" / "hooks.json", home / ".claude" / "settings.json")
+    sentinels = (
+        {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "synthetic-hook"}
+        ]}]}},
+        {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "synthetic-hook"}
+        ]}]}},
+    )
+    for hook_file, sentinel in zip(hook_files, sentinels):
+        hook_file.parent.mkdir(parents=True, exist_ok=True)
+        existing = json.loads(hook_file.read_text(encoding="utf-8")) if hook_file.exists() else {}
+        existing.update(sentinel)
+        hook_file.write_text(json.dumps(existing), encoding="utf-8")
+    hook_identities = tuple(json.loads(path.read_text(encoding="utf-8"))["hooks"] for path in hook_files)
+    with (receiver / "src.codex" / "skills" / "lead" / "SKILL.md").open("ab") as stream:
+        stream.write(b"\nreceiver-version-B\n")
+    assert installer.install(order[1], ["--global", "--no-hypothesis-hook"]) == 0
+    second_digest = json.loads(receipt.read_bytes())["treeSha256"]
+    assert second_digest != first_digest
+    assert second_digest == installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
+    for provider, identity in first_links.items():
+        assert (home / f".{provider}" / "skills" / "lead").lstat().st_ino == identity
+    assert tuple(json.loads(path.read_text(encoding="utf-8"))["hooks"] for path in hook_files) == hook_identities
+
+
+def test_global_codex_native_preflight_precedes_transaction_without_adoption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    installer = _load_installer()
+    home = tmp_path / "home"
+    config = home / ".codex" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(b"# preserve\n")
+    before = _tree_bytes(home)
+    identity = installer._CreateOnlyMutablePath._identity(config)
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(
+        installer, "_append_native_role_blocks",
+        lambda _payload, _registrations: b"agents = {",
+    )
+    def reject_transaction(*_args, **_kwargs):
+        raise AssertionError("transaction entered before native preflight")
+    monkeypatch.setattr(installer, "_InstallTransaction", reject_transaction)
+    assert installer.install("codex", ["--global", "--no-hypothesis-hook"]) == 1
+    assert "E_CREATE_ONLY_CONFIG_INVALID" in capsys.readouterr().err
+    assert _tree_bytes(home) == before
+    assert installer._CreateOnlyMutablePath._identity(config) == identity
+
+
+def test_claude_global_adoption_dry_run_skips_codex_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    receipt.unlink()
+    with (skills / "lead" / "SKILL.md").open("ab") as stream:
+        stream.write(b"legacy unreceipted prior")
+    observed = installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
+    before = _tree_bytes(anchor)
+    monkeypatch.setenv("USERPROFILE", str(anchor))
+    monkeypatch.setenv("HOME", str(anchor))
+    assert installer.install("claude", [
+        "--global", "--dry-run", "--no-hypothesis-hook",
+        "--replace-unreceipted-lead-sha256", observed,
+    ]) == 0
+    output = capsys.readouterr().out
+    assert f"{observed}: 2 replacements" in output
+    assert _tree_bytes(anchor) == before
+    assert not receipt.exists()

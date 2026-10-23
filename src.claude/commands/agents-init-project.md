@@ -4,9 +4,9 @@ You are guiding the user through project policy configuration for the Claude Cod
 
 ## Continuity contract
 
-- Use one primary in-progress task at a time.
-- Side requests may temporarily interrupt that task, but they do not replace it unless the user explicitly reprioritizes, cancels, or parks it.
-- After any side request, explicitly resume the primary task and state the next concrete step.
+- Follow the shared **Primary-task continuity and side work** rule in AGENTS.md; retain the admitted primary outcome and next authorized action.
+- Answer brief questions inline. Promptly delegate eligible substantive admitted side work to matching non-spawning specialists under existing authority, capacity, full resource surfaces and gates; continue ready primary work in the same turn without waiting for the side result.
+- Defer conflicting side work with its owner/resume point or use already-authorized validated isolation; preserve manual modes and explicit user stop/pause/cancel/reprioritization and native Goal holds.
 - After an accepted phase or completed batch, continue to the next clear step unless a real gate blocks progression.
 - Before claiming completion, reconcile the current result against the original request and any still-open required follow-up inside the same task.
 - If a required next action is already known and still inside the current task, keep the task open instead of stopping at a partial batch.
@@ -31,7 +31,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
-| `externalCodexProfile` | `gpt-5.6-sol-xhigh` | `default` | `default` | `gpt-5.6-sol-xhigh` | `gpt-5.6-sol-xhigh` | `gpt-5.6-terra` |
+| `externalCodexProfile` | `gpt-6.1-sol-xhigh` | `default` | `default` | `gpt-6.1-sol-xhigh` | `gpt-6.1-sol-xhigh` | `gpt-6.1-sol-high` |
 
 `correctness-first` and `power-mode` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
@@ -53,8 +53,7 @@ Routing conventions (not persisted as keys):
    - Read `.claude/CLAUDE.md` and check if a `## Project policies` section already exists.
    - Read `.claude/.agents-mode.yaml` first.
    - If it is missing, read legacy `.claude/.agents-mode` as compatibility input only.
-   - If either file exists, normalize it to the current canonical format before presenting or trusting the current values.
-   - Normalize either input forward into `.claude/.agents-mode.yaml` and do not recreate legacy `.claude/.agents-mode`.
+   - Normalize effective values in memory through the dispatch owner's existing per-key read order before presenting or trusting them. Use any global fallback as the starting point for project-local review; do not rewrite borrowed/global configuration on read. Persist the explicitly selected project configuration to the canonical project-local `.yaml` path only within the authorized configuration write in Step 7, and do not recreate legacy files.
    - If either surface already exists, show the current values and ask whether to keep them, review them, or start fresh.
 
 2. **Read the installed canonical sources.**
@@ -110,8 +109,8 @@ Routing conventions (not persisted as keys):
       - `externalCodexWorkdirMode: neutral`
       - `externalClaudeWorkdirMode: neutral`
       - `externalModelMode: runtime-default`
-      - `externalCodexProfile: gpt-5.6-sol-xhigh`
-    - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on the Codex/Claude pair. Kimi is explicit-only, policy-admitted read-only exploration, research, planning, or review through fixed `kimi-code/k3` with no tools or subagents, independently verified and nonauthorizing, while Grok remains unavailable in 1.x.
+      - `externalCodexProfile: gpt-6.1-sol-xhigh`
+    - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on the Codex/Claude pair. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Omitting the capability file keeps tools/servers/subagents empty with permission `reject`; a validated file may select admitted read tools/Model Context Protocol servers or scoped worker tools. Every result remains independently verified and nonauthorizing, while Grok remains unavailable in 1.x.
     - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
 6. **Confirm choices.**
@@ -137,7 +136,7 @@ Routing conventions (not persisted as keys):
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
    preferExternalReviewer: {value}  # allowed: false | true; default: false
-   externalProvider: {value}  # selectable here: auto | codex | claude; default: auto; kimi requires explicit global Windows enrollment and is not initialized as a project-local scalar; grok remains unavailable in 1.x; removed gemini/qwen values fail closed with E_EXTERNAL_PROVIDER_REMOVED
+   externalProvider: {value}  # selectable here: auto | codex | claude; default: auto; kimi is explicit-only and is not initialized as a project-local scalar; grok remains unavailable in 1.x; removed gemini/qwen values fail closed with E_EXTERNAL_PROVIDER_REMOVED
    externalPriorityProfile: {value}  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
    reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
    externalPriorityProfiles: {value}  # allowed: structured profile map
@@ -145,7 +144,7 @@ Routing conventions (not persisted as keys):
    externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-   externalCodexProfile: {value}  # allowed: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-5.6-sol-xhigh
+   externalCodexProfile: {value}  # allowed: default | gpt-6.1-sol-high | gpt-6.1-sol-xhigh | gpt-6.1-sol-max | gpt-6-sol-high | gpt-6-sol-xhigh | gpt-6-sol-max | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-6.1-sol-xhigh
    ```
 
 8. **Write to CLAUDE.md.** Add or replace the `## Project policies` section in `.claude/CLAUDE.md`. Place it between `## Engineering hygiene` and `## Publication safety`. Use this format:
@@ -176,6 +175,5 @@ Routing conventions (not persisted as keys):
 - If the user gives a custom answer that doesn't match an option, record it as-is.
 - Do not invent extra `agents-mode` keys beyond the canonical Claude-line schema.
 - Preserve unknown keys in `.claude/.agents-mode.yaml` when updating.
-- Any read of `.claude/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
-- Any read that drives a decision should prefer local `.claude/.agents-mode.yaml`, then local legacy `.claude/.agents-mode`, then global `~/.claude/.agents-mode.yaml`, then global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`; normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
+- For decision-driving reads, use the dispatch owner's per-key precedence (local `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults) and the in-memory normalization in Step 1; inspection grants no write to the source overlay. Persist only the explicitly selected authorized project configuration in Step 7.
 - Do not change any other section of CLAUDE.md.

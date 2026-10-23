@@ -4,9 +4,8 @@
 This script merges an Orchestrarium structural hook config into a
 target settings/hooks JSON file while preserving all other user-owned keys and
 other hooks. Running it multiple times produces the same result
-(our entry is identified by the configured script marker in the command or
-args fields, so re-runs update in place rather than appending
-duplicates).
+(ownership follows the configured marker in the invoked script's basename,
+so re-runs update only owned handlers rather than appending duplicates).
 
 Supported targets:
   --platform claude   ->  Claude Code settings.json (e.g. ~/.claude/settings.json)
@@ -21,8 +20,8 @@ Cross-platform behavior:
   Registration always invokes the selected Python hook directly.
 
 Removal:
-  --remove  Removes ALL of our hook entries (handles duplicates from earlier
-            buggy versions). Cleans up empty hooks containers. The opt-out env
+  --remove  Removes owned handlers (handles duplicates from earlier buggy
+            versions). Codex group slots are retained. The opt-out env
             var does NOT block --remove, so a standing opt-out can still
             uninstall a previously-installed hook.
 
@@ -45,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import importlib.util
 import os
 import re
 import shlex
@@ -225,6 +225,7 @@ def resolve_hook_target(
     platform: str,
     *,
     python_executable: str | None = None,
+    require_script: bool = True,
 ) -> HookTarget:
     """Resolve and validate the direct-Python hook process target."""
     requested_script = Path(script_path).expanduser()
@@ -232,15 +233,14 @@ def resolve_hook_target(
         raise ValueError(f"hook script path must be absolute: {requested_script}")
 
     executable = _validate_spawnable_executable(
-        # A public launcher may already be running through an interpreter alias.
-        # Bind that running interpreter to its physical file. Explicit overrides
-        # still reach the strict reparse/shim validator without normalization.
-        python_executable
-        if python_executable is not None
-        else str(Path(sys.executable).resolve(strict=True)),
+        python_executable if python_executable is not None else sys.executable,
         host_os,
     )
-    script = _absolute_file(str(requested_script), "hook Python target")
+    script = (
+        _absolute_file(str(requested_script), "hook Python target")
+        if require_script
+        else requested_script
+    )
     if script.suffix.lower() != ".py":
         raise ValueError(f"Python hook target must end in .py: {script}")
     target = HookTarget(str(executable), (str(script),))
@@ -299,6 +299,7 @@ def build_codex_entry(
     host_os: str,
     hook_event: str = "PreToolUse",
     tool_matcher: str | None = None,
+    status_message: str | None = None,
 ) -> dict[str, Any]:
     """Build the Codex shell-form entry for a resolved HookTarget."""
     tokens = (target.executable, *target.args)
@@ -307,52 +308,55 @@ def build_codex_entry(
         if host_os == "windows"
         else " ".join(shlex.quote(token) for token in tokens)
     )
+    handler = {
+        "type": "command",
+        "command": command_str,
+    }
+    if status_message is not None:
+        handler["statusMessage"] = status_message
     return _with_event_matcher(
         {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": command_str,
-                }
-            ],
+            "hooks": [handler],
         },
         hook_event,
         tool_matcher,
     )
 
 
-def _hook_contains_marker(hook: dict[str, Any], script_marker: str) -> bool:
-    """True if a single hook dict references our script via marker substring.
-
-    Marker can appear in either:
-      - The `command` shell-string (legacy shell form / Codex always-shell form).
-      - Any element of the `args` array (exec form, where the script path is
-        a literal argv element separate from the executable name).
-    """
-    command = hook.get("command", "")
-    if isinstance(command, str) and script_marker in command:
-        return True
-    args_field = hook.get("args")
-    if isinstance(args_field, list):
-        for arg in args_field:
-            if isinstance(arg, str) and script_marker in arg:
-                return True
-    return False
+def _hook_health_owner():
+    """Load the exact source sibling; health has no dependency on this writer."""
+    path = Path(__file__).with_name("check-hook-health.py")
+    spec = importlib.util.spec_from_file_location("orchestrarium_registration_health_owner", path)
+    if spec is None or spec.loader is None:
+        raise ValueError("hook invocation owner could not be loaded")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except (OSError, ImportError) as exc:
+        raise ValueError("hook invocation owner could not be loaded") from exc
+    if not callable(getattr(module, "classify_hook_invocation", None)):
+        raise ValueError("hook invocation owner is incompatible")
+    return module
 
 
-def find_our_entry_indices(hook_event_list: list[Any], script_marker: str) -> list[int]:
-    """Return ALL indices whose hook references our script (by marker).
+def _hook_contains_marker(
+    hook: dict[str, Any], script_marker: str,
+    platform: str = "codex", host_os: str = "posix", *, owner=None,
+) -> bool:
+    owner = _hook_health_owner() if owner is None else owner
+    invocation = owner.classify_hook_invocation(hook, {script_marker}, platform, host_os)
+    if invocation.kind == "malformed-owned":
+        raise ValueError("owned hook could not be parsed: " + script_marker)
+    return invocation.kind != "foreign"
 
-    Recognizes both legacy shell form (marker in `command`) and current exec
-    form (marker in `args[k]`). This lets a re-install collapse an older
-    shell-form entry into the new exec-form entry without leaving stale
-    duplicates, and lets `--remove` clean up either form.
 
-    Earlier versions of this script returned only the first match; that left
-    duplicates firing if multiple of our entries were inserted by a buggy or
-    racy install. Now: install collapses duplicates to a single entry; remove
-    deletes every one of our entries.
-    """
+def find_our_entry_indices(
+    hook_event_list: list[Any], script_marker: str,
+    platform: str = "codex", host_os: str = "posix", *, owner=None,
+) -> list[int]:
+    """Return group positions containing an actually invoked owned target."""
+    owner = _hook_health_owner() if owner is None else owner
     indices: list[int] = []
     for idx, entry in enumerate(hook_event_list):
         if not isinstance(entry, dict):
@@ -364,7 +368,7 @@ def find_our_entry_indices(hook_event_list: list[Any], script_marker: str) -> li
             # script's job to repair.
             continue
         for hook in hooks_field:
-            if isinstance(hook, dict) and _hook_contains_marker(hook, script_marker):
+            if isinstance(hook, dict) and _hook_contains_marker(hook, script_marker, platform, host_os, owner=owner):
                 indices.append(idx)
                 break
     return indices
@@ -405,6 +409,16 @@ def load_existing(target: Path) -> dict[str, Any]:
     return data
 
 
+def encode_hook_config(data: dict[str, Any]) -> bytes:
+    """Render the existing UTF-8 JSON format, including host-native newlines.
+
+    Planning has no filesystem effect. The standalone writer and an admitted
+    parent writer consume these same bytes; neither owns a second serializer.
+    """
+    text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    return text.replace("\n", os.linesep).encode("utf-8")
+
+
 def write_atomic(target: Path, data: dict[str, Any]) -> None:
     """Write target atomically via temp file + os.replace.
 
@@ -419,15 +433,15 @@ def write_atomic(target: Path, data: dict[str, Any]) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     real_target = target.resolve() if target.is_symlink() else target
     real_target.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    content = encode_hook_config(data)
     # tempfile beside the REAL target so os.replace is atomic on the same FS.
     fd, tmp_path_str = tempfile.mkstemp(
         prefix=".install-hypothesis-hook.", suffix=".tmp", dir=str(real_target.parent)
     )
     tmp_path = Path(tmp_path_str)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
             f.flush()
             try:
                 os.fsync(f.fileno())
@@ -446,8 +460,10 @@ def install(
     new_entry: dict[str, Any],
     hook_event: str,
     script_marker: str,
+    *, platform: str = "claude", host_os: str = "posix",
 ) -> bool:
-    """Insert our hook entry, removing any duplicates. Returns True if changed."""
+    """Update only owned handlers, preserving foreign content and Codex slots."""
+    owner = _hook_health_owner()
     hooks = data.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         sys.stderr.write("FAIL: 'hooks' key is not a JSON object\n")
@@ -457,50 +473,105 @@ def install(
         sys.stderr.write(f"FAIL: 'hooks.{hook_event}' is not a JSON array\n")
         sys.exit(1)
 
-    existing = find_our_entry_indices(hook_entries, script_marker)
-    changed = False
+    positions = [
+        (group_index, handler_index)
+        for group_index, group in enumerate(hook_entries)
+        if isinstance(group, dict) and isinstance(group.get("hooks"), list)
+        for handler_index, handler in enumerate(group["hooks"])
+        if isinstance(handler, dict)
+        and _hook_contains_marker(handler, script_marker, platform, host_os, owner=owner)
+    ]
+    compatible = next((position for position in positions
+                       if hook_entries[position[0]].get("matcher") == new_entry.get("matcher")), None)
+    retained_metadata = (
+        hook_entries[(compatible or positions[0])[0]]["hooks"][(compatible or positions[0])[1]]
+        if positions else {}
+    )
+    managed = {"type", "command", "args", "statusMessage"}
+    replacement = {key: value for key, value in retained_metadata.items() if key not in managed}
+    replacement.update(new_entry["hooks"][0])
+    # Build the complete result before mutating: malformed/ambiguous ownership
+    # fails without a partially rewritten registration.
+    updated = []
+    owned_positions = set(positions)
+    for group_index, group in enumerate(hook_entries):
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            updated.append(group)
+            continue
+        handlers = []
+        removed_owned = False
+        for handler_index, handler in enumerate(group["hooks"]):
+            position = (group_index, handler_index)
+            if position == compatible:
+                handlers.append(replacement)
+            elif position in owned_positions:
+                removed_owned = True
+            else:
+                handlers.append(handler)
+        if removed_owned and not handlers and platform != "codex" and set(group) <= {"hooks", "matcher"}:
+            continue
+        updated.append({**group, "hooks": handlers})
+    if compatible is None:
+        updated.append({**new_entry, "hooks": [replacement]})
+    if updated == hook_entries:
+        return False
+    hook_entries[:] = updated
+    return True
 
-    # If there are multiple of our entries (duplicates from earlier buggy
-    # state), collapse them to a single entry containing the new content.
-    if len(existing) > 1:
-        # Delete duplicates from the end so earlier indices stay valid.
-        for idx in reversed(existing[1:]):
-            del hook_entries[idx]
-        existing = [existing[0]]
-        changed = True
 
-    if existing:
-        idx = existing[0]
-        if hook_entries[idx] != new_entry:
-            hook_entries[idx] = new_entry
-            changed = True
-    else:
-        hook_entries.append(new_entry)
-        changed = True
-
-    return changed
-
-
-def remove(data: dict[str, Any], hook_event: str, script_marker: str) -> bool:
-    """Remove ALL of our hook entries. Returns True if changed."""
+def remove(
+    data: dict[str, Any],
+    hook_event: str,
+    script_marker: str,
+    *,
+    expected_entry: dict[str, Any] | None = None,
+    platform: str = "claude", host_os: str = "posix",
+) -> bool:
+    """Remove owned entries, or exact handlers when a retirement identity is supplied."""
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
         return False
     hook_entries = hooks.get(hook_event)
     if not isinstance(hook_entries, list):
         return False
-    indices = find_our_entry_indices(hook_entries, script_marker)
+    owner = _hook_health_owner()
+    indices = find_our_entry_indices(hook_entries, script_marker, platform, host_os, owner=owner)
     if not indices:
         return False
+    changed = False
+    expected_handler = expected_entry["hooks"][0] if expected_entry is not None else None
     # Delete from the end so earlier indices stay valid.
     for idx in reversed(indices):
-        del hook_entries[idx]
-    # Clean up empty containers so the file does not gain ghost structure.
+        entry = hook_entries[idx]
+        if expected_entry is None:
+            retained = [handler for handler in entry["hooks"]
+                        if not (isinstance(handler, dict) and _hook_contains_marker(
+                            handler, script_marker, platform, host_os, owner=owner))]
+        elif entry.get("matcher") != expected_entry.get("matcher"):
+            continue
+        else:
+            retained = [
+                handler
+                for handler in entry["hooks"]
+                if not (
+                    isinstance(handler, dict)
+                    and all(handler.get(key) == expected_handler.get(key) for key in ("type", "command", "args"))
+                    and not set(handler).difference({"type", "command", "args", "statusMessage"})
+                )
+            ]
+        if len(retained) == len(entry["hooks"]):
+            continue
+        entry["hooks"] = retained
+        if expected_entry is None and not retained and platform != "codex" and set(entry) <= {"hooks", "matcher"}:
+            del hook_entries[idx]
+        changed = True
+    # Marker-only removal may empty event containers. Exact removal retains
+    # valid empty groups: no runnable handler, but later native group slots stay stable.
     if not hook_entries:
         del hooks[hook_event]
     if not hooks:
         del data["hooks"]
-    return True
+    return changed
 
 
 def main() -> int:
@@ -546,6 +617,11 @@ def main() -> int:
             "on a different tool set, e.g. 'Bash' for a shell-command guard. "
             "Ignored for the Stop event, which takes no matcher."
         ),
+    )
+    parser.add_argument(
+        "--status-message",
+        default=None,
+        help="Optional Codex command-handler statusMessage shown while the hook runs",
     )
     parser.add_argument(
         "--remove",
@@ -616,7 +692,31 @@ def main() -> int:
 
         if args.remove:
             data = load_existing(target)
-            changed = remove(data, args.hook_event, args.script_marker)
+            expected_entry = None
+            if args.tool_matcher is not None:
+                if not args.script_path:
+                    sys.stdout.write(f"  Preserving {args.script_marker} registration: exact retirement identity is incomplete\n")
+                    return 0
+                hook_target = resolve_hook_target(
+                    args.script_path, args.host_os, args.platform, require_script=False
+                )
+                expected_entry = (
+                    build_codex_entry(hook_target, args.host_os, args.hook_event, args.tool_matcher)
+                    if args.platform == "codex"
+                    else build_generic_entry(hook_target, args.hook_event, args.tool_matcher)
+                )
+            changed = remove(
+                data, args.hook_event, args.script_marker, expected_entry=expected_entry,
+                platform=args.platform, host_os=args.host_os,
+            )
+            remaining_hooks = data.get("hooks")
+            remaining_entries = (
+                remaining_hooks.get(args.hook_event) if isinstance(remaining_hooks, dict) else None
+            )
+            if expected_entry is not None and isinstance(remaining_entries, list) and find_our_entry_indices(
+                remaining_entries, args.script_marker, args.platform, args.host_os
+            ):
+                sys.stdout.write(f"  Preserving unmatched {args.script_marker} registration identities\n")
             action = "removed"
         else:
             if not args.script_path:
@@ -643,14 +743,19 @@ def main() -> int:
                 )
             elif args.platform == "codex":
                 entry = build_codex_entry(
-                    hook_target, args.host_os, args.hook_event, args.tool_matcher
+                    hook_target,
+                    args.host_os,
+                    args.hook_event,
+                    args.tool_matcher,
+                    args.status_message,
                 )
             else:
                 entry = build_generic_entry(
                     hook_target, args.hook_event, args.tool_matcher
                 )
             data = load_existing(target)
-            changed = install(data, entry, args.hook_event, args.script_marker)
+            changed = install(data, entry, args.hook_event, args.script_marker,
+                              platform=args.platform, host_os=args.host_os)
             action = "installed/updated"
     except TestTransactionAbort as exc:
         sys.stderr.write(f"{TestAbortPolicy.MARKER} {exc}\n")

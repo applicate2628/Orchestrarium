@@ -24,10 +24,10 @@ When maintaining the Codex side of this monorepo or shared repo-local governance
 - Apply the shared documentation terminology discipline everywhere, not only in docs: in the main conversation and chat replies, always expand domain terms, acronyms, provider/model/role names, workflow labels, and unclear or mixed-language terms on first use — calibrate to comprehension (expand inline or as a short list; do not define ordinary words). When updating human-facing repo documentation, also end terminology-heavy documents with `## Terms and Abbreviations` or a localized equivalent, expanding those terms there.
 - **No mechanical application:** do not copy, move, rename, merge, or propagate content mechanically — between packs, between files, or within the same file — without verifying that the result is correct in the target context. Platform-specific semantics (execution model, parallelism, invocation mechanism, paths, tool capabilities), ownership boundaries, and behavioral implications must be checked before the change lands. "The other pack has it" or "the source file said so" is not sufficient justification. Every change must be independently valid where it lands.
 - **Provider/runtime claims:** when documentation or implementation describes provider-native behavior, explicitly distinguish `official provider behavior`, `Orchestrarium repo-local convention`, and `observed installed/runtime behavior`. Use the official provider docs when they exist, and do not present a source-tree pattern or local install convention as if it were guaranteed by the provider itself. For install-contract changes, verify both the authoritative doc and the installed result before calling the behavior established.
-- **Repo-local external routing heuristic:** `externalProvider: auto` uses only production-recommended provider profiles, currently `codex | claude`, and resolves through the active priority profile rather than by host-pack default. Orchestrarium treats `externalPriorityProfile: balanced` as the quiet default production profile. Kimi is an explicit-only read-only route and Grok remains unavailable in 1.x. The removed Gemini and Qwen scalar values fail closed with `E_EXTERNAL_PROVIDER_REMOVED`.
+- **Repo-local external routing heuristic:** `externalProvider: auto` uses only production-recommended provider profiles, currently `codex | claude`, and resolves through the active priority profile rather than by host-pack default. Orchestrarium treats `externalPriorityProfile: balanced` as the quiet default production profile. Kimi is explicit-only: use its canonical wrapper for policy-admitted read-only research/review, or scoped `engineering` only when the external-role taxonomy maps the profession to `$external-worker`; it never enters `auto` and remains nonauthorizing. Grok remains unavailable in 1.x. The removed Gemini and Qwen scalar values fail closed with `E_EXTERNAL_PROVIDER_REMOVED`.
 - **Reserve advisory/review candidate:** `reserve` is a symbolic supplemental read-only candidate for advisory and review profile orders only, after primary `claude` and `codex`, and independent of the primary provider candidate. `reserveResolver` binds it to one concrete read-only resolver: `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`. `wrapper:<command>` must be a PATH-resolved command or repo-relative wrapper path rather than a workstation-specific absolute path in tracked config, and the execution record must name the actual resolved path. Mutating implementation, code-generation, file-editing, or publication actions must not use `reserve`; they must use the allowed primary provider path or report the provider unavailable.
 - **External CLI prompt delivery:** provider-backed consultant, worker, and reviewer launches that carry a substantive task prompt must use file-based prompt delivery: write the prompt to a temporary prompt file and feed it through the provider's stdin or supported file-input mechanism. Keep argv to launcher flags, model/profile options, and file paths; inline prompt argv is only for tiny smoke checks or a documented provider limitation, and the deviation must be recorded.
-- **Source-tree organization:** the shared rules `Directory-level entity separation` and `Trash hygiene and archival` (in `shared/AGENTS.shared.md` `### Scope and ownership discipline`) govern how this repo organizes source files. Three legacy directories (`src.claude/agents/scripts/`, `src.codex/skills/lead/scripts/`, root `scripts/`) are grandfathered exceptions for user-copy / install-script convenience. New entity types MUST follow the shared rule (typed subdirectory or canonical home), not extend the legacy co-located dirs. Full design narrative + exception rationale + worked examples: [`shared/references/repository-source-hygiene.md`](shared/references/repository-source-hygiene.md).
+- **Source-tree organization:** the shared rules `Directory-level entity separation` and `Artifact disposition and project hygiene` (in `shared/AGENTS.shared.md` `### Scope and ownership discipline`) govern how this repo organizes source files. Three legacy directories (`src.claude/agents/scripts/`, `src.codex/skills/lead/scripts/`, root `scripts/`) are grandfathered exceptions for user-copy / install-script convenience. New entity types MUST follow the shared rule (typed subdirectory or canonical home), not extend the legacy co-located dirs. Full design narrative + exception rationale + worked examples: [`shared/references/repository-source-hygiene.md`](shared/references/repository-source-hygiene.md).
 - **Python owns executable-script logic in this monorepo.** For Orchestrarium-managed production scripts, a `.py` file is the sole canonical implementation. A retained `.sh` file may only be a thin unconditional launcher that locates an interpreter and `exec`s its named Python sibling while forwarding stdin, arguments, and exit status; it must not parse inputs, read configuration, implement decisions, or serve as a rollback copy. Do not retain `.ps1` implementations or rollback copies in the Codex/Claude production surfaces. When an admitted change encounters an independent shell implementation, migrate or delete it in that same change rather than layering another wrapper around it. This is a repo-local source-policy rule, not shared installed governance for arbitrary target projects.
 - **Cross-pack sync:** when editing shared semantic blocks in `operating-model.md` or `subagent-contracts.md`, consult [`shared/references/cross-pack-reconciliation.md`](shared/references/cross-pack-reconciliation.md) to identify and update the matching block in the other pack.
 - **Monorepo install choice:** when a skill or repo-local workflow wants Codex runtime state such as `.agents/.agents-mode.yaml` while operating inside this monorepo, use the global install at `~/.codex/` as the default fallback when the local overlay is absent. Create a repo-local install via `scripts/install-codex.sh|ps1` or `install.sh|ps1` only when the user explicitly wants project-local runtime state; do not synthesize `.agents/` by hand inside the monorepo just to satisfy a gate.
@@ -77,7 +77,7 @@ This monorepo keeps `work-items/` as repo-local task memory for interruption rec
 - Root `.gitignore` defines the local-only boundary at `/.scratch/`, `/.plans/`, `/.reports/`, and `/work-items/`; keep raw logs, transcripts, temp outputs, and repo-local task-memory artifacts there.
 - Never hardcode workstation-specific paths, usernames, drive letters, or local tool details into tracked content unless they are intentionally public and synthetic.
 - Human review before `git push`, release, or equivalent publication must include a leak-check of staged changes.
-- Default/tracked and explicit-path scans are manual pre-commit evidence only. When a pending push is otherwise admissible, the push gate captures the verified gate plus four held modules (`hook_common.py`, machine-path classifier, POSIX process-group helper, scanner), runs one fresh canonical sibling range scan, and accepts only the exact pending invocation's bounded, reaped, non-empty version-3 result covering the complete unpublished commit/tree/blob graph and bound to remote, destination, resolved source, current `HEAD`, and receipt tip. Transcript/manual output and version-2, legacy, zero-commit, incomplete-acquisition, correlation/provenance, or drift results deny. Human review and the explicit user publication marker remain required by their existing routes.
+- Default/tracked and explicit-path scans are manual pre-commit evidence only. For an otherwise admissible pending push, the gate captures eight code roles: the gate, `hook_common.py`, machine-path classifier, POSIX process-group helper, Windows Job helper, scanner, `publication_review_policy.py`, and the existing `linked_runtime_subroots.py`. One fresh bounded, reaped, non-empty version-3 range result must cover the complete unpublished commit/tree/blob graph and bind remote, destination, resolved source, current `HEAD` and receipt tip. Ordinary clean and explicit `qualified` outcomes are distinct; qualified credit additionally requires the actual security-reviewer decision received by Root, trusted policy provisioning outside repository-controlled inputs, exact reviewed scope and final current used-authority verification. Reports, hashes and role labels are not authority. An unchanged content decision may support another fresh scan, never a reused receipt. Transcript/manual/legacy/zero-commit/incomplete, unresolved-finding, refusal, correlation/provenance, resource or relevant drift failure cannot authorize. Human review and explicit user publication authority remain required by their existing routes.
 - Run `python scripts/check-publication-gate.py` (or the thin POSIX launcher `bash scripts/check-publication-gate.sh`) as the repo-local publication gate before publication review; it combines the staged leak scan with the `RELEASE_NOTES.md` requirement for release-relevant tracked changes.
 - If staged tracked changes are release-relevant, publication review must confirm that `RELEASE_NOTES.md` is updated in the same change and that the entry explains the change's practical meaning, not just its title. Publication without either the matching explanatory release-notes entry or an explicit reviewer determination that the change is release-notes-exempt is `BLOCKED`.
 - `$knowledge-archivist` is the default human approver at the publication gate. `$lead` remains the default operator of the publication-safety scan and prepares the staged diff for publication, but the publication approver must be a different role than the role that accepted the artifact into the pipeline.
@@ -113,3 +113,62 @@ Keep accepted artifacts near the code when the repository is the source of truth
 - `UI`: User Interface, the visible or interactive surface presented to a user.
 - `UX`: User Experience, the user's end-to-end interaction quality and clarity.
 - `YAML`: YAML Ain't Markup Language, the structured data format used by files such as `.agents-mode.yaml`.
+
+<!-- graft:start -->
+## Graft — repo context graph
+
+This repo is indexed in `graft/`: small linked markdown nodes that explain each
+system and carry exact file:line spans, kept in sync with the code through git.
+
+For ANY task here — understanding how something works, finding where code lives,
+or scoping a change — get context from the graph before grepping or opening
+source files. Re-ask freely (it's cheap) and reuse literal identifiers you
+already have (symbol, error string, file name) as the query. New to this repo?
+Run `graft map` first — a token-budgeted orientation (dir clusters, hubs,
+hotspots), no LLM, no key.
+
+- Run `graft ask "<your question>" --source` → ranked nodes with the relevant
+  code spans inlined (each hit's ≤8-line crux by default; `--full` for whole
+  definitions when the crux isn't enough). Match the tool to the task shape:
+  for understanding or editing, the top node IS the answer — cite its
+  `covers:` file:line spans and edit straight from `--source`. For
+  exhaustive tasks ("every occurrence / every caller of this pattern"), ranked
+  results are top-N, not complete — run `graft grep "<literal>"` instead
+  (exhaustive over indexed files, grouped by enclosing symbol), falling back
+  to raw `grep -rn` only for unindexed files.
+- `graft skeleton <file>` → every definition's signature + span, ~10× cheaper
+  than reading the file; use it to skim an API surface.
+- `graft callers <symbol>` gives precomputed, exact edges — who calls this.
+  Add `--direction out` for what it calls, or `--depth N` to walk
+  transitively for the full blast radius. For structural questions, skip
+  ranking and use this directly.
+- Or browse: `graft/INDEX.md` lists every node; follow the links.
+- Monorepos and folders of multiple repos rank fairly across sub-projects —
+  hits carry `[scope/]` labels naming which one they're from. Narrow with
+  `graft ask "<task>" --in <scope>/` once you know where you're working.
+
+If a returned span is truncated ("+N more lines"), open the file at that exact
+range before finalizing. Only open source files when a node genuinely lacks a
+needed detail, and then at the exact file:line the node points to — never
+re-read whole files.
+
+After big code changes, refresh the graph with `graft build` (deterministic,
+no API key, $0).
+<!-- graft:end -->
+
+## Local source-navigation precedence
+
+This section owns graph-tool applicability for this checkout. Apply the existing [shared MCP continuity policy](shared/references/mcp-continuity.md) for current tool discovery, command-contract inspection, target identity, freshness and omitted coverage. Inherited/generated tool triggers do not require duplicate graph queries, setup or refresh when the task uses another fitting current tool.
+
+Follow explicit user tool instructions first, including conditional CodeGraph-first when its index is actually present at the selected target. Otherwise use this checkout's existing Graft source-context route for current symbols, callers and change scope; use Graphify for explicit Graphify requests or fitting broader corpus exploration. Direct source reads remain available for details or coverage the selected graph does not provide. Do not query another graph solely to satisfy a conflicting generic trigger.
+
+Use the installed command's actual help/version contract in the current shell. Do not install, upgrade, sync third-party skills or download models merely because inherited setup prose says to. For Graphify, signal activity immediately before each command from the verified selected repository root. In PowerShell use:
+
+```powershell
+New-Item -ItemType Directory -Force -Path 'graphify-out' | Out-Null
+New-Item -ItemType File -Force -Path 'graphify-out/.graphify-activity' | Out-Null
+```
+
+Decide whether structural refresh is needed in this order: (1) an explicit refresh request, or a missing/corrupt/empty index that is actually required for the task; (2) verified material drift affecting the requested source/relationships; (3) otherwise use the existing index. Verify the selected root before classifying its index; a wrong-root result requires correcting the target, not rebuilding the other root. For an existing Graphify index, use the installed documented structural update command, `graphify update .`, only within the admitted task and confirmed command contract. Do not run a deep/large-language-model build automatically. If a required missing index cannot be serviced through the documented authorized structural path, use verified fitting source tools and state the omitted graph coverage rather than invent setup authority.
+
+Age can prompt a freshness check; age plus one small edit does not override the reuse decision without material relevant drift. A zero-result query alone does not prove staleness: try known literal identifiers or another fitting source-navigation tool, and refresh only with independent evidence of the missing/corrupt/empty required index or relevant drift. Pending semantic enrichment is omitted coverage, not total structural-index absence.

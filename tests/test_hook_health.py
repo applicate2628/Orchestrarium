@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -115,7 +116,7 @@ def _mcp_only_config() -> dict:
     }
 
 
-def test_hook_health_uses_force_mode_and_requires_claude_deny_decision(
+def test_hook_health_uses_force_mode_and_accepts_claude_advisory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = tmp_path / "mcp-health.json"
@@ -148,13 +149,73 @@ def test_hook_health_uses_force_mode_and_requires_claude_deny_decision(
         verify_fires=True,
     )
     assert messages == ["PASS claude PreToolUse check-mcp-momentum"]
-    assert "[MCP-FORCE-1]" in str(observed.get("stdout", ""))
+    payload = json.loads(str(observed.get("stdout", "")))
+    specific = payload["hookSpecificOutput"]
+    assert specific["hookEventName"] == "PreToolUse"
+    assert "[MCP-FORCE-ADVISORY]" in specific["additionalContext"]
+    assert "permissionDecision" not in specific
     assert observed.get("mcp_config_exists") is False
     assert observed.get("mode") == "mcpMode: force\n"
 
 
-def test_hook_health_rejects_silent_mcp_positive_probe(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "stdout",
+    (
+        "",
+        "{",
+        "[]",
+        '{"hookSpecificOutput": []}',
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "Stop",
+                    "additionalContext": "[MCP-FORCE-ADVISORY]",
+                }
+            }
+        ),
+        '{"hookSpecificOutput": {"hookEventName": "PreToolUse"}}',
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": "ordinary reminder",
+                }
+            }
+        ),
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": "[MCP-FORCE-ADVISORY] force duty",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "[MCP-FORCE-1]",
+                }
+            }
+        ),
+        json.dumps(
+            {
+                "permissionDecision": "deny",
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": "[MCP-FORCE-ADVISORY] force duty",
+                },
+            }
+        ),
+    ),
+    ids=(
+        "silence",
+        "malformed-json",
+        "non-object-root",
+        "non-object-hook-specific-output",
+        "wrong-event",
+        "missing-context",
+        "wrong-context",
+        "retired-deny-output",
+        "top-level-deny-output",
+    ),
+)
+def test_hook_health_rejects_invalid_mcp_positive_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout: str
 ) -> None:
     target = tmp_path / "silent-mcp-health.json"
     target.write_text(json.dumps(_mcp_only_config()), encoding="utf-8")
@@ -164,7 +225,7 @@ def test_hook_health_rejects_silent_mcp_positive_probe(
     monkeypatch.setattr(
         CHECKER.subprocess,
         "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", ""),
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout, ""),
     )
     with pytest.raises(ValueError, match="check-mcp-momentum.*decision"):
         CHECKER.verify_config(
@@ -179,7 +240,7 @@ def test_hook_health_rejects_silent_mcp_positive_probe(
 def test_missing_executable_and_missing_target_are_distinct(tmp_path: Path) -> None:
     executable_config = _config("claude")
     executable_config["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = str(
-        tmp_path / "missing-python"
+        tmp_path / "missing" / "python"
     )
     executable_json = tmp_path / "missing-executable.json"
     executable_json.write_text(json.dumps(executable_config), encoding="utf-8")
@@ -364,6 +425,89 @@ def test_corrupted_args_on_owned_entry_names_the_stem(tmp_path: Path) -> None:
     assert "missing registered hooks" not in str(excinfo.value)
 
 
+@pytest.mark.parametrize("platform", ("claude", "codex"))
+def test_ownership_ignores_metadata_and_foreign_arguments(platform: str) -> None:
+    stem = "check-bugfix-discipline"
+    foreign = [
+        {"type": "command", "command": "foreign-tool", "description": stem,
+         "statusMessage": stem, "custom": {"path": stem}},
+        {"type": "command", "command": "foreign-tool", "args": [stem + ".py"]},
+        {"type": "command", "command": "foreign-tool --label " + stem + ".py"},
+        {"type": "command", "command": "python /" + stem + "/foreign.py",
+         "args": ["/" + stem + "/foreign.py"]} if platform == "claude" else
+        {"type": "command", "command": "python /" + stem + "/foreign.py"},
+    ]
+    for handler in foreign:
+        assert CHECKER.classify_hook_invocation(handler, {stem}, platform, "posix").kind == "foreign"
+    data = {"hooks": {"PreToolUse": [{"matcher": {"foreign": True}, "hooks": foreign}]}}
+    assert list(CHECKER._iter_owned_hooks(data, {stem}, platform, "posix")) == []
+
+
+def test_invocation_grammar_runner_ambiguity_and_target_position() -> None:
+    marker = "check-git-push-gate"
+    handler = {"command": "python3.12 -B /hooks/check-git-push-gate-runner.py /other.py"}
+    invocation = CHECKER.classify_hook_invocation(handler, {marker}, "codex", "posix")
+    assert invocation.kind == "current-owned"
+    assert invocation.marker == marker
+    assert CHECKER._target_path(list(invocation.argv)) == Path("/hooks/check-git-push-gate-runner.py")
+    with pytest.raises(ValueError, match="ambiguous owned hook markers"):
+        CHECKER.classify_hook_invocation(handler, {marker, marker + "-runner"}, "codex", "posix")
+    for command in ("python -c print /hooks/check-git-push-gate.py",
+                    "bash -c /hooks/check-git-push-gate.sh"):
+        assert CHECKER.classify_hook_invocation({"command": command}, {marker}, "codex", "posix").kind == "foreign"
+    legacy = {"command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:/hooks/check-git-push-gate.ps1"}
+    assert CHECKER.classify_hook_invocation(legacy, {marker}, "codex", "windows").kind == "legacy-owned"
+    with pytest.raises(ValueError, match="legacy invocation"):
+        list(CHECKER._iter_owned_hooks({"hooks": {"Stop": [{"hooks": [legacy]}]}}, {marker}, "codex", "windows"))
+    malformed = {"command": 'python "C:/hooks/check-git-push-gate.py"', "args": []}
+    assert CHECKER.classify_hook_invocation(malformed, {marker}, "codex", "windows").kind == "malformed-owned"
+
+
+def test_definition_snapshots_distinguish_full_values_positions_and_survivors(tmp_path: Path) -> None:
+    target = tmp_path / "hooks.json"
+    marker = "check-bugfix-discipline"
+    handler = {"type": "command", "command": "python /hooks/" + marker + ".py"}
+    foreign = {"command": "foreign-tool", "metadata": "old"}
+    config = {"hooks": {"Stop": [{"hooks": [handler, foreign]}]}}
+
+    def snapshot():
+        target.write_text(json.dumps(config), encoding="utf-8")
+        return CHECKER.owned_definition_snapshots(
+            target=target, platform="codex", host_os="posix", repo_root=ROOT, stems={marker}
+        )
+
+    missing = snapshot()
+    identity = next(iter(missing))
+    assert CHECKER.touched_definition_identities({}, missing) == {identity}
+    foreign["metadata"] = "new"
+    assert CHECKER.touched_definition_identities(missing, snapshot()) == set()
+    previous = missing
+    for value in (None, "", "Check fix discipline"):
+        handler["statusMessage"] = value
+        current = snapshot()
+        assert set(current) == {identity}
+        assert CHECKER.touched_definition_identities(previous, current) == {identity}
+        assert CHECKER.touched_definition_identities(current, snapshot()) == set()
+        previous = current
+    config["hooks"]["Stop"][0]["groupMetadata"] = "custom"
+    metadata = snapshot()
+    assert CHECKER.touched_definition_identities(previous, metadata) == {identity}
+    config["hooks"]["Stop"][0]["hooks"].insert(0, dict(handler))
+    duplicate = snapshot()
+    assert len(duplicate[identity]) == 2
+    config["hooks"]["Stop"][0]["hooks"].pop(0)
+    assert CHECKER.touched_definition_identities(duplicate, snapshot()) == set()
+    config["hooks"]["Stop"][0]["hooks"].reverse()
+    assert CHECKER.touched_definition_identities(metadata, snapshot()) == {identity}
+    config["hooks"]["Stop"][0]["matcher"] = "Bash"
+    matcher = snapshot()
+    assert CHECKER.touched_definition_identities(metadata, matcher) == set(matcher)
+    handler["command"] += " --changed"
+    command = snapshot()
+    assert CHECKER.touched_definition_identities(matcher, command) == set(command)
+    assert CHECKER.touched_definition_identities(command, {}) == set()
+
+
 @pytest.mark.parametrize("pending_status", ("untrusted", "modified"))
 def test_hook_health_report_allows_only_touched_pending(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pending_status: str
@@ -405,7 +549,6 @@ def test_hook_health_report_allows_only_touched_pending(
         host_os="posix",
         repo_root=ROOT,
         verify_fires=False,
-        codex_command=[str(Path(sys.executable).resolve())],
         codex_trust_mode="report",
         touched_identities={touched},
     )
@@ -419,8 +562,8 @@ def test_hook_health_report_allows_only_touched_pending(
             host_os="posix",
             repo_root=ROOT,
             verify_fires=False,
-            codex_command=[str(Path(sys.executable).resolve())],
             codex_trust_mode="require",
+            touched_identities={touched},
         )
     with pytest.raises(ValueError, match="CODEX_HOOK_TRUST_PREEXISTING_DRIFT"):
         CHECKER.verify_config(
@@ -429,7 +572,6 @@ def test_hook_health_report_allows_only_touched_pending(
             host_os="posix",
             repo_root=ROOT,
             verify_fires=False,
-            codex_command=[str(Path(sys.executable).resolve())],
             codex_trust_mode="report",
         )
 
@@ -607,6 +749,71 @@ def test_app_server_cleanup_cancellation_and_terminate_timeout(
         codex_home=tmp_path / "home", query_cwd=tmp_path,
     ) == []
     assert timed.terminated and timed.killed and timed.wait_calls == 2
+
+
+def test_app_server_waits_for_stderr_reader_before_closing_pipe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    process = _FakeAppServer('{"id":1,"result":{}}\n{"id":2,"result":{"data":[]}}\n')
+    read_started = threading.Event()
+    read_finished = threading.Event()
+
+    class SlowStderr(io.BytesIO):
+        closed_during_read = False
+
+        def read(self, size=-1):
+            read_started.set()
+            read_finished.wait(timeout=0.3)
+            read_finished.set()
+            return b""
+
+        def close(self):
+            self.closed_during_read = not read_finished.is_set()
+            read_finished.set()
+            super().close()
+
+    class GatedStdout(io.BytesIO):
+        def readline(self, size=-1):
+            assert read_started.wait(timeout=1)
+            return super().readline(size)
+
+    process.stderr = SlowStderr()
+    process.stdout = GatedStdout(process.stdout.getvalue())
+    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: process)
+
+    assert CHECKER._codex_hooks_list(
+        codex_command=[str(Path(sys.executable).resolve())],
+        codex_home=tmp_path / "home", query_cwd=tmp_path,
+    ) == []
+    assert not process.stderr.closed_during_read
+
+
+def test_app_server_stderr_reader_failure_rejects_trust_result_without_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    process = _FakeAppServer('{"id":1,"result":{}}\n{"id":2,"result":{"data":[]}}\n')
+    read_attempted = threading.Event()
+
+    class FailingStderr(io.BytesIO):
+        def read(self, size=-1):
+            read_attempted.set()
+            raise OSError("synthetic sensitive provider detail")
+
+    class GatedStdout(io.BytesIO):
+        def readline(self, size=-1):
+            assert read_attempted.wait(timeout=1)
+            return super().readline(size)
+
+    process.stderr = FailingStderr()
+    process.stdout = GatedStdout(process.stdout.getvalue())
+    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: process)
+
+    with pytest.raises(ValueError, match="CODEX_HOOK_LIST_BOUNDS") as failure:
+        CHECKER._codex_hooks_list(
+            codex_command=[str(Path(sys.executable).resolve())],
+            codex_home=tmp_path / "home", query_cwd=tmp_path,
+        )
+    assert "synthetic sensitive provider detail" not in str(failure.value)
 
 
 def test_inventory_probe_uses_exact_scope_and_excludes_sentinels(

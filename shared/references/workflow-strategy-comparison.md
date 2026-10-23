@@ -26,7 +26,7 @@ Use it together with:
 | Self-approval bias | `Builder / blocker separation` | Builder and blocking reviewer stay separate |
 | Known bounded review risk | `Claim-Verify` | Default when the risk surface is understood |
 | Novel or externally exposed review risk | `Adversarial` | Default when blind spots matter more than speed |
-| Critical change with both execution and blind-spot risk | `Claim-Verify + Adversarial` | Run in sequence, preserving reviewer independence |
+| Critical execution and blind-spot risks | `Claim-Verify` or `Adversarial` under the admitted risk | Add a complementary independent angle only for a concrete uncovered risk or mandatory gate; preserve all required gates, governing inputs and reviewer independence. The labels alone do not mandate sequential double review. |
 | Scope or priority drift | `Re-intake` | Route back to `product-manager` |
 | Multi-phase landing | `Integration ownership` | Name one owner before QA |
 | Stop-and-wait churn | `Rolling loop` | `PASS` advances, `REVISE` follows the shared spine's consecutive same-role/same-artifact cycle cap, `BLOCKED` stays rare |

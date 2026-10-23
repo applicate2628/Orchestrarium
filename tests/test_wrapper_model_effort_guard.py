@@ -292,7 +292,7 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
 @pytest.mark.parametrize(
     ("provider", "flags", "model", "effort"),
     (
-        ("codex", [], "gpt-5.6-sol", "xhigh"),
+        ("codex", [], "gpt-6.1-sol", "xhigh"),
         ("claude", [], "opus", "xhigh"),
         (
             "codex",
@@ -404,7 +404,7 @@ def test_default_profile_reaches_fake_provider_with_explicit_model_and_effort(
     assert result.returncode == 0, result.stderr
     received = json.loads(capture.read_text(encoding="utf-8"))
     expected = (
-        ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=xhigh"]
+        ["--model", "gpt-6.1-sol", "-c", "model_reasoning_effort=xhigh"]
         if provider == "codex"
         else [
             "-p",
@@ -469,7 +469,6 @@ def test_partial_override_fails_before_fake_provider_launch(
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))
-@requires_windows_process_runner
 def test_launch_and_terminal_ledger_events_record_resolved_profile(
     tmp_path: Path, provider: str
 ) -> None:
@@ -525,7 +524,6 @@ def test_launch_and_terminal_ledger_events_record_resolved_profile(
     assert provider_prompt.parse_provider_result(result.stdout)["launchFlags"] == expected_flags
 
 
-@requires_windows_process_runner
 def test_equal_model_effort_with_different_sandbox_flags_remain_distinguishable(
     tmp_path: Path,
 ) -> None:
@@ -600,6 +598,64 @@ def test_resolved_profile_accepts_documented_nonsecret_claude_io_flags() -> None
 
     assert resolved == [*flags, "--setting-sources", "user"]
     assert (model, effort) == ("opus", "xhigh")
+
+
+def test_claude_explicit_empty_tools_survives_profile_and_native_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flags = ["-p", "--output-format", "text", "--model", "opus", "--effort", "xhigh", "--tools", ""]
+    control = provider_prompt.parse_control(["text-only-review", *flags], provider="claude")
+    assert control.provider_flags == flags
+    resolved, model, effort = provider_prompt.resolved_profile("claude", control.provider_flags)
+    assert resolved == [*flags, "--setting-sources", "user"]
+    provenance = provider_prompt.ExecutionProvenance(
+        "fixture-item", "architecture-reviewer", "claude", model, effort,
+        tuple(resolved), "design.md", "dispatch-fixture", "evidence-fixture", "none",
+    )
+    assert provenance.payload()["launchFlags"] == resolved
+    assert provenance.terminal_projection()["launchFlags"] == resolved
+
+    observed = []
+    runner = provider_prompt.ProcessRunnerV1()
+    def capture_request(request):
+        observed.append(request)
+        return object()  # Request construction only; no provider or auth call.
+    monkeypatch.setattr(runner, "run", capture_request)
+    executable = os.path.abspath(tmp_path / "claude.exe")
+    try:
+        provider_prompt.run_provider_process(
+            runner, [executable], resolved, {}, tmp_path, None, control, "claude",
+        )
+    finally:
+        assert runner.close().outcome == "closed"
+    assert len(observed) == 1
+    assert observed[0].argv == (executable, *resolved)
+    assert observed[0].argv[observed[0].argv.index("--tools") + 1] == ""
+    assert (model, effort) == ("opus", "xhigh")
+
+
+@pytest.mark.parametrize("flag", ("--tools", "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools"))
+def test_claude_tool_selection_preserves_nonempty_lists(flag: str) -> None:
+    flags = ["-p", "--model", "opus", "--effort", "xhigh", flag, "Read,Grep"]
+    resolved, model, effort = provider_prompt.resolved_profile("claude", flags)
+    assert resolved == [*flags, "--setting-sources", "user"]
+    assert (model, effort) == ("opus", "xhigh")
+
+
+@pytest.mark.parametrize(
+    "selection",
+    (
+        ("--allowedTools", ""), ("--allowed-tools", ""),
+        ("--disallowedTools", ""), ("--disallowed-tools", ""),
+        ("--tools", " "), ("--tools", ","), ("--tools", "Read,"),
+        ("--tools", "Read,,Grep"), ("--tools", "Read;Bash"),
+        ("--tools", "--permission-mode"), ("--tools",), ("--tools=",),
+    ),
+)
+def test_claude_tool_selection_rejects_empty_other_flags_and_malformed_lists(selection) -> None:
+    flags = ["-p", "--model", "opus", "--effort", "xhigh", *selection]
+    with pytest.raises(ValueError, match="E_EXTERNAL_LAUNCH_FLAGS_UNSAFE"):
+        provider_prompt.resolved_profile("claude", flags)
 
 
 @pytest.mark.parametrize(

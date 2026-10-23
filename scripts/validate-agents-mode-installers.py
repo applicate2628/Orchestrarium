@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import uuid
@@ -264,6 +265,8 @@ def validate_overlay(
     case: InstallerCase,
     overlay: Path,
     schema_data: dict[str, Any],
+    *,
+    expected_codex_profile: str = "gpt-6.1-sol-xhigh",
 ) -> None:
     if not overlay.is_file():
         raise InstallerRegressionError(f"{case.name} did not create {overlay}")
@@ -290,9 +293,10 @@ def validate_overlay(
     if counts != expected_counts:
         raise InstallerRegressionError(f"{case.name} opinion counts drifted")
 
-    if scalars.get("externalCodexProfile") != "gpt-5.6-sol-xhigh":
+    if scalars.get("externalCodexProfile") != expected_codex_profile:
         raise InstallerRegressionError(
-            f"{case.name} missing shared externalCodexProfile default (gpt-5.6-sol-xhigh)"
+            f"{case.name} externalCodexProfile drifted "
+            f"(expected {expected_codex_profile})"
         )
 
     custom = profiles.get("custom")
@@ -342,6 +346,7 @@ def run_regression(root: Path) -> None:
     schema_data = load_json(root / "shared" / "agents-mode.schema.json")
     scratch = root / ".scratch" / "agents-mode-installer-regression" / uuid.uuid4().hex
     scratch.mkdir(parents=True, exist_ok=True)
+    validation_error: BaseException | None = None
     try:
         for case in INSTALLER_CASES:
             project_root = scratch / f"{case.name}-project"
@@ -372,6 +377,30 @@ def run_regression(root: Path) -> None:
         )
         validate_codex_native_role_install(codex_fresh_project, root)
 
+        codex_explicit_old_project = scratch / "codex-explicit-old-profile-project"
+        codex_explicit_old_project.mkdir(parents=True, exist_ok=True)
+        explicit_old_overlay = codex_explicit_old_project / codex_case.overlay
+        explicit_old_overlay.parent.mkdir(parents=True, exist_ok=True)
+        explicit_old_overlay.write_text(
+            STALE_OVERLAY + "externalCodexProfile: gpt-5.6-sol-max\n",
+            encoding="utf-8",
+        )
+        run_installer(
+            root,
+            codex_case,
+            Path(".scratch")
+            / "agents-mode-installer-regression"
+            / scratch.name
+            / "codex-explicit-old-profile-project",
+        )
+        validate_overlay(
+            codex_case,
+            explicit_old_overlay,
+            schema_data,
+            expected_codex_profile="gpt-5.6-sol-max",
+        )
+        validate_codex_native_role_install(codex_explicit_old_project, root)
+
         codex_global_home = scratch / "codex-python-global-home"
         codex_global_home.mkdir(parents=True, exist_ok=True)
         codex_global_case = InstallerCase(
@@ -389,8 +418,42 @@ def run_regression(root: Path) -> None:
         codex_global_fresh_home.mkdir(parents=True, exist_ok=True)
         run_python_codex_global_installer(root, codex_global_fresh_home)
         validate_codex_native_role_install(codex_global_fresh_home, root)
+    except BaseException as exc:
+        validation_error = exc
+        raise
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        try:
+            def retry_owned_readonly_unlink(func, path, error):
+                candidate = Path(os.path.abspath(path))
+                try:
+                    relative = candidate.relative_to(scratch)
+                    metadata = candidate.lstat()
+                except (OSError, ValueError):
+                    raise error
+                attributes = getattr(metadata, "st_file_attributes", 0)
+                if (
+                    os.name != "nt"
+                    or func is not os.unlink
+                    or not isinstance(error, PermissionError)
+                    or not relative.parts
+                    or not stat.S_ISREG(metadata.st_mode)
+                    or not attributes & stat.FILE_ATTRIBUTE_READONLY
+                    or attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                ):
+                    raise error
+                os.chmod(candidate, metadata.st_mode | stat.S_IWRITE)
+                func(candidate)
+
+            shutil.rmtree(scratch, onexc=retry_owned_readonly_unlink)
+            if scratch.exists() or scratch.is_symlink():
+                raise OSError("owned UUID fixture remains after cleanup")
+        except OSError as cleanup_error:
+            cleanup_detail = f"owned UUID fixture cleanup failed at {scratch}: {cleanup_error}"
+            if validation_error is not None:
+                raise InstallerRegressionError(
+                    f"{type(validation_error).__name__}: {validation_error}; {cleanup_detail}"
+                ) from validation_error
+            raise InstallerRegressionError(cleanup_detail) from cleanup_error
 
 
 def main() -> int:

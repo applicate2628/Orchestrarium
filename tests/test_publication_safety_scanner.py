@@ -37,6 +37,7 @@ reference `find_machine_paths` and asserts this file has zero flaggable lines.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import ctypes
 import dataclasses
@@ -50,6 +51,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -61,6 +63,7 @@ CANONICAL_SCANNER = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "che
 CODEX_SCANNER = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-publication-safety.py"
 CLAUDE_SCANNER = REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-publication-safety.py"
 CODEX_REF = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks" / "check-machine-local-path.py"
+PUSH_GATE = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-git-push-gate.py"
 SCANNERS = (CODEX_SCANNER, CLAUDE_SCANNER)
 
 BACKSLASH = chr(92)  # keep the literal backslash out of source path literals
@@ -109,6 +112,43 @@ def _load_find_machine_paths():
     return mod.find_machine_paths
 
 
+@unittest.skipUnless(os.name == "nt", "native Windows scanner environment")
+def test_windows_sync_scanner_keeps_direct_environment_domain():
+    module = _load_canonical_scanner("_environment_sync_scanner")
+    name = "N" * 129
+    code = "import os,sys;print(os.getenv(sys.argv[1])==sys.argv[2])"
+    result = module._run_windows_owned_process(
+        [sys.executable, "-c", code, name, "SYNTHETIC"],
+        text=True, timeout=5.0, env={name: "SYNTHETIC"},
+    )
+    assert result.returncode == 0 and result.stdout.strip() == "True"
+
+
+@unittest.skipUnless(os.name == "nt", "native Windows scanner environment")
+def test_windows_async_scanner_keeps_direct_environment_domain():
+    import asyncio
+    module = _load_canonical_scanner("_environment_async_scanner")
+    name = "N" * 129
+    code = "import os,sys;print(os.getenv(sys.argv[1])==sys.argv[2])"
+
+    async def receive():
+        process = await module._create_windows_owned_async_process(
+            (sys.executable, "-c", code, name, "SYNTHETIC"),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.DEVNULL, env={name: "SYNTHETIC"},
+        )
+        try:
+            output = await asyncio.wait_for(process.stdout.read(), 5.0)
+            assert await asyncio.wait_for(process.wait(), 5.0) == 0
+            assert output.strip() == b"True"
+            assert process.job.settle(time.monotonic() + 5.0).complete
+        finally:
+            process.job.close()
+            assert await process.close_io()
+
+    asyncio.run(receive())
+
+
 def _load_canonical_scanner(name: str):
     spec = importlib.util.spec_from_file_location(name, str(CANONICAL_SCANNER))
     mod = importlib.util.module_from_spec(spec)
@@ -117,6 +157,24 @@ def _load_canonical_scanner(name: str):
         spec.loader.exec_module(mod)
     finally:
         sys.modules.pop(name, None)
+    return mod
+
+
+def _load_push_gate(name: str):
+    script_dir = str(PUSH_GATE.parent)
+    added = script_dir not in sys.path
+    if added:
+        sys.path.insert(0, script_dir)
+    try:
+        sys.modules.pop("hook_common", None)
+        spec = importlib.util.spec_from_file_location(name, str(PUSH_GATE))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+    finally:
+        sys.modules.pop(name, None)
+        if added:
+            sys.path.remove(script_dir)
     return mod
 
 
@@ -238,6 +296,34 @@ def block_rows() -> dict[str, str]:
         # blocks; see the matching pass_rows() pin for the 9-char value that
         # stays clean. Assembled per MF6.
         "b41_token_centered_digit_floor_ten": _join("to", "ken", " = ", "abcd5efghi"),
+        "b42_callable_then_later_leak": _join(
+            "to", "ken", " = ", "FactoryV1", "(); ",
+            "pass", "word", " = ", "A1B2C3D4E5F6",
+        ),
+        "b43_public_key_token_identity": _join(
+            "publicKey", "To", "ken", "=", '"', "0011223344556677", '"',
+        ),
+        "b44_low_entropy_token": _join("to", "ken", "=", "'", "A" * 12, "'"),
+        "b45_low_entropy_access_token": _join(
+            "access", "To", "ken", "=", "'", "A" * 12, "'",
+        ),
+        "b46_tab_token": _join("to", "ken", "\t=\t", "'", "A" * 12, "'"),
+        "b47_near_name_token": _join(
+            "myPublicKey", "To", "ken", "=", "'", "A" * 12, "'",
+        ),
+        "b48_bearer": _join("Bea", "rer ", "abcdefghijklmnop"),
+        "b49_tab_bearer": _join("Bea", "rer\t", "abcdefghijklmnop"),
+        "b50_key_envelope": _join("BEGIN ", "PRIVATE ", "KEY"),
+        "b51_binary_machine_path": _join(
+            "D", ":", BS, "dev", BS, "synthetic", BS, "build.txt",
+        ),
+        "b52_nonidentifier_plus_call_suffix": _join(
+            "to", "ken", " = ", "A1B2C3D4E5F6", "+", "(", ")",
+        ),
+        "b53_callable_then_same_family_leak": _join(
+            "to", "ken", " = ", "FactoryV1", "(); ",
+            "to", "ken", " = ", "A1B2C3D4E5F6",
+        ),
     }
 
 
@@ -355,11 +441,89 @@ def pass_rows() -> dict[str, str]:
         # no underscore -- this row is the same member-access shape with the
         # underscore the admission fixture happened to omit.
         "p55_csharp_di_underscored_member_access": "apiKey = _configuration.ApiKey;",
+        "p56_digit_bearing_callable": _join(
+            "to", "ken", " = ", "_LedgerInvocationTokenV1", "(", "...", ")",
+        ),
+        "p57_digit_bearing_member_callable": _join(
+            "to", "ken", " = ", "FactoryV1", ".", "make", "(", ")",
+        ),
     }
+
+
+def public_token_reproduction_rows() -> dict[str, str]:
+    return {
+        "port-slots": _join(
+            "to", "ken", "=", '"',
+            "ZIMP_RUN_MANIFEST_TERMINAL_PORT_SLOTS_INVALID", '"',
+        ),
+        "orientations": _join(
+            "to", "ken", "=", '"',
+            "ZIMP_RUN_MANIFEST_TERMINAL_ORIENTATIONS_INVALID", '"',
+        ),
+        "partition-certificate": _join(
+            "ZIMP_ENDPOINT_PARTITION_SUCCESS_TO", "KEN = ", '"',
+            "ZIMP_ENDPOINT_PARTITION_OK_IMMUTABLE_CERTIFICATE", '"',
+        ),
+    }
+
+
+def public_token_annotation(comment: str = "#") -> str:
+    return f"{comment} orchestrarium:public-" + "token"
 
 
 @unittest.skipIf(_git() is None, "needs git on PATH")
 class TestPublicationSafetyScanner(unittest.TestCase):
+    def _run_staged_transition(
+        self,
+        before: dict[str, str],
+        after: dict[str, str],
+        *,
+        renames: tuple[tuple[str, str], ...] = (),
+    ) -> subprocess.CompletedProcess[str]:
+        git = _git()
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run([git, "init", "-q", repo], check=True, capture_output=True)
+            subprocess.run(
+                [git, "-C", repo, "config", "user.email", "t@t"],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [git, "-C", repo, "config", "user.name", "t"],
+                check=True,
+                capture_output=True,
+            )
+            for relative, content in before.items():
+                path = repo / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            subprocess.run([git, "-C", repo, "add", "-A"], check=True, capture_output=True)
+            subprocess.run(
+                [git, "-C", repo, "commit", "-q", "--allow-empty", "-m", "base"],
+                check=True,
+                capture_output=True,
+            )
+            for old, new in renames:
+                (repo / new).parent.mkdir(parents=True, exist_ok=True)
+                subprocess.run(
+                    [git, "-C", repo, "mv", "--", old, new],
+                    check=True,
+                    capture_output=True,
+                )
+            for relative, content in after.items():
+                path = repo / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            subprocess.run([git, "-C", repo, "add", "-A"], check=True, capture_output=True)
+            return subprocess.run(
+                [sys.executable, str(CANONICAL_SCANNER)],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+
     def _run_cached(
         self,
         scanner: Path,
@@ -473,6 +637,274 @@ class TestPublicationSafetyScanner(unittest.TestCase):
             with self.subTest(scanner=scanner.parent.parent.name):
                 self._assert_cached_pass_batch(scanner, pass_rows())
 
+    def test_digit_bearing_callable_passes_text_scan(self) -> None:
+        fixture = pass_rows()["p56_digit_bearing_callable"]
+        rc, out = self._run_cached_full(CANONICAL_SCANNER, fixture)
+        self.assertEqual(rc, 0, out)
+
+    def test_callable_does_not_hide_later_same_line_text_leak(self) -> None:
+        fixture = block_rows()["b53_callable_then_same_family_leak"]
+        proc = self._run_cached_process(CANONICAL_SCANNER, fixture)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("PS-FINDING-CONTENT", proc.stderr)
+
+    def test_digit_bearing_member_callable_passes_text_scan(self) -> None:
+        fixture = pass_rows()["p57_digit_bearing_member_callable"]
+        rc, out = self._run_cached_full(CANONICAL_SCANNER, fixture)
+        self.assertEqual(rc, 0, out)
+
+    def test_nonidentifier_value_with_call_suffix_blocks_text_scan(self) -> None:
+        fixture = block_rows()["b52_nonidentifier_plus_call_suffix"]
+        proc = self._run_cached_process(CANONICAL_SCANNER, fixture)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("PS-FINDING-CONTENT", proc.stderr)
+
+    def test_unannotated_public_protocol_tokens_remain_blocking(self) -> None:
+        rows = public_token_reproduction_rows()
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner):
+                self._assert_cached_block_batch(scanner, rows)
+
+    def test_terminal_public_token_annotations_clear_source_candidates(self) -> None:
+        rows = public_token_reproduction_rows()
+        annotated = {
+            "port-slots": rows["port-slots"] + "), " + public_token_annotation(),
+            "orientations": rows["orientations"] + ", " + public_token_annotation(),
+            "partition-certificate": (
+                rows["partition-certificate"] + "; " + public_token_annotation("//")
+            ),
+            "single-quoted": _join(
+                "to", "ken", " = '",
+                "ZIMP_ENDPOINT_PARTITION_OK_IMMUTABLE_CERTIFICATE", "'; ",
+                public_token_annotation(),
+            ),
+            "capital-token": _join(
+                "CAPITAL_TO", "KEN = \"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ",
+                public_token_annotation(),
+            ),
+        }
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner):
+                self._assert_cached_pass_batch(scanner, annotated)
+
+    def test_public_token_annotation_rejects_nonbinding_forms(self) -> None:
+        value = public_token_reproduction_rows()["partition-certificate"]
+        marker = public_token_annotation()
+        cases = {
+            "malformed": value + "; " + marker + "-extra",
+            "embedded-string": value + '; "' + marker + '"',
+            "detached": value + "\n" + marker,
+            "nonterminal": value + "; " + marker + " trailing",
+            "no-separator": value + marker,
+            "mismatched-quotes": _join(
+                "to", "ken", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE'; ", marker,
+            ),
+        }
+        for name, fixture in cases.items():
+            with self.subTest(name=name):
+                proc = self._run_cached_process(CANONICAL_SCANNER, fixture)
+                self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                self.assertIn("class=value-token", proc.stderr)
+
+    def test_public_token_annotation_is_candidate_local_and_rejects_credentials(self) -> None:
+        marker = public_token_annotation()
+        public = public_token_reproduction_rows()["partition-certificate"]
+        earlier_secret = _join(
+            "to", "ken", "=\"A1B2C3D4E5F6G7H8IJK\"; ",
+        )
+        cases = {
+            "two-assignments": earlier_secret + public + "; " + marker,
+            "auth-camel": _join(
+                "auth", "To", "ken", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ",
+                marker,
+            ),
+            "access-snake": _join(
+                "access_", "to", "ken", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ",
+                marker,
+            ),
+            "api-acronym": _join(
+                "API_TO", "KEN", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ",
+                marker,
+            ),
+            "password-family": _join(
+                "pass", "word", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ", marker,
+            ),
+            "secret-family": _join(
+                "sec", "ret", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ", marker,
+            ),
+            "api-key-family": _join(
+                "api_", "key", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ", marker,
+            ),
+        }
+        for name, fixture in cases.items():
+            with self.subTest(name=name):
+                proc = self._run_cached_process(CANONICAL_SCANNER, fixture)
+                self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                self.assertIn("PS-FINDING-CONTENT", proc.stderr)
+
+    def test_public_token_annotation_rejects_credential_purpose_components(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        cases = {
+            "authentication": _join(
+                "authentica", "tion", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "authorization": _join(
+                "authoriza", "tion", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "authorisation-british": _join(
+                "authorisa", "tion", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "csrf": _join(
+                "cs", "rf", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "password-reset": _join(
+                "pass", "word", "Reset", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "auth-existing": _join(
+                "auth", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "access-existing": _join(
+                "access_", "to", "ken=\"", value, "\"; ", marker,
+            ),
+            "api-existing": _join(
+                "API_TO", "KEN=\"", value, "\"; ", marker,
+            ),
+        }
+        for scanner in SCANNERS:
+            for name, fixture in cases.items():
+                with self.subTest(scanner=scanner, name=name):
+                    proc = self._run_cached_process(scanner, fixture)
+                    self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                    self.assertIn("class=value-token", proc.stderr)
+
+    def test_public_token_annotation_rejects_separator_delimited_credential_components(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        cases = {
+            "authorization-hyphen": f'authorization-token="{value}"; {marker}',
+            "access-dot": f'access.token="{value}"; {marker}',
+            "auth-underscore": f'auth_token="{value}"; {marker}',
+        }
+        for name, fixture in cases.items():
+            with self.subTest(name=name):
+                proc = self._run_cached_process(CANONICAL_SCANNER, fixture)
+                self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                self.assertIn("class=value-token", proc.stderr)
+
+    def test_public_token_annotation_rejects_concatenated_credential_cues(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        cases = {
+            "access-prefix": f'accesstoken="{value}"; {marker}',
+            "api-prefix": f'apitoken="{value}"; {marker}',
+            "session-prefix": f'sessiontoken="{value}"; {marker}',
+            "access-suffix": f'myaccesstoken="{value}"; {marker}',
+            "api-prefix-with-middle": f'apiresponsetoken="{value}"; {marker}',
+            "mixed-case": f'aPItoken="{value}"; {marker}',
+            "underscore-prefix": f'config_accesstoken="{value}"; {marker}',
+            "auth-compound": f'config_authclientToken="{value}"; {marker}',
+            "camel-prefix": f'configAuthclientToken="{value}"; {marker}',
+            "camel-prefix-alternate": f'myAuthclientToken="{value}"; {marker}',
+            "credential-prefix-public-suffix": f'auth_authorshiptoken="{value}"; {marker}',
+        }
+        for scanner in (CANONICAL_SCANNER, *SCANNERS):
+            for name, fixture in cases.items():
+                with self.subTest(scanner=scanner, name=name):
+                    proc = self._run_cached_process(scanner, fixture)
+                    self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                    self.assertIn("class=value-token", proc.stderr)
+
+    def test_public_token_annotation_preserves_lowercase_concatenated_public_names(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        rows = {
+            "protocol": f'protocoltoken="{value}"; {marker}',
+            "result": f'resulttoken="{value}"; {marker}',
+            "embedded-api": f'rapidtoken="{value}"; {marker}',
+            "embedded-api-long": f'capitaltoken="{value}"; {marker}',
+            "authorship": f'authorshiptoken="{value}"; {marker}',
+            "camel-authorship": f'configAuthorshipToken="{value}"; {marker}',
+            "underscore-prefix": f'config_protocoltoken="{value}"; {marker}',
+            "accessibility": f'config_accessibilitytoken="{value}"; {marker}',
+        }
+        for scanner in (CANONICAL_SCANNER, *SCANNERS):
+            self._assert_cached_pass_batch(scanner, rows)
+
+    def test_public_token_annotation_preserves_separator_delimited_noncredential_contexts(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        rows = {
+            "namespace-dot": f'protocol.token="{value}"; {marker}',
+            "namespace-hyphen": f'protocol-token="{value}"; {marker}',
+            "earlier-prose": f'authorization - token="{value}"; {marker}',
+        }
+        self._assert_cached_pass_batch(CANONICAL_SCANNER, rows)
+
+    def test_public_token_annotation_preserves_existing_credential_separator_boundaries(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        separators = (".", "-", "_", ":", "::", "/", "\\")
+        for separator in separators:
+            with self.subTest(separator=separator, kind="credential"):
+                identifier = f"authorization{separator}token"
+                unannotated = f'{identifier}="{value}"'
+                annotated = f"{unannotated}; {marker}"
+                baseline = self._run_cached_process(CANONICAL_SCANNER, unannotated)
+                candidate = self._run_cached_process(CANONICAL_SCANNER, annotated)
+                expected = baseline.returncode
+                self.assertEqual(candidate.returncode, expected, candidate.stdout + candidate.stderr)
+                if expected:
+                    self.assertIn("class=value-token", candidate.stderr)
+
+            with self.subTest(separator=separator, kind="public"):
+                public = f'protocol{separator}token="{value}"; {marker}'
+                rc, output = self._run_cached_full(CANONICAL_SCANNER, public)
+                self.assertEqual(rc, 0, output)
+
+            with self.subTest(separator=separator, kind="whitespace-boundary"):
+                prose = f'authorization {separator} token="{value}"; {marker}'
+                rc, output = self._run_cached_full(CANONICAL_SCANNER, prose)
+                self.assertEqual(rc, 0, output)
+
+        statement_boundary = f'authorization="ordinary"; token="{value}"; {marker}'
+        rc, output = self._run_cached_full(CANONICAL_SCANNER, statement_boundary)
+        self.assertEqual(rc, 0, output)
+
+    def test_public_token_annotation_preserves_noncredential_components(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        rows = {
+            "plain": _join("to", "ken=\"", value, "\"; ", marker),
+            "capital": _join("CAPITAL_TO", "KEN=\"", value, "\"; ", marker),
+            "authorship": _join(
+                "author", "ship", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "user-approved": _join(
+                "userApprovedPublic", "To", "ken=\"", value, "\"; ", marker,
+            ),
+        }
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner):
+                self._assert_cached_pass_batch(scanner, rows)
+
+    def test_public_token_annotation_does_not_suppress_other_finding_classes(self) -> None:
+        annotated = (
+            public_token_reproduction_rows()["partition-certificate"]
+            + "; "
+            + public_token_annotation()
+        )
+        simple = block_rows()["b14_aws"] + "; " + annotated
+        machine_path = block_rows()["b01_win_home"] + "; " + annotated
+
+        simple_proc = self._run_cached_process(CANONICAL_SCANNER, simple)
+        self.assertEqual(simple_proc.returncode, 1, simple_proc.stdout + simple_proc.stderr)
+        self.assertIn("class=simple-", simple_proc.stderr)
+
+        path_proc = self._run_cached_process(CANONICAL_SCANNER, machine_path)
+        self.assertEqual(path_proc.returncode, 1, path_proc.stdout + path_proc.stderr)
+        self.assertIn("class=machine-path", path_proc.stderr)
+
     def test_clean_repo_exits_0(self) -> None:
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
@@ -488,6 +920,131 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                 rc, out = self._run_cached_full(scanner, "nothing machine-local here")
                 self.assertEqual(rc, 0)
                 self.assertIn("publication-safety: clean (tracked, examined 1 file)", out)
+
+    def test_staged_jsonl_append_ignores_unchanged_historical_machine_path(self) -> None:
+        historical = _join('{"path":"', WIN_D, BS, DEV, BS, "historical", '"}\n')
+        appended = historical + '{"event":"clean-append"}\n'
+        proc = self._run_staged_transition(
+            {"logs/agent-runs.jsonl": historical},
+            {"logs/agent-runs.jsonl": appended},
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_staged_modified_machine_path_reports_new_postimage_line(self) -> None:
+        added_path = _join(WIN_D, BS, DEV, BS, "new-output")
+        proc = self._run_staged_transition(
+            {"notes.txt": "first\nthird\n"},
+            {"notes.txt": "first\n" + added_path + "\nthird\n"},
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertRegex(proc.stderr, r"\bline=2\b class=machine-path")
+
+    def test_staged_modified_old_secret_still_blocks_full_postimage(self) -> None:
+        leak = _join("to", "ken", " = ", "'", "A1B2C3D4E5F6", "'")
+        proc = self._run_staged_transition(
+            {"settings.txt": leak + "\nold\n"},
+            {"settings.txt": leak + "\nnew\n"},
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertRegex(proc.stderr, r"\bline=1\b class=value-token")
+
+    def test_staged_pure_rename_ignores_historical_machine_path(self) -> None:
+        historical = _join(WIN_D, BS, DEV, BS, "historical") + "\n"
+        proc = self._run_staged_transition(
+            {"archive/old.txt": historical},
+            {"archive/new.txt": historical},
+            renames=(("archive/old.txt", "archive/new.txt"),),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_staged_rename_old_secret_still_blocks_full_postimage(self) -> None:
+        leak = _join("to", "ken", " = ", "'", "A1B2C3D4E5F6", "'") + "\n"
+        proc = self._run_staged_transition(
+            {"old.txt": leak},
+            {"renamed.txt": leak},
+            renames=(("old.txt", "renamed.txt"),),
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertRegex(proc.stderr, r"\bline=1\b class=value-token")
+
+    def test_staged_added_historical_looking_file_scans_full_postimage(self) -> None:
+        machine_path = _join(WIN_D, BS, DEV, BS, "archived-output") + "\n"
+        proc = self._run_staged_transition(
+            {},
+            {"archive/2020/historical-session.txt": machine_path},
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("class=machine-path", proc.stderr)
+
+    def test_staged_destination_filename_always_checked(self) -> None:
+        proc = self._run_staged_transition(
+            {"notes.txt": "clean\n"},
+            {".env": "clean\n"},
+            renames=(("notes.txt", ".env"),),
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("class=filename-env", proc.stderr)
+
+    def test_staged_ordinary_locator_is_encoded_with_index(self) -> None:
+        machine_path = _join(WIN_D, BS, DEV, BS, "new-output") + "\n"
+        proc = self._run_staged_transition(
+            {},
+            {"logs/agent runs.jsonl": machine_path},
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn(
+            "kind=tracked-blob locator=logs%2Fagent%20runs.jsonl "
+            "staged-index=1 line=1 class=machine-path",
+            proc.stderr,
+        )
+
+    def test_untrusted_finding_locator_never_emitted(self) -> None:
+        unsafe = _join("logs/to", "ken=A1B2C3D4E5F6.txt")
+        machine_path = _join(WIN_D, BS, DEV, BS, "new-output") + "\n"
+        proc = self._run_staged_transition({}, {unsafe: machine_path})
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("kind=tracked-blob locator=redacted staged-index=1", proc.stderr)
+        self.assertNotIn(unsafe, proc.stdout + proc.stderr)
+
+    def test_staged_clean_receipt_shape_unchanged(self) -> None:
+        proc = self._run_staged_transition({}, {"clean.txt": "clean\n"})
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(
+            proc.stdout,
+            "publication-safety: clean (tracked, examined 1 file)\n",
+        )
+        gate = _load_push_gate("_staged_clean_receipt_consumer")
+        observed = gate.parse_publication_safety_observation(proc.stdout)
+        self.assertEqual(observed.kind, "legacy-nonauthorizing")
+
+    def test_staged_malformed_name_status_fails_closed(self) -> None:
+        module = _load_canonical_scanner("_staged_malformed_name_status")
+        malformed = subprocess.CompletedProcess([], 0, stdout=b"M\0unterminated", stderr=b"")
+        with mock.patch.object(module, "_run_git", return_value=malformed):
+            with self.assertRaises(RuntimeError):
+                module._tracked_files()
+
+    def test_staged_type_change_fails_closed(self) -> None:
+        module = _load_canonical_scanner("_staged_type_change")
+        type_change = subprocess.CompletedProcess([], 0, stdout=b"T\0node\0", stderr=b"")
+        with mock.patch.object(module, "_run_git", return_value=type_change):
+            with self.assertRaises(RuntimeError):
+                module._tracked_files()
+
+    def test_staged_modified_diff_failure_fails_closed(self) -> None:
+        module = _load_canonical_scanner("_staged_diff_failure")
+        old_oid = ("1" * 40 + "\n").encode("ascii")
+        new_oid = ("2" * 40 + "\n").encode("ascii")
+        calls = (
+            subprocess.CompletedProcess([], 0, stdout=b"M\0node\0", stderr=b""),
+            subprocess.CompletedProcess([], 0, stdout=new_oid, stderr=b""),
+            subprocess.CompletedProcess([], 0, stdout=b"old\nnew\n", stderr=b""),
+            subprocess.CompletedProcess([], 0, stdout=old_oid, stderr=b""),
+            subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"diff failed"),
+        )
+        with mock.patch.object(module, "_run_git", side_effect=calls):
+            with self.assertRaises(RuntimeError):
+                module._tracked_files()
 
     def test_nothing_staged_exits_0_but_reports_zero_examined(self) -> None:
         # THE LIVE FAILURE (2026-07-25/26): with nothing staged at all (the
@@ -679,6 +1236,505 @@ class TestPublicationSafetyScanner(unittest.TestCase):
 
 
 @unittest.skipIf(_git() is None, "needs git on PATH")
+class TestPublicationSafetyWindowsRangeContainment(unittest.TestCase):
+    def test_windows_range_and_explicit_source_emit_nonempty_v3_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            origin = root / "origin.git"
+            repo = root / "repo"
+            subprocess.run([_git(), "init", "-q", "--bare", str(origin)], check=True)
+            subprocess.run([_git(), "init", "-q", "-b", "main", str(repo)], check=True)
+            for key, value in (("user.email", "t@t"), ("user.name", "t")):
+                subprocess.run([_git(), "-C", str(repo), "config", key, value], check=True)
+            (repo / "clean.txt").write_text("clean content\n", encoding="utf-8")
+            subprocess.run([_git(), "-C", str(repo), "add", "clean.txt"], check=True)
+            subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "clean"], check=True)
+            subprocess.run([_git(), "-C", str(repo), "remote", "add", "origin", str(origin)], check=True)
+            tip = subprocess.run(
+                [_git(), "-C", str(repo), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+
+            for extra, source in (((), "main"), (("--range-source", tip), tip)):
+                with self.subTest(extra=extra):
+                    result = subprocess.run(
+                        [sys.executable, str(CANONICAL_SCANNER), "--range", "origin", "main", *extra],
+                        cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("clean (range, receipt=v3, commits=1,", result.stdout)
+                    self.assertIn("messages=complete", result.stdout)
+                    self.assertIn("history=complete", result.stdout)
+                    self.assertIn(
+                        f"remote=origin, dst=main, src={source}, tip={tip}", result.stdout
+                    )
+
+
+@unittest.skipUnless(os.name == "nt", "Windows Job ownership regression")
+class TestPublicationSafetyWindowsJobOwnership(unittest.TestCase):
+    def test_sync_owned_child_never_selects_foreign_reused_parent_pid(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_foreign_pid")
+        foreign_pid = 2_147_483_000  # Synthetic only; termination is intercepted.
+        owned_pid: list[int] = []
+        termination_attempts: list[int] = []
+        snapshots = 0
+        real_popen = module.subprocess.Popen
+
+        def record_owned_spawn(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            owned_pid.append(process.pid)
+            return process
+
+        def reused_parent_snapshot():
+            nonlocal snapshots
+            snapshots += 1
+            if snapshots == 1:
+                self.assertEqual(len(owned_pid), 1)
+                return ((owned_pid[0], 0), (foreign_pid, owned_pid[0]))
+            return ()
+
+        with (
+            mock.patch.object(module.subprocess, "Popen", side_effect=record_owned_spawn),
+            mock.patch.object(
+                module, "_windows_process_rows", side_effect=reused_parent_snapshot,
+                create=True,
+            ),
+            mock.patch.object(
+                module, "_windows_terminate_pid",
+                side_effect=lambda pid, _timeout: termination_attempts.append(pid),
+                create=True,
+            ),
+        ):
+            result = module._run_owned_process(
+                [sys.executable, "-c", "print('owned')"], timeout=2.0
+            )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), b"owned")
+        self.assertNotIn(foreign_pid, termination_attempts)
+
+    def test_async_selection_refuses_failed_job_launch(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_job_launch_failure")
+
+        class FailingJobOwner:
+            @staticmethod
+            def launch(**_kwargs):
+                raise OSError("injected creation-time Job assignment failure")
+
+        async def select():
+            return await module._read_git_lines_bounded(
+                (sys.executable, "-c", "print('healthy')"),
+                byte_cap=1024,
+                line_cap=256,
+                deadline=asyncio.get_running_loop().time() + 2.0,
+                accepted_codes=frozenset({0}),
+            )
+
+        with mock.patch.object(module, "WindowsJobOwnerV1", FailingJobOwner, create=True):
+            outcome = asyncio.run(select())
+
+        self.assertIsInstance(outcome, module.Refusal)
+        self.assertEqual(outcome.failure_id, "PS-MSG-SPAWN")
+
+    def test_async_binary_batch_preserves_exact_payload_and_reaps_job(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_binary_batch")
+        oid = "1" * 40
+        payload = b"a\0b\nc"
+        child = (
+            "import sys;"
+            "oid=sys.stdin.buffer.readline().strip();"
+            "payload=b'a\\x00b\\nc';"
+            "sys.stdout.buffer.write(oid+b' blob '+str(len(payload)).encode()"
+            "+b'\\n'+payload+b'\\n');"
+            "sys.stdout.buffer.flush();"
+            "sys.stdin.buffer.read()"
+        )
+
+        async def exercise():
+            reader = module._AsyncGitObjectReader(
+                argv=(sys.executable, "-u", "-c", child),
+                request_timeout=2.0, settle_timeout=2.0,
+            )
+            self.assertIsNone(await reader.start())
+            object_result = await reader.read(oid, "blob")
+            finalization = await reader.finalize()
+            return object_result, finalization, reader.reap_certificate
+
+        result, finalization, certificate = asyncio.run(exercise())
+        self.assertIsInstance(result, module.ObjectReadSuccess)
+        self.assertEqual(result.raw, payload)
+        self.assertIsNone(finalization)
+        self.assertIsNotNone(certificate)
+        self.assertTrue(certificate.complete)
+
+    def test_async_selection_drains_large_binary_pipe_with_backpressure(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_pipe_backpressure")
+        line = b"x" * 127
+        child = (
+            "import sys;"
+            "sys.stdout.buffer.write((b'x'*127+b'\\n')*4096);"
+            "sys.stdout.buffer.flush()"
+        )
+
+        async def exercise():
+            result = await module._read_git_lines_bounded(
+                (sys.executable, "-u", "-c", child),
+                byte_cap=600_000, line_cap=128,
+                deadline=asyncio.get_running_loop().time() + 5.0,
+                accepted_codes=frozenset({0}),
+            )
+            pending = {
+                task for task in asyncio.all_tasks()
+                if task is not asyncio.current_task() and not task.done()
+            }
+            return result, pending
+
+        result, pending = asyncio.run(exercise())
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(result[0], 0)
+        self.assertEqual(len(result[1]), 4096)
+        self.assertEqual(result[1][0], line)
+        self.assertEqual(result[1][-1], line)
+        self.assertEqual(pending, set())
+
+    def test_async_selection_cancel_settles_owned_job_without_pending_tasks(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_selection_cancel")
+        owners = []
+        real_launch = module.WindowsJobOwnerV1.launch
+
+        def capture_launch(**kwargs):
+            owner = real_launch(**kwargs)
+            owners.append(owner)
+            return owner
+
+        with tempfile.TemporaryDirectory() as td:
+            ready = Path(td) / "ready"
+            child = (
+                "import pathlib,sys,time;"
+                "pathlib.Path(sys.argv[1]).write_text('ready',encoding='ascii');"
+                "time.sleep(60)"
+            )
+
+            async def exercise():
+                task = asyncio.create_task(module._read_git_lines_bounded(
+                    (sys.executable, "-u", "-c", child, str(ready)),
+                    byte_cap=1024, line_cap=256,
+                    deadline=asyncio.get_running_loop().time() + 5.0,
+                    accepted_codes=frozenset({0}),
+                ))
+                deadline = asyncio.get_running_loop().time() + 2.0
+                while not ready.is_file():
+                    self.assertLess(asyncio.get_running_loop().time(), deadline)
+                    await asyncio.sleep(0.01)
+                task.cancel()
+                outcome = await task
+                pending = {
+                    other for other in asyncio.all_tasks()
+                    if other is not asyncio.current_task() and not other.done()
+                }
+                return outcome, pending
+
+            try:
+                with mock.patch.object(
+                    module.WindowsJobOwnerV1, "launch", side_effect=capture_launch
+                ):
+                    outcome, pending = asyncio.run(exercise())
+            finally:
+                for owner in owners:
+                    owner.close()
+
+        self.assertIsInstance(outcome, module.Refusal)
+        self.assertEqual(outcome.reason, "cancelled")
+        self.assertEqual(pending, set())
+        self.assertEqual(len(owners), 1)
+        closure = owners[0].settle(time.monotonic(), terminate=False)
+        self.assertTrue(closure.complete)
+        self.assertTrue(closure.active_zero)
+        self.assertTrue(closure.handles_closed)
+
+    def test_sync_stream_constructor_failure_closes_transferred_fd(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_sync_fd_failure")
+        owners = []
+        transferred = []
+        real_launch = module.WindowsJobOwnerV1.launch
+
+        def capture_launch(**kwargs):
+            owner = real_launch(**kwargs)
+            owners.append(owner)
+            real_take = owner.take_stdout_fd
+
+            def take_stdout():
+                fd = real_take()
+                transferred.append(fd)
+                return fd
+
+            owner.take_stdout_fd = take_stdout
+            return owner
+
+        try:
+            with (
+                mock.patch.object(module.WindowsJobOwnerV1, "launch", side_effect=capture_launch),
+                mock.patch.object(module.os, "fdopen", side_effect=OSError("injected fdopen")),
+            ):
+                with self.assertRaises(OSError):
+                    module._run_owned_process(
+                        [sys.executable, "-c", "pass"], timeout=2.0
+                    )
+            self.assertEqual(len(transferred), 1)
+            with self.assertRaises(OSError):
+                os.fstat(transferred[0])
+            self.assertTrue(owners[0].settle(time.monotonic()).complete)
+        finally:
+            for fd in transferred:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    def test_async_bridge_constructor_failure_closes_all_transferred_fds(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_async_fd_failure")
+        owners = []
+        transferred = []
+        real_launch = module.WindowsJobOwnerV1.launch
+        real_bridge = module._WindowsAsyncPipeReader
+        initial_workers = {
+            thread.ident for thread in threading.enumerate()
+            if thread.name == "publication-pipe-read"
+        }
+
+        def capture_launch(**kwargs):
+            owner = real_launch(**kwargs)
+            owners.append(owner)
+            for name in ("stdout", "stderr"):
+                real_take = getattr(owner, f"take_{name}_fd")
+
+                def take(real_take=real_take):
+                    fd = real_take()
+                    transferred.append(fd)
+                    return fd
+
+                setattr(owner, f"take_{name}_fd", take)
+            return owner
+
+        def bridge_then_fail(fd, loop):
+            if len(transferred) == 1:
+                return real_bridge(fd, loop)
+            raise OSError("injected second bridge constructor failure")
+
+        async def start():
+            return await module._create_windows_owned_async_process(
+                (sys.executable, "-c", "pass"),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+        try:
+            with (
+                mock.patch.object(module.WindowsJobOwnerV1, "launch", side_effect=capture_launch),
+                mock.patch.object(module, "_WindowsAsyncPipeReader", side_effect=bridge_then_fail),
+            ):
+                with self.assertRaises(OSError):
+                    asyncio.run(start())
+            self.assertEqual(len(transferred), 2)
+            for fd in transferred:
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+            self.assertTrue(owners[0].settle(time.monotonic()).complete)
+            remaining_workers = {
+                thread.ident for thread in threading.enumerate()
+                if thread.name == "publication-pipe-read"
+            }
+            self.assertEqual(remaining_workers, initial_workers)
+        finally:
+            for fd in transferred:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    def test_double_cancel_during_launch_closes_eventual_job(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_double_cancel_launch")
+        started = threading.Event()
+        release = threading.Event()
+        returned = threading.Event()
+
+        class SyntheticJob:
+            pid = 1234
+
+            def __init__(self) -> None:
+                self.owned_child_active = True
+                self.handles_closed = False
+                self.close_calls = 0
+
+            def close(self):
+                self.close_calls += 1
+                self.owned_child_active = False
+                self.handles_closed = True
+
+        job = SyntheticJob()
+
+        def blocked_launch(**_kwargs):
+            started.set()
+            if not release.wait(2.0):
+                raise TimeoutError("synthetic launch was not released")
+            returned.set()
+            return job
+
+        async def exercise():
+            loop = asyncio.get_running_loop()
+            task = asyncio.create_task(module._create_windows_owned_async_process(
+                (sys.executable, "-c", "pass"),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            ))
+
+            def cancel_while_launch_runs():
+                if started.wait(2.0):
+                    loop.call_soon_threadsafe(task.cancel)
+                    loop.call_soon_threadsafe(task.cancel)
+                release.set()
+
+            canceller = threading.Thread(target=cancel_while_launch_runs)
+            canceller.start()
+            try:
+                try:
+                    return "returned", await task
+                except asyncio.CancelledError:
+                    return "cancelled", None
+            finally:
+                release.set()
+                canceller.join(1.0)
+
+        try:
+            with mock.patch.object(
+                module.WindowsJobOwnerV1, "launch", side_effect=blocked_launch
+            ):
+                outcome, process = asyncio.run(exercise())
+            self.assertTrue(started.is_set())
+            self.assertTrue(returned.is_set())
+            if outcome == "returned":
+                self.assertIsNotNone(process)
+                self.assertIs(process.job, job)
+                job.close()
+            else:
+                self.assertEqual(outcome, "cancelled")
+            self.assertEqual(job.close_calls, 1)
+            self.assertTrue(job.handles_closed)
+            self.assertFalse(job.owned_child_active)
+        finally:
+            release.set()
+            if job.owned_child_active:
+                job.close()
+
+    def test_reader_bridge_close_wakes_undelivered_callback_ack(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_undelivered_pipe_ack")
+        read_fd, write_fd = os.pipe()
+        queued = threading.Event()
+        callbacks = []
+
+        class StalledLoop:
+            def call_soon_threadsafe(self, callback, *args):
+                callbacks.append((callback, args))
+                queued.set()
+
+        bridge = None
+
+        async def exercise():
+            nonlocal bridge
+            bridge = module._WindowsAsyncPipeReader(read_fd, StalledLoop())
+            os.write(write_fd, b"x")
+            self.assertTrue(await asyncio.to_thread(queued.wait, 2.0))
+            return bridge.close(time.monotonic() + 0.1)
+
+        try:
+            closed = asyncio.run(exercise())
+            self.assertTrue(closed)
+            self.assertFalse(bridge._thread.is_alive())
+        finally:
+            if callbacks:
+                callbacks[0][1][-1].set()
+            if bridge is not None:
+                bridge._thread.join(1.0)
+            for fd in (read_fd, write_fd):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    def test_double_cancel_during_settlement_still_closes_pipe_bridge(self) -> None:
+        module = _load_canonical_scanner("_scanner_windows_double_cancel_settle")
+        started = threading.Event()
+        release = threading.Event()
+        returned = threading.Event()
+
+        class SyntheticJob:
+            pid = 1234
+
+            settled = False
+
+            def poll(self):
+                return 0
+
+            def settle(self, _deadline, *, terminate):
+                self.terminate_requested = terminate
+                started.set()
+                if not release.wait(2.0):
+                    raise TimeoutError("synthetic settlement was not released")
+                self.settled = True
+                returned.set()
+                return SimpleNamespace(complete=True, direct_exit_code=0)
+
+        class SyntheticBridge:
+            closed = False
+
+            def close(self, _deadline):
+                self.closed = True
+                return True
+
+        job = SyntheticJob()
+        bridge = SyntheticBridge()
+        process = module._WindowsOwnedAsyncProcess(job, [bridge], None, None, None)
+
+        async def exercise():
+            loop = asyncio.get_running_loop()
+            task = asyncio.create_task(module._settle_owned_async_process(
+                process, None, None, timeout_seconds=1.0,
+            ))
+
+            def cancel_while_settlement_runs():
+                if started.wait(2.0):
+                    loop.call_soon_threadsafe(task.cancel)
+                    loop.call_soon_threadsafe(task.cancel)
+                release.set()
+
+            canceller = threading.Thread(target=cancel_while_settlement_runs)
+            canceller.start()
+            try:
+                try:
+                    return "returned", await task
+                except asyncio.CancelledError:
+                    return "cancelled", None
+            finally:
+                release.set()
+                canceller.join(1.0)
+
+        try:
+            outcome, result = asyncio.run(exercise())
+            self.assertIn(outcome, {"returned", "cancelled"})
+            if outcome == "returned":
+                self.assertTrue(result)
+            self.assertTrue(started.is_set())
+            self.assertTrue(returned.is_set())
+            self.assertTrue(job.terminate_requested)
+            self.assertTrue(job.settled)
+            self.assertTrue(bridge.closed)
+        finally:
+            release.set()
+
+
+@unittest.skipIf(_git() is None, "needs git on PATH")
 class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
     """Regression tests for `--range <remote> <dst>` (2026-07-27,
     work-items/active/2026-07-26-push-gate-range-receipt/): the scanner's
@@ -743,6 +1799,20 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
         )
         return proc.returncode, proc.stdout, proc.stderr
 
+    def _run_binary_payload(self, payload: bytes) -> tuple[int, str, str]:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            (repo / "binary-fixture.bin").write_bytes(payload)
+            subprocess.run(
+                [_git(), "-C", str(repo), "add", "binary-fixture.bin"],
+                check=True,
+            )
+            subprocess.run(
+                [_git(), "-C", str(repo), "commit", "-q", "-m", "binary fixture"],
+                check=True,
+            )
+            return self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+
     def test_range_mode_clean_scan_reports_remote_dst_tip_receipt(self) -> None:
         # The exact receipt shape check-git-push-gate.py's SCAN_CLEAN_RANGE_
         # REGEX matches: mode word "range", a non-empty examined count, and
@@ -752,7 +1822,10 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as td:
                     repo = self._init_range_repo(Path(td))
                     self._commit_file(repo, "b.txt", "clean content, nothing machine-local here")
-                    expected_blob_bytes = len((repo / "b.txt").read_bytes())
+                    expected_blob_bytes = len(subprocess.run(
+                        [_git(), "-C", str(repo), "cat-file", "blob", "HEAD:b.txt"],
+                        check=True, capture_output=True,
+                    ).stdout)
                     git = _git()
                     tip = subprocess.run(
                         [git, "-C", str(repo), "rev-parse", "HEAD"],
@@ -857,7 +1930,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             self.assertEqual(rc, 1, out + err)
             self.assertIn("PS-FINDING-CONTENT", err)
 
-    def test_range_mode_empty_remote_ref_inventory_refuses(self) -> None:
+    def test_range_mode_empty_remote_ref_inventory_scans_and_redacts_secret(self) -> None:
         leak = "pass" + "word" + ": hunter2"
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -872,9 +1945,9 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             subprocess.run([_git(), "-C", str(repo), "remote", "add", "origin", str(origin)], check=True)
             self._commit_file(repo, "root.txt", leak, message="root commit")
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
-            self.assertEqual(rc, 2, out + err)
-            self.assertIn("id=PS-MSG-RANGE reason=remote-refs", err)
-            self.assertNotIn("PS-FINDING", out + err)
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("PS-FINDING-CONTENT", err)
+            self.assertNotIn(leak, err)
 
     def test_range_mode_merge_parent_history_is_scanned_after_tip_delete(self) -> None:
         leak = "pass" + "word" + ": hunter2"
@@ -918,9 +1991,12 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             repo = self._init_range_repo(Path(td))
             for name in ("a.txt", "b.txt"):
                 (repo / name).write_text("shared clean\n", encoding="utf-8")
-            expected_blob_bytes = len((repo / "a.txt").read_bytes())
             subprocess.run([_git(), "-C", str(repo), "add", "a.txt", "b.txt"], check=True)
             subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "shared clean blob"], check=True)
+            expected_blob_bytes = len(subprocess.run(
+                [_git(), "-C", str(repo), "cat-file", "blob", "HEAD:a.txt"],
+                check=True, capture_output=True,
+            ).stdout)
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
             self.assertEqual(rc, 0, err)
             self.assertIn("blobs=1", out)
@@ -947,9 +2023,12 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             binary_fixture = repo / "binary.bin"
             text_fixture.write_text("clean text\n", encoding="utf-8")
             binary_fixture.write_bytes(b"\0\xff\x01")
-            expected_blob_bytes = len(text_fixture.read_bytes()) + len(binary_fixture.read_bytes())
             subprocess.run([_git(), "-C", str(repo), "add", "text.txt", "binary.bin"], check=True)
             subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "mixed blobs"], check=True)
+            expected_blob_bytes = sum(len(subprocess.run(
+                [_git(), "-C", str(repo), "cat-file", "blob", f"HEAD:{name}"],
+                check=True, capture_output=True,
+            ).stdout) for name in ("text.txt", "binary.bin"))
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
             self.assertEqual(rc, 0, err)
             self.assertIn("blobs=2", out)
@@ -967,7 +2046,149 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
             self.assertEqual(rc, 1, out + err)
             self.assertIn("PS-FINDING-CONTENT", err)
-            self.assertNotIn(sentinel, out + err)
+        self.assertNotIn(sentinel, out + err)
+
+    def test_range_mode_terminal_public_token_annotations_are_clean(self) -> None:
+        rows = public_token_reproduction_rows()
+        annotated = "\n".join((
+            rows["port-slots"] + "), " + public_token_annotation(),
+            rows["orientations"] + ", " + public_token_annotation(),
+            rows["partition-certificate"] + "; " + public_token_annotation("//"),
+        ))
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "protocol.py", annotated)
+
+            rc, out, err = self._run_range(
+                CANONICAL_SCANNER, repo, "origin", "claude"
+            )
+
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("PS-FINDING", out + err)
+
+    def test_range_mode_binary_public_token_annotation_still_blocks(self) -> None:
+        annotated = (
+            public_token_reproduction_rows()["partition-certificate"]
+            + "; "
+            + public_token_annotation()
+        )
+
+        rc, out, err = self._run_binary_payload(
+            b"\0" + annotated.encode("ascii")
+        )
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("class=value-token", err)
+
+    def test_range_mode_commit_message_public_token_annotation_still_blocks(self) -> None:
+        annotated = (
+            public_token_reproduction_rows()["partition-certificate"]
+            + "; "
+            + public_token_annotation()
+        )
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "clean.txt", "clean", message=annotated)
+
+            rc, out, err = self._run_range(
+                CANONICAL_SCANNER, repo, "origin", "claude"
+            )
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("PS-FINDING-COMMIT-MESSAGE", err)
+        self.assertIn("class=value-token", err)
+
+    def test_range_mode_binary_public_key_identity_and_text_heuristics_are_clean(self) -> None:
+        public_key_token = block_rows()["b43_public_key_token_identity"]
+        payload = _join(
+            "\0", public_key_token, "\0", "private", "_key", "\0",
+            "secret", "_key", "\0", "$ explain",
+        ).encode("ascii")
+
+        rc, out, err = self._run_binary_payload(payload)
+
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("text=0, binary=1", out)
+        self.assertNotIn("PS-FINDING", out + err)
+
+    def test_range_mode_binary_digit_bearing_callable_is_clean(self) -> None:
+        fixture = pass_rows()["p56_digit_bearing_callable"]
+        payload = b"\0" + fixture.replace("(", "   (", 1).encode("ascii")
+
+        rc, out, err = self._run_binary_payload(payload)
+
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("PS-FINDING", out + err)
+
+    def test_range_mode_binary_callable_does_not_hide_later_same_line_leak(self) -> None:
+        fixture = block_rows()["b53_callable_then_same_family_leak"]
+
+        rc, out, err = self._run_binary_payload(b"\0" + fixture.encode("ascii"))
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_binary_digit_bearing_member_callable_is_clean(self) -> None:
+        fixture = pass_rows()["p57_digit_bearing_member_callable"]
+
+        rc, out, err = self._run_binary_payload(b"\0" + fixture.encode("ascii"))
+
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("PS-FINDING", out + err)
+
+    def test_range_mode_binary_nonidentifier_value_with_call_suffix_blocks(self) -> None:
+        fixture = block_rows()["b52_nonidentifier_plus_call_suffix"]
+
+        rc, out, err = self._run_binary_payload(b"\0" + fixture.encode("ascii"))
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_binary_strong_credentials_and_machine_paths_still_block(self) -> None:
+        cases = {
+            name: b"\0" + block_rows()[row].encode("ascii")
+            for name, row in {
+                "low-entropy-token": "b44_low_entropy_token",
+                "low-entropy-access-token": "b45_low_entropy_access_token",
+                "tab-token": "b46_tab_token",
+                "near-name-token": "b47_near_name_token",
+                "bearer": "b48_bearer",
+                "tab-bearer": "b49_tab_bearer",
+                "private-key-envelope": "b50_key_envelope",
+                "machine-path": "b51_binary_machine_path",
+            }.items()
+        }
+        for name, payload in cases.items():
+            with self.subTest(name=name):
+                rc, out, err = self._run_binary_payload(payload)
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_binary_public_key_token_exclusion_is_per_match(self) -> None:
+        payload = _join(
+            "\0", block_rows()["b43_public_key_token_identity"], " ",
+            block_rows()["b45_low_entropy_access_token"],
+        ).encode("ascii")
+
+        rc, out, err = self._run_binary_payload(payload)
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_text_public_key_token_still_uses_full_text_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(
+                repo,
+                "metadata.txt",
+                block_rows()["b43_public_key_token_identity"],
+                message="text metadata fixture",
+            )
+
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("PS-FINDING-CONTENT", err)
 
     def test_range_mode_decoy_scanner_basename_has_no_exemption(self) -> None:
         content = CANONICAL_SCANNER.read_text(encoding="utf-8")
@@ -1428,17 +2649,19 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                     self._commit(repo, "base.txt", "clean base", "clean base")
                     self._git_run(repo, "merge", "--no-ff", "side", "-q", "-m", message)
                 proc = self._run_range(repo)
-                if case in {"initial", "other-remote"}:
-                    self.assertEqual(
-                        proc.returncode,
-                        2,
-                        f"case={case} out={proc.stdout!r} err={proc.stderr!r}",
-                    )
-                    self.assertIn("reason=remote-refs", proc.stderr)
-                    self.assertNotIn("PS-FINDING", proc.stdout + proc.stderr)
-                else:
-                    self.assertEqual(proc.returncode, 1, f"case={case} out={proc.stdout!r} err={proc.stderr!r}")
-                    self.assertNotIn("A1B2C3D4E5F6G7H8IJK", proc.stdout + proc.stderr)
+                self.assertEqual(proc.returncode, 1, f"case={case} out={proc.stdout!r} err={proc.stderr!r}")
+                self.assertNotIn("A1B2C3D4E5F6G7H8IJK", proc.stdout + proc.stderr)
+
+    def test_range_first_push_empty_remote_scans_clean_initial_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td), publish_seed=False)
+
+            proc = self._run_range(repo)
+
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("publication-safety: clean (range, receipt=v3, commits=1,", proc.stdout)
+            self.assertIn("messages=complete", proc.stdout)
+            self.assertIn("remote=origin, dst=main, src=main,", proc.stdout)
 
     def test_range_message_zero_file_nonzero_commit(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1885,7 +3108,6 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
         tip = "1" * 40
         other = "2" * 40
         cases = {
-            "empty": (),
             "invalid-oid": (b"not-an-oid\trefs/heads/main",),
             "malformed-row": (tip.encode("ascii"),),
             "invalid-ref": (f"{tip}\tHEAD".encode("ascii"),),
@@ -1984,12 +3206,61 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                 self.assertIsInstance(outcome, module.Refusal)
                 self.assertIn(outcome.failure_id, {"PS-MSG-FRAME", "PS-MSG-RANGE"})
 
+    def test_remote_ref_inventory_preserves_large_mixed_advertisement(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_remote_ref_inventory_mixed")
+        head_oid = "1" * 40
+        tag_oid = "2" * 40
+        peeled_oid = "3" * 40
+        pull_oid = "4" * 40
+        notes_oid = "5" * 40
+        rows = tuple(
+            [
+                f"{head_oid}\trefs/heads/branch-{index:05d}".encode("ascii")
+                for index in range(66)
+            ]
+            + [
+                f"{tag_oid}\trefs/tags/tag-{index:05d}".encode("ascii")
+                for index in range(33)
+            ]
+            + [
+                f"{peeled_oid}\trefs/tags/tag-{index:05d}^{{}}".encode("ascii")
+                for index in range(7)
+            ]
+            + [f"{notes_oid}\trefs/notes/commits".encode("ascii")]
+            + [
+                f"{pull_oid}\trefs/pull/{index}/head".encode("ascii")
+                for index in range(1, 612)
+            ]
+        )
+        self.assertEqual(len(rows), 718)
+
+        outcome = module._parse_remote_ref_tip_oids(rows, module._SHA1_OBJECT_FORMAT)
+
+        self.assertIsInstance(outcome, tuple)
+        self.assertEqual(len(outcome), 711)
+        self.assertEqual(len({tip.refname for tip in outcome}), 711)
+        for prefix, count, oid in (
+            (b"refs/heads/", 66, head_oid),
+            (b"refs/tags/", 33, tag_oid),
+            (b"refs/pull/", 611, pull_oid),
+            (b"refs/notes/", 1, notes_oid),
+        ):
+            selected = [tip for tip in outcome if tip.refname.startswith(prefix)]
+            self.assertEqual(len(selected), count)
+            self.assertTrue(all(tip.oid == oid for tip in selected))
+        peeled = [tip for tip in outcome if tip.peeled_oid is not None]
+        self.assertEqual(len(peeled), 7)
+        self.assertTrue(all(tip.peeled_oid == peeled_oid for tip in peeled))
+        self.assertEqual(peeled[0].refname, b"refs/tags/tag-00000")
+        self.assertEqual(peeled[-1].refname, b"refs/tags/tag-00006")
+        self.assertEqual(outcome[-1].refname, b"refs/pull/611/head")
+
     def test_range_missing_destination_refuses_over_cap_remote_ref_inventory(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_remote_ref_inventory_cap")
         tip = "1" * 40
         remote_rows = tuple(
             f"{tip}\trefs/heads/branch-{index:05d}".encode("ascii")
-            for index in range(257)
+            for index in range(module._MAX_REMOTE_REFS + 1)
         )
 
         async def fake_reader(argv, **_kwargs):
@@ -2812,19 +4083,6 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             {"GIT_CONFIG_COUNT": "bogus"},
             {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "only-key"},
             {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_0": "orphan", "GIT_CONFIG_VALUE_0": "orphan"},
-            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_2": "sparse-orphan"},
-            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_VALUE_999": "sparse-orphan"},
-            {"GIT_CONFIG_KEY_2": "count-missing"},
-            {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "credential.useHttpPath",
-             "GIT_CONFIG_VALUE_0": "true", "GIT_CONFIG_KEY_3": "sparse-orphan"},
-            {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "credential.useHttpPath",
-             "GIT_CONFIG_VALUE_0": "true", "GIT_CONFIG_VALUE_3": "sparse-orphan"},
-            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_00": "noncanonical-index"},
-            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_VALUE_-1": "negative-index"},
-            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_suffix": "malformed-index"},
-            {"GIT_CONFIG_COUNT": "1025"},
-            {"GIT_CONFIG_COUNT": "-1"},
-            {"GIT_CONFIG_COUNT": "01"},
         )
         for ambient in cases:
             with self.subTest(ambient=ambient), mock.patch.dict(os.environ, ambient, clear=False):
@@ -2832,8 +4090,7 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                     if key.startswith("GIT_CONFIG_") and key not in ambient:
                         os.environ.pop(key, None)
                 outcome = module._remote_probe_binding("https://example.invalid/repository.git")
-                self.assertTrue(isinstance(outcome, module.Refusal),
-                                "malformed indexed Git configuration must refuse")
+                self.assertIsInstance(outcome, module.Refusal)
                 self.assertEqual(outcome.failure_id, "PS-MSG-RANGE")
                 self.assertEqual(outcome.reason, "remote-binding")
 
@@ -2899,13 +4156,8 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
 
                 proc = self._run_range(repo)
 
-                if push_has_seed:
-                    self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
-                    self.assertIn("PS-FINDING-COMMIT-MESSAGE", proc.stderr)
-                else:
-                    self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
-                    self.assertIn("reason=remote-refs", proc.stderr)
-                    self.assertNotIn("PS-FINDING", proc.stdout + proc.stderr)
+                self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                self.assertIn("PS-FINDING-COMMIT-MESSAGE", proc.stderr)
                 self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
 
     def test_range_refuses_multiple_configured_push_destinations(self) -> None:
@@ -3060,6 +4312,9 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             "src=refs%2Fheads%2Ftopic, tip=" + "2" * 40 + ")",
         )
         self.assertFalse(hasattr(module, "_serialize_range_receipt_v2"))
+
+    def test_range_contract_unchanged_after_staged_delta(self) -> None:
+        self.test_receipt_v3_canonicalization()
 
     def test_redacted_finding_output(self) -> None:
         sentinel = "A1B2C3D4E5F6G7H8IJK"
@@ -4152,6 +5407,279 @@ class TestPublicationSafetyScannerR5Proof(unittest.TestCase):
             ) = originals
 
 
+class TestPublicationSafetyScannerEarlyRefusalCleanup(unittest.TestCase):
+    def _module(self, suffix: str):
+        return _load_canonical_scanner("_scanner_cleanup_" + suffix)
+
+    def test_large_residual_output_is_discarded_while_child_settles(self) -> None:
+        module = self._module("large_residual")
+        oid = "1" * 40
+        rows = (
+            (
+                "oversized",
+                oid,
+                module._MAX_BLOB_BYTES + 1,
+                module._refusal("PS-MSG-LIMIT", "blob-bytes"),
+            ),
+            (
+                "bad-identity",
+                "2" * 40,
+                4 * 1024 * 1024,
+                module._refusal("PS-MSG-FRAME", "identity"),
+            ),
+        )
+
+        async def exercise(label: str, returned_oid: str, size: int, expected) -> None:
+            producer = (
+                "import sys\n"
+                "request = sys.stdin.buffer.readline().strip()\n"
+                f"sys.stdout.buffer.write(b'{returned_oid} blob {size}\\n')\n"
+                "sys.stdout.buffer.flush()\n"
+                "chunk = b'x' * 65536\n"
+                f"remaining = {size}\n"
+                "while remaining:\n"
+                "    part = chunk[:min(len(chunk), remaining)]\n"
+                "    sys.stdout.buffer.write(part)\n"
+                "    sys.stdout.buffer.flush()\n"
+                "    remaining -= len(part)\n"
+                "sys.stdout.buffer.write(b'\\n')\n"
+                "sys.stdout.buffer.flush()\n"
+            )
+            reader = module._AsyncGitObjectReader(
+                argv=(sys.executable, "-u", "-c", producer),
+                request_timeout=1.0,
+                settle_timeout=3.0,
+            )
+            self.assertIsNone(await reader.start(), label)
+            try:
+                refusal = await reader.read(oid, "blob")
+                self.assertEqual(refusal, expected, label)
+                finalization = await reader.finalize()
+                self.assertIsNone(finalization, label)
+                certificate = reader.reap_certificate
+                self.assertIsNotNone(certificate, label)
+                self.assertTrue(certificate.complete, label)
+                self.assertEqual(certificate.cleanup_errors, (), label)
+                self.assertEqual(certificate.attempts_used, 1, label)
+                outcome = module._finalize_range_outcome(
+                    module.ScanOutcome("refusal", "range", refusal=refusal),
+                    finalization,
+                    certificate,
+                )
+                self.assertEqual(outcome.refusal, expected, label)
+                self.assertIs(outcome.reap_certificate, certificate, label)
+            finally:
+                process = reader.process
+                if process is not None and process.returncode is None:
+                    process.kill()
+                    await process.wait()
+
+        async def run_rows() -> None:
+            for row in rows:
+                with self.subTest(row=row[0]):
+                    await exercise(*row)
+
+        asyncio.run(run_rows())
+
+    def test_normal_reader_still_rejects_trailing_output(self) -> None:
+        module = self._module("normal_trailing")
+        oid = "1" * 40
+        producer = (
+            "import sys\n"
+            "request = sys.stdin.buffer.readline().strip()\n"
+            "sys.stdout.buffer.write(request + b' blob 1\\n' + b'x\\ntrailing')\n"
+            "sys.stdout.buffer.flush()\n"
+            "sys.stdin.buffer.read()\n"
+        )
+
+        async def exercise() -> None:
+            reader = module._AsyncGitObjectReader(
+                argv=(sys.executable, "-u", "-c", producer),
+                request_timeout=1.0,
+                settle_timeout=1.0,
+            )
+            self.assertIsNone(await reader.start())
+            try:
+                result = await reader.read(oid, "blob")
+                self.assertEqual(type(result).__name__, "ObjectReadSuccess")
+                self.assertIsNone(await reader.finalize())
+                self.assertEqual(reader.state, module.ReaderState.REAP_PENDING)
+                outcome = module._finalize_range_outcome(
+                    module.ScanOutcome("clean", "range"), None, reader.reap_certificate
+                )
+                self.assertEqual(outcome.kind, "refusal")
+                self.assertEqual(outcome.refusal.failure_id, "PS-MSG-REAP")
+                self.assertIsNotNone(reader.process.returncode)
+            finally:
+                if reader.process is not None and reader.process.returncode is None:
+                    reader.process.kill()
+                    await reader.process.wait()
+
+        asyncio.run(exercise())
+
+
+class TestReviewedCandidateProjection(unittest.TestCase):
+    """Detector identity and projection checks; no reviewer authority is minted."""
+
+    def _owners(self):
+        scanner = _load_canonical_scanner("_reviewed_candidate_projection")
+        return scanner, scanner._load_review_policy_module()
+
+    def test_every_engine_selected_start_includes_overlaps(self):
+        scanner = _load_canonical_scanner("_reviewed_matching_starts")
+        self.assertEqual(
+            [match.span() for match in scanner._matching_starts(re.compile("aa"), "aaa")],
+            [(0, 2), (1, 3)],
+        )
+        self.assertEqual(
+            [match.span() for match in scanner._matching_starts(re.compile("a+"), "aaa")],
+            [(0, 3), (1, 3), (2, 3)],
+        )
+        with self.assertRaisesRegex(RuntimeError, "zero-width"):
+            list(scanner._matching_starts(re.compile(""), "x"))
+
+    def test_same_line_candidates_and_independent_families_survive(self):
+        scanner = _load_canonical_scanner("_reviewed_complete_content")
+        text = _join("private", "_key", " private", "_key", " secret", "_key")
+        hits = scanner._content_hits(text, "sample.txt", lambda _line: ())
+        self.assertEqual([row.detector_class for row in hits], ["simple-10", "simple-10", "simple-11"])
+        capped = scanner._content_hits(text, "sample.txt", lambda _line: (), max_findings=1)
+        self.assertEqual(len(capped), 1)
+        visited = []
+        scanner._content_hits("\n".join((text, text, text)), "sample.txt",
+                              lambda line: visited.append(line), max_findings=1)
+        self.assertEqual(len(visited), 3)
+
+    def test_catalog_keeps_all_token_leaves_and_semantic_identity(self):
+        scanner, policy = self._owners()
+        definitions = scanner.detector_definitions(policy)
+        value = definitions["value-token-v1"]["definition"]
+        self.assertEqual(len(value["leaves"]), 2)
+        self.assertEqual(value["exclusions"], ["callable-rhs-v1", "public-token-v1", "scanner-self-v1"])
+        self.assertEqual(definitions, scanner.detector_definitions(policy))
+
+    def test_original_utf8_bom_and_line_separators_keep_byte_coordinates(self):
+        scanner, policy = self._owners()
+        text = _join(chr(0xfeff), chr(0x03b1), "\r\n", chr(0x2028), "private", "_key", "\r\n")
+        raw = text.encode("utf-8")
+        rows = scanner.analyze_review_candidates(raw, b"sample.txt", subject_kind="tracked-blob", policy_module=policy)["candidates"]
+        self.assertEqual(len(rows), 1)
+        candidate = rows[0]["candidate"]
+        start = raw.index(_join("private", "_key").encode("ascii"))
+        self.assertEqual(candidate["startByte"], start)
+        self.assertEqual(candidate["endByteExclusive"], start + 11)
+        self.assertEqual(candidate["sha256"], hashlib.sha256(raw[start:start + 11]).hexdigest())
+        invalid = scanner.analyze_review_candidates(b"\xff" + raw, b"sample.txt", subject_kind="tracked-blob", policy_module=policy)
+        self.assertEqual(invalid["candidates"], ())
+        self.assertTrue(invalid["unresolved"])
+
+    def test_equivalent_assignment_keeps_contributors_but_repeated_rhs_does_not_merge(self):
+        scanner, policy = self._owners()
+        rhs = "A1B2C3D4E5F6"
+        text = _join("Auth", "Token", " = '", rhs, "'; Auth", "Token", " = '", rhs, "'")
+        rows = scanner.analyze_review_candidates(text.encode("ascii"), b"sample.txt", subject_kind="tracked-blob", policy_module=policy)["candidates"]
+        token_rows = [row for row in rows if row["detector"]["ruleId"] == "value-token-v1"]
+        self.assertEqual(len(token_rows), 2)
+        self.assertTrue(all(len(row["candidate"]["contributors"]) == 2 for row in token_rows))
+        self.assertNotEqual(token_rows[0]["candidate"]["assignment"], token_rows[1]["candidate"]["assignment"])
+
+    def test_region_projects_one_complete_group_and_rejects_multiple_or_straddling(self):
+        scanner, policy = self._owners()
+        raw = _join("private", "_key private", "_key").encode("ascii")
+        rows = scanner.analyze_review_candidates(raw, b"sample.txt", subject_kind="tracked-blob", policy_module=policy)["candidates"]
+        detector = rows[0]["detector"]
+        region = scanner._byte_region(raw, 0, 11)
+        projected = scanner.project_review_candidate(raw, b"sample.txt", detector, region, policy_module=policy)
+        self.assertEqual(projected, {"status": "bound", "candidate": rows[0]["candidate"], "reason": "none"})
+        for start, end in ((0, len(raw)), (1, 11)):
+            with self.subTest(start=start, end=end):
+                result = scanner.project_review_candidate(
+                    raw, b"sample.txt", detector, scanner._byte_region(raw, start, end), policy_module=policy,
+                )
+                self.assertNotEqual(result["status"], "bound")
+
+    def test_qualified_wire_is_distinct_and_never_formats_zero_applications(self):
+        # Formatter evidence only: this constructed value grants no authority.
+        scanner, policy = self._owners()
+        used = (("D1", "a" * 64),)
+        evidence = scanner.ReviewedEvidence("b" * 64, used, 1, "c" * 64,
+                                           base64.b64encode(policy.C([list(row) for row in used])).decode("ascii"))
+        outcome = scanner.ScanOutcome("clean", "tracked", file_count=1, review=evidence)
+        stdout, stderr, status = scanner._format_outcome(outcome)
+        self.assertEqual((stderr, status), ("", 0))
+        self.assertTrue(stdout.startswith("publication-safety: qualified (staged, examined=1, policy-snapshot="))
+        self.assertTrue(stdout.endswith(", unresolved=0, evaluation=complete)"))
+        self.assertNotIn("publication-safety: clean", stdout)
+        empty = dataclasses.replace(outcome, review=dataclasses.replace(evidence, applied=0))
+        self.assertEqual(scanner._format_outcome(empty)[2], 2)
+
+    def test_absent_policy_does_not_request_repository_metadata(self):
+        scanner, policy = self._owners()
+        policy_read = policy.decode_policy_snapshot({
+            "schemaVersion": 1, "status": "absent", "origin": None,
+            "rawBase64": None, "rawSha256": None, "diagnostic": "absent",
+        })
+        with (
+            mock.patch.object(scanner, "_load_review_policy_module", return_value=policy),
+            mock.patch.object(policy, "resolve_trusted_origin", return_value=object()),
+            mock.patch.object(policy, "read_policy_snapshot", return_value=policy_read),
+            mock.patch.object(scanner, "_capture_review_repository", side_effect=AssertionError("metadata not needed")),
+        ):
+            evaluation, exchanges = scanner._prepare_review_evaluation(REPO_ROOT, time.monotonic() + 10)
+        self.assertIsNone(evaluation.repository)
+        self.assertEqual(exchanges, [])
+
+    def test_application_evidence_calls_single_digest_owner_with_all_ordered_rows(self):
+        # Pure evidence method fixture; no snapshot authority or policy is issued.
+        scanner, policy = self._owners()
+        evaluation = object.__new__(scanner.ReviewEvaluation)
+        evaluation.policy = policy
+        evaluation.read = SimpleNamespace(snapshot_id="b" * 64)
+        evaluation.unresolved = 0
+        evaluation._applications = []
+        self.assertIsNone(evaluation.evidence())
+        entries = []
+        for index in range(scanner._MAX_FINDINGS + 1):
+            subject = {"repositorySha256": "a" * 64, "mode": "range-blob-text",
+                       "commitOid": "1" * 40, "rawPathBase64": base64.b64encode(f"p{index:04d}".encode()).decode(),
+                       "blobOid": "2" * 40, "blobSha256": "c" * 64, "blobByteCount": 1, "gitMode": "100644"}
+            candidate = {"normalFormId": "nf-simple-match-v1", "startByte": 0, "endByteExclusive": 1,
+                         "sha256": "d" * 64, "assignment": None, "contributors": [], "occurrenceSha256": "e" * 64}
+            detector = {"ruleId": "fixture", "meaningSha256": "f" * 64}
+            row = {"subject": subject, "occurrenceSha256": candidate["occurrenceSha256"],
+                   "bindingSha256": "a" * 64, "decisionId": "D1", "recordSha256": "b" * 64,
+                   "occurrenceId": f"O{index}"}
+            entries.append((subject, candidate, detector, row))
+        evaluation._applications = list(reversed(entries))
+        expected_rows = [row for _subject, _candidate, _detector, row in entries]
+        expected_digest = policy.applied_set_digest(expected_rows)
+        original_owner = policy.applied_set_digest
+        acquired = []
+
+        def observe(rows):
+            self.assertNotIsInstance(rows, (list, tuple))
+            acquired.extend(rows)
+            return original_owner(acquired)
+
+        with mock.patch.object(policy, "applied_set_digest", side_effect=observe) as owner:
+            evidence = evaluation.evidence()
+        owner.assert_called_once()
+        self.assertEqual(acquired, expected_rows)
+        self.assertEqual(evidence.applied_set, expected_digest)
+        self.assertEqual(evidence.applied, scanner._MAX_FINDINGS + 1)
+        self.assertEqual(evidence.used_decisions, (("D1", "b" * 64),))
+        self.assertEqual(evidence.used_token, base64.b64encode(policy.C([["D1", "b" * 64]])).decode("ascii"))
+        evaluation.unresolved = 1
+        with self.assertRaisesRegex(RuntimeError, "unresolved"):
+            evaluation.evidence()
+
+    def test_partial_captured_injection_has_no_standalone_fallback(self):
+        scanner = _load_canonical_scanner("_reviewed_partial_injection")
+        with mock.patch.dict(scanner.__dict__, {"__injected_review_execution__": "gate-captured-v1"}):
+            with self.assertRaisesRegex(RuntimeError, "injection"):
+                scanner._load_review_policy_module()
+
+
 class TestThisTestFileIsGateSafe(unittest.TestCase):
     """MF6: assert this very test file contains no machine-local-path literal the
     scanner would flag, so staging it never self-trips the publication gate."""
@@ -4165,6 +5693,15 @@ class TestThisTestFileIsGateSafe(unittest.TestCase):
             if hits:
                 offenders.append((n, hits, line.strip()[:80]))
         self.assertEqual(offenders, [], f"flaggable literals in test source: {offenders}")
+
+        scanner = _load_canonical_scanner("scanner_source_self_gate")
+        relative_path = Path(__file__).relative_to(REPO_ROOT).as_posix()
+        text_findings = scanner._content_hits(src, relative_path, find_machine_paths)
+        binary_findings = scanner._binary_content_hits(
+            src.encode("utf-8"), relative_path, find_machine_paths
+        )
+        self.assertEqual(text_findings, [], f"content findings in test source: {text_findings}")
+        self.assertEqual(binary_findings, [], f"binary findings in test source: {binary_findings}")
 
 
 if __name__ == "__main__":

@@ -28,14 +28,14 @@ description: "Consultant: advise on tradeoffs without approving gates."
 - Act as an independent advisor, not as a pipeline owner.
 - Produce one concise second-opinion memo and stop there.
 - Stay advisory-only: do not route work, do not accept artifacts, and do not block progress.
-- **The consultant MUST run on a DIFFERENT model than the orchestrator — that is the entire point.** An
-  independent second opinion only adds signal when it comes from a different model: if the orchestrating
-  runtime is Claude, the external consultant must resolve to a non-Claude provider (e.g. Codex); if the
-  orchestrator is Codex, the consultant must resolve to non-Codex (e.g. Claude). A same-model consultant is
-  the orchestrator agreeing with itself and gives no second signal. Resolve the provider so the consultant
-  model differs from the orchestrator's; if only the orchestrator's own model is available, return an
-  unavailable memo stating "no independent (different-model) consultant available" rather than running a
-  same-model echo.
+- **The consultant MUST run on a DIFFERENT model than the orchestrator.** This role remains advisory.
+  In external mode it additionally requires a provider different from the orchestrating host provider;
+  generic explicit self-provider overrides do not apply to external Consultant. In internal mode, use
+  the existing actual-model exclusion and admitted ordinary options; the external provider restriction
+  does not redefine internal model selection. An explicitly selected same-host external provider is
+  excluded by the Consultant role's provider rule, not evidence that no different model exists.
+  Report exhausted admissible options or missing runtime/model evidence with the exact observed restriction
+  or unknown fact; claim provider/model unavailability only from current observation. Different-provider selection alone proves neither measured model independence nor commission diversity.
 
 ## Invocation by mode (the rule below is EXTERNAL-only)
 
@@ -100,13 +100,13 @@ reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper |
 externalPriorityProfiles: {...}  # structured profile map; default seed ships balanced and quality-first
 externalOpinionCounts: {...}  # structured lane-count map; default seed keeps documented lanes at 1
 externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-externalCodexProfile: {value}  # allowed: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-5.6-sol-xhigh
+externalCodexProfile: {value}  # allowed: default | gpt-6.1-sol-high | gpt-6.1-sol-xhigh | gpt-6.1-sol-max | gpt-6-sol-high | gpt-6-sol-xhigh | gpt-6-sol-max | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-6.1-sol-xhigh
 ```
 
 `consultantMode` continues to govern consultant behavior. `reserve` is a symbolic supplemental advisory/review profile candidate that may be reached after primary `claude`/`codex`; it is independent of primary `claude` and is not a retry, fallback, or transport swap for a failed Claude CLI run. `reserveResolver` binds that symbolic candidate to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`; `wrapper:<command>` must be a PATH-resolved command or repo-relative wrapper path. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default, and `externalCodexProfile: default` inherits `externalModelMode` when Codex is selected or auto-resolved. Shipped `auto` stays on the Codex/Claude pair. Kimi is explicit-only for policy-admitted read-only research/review, independently verified and nonauthorizing; Grok remains unavailable in 1.x. `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
 
-Read and normalize `.claude/.agents-mode.yaml` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
-If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
+Read the effective Claude overlay and normalize its effective values in memory through the existing per-key resolver before routing. Valid sparse, comment-free, or older-layout files are compatibility input for routing reads; do not rewrite them merely to read or trust their flags.
+If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override. Persist canonical formatting only within an authorized install/configuration write, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys and removing retired canonical keys.
 
 For the full `value | meaning` tables, see `docs/agents-mode-reference.md` in the source repository (maintainer reference; not installed at runtime).
 
@@ -162,6 +162,13 @@ Check the selected provider first:
 - Claude path: `claude`
 - Kimi path: approved `invoke-kimi-prompt` wrapper from `contracts/external-dispatch.md`; the wrapper owns all Kimi provider argv
 
+Before provider-specific transport, classify the advisory as `planning`, `review`, or `critical-design`, call the installed `describe_ordinary_native_role_options`, then call `resolve_ordinary_native_dispatch` with the nonempty approved scope and caller rationale. Disabled mode performs neither call. An omitted model and effort selects the policy-owned `frontier-high` candidate (`gpt-6.1-sol`, `high`); a complete explicit admissible pair wins; a partial pair fails; and `max` still requires explicit user approval. The default candidate is not a minimum effort and does not authorize forcing `xhigh`.
+
+- `internal` mode consumes the resolved generic skill-only invocation. Exclude the orchestrator's actual model from the usable options; if that leaves no different-model option, return the existing unavailable advisory.
+- External Codex passes `resolvedModel` and `resolvedEffort` to the existing wrapper as complete model/effort flags.
+- External Claude never receives the resolver's Codex model token. A complete explicit admissible `externalClaudeProfile` wins on the Codex line; otherwise the omitted `frontier`/`high` result maps to `sonnet-high`. If the resolved tier/effort has no existing Claude profile mapping, return unavailable with no fallback.
+- External Kimi bypasses this effort mapping exactly as before: fixed `kimi-code/k3`, no caller-composed provider flags, independent verification, and nonauthorization. Grok remains unavailable.
+
 If Codex is selected:
 
 Required pattern — use the prompt-orchestration wrapper `invoke-codex-prompt.sh` (Bash / Git Bash) or `invoke-codex-prompt.py` through Python (PowerShell), always with `--terminal-receipt <absolute-caller-owned-path>`. The wrapper enforces file-based prompt delivery so you do not have to construct the prompt/redirect chain by hand: it reserves the receipt, probes Codex availability, creates one randomized private run directory, runs `codex exec --json` non-interactively with the prompt on stdin, enforces its configured timeout and combined stream quota, validates the bounded provider result, tombstones and reclaims the exact run directory, safety-scans and commits the receipt, emits and flushes the identical V2 `ORCHESTRARIUM_PROVIDER_RESULT_V2=<json>` line once, then records the optional path-free terminal event. Consume the complete untrusted/potentially-sensitive response from `resultText`; for a tracked run, require the nonauthorizing tuple, verify process exit, and read the ledger back separately. Do not expect or retain prompt, stdout, stderr, or process paths; the caller owns receipt retention/deletion. Never embed the substantive prompt in argv.
@@ -173,7 +180,7 @@ echo "<full prompt body>" |
 # Or with prompt already in a file:
 bash .claude/agents/scripts/invoke-codex-prompt.sh advisory-design-adr --prompt-file path/to/prompt.md --terminal-receipt <absolute-caller-owned-receipt>
 # Override codex flags after `--`:
-bash .claude/agents/scripts/invoke-codex-prompt.sh worker-task --terminal-receipt <absolute-caller-owned-receipt> -- -c model_reasoning_effort=xhigh --model gpt-5.6-sol
+bash .claude/agents/scripts/invoke-codex-prompt.sh worker-task --terminal-receipt <absolute-caller-owned-receipt> -- -c model_reasoning_effort=xhigh --model gpt-6.1-sol
 ```
 
 ```powershell
@@ -184,7 +191,7 @@ Get-Content -Raw .\prompt.md |
 
 The wrapper has no SECRET.md, no env injection, and no auth-mode switching — codex authenticates through its own ambient path (`~/.codex/auth.json` from `codex login`, or the `OPENAI_API_KEY` env). The wrapper exists purely to encapsulate the file-based prompt orchestration rule so each consultant invocation does not have to re-implement it by hand (which is the recurring lazy-discipline failure mode this design defends against).
 
-- **Consultant calls run at high effort by default**, regardless of `externalModelMode` or `externalCodexProfile`: Codex uses model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` (`-c model_reasoning_effort=xhigh`); the Claude path uses `--model opus --effort xhigh`. **`xhigh` is the default for BOTH providers. For especially heavy / complex tasks that genuinely need more depth, the orchestrator may escalate the consultant to the provider's deepest tier (Claude `--effort max`).** Do not DOWNSHIFT a consultant lane below `xhigh` (runtime-default, `gpt-5.6-terra`, or a lower `--effort`). The shipped `invoke-codex-prompt.sh` wrapper already includes the xhigh override in its default flags, so a default wrapper invocation honors this rule automatically; do not strip the override on re-dispatch after a failure, and do not silently downshift to runtime-default or `gpt-5.6-terra` between attempts.
+- Consultant calls always pass the ordinary selector's complete resolved pair to the wrapper. The wrapper command remains the same one-command surface; Consultant callers do not rely on its generic no-flags default.
 - Build the full prompt handoff for the approved wrapper; its private prompt, stdout, stderr, and process paths are not caller surfaces.
 - Set the prompt wrapper's timeout according to the shared external-dispatch contract (`contracts/external-dispatch.md`) and treat `timedOut=true` with exit `124` as terminal. Do not launch a duplicate advisory call for the same memo; independent external lanes may still run in parallel when their scopes are disjoint and the routing contract allows it.
 - If Codex is not installed, fails, times out, or hits quota/auth limits, do not silently degrade the consultant requirement. Return an unavailable memo and keep routing honest. Drafting an advisory response without an approved wrapper result is a discipline violation regardless of confidence.
@@ -199,7 +206,7 @@ If the advisory profile resolves to primary Claude, run the approved `invoke-cla
 
 If Kimi is selected explicitly, keep it read-only and nonauthorizing.
 
-- Use only the approved Kimi transport from the shared external-dispatch contract with fixed `kimi-code/k3`, file-based prompt delivery, no tools or subagents, and independent verification.
+- Use only the approved Kimi transport from the shared external-dispatch contract with fixed `kimi-code/k3`, file-based prompt delivery, and independent verification. Omission of the capability file keeps tools/servers/subagents empty with permission `reject`; a validated file for this read-only advisory role may select only admitted read tools or Model Context Protocol servers.
 - If Kimi is unavailable or fails, return an unavailable memo; do not silently downgrade to Codex or Claude.
 - Grok remains unavailable in 1.x and must not be selected, launched, or probed.
 - Route every substantive task through the approved provider prompt wrapper named by the shared external-dispatch contract, which owns file/stdin prompt delivery and the governance capsule; raw provider CLI prompt routes are unsupported. Inline argv is only for a fixed synthetic non-substantive smoke token, never a provider limitation or real task.

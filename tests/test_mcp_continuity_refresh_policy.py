@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -21,6 +23,13 @@ REFERENCE_CONTRACTS = {
         "confirm freshness again, then repeat the",
         "stateless or live MCP does not need a refresh",
         "stale output is not presented as current",
+        "reported project/index identity matches the selected root",
+        "known omitted coverage is reported",
+        "own supported entrypoint, help, and version",
+        "not a per-call version check",
+        "qualified symbol plus declaring type/file",
+        "direct calls, callback/indirect reachability, and fuzzy suggestions",
+        "Ambiguous/unmatched rows require source verification",
         "explicitly non-normative workflow example",
         "CodeGraph uses",
         "this name never selects a tool",
@@ -32,6 +41,13 @@ REFERENCE_CONTRACTS = {
         "снова подтвердить свежесть и только затем повторить",
         "MCP без сохраняемого состояния или live MCP не требует refresh",
         "устаревший вывод не представляется как актуальный",
+        "сообщаемая инструментом идентичность проекта/индекса совпадает с выбранным корнем",
+        "сообщается об известном пропущенном покрытии",
+        "собственные поддерживаемые entrypoint, help и version",
+        "не является проверкой version при каждом вызове",
+        "квалифицированный символ и, где применимо, объявляющий тип/файл",
+        "прямые вызовы, callback/косвенную достижимость и нечёткие предложения",
+        "Неоднозначные/несопоставленные строки требуют проверки исходника",
         "ненормативный пример workflow",
         "для CodeGraph это",
         "это имя никогда не выбирает инструмент",
@@ -43,11 +59,23 @@ def load_policy(path: Path, index: int):
     spec = importlib.util.spec_from_file_location(f"mcp_continuity_policy_{index}", path)
     assert spec is not None and spec.loader is not None
     policy = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(policy)
+    with patch.object(sys, "path", [str(path.parent), *sys.path]):
+        spec.loader.exec_module(policy)
     return policy
 
 
 class StatefulMcpRefreshPolicyTests(unittest.TestCase):
+    def test_navigation_uses_strict_shared_command_acquisition(self) -> None:
+        for index, path in enumerate(POLICY_PATHS):
+            policy = load_policy(path, index)
+            command = "rg -n symbol src"
+            for payload in ({"cmd": command}, {"command": command}):
+                self.assertTrue(policy.classify_tool_choice("functions.exec_command", payload, str(ROOT)))
+            for payload in ({"cmd": "", "command": command}, {"cmd": command, "command": command}):
+                self.assertFalse(policy.classify_tool_choice("exec_command", payload, str(ROOT)))
+            self.assertFalse(policy.classify_tool_choice("tools..exec_command", {"cmd": command}, str(ROOT)))
+            self.assertTrue(policy.classify_tool_choice("Grep", {"pattern": "symbol", "type": "py"}, str(ROOT)))
+
     def test_english_and_russian_references_carry_the_same_freshness_contract(self) -> None:
         for path, markers in REFERENCE_CONTRACTS.items():
             with self.subTest(reference=path.relative_to(ROOT).as_posix()):
@@ -59,30 +87,53 @@ class StatefulMcpRefreshPolicyTests(unittest.TestCase):
         )
         self.assertNotIn("статический или live MCP", russian_reference)
 
-    def test_codegraph_stale_sync_fresh_repeat_query_fixture(self) -> None:
-        """An indexed server must prove freshness before reusing a query result."""
-        required_order = (
-            "Non-normative workflow examples only",
-            "CodeGraph follows `status -> sync -> fresh status -> repeat query`",
-            "These names never select a tool",
-            "If refresh fails, report it explicitly",
-            "do not present stale output as current",
+    def test_stateful_or_indexed_mcp_fixture_requires_freshness_before_repeat(self) -> None:
+        """Stateful or indexed evidence must refresh before its query is reused."""
+        required_session_context = (
+            "Before using stateful or indexed repository evidence",
+            "check status/freshness; when stale or pending, sync/update/reindex, confirm fresh, and repeat the intended query.",
+            "Never present stale evidence.",
+            "reported project/index identity matches the selected root",
+            "Report known omitted coverage.",
+            "When instructions conflict with an installed tool, inspect its own supported entrypoint/help/version; do not invent or reimplement its pipeline.",
+            "This is not a per-call version check.",
+            "match the qualified symbol plus declaring type/file",
+            "distinguish direct calls, callback/indirect reachability, and fuzzy suggestions",
+            "Ambiguous/unmatched rows require source verification; do not declare them exact.",
+            "Use another path only if refresh fails, the tool is unavailable, the user forbids it, or an explicit resource bound is exceeded; state why.",
+            "Stateless or live tools need no refresh.",
         )
-        for index, path in enumerate(POLICY_PATHS):
-            with self.subTest(policy=path.relative_to(ROOT).as_posix()):
-                context = load_policy(path, index).SESSION_START_CONTEXT
-                cursor = -1
-                for token in required_order:
-                    cursor = context.find(token, cursor + 1)
-                    self.assertNotEqual(cursor, -1, token)
+        policy = load_policy(POLICY_PATHS[0], 0)
+        for marker in required_session_context:
+            self.assertIn(marker, policy.SESSION_START_CONTEXT)
+        for marker in (
+            "discover fitting runtime MCP/tools",
+            "status/freshness",
+            "sync/update/reindex",
+            "reported project/index identity",
+            "match the qualified symbol plus declaring type/file",
+            "Use fallback only if refresh fails",
+        ):
+            self.assertNotIn(marker, policy.TURN_ANCHOR_CONTEXT)
+        for marker in (
+            "keep the admitted primary outcome and next authorized action explicit",
+            "continue useful independent ready work",
+            "keep mandatory gates",
+            "settle every owned process/resource",
+            "preserve pre-existing user state",
+        ):
+            self.assertIn(marker, policy.TURN_ANCHOR_CONTEXT)
 
-    def test_stateless_or_live_mcp_fixture_does_not_require_refresh(self) -> None:
-        for index, path in enumerate(POLICY_PATHS):
+    def test_policy_projections_match_canonical_freshness_contexts(self) -> None:
+        policy = load_policy(POLICY_PATHS[0], 0)
+        canonical_contexts = (policy.SESSION_START_CONTEXT, policy.TURN_ANCHOR_CONTEXT)
+        for index, path in enumerate(POLICY_PATHS[1:], start=1):
             with self.subTest(policy=path.relative_to(ROOT).as_posix()):
                 policy = load_policy(path, index)
-                self.assertIn("Stateless or live MCPs need no refresh.", policy.SESSION_START_CONTEXT)
-                self.assertIn("stateless/live MCPs are exempt.", policy.TURN_ANCHOR_CONTEXT)
-                self.assertIn("fresh recheck, then repeat the query", policy.TURN_ANCHOR_CONTEXT)
+                self.assertEqual(
+                    (policy.SESSION_START_CONTEXT, policy.TURN_ANCHOR_CONTEXT),
+                    canonical_contexts,
+                )
 
 
 if __name__ == "__main__":

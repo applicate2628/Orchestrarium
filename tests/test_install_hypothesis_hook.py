@@ -52,8 +52,6 @@ def run_installer(
     script_path: str = str(PY_SCRIPT_PATH),
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
-    if host_os == "windows" and os.name != "nt":
-        raise unittest.SkipTest("Windows installer integration requires a native Python .exe")
     cmd = [
         sys.executable,
         str(HOOK_INSTALLER),
@@ -80,38 +78,71 @@ def load_json(path: Path) -> dict:
 
 class TestInstallHypothesisHook(unittest.TestCase):
 
+    def test_owned_handler_update_preserves_mixed_groups_and_codex_slots(self) -> None:
+        for matcher in ("Bash", "ChangedTool"):
+            with self.subTest(matcher=matcher):
+                owned = {"type": "command", "command": "python /hooks/check-bugfix-discipline.py",
+                         "statusMessage": "Old status", "timeout": 9}
+                foreign = {"command": "foreign-tool --label check-bugfix-discipline.py",
+                           "description": "check-bugfix-discipline", "custom": True}
+                later = {"matcher": "Later", "hooks": [{"command": "later-tool"}]}
+                data = {"hooks": {"PreToolUse": [
+                    {"matcher": "Bash", "groupMetadata": "keep", "hooks": [foreign, owned]},
+                    {"matcher": "Bash", "hooks": [dict(owned)]}, later,
+                ]}}
+                new = {"matcher": matcher, "hooks": [{"type": "command",
+                       "command": "python /hooks/check-bugfix-discipline.py", "statusMessage": "New status"}]}
+                self.assertTrue(HOOK_MODULE.install(data, new, "PreToolUse", "check-bugfix-discipline", platform="codex"))
+                groups = data["hooks"]["PreToolUse"]
+                self.assertEqual(groups[0]["groupMetadata"], "keep")
+                self.assertEqual(groups[0]["matcher"], "Bash")
+                self.assertEqual(groups[0]["hooks"][0], foreign)
+                self.assertEqual(groups[1], {"matcher": "Bash", "hooks": []})
+                self.assertEqual(groups[2], later)
+                current = groups[0]["hooks"][1] if matcher == "Bash" else groups[3]["hooks"][0]
+                self.assertEqual(current["timeout"], 9)
+                self.assertEqual(current["statusMessage"], "New status")
+                before = json.dumps(data, sort_keys=True)
+                self.assertFalse(HOOK_MODULE.install(data, new, "PreToolUse", "check-bugfix-discipline", platform="codex"))
+                self.assertEqual(json.dumps(data, sort_keys=True), before)
+
+    def test_malformed_owned_input_does_not_mutate_registration(self) -> None:
+        data = {"hooks": {"Stop": [{"hooks": [{"command": "python", "args": "/hooks/check-bugfix-discipline.py"}]}]}}
+        before = json.dumps(data)
+        with self.assertRaisesRegex(ValueError, "owned hook could not be parsed"):
+            HOOK_MODULE.install(data, {"hooks": [{"command": "python", "args": ["/hooks/check-bugfix-discipline.py"]}]},
+                                "Stop", "check-bugfix-discipline", platform="claude")
+        self.assertEqual(json.dumps(data), before)
+
+    def test_health_deployment_is_self_contained_and_writer_requires_its_owner(self) -> None:
+        health_path = self.tmpdir / "check-hook-health.py"
+        shutil.copyfile(REPO_ROOT / "scripts/check-hook-health.py", health_path)
+        health_spec = importlib.util.spec_from_file_location("isolated_health_owner", health_path)
+        health = importlib.util.module_from_spec(health_spec)
+        sys.modules[health_spec.name] = health
+        health_spec.loader.exec_module(health)
+        self.assertEqual(health.classify_hook_invocation(
+            {"command": "python /hooks/check-bugfix-discipline.py"}, {"check-bugfix-discipline"}, "codex", "posix"
+        ).kind, "current-owned")
+        isolated = self.tmpdir / "source-without-owner"
+        isolated.mkdir()
+        writer = isolated / HOOK_INSTALLER.name
+        shutil.copyfile(HOOK_INSTALLER, writer)
+        self.target.write_text('{"userMetadata":true}\n', encoding="utf-8")
+        before = self.target.read_bytes()
+        result = subprocess.run([sys.executable, "-B", str(writer), "--target", str(self.target),
+                                 "--platform", "claude", "--script-path", str(PY_SCRIPT_PATH)],
+                                capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("hook invocation owner could not be loaded", result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
+
     def setUp(self) -> None:
         self.tmpdir = Path(tempfile.mkdtemp(prefix="orch-hook-test-"))
         self.target = self.tmpdir / "settings.json"
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-
-    def _interpreter_alias(self) -> tuple[Path, Path]:
-        canonical = self.tmpdir / "python-real.exe"
-        canonical.write_bytes(b"synthetic serialization target; never executed")
-        alias = self.tmpdir / "python3.exe"
-        try:
-            alias.symlink_to(canonical)
-        except (OSError, NotImplementedError) as exc:
-            self.skipTest(f"symlink creation is required: {exc}")
-        return alias, canonical
-
-    def test_default_running_interpreter_alias_is_canonicalized(self) -> None:
-        from unittest.mock import patch
-        alias, canonical = self._interpreter_alias()
-        with patch.object(HOOK_MODULE.sys, "executable", str(alias)):
-            target = HOOK_MODULE.resolve_hook_target(
-                SCRIPT_PATH, "windows", "claude"
-            )
-        self.assertEqual(Path(target.executable), canonical.resolve())
-
-    def test_explicit_interpreter_reparse_target_still_refuses(self) -> None:
-        alias, _canonical = self._interpreter_alias()
-        with self.assertRaisesRegex(ValueError, "reparse target"):
-            HOOK_MODULE.resolve_hook_target(
-                SCRIPT_PATH, "windows", "claude", python_executable=str(alias)
-            )
 
     def test_install_into_empty_posix_claude_exec_form(self) -> None:
         result = run_installer(self.target)
@@ -294,6 +325,152 @@ class TestInstallHypothesisHook(unittest.TestCase):
                 self.assertEqual(len(entries), 1)
                 self.assertEqual(entries[0]["matcher"], "Bash")
 
+    def test_retired_codex_audit_removes_only_exact_handler(self) -> None:
+        script = self.tmpdir / "hooks" / "check-mcp-momentum.py"
+        command = (
+            f"{PureWindowsPath(sys.executable).as_posix()} "
+            f"{PureWindowsPath(script).as_posix()}"
+        )
+        matcher = "Grep|Bash|PowerShell|shell_command|exec_command"
+        owned = {"type": "command", "command": command, "statusMessage": "Check MCP tool use"}
+        sibling = {"type": "command", "command": "echo custom-sibling", "timeout": 7}
+        near_match = {"type": "command", "command": command + " --custom"}
+        changed_matcher = {"matcher": "CustomTool", "hooks": [owned]}
+        changed_event = {"hooks": [owned]}
+        original = {
+            "metadata": {"keep": True},
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": matcher, "groupMetadata": "keep", "hooks": [owned, sibling, near_match]},
+                    changed_matcher,
+                ],
+                "Stop": [changed_event],
+            },
+        }
+        self.target.write_text(json.dumps(original), encoding="utf-8")
+        expected = {
+            **original,
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": matcher, "groupMetadata": "keep", "hooks": [sibling, near_match]},
+                    changed_matcher,
+                ],
+                "Stop": [changed_event],
+            },
+        }
+        options = (
+            "--remove", "--script-marker", "check-mcp-momentum", "--tool-matcher", matcher,
+        )
+        first = run_installer(
+            self.target, *options, platform="codex", host_os="windows", script_path=str(script),
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(load_json(self.target), expected)
+        before_second = self.target.read_bytes()
+        second = run_installer(
+            self.target, *options, platform="codex", host_os="windows", script_path=str(script),
+        )
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.target.read_bytes(), before_second)
+        self.assertIn("preserv", second.stdout.lower())
+
+    def test_retired_codex_audit_requires_complete_removal_identity(self) -> None:
+        original = {
+            "metadata": "keep",
+            "hooks": {"PreToolUse": [{
+                "matcher": "Grep|Bash|PowerShell|shell_command|exec_command",
+                "hooks": [{"type": "command", "command": "echo check-mcp-momentum.py"}],
+            }]},
+        }
+        self.target.write_text(json.dumps(original), encoding="utf-8")
+        before = self.target.read_bytes()
+        result = run_installer(
+            self.target, "--remove", "--script-marker", "check-mcp-momentum",
+            "--tool-matcher", "Grep|Bash|PowerShell|shell_command|exec_command",
+            platform="codex", host_os="windows", script_path="",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertIn("preserv", result.stdout.lower())
+
+    def test_retired_codex_audit_absent_identity_is_noop(self) -> None:
+        self.target.write_text('{"metadata":"keep"}\n', encoding="utf-8")
+        before = self.target.read_bytes()
+        result = run_installer(
+            self.target, "--remove", "--script-marker", "check-mcp-momentum",
+            "--tool-matcher", "Grep|Bash|PowerShell|shell_command|exec_command",
+            platform="codex", host_os="windows",
+            script_path=str(self.tmpdir / "absent" / "check-mcp-momentum.py"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
+
+    def test_exact_handler_mode_is_independent_of_script_marker(self) -> None:
+        script = self.tmpdir / "arbitrary-owner.py"
+        command = f"{PureWindowsPath(sys.executable).as_posix()} {PureWindowsPath(script).as_posix()}"
+        sibling = {"type": "command", "command": "echo user-sibling"}
+        foreign_group = {"matcher": "ForeignTool", "hooks": [{"type": "command", "command": "echo foreign"}]}
+        self.target.write_text(json.dumps({
+            "hooks": {"PreToolUse": [
+                {"matcher": "SyntheticTool", "hooks": [{"type": "command", "command": command}]},
+                {
+                    "matcher": "SyntheticTool", "metadata": "keep",
+                    "hooks": [{"type": "command", "command": command}, sibling],
+                },
+                foreign_group,
+            ]},
+        }), encoding="utf-8")
+        result = run_installer(
+            self.target, "--remove", "--script-marker", "arbitrary-owner",
+            "--tool-matcher", "SyntheticTool",
+            platform="codex", host_os="windows", script_path=str(script),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.target.exists(), "exact removal must preserve the custom sibling group")
+        self.assertEqual(load_json(self.target), {
+            "hooks": {"PreToolUse": [
+                {"matcher": "SyntheticTool", "hooks": []},
+                {"matcher": "SyntheticTool", "metadata": "keep", "hooks": [sibling]},
+                foreign_group,
+            ]},
+        })
+        before_second = self.target.read_bytes()
+        second = run_installer(
+            self.target, "--remove", "--script-marker", "arbitrary-owner",
+            "--tool-matcher", "SyntheticTool",
+            platform="codex", host_os="windows", script_path=str(script),
+        )
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.target.read_bytes(), before_second)
+
+    def test_exact_retirement_transaction_restores_registration_bytes(self) -> None:
+        spec = importlib.util.spec_from_file_location("retirement_transaction", REPO_ROOT / "scripts/production_installer.py")
+        assert spec and spec.loader
+        installer = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = installer
+        spec.loader.exec_module(installer)
+        script = self.tmpdir / "hooks" / "check-mcp-momentum.py"
+        command = f"{PureWindowsPath(sys.executable).as_posix()} {PureWindowsPath(script).as_posix()}"
+        matcher = "Grep|Bash|PowerShell|shell_command|exec_command"
+        sibling = {"type": "command", "command": "echo custom-sibling"}
+        self.target.write_text(json.dumps({
+            "metadata": "keep",
+            "hooks": {"PreToolUse": [{
+                "matcher": matcher, "hooks": [{"type": "command", "command": command}, sibling],
+            }]},
+        }) + "\n", encoding="utf-8")
+        before = self.target.read_bytes()
+        with self.assertRaisesRegex(RuntimeError, "injected verification failure"):
+            with installer._InstallTransaction([self.target], enabled=True):
+                result = run_installer(
+                    self.target, "--remove", "--script-marker", "check-mcp-momentum",
+                    "--tool-matcher", matcher, platform="codex", host_os="windows", script_path=str(script),
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(load_json(self.target)["hooks"]["PreToolUse"][0]["hooks"], [sibling])
+                raise RuntimeError("injected verification failure")
+        self.assertEqual(self.target.read_bytes(), before)
+
     def test_codex_windows_remove_works(self) -> None:
         # Removal must work the same way on Codex+Windows as on POSIX.
         existing_cmd = f"bash {SCRIPT_PATH}"
@@ -306,7 +483,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         }, indent=2), encoding="utf-8")
         result = run_installer(self.target, "--remove", platform="codex", host_os="windows")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(self.target.exists())
+        self.assertEqual(load_json(self.target), {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}})
 
     def test_idempotent_reinstall(self) -> None:
         run_installer(self.target)
@@ -619,7 +796,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         for platform in ("claude", "codex"):
             python_targets = [PY_SCRIPT_PATH]
             self.assertTrue(python_targets)
-            for host_os in (("posix", "windows") if os.name == "nt" else ("posix",)):
+            for host_os in ("posix", "windows"):
                 for python_target in python_targets:
                     with self.subTest(
                         platform=platform,
@@ -658,7 +835,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
             owned = [PY_SCRIPT_PATH]
             self.assertTrue(owned)
             missing = self.tmpdir / platform / "missing-last-owned-hook.py"
-            for host_os in (("posix", "windows") if os.name == "nt" else ("posix",)):
+            for host_os in ("posix", "windows"):
                 with self.subTest(platform=platform, host_os=host_os):
                     candidates = [*owned, missing]
                     with self.assertRaisesRegex(ValueError, "hook Python target"):
@@ -676,7 +853,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
     def test_registered_script_arg_is_absolute(self) -> None:
         target = HOOK_MODULE.resolve_hook_target(
             str(PY_SCRIPT_PATH),
-            "windows" if os.name == "nt" else "posix",
+            "windows",
             "claude",
             python_executable=sys.executable,
         )
@@ -705,7 +882,6 @@ class TestInstallHypothesisHook(unittest.TestCase):
                 python_executable=str(self.tmpdir / "missing-python.exe"),
             )
 
-    @unittest.skipUnless(os.name == "nt", "native Windows unquoted command admission")
     def test_windows_unquoted_shape_and_unsupported_path_rejection(self) -> None:
         target = HOOK_MODULE.resolve_hook_target(
             str(PY_SCRIPT_PATH),
@@ -777,7 +953,8 @@ class TestInstallHypothesisHook(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         entries = load_json(self.target)["hooks"]["PreToolUse"]
-        self.assertEqual(len(entries), 1)
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[1], {"matcher": "Edit|Write|NotebookEdit|apply_patch", "hooks": []})
         command = entries[0]["hooks"][0]["command"].lower()
         self.assertNotIn("powershell", command)
         self.assertIn(".py", command)

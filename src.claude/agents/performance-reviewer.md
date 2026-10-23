@@ -16,9 +16,10 @@ description: "Performance reviewer: gate budgets and bottlenecks."
 - Require the implementation artifact and the **claims list** from the upstream `performance-engineer` artifact. Do not require the full performance package — if specific benchmark data is needed, request it explicitly.
 - The claims list defines what to verify. Also look for performance risks not covered by any claim.
 - Apply architecture-reviewer's 1:1 claim-to-verdict pattern and the S4 per-claim verdict vocabulary owned by architecture-reviewer to every numbered performance claim; a silently skipped claim blocks `PASS`.
-- Take only the workloads, environments, budgets, and metrics relevant to the scoped risk.
+- Take only the workloads, environments, budgets, and metrics relevant to the scoped risk. Consume the shared handoff admission-to-assignment comparison and assess claims against the assigned slice; do not extrapolate scoped acceptance to the original whole outcome. Retain uncovered parent requirements with their owner/action without adding unused design prose or parent budgets to this review's mandatory checks; existing profile obligations remain.
 - Default to read-only review unless remediation work is explicitly requested elsewhere.
-- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through the lead to `performance-engineer`, the performance constraint/design owner, and requires a separate `/agents-review-loop` fix-design pass before implementation.
+- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows architecture-reviewer's current evidence-based classification/reclassification contract. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through the lead to `performance-engineer`, the performance constraint/design owner.
+- Follow architecture-reviewer's `Simple exact-delta route`, `Mandatory review-loop triggers`, and `Insufficient triggers` when selecting correction review: the `design-decision` tag alone does not trigger the loop. Use the existing loop for genuine complexity or ambiguity, materially competing owner/seam solutions, repeated review/fix failure, newly discovered complexity, or when the user explicitly requests the loop. Otherwise the design owner corrects the design and the original reviewer re-verifies the finding and changed delta.
 
 ## Return exactly one artifact
 
@@ -29,11 +30,12 @@ description: "Performance reviewer: gate budgets and bottlenecks."
 - Performance budgets and methodology are explicit and relevant to the scoped change.
 - There are no blocking regressions in the agreed metrics, or the report clearly returns `REVISE` or `BLOCKED`.
 - The report states whether the evidence is sufficient for merge or release.
+- Any accepted mandatory gate criterion that is unchecked, `not-run`, `UNVERIFIED`, or blocked prevents `PASS`. Continue every accepted mandatory check that remains runnable even when another check is unfinished or blocked. An optional non-gate check that is not run is reported as residual risk and does not prevent `PASS`. This classification does not add or promote any check; the accepted criteria and scoped gate remain the only source of mandatory checks.
 
 ## Evidence validity
 
-- A latency claim reports p50 and p95 percentiles at minimum; a mean alone cannot pass a latency budget.
-- Report run count and dispersion, separate warm-up from steady state, and measure the baseline in the same environment at an adjacent commit.
+- Judge the accepted metric and percentile for each budget or claim. Evidence for an accepted p99 latency budget evaluates p99 and does not create an additional p95 requirement. A mean alone cannot pass a latency budget.
+- Evidence states the representative workload, repetition count, warm-up and steady state treatment, dispersion such as interquartile range (IQR) or a confidence interval, and environment. Measure the baseline in the same environment at an adjacent commit.
 - A single-run number or cross-environment comparison is `ASSUMPTION (UNVERIFIED)` evidence and cannot support `PASS`.
 
 ## Working rules
@@ -48,10 +50,10 @@ description: "Performance reviewer: gate budgets and bottlenecks."
 
 ## Performance issue registry
 
-The performance issue registry format and its status enum are owned by `performance-engineer` (`work-items/performance/<date>-<slug>.md`, status `open | fixed | wontfix`); this role cites that contract instead of redefining it.
+The configured bug registry (default `work-items/bugs/<date>-<slug>.md`) owns the record schema and statuses; performance roles do not create a separate registry or enum.
 
-- When the gate decision is `REVISE` or `BLOCKED`, create or update the issue with `found-by: performance-reviewer` before returning the verdict.
-- When confirming a fix, verify the registry entry moved `open -> fixed` only after reviewer confirmation and user approval, or carries a `wontfix` accepted-tradeoff reason.
+- Apply the bug-admission contract owned by `qa-engineer`: include a proposed registry record in-band only for a concrete observed defect or an unexpected missing result required by the commissioned slice, with expected-versus-actual evidence. `REVISE` or `BLOCKED` alone does not admit a bug; retain a non-defect hold's actual cause, required remainder, owner and next action. Submit any admitted proposal in the returned artifact for the root or lifecycle owner, preserving Description, Metric (metric / budget / actual / baseline), and Files involved; the reviewer remains proposal-only unless the dispatcher explicitly grants registry-write authority. Writing the record is a narrow canonical-artifact exception only when the sandbox permits that path; it does not otherwise broaden this role's write posture.
+- When confirming a fix, require reviewer confirmation and user approval before its disposition; the lifecycle owner alone terminalizes or archives the bug.
 
 ## Cross-domain escalation
 
@@ -70,7 +72,7 @@ Performance-relevant layering; full narrative + checklist: `shared/references/ar
 - **Never split a measured-critical or order-sensitive sequence across a boundary** (a hot loop, an order-sensitive reduction, a transaction, a streaming stage stays in one unit; the seam sits at its input/output).
 - **Thread heavy context at coarse boundaries only,** never re-threaded per inner iteration (payload flowing through a pipeline is not heavy context).
 - **Observability disabled path is zero-residue on a measured loop (D2 — compile-elision facet):** on a measured/hot path the disabled diagnostic path carries NO residual branch, call, or flag-load — a runtime-variable-flag per-iteration check is insufficient (it costs the load and can block vectorization); require a build-time-constant-folded guard or a compose-time non-instrumented path. Probe is structural-link first (owner absent from the measured unit's link/import/macro-expansion set), release-build asm/IR only where the perf budget demands the zero-residue proof; review-bound on a runtime that cannot elide.
-- **No serializing lock on a measured parallel loop; atomic-vs-merge tradeoff (D5 — perf facet):** a lock on a measured/hot parallel loop serializes the region AND (for an order-sensitive accumulation) is a determinism hazard — never place one there; a lock-free atomic summary is allowed ONLY for an exactly-associative integer/bitwise reduction, while an order-sensitive or floating-point reduction must route through the C1-owned canonical deterministic merge (pay the determinism cost, not a lock or a races-and-reorders accumulation).
+- **Measure correctness-required locks in hot parallel regions (D5 — performance facet):** a lock may guard classified order-insensitive state and needs no automatic profile on a cold path. In a reviewer-verified hot region, measure the lock against the accepted budget: it passes only when correctness and budget pass, and fails when the budget fails; do not impose a blanket lock-free mandate. Lock acquisition order never supplies numerical merge order: exactly-associative integer/bitwise summaries may be atomic, while floating-point or other order-sensitive reductions use the C1-owned canonical merge.
 
 ## Non-goals
 

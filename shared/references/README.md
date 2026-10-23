@@ -31,6 +31,8 @@ Shared-core documents may still keep provider-local addenda when the shared blue
 
 `mcp-continuity.md` defines the shared three-event Model Context Protocol continuity policy. Its Codex and Claude Code addenda own only provider event-envelope, matcher, delivery, and installed-path details.
 
+[`github-pr-review-bot-protocol.md`](github-pr-review-bot-protocol.md) owns the shared methodology for REST issue-comment ordering, connector author identity, overlapping-run attribution, semantic clean evidence, exact terminal signatures, and retry lineage. The two provider skill copies remain self-contained installed bindings and must stay byte-identical.
+
 Russian translations live under `shared/references/ru/` for shared documents that are mirrored for Russian-language operators.
 
 Architecture-pattern selection uses one applicability-first semantic owner and one operator translation:

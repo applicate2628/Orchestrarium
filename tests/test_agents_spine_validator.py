@@ -1,18 +1,17 @@
 """Wire scripts/validate-agents-spine.py into the standard test gate.
 
 The spine validator guards `shared/AGENTS.shared.md` (the always-loaded governance
-file merged into every installed AGENTS.md) against exceeding the Claude 40k-char
-context-budget cap or dropping any manifest "protection tokens" that the
+file merged into every installed AGENTS.md) against dropping manifest "protection tokens" that the
 spine cut promised to keep. It shipped as a manual CLI with NO caller anywhere in
 the repo (full-repo-review finding: the "fails-closed / enforces" claim was only
 true if a human remembered to run it). This test makes it run on every
 `pytest tests/`, so a future governance edit that drops a protection token, breaks
-a reference pointer, orphans a discipline card, or blows the size cap fails the
+a reference pointer or orphans a discipline card fails the
 suite — turning the manual CLI into an actually-enforced gate.
 
 Scope note (honest): the manifest is a token-presence / deletion detector plus a
-size and pointer/parity check. It proves the pinned vocabulary still appears and
-the spine still fits; it does NOT prove each rule still BINDS (a MUST reworded to
+pointer/parity check, with informational size unless a local budget is explicitly
+selected. It proves the pinned vocabulary still appears; it does NOT prove each rule still BINDS (a MUST reworded to
 "optional" while keeping the pinned token would still pass). See RELEASE_NOTES for
 the precise guarantee wording.
 """
@@ -41,11 +40,13 @@ def test_validator_script_exists() -> None:
 def test_spine_validator_passes_on_current_spine() -> None:
     # The actual gate: runs the real validator against the real spine on every
     # test run. Fails the suite if any protection token leaves the
-    # spine, a reference pointer dies, a discipline card is orphaned, or the
-    # size cap is exceeded.
+    # spine, a reference pointer dies, or a discipline card is orphaned.
     p = _run()
     assert p.returncode == 0, f"spine validator FAILED:\n{p.stdout}\n{p.stderr}"
     assert "RESULT: PASS" in p.stdout, p.stdout
+    assert "INFO: spine size" in p.stdout, p.stdout
+    assert "no local size budget selected" in p.stdout, p.stdout
+    assert "PASS: spine size" not in p.stdout, p.stdout
 
 
 def test_spine_validator_fails_on_tiny_size_cap() -> None:

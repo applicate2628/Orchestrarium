@@ -14,6 +14,7 @@ import dataclasses
 import errno
 import hashlib
 import hmac
+import importlib.util
 import json
 import math
 import os
@@ -26,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
@@ -39,11 +41,12 @@ CAPABILITY_MAGIC = b"OPCAPV1\0"
 MAX_ARGV_COUNT = 1024
 MAX_ARG_BYTES = 32 * 1024
 MAX_ARGV_BYTES = 128 * 1024
-MAX_ENVIRONMENT_COUNT = 128
 MAX_ENVIRONMENT_NAME_BYTES = 128
 MAX_ENVIRONMENT_VALUE_BYTES = 64 * 1024
 MAX_ENVIRONMENT_BYTES = 128 * 1024
 MAX_STDIN_BYTES = 16 * 1024 * 1024
+# Concurrent complete-line backlog, distinct from provider receipt/event limits.
+MAX_DIALOGUE_PENDING_LINES = 4096
 MAX_JSON_HEADER_BYTES = 512 * 1024
 MAX_REQUEST_BUNDLE_BYTES = 17_301_556
 MAX_WINDOWS_COMMAND_LINE_UNITS = 32_766
@@ -71,6 +74,7 @@ FAILURE_IDS = frozenset(
         "PSV1-JOB-TERMINATE",
         "PSV1-STDIN-SHORT-WRITE",
         "PSV1-STDIN-BROKEN-PIPE",
+        "PSV1-KIMI-ACP-PROTOCOL",
         "PSV1-CAPTURE-LIMIT",
         "PSV1-CAPTURE-IO",
         "PSV1-DEADLINE",
@@ -106,7 +110,6 @@ TERMINAL_STAGES = frozenset(
         "completed",
     }
 )
-_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _LOWER_HEX_32 = re.compile(r"[0-9a-f]{32}\Z")
 _LOWER_HEX_64 = re.compile(r"[0-9a-f]{64}\Z")
 _WINDOWS_SHELL_HOSTS = frozenset(
@@ -124,46 +127,20 @@ _WINDOWS_ARGV_PROFILES = frozenset(
 
 
 class KimiWindowsProfileV1:
-    """The sole owner of the sealed Windows Kimi bundle grammar."""
+    """The sole owner of the bounded Windows Kimi ACP argv grammar."""
 
-    profile_id = "kimi-sealed-bundle-text-v1"
+    profile_id = "kimi-acp-one-shot-v1"
     probe_profile_id = "kimi-metadata-probe-v2"
     model = "kimi-code/k3"
-    constant_prompt = "Review the sealed bundle and return only the requested result."
-    argv_shape = (
-        "--agent-file", None,
-        "--skills-dir", None,
-        "--model", model,
-        "--output-format", "text",
-        "--prompt", constant_prompt,
-    )
-    agent_frontmatter = (
-        b"---\n"
-        b"name: orchestrarium-bundle-reviewer\n"
-        b"description: Reviews only the context bundled in this file\n"
-        b"tools: []\n"
-        b"subagents: []\n"
-        b"---\n\n"
-    )
 
     @classmethod
-    def build_args(cls, agent_file: Path, skills_dir: Path) -> list[str]:
-        arguments = list(cls.argv_shape)
-        arguments[1] = str(agent_file.resolve(strict=True))
-        arguments[3] = str(skills_dir.resolve(strict=True))
-        return arguments
-
-    @classmethod
-    def matches_argv(cls, argv: Sequence[str]) -> bool:
-        values = argv[1:]
-        return len(values) == len(cls.argv_shape) and all(
-            expected is None or actual == expected
-            for actual, expected in zip(values, cls.argv_shape, strict=True)
-        )
+    def build_args(cls) -> list[str]:
+        return ["acp"]
 
 
 _WINDOWS_ARGV_PROFILES = _WINDOWS_ARGV_PROFILES | frozenset(
-    {KimiWindowsProfileV1.profile_id, KimiWindowsProfileV1.probe_profile_id}
+    {KimiWindowsProfileV1.profile_id, KimiWindowsProfileV1.probe_profile_id,
+     "native-parser-contract-v1"}
 )
 
 
@@ -238,7 +215,63 @@ class SettlePolicyV1:
 
 _WINDOWS_ARGV_ADMISSION_SEAL = object()
 _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL = object()
+_WINDOWS_PARSER_CONTRACT_SEAL = object()
 _WINDOWS_INTERNAL_PROBE_ADMISSION_SEAL = object()
+
+
+@dataclass(frozen=True)
+class WindowsParserContractV1:
+    """A trusted composition owner's declared parser premise, not child observation."""
+
+    schema_version: int
+    family: str
+    domain: str
+    codec: str
+    basis: str
+    origin: str
+    _seal: object = field(repr=False, compare=False)
+
+
+def accept_windows_parser_contract(
+    *, family: str, domain: str, codec: str, basis: str, origin: str
+) -> WindowsParserContractV1:
+    """Called by trusted installed integration/operator composition, never request decoding."""
+    contract = WindowsParserContractV1(
+        1, family, domain, codec, basis, origin, _WINDOWS_PARSER_CONTRACT_SEAL
+    )
+    _validate_windows_parser_contract(contract)
+    return contract
+
+
+def _validate_windows_parser_contract(contract: object) -> None:
+    if contract is None:
+        raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
+    if (
+        type(contract) is not WindowsParserContractV1
+        or contract._seal is not _WINDOWS_PARSER_CONTRACT_SEAL
+        or contract.schema_version != 1
+        or (contract.family, contract.domain, contract.codec)
+        != ("msvcrt-v1", "wide-utf16-v1", "msvcrt-v1")
+        or not isinstance(contract.origin, str)
+        or contract.origin not in {"installed-integration", "accepted-operator"}
+        or not isinstance(contract.basis, str)
+        or not contract.basis.strip()
+    ):
+        raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
+    try:
+        if len(contract.basis.encode("utf-8")) > 512:
+            raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
+    except UnicodeError as exc:
+        raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation") from exc
+
+
+def _parser_contract_sha256(contract: WindowsParserContractV1) -> str:
+    encoded = json.dumps(
+        (contract.schema_version, contract.family, contract.domain,
+         contract.codec, contract.basis, contract.origin),
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -252,16 +285,17 @@ class WindowsArgvAdmissionV1:
     actual_argv_sha256: str
     actual_argv_shape_sha256: str
     probe_kind: str
-    probe_requested_argv_sha256: str
-    probe_observed_argv_sha256: str
+    probe_requested_argv_sha256: str | None
+    probe_observed_argv_sha256: str | None
     expires_at_monotonic: float
     status: str
     _seal: object = field(repr=False, compare=False)
-    _child_evidence_seal: object = field(repr=False, compare=False)
+    _child_evidence_seal: object | None = field(repr=False, compare=False)
     prompt_file_canonical: str | None = None
     prompt_file_identity: str | None = None
     prompt_file_sha256: str | None = None
     executable_binding: "ExecutableBindingV1 | None" = None
+    parser_contract_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -280,7 +314,7 @@ class ExecutableBindingV1:
 def _expected_executable_binding_matches(
     expected: object, live: ExecutableBindingV1
 ) -> bool:
-    """Compare the enrolled portable pin with the live OS-object evidence."""
+    """Compare a caller-supplied binding with the live OS-object evidence."""
 
     if type(expected) is not ExecutableBindingV1:
         return False
@@ -563,6 +597,14 @@ class ProcessRequestV1:
     request_id: str | None = None
     policy_id: str | None = None
     expected_executable_binding: ExecutableBindingV1 | None = None
+    windows_parser_contract: WindowsParserContractV1 | None = None
+
+
+@dataclass(frozen=True)
+class ProcessDialogueV1:
+    protocol_id: str
+    handler: Callable[["ProcessDialogueChannelV1"], None]
+    continue_after_stdout_capture_limit: bool = False
 
 
 def _hook_script_binding(path: Path) -> dict[str, object]:
@@ -712,7 +754,7 @@ class _LifecycleResourceV1:
 class RunLifecycleV1:
     """Sole per-run cancellation, worker, resource, and finalization owner."""
 
-    def __init__(self, run_id: RunTokenV1) -> None:
+    def __init__(self, run_id: RunTokenV1, *, native_preparation: bool = False) -> None:
         self.token = run_id
         self._cancel = threading.Event()
         self._settled = threading.Event()
@@ -720,6 +762,8 @@ class RunLifecycleV1:
         self._resources: list[_LifecycleResourceV1] = []
         self._workers: set[str] = set()
         self._state = "not-started"
+        self._native_preparation_phase = "preparing" if native_preparation else None
+        self._native_preparation: PreparedNativeWindowsLaunchV1 | None = None
         self._observation = FinalizerObservationV1("not-started", False, ())
 
     @property
@@ -757,6 +801,48 @@ class RunLifecycleV1:
 
     def request_cancel(self) -> None:
         self._cancel.set()
+
+    @property
+    def native_preparation_used(self) -> bool:
+        with self._condition:
+            return self._native_preparation_phase != "idle" or self._settled.is_set()
+
+    def finish_native_preparation(self, prepared: "PreparedNativeWindowsLaunchV1") -> None:
+        with self._condition:
+            if self._native_preparation_phase != "preparing":
+                raise ProcessSupervisionError("PSV1-INTERNAL", "request-validation")
+            if self.cancelled:
+                raise ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
+            self._native_preparation = prepared
+            self._native_preparation_phase = "idle"
+            self._condition.notify_all()
+
+    def consume_native_preparation(self, prepared: "PreparedNativeWindowsLaunchV1") -> bool:
+        with self._condition:
+            if (self._native_preparation is not prepared
+                or self._native_preparation_phase != "idle" or self._state != "not-started"):
+                return False
+            if self.cancelled:
+                raise ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
+            self._native_preparation_phase = "running"
+            return True
+
+    def finalize_idle_preparation(
+        self, deadline: float, *, wait_preparing: bool = True
+    ) -> FinalizerObservationV1 | None:
+        with self._condition:
+            while self._native_preparation_phase == "preparing" and not self._settled.is_set():
+                if not wait_preparing:
+                    return None
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._condition.wait(remaining)
+            if self._native_preparation_phase == "idle":
+                self._native_preparation_phase = "closing"
+            elif self._native_preparation_phase != "closing":
+                return None
+        return self.finalize_once(deadline)
 
     def register_worker(self, name: str) -> None:
         with self._condition:
@@ -842,6 +928,9 @@ class RunLifecycleV1:
                     self._condition.wait(max(0.0, deadline - time.monotonic()))
                 return self._observation
             self._state = "running"
+            if self._native_preparation_phase is not None:
+                self._native_preparation_phase = "closing"
+                self._condition.notify_all()
         issues = list(self._observation.cleanup_issues)
         for resource in tuple(reversed(self._resources)):
             if resource.state == "CLOSED":
@@ -867,6 +956,8 @@ class RunLifecycleV1:
 
     def mark_settled(self) -> None:
         self._settled.set()
+        with self._condition:
+            self._condition.notify_all()
 
     def wait_settled(self, deadline: float) -> bool:
         return self._settled.wait(max(0.0, deadline - time.monotonic()))
@@ -1229,92 +1320,6 @@ def resolve_executable_version(path: Path) -> str:
     return _stream_executable_binding(path)[1]
 
 
-def _kimi_bundle_file_binding(
-    request: ProcessRequestV1, *, failure_id: str
-) -> tuple[str, str, str]:
-    def reject() -> ProcessSupervisionError:
-        return ProcessSupervisionError(failure_id, "request-validation")
-
-    try:
-        argv = request.argv
-        if not KimiWindowsProfileV1.matches_argv(argv):
-            raise reject()
-        raw_path = argv[2]
-        if not raw_path or "\x00" in raw_path:
-            raise reject()
-        prompt = Path(raw_path)
-        normalized = Path(os.path.abspath(prompt))
-        if (
-            not prompt.is_absolute()
-            or os.path.normcase(str(normalized)) != os.path.normcase(raw_path)
-        ):
-            raise reject()
-        root = Path(os.path.abspath(request.cwd))
-        bind_cwd_identity(str(root))
-        try:
-            relative = normalized.relative_to(root)
-        except ValueError as exc:
-            raise reject() from exc
-        if not relative.parts:
-            raise reject()
-        for component in reversed((normalized, *normalized.parents)):
-            metadata = component.lstat()
-            if stat.S_ISLNK(metadata.st_mode) or _is_reparse(metadata):
-                raise reject()
-            if component == root:
-                break
-        else:
-            raise reject()
-        before = normalized.lstat()
-        if not stat.S_ISREG(before.st_mode):
-            raise reject()
-        descriptor = os.open(
-            normalized,
-            os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
-        )
-        try:
-            opened = os.fstat(descriptor)
-            if (opened.st_dev, opened.st_ino, opened.st_mode) != (
-                before.st_dev,
-                before.st_ino,
-                before.st_mode,
-            ):
-                raise reject()
-            digest = hashlib.sha256()
-            while True:
-                chunk = os.read(descriptor, 1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
-        finally:
-            os.close(descriptor)
-        content = normalized.read_bytes()
-        if not content.startswith(KimiWindowsProfileV1.agent_frontmatter) or b"${" in content:
-            raise reject()
-        skills = Path(argv[4])
-        if not skills.is_absolute() or Path(os.path.abspath(skills)) != skills or not skills.is_dir() or any(skills.iterdir()):
-            raise reject()
-        try:
-            skills.relative_to(root)
-        except ValueError as exc:
-            raise reject() from exc
-        identity = hashlib.sha256(
-            struct.pack(
-                ">QQQQQ",
-                opened.st_dev & ((1 << 64) - 1),
-                opened.st_ino & ((1 << 64) - 1),
-                opened.st_mode & ((1 << 64) - 1),
-                opened.st_size & ((1 << 64) - 1),
-                opened.st_mtime_ns & ((1 << 64) - 1),
-            )
-        ).hexdigest()
-        return str(normalized), identity, digest.hexdigest()
-    except ProcessSupervisionError:
-        raise
-    except (OSError, ValueError, OverflowError, UnicodeError) as exc:
-        raise reject() from exc
-
-
 def _argv_shape_sha256(argv: Sequence[str]) -> str:
     shapes: list[tuple[str, ...]] = []
     for index, item in enumerate(argv):
@@ -1614,18 +1619,28 @@ class WindowsArgvAdmissionOwnerV1:
         launch_owner = executable_launch_owner
         prompt_binding: tuple[str, str, str] | None = None
         executable_binding: ExecutableBindingV1 | None = None
-        if _is_kimi_executable_profile(profile_id):
-            if profile_id == KimiWindowsProfileV1.profile_id:
-                prompt_binding = _kimi_bundle_file_binding(
-                    request, failure_id="PSV1-ARGV-CODEC-UNSUPPORTED"
+        contract = request.windows_parser_contract
+        if profile_id == "native-parser-contract-v1":
+            _validate_windows_parser_contract(contract)
+            executable_binding = launch_owner.binding
+            if executable_binding is None or launch_owner._closed or (
+                request.expected_executable_binding is not None
+                and not _expected_executable_binding_matches(
+                    request.expected_executable_binding, executable_binding
                 )
-            if executable.name.casefold() != "kimi.exe":
+            ):
                 raise ProcessSupervisionError(
                     "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
                 )
+            identity = launch_owner.identity_sha256
+            version = launch_owner.version_sha256
+        elif _is_kimi_executable_profile(profile_id):
             executable_binding = launch_owner.binding
-            if not _expected_executable_binding_matches(
-                request.expected_executable_binding, executable_binding
+            if executable_binding is None or (
+                request.expected_executable_binding is not None
+                and not _expected_executable_binding_matches(
+                    request.expected_executable_binding, executable_binding
+                )
             ):
                 raise ProcessSupervisionError(
                     "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
@@ -1637,7 +1652,10 @@ class WindowsArgvAdmissionOwnerV1:
         else:
             identity = launch_owner.identity_sha256
             version = launch_owner.version_sha256
-        if profile_id == "python-hook-health-v1":
+        if profile_id == "native-parser-contract-v1":
+            probe_kind = "parser-contract-v1"
+            requested = observed = None
+        elif profile_id == "python-hook-health-v1":
             if (
                 executable.resolve() != Path(sys.executable).resolve()
                 or len(request.argv) < 2
@@ -1664,11 +1682,14 @@ class WindowsArgvAdmissionOwnerV1:
                 lifecycle, request, executable, launch_owner
             )
         elif profile_id == KimiWindowsProfileV1.profile_id:
-            if _windows_argv_roundtrip(request.argv) != request.argv:
+            if (
+                request.argv != (str(executable), "acp")
+                or _windows_argv_roundtrip(request.argv) != request.argv
+            ):
                 raise ProcessSupervisionError(
                     "PSV1-ARGV-ATTESTATION", "request-validation"
                 )
-            probe_kind = "kimi-sealed-bundle-v1"
+            probe_kind = "kimi-acp-one-shot-v1"
             requested = observed = _json_argv_sha256(request.argv)
         elif profile_id == KimiWindowsProfileV1.probe_profile_id:
             if (
@@ -1687,7 +1708,7 @@ class WindowsArgvAdmissionOwnerV1:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
             )
-        if not hmac.compare_digest(requested, observed):
+        if profile_id != "native-parser-contract-v1" and not hmac.compare_digest(requested, observed):
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
@@ -1707,9 +1728,10 @@ class WindowsArgvAdmissionOwnerV1:
             expires,
             "pass",
             _WINDOWS_ARGV_ADMISSION_SEAL,
-            _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL,
+            None if profile_id == "native-parser-contract-v1" else _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL,
             *(prompt_binding or (None, None, None)),
             executable_binding,
+            _parser_contract_sha256(contract) if profile_id == "native-parser-contract-v1" else None,
         )
 
     def consume(
@@ -1719,6 +1741,8 @@ class WindowsArgvAdmissionOwnerV1:
         admission: WindowsArgvAdmissionV1,
         launch_owner: "_ExecutableLaunchOwnerV1",
     ) -> None:
+        if type(admission) is not WindowsArgvAdmissionV1:
+            raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
         executable = Path(request.resolved_executable)
         if (
             launch_owner._closed
@@ -1728,26 +1752,32 @@ class WindowsArgvAdmissionOwnerV1:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
+        generic = admission.profile_id == "native-parser-contract-v1"
+        if generic:
+            _validate_windows_parser_contract(request.windows_parser_contract)
         executable_binding = (
-            launch_owner.binding if _is_kimi_executable_profile(admission.profile_id) else None
+            launch_owner.binding if generic or _is_kimi_executable_profile(admission.profile_id) else None
         )
         if executable_binding is not None:
-            identity = executable_binding.sha256
-            version = hashlib.sha256(
-                f"kimi-release:{executable_binding.size}:{identity}".encode("ascii")
-            ).hexdigest()
+            if generic:
+                identity = launch_owner.identity_sha256
+                version = launch_owner.version_sha256
+            else:
+                identity = executable_binding.sha256
+                version = hashlib.sha256(
+                    f"kimi-release:{executable_binding.size}:{identity}".encode("ascii")
+                ).hexdigest()
         else:
             identity = launch_owner.identity_sha256
             version = launch_owner.version_sha256
-        prompt_binding = (
-            _kimi_bundle_file_binding(request, failure_id="PSV1-ARGV-ATTESTATION")
-            if admission.profile_id == KimiWindowsProfileV1.profile_id
-            else (None, None, None)
-        )
+        prompt_binding = (None, None, None)
         valid = (
             type(admission) is WindowsArgvAdmissionV1
             and admission._seal is _WINDOWS_ARGV_ADMISSION_SEAL
-            and admission._child_evidence_seal is _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL
+            and (
+                (generic and admission._child_evidence_seal is None)
+                or (not generic and admission._child_evidence_seal is _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL)
+            )
             and admission.schema_version == 1
             and admission.run_token_sha256 == lifecycle.token.sha256
             and admission.profile_id == request.windows_argv_profile_id
@@ -1756,16 +1786,32 @@ class WindowsArgvAdmissionOwnerV1:
             and admission.resolved_executable_version == version
             and admission.executable_binding == executable_binding
             and (
-                _expected_executable_binding_matches(
-                    request.expected_executable_binding, executable_binding
+                request.expected_executable_binding is None
+                or (
+                    executable_binding is not None
+                    and _expected_executable_binding_matches(
+                        request.expected_executable_binding, executable_binding
+                    )
                 )
-                if executable_binding is not None
-                else request.expected_executable_binding is None
             )
             and admission.actual_argv_sha256 == _json_argv_sha256(request.argv)
             and admission.actual_argv_shape_sha256 == _argv_shape_sha256(request.argv)
-            and admission.probe_requested_argv_sha256
-            == admission.probe_observed_argv_sha256
+            and (
+                (generic and admission.probe_kind == "parser-contract-v1"
+                 and admission.probe_requested_argv_sha256 is None
+                 and admission.probe_observed_argv_sha256 is None
+                 and request.windows_parser_contract is not None
+                 and admission.parser_contract_sha256
+                 == _parser_contract_sha256(request.windows_parser_contract))
+                or (not generic and request.windows_parser_contract is None
+                    and admission.parser_contract_sha256 is None
+                    and isinstance(admission.probe_requested_argv_sha256, str)
+                    and isinstance(admission.probe_observed_argv_sha256, str)
+                    and _LOWER_HEX_64.fullmatch(admission.probe_requested_argv_sha256)
+                    and _LOWER_HEX_64.fullmatch(admission.probe_observed_argv_sha256)
+                    and admission.probe_requested_argv_sha256
+                    == admission.probe_observed_argv_sha256)
+            )
             and admission.status == "pass"
             and (
                 admission.prompt_file_canonical,
@@ -1908,29 +1954,64 @@ def hook_health_capture_policy() -> CapturePolicyV1:
     )
 
 
-def _validate_environment(rows: Sequence[EnvironmentRowV1]) -> None:
-    if len(rows) > MAX_ENVIRONMENT_COUNT:
+def _validate_environment(
+    rows: tuple[EnvironmentRowV1, ...],
+    windows_api: _WindowsKernelV1 | None = None,
+) -> None:
+    # A nonempty name, '=' and row NUL cost at least three UTF-8 bytes.
+    if type(rows) is not tuple or len(rows) > MAX_ENVIRONMENT_BYTES // 3:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     seen: set[str] = set()
+    items: list[tuple[str, str]] = []
     total = 0
     for row in rows:
-        if not isinstance(row, EnvironmentRowV1) or not _ENV_NAME.fullmatch(row.name):
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        name_bytes = row.name.encode("utf-8")
-        value_bytes = row.value.encode("utf-8")
         if (
-            "\0" in row.value
-            or len(name_bytes) > MAX_ENVIRONMENT_NAME_BYTES
+            not isinstance(row, EnvironmentRowV1)
+            or not isinstance(row.name, str)
+            or not isinstance(row.value, str)
+            or len(row.name) > MAX_ENVIRONMENT_NAME_BYTES
+            or len(row.value) > MAX_ENVIRONMENT_VALUE_BYTES
+            or not row.name
+            or "\0" in row.name
+            or "=" in row.name
+            or "\0" in row.value
+        ):
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+        try:
+            name_bytes = row.name.encode("utf-8")
+            value_bytes = row.value.encode("utf-8")
+            if os.name != "nt":
+                os.fsencode(row.name)
+                os.fsencode(row.value)
+        except UnicodeError as exc:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation") from exc
+        if (
+            len(name_bytes) > MAX_ENVIRONMENT_NAME_BYTES
             or len(value_bytes) > MAX_ENVIRONMENT_VALUE_BYTES
         ):
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        key = row.name.casefold() if os.name == "nt" else row.name
-        if key in seen:
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        seen.add(key)
         total += len(name_bytes) + 1 + len(value_bytes) + 1
-    if total > MAX_ENVIRONMENT_BYTES:
-        raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+        if total > MAX_ENVIRONMENT_BYTES:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+        if os.name == "nt":
+            items.append((row.name, row.value))
+        else:
+            if row.name in seen:
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            seen.add(row.name)
+    if os.name == "nt":
+        try:
+            if windows_api is None:
+                raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation")
+            block, duplicates = windows_api.serialize_environment(items)
+        except ProcessSupervisionError:
+            raise
+        except (AttributeError, OSError, ValueError, TypeError, _WINDOWS_JOB.WindowsJobError) as exc:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation") from exc
+        if duplicates:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+        if len(block.encode("utf-16-le")) // 2 > MAX_WINDOWS_ENVIRONMENT_UNITS:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
 
 
 def _validate_request_shape_before_executable_acquisition(
@@ -1938,13 +2019,18 @@ def _validate_request_shape_before_executable_acquisition(
 ) -> None:
     if not isinstance(request, ProcessRequestV1) or request.schema_version != 1:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+    if request.windows_argv_profile_id == "native-parser-contract-v1" and type(request.argv) is not tuple:
+        raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     if not 1 <= len(request.argv) <= MAX_ARGV_COUNT:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     aggregate = 0
     for item in request.argv:
         if not isinstance(item, str) or "\0" in item:
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        encoded = item.encode("utf-8")
+        try:
+            encoded = item.encode("utf-8")
+        except UnicodeError as exc:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation") from exc
         if len(encoded) > MAX_ARG_BYTES:
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
         aggregate += len(encoded) + 1
@@ -1981,7 +2067,8 @@ def validate_process_request(
         raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation") from exc
     expected_binding = request.expected_executable_binding
     if expected_binding is not None and (
-        not _is_kimi_executable_profile(request.windows_argv_profile_id)
+        not (_is_kimi_executable_profile(request.windows_argv_profile_id)
+             or request.windows_argv_profile_id == "native-parser-contract-v1")
         or executable_launch_owner is None
         or not _expected_executable_binding_matches(
             expected_binding, executable_launch_owner.binding
@@ -2002,12 +2089,34 @@ def validate_process_request(
             raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
         if request.windows_argv_profile_id not in _WINDOWS_ARGV_PROFILES:
             raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
-        command = serialize_msvcrt_argv(request.argv)
-        if len(command.encode("utf-16-le")) // 2 > MAX_WINDOWS_COMMAND_LINE_UNITS:
+        if request.windows_argv_profile_id == "native-parser-contract-v1":
+            _validate_windows_parser_contract(request.windows_parser_contract)
+            if executable_launch_owner is None or executable_launch_owner.binding is None:
+                raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation")
+        elif request.windows_parser_contract is not None:
+            raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
+        try:
+            command = serialize_msvcrt_argv(request.argv)
+            command_units = len(command.encode("utf-16-le")) // 2
+        except UnicodeError as exc:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation") from exc
+        if command_units > MAX_WINDOWS_COMMAND_LINE_UNITS:
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     elif basename in _POSIX_SHELL_HOSTS:
         raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
-    _validate_environment(request.environment)
+    windows_api = None
+    if os.name == "nt":
+        try:
+            windows_api = (
+                _WindowsKernelV1()
+                if executable_launch_owner is None
+                else executable_launch_owner.windows_api
+            )
+            if windows_api is None:
+                raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation")
+        except (AttributeError, OSError, _WINDOWS_JOB.WindowsJobError) as exc:
+            raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation") from exc
+    _validate_environment(request.environment, windows_api)
     if request.stdin_bytes is not None and (
         not isinstance(request.stdin_bytes, bytes) or len(request.stdin_bytes) > MAX_STDIN_BYTES
     ):
@@ -2162,64 +2271,43 @@ def _request_failure(
     )
 
 
-class WindowsInheritanceCoordinatorV1:
-    def __init__(self) -> None:
-        self.lock = threading.Lock()
-        self._poisoned = False
+def _load_windows_job_module() -> Any:
+    module_name = "_orchestrarium_windows_job_v1"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing
+    module_path = Path(__file__).resolve().parent / "windows_job.py"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Windows Job owner unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    if module.windows_job_module_contract_v1() != (
+        module.WINDOWS_JOB_MODULE_CONTRACT_V1,
+        module.WindowsJobOwnerV1,
+        module.WindowsJobError,
+    ):
+        sys.modules.pop(module_name, None)
+        raise RuntimeError("Windows Job owner contract mismatch")
+    return module
 
-    @property
-    def poisoned(self) -> bool:
-        return self._poisoned
 
-    def poison(self) -> None:
-        self._poisoned = True
+_WINDOWS_JOB = _load_windows_job_module()
+WindowsInheritanceCoordinatorV1 = _WINDOWS_JOB.WindowsInheritanceCoordinatorV1
 
 
 if os.name == "nt":
     from ctypes import wintypes
-
-    ULONG_PTR = wintypes.WPARAM
-    SIZE_T = ctypes.c_size_t
-
-    class SECURITY_ATTRIBUTES(ctypes.Structure):
-        _fields_ = [
-            ("nLength", wintypes.DWORD),
-            ("lpSecurityDescriptor", ctypes.c_void_p),
-            ("bInheritHandle", wintypes.BOOL),
-        ]
-
-    class STARTUPINFOW(ctypes.Structure):
-        _fields_ = [
-            ("cb", wintypes.DWORD),
-            ("lpReserved", wintypes.LPWSTR),
-            ("lpDesktop", wintypes.LPWSTR),
-            ("lpTitle", wintypes.LPWSTR),
-            ("dwX", wintypes.DWORD),
-            ("dwY", wintypes.DWORD),
-            ("dwXSize", wintypes.DWORD),
-            ("dwYSize", wintypes.DWORD),
-            ("dwXCountChars", wintypes.DWORD),
-            ("dwYCountChars", wintypes.DWORD),
-            ("dwFillAttribute", wintypes.DWORD),
-            ("dwFlags", wintypes.DWORD),
-            ("wShowWindow", wintypes.WORD),
-            ("cbReserved2", wintypes.WORD),
-            ("lpReserved2", ctypes.POINTER(ctypes.c_ubyte)),
-            ("hStdInput", wintypes.HANDLE),
-            ("hStdOutput", wintypes.HANDLE),
-            ("hStdError", wintypes.HANDLE),
-        ]
-
-    class STARTUPINFOEXW(ctypes.Structure):
-        _fields_ = [("StartupInfo", STARTUPINFOW), ("lpAttributeList", ctypes.c_void_p)]
-
-    class PROCESS_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("hProcess", wintypes.HANDLE),
-            ("hThread", wintypes.HANDLE),
-            ("dwProcessId", wintypes.DWORD),
-            ("dwThreadId", wintypes.DWORD),
-        ]
+    STARTUPINFOW = _WINDOWS_JOB.STARTUPINFOW
+    STARTUPINFOEXW = _WINDOWS_JOB.STARTUPINFOEXW
+    PROCESS_INFORMATION = _WINDOWS_JOB.PROCESS_INFORMATION
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION = _WINDOWS_JOB.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = _WINDOWS_JOB.JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
 
     class BY_HANDLE_FILE_INFORMATION(ctypes.Structure):
         _fields_ = [
@@ -2235,46 +2323,6 @@ if os.name == "nt":
             ("nFileIndexLow", wintypes.DWORD),
         ]
 
-    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("PerProcessUserTimeLimit", ctypes.c_longlong),
-            ("PerJobUserTimeLimit", ctypes.c_longlong),
-            ("LimitFlags", wintypes.DWORD),
-            ("MinimumWorkingSetSize", SIZE_T),
-            ("MaximumWorkingSetSize", SIZE_T),
-            ("ActiveProcessLimit", wintypes.DWORD),
-            ("Affinity", ULONG_PTR),
-            ("PriorityClass", wintypes.DWORD),
-            ("SchedulingClass", wintypes.DWORD),
-        ]
-
-    class IO_COUNTERS(ctypes.Structure):
-        _fields_ = [(name, ctypes.c_ulonglong) for name in (
-            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
-            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
-        )]
-
-    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
-            ("IoInfo", IO_COUNTERS),
-            ("ProcessMemoryLimit", SIZE_T),
-            ("JobMemoryLimit", SIZE_T),
-            ("PeakProcessMemoryUsed", SIZE_T),
-            ("PeakJobMemoryUsed", SIZE_T),
-        ]
-
-    class JOBOBJECT_BASIC_ACCOUNTING_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("TotalUserTime", ctypes.c_longlong),
-            ("TotalKernelTime", ctypes.c_longlong),
-            ("ThisPeriodTotalUserTime", ctypes.c_longlong),
-            ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
-            ("TotalPageFaultCount", wintypes.DWORD),
-            ("TotalProcesses", wintypes.DWORD),
-            ("ActiveProcesses", wintypes.DWORD),
-            ("TotalTerminatedProcesses", wintypes.DWORD),
-        ]
 
 
 def windows_abi_layout() -> dict[str, int]:
@@ -2289,74 +2337,14 @@ def windows_abi_layout() -> dict[str, int]:
     }
 
 
-class _WindowsKernelV1:
-    WAIT_OBJECT_0 = 0
-    WAIT_TIMEOUT = 258
-    INFINITE = 0xFFFFFFFF
-    HANDLE_FLAG_INHERIT = 1
-    STARTF_USESTDHANDLES = 0x100
-    CREATE_SUSPENDED = 0x4
-    CREATE_UNICODE_ENVIRONMENT = 0x400
-    EXTENDED_STARTUPINFO_PRESENT = 0x80000
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-    PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
-    PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002000D
-    STILL_ACTIVE = 259
-    GENERIC_READ = 0x80000000
-    FILE_READ_ATTRIBUTES = 0x00000080
-    FILE_SHARE_READ = 0x00000001
-    FILE_SHARE_WRITE = 0x00000002
-    OPEN_EXISTING = 3
-    FILE_ATTRIBUTE_NORMAL = 0x00000080
-    FILE_ATTRIBUTE_DIRECTORY = 0x00000010
-    FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
-    FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
-    FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
-    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-
-    def __init__(self) -> None:
-        self.k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        self._bind()
+class _WindowsKernelV1(_WINDOWS_JOB.WindowsKernelV1):
+    """Add executable-path identity operations to the shared Job kernel ABI."""
 
     def _bind(self) -> None:
+        super()._bind()
         k = self.k32
-        k.CreatePipe.argtypes = [ctypes.POINTER(wintypes.HANDLE), ctypes.POINTER(wintypes.HANDLE), ctypes.POINTER(SECURITY_ATTRIBUTES), wintypes.DWORD]
-        k.CreatePipe.restype = wintypes.BOOL
-        k.SetHandleInformation.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD]
-        k.SetHandleInformation.restype = wintypes.BOOL
-        k.CloseHandle.argtypes = [wintypes.HANDLE]
-        k.CloseHandle.restype = wintypes.BOOL
-        k.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
-        k.CreateJobObjectW.restype = wintypes.HANDLE
-        k.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
-        k.SetInformationJobObject.restype = wintypes.BOOL
-        k.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
-        k.QueryInformationJobObject.restype = wintypes.BOOL
-        k.InitializeProcThreadAttributeList.argtypes = [ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(SIZE_T)]
-        k.InitializeProcThreadAttributeList.restype = wintypes.BOOL
-        k.UpdateProcThreadAttribute.argtypes = [ctypes.c_void_p, wintypes.DWORD, SIZE_T, ctypes.c_void_p, SIZE_T, ctypes.c_void_p, ctypes.c_void_p]
-        k.UpdateProcThreadAttribute.restype = wintypes.BOOL
-        k.DeleteProcThreadAttributeList.argtypes = [ctypes.c_void_p]
-        k.DeleteProcThreadAttributeList.restype = None
-        k.CreateProcessW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, ctypes.c_void_p, ctypes.c_void_p, wintypes.BOOL, wintypes.DWORD, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.POINTER(STARTUPINFOW), ctypes.POINTER(PROCESS_INFORMATION)]
-        k.CreateProcessW.restype = wintypes.BOOL
-        k.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-        k.CreateFileW.restype = wintypes.HANDLE
         k.GetFileInformationByHandle.argtypes = [wintypes.HANDLE, ctypes.POINTER(BY_HANDLE_FILE_INFORMATION)]
         k.GetFileInformationByHandle.restype = wintypes.BOOL
-        k.IsProcessInJob.argtypes = [wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
-        k.IsProcessInJob.restype = wintypes.BOOL
-        k.ResumeThread.argtypes = [wintypes.HANDLE]
-        k.ResumeThread.restype = wintypes.DWORD
-        k.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
-        k.TerminateJobObject.restype = wintypes.BOOL
-        k.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-        k.WaitForSingleObject.restype = wintypes.DWORD
-        k.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-        k.GetExitCodeProcess.restype = wintypes.BOOL
-
-    def close(self, handle: int | None) -> bool:
-        return not handle or bool(self.k32.CloseHandle(handle))
 
     def open_guarded_path(self, path: Path, *, directory: bool) -> int:
         desired = self.FILE_READ_ATTRIBUTES if directory else self.GENERIC_READ
@@ -2505,6 +2493,33 @@ class _ExecutableLaunchOwnerV1:
                 raise OSError("executable launch owner cleanup failed") from errors[0]
 
 
+@dataclass(frozen=True)
+class PreparedNativeWindowsLaunchV1:
+    """One held executable/lifecycle from capability preflight through final creation."""
+
+    runner: "ProcessRunnerV1"
+    lifecycle: RunLifecycleV1
+    executable_owner: _ExecutableLaunchOwnerV1
+    argv: tuple[str, ...]
+    deadline_monotonic: float
+    parser_contract: WindowsParserContractV1
+    expected_executable_binding: ExecutableBindingV1 | None
+
+    @property
+    def used(self) -> bool:
+        return self.lifecycle.native_preparation_used
+
+    def close(self) -> None:
+        observation = self.lifecycle.finalize_idle_preparation(
+            time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
+        )
+        if observation is None:
+            return
+        if not observation.resources_closed:
+            raise ProcessSupervisionError("PSV1-RESOURCE-CLOSE", "resource-cleanup")
+        self.runner._release_lifecycle(self.lifecycle)
+
+
 def _acquire_executable_launch_owner(
     path: Path,
     lifecycle: RunLifecycleV1,
@@ -2529,7 +2544,7 @@ def _acquire_executable_launch_owner(
         if os.name == "nt":
             import msvcrt
 
-            api = windows_api or _WindowsKernelV1()
+            api = windows_api if windows_api is not None else _WindowsKernelV1()
             owner.windows_api = api
             for component in reversed((absolute.parent, *absolute.parent.parents)):
                 metadata = component.lstat()
@@ -2631,12 +2646,199 @@ def _convert_windows_handle_to_fd(
         raise
     return descriptor
 
-def _windows_environment_block(request: ProcessRequestV1) -> ctypes.Array[Any]:
-    rows = sorted(request.environment, key=lambda row: row.name.casefold())
-    text = "\0".join(f"{row.name}={row.value}" for row in rows) + "\0\0"
-    if len(text) > MAX_WINDOWS_ENVIRONMENT_UNITS:
-        raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-    return ctypes.create_unicode_buffer(text)
+class _DialogueLineRouterV1:
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._buffer = bytearray()
+        self._lines: deque[bytes] = deque()
+        self._queued_bytes = 0
+        self._eof = False
+        self._failed = False
+
+    def feed(self, data: bytes) -> None:
+        with self._condition:
+            if self._failed:
+                return
+            retained_bytes = self._queued_bytes + len(self._buffer)
+            if len(data) > MAX_STDIN_BYTES - retained_bytes:
+                self._failed = True
+                self._condition.notify_all()
+                return
+            if data.count(b"\n") > MAX_DIALOGUE_PENDING_LINES - len(self._lines):
+                self._buffer.clear()
+                self._failed = True
+                self._condition.notify_all()
+                return
+            search_from = len(self._buffer)
+            self._buffer.extend(data)
+            while not self._failed:
+                newline = self._buffer.find(b"\n", search_from)
+                if newline < 0:
+                    break
+                line = bytes(self._buffer[: newline + 1])
+                self._lines.append(line)
+                self._queued_bytes += len(line)
+                del self._buffer[: newline + 1]
+                search_from = 0
+            self._condition.notify_all()
+
+    def finish(self, *, failed: bool = False) -> None:
+        with self._condition:
+            self._failed = self._failed or failed or bool(self._buffer)
+            self._eof = True
+            self._condition.notify_all()
+
+    def read_line(
+        self,
+        deadline: float,
+        cancellation_requested: Callable[[], bool],
+    ) -> bytes:
+        with self._condition:
+            while True:
+                if self._failed:
+                    raise ProcessSupervisionError(
+                        "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
+                    )
+                if self._lines:
+                    line = self._lines.popleft()
+                    self._queued_bytes -= len(line)
+                    return line
+                if self._eof:
+                    raise EOFError("ACP stdout closed")
+                if cancellation_requested():
+                    raise ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ProcessSupervisionError("PSV1-DEADLINE", "deadline")
+                self._condition.wait(min(ENGINE_POLL_INTERVAL_SECONDS, remaining))
+
+
+class ProcessDialogueChannelV1:
+    def __init__(
+        self,
+        stdin_fd: int,
+        lines: _DialogueLineRouterV1,
+        lifecycle: RunLifecycleV1,
+        deadline: float,
+        cancellation_probe: CancellationProbeV1 | None,
+    ) -> None:
+        self._stdin_fd = stdin_fd
+        self._lines = lines
+        self._lifecycle = lifecycle
+        self._deadline = deadline
+        self._cancellation_probe = cancellation_probe
+        self._cleanup_mode = False
+        self._cleanup_end: float | None = None
+        self._cleanup_span: float | None = None
+        self.written_bytes = 0
+
+    def cancellation_requested(self) -> bool:
+        if self._cleanup_mode:
+            return False
+        return self._lifecycle.cancelled or bool(
+            self._cancellation_probe is not None and self._cancellation_probe()
+        )
+
+    def begin_cleanup(self) -> None:
+        if self._cleanup_mode:
+            return
+        self._cleanup_span = RUNNER_CLOSE_TIMEOUT_SECONDS
+        self._cleanup_end = time.monotonic() + self._cleanup_span
+        self._deadline = self._cleanup_end
+        self._cleanup_mode = True
+
+    def write_line(
+        self, payload: bytes, *, reserve_cleanup_fraction: float = 0.0
+    ) -> int:
+        if self.cancellation_requested():
+            raise ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
+        if (
+            isinstance(reserve_cleanup_fraction, bool)
+            or not isinstance(reserve_cleanup_fraction, (int, float))
+            or not 0.0 <= reserve_cleanup_fraction <= 1.0
+            or reserve_cleanup_fraction
+            and (self._cleanup_end is None or self._cleanup_span is None)
+        ):
+            raise ProcessSupervisionError("PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery")
+        deadline = (
+            self._cleanup_end - self._cleanup_span * reserve_cleanup_fraction
+            if reserve_cleanup_fraction
+            else self._deadline
+        )
+        if (
+            not isinstance(payload, bytes)
+            or not payload
+            or len(payload) > MAX_STDIN_BYTES
+            or len(payload) > MAX_STDIN_BYTES - self.written_bytes
+            or not payload.endswith(b"\n")
+            or b"\n" in payload[:-1]
+            or time.monotonic() >= deadline
+        ):
+            raise ProcessSupervisionError(
+                "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
+        )
+        written = write_all_bytes(payload, lambda view: os.write(self._stdin_fd, view))
+        self.written_bytes += written
+        return written
+
+    def read_line(self, *, reserve_cleanup_fraction: float = 0.0) -> bytes:
+        if (
+            isinstance(reserve_cleanup_fraction, bool)
+            or not isinstance(reserve_cleanup_fraction, (int, float))
+            or not 0.0 <= reserve_cleanup_fraction <= 1.0
+            or reserve_cleanup_fraction
+            and (self._cleanup_end is None or self._cleanup_span is None)
+        ):
+            raise ProcessSupervisionError("PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery")
+        deadline = (
+            self._cleanup_end - self._cleanup_span * reserve_cleanup_fraction
+            if reserve_cleanup_fraction
+            else self._deadline
+        )
+        return self._lines.read_line(
+            deadline,
+            self.cancellation_requested,
+        )
+
+
+def _dialogue_fd(
+    fd: int,
+    dialogue: ProcessDialogueV1,
+    lines: _DialogueLineRouterV1,
+    observation: dict[str, object],
+    issues: list[str],
+    lifecycle: RunLifecycleV1,
+    resource_name: str,
+    deadline: float,
+    cancellation_probe: CancellationProbeV1 | None,
+) -> None:
+    channel = ProcessDialogueChannelV1(
+        fd, lines, lifecycle, deadline, cancellation_probe
+    )
+    try:
+        dialogue.handler(channel)
+        observation.update(
+            expected=channel.written_bytes,
+            written=channel.written_bytes,
+            complete=True,
+        )
+    except ProcessSupervisionError as exc:
+        observation.update(
+            failure=exc.failure_id,
+            written=channel.written_bytes,
+            complete=False,
+        )
+    except BaseException:
+        observation.update(
+            failure="PSV1-KIMI-ACP-PROTOCOL",
+            written=channel.written_bytes,
+            complete=False,
+        )
+    finally:
+        if not lifecycle.close_resource(
+            resource_name, time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
+        ):
+            issues.append("PSV1-DESCRIPTOR-OWNERSHIP")
 
 
 def _reader_fd(
@@ -2647,6 +2849,7 @@ def _reader_fd(
     issues: list[str],
     lifecycle: RunLifecycleV1 | None = None,
     resource_name: str | None = None,
+    dialogue_lines: _DialogueLineRouterV1 | None = None,
 ) -> None:
     try:
         while True:
@@ -2654,9 +2857,15 @@ def _reader_fd(
             if not data:
                 return
             capture.feed(stream, data)
+            if dialogue_lines is not None:
+                dialogue_lines.feed(data)
     except BaseException:
         issues.append("PSV1-CAPTURE-IO")
+        if dialogue_lines is not None:
+            dialogue_lines.finish(failed=True)
     finally:
+        if dialogue_lines is not None:
+            dialogue_lines.finish()
         if lifecycle is not None and resource_name is not None:
             if not lifecycle.close_resource(
                 resource_name, time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
@@ -2718,9 +2927,10 @@ def _result_from_parts(
     resources_closed: bool,
     poisoned: bool,
     cleanup_issues: Sequence[str],
+    capture_limit_is_failure: bool = True,
 ) -> ProcessResultV1:
     streams = capture.snapshot()
-    if failure_id is None and (
+    if failure_id is None and capture_limit_is_failure and (
         capture.limit_crossed or any(stream.truncated for stream in streams.values())
     ):
         failure_id = "PSV1-CAPTURE-LIMIT"
@@ -2750,7 +2960,7 @@ def _result_from_parts(
         cancelled,
         max(0.0, time.monotonic() - started),
         StdinObservationV1(
-            len(request.stdin_bytes or b""),
+            int(stdin_state.get("expected", len(request.stdin_bytes or b""))),
             int(stdin_state.get("written", 0)),
             bool(stdin_state.get("complete", not request.stdin_bytes)),
         ),
@@ -2781,7 +2991,7 @@ class _WindowsBackendV1:
     ) -> None:
         self.coordinator = coordinator
         self.admission_owner = admission_owner
-        self.api = api or _WindowsKernelV1()
+        self.api = api if api is not None else _WindowsKernelV1()
 
     def run(
         self,
@@ -2791,6 +3001,7 @@ class _WindowsBackendV1:
         executable_launch_owner: "_ExecutableLaunchOwnerV1",
         admission: WindowsArgvAdmissionV1 | None = None,
         internal_probe_admission: WindowsInternalProbeAdmissionV1 | None = None,
+        dialogue: ProcessDialogueV1 | None = None,
     ) -> ProcessResultV1:
         import msvcrt
 
@@ -2816,13 +3027,14 @@ class _WindowsBackendV1:
             "stdin_child", "stdin_parent", "stdout_child", "stdout_parent",
             "stderr_child", "stderr_parent", "job", "process", "thread",
         )}
-        attr_buffer: ctypes.Array[Any] | None = None
-        attr_initialized = False
         capture = BoundedCaptureV1(
             request.capture_policy, request.capture_sink_binding
         )
         issues: list[str] = []
-        stdin_state: dict[str, object] = {"written": 0, "complete": not request.stdin_bytes}
+        stdin_state: dict[str, object] = {
+            "written": 0,
+            "complete": not request.stdin_bytes and dialogue is None,
+        }
         failure_id: str | None = None
         stage = "completed"
         timed_out = False
@@ -2835,8 +3047,23 @@ class _WindowsBackendV1:
         exit_code: int | None = None
         reader_threads: list[threading.Thread] = []
         writer_thread: threading.Thread | None = None
-        process_created = False
-        job_terminate_failed = False
+        job_process: Any | None = None
+        helper: Any | None = None
+
+        def record_job_closure(closure: Any) -> None:
+            nonlocal direct_reaped, exit_code, settlement, job_handle_closed
+            nonlocal primary_thread_closed, failure_id, stage
+            direct_reaped = closure.direct_reaped
+            if exit_code is None:
+                exit_code = closure.direct_exit_code
+            settlement = "EMPTY" if closure.active_zero else "AMBIGUOUS"
+            job_handle_closed = closure.handles_closed
+            primary_thread_closed = closure.handles_closed
+            if closure.issues:
+                issues.extend(closure.issues)
+            if not closure.complete or (closure.job_terminated and failure_id is None):
+                if failure_id is None:
+                    failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
 
         def register_handle(name: str, handle: int) -> None:
             handles[name] = handle
@@ -2846,7 +3073,12 @@ class _WindowsBackendV1:
                 current = handles.get(name)
                 if current is None:
                     return
-                closed = self.api.close(current)
+                if job_process is not None:
+                    before_close = len(job_process._issues)
+                    job_process._close_handle(name)
+                    closed = len(job_process._issues) == before_close
+                else:
+                    closed = self.api.close(current)
                 handles[name] = None
                 if not closed:
                     raise OSError("CloseHandle failed")
@@ -2874,27 +3106,17 @@ class _WindowsBackendV1:
                 job_handle_closed = True
 
         def terminate_job() -> bool:
-            if handles["job"]:
-                return bool(k.TerminateJobObject(handles["job"], 1))
+            if job_process is not None:
+                return job_process.terminate_job()
             return True
 
         def last_close_after_terminate_failure() -> None:
-            nonlocal failure_id, stage, settlement, job_terminate_failed
-            job_terminate_failed = True
+            nonlocal failure_id, stage, settlement
             failure_id = "PSV1-JOB-TERMINATE"
             stage = "tree-settlement"
             settlement = "AMBIGUOUS"
-            if handles["job"]:
-                accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
-                returned = wintypes.DWORD()
-                k.QueryInformationJobObject(
-                    handles["job"],
-                    1,
-                    ctypes.byref(accounting),
-                    ctypes.sizeof(accounting),
-                    ctypes.byref(returned),
-                )
-                close_handle("job")
+            if job_process is not None:
+                job_process._close_handle("job")
 
         def cleanup_windows_backend(remaining: float) -> None:
             before = len(issues)
@@ -2911,6 +3133,10 @@ class _WindowsBackendV1:
                     issues.append("PSV1-RESOURCE-CLOSE")
                 else:
                     lifecycle.release_worker(f"{worker_prefix}{name}")
+            if job_process is not None:
+                closure = job_process.close()
+                if not closure.complete:
+                    issues.extend(closure.issues or ("PSV1-TREE-SETTLEMENT",))
             for name in (
                 "thread",
                 "process",
@@ -2922,13 +3148,6 @@ class _WindowsBackendV1:
                 "stderr_parent",
             ):
                 close_handle(name)
-            if attr_initialized and attr_buffer is not None:
-                try:
-                    k.DeleteProcThreadAttributeList(
-                        ctypes.cast(attr_buffer, ctypes.c_void_p)
-                    )
-                except BaseException:
-                    issues.append("PSV1-RESOURCE-CLOSE")
             close_handle("job")
             if len(issues) != before:
                 raise OSError("windows backend cleanup incomplete")
@@ -2938,158 +3157,73 @@ class _WindowsBackendV1:
         try:
             if self.coordinator.poisoned:
                 raise ProcessSupervisionError("PSV1-INHERITANCE-POISONED", "handle-preparation")
-            sa = SECURITY_ATTRIBUTES(ctypes.sizeof(SECURITY_ATTRIBUTES), None, False)
-            pairs = (
-                ("stdin_child", "stdin_parent"),
-                ("stdout_parent", "stdout_child"),
-                ("stderr_parent", "stderr_child"),
-            )
-            for read_name, write_name in pairs:
-                read = wintypes.HANDLE()
-                write = wintypes.HANDLE()
-                if not k.CreatePipe(ctypes.byref(read), ctypes.byref(write), ctypes.byref(sa), 0):
-                    raise ProcessSupervisionError("PSV1-HANDLE-INHERITANCE", "handle-preparation")
-                register_handle(read_name, read.value)
-                register_handle(write_name, write.value)
-            job = k.CreateJobObjectW(None, None)
-            if not job:
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            register_handle("job", job)
-            limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-            limits.BasicLimitInformation.LimitFlags = self.api.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            if not k.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            size = SIZE_T()
-            k.InitializeProcThreadAttributeList(None, 2, 0, ctypes.byref(size))
-            if not size.value:
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            attr_buffer = ctypes.create_string_buffer(size.value)
-            attr_pointer = ctypes.cast(attr_buffer, ctypes.c_void_p)
-            if not k.InitializeProcThreadAttributeList(attr_pointer, 2, 0, ctypes.byref(size)):
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            attr_initialized = True
-            job_value = wintypes.HANDLE(job)
-            if not k.UpdateProcThreadAttribute(
-                attr_pointer, 0, self.api.PROC_THREAD_ATTRIBUTE_JOB_LIST,
-                ctypes.byref(job_value), ctypes.sizeof(job_value), None, None,
-            ):
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            child_handles = (wintypes.HANDLE * 3)(
-                handles["stdin_child"], handles["stdout_child"], handles["stderr_child"]
-            )
-            if not k.UpdateProcThreadAttribute(
-                attr_pointer, 0, self.api.PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                child_handles, ctypes.sizeof(child_handles), None, None,
-            ):
-                raise ProcessSupervisionError("PSV1-ATTRIBUTE-LIST", "handle-preparation")
-            startup = STARTUPINFOEXW()
-            startup.StartupInfo.cb = ctypes.sizeof(startup)
-            startup.StartupInfo.dwFlags = self.api.STARTF_USESTDHANDLES
-            startup.StartupInfo.hStdInput = handles["stdin_child"]
-            startup.StartupInfo.hStdOutput = handles["stdout_child"]
-            startup.StartupInfo.hStdError = handles["stderr_child"]
-            startup.lpAttributeList = attr_pointer
-            info = PROCESS_INFORMATION()
-            command = ctypes.create_unicode_buffer(serialize_msvcrt_argv(request.argv))
-            environment = _windows_environment_block(request)
-            child_names = ("stdin_child", "stdout_child", "stderr_child")
-            with self.coordinator.lock:
-                if self.coordinator.poisoned:
-                    raise ProcessSupervisionError("PSV1-INHERITANCE-POISONED", "handle-preparation")
-                enabled: list[str] = []
-                try:
-                    for name in child_names:
-                        if not k.SetHandleInformation(handles[name], self.api.HANDLE_FLAG_INHERIT, self.api.HANDLE_FLAG_INHERIT):
-                            raise ProcessSupervisionError("PSV1-HANDLE-INHERITANCE", "handle-preparation")
-                        enabled.append(name)
-                    create_owner = WindowsCreateOwnerV1(
-                        self.admission_owner,
-                        request,
-                        lambda: k.CreateProcessW(
-                            str(request.resolved_executable), command, None, None, True,
-                            self.api.CREATE_SUSPENDED | self.api.CREATE_UNICODE_ENVIRONMENT | self.api.EXTENDED_STARTUPINFO_PRESENT,
-                            environment, validated_cwd.canonical_absolute, ctypes.byref(startup.StartupInfo), ctypes.byref(info),
-                        ),
-                        executable_launch_owner,
-                    )
-                    created = (
-                        create_owner.create_internal_probe(
-                            lifecycle,
-                            internal_probe_admission,
-                            executable_launch_owner,
-                        )
-                        if internal_probe_admission is not None
-                        else create_owner.create_task(
-                            lifecycle, request, admission
-                        )
-                    )
-                    if not created:
-                        raise ProcessSupervisionError("PSV1-PROCESS-CREATE", "process-create")
-                    register_handle("process", info.hProcess)
-                    register_handle("thread", info.hThread)
-                    process_created = True
-                    if not lifecycle.close_resource(
-                        executable_launch_owner.resource_name,
-                        time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
-                    ):
-                        raise ProcessSupervisionError(
-                            "PSV1-RESOURCE-CLOSE", "resource-cleanup"
-                        )
-                finally:
-                    restoration_ok = True
-                    for name in enabled:
-                        if not k.SetHandleInformation(handles[name], self.api.HANDLE_FLAG_INHERIT, 0):
-                            restoration_ok = False
-                    if not restoration_ok:
-                        self.coordinator.poison()
-                        if process_created:
-                            if not terminate_job():
-                                last_close_after_terminate_failure()
-                        failure_id = "PSV1-INHERITANCE-POISONED"
-                        stage = "handle-preparation"
-            for name in child_names:
-                close_handle(name)
-            if failure_id:
-                raise ProcessSupervisionError(failure_id, stage)
-            in_job = wintypes.BOOL()
-            if not k.IsProcessInJob(handles["process"], handles["job"], ctypes.byref(in_job)) or not in_job.value:
-                raise ProcessSupervisionError("PSV1-TREE-VERIFICATION", "tree-verification")
-            ownership_confirmed = True
-            if request.diagnostic_port is not None:
-                request.diagnostic_port.emit(
-                    "process.supervision.windows.job-verified.v1",
-                    {"ownershipConfirmed": True},
+            helper = _WINDOWS_JOB
+            def admitted_create(create_once: Callable[[], bool]) -> bool:
+                create_owner = WindowsCreateOwnerV1(
+                    self.admission_owner, request, create_once, executable_launch_owner
                 )
-            resume = k.ResumeThread(handles["thread"])
-            if resume != 1:
-                raise ProcessSupervisionError("PSV1-PROCESS-RESUME", "process-resume")
-            close_handle("thread")
-            def convert_parent(name: str, flags: int) -> tuple[int, str]:
-                handle = handles[name]
-                assert handle is not None
-                resource_name = f"{handle_prefix}{name}"
-                try:
-                    descriptor = _convert_windows_handle_to_fd(
-                        handle,
-                        flags,
-                        lifecycle,
-                        resource_name,
-                        converter=msvcrt.open_osfhandle,
-                        handle_closer=self.api.close,
+                created = (
+                    create_owner.create_internal_probe(
+                        lifecycle, internal_probe_admission, executable_launch_owner
                     )
-                    return descriptor, resource_name
-                finally:
-                    handles[name] = None
+                    if internal_probe_admission is not None
+                    else create_owner.create_task(lifecycle, request, admission)
+                )
+                if created and not lifecycle.close_resource(
+                    executable_launch_owner.resource_name,
+                    time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
+                ):
+                    raise ProcessSupervisionError("PSV1-RESOURCE-CLOSE", "resource-cleanup")
+                return bool(created)
 
-            stdin_fd, stdin_resource = convert_parent(
-                "stdin_parent", os.O_WRONLY | os.O_BINARY
+            def before_resume() -> None:
+                if request.diagnostic_port is not None:
+                    request.diagnostic_port.emit(
+                        "process.supervision.windows.job-verified.v1",
+                        {"ownershipConfirmed": True},
+                    )
+
+            job_process = helper.WindowsJobOwnerV1.launch(
+                executable=str(request.resolved_executable),
+                argv=request.argv,
+                cwd=validated_cwd.canonical_absolute,
+                environment=_environment_mapping(request),
+                create_gate=admitted_create,
+                before_resume=before_resume,
+                coordinator=self.coordinator,
+                api=self.api,
             )
-            stdout_fd, stdout_resource = convert_parent(
-                "stdout_parent", os.O_RDONLY | os.O_BINARY
-            )
-            stderr_fd, stderr_resource = convert_parent(
-                "stderr_parent", os.O_RDONLY | os.O_BINARY
-            )
+            handles = job_process._handles
+            ownership_confirmed = True
+            for name in handles:
+                register_handle(name, handles[name])
+            primary_thread_closed = handles["thread"] is None
+            def take_parent(name: str) -> tuple[int, str]:
+                resource_name = f"{handle_prefix}{name}_parent"
+                descriptor = getattr(job_process, f"take_{name}_fd")()
+                if descriptor is None:
+                    raise ProcessSupervisionError("PSV1-DESCRIPTOR-OWNERSHIP", "handle-preparation")
+                try:
+                    lifecycle.transfer_resource(
+                        resource_name,
+                        lambda _remaining, fd=descriptor: os.close(fd),
+                        state="FD_OWNED",
+                    )
+                except BaseException:
+                    try:
+                        os.close(descriptor)
+                    except OSError as close_error:
+                        lifecycle.mark_resource_uncertain(resource_name)
+                        raise ProcessSupervisionError(
+                            "PSV1-DESCRIPTOR-OWNERSHIP", "resource-cleanup"
+                        ) from close_error
+                    raise
+                return descriptor, resource_name
+
+            stdin_fd, stdin_resource = take_parent("stdin")
+            stdout_fd, stdout_resource = take_parent("stdout")
+            stderr_fd, stderr_resource = take_parent("stderr")
+            dialogue_lines = _DialogueLineRouterV1() if dialogue is not None else None
             for fd, name, resource_name in (
                 (stdout_fd, "stdout", stdout_resource),
                 (stderr_fd, "stderr", stderr_resource),
@@ -3105,6 +3239,7 @@ class _WindowsBackendV1:
                         issues,
                         lifecycle,
                         resource_name,
+                        dialogue_lines if name == "stdout" else None,
                     ),
                     daemon=True,
                 )
@@ -3112,14 +3247,28 @@ class _WindowsBackendV1:
                 reader_threads.append(thread)
             lifecycle.register_worker(f"{worker_prefix}stdin")
             writer_thread = threading.Thread(
-                target=_writer_fd,
+                target=_dialogue_fd if dialogue is not None else _writer_fd,
                 args=(
-                    stdin_fd,
-                    request.stdin_bytes or b"",
-                    stdin_state,
-                    issues,
-                    lifecycle,
-                    stdin_resource,
+                    (
+                        stdin_fd,
+                        dialogue,
+                        dialogue_lines,
+                        stdin_state,
+                        issues,
+                        lifecycle,
+                        stdin_resource,
+                        request.deadline_monotonic,
+                        request.cancellation_probe,
+                    )
+                    if dialogue is not None
+                    else (
+                        stdin_fd,
+                        request.stdin_bytes or b"",
+                        stdin_state,
+                        issues,
+                        lifecycle,
+                        stdin_resource,
+                    )
                 ),
                 daemon=True,
             )
@@ -3134,16 +3283,27 @@ class _WindowsBackendV1:
                 wait_failed = wait == self.api.INFINITE
                 if wait_failed:
                     failure_id, stage = "PSV1-INTERNAL", "execution"
-                elif capture.limit_crossed:
+                elif capture.limit_crossed and not (
+                    dialogue is not None
+                    and dialogue.continue_after_stdout_capture_limit
+                    and capture.snapshot()["stdout"].truncated
+                    and not capture.snapshot()["stderr"].truncated
+                ):
                     failure_id, stage = "PSV1-CAPTURE-LIMIT", "capture-limit"
                 elif capture.io_failed or "PSV1-CAPTURE-IO" in issues:
                     failure_id, stage = "PSV1-CAPTURE-IO", "execution"
                 elif stdin_state.get("failure"):
-                    failure_id, stage = str(stdin_state["failure"]), "stdin-delivery"
-                elif lifecycle.cancelled or (
+                    failure_id = str(stdin_state["failure"])
+                    if failure_id == "PSV1-CANCELLED":
+                        stage, cancelled = "cancellation", True
+                    elif failure_id == "PSV1-DEADLINE":
+                        stage, timed_out = "deadline", True
+                    else:
+                        stage = "stdin-delivery"
+                elif dialogue is None and (lifecycle.cancelled or (
                     request.cancellation_probe is not None
                     and request.cancellation_probe()
-                ):
+                )):
                     failure_id, stage, cancelled = "PSV1-CANCELLED", "cancellation", True
                 elif now >= request.deadline_monotonic:
                     failure_id, stage, timed_out = "PSV1-DEADLINE", "deadline", True
@@ -3188,27 +3348,8 @@ class _WindowsBackendV1:
                     lifecycle.release_worker(f"{worker_prefix}stdin")
             if any(thread.is_alive() for thread in reader_threads) or (writer_thread and writer_thread.is_alive()):
                 issues.append("PSV1-RESOURCE-CLOSE")
-            if not job_terminate_failed and handles["job"]:
-                accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
-                returned = wintypes.DWORD()
-                settle_until = phase_deadline()
-                while True:
-                    if not k.QueryInformationJobObject(handles["job"], 1, ctypes.byref(accounting), ctypes.sizeof(accounting), ctypes.byref(returned)):
-                        settlement = "AMBIGUOUS"
-                        if failure_id is None:
-                            failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
-                        break
-                    if accounting.ActiveProcesses == 0:
-                        settlement = "EMPTY"
-                        break
-                    if time.monotonic() >= settle_until:
-                        settlement = "NONEMPTY"
-                        if not terminate_job():
-                            last_close_after_terminate_failure()
-                        if failure_id is None:
-                            failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
-                        break
-                    time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
+            if job_process is not None:
+                record_job_closure(job_process.settle(phase_deadline()))
         except ProcessSupervisionError as exc:
             if failure_id is None:
                 failure_id, stage = exc.failure_id, exc.terminal_stage
@@ -3217,35 +3358,32 @@ class _WindowsBackendV1:
                 and exc.terminal_stage == "deadline"
             ):
                 timed_out = True
-            if not terminate_job():
-                last_close_after_terminate_failure()
-            if handles["process"]:
-                k.WaitForSingleObject(
-                    handles["process"],
-                    max(0, int((phase_deadline() - time.monotonic()) * 1000)),
-                )
-                direct_reaped = True
-            if handles["job"]:
-                accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
-                returned = wintypes.DWORD()
-                settle_until = phase_deadline()
-                while time.monotonic() <= settle_until:
-                    if not k.QueryInformationJobObject(
-                        handles["job"],
-                        1,
-                        ctypes.byref(accounting),
-                        ctypes.sizeof(accounting),
-                        ctypes.byref(returned),
-                    ):
-                        break
-                    if accounting.ActiveProcesses == 0:
-                        settlement = "EMPTY"
-                        break
-                    time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
-        except BaseException:
-            if not terminate_job():
-                last_close_after_terminate_failure()
-            raise
+            closure = getattr(exc, "windows_job_closure", None)
+            if closure is not None:
+                record_job_closure(closure)
+            elif job_process is not None:
+                record_job_closure(job_process.settle(phase_deadline(), terminate=True))
+        except BaseException as exc:
+            if helper is not None and isinstance(exc, helper.WindowsJobError):
+                mapping = {
+                    "WJOB-STDIO": "PSV1-HANDLE-INHERITANCE",
+                    "WJOB-INHERITANCE": "PSV1-HANDLE-INHERITANCE",
+                    "WJOB-INHERITANCE-POISONED": "PSV1-INHERITANCE-POISONED",
+                    "WJOB-PROCESS-CREATE": "PSV1-PROCESS-CREATE",
+                    "WJOB-MEMBERSHIP": "PSV1-TREE-VERIFICATION",
+                    "WJOB-RESUME": "PSV1-PROCESS-RESUME",
+                    "WJOB-JOB-TERMINATE": "PSV1-JOB-TERMINATE",
+                    "WJOB-HANDLE-CLOSE": "PSV1-RESOURCE-CLOSE",
+                }
+                failure_id = mapping.get(exc.failure_id, "PSV1-ATTRIBUTE-LIST")
+                stage = exc.stage if exc.stage in TERMINAL_STAGES else "handle-preparation"
+                closure = getattr(exc, "windows_job_closure", None)
+                if closure is not None:
+                    record_job_closure(closure)
+            else:
+                if job_process is not None:
+                    job_process.close()
+                raise
         if internal_probe:
             if not lifecycle.close_resource(backend_resource_name, phase_deadline()):
                 issues.append("PSV1-RESOURCE-CLOSE")
@@ -3256,6 +3394,13 @@ class _WindowsBackendV1:
         resources_closed = not any(handles.values()) and not issues
         if settlement == "AMBIGUOUS" and direct_reaped and ownership_confirmed and not failure_id:
             failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
+        final_streams = capture.snapshot()
+        continued_stdout_capture_limit = (
+            dialogue is not None
+            and dialogue.continue_after_stdout_capture_limit
+            and final_streams["stdout"].truncated
+            and not final_streams["stderr"].truncated
+        )
         return _result_from_parts(
             request, started,
             executable_identity_sha256=validated_cwd.executable_identity_sha256,
@@ -3266,6 +3411,7 @@ class _WindowsBackendV1:
             direct_reaped=direct_reaped, primary_thread_closed=primary_thread_closed,
             job_handle_closed=job_handle_closed, resources_closed=resources_closed,
             poisoned=self.coordinator.poisoned, cleanup_issues=issues,
+            capture_limit_is_failure=not continued_stdout_capture_limit,
         )
 
 
@@ -3318,6 +3464,7 @@ class ProcessRunnerV1:
         environment: tuple[EnvironmentRowV1, ...],
         deadline_seconds: float = 60.0,
         capture_limit_bytes: int,
+        stdin_bytes: bytes | None = None,
     ) -> tuple[ProcessRequestV1, CaptureSinkBindingV1]:
         """Build the sealed request used by the repository-transfer Git adapter."""
 
@@ -3335,6 +3482,13 @@ class ProcessRunnerV1:
                 or not 0 < deadline_seconds <= 60.0
                 or not isinstance(capture_limit_bytes, int)
                 or not 0 < capture_limit_bytes <= MAX_CAPTURE_BYTES // 2
+                or (
+                    stdin_bytes is not None
+                    and (
+                        type(stdin_bytes) is not bytes
+                        or len(stdin_bytes) > MAX_STDIN_BYTES
+                    )
+                )
             ):
                 raise ProcessSupervisionError(
                     "PSV1-REQUEST-INVALID", "request-validation"
@@ -3353,7 +3507,7 @@ class ProcessRunnerV1:
             resolved_executable=executable,
             cwd=canonical_cwd,
             environment=environment,
-            stdin_bytes=None,
+            stdin_bytes=stdin_bytes,
             deadline_monotonic=time.monotonic() + float(deadline_seconds),
             capture_policy=RepositoryTransferCapturePolicyV1(
                 "repository-transfer-git-v1",
@@ -3463,7 +3617,7 @@ class ProcessRunnerV1:
         result = _WindowsBackendV1(
             self.windows_inheritance_coordinator,
             self.windows_argv_admission_owner,
-            self._windows_api,
+            executable_launch_owner.windows_api,
         ).run(
             request,
             lifecycle,
@@ -3494,18 +3648,65 @@ class ProcessRunnerV1:
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
-    def _begin_lifecycle(self) -> RunLifecycleV1:
+    def _begin_lifecycle(self, *, native_preparation: bool = False) -> RunLifecycleV1:
         with self._lock:
             if self._closed or self._next_counter >= MAX_RUN_COUNTER:
                 self._closed = True
                 raise ProcessSupervisionError("PSV1-RUNNER-CLOSED", "request-validation")
             self._next_counter += 1
             run_id = RunTokenV1(self._runner_nonce, self._next_counter)
-            lifecycle = RunLifecycleV1(run_id)
+            lifecycle = RunLifecycleV1(run_id, native_preparation=native_preparation)
             self._active[run_id] = lifecycle
             return lifecycle
 
+    def prepare_native_windows_launch(
+        self,
+        *,
+        argv: tuple[str, ...],
+        deadline_monotonic: float,
+        parser_contract: WindowsParserContractV1,
+        expected_executable_binding: ExecutableBindingV1 | None = None,
+    ) -> PreparedNativeWindowsLaunchV1:
+        """Validate capability before prompt access, retaining the same opened image."""
+        _validate_windows_parser_contract(parser_contract)
+        if os.name != "nt" or type(argv) is not tuple or not argv:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+        lifecycle = self._begin_lifecycle(native_preparation=True)
+        try:
+            request = ProcessRequestV1(
+                1, argv, Path(argv[0]), os.getcwd(), (), None,
+                deadline_monotonic,
+                CapturePolicyV1("native-parser-preflight-v1", 1, 0, 0, 1),
+                self.mint_memory_capture_sink(), SettlePolicyV1(5.0),
+                windows_argv_profile_id="native-parser-contract-v1",
+                expected_executable_binding=expected_executable_binding,
+                windows_parser_contract=parser_contract,
+            )
+            _validate_request_shape_before_executable_acquisition(request)
+            owner = _acquire_executable_launch_owner(
+                request.resolved_executable, lifecycle, windows_api=self._windows_api
+            )
+            validate_process_request(request, owner, argv_executable_prevalidated=True)
+            prepared = PreparedNativeWindowsLaunchV1(
+                self, lifecycle, owner, argv, deadline_monotonic,
+                parser_contract, expected_executable_binding,
+            )
+            lifecycle.finish_native_preparation(prepared)
+            return prepared
+        except BaseException:
+            observation = lifecycle.finalize_once(
+                time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
+            )
+            self._release_lifecycle(lifecycle)
+            if not observation.resources_closed:
+                raise ProcessSupervisionError(
+                    "PSV1-RESOURCE-CLOSE", "resource-cleanup"
+                )
+            raise
+
     def _release_lifecycle(self, lifecycle: RunLifecycleV1) -> None:
+        if lifecycle._native_preparation_phase is not None and not lifecycle.observation.resources_closed:
+            return
         lifecycle.mark_settled()
         with self._lock:
             self._active.pop(lifecycle.token, None)
@@ -3520,6 +3721,13 @@ class ProcessRunnerV1:
         settled: list[str] = []
         unsettled: list[str] = []
         for lifecycle in active:
+            observation = lifecycle.finalize_idle_preparation(deadline, wait_preparing=False)
+            if observation is not None and observation.resources_closed:
+                self._release_lifecycle(lifecycle)
+        for lifecycle in active:
+            observation = lifecycle.finalize_idle_preparation(deadline)
+            if observation is not None and observation.resources_closed:
+                self._release_lifecycle(lifecycle)
             if lifecycle.wait_settled(deadline):
                 settled.append(lifecycle.token.sha256)
                 continue
@@ -3540,9 +3748,22 @@ class ProcessRunnerV1:
         request: ProcessRequestV1,
         *,
         lifecycle: RunLifecycleV1 | None = None,
+        dialogue: ProcessDialogueV1 | None = None,
+        prepared_native_launch: PreparedNativeWindowsLaunchV1 | None = None,
     ) -> ProcessResultV1:
         started = time.monotonic()
-        owned_lifecycle = lifecycle
+        if prepared_native_launch is not None:
+            if (type(prepared_native_launch) is not PreparedNativeWindowsLaunchV1
+                or prepared_native_launch.runner is not self
+                or prepared_native_launch.used):
+                return _request_failure(
+                    request,
+                    ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation"),
+                    started,
+                )
+        owned_lifecycle = (
+            prepared_native_launch.lifecycle if prepared_native_launch is not None else lifecycle
+        )
         if owned_lifecycle is None:
             try:
                 owned_lifecycle = self._begin_lifecycle()
@@ -3551,11 +3772,38 @@ class ProcessRunnerV1:
         validated_cwd: ValidatedCwdV1 | None = None
         executable_launch_owner: _ExecutableLaunchOwnerV1 | None = None
         try:
+            if prepared_native_launch is not None:
+                if not owned_lifecycle.consume_native_preparation(prepared_native_launch):
+                    return _request_failure(
+                        request,
+                        ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation"),
+                        started,
+                    )
             if not isinstance(request, ProcessRequestV1):
                 raise ProcessSupervisionError(
                     "PSV1-REQUEST-INVALID", "request-validation"
                 )
             _validate_request_shape_before_executable_acquisition(request)
+            if dialogue is not None and (
+                type(dialogue) is not ProcessDialogueV1
+                or dialogue.protocol_id != KimiWindowsProfileV1.profile_id
+                or not callable(dialogue.handler)
+                or type(dialogue.continue_after_stdout_capture_limit) is not bool
+                or request.windows_argv_profile_id
+                != KimiWindowsProfileV1.profile_id
+                or request.stdin_bytes is not None
+            ):
+                raise ProcessSupervisionError(
+                    "PSV1-REQUEST-INVALID", "request-validation"
+                )
+            if (
+                dialogue is None
+                and request.windows_argv_profile_id
+                == KimiWindowsProfileV1.profile_id
+            ):
+                raise ProcessSupervisionError(
+                    "PSV1-REQUEST-INVALID", "request-validation"
+                )
             if os.name != "nt":
                 raise ProcessSupervisionError(
                     "PSV1-POSIX-ORACLE-UNAVAILABLE", "request-validation"
@@ -3576,11 +3824,25 @@ class ProcessRunnerV1:
                 raise ProcessSupervisionError(
                     "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
                 ) from exc
-            executable_launch_owner = _acquire_executable_launch_owner(
-                request.resolved_executable,
-                owned_lifecycle,
-                windows_api=self._windows_api,
-            )
+            if prepared_native_launch is not None:
+                if (
+                    request.argv != prepared_native_launch.argv
+                    or request.deadline_monotonic != prepared_native_launch.deadline_monotonic
+                    or request.windows_parser_contract != prepared_native_launch.parser_contract
+                    or request.expected_executable_binding
+                    != prepared_native_launch.expected_executable_binding
+                    or request.windows_argv_profile_id != "native-parser-contract-v1"
+                    or os.path.normcase(os.path.abspath(request.resolved_executable))
+                    != os.path.normcase(str(prepared_native_launch.executable_owner.path))
+                ):
+                    raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
+                executable_launch_owner = prepared_native_launch.executable_owner
+            else:
+                executable_launch_owner = _acquire_executable_launch_owner(
+                    request.resolved_executable,
+                    owned_lifecycle,
+                    windows_api=self._windows_api,
+                )
             validated_cwd = validate_process_request(
                 request,
                 executable_launch_owner,
@@ -3594,7 +3856,8 @@ class ProcessRunnerV1:
                 admission = None
         except _WindowsArgvProbeFailure as exc:
             observation = owned_lifecycle.finalize_once(
-                min(
+                time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
+                if prepared_native_launch is not None else min(
                     request.deadline_monotonic,
                     time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
                 )
@@ -3632,6 +3895,8 @@ class ProcessRunnerV1:
                     else None
                 ),
             )
+            if exc.failure_id == "PSV1-CANCELLED":
+                result = dataclasses.replace(result, cancelled=True)
             observation = owned_lifecycle.finalize_once(
                 time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
             )
@@ -3653,6 +3918,10 @@ class ProcessRunnerV1:
             return dataclasses.replace(
                 result, run_token_sha256=owned_lifecycle.token.sha256
             )
+        except BaseException:
+            owned_lifecycle.finalize_once(time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS)
+            self._release_lifecycle(owned_lifecycle)
+            raise
         duplicate_request_id = False
         with self._lock:
             if request.request_id is not None:
@@ -3667,12 +3936,15 @@ class ProcessRunnerV1:
                 started,
                 executable_identity_sha256=validated_cwd.executable_identity_sha256,
             )
-            owned_lifecycle.finalize_once(
+            observation = owned_lifecycle.finalize_once(
                 time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
             )
             self._release_lifecycle(owned_lifecycle)
             return dataclasses.replace(
-                result, run_token_sha256=owned_lifecycle.token.sha256
+                result, run_token_sha256=owned_lifecycle.token.sha256,
+                resources_closed=result.resources_closed and observation.resources_closed,
+                cleanup_uncertain=result.cleanup_uncertain or not observation.resources_closed,
+                cleanup_issues=tuple(dict.fromkeys((*result.cleanup_issues, *observation.cleanup_issues))),
             )
         try:
             owned_lifecycle.register_resource(
@@ -3688,6 +3960,10 @@ class ProcessRunnerV1:
             ):
                 raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
             if self._backend_factory is not None:
+                if dialogue is not None:
+                    raise ProcessSupervisionError(
+                        "PSV1-REQUEST-INVALID", "request-validation"
+                    )
                 backend = self._backend_factory(self, owned_lifecycle)
                 assert executable_launch_owner is not None
                 result = backend(
@@ -3702,13 +3978,14 @@ class ProcessRunnerV1:
                 result = _WindowsBackendV1(
                     self.windows_inheritance_coordinator,
                     self.windows_argv_admission_owner,
-                    self._windows_api,
+                    executable_launch_owner.windows_api,
                 ).run(
                     request,
                     owned_lifecycle,
                     validated_cwd,
                     executable_launch_owner,
                     admission,
+                    dialogue=dialogue,
                 )
         except ProcessSupervisionError as exc:
             result = _request_failure(

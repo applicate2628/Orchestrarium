@@ -2,25 +2,23 @@
 """Claude PreToolUse binding for the shared MCP-continuity policy.
 
 The shared policy remains the sole owner of confident source-navigation
-classification.  This provider adapter binds only Claude
-root conversations in effective ``mcpMode: force``.  Auto, unresolved modes,
-and subagents preserve the existing advisory behavior.  Every failure remains
+classification.  This provider adapter reminds Claude root conversations of
+their mandatory duty in effective ``mcpMode: force`` without determining
+compliance.  Auto, unresolved modes, and subagents preserve the existing
+advisory behavior.  Every failure remains
 fail-open so a malformed envelope or unreadable config cannot create a retry
 loop.
 """
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from hook_common import (
-    STATUS_FOUND,
     emit_advisory,
-    last_genuine_user_text,
     parse_envelope,
     read_stdin_utf8,
 )
@@ -31,42 +29,6 @@ from mcp_continuity_policy import (
 )
 
 
-RECOVERY_MARKER = "[approve-mcp-fallback:v1]"
-TRANSCRIPT_BYTE_CAP = 4 * 1024 * 1024
-
-
-def _emit_deny(envelope: dict) -> None:
-    event = envelope.get("hook_event_name")
-    if not isinstance(event, str) or not event:
-        event = "PreToolUse"
-    reason = (
-        "[MCP-FORCE-1] Effective mcpMode is force and this root source-"
-        "navigation choice requires an MCP checkpoint. Use runtime tool discovery "
-        "as the only availability source and query the relevant tool now. If the MCP "
-        "path is unavailable or inappropriate, the exact host-projected "
-        f"user-role message {RECOVERY_MARKER} enables one recovery turn; it "
-        "is not authenticated authorization."
-    )
-    payload = {
-        "hookSpecificOutput": {
-            "hookEventName": event,
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }
-    }
-    print(json.dumps(payload, ensure_ascii=True))
-
-
-def _emit_recovery(envelope: dict) -> None:
-    emit_advisory(
-        envelope,
-        "[MCP-FORCE-RECOVERY] The exact host-projected user-role recovery "
-        "marker allows this qualifying search. It excludes assistant/tool-text "
-        "injection but is not authenticated authorship, changes no "
-        "configuration, and expires at the next projected user-role message.",
-    )
-
-
 def _emit_mode_unresolved(envelope: dict) -> None:
     emit_advisory(
         envelope,
@@ -75,16 +37,6 @@ def _emit_mode_unresolved(envelope: dict) -> None:
         "hook is allowing the choice and is not treating an invalid, missing, "
         "or unreadable value as force.",
     )
-
-
-def _exact_projected_user_recovery_marker(envelope: dict) -> bool:
-    transcript_path = envelope.get("transcript_path")
-    if not isinstance(transcript_path, str) or not transcript_path:
-        return False
-    text, status = last_genuine_user_text(
-        transcript_path, byte_cap=TRANSCRIPT_BYTE_CAP
-    )
-    return status == STATUS_FOUND and text == RECOVERY_MARKER
 
 
 def main() -> int:
@@ -110,10 +62,15 @@ def main() -> int:
         if mode != "force":
             _emit_mode_unresolved(envelope)
             return 0
-        if _exact_projected_user_recovery_marker(envelope):
-            _emit_recovery(envelope)
-            return 0
-        _emit_deny(envelope)
+        emit_advisory(
+            envelope,
+            "[MCP-FORCE-ADVISORY] Effective mcpMode is force. Runtime tool "
+            "discovery, relevant tool schema and fitting MCP use are mandatory, "
+            "including selected-root/currentness checks. This source-navigation "
+            "heuristic has not determined compliance. Follow the shared MCP-"
+            "continuity requirements and existing alternative-path restrictions; "
+            "this reminder grants no permission and does not override host refusals.",
+        )
     except Exception:
         return 0
     return 0

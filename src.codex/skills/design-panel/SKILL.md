@@ -30,11 +30,11 @@ Candidate launch arguments MUST NOT select or resume an existing provider sessio
 | `DP5 — Mandatory comparison` | The synthesis owner receives ALL valid candidates and produces an explicit comparison matrix. Surface-sweep panels take the verified union of compatible coverage; architecture-choice panels select or coherently combine options — never majority-vote or blind union of incompatible designs. |
 | `DP6 — Sole advance gate` | Only the synthesis artifact carries the Change-Surface Contract, final numbered `{guarantee, single-owner, enforcement-probe}` claims, and durable decision-registry identifiers, plus `PASS`. Candidate artifacts carry none of these. A panel invocation returns one public result: the synthesis or a non-success status. |
 | `DP7 — Fail closed` | Missing/errored/empty lanes are `UNVERIFIED`; duplicate framings invalidate quorum; unresolved conflicts return `REVISE`; fewer than two valid candidates return `BLOCKED:dependency`. |
-| `DP8 — One shot, then verify` | Candidate generation happens once; synthesis is the convergence step. No round counter or anti-drift ledger. Hand the synthesized design to `$review-loop` if independent verification is wanted. |
+| `DP8 — One shot, then verify` | Candidate generation happens once; synthesis is the convergence step. No round counter or anti-drift ledger. After synthesis, reassess the existing mandatory review-loop triggers. Perform required verification when a trigger remains; otherwise additional review needs its existing admission. A panel alone mandates neither a loop nor Planner and cannot waive an explicit full-loop request or unresolved owner/seam risk. Continue only the next selected authorized stage. |
 
 ## Steps
 
-1. **Read the routing surface.** Read and normalize `.agents/.agents-mode.yaml` first; honor `parallelMode`, `externalProvider`, `externalPriorityProfile`, and the other structured routing keys. Shipped `auto` stays on the Codex/Claude pair; Kimi is explicit-only Windows-enrolled read-only no-tools bundle review, independently verified and nonauthorizing; Grok remains unavailable in 1.x.
+1. **Read the routing surface.** Read and normalize `.agents/.agents-mode.yaml` first; honor `parallelMode`, `externalProvider`, `externalPriorityProfile`, and the other structured routing keys. Shipped `auto` stays on the Codex/Claude pair; Kimi is explicit-only Windows read-only work through the canonical fixed `kimi-code/k3` wrapper. Omission of the capability file keeps tools/servers/subagents empty with permission `reject`, while a validated file may select admitted read tools or Model Context Protocol servers; every result remains independently verified and nonauthorizing. Grok remains unavailable in 1.x.
 2. **Pinned-input gate.** Confirm one admitted objective, scope, and evidence/constraint package exist. A panel multiplies an unverified premise across every lane — verify it first.
 3. **Choose N and framings.** Default `N=2`. Pick a distinct, bounded framing per lane and pre-register them (lane id, framing, resolved role) before dispatch.
 4. **Dispatch the candidate lanes** through the external surface, each carrying the identical pinned input and its own framing, with file-based prompt delivery (write the prompt body to a temporary file; argv stays for launcher flags and file paths). Inspect the resolved provider argv and fail closed on every session-reuse route listed by `DP3-NATIVE-ROUTE-UNVERIFIED`. Run concurrently when the runtime supports it, else sequentially in fresh contexts. Each lane writes its candidate to `design-<lane>.md`, never `design.md`.
@@ -68,7 +68,7 @@ The synthesis owner is the orchestrating session, performing synthesis directly 
 - This is a utility skill, not a new specialist role, and not a replacement for `$lead`.
 - Only the synthesis step may write `design.md`; candidate lanes never see each other's output.
 - Do not silently downgrade an external lane to internal execution.
-- Do NOT commit, push, or install from this skill. Implementation stops at the human commit gate.
+- Do NOT commit, push, or install from this skill. Return the accepted artifact to the root; verified local commit checkpoints remain the root's responsibility under shared governance. Human review remains required before push, release, or equivalent publication.
 
 ## Non-goals
 

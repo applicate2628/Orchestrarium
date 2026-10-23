@@ -41,7 +41,6 @@ HOOK_PYTHON_ENTRYPOINTS = (
     CODEX_HOOKS / "check-no-trash-in-repo.py",
     CODEX_HOOKS / "check-stale-relation-residue.py",
     CODEX_HOOKS / "check-repository-orientation.py",
-    CODEX_HOOKS / "check-mcp-momentum.py",
 )
 
 MCP_REMINDERS = (

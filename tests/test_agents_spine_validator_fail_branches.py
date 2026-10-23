@@ -75,9 +75,9 @@ def _copy_spine_tree(dst_root: Path) -> Path:
     return dst_root / "shared" / "AGENTS.shared.md"
 
 
-def _run_cli(spine: Path) -> subprocess.CompletedProcess:
+def _run_cli(spine: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(VALIDATOR), "--spine", str(spine)],
+        [sys.executable, str(VALIDATOR), "--spine", str(spine), *args],
         capture_output=True, text=True, encoding="utf-8",
     )
 
@@ -94,6 +94,30 @@ class TestSpineValidatorHarness(unittest.TestCase):
             spine = _copy_spine_tree(Path(td))
             ok, messages = mod.validate(spine)
             self.assertTrue(ok, f"baseline copy must PASS; messages:\n" + "\n".join(messages))
+            self.assertTrue(messages[0].startswith("INFO: spine size"), messages)
+            self.assertIn("no local size budget selected", messages[0])
+
+    def test_selected_budget_boundaries_preserve_api_and_cli_contract(self) -> None:
+        mod = _load_validator()
+        with tempfile.TemporaryDirectory() as td:
+            spine = _copy_spine_tree(Path(td))
+            text = spine.read_text(encoding="utf-8")
+            size = max(len(text), len(text.encode("utf-8")))
+            self.assertGreater(len(text.encode("utf-8")), len(text))
+            for budget, expected in ((size - 1, False), (size, True), (size + 1, True), (0, False), (-1, False)):
+                with self.subTest(budget=budget):
+                    ok, messages = mod.validate(spine, budget)
+                    self.assertEqual(ok, expected, messages)
+                    self.assertTrue(messages[0].startswith("PASS: spine size" if expected else "FAIL: spine size"), messages)
+                    result = _run_cli(spine, "--size-cap", str(budget))
+                    self.assertEqual(result.returncode, 0 if expected else 1, result.stdout)
+                    self.assertIn("RESULT: PASS" if expected else "RESULT: FAIL", result.stdout)
+            with self.assertRaises(TypeError):
+                mod.validate(spine, "not-an-integer")
+            result = _run_cli(spine, "--size-cap", "not-an-integer")
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("invalid int value", result.stderr)
+            self.assertNotIn("RESULT: PASS", result.stdout)
 
     def test_unmutated_copy_passes_via_cli(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -128,6 +152,12 @@ class TestMissingManifestTokenFailsClosed(unittest.TestCase):
             joined = "\n".join(messages)
             self.assertIn("FAIL: missing", joined, joined)
             self.assertIn("banned reasoning phrases", joined, joined)
+            self.assertTrue(messages[0].startswith("INFO: spine size"), messages)
+            self.assertGreater(max(len(text), len(text.encode("utf-8"))), 1000)
+            explicit_ok, explicit_messages = mod.validate(spine, 1000)
+            self.assertFalse(explicit_ok)
+            self.assertTrue(explicit_messages[0].startswith("FAIL: spine size"), explicit_messages)
+            self.assertIn("FAIL: missing", "\n".join(explicit_messages))
 
     def test_removed_token_fails_via_cli(self) -> None:
         mod = _load_validator()
@@ -301,6 +331,18 @@ class TestMissingSpineFileFailsClosed(unittest.TestCase):
             ok, messages = mod.validate(missing)
             self.assertFalse(ok)
             self.assertTrue(any("not found" in m for m in messages), messages)
+
+    def test_invalid_utf8_remains_an_acquisition_failure(self) -> None:
+        mod = _load_validator()
+        with tempfile.TemporaryDirectory() as td:
+            spine = Path(td) / "AGENTS.shared.md"
+            spine.write_bytes(b"\xff")
+            with self.assertRaises(UnicodeDecodeError):
+                mod.validate(spine)
+            result = _run_cli(spine)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("UnicodeDecodeError", result.stderr)
+            self.assertNotIn("RESULT: PASS", result.stdout)
 
 
 if __name__ == "__main__":

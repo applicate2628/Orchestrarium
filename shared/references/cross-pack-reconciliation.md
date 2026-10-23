@@ -17,12 +17,13 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 
 | Block | Claude (`src.claude/agents/contracts/operating-model.md`) | Codex (`src.codex/skills/lead/operating-model.md`) | Notes |
 |-------|----------------------------------------------------------|-----------------------------------------------------|-------|
+| Primary-task lock | §"Primary-task lock" | §"Primary-task lock" | Both project the shared AGENTS.md **Primary-task continuity and side work** owner; brief inline questions, eligible substantive side delegation and no-wait ready primary continuation preserve existing authority, resource gates, holds and recovery. |
 | Isolation rule | §"Isolation rule" | §"Isolation rule" | Claude mentions Agent tool explicitly; Codex says "designated agent invocation mechanism" |
 | Research admission filter | §"Research admission filter" | §"Research admission filter" | Identical semantics, identical 8-item list + 3 gate owners |
 | Interaction types | §"Interaction types" table | §"Interaction types" table | Same 8 types; Claude has prose descriptions, Codex has compact table |
 | Cross-domain escalation | §"Cross-domain escalation protocol" | §"Cross-domain escalation protocol" | Identical 4-step protocol; Claude adds target-domain mapping table |
 | Adjacent-issue protocol | §"Adjacent-issue protocol" | §"Adjacent-issue protocol" | Identical semantics; Codex says "configured bug registry path" vs Claude's `work-items/bugs/` |
-| Artifact invalidation | §"Artifact invalidation protocol" | §"Artifact invalidation protocol" | Claude has 3 detailed steps; Codex condensed to 3 points. Same dependency chain. |
+| Artifact invalidation | §"Artifact invalidation protocol" | §"Artifact invalidation protocol" | Both blocks point to their platform-local canonical producing-scope and accepted-baseline handoff rule; neither defines another invalidation procedure. |
 | REVISE correction cap | §"REVISE iteration cap" | §"REVISE iteration cap procedure" | Both bindings cite the shared spine's consecutive same-role/same-artifact cap and escalation procedure; neither binding owns its numeric value |
 | Periodic controls | §"Periodic controls" table | §"Periodic controls" | Claude has full 11-row control matrix; Codex defers to repo-defined matrix |
 | How to instruct reviewers | §"How to instruct reviewers" | §"Review strategy selection" | Claude: 2 compact paragraphs. Codex: full strategy A/B with decision table. Semantics identical. |
@@ -36,11 +37,11 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 
 | Block | Claude (`src.claude/agents/contracts/subagent-contracts.md`) | Codex (`src.codex/skills/lead/subagent-contracts.md`) | Notes |
 |-------|-------------------------------------------------------------|-------------------------------------------------------|-------|
-| Handoff template | §"Handoff template" | §"Shared handoff template" | Identical structure; Codex has extra placeholder lines |
+| Handoff template | §"Handoff template" | §"Shared handoff template" | Identical structure and admission-to-assignment input receiving plus result-to-dispatch correlation; shared field meanings are owned by the canonical shared blueprint; Codex has extra placeholder lines |
 | Artifact gate | §"Artifact gate" | §"Artifact gate — no delegation without brief" | Identical rules; Codex adds "if the repository uses one" qualifier |
 | status.md format | §"status.md format" | §"status.md format" | Identical format. Only diff: Codex says "role to invoke" vs Claude's "agent to launch" |
 | Response format | §"Response format" | §"Shared response format" | Same 5-line format. Codex adds fact-first note and consultant exception inline |
-| BLOCKED classification | §"BLOCKED classification" | §"BLOCKED classification" | Identical 2-class table. Codex: "configured bug registry path" vs Claude: `work-items/bugs/` |
+| BLOCKED classification | §"BLOCKED classification" | §"BLOCKED classification" | Shared subagent operating model owns classification; QA owns conditional bug admission. Preserve the two classes and actual cause/owner/next action; admitted proposals use Codex's configured registry path or Claude's `work-items/bugs/` |
 | Interaction rules | §"Interaction rules" | §"Interaction rules" | Same 5 rules; minor wording adaptation |
 | Test ownership boundary | §"Test ownership boundary" | — | **Claude only.** Codex has no equivalent. |
 | Structured completion report | §"Structured completion report" | §"Structured completion report" | Identical 4-item format |

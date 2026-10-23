@@ -65,16 +65,33 @@ def run_hook(
     tool_input: object,
     raw: str | None = None,
     cwd: str = "/tmp",
+    tool_name: str | None = "Bash",
 ) -> subprocess.CompletedProcess:
     envelope = {"cwd": cwd, "tool_input": tool_input}
+    if tool_name is not None:
+        envelope["tool_name"] = tool_name
     stdin = raw if raw is not None else json.dumps(envelope, ensure_ascii=False)
     return subprocess.run(
-        [sys.executable, str(script)],
+        [sys.executable, "-B", str(script)],
         input=stdin, capture_output=True, text=True, encoding="utf-8",
     )
 
 
 class TestStrayArtifactHook(unittest.TestCase):
+    def test_supported_command_carriers_have_equal_advisory_polarity(self) -> None:
+        for script in HOOKS:
+            command = "git worktree add ../owned-test-subject"
+            baseline = run_hook(script, {"command": command}, tool_name="exec_command")
+            equivalent = run_hook(script, {"cmd": command}, tool_name="functions.exec_command")
+            self.assertEqual(baseline.returncode, 0)
+            self.assertEqual(equivalent.stdout, baseline.stdout)
+            self.assertTrue(baseline.stdout)
+            for payload in ({"cmd": command, "command": command}, {"cmd": "", "command": command}):
+                rejected = run_hook(script, payload, tool_name="exec_command")
+                self.assertEqual((rejected.returncode, rejected.stdout, rejected.stderr), (0, "", ""))
+            unsupported = run_hook(script, {"command": command}, tool_name=None)
+            self.assertEqual((unsupported.returncode, unsupported.stdout, unsupported.stderr), (0, "", ""))
+
     def assert_outcome(self, tool_input: object, should_warn: bool, raw: str | None = None) -> None:
         for script in HOOKS:
             with self.subTest(script=script.parent.parent.name):
@@ -253,11 +270,15 @@ class _CwdAwareHookCase(unittest.TestCase):
     `cwd` on disk (the repo-root probe stats `cwd/".git"`)."""
 
     def assert_outcome(
-        self, tool_input: object, should_warn: bool, cwd: str = "/tmp"
+        self,
+        tool_input: object,
+        should_warn: bool,
+        cwd: str = "/tmp",
+        tool_name: str = "Bash",
     ) -> None:
         for script in HOOKS:
             with self.subTest(script=script.parent.parent.name):
-                p = run_hook(script, tool_input, cwd=cwd)
+                p = run_hook(script, tool_input, cwd=cwd, tool_name=tool_name)
                 self.assertEqual(p.returncode, 0, p.stderr)
                 self.assertEqual(p.stderr, "")
                 self.assertEqual(bool(p.stdout.strip()), should_warn, f"stdout={p.stdout!r}")
@@ -314,6 +335,42 @@ class TestRootArtifactRedirect(_CwdAwareHookCase):
 
     def test_bare_obj_redirect_into_root_warns(self) -> None:
         self.assert_outcome({"command": "cat x > probe.obj"}, True, cwd=ROOT_CWD)
+
+    def test_quoted_javascript_arrow_is_not_a_redirect(self) -> None:
+        # The hook command text carries JavaScript as a quoted shell argument.
+        # Neither a plain arrow nor quotes escaped in POSIX/PowerShell syntax may
+        # expose its `>` as an outer-shell redirect.
+        commands = (
+            ("Bash", 'node -e "import(\'x\').then(m=>console.log(m))"'),
+            ("Bash", r'node -e "const target = \"> console.log \""'),
+            ("PowerShell", 'node -e "const target = `\"> console.log `\""'),
+        )
+        for tool_name, command in commands:
+            with self.subTest(tool_name=tool_name, command=command):
+                self.assert_outcome(
+                    {"command": command}, False, cwd=ROOT_CWD, tool_name=tool_name
+                )
+
+    def test_quoted_outer_redirect_target_warns(self) -> None:
+        self.assert_outcome(
+            {"command": 'node -e "1" > "console.log"'}, True, cwd=ROOT_CWD
+        )
+
+    def test_powershell_backslash_does_not_escape_a_quote(self) -> None:
+        self.assert_outcome(
+            {"command": r'Write-Output "C:\temp\" > console.log'},
+            True,
+            cwd=ROOT_CWD,
+            tool_name="PowerShell",
+        )
+
+    def test_powershell_backtick_escapes_an_outer_redirect(self) -> None:
+        self.assert_outcome(
+            {"command": "Write-Output `> console.log"},
+            False,
+            cwd=ROOT_CWD,
+            tool_name="PowerShell",
+        )
 
     # --- silent: the false-positive side ---
     def test_redirect_into_scratch_subdir_no_warn(self) -> None:

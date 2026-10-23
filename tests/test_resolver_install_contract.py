@@ -38,5 +38,6 @@ def test_shipped_resolver_and_reminder_rationale_agree() -> None:
 
     assert "resolve-agents-mode.py" in helpers
     assert "is NOT shipped to install targets" not in reminder
-    assert "is shipped beside this hook" in reminder
-    assert "does not import or\nexecute it" in reminder
+    assert "sibling ``agents_mode_runtime.py`` support leaf owns the first-match read" in reminder
+    assert "full resolver, ``resolve-agents-mode.py``, is\nshipped beside this hook" in reminder
+    assert "does not import or execute it" in reminder

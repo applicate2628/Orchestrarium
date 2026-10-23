@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import importlib.util
 import subprocess
@@ -21,6 +22,318 @@ def _engine_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _completed_grouped_scout(repo: Path, findings: list, rows: list) -> tuple[Path, dict]:
+    state, receipt = _begin(repo)
+    for lane in ("surgical", "deep", "scout"):
+        result = _record_round(repo, state, receipt, 1, lane, "PASS", findings=findings, reconciliation=rows)
+        assert result.returncode == 0, result.stderr
+    result = _run(repo, "complete-round", "--state", state, "--operation-id", "complete-1", "--round", 1)
+    assert result.returncode == 0, result.stderr
+    return state, receipt
+
+
+def _scout_metadata(state: Path, indexes: list[int], *, head: str | None = None) -> dict:
+    block = json.loads(state.read_text(encoding="utf-8"))["rounds"][-1]["scout"]
+    return {
+        "version": 1,
+        "scout_result_sha256": hashlib.sha256(json.dumps(block, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+        "expected_head": head,
+        "links": [{"finding_index": index, "reconciliation_index": row} for index, row in enumerate(indexes)],
+        "evidence": "Root compared every indexed original finding with its original grouped disposition; reviewed content unchanged.",
+    }
+
+
+def _amend_arguments(repo: Path, state: Path, receipt: dict, metadata: dict, operation_id: str = "metadata-a", round_number: int = 1) -> list[object]:
+    content = json.dumps(metadata)
+    request_id = hashlib.sha256(content.encode()).hexdigest()
+    path = _text(repo / ".scratch" / f"{operation_id}-{request_id}.json", content)
+    return ["amend-scout-reconciliation", "--state", state, "--operation-id", operation_id,
+            "--round", round_number, "--attempt-id", receipt["attempts"]["scout"],
+            "--artifact-revision", receipt["artifact_revision"], "--metadata-file", path]
+
+
+@pytest.mark.parametrize("findings,rows,indexes", [
+    (list(range(7)), [{"facts": [0, 1]}, {"facts": [2, 3]}, {"facts": [4]}, {"facts": [5]}, {"facts": [6]}], [0, 0, 1, 1, 2, 3, 4]),
+    (["duplicate", "duplicate", {"opaque": "Ω"}], [{"facts": "all three indexed occurrences"}], [0, 0, 0]),
+    ([], [], []),
+])
+def test_scout_metadata_collection_history_replay_and_terminal(tmp_path: Path, findings: list, rows: list, indexes: list[int]) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _completed_grouped_scout(repo, findings, rows)
+    original = json.loads(state.read_text(encoding="utf-8"))
+    raw_result = (repo / ".scratch" / "round-1-scout.json").read_bytes()
+    assert _run(repo, "validate", "--state", state, "--require-v2").returncode == 0
+    if len(rows) < len(findings):
+        before = state.read_bytes()
+        close = _run(repo, "close", "--state", state, "--operation-id", "early-close", "--outcome", "converged")
+        assert close.returncode == 1 and "scout findings remain unreconciled" in close.stderr
+        assert state.read_bytes() == before
+    metadata = _scout_metadata(state, indexes)
+    first_args = _amend_arguments(repo, state, receipt, metadata)
+    first = _run(repo, *first_args)
+    assert first.returncode == 0, first.stderr
+    first_receipt = json.loads(first.stdout)
+    assert first_receipt["event"] == "ORCHESTRARIUM_REVIEW_LOOP_STATE_V2"
+    assert first_receipt["amendment"]["execution_path"] == "helper"
+    accepted_comparison = _text(repo / ".scratch" / "accepted-comparison.md", json.dumps({"original_findings": findings, "original_dispositions": rows, "verified_links": metadata["links"]}))
+    assert json.loads(accepted_comparison.read_text(encoding="utf-8"))["verified_links"] == metadata["links"]
+    metadata_b = {**metadata, "expected_head": "metadata-a", "evidence": "Accepted synthetic Root comparison reference: .scratch/accepted-comparison.md; all original indexed associations verified."}
+    second = _run(repo, *_amend_arguments(repo, state, receipt, metadata_b, "metadata-b"))
+    assert second.returncode == 0, second.stderr
+    amended = json.loads(state.read_text(encoding="utf-8"))
+    assert amended["operations"][:-2] == original["operations"]
+    preserved = json.loads(json.dumps(amended))
+    preserved["operations"] = preserved["operations"][:-2]
+    del preserved["rounds"][0]["scout_reconciliation_amendment"]
+    assert preserved == original
+    assert (repo / ".scratch" / "round-1-scout.json").read_bytes() == raw_result
+    module = _engine_module()
+    projection = module.effective_scout_reconciliation(amended, 0)
+    assert projection["reconciliation"] == [{"finding_index": i, "reconciliation_index": row, "disposition": rows[row]} for i, row in enumerate(indexes)]
+    before = state.read_bytes()
+    replay = _run(repo, *first_args)
+    assert replay.returncode == 0 and json.loads(replay.stdout) == first_receipt
+    assert state.read_bytes() == before
+    conflict = _run(repo, *_amend_arguments(repo, state, receipt, {**metadata, "evidence": "different"}))
+    assert conflict.returncode == 1 and "RLSTATE_OPERATION_CONFLICT" in conflict.stderr
+    assert state.read_bytes() == before
+    closed = _run(repo, "close", "--state", state, "--operation-id", "close", "--outcome", "converged")
+    assert closed.returncode == 0, closed.stderr
+    assert _run(repo, "validate", "--state", state, "--require-v2", "--require-terminal").returncode == 0
+    validator = subprocess.run([sys.executable, "-B", str(ROOT / "scripts" / "validate-review-loop-state.py"), str(state)], cwd=repo, text=True, capture_output=True)
+    assert validator.returncode == 0, validator.stderr
+    before = state.read_bytes()
+    assert _run(repo, *first_args).returncode == 0
+    terminal = _run(repo, *_amend_arguments(repo, state, receipt, {**metadata, "expected_head": "metadata-b"}, "metadata-c"))
+    assert terminal.returncode == 1 and "terminal" in terminal.stderr
+    assert state.read_bytes() == before
+
+
+@pytest.mark.parametrize("fault", ["missing_digest", "missing_head", "empty_evidence", "stale_head", "wrong_digest", "missing_link", "duplicate_index", "unordered", "outside_row", "bool_index", "unknown_field", "wrong_version"])
+def test_scout_metadata_precommit_refusals_preserve_whole_state(tmp_path: Path, fault: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _completed_grouped_scout(repo, ["a", "b"], [{"facts": ["a", "b"]}])
+    metadata = _scout_metadata(state, [0, 0])
+    if fault == "missing_digest":
+        del metadata["scout_result_sha256"]
+    elif fault == "missing_head":
+        del metadata["expected_head"]
+    elif fault == "empty_evidence":
+        metadata["evidence"] = " "
+    elif fault == "stale_head":
+        metadata["expected_head"] = "other-head"
+    elif fault == "wrong_digest":
+        metadata["scout_result_sha256"] = "0" * 64
+    elif fault == "missing_link":
+        metadata["links"].pop()
+    elif fault == "duplicate_index":
+        metadata["links"][1]["finding_index"] = 0
+    elif fault == "unordered":
+        metadata["links"].reverse()
+    elif fault == "outside_row":
+        metadata["links"][0]["reconciliation_index"] = 1
+    elif fault == "bool_index":
+        metadata["links"][0]["finding_index"] = False
+    elif fault == "unknown_field":
+        metadata["findings"] = []
+    elif fault == "wrong_version":
+        metadata["version"] = True
+    before = state.read_bytes()
+    result = _run(repo, *_amend_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 1 and "RLSTATE_" in result.stderr
+    assert state.read_bytes() == before
+
+
+def test_scout_metadata_correction_retention_and_cap(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _completed_grouped_scout(repo, ["a", "b"], [{"facts": ["a", "b"]}, {"facts": []}])
+    metadata_a = _scout_metadata(state, [0, 1])
+    args_a = _amend_arguments(repo, state, receipt, metadata_a)
+    assert _run(repo, *args_a).returncode == 0  # Mechanical acceptance is not semantic truth.
+    metadata_b = {**metadata_a, "expected_head": "metadata-a", "links": [{"finding_index": 0, "reconciliation_index": 0}, {"finding_index": 1, "reconciliation_index": 0}], "evidence": "Root correction: original row 0 explicitly covers a and b; row 1 covers neither."}
+    assert _run(repo, *_amend_arguments(repo, state, receipt, metadata_b, "metadata-b")).returncode == 0
+    (repo / "design.md").write_text("advanced live candidate, distinct from the frozen review", encoding="utf-8")
+    assert _run(repo, *_amend_arguments(repo, state, receipt, {**metadata_b, "expected_head": "metadata-b"}, "metadata-c")).returncode == 0
+    (repo / "design.md").unlink()  # Fresh correction still targets the frozen original.
+    absent_source = _run(repo, *_amend_arguments(repo, state, receipt, {**metadata_b, "expected_head": "metadata-c"}, "metadata-d"))
+    assert absent_source.returncode == 0, absent_source.stderr
+    baseline = json.loads(state.read_text(encoding="utf-8"))
+    before = state.read_bytes()
+    replay = _run(repo, *args_a)
+    assert replay.returncode == 0 and state.read_bytes() == before
+    diff = _text(repo / ".scratch" / "delta.txt", "changed independent surgical artifact")
+    candidate = _text(repo / "changed.md", "changed candidate round 2")
+    result = _run(repo, "next-round", "--state", state, "--operation-id", "next-2", "--artifact-file", candidate, "--diff-file", diff, "--affected-lane", "surgical")
+    assert result.returncode == 0, result.stderr
+    second = json.loads(result.stdout)
+    assert _record_round(repo, state, second, 2, "surgical", "PASS").returncode == 0
+    assert _run(repo, "complete-round", "--state", state, "--operation-id", "complete-2", "--round", 2).returncode == 0
+    before = state.read_bytes()
+    old_target = _run(repo, *_amend_arguments(repo, state, receipt, {**metadata_b, "expected_head": "metadata-b"}, "retroactive"))
+    assert old_target.returncode == 1 and "latest complete round" in old_target.stderr
+    retained_args = _amend_arguments(repo, state, receipt, metadata_b, "retained", 2)
+    assert _run(repo, *retained_args).returncode == 1
+    assert state.read_bytes() == before
+    candidate.write_text("changed candidate round 3", encoding="utf-8")
+    third = _run(repo, "next-round", "--state", state, "--operation-id", "next-3", "--artifact-file", candidate, "--diff-file", diff, "--affected-lane", "scout")
+    assert third.returncode == 0, third.stderr
+    third_receipt = json.loads(third.stdout)
+    assert _record_round(repo, state, third_receipt, 3, "scout", "PASS", findings=[1, 2, 3], reconciliation=[{"all": [1, 2, 3]}]).returncode == 0
+    assert _run(repo, "complete-round", "--state", state, "--operation-id", "complete-3", "--round", 3).returncode == 0
+    third_meta = _scout_metadata(state, [0, 0, 0])
+    for index in range(4):
+        head = None if index == 0 else f"third-{index - 1}"
+        result = _run(repo, *_amend_arguments(repo, state, third_receipt, {**third_meta, "expected_head": head, "evidence": f"Root comparison correction {index}: original row covers all three facts."}, f"third-{index}", 3))
+        assert result.returncode == 0, result.stderr
+    current = json.loads(state.read_text(encoding="utf-8"))
+    assert current["rounds"][0] == baseline["rounds"][0]
+    assert current["operations"][:len(baseline["operations"])] == baseline["operations"]
+    effective = _engine_module().effective_scout_reconciliation(current, 1)
+    assert [row["reconciliation_index"] for row in effective["reconciliation"]] == [0, 0]
+    before = state.read_bytes()
+    candidate.write_text("changed candidate round 4", encoding="utf-8")
+    fourth = _run(repo, "next-round", "--state", state, "--operation-id", "next-4", "--artifact-file", candidate, "--diff-file", diff)
+    assert fourth.returncode == 1 and "round cap" in fourth.stderr
+    assert state.read_bytes() == before
+    assert _run(repo, "close", "--state", state, "--operation-id", "close", "--outcome", "converged").returncode == 0
+
+
+def test_scout_amendment_history_rejects_forks_wrong_targets_and_dangling_heads(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _completed_grouped_scout(repo, ["a", "b"], [{"all": ["a", "b"]}])
+    metadata = _scout_metadata(state, [0, 0])
+    assert _run(repo, *_amend_arguments(repo, state, receipt, metadata)).returncode == 0
+    assert _run(repo, *_amend_arguments(repo, state, receipt, {**metadata, "expected_head": "metadata-a"}, "metadata-b")).returncode == 0
+    original = json.loads(state.read_text(encoding="utf-8"))
+    module = _engine_module()
+    assert module.validate_v2(original) == []
+    for fault in ("branch", "cycle", "dangling", "nonlatest", "missing_head", "target", "original", "range", "provenance", "fingerprint", "retained"):
+        data = json.loads(json.dumps(original))
+        rnd = data["rounds"][0]
+        op = data["operations"][-1]
+        amendment = op["receipt"]["amendment"]
+        if fault == "branch":
+            amendment["previous_operation_id"] = None
+        elif fault == "cycle":
+            amendment["previous_operation_id"] = "metadata-b"
+        elif fault == "dangling":
+            rnd["scout_reconciliation_amendment"]["operation_id"] = "missing"
+        elif fault == "nonlatest":
+            rnd["scout_reconciliation_amendment"]["operation_id"] = "metadata-a"
+        elif fault == "missing_head":
+            del rnd["scout_reconciliation_amendment"]
+        elif fault == "target":
+            amendment["attempt_id"] = "different"
+        elif fault == "original":
+            rnd["scout"]["findings"][0] = "changed"
+        elif fault == "range":
+            amendment["links"][0]["reconciliation_index"] = 99
+        elif fault == "provenance":
+            amendment["execution_path"] = "owner-equivalent-manual"
+        elif fault == "fingerprint":
+            op["fingerprint"] = "different"
+        elif fault == "retained":
+            rnd["scout"]["state"] = "retained"
+        assert module.validate_v2(data), fault
+    manual = json.loads(json.dumps(original))
+    for operation in manual["operations"][-2:]:
+        operation["receipt"]["event"] = module.MANUAL_RECEIPT_EVENT
+        operation["receipt"]["amendment"]["execution_path"] = "owner-equivalent-manual"
+        operation["receipt"]["amendment"]["source"] = "declared synthetic manual transaction evidence"
+    assert module.validate_v2(manual) == []  # Shape is neither execution nor semantic attestation.
+
+
+@pytest.mark.parametrize("fault", ["attempt", "revision", "incomplete", "snapshot"])
+def test_scout_metadata_target_refusals(tmp_path: Path, fault: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _completed_grouped_scout(repo, [1, 2], [{"all": [1, 2]}])
+    metadata = _scout_metadata(state, [0, 0])
+    args = _amend_arguments(repo, state, receipt, metadata)
+    if fault == "attempt":
+        args[args.index("--attempt-id") + 1] = "different-attempt"
+    elif fault == "revision":
+        args[args.index("--artifact-revision") + 1] = "sha256:" + "0" * 64
+    elif fault == "incomplete":
+        data = json.loads(state.read_text(encoding="utf-8"))
+        data["rounds"][0]["phase"] = "collecting"
+        state.write_text(json.dumps(data), encoding="utf-8")  # Explicit degraded fixture only.
+    elif fault == "snapshot":
+        data = json.loads(state.read_text(encoding="utf-8"))
+        (repo / data["rounds"][0]["artifact"]["snapshot"]).write_text("damaged frozen candidate", encoding="utf-8")
+    before = state.read_bytes()
+    result = _run(repo, *args)
+    assert result.returncode == 1 and "RLSTATE_" in result.stderr
+    assert state.read_bytes() == before
+
+
+def test_scout_metadata_real_lock_and_stale_head_race(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _completed_grouped_scout(repo, [1, 2], [{"all": [1, 2]}])
+    metadata = _scout_metadata(state, [0, 0])
+    args_a = _amend_arguments(repo, state, receipt, metadata)
+    args_b = _amend_arguments(repo, state, receipt, {**metadata, "evidence": "Parallel Root comparison on the original null head"}, "metadata-b")
+    barrier = repo / ".scratch" / "amendment.barrier"
+    process = _barrier_process(repo, barrier, *args_a, mode="amendment-race")
+    try:
+        _wait_for_barrier(barrier, process)
+        before = state.read_bytes()
+        locked = _run(repo, *args_b)
+        assert locked.returncode == 1 and "RLSTATE_LOCKED" in locked.stderr
+        assert state.read_bytes() == before
+        barrier.with_suffix(".release").write_text("release", encoding="utf-8")
+        stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 0, stdout + stderr
+        before = state.read_bytes()
+        stale = _run(repo, *args_b)
+        assert stale.returncode == 1 and "RLSTATE_RECONCILIATION_HEAD_MISMATCH" in stale.stderr
+        assert state.read_bytes() == before
+        data = json.loads(before)
+        assert data["rounds"][0]["scout_reconciliation_amendment"] == {"operation_id": "metadata-a"}
+        assert sum(op["id"] == "metadata-a" for op in data["operations"]) == 1
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+
+
+@pytest.mark.parametrize("mode", ["different-valid-state", "after-replace-error", "keyboard-interrupt"])
+def test_scout_metadata_uncertain_readback_and_actual_settlement(tmp_path: Path, mode: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _completed_grouped_scout(repo, [1, 2], [{"all": [1, 2]}])
+    metadata = _scout_metadata(state, [0, 0])
+    args = _amend_arguments(repo, state, receipt, metadata)
+    before = state.read_bytes()
+    process = _barrier_process(repo, repo / ".scratch" / "uncertain.barrier", *args, mode=mode)
+    try:
+        stdout, stderr = process.communicate(timeout=10)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+    if mode == "keyboard-interrupt":
+        assert "RETURN=130" in stdout and "RLSTATE_CANCELLED" in stderr
+        assert state.read_bytes() == before
+        expected_operations = 0
+    else:
+        assert "RETURN=1" in stdout and "RLSTATE_COMMIT_UNCERTAIN" in stderr
+        assert '"event"' not in stdout  # No planned helper success.
+        expected_operations = 1
+    data = json.loads(state.read_text(encoding="utf-8"))
+    assert _engine_module().validate_v2(data) == []
+    assert sum(op["id"] == "metadata-a" for op in data["operations"]) == expected_operations
+    assert data["operations"][:len(json.loads(before)["operations"])] == json.loads(before)["operations"]
+    actual = state.read_bytes()
+    replay = _run(repo, *args)
+    assert replay.returncode == 0, replay.stderr
+    if expected_operations:
+        assert state.read_bytes() == actual
+    final = json.loads(state.read_text(encoding="utf-8"))
+    assert sum(op["id"] == "metadata-a" for op in final["operations"]) == 1
+    assert final["rounds"][0]["scout_reconciliation_amendment"] == {"operation_id": "metadata-a"}
+    assert not list(state.parent.glob(".*.tmp"))
+    assert _run(repo, "close", "--state", state, "--operation-id", "close", "--outcome", "converged").returncode == 0
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -162,6 +475,31 @@ elif mode == "uncertain-state":
             destination.write_text('{"schema_version":2,"rounds":[', encoding="utf-8")
             barrier.write_text("ready\\n", encoding="utf-8")
     module.os.replace = corrupt_after_state_replace
+elif mode in {"different-valid-state", "after-replace-error"}:
+    import json
+    original_replace = module.os.replace
+    def inject_after_state_replace(source, destination):
+        original_replace(source, destination)
+        destination = Path(destination)
+        if destination.name == "state.json":
+            barrier.write_text("ready\\n", encoding="utf-8")
+            if mode == "after-replace-error":
+                raise OSError("synthetic post-replacement failure")
+            data = json.loads(destination.read_text(encoding="utf-8"))
+            data["scope"] = "synthetic different structurally valid committed scope"
+            destination.write_text(json.dumps(data), encoding="utf-8")
+    module.os.replace = inject_after_state_replace
+elif mode == "amendment-race":
+    original_write = module._atomic_write
+    def pause_before_commit(*args, **kwargs):
+        barrier.write_text("ready\\n", encoding="utf-8")
+        deadline = time.monotonic() + 10
+        while not barrier.with_suffix(".release").exists():
+            if time.monotonic() > deadline:
+                raise RuntimeError("synthetic race release timeout")
+            time.sleep(0.01)
+        return original_write(*args, **kwargs)
+    module._atomic_write = pause_before_commit
 elif mode == "after-commit":
     original_commit = module._commit_operation
     def stop_after_committed_readback(*args, **kwargs):
@@ -225,7 +563,17 @@ def _begin(repo: Path, operation_id: str = "begin-1") -> tuple[Path, dict]:
     return state, receipt
 
 
-def _record(repo: Path, state: Path, receipt: dict, lane: str, verdict: str) -> subprocess.CompletedProcess[str]:
+def _record_round(
+    repo: Path,
+    state: Path,
+    receipt: dict,
+    round_number: int,
+    lane: str,
+    verdict: str,
+    *,
+    findings: list | None = None,
+    reconciliation: list | None = None,
+) -> subprocess.CompletedProcess[str]:
     payload = {
         "verdict": verdict,
         "rationale": "specific evidence-backed result",
@@ -234,9 +582,12 @@ def _record(repo: Path, state: Path, receipt: dict, lane: str, verdict: str) -> 
         "verification_adequate": "yes",
     }
     if lane == "scout":
-        payload = {"findings": [], "reconciliation": []}
+        payload = {
+            "findings": [] if findings is None else findings,
+            "reconciliation": [] if reconciliation is None else reconciliation,
+        }
     result_file = _text(
-        repo / ".scratch" / f"{lane}.json",
+        repo / ".scratch" / f"round-{round_number}-{lane}.json",
         json.dumps(payload),
     )
     attempt = receipt["attempts"][lane]
@@ -244,13 +595,77 @@ def _record(repo: Path, state: Path, receipt: dict, lane: str, verdict: str) -> 
         repo,
         "record-result",
         "--state", state,
-        "--operation-id", f"result-{lane}-{verdict.lower()}",
-        "--round", 1,
+        "--operation-id", f"result-r{round_number}-{lane}-{verdict.lower()}",
+        "--round", round_number,
         "--lane", lane,
         "--attempt-id", attempt,
         "--artifact-revision", receipt["artifact_revision"],
         "--result-file", result_file,
     )
+
+
+def _record(
+    repo: Path,
+    state: Path,
+    receipt: dict,
+    lane: str,
+    verdict: str,
+) -> subprocess.CompletedProcess[str]:
+    return _record_round(repo, state, receipt, 1, lane, verdict)
+
+
+def _complete_initial_revise(
+    repo: Path,
+    state: Path,
+    receipt: dict,
+    *,
+    scout_findings: list | None = None,
+    scout_reconciliation: list | None = None,
+) -> None:
+    assert _record_round(repo, state, receipt, 1, "surgical", "REVISE").returncode == 0
+    assert _record_round(repo, state, receipt, 1, "deep", "PASS").returncode == 0
+    assert _record_round(
+        repo,
+        state,
+        receipt,
+        1,
+        "scout",
+        "PASS",
+        findings=scout_findings,
+        reconciliation=scout_reconciliation,
+    ).returncode == 0
+    completed = _run(
+        repo,
+        "complete-round",
+        "--state", state,
+        "--operation-id", "complete-1",
+        "--round", 1,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def _next_round_arguments(
+    repo: Path,
+    state: Path,
+    operation_id: str,
+    *,
+    affected_lanes: tuple[str, ...] = (),
+    full_review: bool = False,
+) -> list[object]:
+    artifact = _text(repo / f"{operation_id}.md", f"{operation_id} artifact\n")
+    diff = _text(repo / ".scratch" / f"{operation_id}-diff.txt", f"{operation_id} diff\n")
+    args: list[object] = [
+        "next-round",
+        "--state", state,
+        "--operation-id", operation_id,
+        "--diff-file", diff,
+        "--artifact-file", artifact,
+    ]
+    if full_review:
+        args.append("--full-review")
+    for lane in affected_lanes:
+        args.extend(("--affected-lane", lane))
+    return args
 
 
 def test_begin_persists_and_reads_back_before_receipt(tmp_path: Path) -> None:
@@ -571,6 +986,71 @@ def test_v1_migration_rejects_ambiguous_multi_failure_history(tmp_path: Path) ->
     assert state.read_bytes() == before
 
 
+@pytest.mark.parametrize("affected_lanes", ((), ("surgical",)))
+def test_next_round_accepts_changed_artifact_after_pass(
+    tmp_path: Path, affected_lanes: tuple[str, ...],
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    for lane in ("surgical", "deep", "scout"):
+        running = _run(
+            repo, "mark-running", "--state", state,
+            "--operation-id", f"running-1-{lane}", "--round", 1,
+            "--lane", lane, "--attempt-id", first["attempts"][lane],
+        )
+        assert running.returncode == 0, running.stderr
+        assert _record(repo, state, first, lane, "PASS").returncode == 0
+    completed = _run(repo, "complete-round", "--state", state,
+                     "--operation-id", "complete-1", "--round", 1)
+    assert completed.returncode == 0, completed.stderr
+    initial = json.loads(state.read_text(encoding="utf-8"))["rounds"][0]
+    snapshot = repo / initial["artifact"]["snapshot"]
+    snapshot_before = snapshot.read_bytes()
+    args = _next_round_arguments(repo, state, "round-2", affected_lanes=affected_lanes)
+
+    admitted = _run(repo, *args)
+
+    assert admitted.returncode == 0, admitted.stderr
+    second = json.loads(admitted.stdout)
+    assert second["event"] == "ORCHESTRARIUM_REVIEW_LOOP_STATE_V2"
+    assert second["round"] == 2
+    assert second["artifact_revision"] != first["artifact_revision"]
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    assert persisted["rounds"][0] == initial
+    assert snapshot.read_bytes() == snapshot_before
+    assert persisted["rounds"][1]["artifact"]["revision"] == second["artifact_revision"]
+    assert (repo / persisted["rounds"][1]["artifact"]["snapshot"]).read_bytes() == (repo / "round-2.md").read_bytes()
+    active_lanes = affected_lanes or ("surgical", "deep", "scout")
+    assert set(second["attempts"]) == set(active_lanes)
+    if affected_lanes:
+        assert second["coverage"]["source_revision"] == first["artifact_revision"]
+        assert persisted["rounds"][1]["deep"]["state"] == "retained"
+        assert persisted["rounds"][1]["scout"]["state"] == "retained"
+    for lane in active_lanes:
+        assert _record_round(repo, state, second, 2, lane, "PASS").returncode == 0
+    assert _run(repo, "complete-round", "--state", state,
+                "--operation-id", "complete-2", "--round", 2).returncode == 0
+    validated = _run(repo, "validate", "--state", state, "--require-v2")
+    assert validated.returncode == 0, validated.stderr
+
+
+def test_next_round_rejects_unchanged_artifact_after_revise(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    diff = _text(repo / ".scratch" / "unchanged-diff.txt", "claimed change without changed artifact\n")
+    before = _tree_bytes(repo / ".scratch" / "reviews")
+
+    refused = _run(repo, "next-round", "--state", state,
+                   "--operation-id", "round-2", "--diff-file", diff,
+                   "--artifact-file", repo / "design.md")
+
+    assert refused.returncode != 0
+    assert "next round requires a changed artifact revision" in refused.stderr
+    assert refused.stdout == ""
+    assert _tree_bytes(repo / ".scratch" / "reviews") == before
+
+
 def test_next_round_accepts_new_frozen_revision_after_revise(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     state, receipt = _begin(repo)
@@ -586,6 +1066,303 @@ def test_next_round_accepts_new_frozen_revision_after_revise(tmp_path: Path) -> 
     assert second["artifact_revision"] != receipt["artifact_revision"]
     persisted = json.loads(state.read_text(encoding="utf-8"))
     assert persisted["rounds"][0]["artifact"]["revision"] == receipt["artifact_revision"]
+
+
+def test_full_next_round_replay_preserves_legacy_shape_and_fingerprint(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    args = _next_round_arguments(repo, state, "round-2-full")
+
+    created = _run(repo, *args)
+
+    assert created.returncode == 0, created.stderr
+    receipt = json.loads(created.stdout)
+    assert set(receipt["attempts"]) == {"surgical", "deep", "scout"}
+    assert "coverage" not in receipt
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    assert "coverage" not in persisted["rounds"][1]
+    assert all(
+        persisted["rounds"][1][lane]["state"] == "admitted"
+        for lane in ("surgical", "deep", "scout")
+    )
+
+    replay = _run(repo, *args, "--full-review")
+
+    assert replay.returncode == 0, replay.stderr
+    assert json.loads(replay.stdout) == receipt
+
+
+def test_delta_round_retains_passed_lanes_and_closes_from_effective_results(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    created = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-delta",
+            affected_lanes=("surgical",),
+        ),
+    )
+
+    assert created.returncode == 0, created.stderr
+    second = json.loads(created.stdout)
+    assert set(second["attempts"]) == {"surgical"}
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    round_two = persisted["rounds"][1]
+    assert "coverage" not in persisted["rounds"][0]
+    expected_coverage = {
+        "mode": "delta",
+        "affected_lanes": ["surgical"],
+        "source_round": 1,
+        "source_revision": first["artifact_revision"],
+    }
+    assert second["coverage"] == expected_coverage
+    assert round_two["coverage"] == expected_coverage
+    for lane in ("deep", "scout"):
+        assert round_two[lane] == {
+            "state": "retained",
+            "applies_to_revision": second["artifact_revision"],
+            "retained_from": {
+                "round": 1,
+                "artifact_revision": first["artifact_revision"],
+            },
+        }
+
+    before = state.read_bytes()
+    retained_attempt = _run(
+        repo,
+        "mark-running",
+        "--state", state,
+        "--operation-id", "run-retained-deep",
+        "--round", 2,
+        "--lane", "deep",
+        "--attempt-id", first["attempts"]["deep"],
+    )
+    assert retained_attempt.returncode != 0
+    assert "RLSTATE_ATTEMPT_MISMATCH" in retained_attempt.stderr
+    assert state.read_bytes() == before
+
+    assert _record_round(repo, state, second, 2, "surgical", "PASS").returncode == 0
+    completed = _run(
+        repo,
+        "complete-round",
+        "--state", state,
+        "--operation-id", "complete-2",
+        "--round", 2,
+    )
+    assert completed.returncode == 0, completed.stderr
+    closed = _run(
+        repo,
+        "close",
+        "--state", state,
+        "--operation-id", "close-delta",
+        "--outcome", "converged",
+    )
+    assert closed.returncode == 0, closed.stderr
+
+
+def test_delta_round_rejects_retaining_revise_or_unreconciled_scout(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(
+        repo,
+        state,
+        first,
+        scout_findings=[{"id": "finding-1"}],
+        scout_reconciliation=[],
+    )
+    before = state.read_bytes()
+
+    retained_revise = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-retain-revise",
+            affected_lanes=("deep",),
+        ),
+    )
+    retained_scout = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-retain-scout",
+            affected_lanes=("surgical",),
+        ),
+    )
+
+    assert retained_revise.returncode != 0
+    assert "RLSTATE_INVALID" in retained_revise.stderr
+    assert retained_scout.returncode != 0
+    assert "RLSTATE_INVALID" in retained_scout.stderr
+    assert state.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "affected_lanes",
+    (
+        ("surgical", "deep", "scout"),
+        ("surgical", "surgical"),
+    ),
+)
+def test_delta_round_requires_unique_nonempty_strict_subset(
+    tmp_path: Path,
+    affected_lanes: tuple[str, ...],
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    before = state.read_bytes()
+
+    result = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-invalid-coverage",
+            affected_lanes=affected_lanes,
+        ),
+    )
+
+    assert result.returncode != 0
+    assert "RLSTATE_INVALID" in result.stderr
+    assert state.read_bytes() == before
+
+
+def test_delta_coverage_validation_rejects_copied_or_mismatched_retention(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    created = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-valid-for-validation",
+            affected_lanes=("surgical",),
+        ),
+    )
+    assert created.returncode == 0, created.stderr
+    valid = json.loads(state.read_text(encoding="utf-8"))
+    module = _engine_module()
+    assert module.validate_v2(valid) == []
+
+    mutations = (
+        ("coverage: expected object", lambda rnd: rnd.__setitem__("coverage", None)),
+        ("source_revision", lambda rnd: rnd["coverage"].__setitem__("source_revision", "sha256:" + "0" * 64)),
+        ("retained_from", lambda rnd: rnd["deep"]["retained_from"].__setitem__("round", 0)),
+        ("applies_to_revision", lambda rnd: rnd["deep"].__setitem__("applies_to_revision", "sha256:" + "0" * 64)),
+        ("unexpected field", lambda rnd: rnd["deep"].__setitem__("verdict", "PASS")),
+    )
+    for expected, mutate in mutations:
+        candidate = json.loads(json.dumps(valid))
+        mutate(candidate["rounds"][1])
+        assert any(expected in error for error in module.validate_v2(candidate))
+
+
+@pytest.mark.parametrize(
+    ("target", "value", "expected"),
+    (
+        ("lane_failures", None, "lane_failures: expected list"),
+        ("coverage_round", True, "coverage.source_round"),
+        ("coverage_round", 1.0, "coverage.source_round"),
+        ("retained_round", True, "deep.retained_from"),
+        ("retained_round", 1.0, "deep.retained_from"),
+    ),
+    ids=("null-failures", "coverage-bool", "coverage-float", "retained-bool", "retained-float"),
+)
+def test_delta_validation_rejects_null_failures_and_round_lookalikes(
+    tmp_path: Path,
+    target: str,
+    value: object,
+    expected: str,
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    created = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-malformed-validation",
+            affected_lanes=("surgical",),
+        ),
+    )
+    assert created.returncode == 0, created.stderr
+    candidate = json.loads(state.read_text(encoding="utf-8"))
+    round_two = candidate["rounds"][1]
+    if target == "lane_failures":
+        round_two["lane_failures"] = value
+    elif target == "coverage_round":
+        round_two["coverage"]["source_round"] = value
+    else:
+        round_two["deep"]["retained_from"]["round"] = value
+
+    errors = _engine_module().validate_v2(candidate)
+
+    assert any(expected in error for error in errors)
+
+
+def test_delta_round_keeps_three_round_cap(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    previous = first
+    for round_number in (2, 3):
+        created = _run(
+            repo,
+            *_next_round_arguments(
+                repo,
+                state,
+                f"round-{round_number}-delta",
+                affected_lanes=("surgical",),
+            ),
+        )
+        assert created.returncode == 0, created.stderr
+        previous = json.loads(created.stdout)
+        assert _record_round(
+            repo,
+            state,
+            previous,
+            round_number,
+            "surgical",
+            "REVISE",
+        ).returncode == 0
+        completed = _run(
+            repo,
+            "complete-round",
+            "--state", state,
+            "--operation-id", f"complete-{round_number}",
+            "--round", round_number,
+        )
+        assert completed.returncode == 0, completed.stderr
+
+    before = state.read_bytes()
+    fourth = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-4-delta",
+            affected_lanes=("surgical",),
+        ),
+    )
+    assert fourth.returncode != 0
+    assert "round cap exceeded" in fourth.stderr
+    assert state.read_bytes() == before
 
 
 def test_v1_read_compat_and_explicit_migration_required(tmp_path: Path) -> None:

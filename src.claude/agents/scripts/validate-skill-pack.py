@@ -54,7 +54,7 @@ CURATED_ROLE_SKILLS = frozenset({"lead", "product-manager", "analyst", "architec
 _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
  ('direct', 'exists', 'shared/AGENTS.shared.md exists'),
  ('direct', 'exists', 'src.claude/agents/lead.md exists'),
- ('direct', 'exists', 'src.claude/skills/lead/SKILL.md exists'),
+ ('direct', 'exists', '@SKILLS/lead/SKILL.md exists'),
  ('direct', 'exists', 'src.claude/agents/consultant.md exists'),
  ('direct', 'exists', 'src.claude/agents/external-worker.md exists'),
  ('direct', 'exists', 'src.claude/agents/external-reviewer.md exists'),
@@ -124,8 +124,8 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'agents-design-panel command points at the installed contract'),
  ('check_contains',
   'src.claude/CLAUDE.md',
-  'agents-design-panel.md',
-  'CLAUDE.md dispatch index exposes the design-panel command'),
+  '.claude/commands/agents-help.md',
+  'CLAUDE.md points to the installed command index'),
  ('check_contains',
   'src.claude/commands/agents-help.md',
   '/agents-design-panel',
@@ -158,11 +158,11 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'I will not dispatch or modify',
   'agents-status reserved-PM offer stays read-only (no dispatch/modify without confirmation)'),
  ('check_contains',
-  'src.claude/skills/lead/SKILL.md',
-  'hold the Lead role AS the main conversation',
+  '@SKILLS/lead/SKILL.md',
+  'the orchestration owner stays in the main session',
   'lead skill declares the Lead role is held AS the main conversation'),
  ('check_absent',
-  'src.claude/skills/lead/SKILL.md',
+  '@SKILLS/lead/SKILL.md',
   'context: fork',
   'lead skill is not dispatched as a forked subagent (no context: fork)'),
  ('direct', 'exists', '@ROOT/shared/references/README.md exists'),
@@ -420,94 +420,94 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   '120',
   'Claude addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
-  '@ROOT/shared/references/subagent-operating-model.md',
-  '257a472ee180e3eb7fcc5a6b938040d43475cfb26cc58264ec5b28e40c42ac18',
-  'shared subagent-operating-model matches the current canonical normalized fingerprint'),
- ('check_normalized_sha256',
   '@ROOT/references-claude/subagent-operating-model.md',
-  '2b4f4fdf49d36bd80270e4292ce30cf84b4650751b6a93493dd0e335c24ed404',
+  '0a71aa6143437113672b9cf1c5f9782279007b2936c46fe622a8a837e5dbcb40',
   'Claude addendum matches the current canonical normalized fingerprint'),
  ('direct', 'role_index_claude', 'role_index_claude'),
  ('check_common_skill_body_pin',
   'analyzing-video-bugs',
   'cf78ec0176f1726891045a2c2626363377994f34f081f9a9ad0ffbdb60740e91',
-  'src.claude/skills/analyzing-video-bugs/SKILL.md'),
+  '@SKILLS/analyzing-video-bugs/SKILL.md'),
  ('check_common_skill_body_pin',
   'bug-hunting',
   '56c6ed8a5a590559bdf29409102b2b8b654bf73c7be2b4ef23c4d2c74e019232',
-  'src.claude/skills/bug-hunting/SKILL.md'),
+  '@SKILLS/bug-hunting/SKILL.md'),
  ('check_common_skill_body_pin',
   'explain-simply',
   'f0f0e4dd1bed68aa8114adf6059fea32fedbee8fd06bf8bb12042dcd07ebb408',
-  'src.claude/skills/explain-simply/SKILL.md'),
+  '@SKILLS/explain-simply/SKILL.md'),
  ('check_common_skill_body_pin',
   'github-pr-review-bot',
-  '5155539778884ba6a25589c03af2fc717ebd9c1d7ed65dce504bedf9c37445ed',
-  'src.claude/skills/github-pr-review-bot/SKILL.md'),
+  'aea0d0e4529326d6347368ce6d811e7f398a4cb0ee18df8504444e8d4f621935',
+  '@SKILLS/github-pr-review-bot/SKILL.md'),
  ('check_contains',
-   'src.claude/skills/github-pr-review-bot/SKILL.md',
+   '@SKILLS/github-pr-review-bot/SKILL.md',
   'Two or more unresolved same-head trigger candidates',
   'github-pr-review-bot refuses ambiguous same-head terminal ownership'),
  ('check_contains',
-  'src.claude/skills/github-pr-review-bot/SKILL.md',
+  '@SKILLS/github-pr-review-bot/SKILL.md',
   'gh api --paginate --slurp',
   'github-pr-review-bot merges every REST page before classification'),
  ('check_contains',
-  'src.claude/skills/github-pr-review-bot/SKILL.md',
+  '@SKILLS/github-pr-review-bot/SKILL.md',
   'Page-local `--jq`',
   'github-pr-review-bot rejects page-local REST filtering'),
  ('check_contains',
-  'src.claude/skills/github-pr-review-bot/SKILL.md',
+  '@SKILLS/github-pr-review-bot/SKILL.md',
   'fails or is incomplete',
   'github-pr-review-bot fails closed on incomplete GraphQL pagination'),
  ('check_contains',
-  'src.claude/skills/github-pr-review-bot/SKILL.md',
+  '@SKILLS/github-pr-review-bot/SKILL.md',
   'A `Completed` summary alone is never `clean`',
   'github-pr-review-bot does not treat summary completion as clean'),
  ('check_contains',
-  'src.claude/skills/github-pr-review-bot/SKILL.md',
+  '@SKILLS/github-pr-review-bot/SKILL.md',
   'Findings from the exact post-trigger review on the current head take precedence',
   'github-pr-review-bot prioritizes exact post-trigger current-head findings'),
  ('check_common_skill_body_pin',
   'generalize-from-instance',
-  '7233fcd0d38ccb87e2b95d5f95af3811aa5224e873591eaefd397d3c20b9fea4',
-  'src.claude/skills/generalize-from-instance/SKILL.md'),
+  'c55e0d9389abce424e778c41816127c76948d67d92233e9afb26ab4d92cfaf97',
+  '@SKILLS/generalize-from-instance/SKILL.md'),
  ('check_common_skill_body_pin',
+  'implementation-to-theory',
+  '2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78',
+  '@SKILLS/implementation-to-theory/SKILL.md'),
+ ('check_common_skill_body_parity',
   'manual-repo-transfer',
-  '2ca88a24317c81cc18c5f2cc6125895d06ae790a19195ce4a3359428b2c51ea0',
+  'src.codex/skills/manual-repo-transfer/SKILL.md',
   'src.claude/skills/manual-repo-transfer/SKILL.md'),
- ('check_common_skill_body_pin',
+ ('check_common_skill_body_parity',
   'repo-cleanup',
-  'e618521a08476c7ae31a03a2cba02a1b885d50fb0455bd7e765681b948502623',
+  'src.codex/skills/repo-cleanup/SKILL.md',
   'src.claude/skills/repo-cleanup/SKILL.md'),
  ('check_common_skill_body_pin',
   'mathtype-book-page',
   '615499de68dc03fccb23954e8ed94662076a9a744a493b71232ebdcce55357be',
-  'src.claude/skills/mathtype-book-page/SKILL.md'),
+  '@SKILLS/mathtype-book-page/SKILL.md'),
  ('check_common_skill_body_pin',
   'vak-dissertation-review',
   'e259d114a1ea2372d9152a07445aeba82c51493b9caf7b39f3b6b96678e9b261',
-  'src.claude/skills/vak-dissertation-review/SKILL.md'),
+  '@SKILLS/vak-dissertation-review/SKILL.md'),
  ('check_common_skill_body_pin',
   'vcpkg-builder',
    '72208f4bec6ebf30eb49e99da12cc4e3cef6ef2572bb1583232a5fb1ebe791dc',
-  'src.claude/skills/vcpkg-builder/SKILL.md'),
+  '@SKILLS/vcpkg-builder/SKILL.md'),
  ('check_common_skill_body_pin',
   'vcpkg-ports-updater',
   '17aedafce43a1de5c0917e2a14cba131fcd5dcccca67902ad42852108d90816f',
-  'src.claude/skills/vcpkg-ports-updater/SKILL.md'),
+  '@SKILLS/vcpkg-ports-updater/SKILL.md'),
  ('check_common_skill_body_pin',
   'windows-gui-manual-testing',
-  'b3a029e6784d1d9e37f789b8b512f31f5e5c2161ca6807dc8a140854042ae6c8',
-  'src.claude/skills/windows-gui-manual-testing/SKILL.md'),
+  '7dd186bbeee1fab2eb44e2d4f1c4772ffea87d918605efdcc00a5a8fb3c272b8',
+  '@SKILLS/windows-gui-manual-testing/SKILL.md'),
  ('direct', 'common_pin_completeness', 'common_pin_completeness'),
- ('check_file', 'src.claude/skills/lead/SKILL.md', 'lead has a curated role-skill file'),
+ ('check_file', '@SKILLS/lead/SKILL.md', 'lead has a curated role-skill file'),
  ('check_file',
-  'src.claude/skills/product-manager/SKILL.md',
+  '@SKILLS/product-manager/SKILL.md',
   'product-manager has a curated role-skill file'),
- ('check_file', 'src.claude/skills/analyst/SKILL.md', 'analyst has a curated role-skill file'),
- ('check_file', 'src.claude/skills/architect/SKILL.md', 'architect has a curated role-skill file'),
- ('check_file', 'src.claude/skills/planner/SKILL.md', 'planner has a curated role-skill file'),
+ ('check_file', '@SKILLS/analyst/SKILL.md', 'analyst has a curated role-skill file'),
+ ('check_file', '@SKILLS/architect/SKILL.md', 'architect has the universal role-contract body'),
+ ('check_file', '@SKILLS/planner/SKILL.md', 'planner has a curated role-skill file'),
  ('check_contains',
   'src.claude/agents/product-manager.md',
   'invoke the `Skill` tool with name `product-manager` to load the full role contract',
@@ -526,12 +526,11 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'analyst agent wrapper is not a fail-closed stub (dual role must stay a valid dispatch target)'),
  ('check_contains',
   'src.claude/agents/architect.md',
-  'invoke the `Skill` tool with name `architect` to load the full role contract',
-  'architect agent wrapper pins to its curated skill via the Skill tool'),
- ('check_absent',
-  'src.claude/agents/architect.md',
-  'lead-is-a-main-conversation-role',
-  'architect agent wrapper is not a fail-closed stub (dual role must stay a valid dispatch target)'),
+  'The universal Architect skill (`.agents/skills/architect/SKILL.md`, sourced from `src.codex/skills/architect/SKILL.md`) is the sole role-contract body owner',
+  'architect agent wrapper pins to the universal role-contract body via the Skill tool'),
+ ('check_not_exists',
+  'src.claude/skills/architect/SKILL.md',
+  'architect has no duplicate Claude-owned source body'),
  ('check_contains',
   'src.claude/agents/planner.md',
   'invoke the `Skill` tool with name `planner` to load the full role contract',
@@ -578,8 +577,8 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'external-dispatch does not record consultant fallback approvals'),
  ('check_contains',
   'src.claude/agents/contracts/subagent-contracts.md',
-  'Read and normalize `.claude/.agents-mode.yaml` first.',
-  'subagent-contracts require read-time agents-mode normalization'),
+  'Read the effective Claude overlay and normalize its effective values in memory through the existing per-key resolver before trusting its flags. Honor `parallelMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalModelMode`, `externalCodexProfile`, and advisory/review-only `reserve` profile entries when present. Drop retired canonical keys from the in-memory effective values. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode.yaml` file; it remains Codex-line only.',
+  'subagent contracts preserve Claude in-memory key restrictions'),
  ('check_contains',
   'src.claude/agents/contracts/subagent-contracts.md',
   'agent-runs.jsonl format',
@@ -628,7 +627,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'subagent-contracts reject none for superseded mechanisms'),
  ('check_contains',
   'src.claude/agents/qa-engineer.md',
-  'cannot return `PASS` until it verifies the disposition field against the diff',
+  'Verify disposition for the mechanism changed or superseded in the commissioned slice',
   'QA gate verifies dead/superseded code disposition before PASS'),
  ('check_contains',
   'src.claude/commands/agents-bugfix.md',
@@ -664,12 +663,19 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'operating-model carries the A3 physical-state reconciliation trigger'),
  ('check_contains',
   'src.claude/commands/agents-init-project.md',
-  'normalize it to the current canonical format before presenting or trusting the current values.',
+  'Normalize effective values in memory through the dispatch owner\'s existing per-key read order before '
+  'presenting or trusting them. Use any global fallback as the starting point for project-local review; '
+  'do not rewrite borrowed/global configuration on read. Persist the explicitly selected project '
+  'configuration to the canonical project-local `.yaml` path only within the authorized configuration '
+  'write in Step 7, and do not recreate legacy files.',
   'agents-init-project normalizes existing agents-mode before reading values'),
  ('check_contains',
   'src.claude/commands/agents-init-project.md',
-  'Any read of `.claude/.agents-mode.yaml` that drives a decision should normalize the file to the current '
-  'canonical format before trusting the flags.',
+  'For decision-driving reads, use the dispatch owner\'s per-key precedence (local `.claude/.agents-mode.yaml`, '
+  'local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global '
+  'legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults) '
+  'and the in-memory normalization in Step 1; inspection grants no write to the source overlay. '
+  'Persist only the explicitly selected authorized project configuration in Step 7.',
   'agents-init-project requires read-time agents-mode normalization'),
  ('check_contains',
   'src.claude/commands/agents-second-opinion.md',
@@ -681,11 +687,11 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'shared governance no longer allows adapter-host metadata for external execution'),
  ('check_contains',
   'shared/AGENTS.shared.md',
-  'must use direct external launch',
+  'use orchestrating runtime/approved wrapper, never an internal relay',
   'shared governance requires direct external launch'),
  ('check_contains',
   'shared/AGENTS.shared.md',
-  'substantive task prompt must use file-based prompt delivery',
+  'file-based prompt via stdin/file, never argv',
   'shared governance requires file-based external CLI prompts'),
  ('check_contains',
   'shared/AGENTS.shared.md',
@@ -697,7 +703,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'shared governance requires state synchronization ownership discipline'),
  ('check_contains',
   'shared/AGENTS.shared.md',
-  'split-brain state sync as an architecture bug',
+  'Split-brain sync is an architecture bug',
   'shared governance rejects split-brain state synchronization'),
  ('check_contains',
   'shared/AGENTS.shared.md',
@@ -705,11 +711,11 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'shared governance requires traceable state synchronization diagnostics'),
  ('check_contains',
   'src.claude/agents/external-worker.md',
-  'Read and normalize `.claude/.agents-mode.yaml` to the current canonical format before trusting its flags.',
+  'Resolve config, provider, model/profile, workdir, fallback, and transport through the shared external-dispatch owner; consume effective values in memory and do not rewrite configuration on a routing read.',
   'external-worker normalizes agents-mode before routing'),
  ('check_contains',
   'src.claude/agents/external-reviewer.md',
-  'Read and normalize `.claude/.agents-mode.yaml` to the current canonical format before trusting its flags.',
+  'Resolve config, provider, model/profile, workdir, fallback, and transport through the shared external-dispatch owner; consume effective values in memory and do not rewrite configuration on a routing read.',
   'external-reviewer normalizes agents-mode before routing'),
  ('check_absent',
   'src.claude/agents/contracts/external-dispatch.md',
@@ -733,7 +739,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'external-dispatch limits inline argv to synthetic smoke'),
  ('check_contains',
   'shared/AGENTS.shared.md',
-  'verify every subagent result before accepting it',
+  'verify before acceptance/forwarding/completion',
   'shared governance requires verification before trusting subagent results'),
  ('check_contains',
   'shared/AGENTS.shared.md',
@@ -745,7 +751,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'shared governance requires terminology and abbreviation explanations in documents'),
  ('check_contains',
   'shared/AGENTS.shared.md',
-  'concrete observable data',
+  'capture observable wording/error/log/return/repro or `file:line`; verify the causal chain',
   'shared governance requires measured evidence before root-cause or fix claims'),
  ('check_contains',
   'shared/AGENTS.shared.md',
@@ -785,16 +791,16 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'external-worker requires direct external launch'),
  ('check_contains',
   'src.claude/agents/external-worker.md',
-  'file-based prompt delivery',
-  'external-worker requires file-based external CLI prompts'),
+  'file/stdin delivery',
+  'external-worker requires file/stdin prompt delivery'),
  ('check_contains',
   'src.claude/agents/external-reviewer.md',
   'direct external launch contract',
   'external-reviewer requires direct external launch'),
  ('check_contains',
   'src.claude/agents/external-reviewer.md',
-  'file-based prompt delivery',
-  'external-reviewer requires file-based external CLI prompts'),
+  'file/stdin delivery',
+  'external-reviewer requires file/stdin prompt delivery'),
  ('check_contains',
   'src.claude/CLAUDE.md',
   'approved thin wrapper',
@@ -1258,15 +1264,15 @@ _INSTALLED_ACTIONS = (
 )
 
 _APAT_ACTIONS = (
-    ("check_file", "@PACK/skills/lead/SKILL.md", "APAT-E006-INSTALLED-MISSING: claude lead APAT projection file"),
-    ("check_file", "@PACK/skills/architect/SKILL.md", "APAT-E006-INSTALLED-MISSING: claude architect AP0-AP5 projection file"),
+    ("check_file", "@SKILLS/lead/SKILL.md", "APAT-E006-INSTALLED-MISSING: claude lead APAT projection file"),
+    ("check_file", "@SKILLS/architect/SKILL.md", "APAT-E006-INSTALLED-MISSING: claude architect AP0-AP5 projection file"),
     ("check_file", "@PACK/agents/architecture-reviewer.md", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT projection file"),
-    ("check_contains", "@PACK/skills/lead/SKILL.md", "<!-- APAT-BLOCK:LEAD-ROUTING:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude lead APAT-G04-PROVIDER-PARITY projection marker"),
-    ("check_contains", "@PACK/skills/lead/SKILL.md", "is not a universal Architect prelude", "APAT-E006-INSTALLED-MISSING: claude lead APAT-G05-INSTALLED-PARITY negative-selection wording"),
-    *(("check_contains", "@PACK/skills/architect/SKILL.md", f'<!-- APAT-SEMANTIC id="AP{number}.', f"APAT-E006-INSTALLED-MISSING: claude architect AP{number} marker") for number in range(6)),
-    ("check_contains", "@PACK/skills/architect/SKILL.md", "<!-- APAT-BLOCK:ARCHITECT-DISPOSITION:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude architect AP0-AP5 projection section marker"),
+    ("check_contains", "@SKILLS/lead/SKILL.md", "<!-- APAT-BLOCK:LEAD-ROUTING:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude lead APAT-G04-PROVIDER-PARITY projection marker"),
+    ("check_contains", "@SKILLS/lead/SKILL.md", "is not a universal Architect prelude", "APAT-E006-INSTALLED-MISSING: claude lead APAT-G05-INSTALLED-PARITY negative-selection wording"),
+    *(("check_contains", "@SKILLS/architect/SKILL.md", f'<!-- APAT-SEMANTIC id="AP{number}.', f"APAT-E006-INSTALLED-MISSING: claude architect AP{number} marker") for number in range(6)),
+    ("check_contains", "@SKILLS/architect/SKILL.md", "<!-- APAT-BLOCK:ARCHITECT-DISPOSITION:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude architect AP0-AP5 projection section marker"),
     ("check_contains", "@PACK/agents/architecture-reviewer.md", "<!-- APAT-BLOCK:ARCHITECTURE-REVIEW:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT projection section marker"),
-    ("check_contains", "@PACK/agents/architecture-reviewer.md", "each tempting but unsuitable pattern has explicit negative evidence", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT negative-selection wording"),
+    ("check_contains", "@PACK/agents/architecture-reviewer.md", "each evidence-triggered candidate that is rejected has explicit negative evidence; an unadmitted pattern needs no invented rejection", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT negative-selection wording"),
 )
 
 _APAT_DEV_ACTIONS = (
@@ -1326,8 +1332,12 @@ _SOURCE_ONLY_MAINTAINER_OPERATIONS = (
 
 def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
     return (
-        action[:2] == ("direct", "curated_registry")
-        or any(str(value).startswith("src.claude/skills/lead/") for value in action)
+        any(
+            str(value).startswith(
+                ("src.claude/skills/lead/", "src.claude/skills/architect/", "src.codex/skills/architect/")
+            )
+            for value in action
+        )
         or action[0] in _SOURCE_ONLY_MAINTAINER_OPERATIONS
         or any(
             str(value).startswith(_SOURCE_ONLY_MAINTAINER_PREFIXES)
@@ -1337,11 +1347,33 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 
 
 _ALL_ACTIONS = (
-    _DECLARED_ACTIONS[0:42]
-    + _DECLARED_ACTIONS[114:257]
+    _DECLARED_ACTIONS[0:40]
+    + _DECLARED_ACTIONS[41:42]
+    + _DECLARED_ACTIONS[113:257]
     + _APAT_ACTIONS
+    + (
+        (
+            "check_common_skill_body_pin", "post-spawn-cleanup",
+            "afc6e1c2bccc547c2fbe4ee77a8d98e1ca546203662218817c6f8699bb6dc5ac",
+            "@SKILLS/post-spawn-cleanup/SKILL.md",
+        ),
+    )
 )
 
+
+_CURRENT_SKILL_ACTIONS = (
+    _DECLARED_ACTIONS[40],
+    (
+        "check_contains", "@SKILLS/lead/SKILL.md",
+        "apply the current-owner reuse check",
+        "lead skill requires current-owner reuse before approach or assignment",
+    ),
+    (
+        "check_contains", "@SKILLS/lead/subagent-contracts.md",
+        "An accepted plan is an input, not proof the capability is still missing",
+        "specialist handoff requires current-owner reuse before implementation",
+    ),
+)
 
 ACTIONS = (
     (
@@ -1353,28 +1385,68 @@ ACTIONS = (
     ),
     (
         "dev_repo",
-        _DECLARED_ACTIONS[42:114]
+        _DECLARED_ACTIONS[42:113]
         + _DECLARED_ACTIONS[270:274]
         + _DECLARED_ACTIONS[275:280]
         + _DECLARED_ACTIONS[281:287]
         + _DECLARED_ACTIONS[294:309]
-        # Declaration 309 reads the source-only root README, absent when installed.
+        # Declaration 308 reads the source-only root README, absent when installed.
         + _DECLARED_ACTIONS[309:310]
         + tuple(
             action for action in _ALL_ACTIONS
             if _is_source_only_maintainer_action(action)
         )
+        + (
+            (
+                "check_contains", "src.claude/skills/lead/SKILL.md",
+                "hold the Lead role AS the main conversation",
+                "historical Claude Source Lead declares main-conversation ownership",
+            ),
+        )
         + _APAT_DEV_ACTIONS
-        + _UI_CONTINUITY_DEV_ACTIONS,
+        + _UI_CONTINUITY_DEV_ACTIONS
+        + (
+            (
+                "check_contains", "src.claude/agents/consultant.md",
+                "Read the effective Claude overlay and normalize its effective values in memory through the existing per-key resolver before routing. Valid sparse, comment-free, or older-layout files are compatibility input for routing reads; do not rewrite them merely to read or trust their flags.",
+                "consultant reads the Claude overlay in memory",
+            ),
+            (
+                "check_contains", "src.claude/agents/consultant.md",
+                "If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override. Persist canonical formatting only within an authorized install/configuration write, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys and removing retired canonical keys.",
+                "consultant preserves precedence and authorized-write boundary",
+            ),
+            (
+                "check_contains", "src.claude/agents/contracts/subagent-contracts.md",
+                "If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Comment-free, sparse, or older-layout overlays remain valid compatibility input for routing reads; a read does not rewrite its input.",
+                "subagent contracts preserve Claude precedence and read-only routing",
+            ),
+            (
+                "check_contains", "src.claude/agents/contracts/subagent-contracts.md",
+                "Do not recreate a legacy file or synthesize a local override on read alone. Persist canonical formatting only within an authorized install/configuration write, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys and removing retired canonical keys.",
+                "subagent contracts restrict Claude writes to authorization",
+            ),
+            (
+                "check_contains", "src.claude/agents/external-worker.md",
+                "Persisted normalization belongs only to an authorized install/configuration write.",
+                "external-worker persists normalization only in an authorized write",
+            ),
+            (
+                "check_contains", "src.claude/agents/external-reviewer.md",
+                "Persisted normalization belongs only to an authorized install/configuration write.",
+                "external-reviewer persists normalization only in an authorized write",
+            ),
+        ),
     ),
     (
         "dev_repo_nonstandalone",
         _DECLARED_ACTIONS[257:270]
         + _DECLARED_ACTIONS[274:275]
         + _DECLARED_ACTIONS[280:281]
-        + _DECLARED_ACTIONS[287:294],
+        + _DECLARED_ACTIONS[287:294]
+        + _CURRENT_SKILL_ACTIONS,
     ),
-    ("installed", _INSTALLED_ACTIONS),
+    ("installed", _INSTALLED_ACTIONS + _CURRENT_SKILL_ACTIONS),
 )
 
 def validate(root: Path | None = None):

@@ -2,14 +2,16 @@
 """Git-push publication gate (PreToolUse, BLOCKING) — structural backstop for
 the human-review-before-push rule.
 
-WHAT THIS DENIES: a command that confidently runs `git push` when neither the
-genuine user's per-turn approval marker nor one fresh gate-owned canonical
-range scan authorizes the exact pending push. The gate derives the only scanner
-producer as one held gate plus gate-relative four-module closure (`hook_common.py`, the
-machine-path classifier, the POSIX process-group helper, and `check-publication-safety.py`), snapshots and
-executes those bytes directly with its current trusted interpreter, and binds
-the exactly correlated typed result to remote, destination, source, current
-HEAD, and receipt tip. Scanner-
+WHAT THIS DENIES: a real non-dry `git push` without applicable genuine-user
+publication authority and one fresh gate-owned canonical range scan for the
+exact pending push. The gate derives the only scanner
+producer as one held gate plus a fixed seven-module closure (`hook_common.py`, the
+machine-path classifier, the POSIX process-group helper, the Windows Job helper,
+`check-publication-safety.py`, the reviewed-publication policy owner, and the
+linked-runtime-subroot helper), captures policy through those held bytes, executes
+the complete closure with its current trusted interpreter, and binds the exactly
+correlated typed result to remote, destination, source, current HEAD, and receipt
+tip. Scanner-
 looking transcript calls and outputs are untrusted diagnostics and never mint
 authorization.
 
@@ -243,21 +245,28 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      bodies are data; uncertain regions preserve literal push candidates,
      while prefixes, option roles, operands, repository context, and command
      boundaries remain explicit provenance. No detected push or candidate → exit 0.
+     Incomplete analysis with no effective publication record or malformed-minus-C
+     candidate returns ABSTAIN, preserving uncertainty without vetoing ordinary
+     work. Abstention certifies neither exact effects nor publication authority;
+     it supplies no dry-run, human-approval, grant, or scan credit. The analysis
+     dialect does not establish the actual interpreter. Positive candidates
+     continue through the existing publication checks even under uncertainty.
   5. Every exact direct push proving a standalone positive long `--dry-run`,
      with no negation, ambiguous option role, or conservative candidate → exit 0.
-  6. If `transcript_path` is missing, unreadable, invalid, or exceeds the
-     bounded full-history limits → deny with `PRG-TRANSCRIPT-UNAVAILABLE`.
-  7. If the LAST GENUINE USER MESSAGE contains `[approve-publication]` AND
-     that message is no longer than MARKER_MAX_MESSAGE_LENGTH characters →
-     exit 0. The marker is honored ONLY from the user's own text — never from
-     assistant prose, tool calls, or tool output — because prior provider or
-     file content quoting the marker must not approve a publication. The
-     length bound (2026-07-26 hardening; see MARKER_MAX_MESSAGE_LENGTH's own
-     comment for the full contract decision and measurements) exists because
-     the deny reason at step 10 embeds this same marker verbatim, so an
-     operator who copies that reason back into chat reproduces the identical
-     marker; a message shaped like a copied multi-paragraph deny block does
-     not count as an approval here.
+  6. Missing, unreadable, invalid, or unstable required history denies with
+     `PRG-TRANSCRIPT-UNAVAILABLE`. Reduce the complete stable JSONL history in
+     forward order, binding both bounded-read passes to its opened descriptor's
+     initial byte size. Complete history alone supplies no publication authority;
+     active grants still enter the unchanged strict route.
+  7. Qualified current-turn consent from `[approve-publication]` in one genuine
+     answer enters the common strict command, repository/range binding and
+     fresh authoritative-scan completion BEFORE unrelated standing history.
+     Consent never returns an unconditional real-push allowance. Validate the
+     entire answer batch atomically and honor revocation/conflicts. P qualifies
+     original occurrences for both consent and push instructions, excluding
+     formal quote/code/tagged-JSON data without a whole-answer length limit.
+     Questions, identifiers, assistant/tool/file content and joined fragments
+     grant no authority. Original whole-token display forms remain accepted.
   8. Derive the latest exact PR grant/revoke/malformed state from the complete
      bounded readable transcript. A malformed reserved signal denies. An
      active grant runs only the strict PR route: fresh GitHub/Git binding and
@@ -287,18 +296,11 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      decision is carried by the stdout payload, not the exit code).
 
 WHAT THE GENERIC NON-PR ROUTE STILL DOES NOT COVER (disclosed, not silently assumed away):
-  - SHORT QUOTES OF THE BARE MARKER (2026-07-26, `$security-engineer`
-    contract decision on `work-items/bugs/2026-07-26-the-deny-message-
-    teaches-the-marker-that-opens-the-gate.md`). The MARKER_MAX_MESSAGE_LENGTH
-    bound (see step 7 and that constant's own comment) closes a long, copied
-    deny-block from opening the gate, but a SHORT quote of or question about
-    just the marker itself ("what does `[approve-publication]` mean?") is
-    still indistinguishable, by length or content, from a genuine short
-    approval — no fixed-string match at this layer can tell them apart with
-    certainty, because the marker is disclosed text a human can always
-    retype into either shape. Fully closing this needs a per-event nonce or
-    an out-of-band confirmation channel; both are larger contract changes
-    than this bounded fix makes.
+  - UNMARKED COPIED PROSE. Formal quotation/data contributes neither generic
+    signal, but unmarked prose is byte-identical to direct prose. The public
+    fixed marker and existing instruction vocabulary cannot infer intent.
+    A copied denial's code-wrapped marker is excluded while independently
+    unquoted push prose can still request the mandatory scan completion.
   - RECEIPTS DO NOT BIND REPOSITORY / WORKTREE IDENTITY. Command-local
     repository selectors (`GIT_DIR`, `GIT_WORK_TREE`, `-C`, `--git-dir`,
     `--work-tree`, `--namespace`, and push `--repo`) are retained and denied
@@ -339,6 +341,7 @@ WHAT THE GENERIC NON-PR ROUTE STILL DOES NOT COVER (disclosed, not silently assu
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import hashlib
 import os
@@ -351,63 +354,68 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 from urllib.parse import quote, unquote_to_bytes, urlsplit
 
 from hook_common import (
     CURRENT_TURN_BYTE_CAP,
+    HISTORY_STATUS_ABSENT,
     HISTORY_STATUS_FOUND,
+    HISTORY_STATUS_IDENTITY_DRIFT,
+    HISTORY_STATUS_INVALID,
     HISTORY_STATUS_LIMIT,
+    HISTORY_STATUS_UNREADABLE,
     NO_OBSERVED_FAILURE,
     STATUS_FOUND,
     extract_model_shell_command_occurrences,
     extract_model_tool_calls_with_ids,
     extract_tool_outputs_with_ids,
-    extract_user_typed_text,
     is_user_message,
     parse_envelope,
     read_stdin_utf8,
-    read_transcript_history,
     scan_current_turn_boundary,
 )
 
 
 from git_push_gate_preflight import (
     PreflightResult,
+    TranscriptDiagnostic,
     validate_preflight_result,
+    validate_transcript_diagnostic,
     build_preflight_from_stdin,
     ShellParseResult,
+    absolute_literal_root_context,
     PrRouteDenied,
     resolve_command_dialect,
     parse_transcript_command,
     project_scan_range_binding,
+    extract_publication_user_reply,
+    is_simple_pr_approval,
+    normalize_publication_approval_text,
+    parse_publication_pr_grant,
 )
 
 
-# Per-turn override marker — honored ONLY from the last genuine user message.
+# Per-turn consent marker — honored ONLY from the last genuine user message;
+# it never replaces mandatory command, binding and authoritative-scan checks.
 # User-side only by design: assistant prose can be steered by injected content
-# (see the consultant continuation-prompt untrusted-data rule), so unlike
-# [skip-bugfix-discipline] this marker never counts from the model's own reply.
+# (see the consultant continuation-prompt untrusted-data rule). Neither this
+# marker nor [skip-bugfix-discipline] gains authority from the model's own reply.
 
-PR_GRANT_PREFIX = "[approve-pr-publication:v1 pr="
-PR_GRANT_NUMBER_REGEX = re.compile(r"^[1-9][0-9]*$")
-PR_GRANT_MARKDOWN_REGEX = re.compile(
-    r"^\[(?P<label>[^\]]+)\]\((?P<destination>[^)]+)\)$"
-)
 PR_URL_REGEX = re.compile(
     r"^(?P<url>https://github\.com/"
     r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/"
     r"(?P<repo>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/pull/"
     r"(?P<number>[1-9][0-9]*))$"
 )
-PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
-PR_RESERVED_PREFIXES = ("[approve-pr-publication:", "[revoke-pr-publication:")
-TRANSCRIPT_HISTORY_BYTE_CAP = 32 * 1024 * 1024
-TRANSCRIPT_HISTORY_RECORD_CAP = 50_000
-TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 2 * 1024 * 1024
+PR_BINDING_SIDECAR_SUFFIX = ".pr-publication-binding-v1.json"
+PR_BINDING_LOCK_SUFFIX = ".lock"
+PR_BINDING_SIDECAR_BYTE_CAP = 8192
+TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 4 * 1024 * 1024
 PROCESS_OUTPUT_BYTE_CAP = 256 * 1024
 PROCESS_TIMEOUT_SECONDS = 8.0
 ORACLE_TIMEOUT_SECONDS = 45.0
@@ -489,6 +497,37 @@ class ActivePrGrant(NamedTuple):
     number: int
 
 
+class SimplePrIntent(NamedTuple):
+    record: int
+    sha256: str
+    prior_scoped_grant: ActivePrGrant | None
+
+
+class PrBindingState(NamedTuple):
+    anchor_record: int
+    anchor_sha256: str
+    state: str
+    repository_identity: tuple[int, int]
+    remote: str
+    head_ref: str
+    pr_url: str | None
+    pr_id: str | None
+    head_repository_id: str | None
+
+
+class PreparedPrPush(NamedTuple):
+    literal: LiteralPushCommand
+    repository_workdir: str
+    git_exe: str
+
+
+class VerifiedPrOracle(NamedTuple):
+    target: PushTarget
+    local_head: str
+    pr_id: str
+    head_repository_id: str
+
+
 class ProcessResult(NamedTuple):
     returncode: int
     stdout: bytes
@@ -536,14 +575,68 @@ class SourceLayout:
     name: str
     gate_suffix: tuple[str, ...]
     trust_root_up: int
+    role_paths: tuple[tuple[str, str], ...]
+
+
+SOURCE_ROLE_ORDER = (
+    "gate", "hook_common", "classifier", "posix_helper", "windows_job",
+    "scanner", "publication_review_policy", "linked_runtime_subroots",
+)
 
 
 SOURCE_LAYOUTS = (
-    SourceLayout("universal", ("scripts", "universal-hooks", "scripts", "check-git-push-gate.py"), 2),
-    SourceLayout("generated-codex", ("src.codex", "skills", "lead", "scripts", "check-git-push-gate.py"), 1),
-    SourceLayout("generated-claude", ("src.claude", "agents", "scripts", "check-git-push-gate.py"), 1),
-    SourceLayout("global", (".codex", "skills", "lead", "scripts", "check-git-push-gate.py"), 1),
-    SourceLayout("project-local", (".agents", "skills", "lead", "scripts", "check-git-push-gate.py"), 1),
+    SourceLayout(
+        "universal", ("scripts", "universal-hooks", "scripts", "check-git-push-gate.py"), 2,
+        (
+            ("gate", "universal-hooks/scripts/check-git-push-gate.py"),
+            ("hook_common", "universal-hooks/scripts/hook_common.py"),
+            ("classifier", "universal-hooks/hooks/check-machine-local-path.py"),
+            ("posix_helper", "process_supervision/posix_process_group.py"),
+            ("windows_job", "process_supervision/windows_job.py"),
+            ("scanner", "universal-hooks/scripts/check-publication-safety.py"),
+            ("publication_review_policy", "universal-hooks/scripts/publication_review_policy.py"),
+            ("linked_runtime_subroots", "linked_runtime_subroots.py"),
+        ),
+    ),
+    SourceLayout(
+        "codex-source", ("src.codex", "skills", "lead", "scripts", "check-git-push-gate.py"), 4,
+        (
+            ("gate", "src.codex/skills/lead/scripts/check-git-push-gate.py"),
+            ("hook_common", "src.codex/skills/lead/scripts/hook_common.py"),
+            ("classifier", "src.codex/skills/lead/hooks/check-machine-local-path.py"),
+            ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
+            ("windows_job", "scripts/process_supervision/windows_job.py"),
+            ("scanner", "src.codex/skills/lead/scripts/check-publication-safety.py"),
+            ("publication_review_policy", "src.codex/skills/lead/scripts/publication_review_policy.py"),
+            ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+        ),
+    ),
+    SourceLayout(
+        "claude-source", ("src.claude", "agents", "scripts", "check-git-push-gate.py"), 3,
+        (
+            ("gate", "src.claude/agents/scripts/check-git-push-gate.py"),
+            ("hook_common", "src.claude/agents/scripts/hook_common.py"),
+            ("classifier", "src.claude/agents/hooks/check-machine-local-path.py"),
+            ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
+            ("windows_job", "scripts/process_supervision/windows_job.py"),
+            ("scanner", "src.claude/agents/scripts/check-publication-safety.py"),
+            ("publication_review_policy", "src.claude/agents/scripts/publication_review_policy.py"),
+            ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+        ),
+    ),
+    SourceLayout(
+        "component", ("scripts", "check-git-push-gate.py"), 1,
+        (
+            ("gate", "scripts/check-git-push-gate.py"),
+            ("hook_common", "scripts/hook_common.py"),
+            ("classifier", "hooks/check-machine-local-path.py"),
+            ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
+            ("windows_job", "scripts/process_supervision/windows_job.py"),
+            ("scanner", "scripts/check-publication-safety.py"),
+            ("publication_review_policy", "scripts/publication_review_policy.py"),
+            ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+        ),
+    ),
 )
 
 
@@ -552,6 +645,19 @@ class PathComponentIdentity:
     root_relative_name: str
     kind: str
     identity: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class RootLocatorIdentity:
+    logical_gate: str
+    logical_root: str
+    kind: str
+    locator_identity: tuple[int, ...]
+    raw_target: str | None
+    physical_root: str
+    physical_root_identity: tuple[int, ...]
+    physical_gate: str
+    gate_identity: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -564,6 +670,38 @@ class CanonicalSourceClosure:
     gate_identity: tuple[int, ...]
     bootstrap_digest: str
     interpreter_identity: InterpreterIdentity
+    root_locator: RootLocatorIdentity
+
+
+@dataclass(frozen=True)
+class CapturedReviewModules:
+    policy_module: object
+    linked_module: object
+    registered: tuple[tuple[str, object], ...]
+
+
+@dataclass(frozen=True)
+class CapturedReviewPayload:
+    modules: CapturedReviewModules
+    snapshot: object
+    snapshot_id: str
+    repository_observation: object
+    repository: object | None
+    origin_is_outside_repository: bool
+    payload_bytes: bytes
+    payload_sha256: str
+
+    @property
+    def policy_module(self) -> object:
+        return self.modules.policy_module
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(r"[0-9a-f]{64}", self.snapshot_id) is None:
+            raise ValueError("review-snapshot-id")
+        if type(self.payload_bytes) is not bytes:
+            raise ValueError("review-payload-bytes")
+        if hashlib.sha256(self.payload_bytes).hexdigest() != self.payload_sha256:
+            raise ValueError("review-payload-digest")
 
 
 class PendingState(str, Enum):
@@ -585,6 +723,7 @@ class PendingScanInvocation:
     interpreter_identity: InterpreterIdentity
     exact_argv: tuple[str, ...]
     result_slot: object
+    captured_review: CapturedReviewPayload | None = None
     created_tick: float = field(default_factory=time.monotonic)
     authorization_deadline: float | None = None
     state: PendingState = field(init=False, default=PendingState.PREPARED)
@@ -602,6 +741,7 @@ class PendingScanInvocation:
         if getattr(self, "_identity_sealed", False) and name in {
             "invocation_id", "attempt_id", "binding", "closure",
             "interpreter_identity", "exact_argv", "result_slot",
+            "captured_review",
             "created_tick", "authorization_deadline",
         }:
             raise AttributeError("pending invocation identity is immutable")
@@ -629,6 +769,10 @@ class PendingScanInvocation:
         interpreter_after: InterpreterIdentity,
         binding_after: PushScanBinding,
         freshness_tick: float,
+        *,
+        finalize_review: Callable[
+            ["QualifiedPublicationEvidence"], tuple[dict, list[list[str]]]
+        ] | None = None,
     ) -> "ConsumedAuthoritativeEvidence":
         prefix = "PGG" if self.binding.route == "generic" else "PRG"
         with self._transition_lock:
@@ -684,6 +828,8 @@ class PendingScanInvocation:
             self.binding_fresh_tick = freshness_tick
             self.correlation_id = secrets.token_hex(16)
             self.state = PendingState.CORRELATED
+            review_finalization = None
+            review_used_list = None
             try:
                 if not execution.bounded_completion:
                     raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
@@ -699,7 +845,7 @@ class PendingScanInvocation:
                     raise PrRouteDenied(prefix + "-SCAN-REFUSAL")
                 if execution.exit_code != 0:
                     raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
-                if parsed.kind != "valid-v3" or parsed.receipt is None:
+                if parsed.kind not in ("valid-v3", "qualified-v3") or parsed.receipt is None:
                     mismatch = "PGG-RANGE-RECEIPT-VERSION" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
                     raise PrRouteDenied(mismatch)
                 receipt = parsed.receipt
@@ -715,13 +861,54 @@ class PendingScanInvocation:
                 ):
                     mismatch = "PGG-RANGE-TIP-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
                     raise PrRouteDenied(mismatch)
+                if parsed.kind == "qualified-v3":
+                    qualification = parsed.qualification
+                    captured_review = self.captured_review
+                    if (
+                        execution.stderr
+                        or qualification is None
+                        or captured_review is None
+                        or not captured_review.origin_is_outside_repository
+                        or qualification.policy_snapshot_id != captured_review.snapshot_id
+                        or not callable(finalize_review)
+                    ):
+                        raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+                    finalized = finalize_review(qualification)
+                    if type(finalized) is not tuple or len(finalized) != 2:
+                        raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+                    review_finalization, review_used_list = finalized
+                    finalization_keys = {
+                        "inputSnapshotId", "usedList", "currentSnapshotId",
+                        "repositorySha256", "status", "reason", "resourcesSettled",
+                    }
+                    if (
+                        type(review_finalization) is not dict
+                        or set(review_finalization) != finalization_keys
+                        or review_finalization.get("inputSnapshotId") != captured_review.snapshot_id
+                        or type(review_used_list) is not list
+                        or any(
+                            type(row) is not list
+                            or len(row) != 2
+                            or type(row[0]) is not str
+                            or type(row[1]) is not str
+                            for row in review_used_list
+                        )
+                        or review_finalization.get("usedList") != review_used_list
+                        or review_finalization.get("status") != "valid"
+                        or review_finalization.get("reason") != "none"
+                        or review_finalization.get("resourcesSettled") is not True
+                    ):
+                        raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+                if time.monotonic() > float(self.authorization_deadline):
+                    raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
             except BaseException:
                 self.state = PendingState.FAILED
                 raise
             self.consumption_id = secrets.token_hex(16)
             self.state = PendingState.CONSUMED
             return ConsumedAuthoritativeEvidence(
-                self.invocation_id, self.binding, parsed, self.consumption_id, execution
+                self.invocation_id, self.binding, parsed, self.consumption_id, execution,
+                review_finalization,
             )
 
 
@@ -849,9 +1036,18 @@ class RangeReceiptV3(NamedTuple):
     tip: str
 
 
+class QualifiedPublicationEvidence(NamedTuple):
+    policy_snapshot_id: str
+    used_decisions_b64: str
+    applied: int
+    applied_set: str
+    examined: int | None = None
+
+
 class PublicationSafetyObservation(NamedTuple):
     kind: str
     receipt: RangeReceiptV3 | None
+    qualification: QualifiedPublicationEvidence | None = None
 
 
 class UntrustedTranscriptScanObservation(NamedTuple):
@@ -868,6 +1064,7 @@ class ConsumedAuthoritativeEvidence(NamedTuple):
     parsed_outcome: PublicationSafetyObservation
     consumption_id: str
     execution: TrustedExecutionRecord | None = None
+    review_finalization: dict | None = None
 
 
 AuthoritativeScanObservation = ConsumedAuthoritativeEvidence
@@ -880,66 +1077,11 @@ AuthoritativeScanObservation = ConsumedAuthoritativeEvidence
 
 
 
-# MARKER-HONORING LENGTH BOUND (2026-07-26, `$security-engineer` contract
-# decision — work-items/bugs/2026-07-26-the-deny-message-teaches-the-marker-
-# that-opens-the-gate.md). The deny reason below embeds the marker verbatim
-# so the operator knows what to type; an operator who copies that SAME text
-# back into chat ("what does this mean?", pasting it into a bug report)
-# reproduces the identical marker byte-for-byte. A bare substring search
-# cannot distinguish that from a deliberate approval — both are the same
-# bytes. The marker is a disclosed, shared, non-secret token, not a nonce; no
-# fixed-string match at this layer separates "operator approved" from
-# "operator quoted the denial" with certainty, because a human can always
-# retype or paste any substring of already-disclosed text into either shape.
-#
-# Candidates considered and rejected (full comparison in the filed bug):
-#   - Marker-must-be-on-its-own-line: rejected — it BREAKS the existing,
-#     tested, documented approval convention. Both `test_user_marker_allows`
-#     ("looks good, push it [approve-publication]") and
-#     `test_lead_sync_flow_marker_allows` ("Wave E approved after review —
-#     sync all branches [approve-publication]") carry the marker inline at
-#     the end of an ordinary sentence, never alone on a line. A "fix" that
-#     invalidates the documented contract it is meant to protect is a
-#     regression, not a hardening.
-#   - Recognize-the-gate's-own-output (exclude when deny-text vocabulary
-#     co-occurs): rejected as the PRIMARY mechanism — it couples this
-#     matcher to the deny reason's prose. This file's own history
-#     (CORRELATION / COLLISION REJECTION / ORDERING / CALL-SIDE UNIQUENESS
-#     notes above) is a record of exactly this kind of self-referential
-#     pattern-matching drifting once real transcripts and real wording
-#     changes are thrown at it; adding a fourth self-referential layer here,
-#     on the strength of a single review pass with no adversarial pressure
-#     yet applied, is not a risk this fix should take on.
-#   - Change the marker string: rejected — the new string still has to
-#     appear verbatim in the deny text for the operator to know what to
-#     type, recreating the identical echo path under a new name, while
-#     breaking every existing workflow/doc/habit across all four provider
-#     packs for no structural gain.
-#
-# Chosen mitigation: a LENGTH BOUND, decoupled from the deny text's wording
-# entirely (robust to future edits of that prose, unlike the rejected
-# recognize-own-output approach). The marker is honored only when the
-# carrying message is short enough to plausibly be a deliberate one-line
-# approval, not a copied multi-paragraph block. Measured, not guessed
-# (2026-07-26): the two documented genuine approvals above are 41 and 70
-# characters; the shipped deny reason text is 2384 characters; a realistic
-# PARTIAL quote of just one deny clause (clause (a) alone, a plausible
-# "what does this bullet mean?" paste) measures 284-305 characters.
-# MARKER_MAX_MESSAGE_LENGTH sits below both measured accident sizes with
-# margin, while sitting well above both measured genuine-approval sizes —
-# closing the bug's own named scenario ("pasting it into a bug report")
-# with high confidence.
-#
-# NOT CLOSED (disclosed, not silently assumed away): a SHORT quote of, or
-# question about, just the bare marker itself ("what does `[approve-
-# publication]` mean?" — well under any length bound) is indistinguishable
-# by length OR content from a genuine short approval. This residual is
-# shared by every candidate considered above, not unique to this one;
-# closing it fully needs a per-event nonce or an out-of-band confirmation
-# channel, both larger contract changes than this bounded fix makes.
-# MARKER_MAX_MESSAGE_LENGTH is a tunable judgment call, not a measured
-# physical constant — recalibrate it if it is ever seen rejecting a genuine
-# operator approval in practice.
+# P owns publication-specific original-occurrence qualification for BOTH
+# generic consent and explicit instructions. Raw answers/event digests and
+# this policy's chronology, binding and scan completion remain unchanged.
+# Explicit quote/code/tagged-JSON syntax is data; plain inline markers retain
+# their existing placement and exact whole-token display compatibility.
 
 # Explicit user push-instruction signal (English + Russian). Matched against
 # the last genuine user message only; used together with scan evidence.
@@ -1089,6 +1231,40 @@ SCAN_CLEAN_RANGE_V3_REGEX = re.compile(
     rf"src=(?P<src>[A-Za-z0-9._~%-]+), tip=(?P<tip>{_LOWERCASE_OID_PATTERN})\)$",
     re.MULTILINE,
 )
+SCAN_QUALIFIED_STAGED_REGEX = re.compile(
+    r"\Apublication-safety: qualified \(staged, "
+    r"examined=(?P<examined>0|[1-9][0-9]*), "
+    r"policy-snapshot=(?P<policy_snapshot>[0-9a-f]{64}), "
+    r"used-decisions=(?P<used_decisions>[A-Za-z0-9+/]+={0,2}), "
+    r"applied=(?P<applied>[1-9][0-9]*), "
+    r"applied-set=(?P<applied_set>[0-9a-f]{64}), "
+    r"unresolved=0, evaluation=complete\)\n\Z"
+)
+SCAN_QUALIFIED_RANGE_V3_REGEX = re.compile(
+    r"\Apublication-safety: qualified \(range, receipt=v3, "
+    r"commits=(?P<commits>[1-9][0-9]*), "
+    r"commit-set=(?P<commit_set>[0-9a-f]{64}), messages=complete, "
+    r"objects=(?P<objects>[1-9][0-9]*), "
+    r"object-set=(?P<object_set>[0-9a-f]{64}), "
+    r"blobs=(?P<blobs>0|[1-9][0-9]*), "
+    r"blob-set=(?P<blob_set>[0-9a-f]{64}), "
+    r"blob-bytes=(?P<blob_bytes>0|[1-9][0-9]*), "
+    r"text=(?P<text>0|[1-9][0-9]*), "
+    r"binary=(?P<binary>0|[1-9][0-9]*), "
+    r"subjects=(?P<subjects>0|[1-9][0-9]*), "
+    r"subject-set=(?P<subject_set>[0-9a-f]{64}), "
+    r"paths=(?P<paths>0|[1-9][0-9]*), "
+    r"path-set=(?P<path_set>[0-9a-f]{64}), history=complete, "
+    r"remote=(?P<remote>[A-Za-z0-9._~%-]+), "
+    r"dst=(?P<dst>[A-Za-z0-9._~%-]+), "
+    r"src=(?P<src>[A-Za-z0-9._~%-]+), "
+    rf"tip=(?P<tip>{_LOWERCASE_OID_PATTERN}), "
+    r"policy-snapshot=(?P<policy_snapshot>[0-9a-f]{64}), "
+    r"used-decisions=(?P<used_decisions>[A-Za-z0-9+/]+={0,2}), "
+    r"applied=(?P<applied>[1-9][0-9]*), "
+    r"applied-set=(?P<applied_set>[0-9a-f]{64}), "
+    r"unresolved=0, evaluation=complete\)\n\Z"
+)
 SCAN_CLEAN_PATH_REGEX = re.compile(
     r"^publication-safety:\s*clean\s*\(\s*path\s*,\s*examined\s+\d+\s+files?[^\r\n]*\)\s*$",
     re.IGNORECASE | re.MULTILINE,
@@ -1112,10 +1288,76 @@ def _decode_canonical_receipt_token(token: str) -> str | None:
     return value
 
 
+def _valid_used_decisions_b64(value: str) -> bool:
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error):
+        return False
+    return bool(decoded) and base64.b64encode(decoded).decode("ascii") == value
+
+
 def parse_publication_safety_observation(text: str) -> PublicationSafetyObservation:
     text = text.replace("\r\n", "\n")
     if "\r" in text:
         return PublicationSafetyObservation("malformed", None)
+    if "publication-safety: qualified" in text:
+        staged = SCAN_QUALIFIED_STAGED_REGEX.fullmatch(text)
+        if staged is not None:
+            used_decisions = staged.group("used_decisions")
+            examined = int(staged.group("examined"))
+            if examined == 0 or not _valid_used_decisions_b64(used_decisions):
+                return PublicationSafetyObservation("malformed", None)
+            return PublicationSafetyObservation(
+                "qualified-staged", None,
+                QualifiedPublicationEvidence(
+                    staged.group("policy_snapshot"), used_decisions,
+                    int(staged.group("applied")), staged.group("applied_set"),
+                    examined,
+                ),
+            )
+
+        qualified = SCAN_QUALIFIED_RANGE_V3_REGEX.fullmatch(text)
+        if qualified is None:
+            return PublicationSafetyObservation("malformed", None)
+        used_decisions = qualified.group("used_decisions")
+        if not _valid_used_decisions_b64(used_decisions):
+            return PublicationSafetyObservation("malformed", None)
+        # Route the shared V3 graph/count/selection invariants through the
+        # existing parser. The qualified spelling changes disposition evidence,
+        # not the range receipt or its graph contract.
+        v3_text = (
+            "publication-safety: clean (range, receipt=v3, "
+            f"commits={qualified.group('commits')}, "
+            f"commit-set={qualified.group('commit_set')}, messages=complete, "
+            f"objects={qualified.group('objects')}, "
+            f"object-set={qualified.group('object_set')}, "
+            f"blobs={qualified.group('blobs')}, "
+            f"blob-set={qualified.group('blob_set')}, "
+            f"blob-bytes={qualified.group('blob_bytes')}, "
+            f"text={qualified.group('text')}, "
+            f"binary={qualified.group('binary')}, "
+            f"subjects={qualified.group('subjects')}, "
+            f"subject-set={qualified.group('subject_set')}, "
+            f"paths={qualified.group('paths')}, "
+            f"path-set={qualified.group('path_set')}, history=complete, "
+            f"remote={qualified.group('remote')}, "
+            f"dst={qualified.group('dst')}, "
+            f"src={qualified.group('src')}, "
+            f"tip={qualified.group('tip')})\n"
+        )
+        parsed_v3 = parse_publication_safety_observation(v3_text)
+        if parsed_v3.kind != "valid-v3" or parsed_v3.receipt is None:
+            return PublicationSafetyObservation("malformed", None)
+        if parsed_v3.receipt.text <= 0 or parsed_v3.receipt.blob_bytes <= 0:
+            return PublicationSafetyObservation("malformed", None)
+        return PublicationSafetyObservation(
+            "qualified-v3", parsed_v3.receipt,
+            QualifiedPublicationEvidence(
+                qualified.group("policy_snapshot"), used_decisions,
+                int(qualified.group("applied")), qualified.group("applied_set"),
+            ),
+        )
+
     v3_matches = list(SCAN_CLEAN_RANGE_V3_REGEX.finditer(text))
     clean_lines = [
         line for line in text.splitlines()
@@ -1346,32 +1588,22 @@ def _mask_attached_io_numbers(command: str) -> str:
 
 
 def _parse_pr_grant(text: str) -> ActivePrGrant | None:
-    if not text.startswith(PR_GRANT_PREFIX) or not text.endswith("]"):
+    parsed = parse_publication_pr_grant(text)
+    if parsed is None:
         return None
-    target = text[len(PR_GRANT_PREFIX):-1]
-    if PR_GRANT_NUMBER_REGEX.fullmatch(target):
-        return ActivePrGrant(target, "", "", int(target))
-    markdown = PR_GRANT_MARKDOWN_REGEX.fullmatch(target)
-    if markdown:
-        if markdown.group("label") != markdown.group("destination"):
-            return None
-        target = markdown.group("label")
-    match = PR_URL_REGEX.fullmatch(target)
-    if not match:
-        return None
-    owner = match.group("owner")
-    repo = match.group("repo")
-    if owner in (".", "..") or repo in (".", ".."):
-        return None
-    return ActivePrGrant(
-        match.group("url"), owner, repo, int(match.group("number"))
-    )
+    return ActivePrGrant(parsed.url, parsed.owner, parsed.repo, parsed.number)
 
 
 def _canonicalize_numeric_pr_grant(
-    number: int, authorization_workdir: str
+    number: int, authorization_workdir: str, *, preflight: PreflightResult
 ) -> ActivePrGrant:
     repository_workdir = _normalize_repository_workdir(authorization_workdir)
+    _prepare_selected_repository_workdir(
+        absolute_literal_root_context(preflight.parsed)
+        if preflight.parsed is not None else None,
+        preflight.repository_workdir,
+        preflight.repository_workdir_source,
+    )
     git_exe = _resolve_executable("git", repository_workdir)
     gh_exe = _resolve_executable("gh", repository_workdir)
     if git_exe is None or gh_exe is None:
@@ -1407,132 +1639,513 @@ def _canonicalize_numeric_pr_grant(
     return ActivePrGrant(match.group("url"), owner, repo, number)
 
 
-def _derive_pr_grant(
-    entries: list[dict], envelope_repository_workdir: str
-) -> tuple[str, ActivePrGrant | None]:
-    state = "absent"
-    grant: ActivePrGrant | None = None
+@dataclass(slots=True)
+class _PrGrantReducer:
+    """Reduce genuine-user PR grant state in original transcript order."""
+
+    preflight: PreflightResult
+    state: str = "absent"
+    grant: ActivePrGrant | SimplePrIntent | None = None
     transcript_workdir: str | None = None
-    genuine_user_indexes = [
-        index for index, entry in enumerate(entries)
-        if is_user_message(entry) and extract_user_typed_text(entry)
-    ]
-    last_user_index = genuine_user_indexes[-1] if genuine_user_indexes else -1
-    for index, entry in enumerate(entries):
-        payload = entry.get("payload") if isinstance(entry, dict) else None
+    record_position: int = 0
+    last_genuine_user_position: int = -1
+    pending_numeric: tuple[ActivePrGrant, str | None, int] | None = None
+    prior_scoped_grant: ActivePrGrant | None = None
+
+    def consume(self, entry: dict, raw_record: bytes | None = None) -> None:
+        position = self.record_position
+        self.record_position += 1
+        payload = entry.get("payload")
         if entry.get("type") in ("session_meta", "turn_context"):
             raw_context = payload.get("cwd") if isinstance(payload, dict) else None
-            transcript_workdir = raw_context if type(raw_context) is str and raw_context else None
+            self.transcript_workdir = (
+                raw_context if type(raw_context) is str and raw_context else None
+            )
         if not is_user_message(entry):
-            continue
-        text = extract_user_typed_text(entry)
-        if not text:
-            continue
-        if text == PR_REVOKE_MARKER:
-            state, grant = "revoked", None
-            continue
-        parsed_grant = _parse_pr_grant(text)
+            return
+        reply = extract_publication_user_reply(entry)
+        action, text = reply.publication_action()
+        if action == "malformed":
+            self.state, self.grant, self.pending_numeric = "malformed", None, None
+            return
+        if reply.kind != "structured-answer" and not any(reply.answers):
+            return
+        normalized = normalize_publication_approval_text(text)
+
+        if self.pending_numeric is not None and self.pending_numeric[1] is None:
+            self.state, self.grant, self.pending_numeric = "malformed", None, None
+        self.last_genuine_user_position = position
+
+        if action == "revoked":
+            self.state, self.grant, self.pending_numeric = "revoked", None, None
+            self.prior_scoped_grant = None
+            return
+        if is_simple_pr_approval(normalized):
+            digest = hashlib.sha256(raw_record).hexdigest() if raw_record else ""
+            self.state = "simple"
+            self.grant = SimplePrIntent(position + 1, digest, self.prior_scoped_grant)
+            self.pending_numeric = None
+            return
+        parsed_grant = _parse_pr_grant(normalized)
         if parsed_grant is not None:
-            if not parsed_grant.owner:
-                direct_context = entry.get("cwd")
-                if direct_context is not None and (
-                    type(direct_context) is not str or not direct_context
-                ):
-                    state, grant = "malformed", None
-                    continue
-                contexts = {
-                    value for value in (direct_context, transcript_workdir)
-                    if value is not None
-                }
-                if len(contexts) > 1:
-                    state, grant = "malformed", None
-                    continue
-                authorization_workdir = next(iter(contexts), None)
-                if authorization_workdir is None and index == last_user_index:
-                    authorization_workdir = envelope_repository_workdir
-                if authorization_workdir is None:
-                    state, grant = "malformed", None
-                    continue
-                parsed_grant = _canonicalize_numeric_pr_grant(
-                    parsed_grant.number, authorization_workdir
-                )
-            state, grant = "active", parsed_grant
-            continue
-        if text.startswith(PR_RESERVED_PREFIXES):
-            state, grant = "malformed", None
-    return state, grant
+            if parsed_grant.owner:
+                self.state, self.grant = "active", parsed_grant
+                self.prior_scoped_grant = parsed_grant
+                self.pending_numeric = None
+                return
+            direct_context = entry.get("cwd")
+            if direct_context is not None and (
+                type(direct_context) is not str or not direct_context
+            ):
+                self.state, self.grant, self.pending_numeric = "malformed", None, None
+                return
+            contexts = {
+                value
+                for value in (direct_context, self.transcript_workdir)
+                if value is not None
+            }
+            if len(contexts) > 1:
+                self.state, self.grant, self.pending_numeric = "malformed", None, None
+                return
+            authorization_workdir = next(iter(contexts), None)
+            self.state, self.grant = "active", None
+            self.pending_numeric = (parsed_grant, authorization_workdir, position)
+            return
+
+    def finish(self) -> tuple[str, ActivePrGrant | SimplePrIntent | None]:
+        if self.pending_numeric is None:
+            return self.state, self.grant
+        parsed_grant, authorization_workdir, position = self.pending_numeric
+        if authorization_workdir is None:
+            if position != self.last_genuine_user_position:
+                self.state, self.grant, self.pending_numeric = "malformed", None, None
+                return self.state, self.grant
+            if (
+                type(self.preflight.repository_workdir) is not str
+                or not self.preflight.repository_workdir
+            ):
+                self.state, self.grant, self.pending_numeric = "malformed", None, None
+                return self.state, self.grant
+            authorization_workdir = self.preflight.repository_workdir
+        self.grant = _canonicalize_numeric_pr_grant(
+            parsed_grant.number, authorization_workdir, preflight=self.preflight
+        )
+        self.state, self.pending_numeric = "active", None
+        return self.state, self.grant
 
 
-def _read_stable_transcript_suffix(transcript_path: str) -> tuple[list[dict], str]:
-    """Read one stable complete-record suffix under the history reader's caps."""
+def _stream_stable_pr_grant(
+    preflight: PreflightResult,
+) -> tuple[str, ActivePrGrant | SimplePrIntent | None, str]:
+    """Reduce exactly the opened descriptor's initial, identity-stable history."""
+
+    transcript_path = preflight.transcript_path
     if not transcript_path:
-        return [], "absent"
+        return "absent", None, HISTORY_STATUS_ABSENT
     path = Path(transcript_path)
+    reducer = _PrGrantReducer(preflight)
     try:
+        path_before = path.stat()
+        if not stat.S_ISREG(path_before.st_mode):
+            return "absent", None, HISTORY_STATUS_UNREADABLE
         with path.open("rb") as stream:
             before = os.fstat(stream.fileno())
-            eof = before.st_size
-            if eof > TRANSCRIPT_HISTORY_BYTE_CAP:
-                stream.seek(eof - TRANSCRIPT_HISTORY_BYTE_CAP)
-                raw = stream.read(TRANSCRIPT_HISTORY_BYTE_CAP)
-                if len(raw) != TRANSCRIPT_HISTORY_BYTE_CAP:
-                    return [], "unreadable"
-                sentinel, payload = raw[:1], raw[1:]
-                if sentinel != b"\n":
-                    newline = payload.find(b"\n")
-                    if newline < 0:
-                        return [], "limit"
-                    payload = payload[newline + 1 :]
-            else:
-                stream.seek(0)
-                payload = stream.read(eof)
-                if len(payload) != eof:
-                    return [], "unreadable"
+            identity_fields = ("st_dev", "st_ino", "st_mode")
+            if tuple(getattr(before, name) for name in identity_fields) != tuple(
+                getattr(path_before, name) for name in identity_fields
+            ):
+                return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
+            frontier = before.st_size
+            total_bytes = 0
+            content_digest = hashlib.sha256()
+            while total_bytes < frontier:
+                raw_line = stream.readline(min(
+                    TRANSCRIPT_HISTORY_LINE_BYTE_CAP + 1,
+                    frontier - total_bytes,
+                ))
+                if not raw_line:
+                    return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
+                total_bytes += len(raw_line)
+                content_digest.update(raw_line)
+                if len(raw_line) > TRANSCRIPT_HISTORY_LINE_BYTE_CAP:
+                    return "absent", None, HISTORY_STATUS_LIMIT
+                if not raw_line.strip():
+                    continue
+                try:
+                    entry = json.loads(raw_line.decode("utf-8", errors="strict"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    return "absent", None, HISTORY_STATUS_INVALID
+                if not isinstance(entry, dict):
+                    return "absent", None, HISTORY_STATUS_INVALID
+                reducer.consume(entry, raw_line)
+            if stream.read(1):
+                return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
+            first_digest = content_digest.digest()
             after = os.fstat(stream.fileno())
+            stream.seek(0)
+            verify_digest = hashlib.sha256()
+            verify_bytes = 0
+            while verify_bytes < frontier:
+                chunk = stream.read(min(1024 * 1024, frontier - verify_bytes))
+                if not chunk:
+                    return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
+                verify_bytes += len(chunk)
+                verify_digest.update(chunk)
+            if stream.read(1):
+                return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
+            after_verify = os.fstat(stream.fileno())
             current = path.stat()
+    except PrRouteDenied:
+        raise
     except Exception:
-        return [], "unreadable"
+        return "absent", None, HISTORY_STATUS_UNREADABLE
 
-    identity_before = (
-        before.st_dev,
-        before.st_ino,
-        before.st_size,
-        before.st_mtime_ns,
+    stable_fields = (
+        "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"
     )
-    if identity_before != (
-        after.st_dev,
-        after.st_ino,
-        after.st_size,
-        after.st_mtime_ns,
-    ) or identity_before != (
-        current.st_dev,
-        current.st_ino,
-        current.st_size,
-        current.st_mtime_ns,
+    descriptor_before = tuple(getattr(before, name) for name in stable_fields)
+    if (
+        descriptor_before != tuple(getattr(after, name) for name in stable_fields)
+        or descriptor_before
+        != tuple(getattr(after_verify, name) for name in stable_fields)
+        or tuple(getattr(path_before, name) for name in stable_fields)
+        != tuple(getattr(current, name) for name in stable_fields)
+        or total_bytes != frontier
+        or verify_bytes != frontier
+        or first_digest != verify_digest.digest()
     ):
-        return [], "unreadable"
+        return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
+    state, grant = reducer.finish()
+    return state, grant, HISTORY_STATUS_FOUND
 
-    raw_lines = payload.split(b"\n")
-    ended_with_newline = payload.endswith(b"\n")
-    if ended_with_newline:
-        raw_lines.pop()
-    entries: list[dict] = []
-    for index, raw_line in enumerate(raw_lines):
-        if not raw_line.strip():
-            continue
-        line_size = len(raw_line) + (1 if ended_with_newline or index < len(raw_lines) - 1 else 0)
-        if line_size > TRANSCRIPT_HISTORY_LINE_BYTE_CAP:
-            return [], "limit"
-        if len(entries) >= TRANSCRIPT_HISTORY_RECORD_CAP:
-            return [], "limit"
+
+def _recover_stable_pr_grant(
+    preflight: PreflightResult,
+) -> tuple[str, ActivePrGrant | SimplePrIntent | None, str]:
+    """Retry only one complete reread after a discarded identity-drift snapshot."""
+    state, grant, status = _stream_stable_pr_grant(preflight)
+    if status == HISTORY_STATUS_IDENTITY_DRIFT:
+        return _stream_stable_pr_grant(preflight)
+    return state, grant, status
+
+
+def _binding_sidecar_path(transcript_path: str) -> Path:
+    if type(transcript_path) is not str or not transcript_path:
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+    transcript = Path(transcript_path)
+    try:
+        if not transcript.is_file():
+            raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+    except OSError:
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE") from None
+    return Path(str(transcript) + PR_BINDING_SIDECAR_SUFFIX)
+
+
+def _repository_identity(repository_workdir: str) -> tuple[int, int]:
+    try:
+        observed = os.stat(repository_workdir, follow_symlinks=False)
+    except OSError:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
+    return observed.st_dev, observed.st_ino
+
+
+def _binding_payload(state: PrBindingState) -> dict:
+    return {
+        "v": 1,
+        "anchor": {
+            "record": state.anchor_record,
+            "sha256": state.anchor_sha256,
+        },
+        "state": state.state,
+        "repositoryIdentity": list(state.repository_identity),
+        "remote": state.remote,
+        "headRef": state.head_ref,
+        "prUrl": state.pr_url,
+        "prId": state.pr_id,
+        "headRepositoryId": state.head_repository_id,
+    }
+
+
+def _validate_binding_payload(value: object) -> PrBindingState:
+    expected = {
+        "v", "anchor", "state", "repositoryIdentity", "remote", "headRef",
+        "prUrl", "prId", "headRepositoryId",
+    }
+    if not isinstance(value, dict) or set(value) != expected or value.get("v") != 1:
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    anchor = value.get("anchor")
+    identity = value.get("repositoryIdentity")
+    if (
+        not isinstance(anchor, dict)
+        or set(anchor) != {"record", "sha256"}
+        or type(anchor.get("record")) is not int
+        or anchor["record"] <= 0
+        or not isinstance(anchor.get("sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", anchor["sha256"]) is None
+        or not isinstance(identity, list)
+        or len(identity) != 2
+        or any(type(item) is not int or item < 0 for item in identity)
+        or value.get("state") not in {"pending", "bound", "revoked"}
+        or not isinstance(value.get("remote"), str)
+        or REMOTE_NAME_REGEX.fullmatch(value["remote"]) is None
+        or not isinstance(value.get("headRef"), str)
+        or not _portable_pr_head_ref(value["headRef"])
+    ):
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    pr_values = (value.get("prUrl"), value.get("prId"), value.get("headRepositoryId"))
+    if value["state"] == "pending":
+        if pr_values != (None, None, None):
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    elif value["state"] == "bound" and any(
+        not isinstance(item, str) or not item for item in pr_values
+    ):
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    elif value["state"] == "revoked" and pr_values != (None, None, None) and any(
+        not isinstance(item, str) or not item for item in pr_values
+    ):
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    if value["state"] == "bound" or (
+        value["state"] == "revoked" and pr_values != (None, None, None)
+    ):
+        if (
+            PR_URL_REGEX.fullmatch(value["prUrl"]) is None
+            or NODE_ID_REGEX.fullmatch(value["prId"]) is None
+            or NODE_ID_REGEX.fullmatch(value["headRepositoryId"]) is None
+        ):
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    return PrBindingState(
+        anchor["record"], anchor["sha256"], value["state"], tuple(identity),
+        value["remote"], value["headRef"], *pr_values,
+    )
+
+
+def _read_binding_state(path: Path) -> PrBindingState | None:
+    try:
+        observed = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise PrRouteDenied("PRG-AUTH-MALFORMED") from None
+    if (
+        not stat.S_ISREG(observed.st_mode)
+        or stat.S_ISLNK(observed.st_mode)
+        or observed.st_nlink != 1
+        or observed.st_size > PR_BINDING_SIDECAR_BYTE_CAP
+        or bool(
+            getattr(observed, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        )
+    ):
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    try:
+        with path.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            identity_fields = ("st_dev", "st_ino", "st_mode", "st_nlink")
+            if tuple(getattr(opened, name) for name in identity_fields) != tuple(
+                getattr(observed, name) for name in identity_fields
+            ):
+                raise PrRouteDenied("PRG-AUTH-MALFORMED")
+            raw = stream.read(PR_BINDING_SIDECAR_BYTE_CAP + 1)
+            after_read = os.fstat(stream.fileno())
+            stream.seek(0)
+            verified = stream.read(PR_BINDING_SIDECAR_BYTE_CAP + 1)
+            after_verify = os.fstat(stream.fileno())
+        if len(raw) > PR_BINDING_SIDECAR_BYTE_CAP:
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        current = path.lstat()
+        stable_fields = (
+            "st_dev", "st_ino", "st_mode", "st_nlink", "st_size",
+            "st_mtime_ns", "st_ctime_ns",
+        )
+        opened_fields = tuple(getattr(opened, name) for name in stable_fields)
+        if (
+            opened_fields
+            != tuple(getattr(after_read, name) for name in stable_fields)
+            or opened_fields
+            != tuple(getattr(after_verify, name) for name in stable_fields)
+            or tuple(getattr(observed, name) for name in stable_fields)
+            != tuple(getattr(current, name) for name in stable_fields)
+            or raw != verified
+            or len(raw) != opened.st_size
+        ):
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        value = json.loads(raw.decode("utf-8", errors="strict"))
+    except PrRouteDenied:
+        raise
+    except Exception:
+        raise PrRouteDenied("PRG-AUTH-MALFORMED") from None
+    return _validate_binding_payload(value)
+
+
+def _binding_lock_path(path: Path) -> Path:
+    return path.with_name(path.name + PR_BINDING_LOCK_SUFFIX)
+
+
+def _binding_file_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
+    return metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_nlink
+
+
+def _unlink_owned_binding_file(
+    path: Path, identity: tuple[int, int, int, int]
+) -> bool:
+    try:
+        current = path.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if (
+        _binding_file_identity(current) != identity
+        or not stat.S_ISREG(current.st_mode)
+        or stat.S_ISLNK(current.st_mode)
+        or current.st_nlink != 1
+        or bool(
+            getattr(current, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        )
+    ):
+        return False
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    return True
+
+
+def _acquire_binding_write_lock(path: Path) -> tuple[int, Path, tuple[int, int, int, int]]:
+    lock_path = _binding_lock_path(path)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except FileExistsError:
+        raise PrRouteDenied("PRG-BINDING-DRIFT") from None
+    except Exception:
+        raise PrRouteDenied("PRG-INTERNAL") from None
+    identity: tuple[int, int, int, int] | None = None
+    try:
+        metadata = os.fstat(descriptor)
+        identity = _binding_file_identity(metadata)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or bool(
+                getattr(metadata, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            )
+        ):
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        return descriptor, lock_path, identity
+    except BaseException:
         try:
-            entry = json.loads(raw_line.decode("utf-8", errors="strict"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            return [], "invalid"
-        if not isinstance(entry, dict):
-            return [], "invalid"
-        entries.append(entry)
-    return entries, "found"
+            os.close(descriptor)
+        except OSError:
+            pass
+        if identity is not None:
+            _unlink_owned_binding_file(lock_path, identity)
+        raise
+
+
+def _release_binding_write_lock(
+    descriptor: int,
+    lock_path: Path,
+    identity: tuple[int, int, int, int],
+    *,
+    preserve_primary: bool,
+) -> None:
+    failure_id: str | None = None
+    try:
+        os.close(descriptor)
+    except OSError:
+        failure_id = "PRG-INTERNAL"
+    if not _unlink_owned_binding_file(lock_path, identity):
+        failure_id = failure_id or "PRG-BINDING-DRIFT"
+    if failure_id is not None and not preserve_primary:
+        raise PrRouteDenied(failure_id)
+
+
+def _write_binding_state(
+    path: Path, state: PrBindingState, *, expected: PrBindingState | None
+) -> None:
+    payload = json.dumps(
+        _binding_payload(state), ensure_ascii=True, separators=(",", ":")
+    ).encode("utf-8")
+    if len(payload) > PR_BINDING_SIDECAR_BYTE_CAP:
+        raise PrRouteDenied("PRG-INTERNAL")
+    lock_fd, lock_path, lock_identity = _acquire_binding_write_lock(path)
+    target = path if expected is None else path.with_name(
+        path.name + ".tmp-" + secrets.token_hex(8)
+    )
+    write_fd: int | None = None
+    target_identity: tuple[int, int, int, int] | None = None
+    committed = False
+    primary = True
+    try:
+        if _read_binding_state(path) != expected:
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_BINARY"):
+            flags |= os.O_BINARY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            write_fd = os.open(target, flags, 0o600)
+            target_metadata = os.fstat(write_fd)
+            target_identity = _binding_file_identity(target_metadata)
+            if (
+                not stat.S_ISREG(target_metadata.st_mode)
+                or target_metadata.st_nlink != 1
+                or bool(
+                    getattr(target_metadata, "st_file_attributes", 0)
+                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                )
+            ):
+                raise OSError("sidecar staging file is not owned and ordinary")
+            offset = 0
+            while offset < len(payload):
+                written = os.write(write_fd, payload[offset:])
+                if written <= 0:
+                    raise OSError("short sidecar write")
+                offset += written
+            os.fsync(write_fd)
+            os.close(write_fd)
+            write_fd = None
+            if expected is not None:
+                if _read_binding_state(path) != expected:
+                    raise PrRouteDenied("PRG-BINDING-DRIFT")
+                os.replace(target, path)
+                committed = True
+            if _read_binding_state(path) != state:
+                raise PrRouteDenied("PRG-BINDING-DRIFT")
+            committed = True
+        except FileExistsError:
+            raise PrRouteDenied("PRG-BINDING-DRIFT") from None
+        except PrRouteDenied:
+            raise
+        except Exception:
+            raise PrRouteDenied("PRG-INTERNAL") from None
+        primary = False
+    finally:
+        if write_fd is not None:
+            try:
+                os.close(write_fd)
+            except OSError:
+                pass
+        if not committed and target_identity is not None:
+            _unlink_owned_binding_file(target, target_identity)
+        _release_binding_write_lock(
+            lock_fd, lock_path, lock_identity, preserve_primary=primary
+        )
+
+
+def _same_binding_anchor(state: PrBindingState, intent: SimplePrIntent) -> bool:
+    return (
+        state.anchor_record == intent.record
+        and state.anchor_sha256 == intent.sha256
+    )
 
 
 def _is_within(path: Path, parent: Path) -> bool:
@@ -1626,11 +2239,11 @@ def _parse_pr_literal_shape(
     )
 
 
-def _bind_pr_literal_executable(
-    literal: LiteralPushCommand, resolved_git: str
-) -> LiteralPushCommand:
+def _bind_literal_executable_identity(
+    literal_executable: str, resolved_git: str, failure_id: str,
+) -> None:
     try:
-        executable_path = Path(literal.executable).resolve(strict=True)
+        executable_path = Path(literal_executable).resolve(strict=True)
         resolved_path = Path(resolved_git).resolve(strict=True)
         same_identity = executable_path.is_file() and resolved_path.is_file() and os.path.samefile(
             executable_path, resolved_path
@@ -1638,7 +2251,15 @@ def _bind_pr_literal_executable(
     except Exception:
         same_identity = False
     if not same_identity:
-        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        raise PrRouteDenied(failure_id)
+
+
+def _bind_pr_literal_executable(
+    literal: LiteralPushCommand, resolved_git: str
+) -> LiteralPushCommand:
+    _bind_literal_executable_identity(
+        literal.executable, resolved_git, "PRG-COMMAND-SHAPE"
+    )
     return literal
 
 
@@ -1674,6 +2295,8 @@ def _run_process(
     stdout = bytearray()
     stderr = bytearray()
     overflow = threading.Event()
+    output_lock = threading.Lock()
+    reader_failures: list[BaseException] = []
 
     def drain(stream, destination: bytearray) -> None:
         try:
@@ -1681,48 +2304,258 @@ def _run_process(
                 chunk = stream.read(8192)
                 if not chunk:
                     return
-                if len(destination) + len(chunk) > PROCESS_OUTPUT_BYTE_CAP:
-                    overflow.set()
-                    return
-                destination.extend(chunk)
-        except OSError:
+                with output_lock:
+                    if len(destination) + len(chunk) > PROCESS_OUTPUT_BYTE_CAP:
+                        overflow.set()
+                        return
+                    destination.extend(chunk)
+        except BaseException as exc:
+            with output_lock:
+                reader_failures.append(exc)
             overflow.set()
 
-    assert process.stdout is not None and process.stderr is not None
-    readers = (
-        threading.Thread(target=drain, args=(process.stdout, stdout), daemon=True),
-        threading.Thread(target=drain, args=(process.stderr, stderr), daemon=True),
-    )
-    for reader in readers:
-        reader.start()
-
-    deadline = time.monotonic() + max(0.0, timeout)
+    started: list[threading.Thread] = []
+    primary_failure: BaseException | None = None
+    primary_traceback = None
+    cleanup_failures: list[BaseException] = []
     failed = False
-    while process.poll() is None:
-        if overflow.is_set() or time.monotonic() >= deadline:
-            failed = True
-            process.kill()
-            break
-        time.sleep(0.01)
-    try:
-        process.wait(timeout=1.0)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
+    if process.stdout is None or process.stderr is None:
+        primary_failure = RuntimeError("process output pipe unavailable")
+        primary_traceback = primary_failure.__traceback__
+        readers = ()
         failed = True
-    for reader in readers:
-        reader.join(timeout=1.0)
-    process.stdout.close()
-    process.stderr.close()
-    if failed or overflow.is_set() or any(reader.is_alive() for reader in readers):
+    else:
+        readers = (
+            threading.Thread(target=drain, args=(process.stdout, stdout), daemon=True),
+            threading.Thread(target=drain, args=(process.stderr, stderr), daemon=True),
+        )
+    deadline = time.monotonic() + max(0.0, timeout)
+    try:
+        for reader in readers:
+            reader.start()
+            started.append(reader)
+        while process.poll() is None:
+            if overflow.is_set() or time.monotonic() >= deadline:
+                failed = True
+                break
+            time.sleep(0.01)
+    except BaseException as exc:
+        primary_failure = exc
+        primary_traceback = exc.__traceback__
+        failed = True
+
+    termination_attempted = False
+    termination_succeeded = False
+
+    def request_termination() -> bool:
+        nonlocal termination_attempted, termination_succeeded
+        if termination_attempted:
+            return termination_succeeded
+        termination_attempted = True
+        try:
+            if process.poll() is not None:
+                termination_succeeded = True
+                return True
+            process.kill()
+            termination_succeeded = True
+            return True
+        except ProcessLookupError:
+            termination_succeeded = True
+            return True
+        except BaseException as exc:
+            cleanup_failures.append(exc)
+            try:
+                termination_succeeded = process.poll() is not None
+            except BaseException as observe_exc:
+                cleanup_failures.append(observe_exc)
+                termination_succeeded = False
+            return termination_succeeded
+
+    def wait_for_owned_child() -> None:
+        nonlocal failed, primary_failure, primary_traceback
+        if termination_attempted and not termination_succeeded:
+            return
+        try:
+            if termination_attempted:
+                process.wait()
+            else:
+                process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            failed = True
+            if request_termination():
+                try:
+                    process.wait()
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+        except BaseException as exc:
+            if primary_failure is None:
+                primary_failure = exc
+                primary_traceback = exc.__traceback__
+            if request_termination():
+                try:
+                    process.wait()
+                except BaseException as cleanup_exc:
+                    cleanup_failures.append(cleanup_exc)
+            else:
+                cleanup_failures.append(exc)
+
+    if failed or overflow.is_set():
+        request_termination()
+    wait_for_owned_child()
+
+    for reader in started:
+        try:
+            reader.join(timeout=1.0)
+        except BaseException as exc:
+            if primary_failure is None:
+                primary_failure = exc
+                primary_traceback = exc.__traceback__
+            cleanup_failures.append(exc)
+
+    live_readers: list[threading.Thread] = []
+    for reader in started:
+        try:
+            if reader.is_alive():
+                live_readers.append(reader)
+        except BaseException as exc:
+            if primary_failure is None:
+                primary_failure = exc
+                primary_traceback = exc.__traceback__
+            cleanup_failures.append(exc)
+
+    if live_readers:
+        failed = True
+        for stream in (process.stdout, process.stderr):
+            if stream is None:
+                continue
+            try:
+                if not stream.closed:
+                    stream.close()
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+        for reader in live_readers:
+            try:
+                reader.join(timeout=1.0)
+            except BaseException as exc:
+                if primary_failure is None:
+                    primary_failure = exc
+                    primary_traceback = exc.__traceback__
+                cleanup_failures.append(exc)
+
+    for stream in (process.stdout, process.stderr):
+        if stream is None:
+            continue
+        try:
+            if not stream.closed:
+                stream.close()
+        except BaseException as exc:
+            cleanup_failures.append(exc)
+
+    unsettled = False
+    try:
+        unsettled = (
+            process.returncode is None
+            or any(reader.is_alive() for reader in started)
+            or any(stream is not None and not stream.closed for stream in (
+                process.stdout, process.stderr
+            ))
+        )
+    except BaseException as exc:
+        cleanup_failures.append(exc)
+        unsettled = True
+
+    if unsettled:
+        cleanup_failures.append(RuntimeError("process resources remain unsettled"))
+
+    def retain_outcome(error: BaseException) -> None:
+        outcome = {
+            "returncode": process.returncode,
+            "stdout": bytes(stdout),
+            "stderr": bytes(stderr),
+            "complete": False,
+            "resourcesSettled": not unsettled,
+        }
+        try:
+            setattr(error, "publication_gate_process_outcome", outcome)
+            if unsettled:
+                setattr(error, "publication_gate_owned_process", process)
+                setattr(error, "publication_gate_owned_readers", tuple(started))
+                setattr(error, "publication_gate_owned_streams", (process.stdout, process.stderr))
+        except BaseException as capture_failure:
+            raise error from capture_failure
+
+    if primary_failure is not None:
+        retain_outcome(primary_failure)
+        if cleanup_failures:
+            raise primary_failure.with_traceback(primary_traceback) from cleanup_failures[0]
+        raise primary_failure.with_traceback(primary_traceback)
+    if cleanup_failures:
+        failure = RuntimeError("process cleanup failed")
+        retain_outcome(failure)
+        raise failure from cleanup_failures[0]
+    if unsettled:
+        raise RuntimeError("process resources remain unsettled")
+    if failed or overflow.is_set() or reader_failures:
         return None
     return ProcessResult(process.returncode, bytes(stdout), bytes(stderr))
 
 
-_SCAN_BOOTSTRAP = r'''import base64,builtins,json,sys,types
-bundle=json.loads(sys.stdin.buffer.read().decode("ascii"))
-sources={key:base64.b64decode(value,validate=True) for key,value in bundle.items()}
-allowed=set(sys.stdlib_module_names)|{"hook_common"}
+_SCAN_BOOTSTRAP = r'''import base64,builtins,hashlib,json,re,sys,types
+def no_duplicates(pairs):
+    result={}
+    for key,value in pairs:
+        if key in result: raise ValueError("duplicate payload member")
+        result[key]=value
+    return result
+def exact_object(value, keys, label):
+    if type(value) is not dict or set(value)!=set(keys):
+        raise ValueError(label)
+    return value
+bundle=json.loads(sys.stdin.buffer.read().decode("ascii"),object_pairs_hook=no_duplicates)
+exact_object(bundle,("payloadVersion","sources","review"),"payload shape")
+if type(bundle["payloadVersion"]) is not int or bundle["payloadVersion"]!=1:
+    raise ValueError("payload version")
+roles=("hook_common","classifier","posix_helper","windows_job","scanner","publication_review_policy","linked_runtime_subroots")
+encoded_sources=exact_object(bundle["sources"],roles,"source roles")
+sources={}
+for key,value in encoded_sources.items():
+    if type(value) is not str: raise ValueError("source encoding")
+    raw=base64.b64decode(value,validate=True)
+    if base64.b64encode(raw).decode("ascii")!=value: raise ValueError("source encoding")
+    sources[key]=raw
+review=exact_object(bundle["review"],("schemaVersion","repositoryObservation","snapshot","snapshotId"),"review shape")
+if type(review["schemaVersion"]) is not int or review["schemaVersion"]!=1:
+    raise ValueError("review version")
+if type(review["snapshotId"]) is not str or re.fullmatch(r"[0-9a-f]{64}",review["snapshotId"]) is None:
+    raise ValueError("snapshot id")
+snapshot=exact_object(review["snapshot"],("schemaVersion","status","origin","rawBase64","rawSha256","diagnostic"),"snapshot shape")
+if type(snapshot["schemaVersion"]) is not int or snapshot["schemaVersion"]!=1:
+    raise ValueError("snapshot version")
+if snapshot["status"]=="captured":
+    if snapshot["origin"] is None or type(snapshot["rawBase64"]) is not str or type(snapshot["rawSha256"]) is not str or snapshot["diagnostic"]!="none":
+        raise ValueError("captured snapshot shape")
+    raw_policy=base64.b64decode(snapshot["rawBase64"],validate=True)
+    if base64.b64encode(raw_policy).decode("ascii")!=snapshot["rawBase64"] or hashlib.sha256(raw_policy).hexdigest()!=snapshot["rawSha256"]:
+        raise ValueError("captured snapshot bytes")
+elif snapshot["status"] in ("absent","unavailable"):
+    if snapshot["rawBase64"] is not None or snapshot["rawSha256"] is not None or snapshot["diagnostic"] in (None,"none"):
+        raise ValueError("uncaptured snapshot shape")
+else:
+    raise ValueError("snapshot status")
+observation=exact_object(review["repositoryObservation"],("status","repository","diagnostic"),"repository observation shape")
+if observation["status"]=="captured":
+    repo=exact_object(observation["repository"],("kind","objectFormat","commonGit","worktreeGit","worktreeRoot"),"repository shape")
+    for name in ("commonGit","worktreeGit","worktreeRoot"):
+        exact_object(repo[name],("pathEncoding","pathBase64","device","inode"),"native directory shape")
+    if observation["diagnostic"]!="none": raise ValueError("repository observation diagnostic")
+elif observation["status"] in ("not-requested","unavailable"):
+    if observation["repository"] is not None: raise ValueError("unobserved repository")
+    expected_diagnostic="not-needed" if observation["status"]=="not-requested" else "metadata-unavailable"
+    if observation["diagnostic"]!=expected_diagnostic and not (observation["status"]=="unavailable" and observation["diagnostic"]=="unprovable-native-identity"):
+        raise ValueError("repository observation diagnostic")
+else:
+    raise ValueError("repository observation status")
+allowed=set(sys.stdlib_module_names)|{"hook_common","_orchestrarium_publication_review_policy_v1","_orchestrarium_linked_runtime_subroots_v1"}
 original_import=builtins.__import__
 def guarded_import(name,globals=None,locals=None,fromlist=(),level=0):
     if not level and name.split(".",1)[0] not in allowed:
@@ -1743,11 +2576,35 @@ posix_helper=types.ModuleType(posix_helper_name)
 posix_helper.__file__="<closure>/process_supervision/posix_process_group.py"
 sys.modules[posix_helper_name]=posix_helper
 exec(compile(sources["posix_helper"],posix_helper.__file__,"exec"),posix_helper.__dict__,posix_helper.__dict__)
+windows_job_name="_orchestrarium_windows_job_v1"
+windows_job=types.ModuleType(windows_job_name)
+windows_job.__file__="<closure>/process_supervision/windows_job.py"
+sys.modules[windows_job_name]=windows_job
+exec(compile(sources["windows_job"],windows_job.__file__,"exec"),windows_job.__dict__,windows_job.__dict__)
+linked_name="_orchestrarium_linked_runtime_subroots_v1"
+linked=types.ModuleType(linked_name)
+linked.__file__="<closure>/linked_runtime_subroots.py"
+sys.modules[linked_name]=linked
+exec(compile(sources["linked_runtime_subroots"],linked.__file__,"exec"),linked.__dict__,linked.__dict__)
+policy_name="_orchestrarium_publication_review_policy_v1"
+policy=types.ModuleType(policy_name)
+policy.__file__="<closure>/publication_review_policy.py"
+sys.modules[policy_name]=policy
+exec(compile(sources["publication_review_policy"],policy.__file__,"exec"),policy.__dict__,policy.__dict__)
+if sys.modules.get(linked_name) is not linked or linked.__name__!=linked_name or linked.__file__!="<closure>/linked_runtime_subroots.py":
+    raise RuntimeError("linked module identity")
+if sys.modules.get(policy_name) is not policy or policy.__name__!=policy_name or policy.__file__!="<closure>/publication_review_policy.py" or getattr(policy,"POLICY_MODULE_CONTRACT_ID",None)!="orchestrarium.publication-review-policy.module.v1":
+    raise RuntimeError("policy module identity")
+if getattr(policy,"POLICY_MODULE_KEY",None)!=policy_name or getattr(policy,"POLICY_INJECTION_KEY",None)!="__injected_review_policy_module__":
+    raise RuntimeError("policy injection contract")
+if policy.H("orchestrarium.publication-review.snapshot.v1",snapshot)!=review["snapshotId"]:
+    raise RuntimeError("snapshot id")
 if len(sys.argv)<3 or sys.argv[1]!="--gate-git-executable":
     raise RuntimeError("git executable contract")
 git_executable=sys.argv[2]
 scanner_path="<closure>/check-publication-safety.py"
-scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable,"__injected_posix_process_group_module__":posix_helper}
+scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable,"__injected_posix_process_group_module__":posix_helper,"__injected_windows_job_module__":windows_job,"__injected_review_policy_snapshot__":snapshot,"__injected_review_repository_observation__":observation,"__injected_review_execution__":"gate-captured-v1"}
+scanner[policy.POLICY_INJECTION_KEY]=policy
 sys.argv=[scanner_path,*sys.argv[3:]]
 exec(compile(sources["scanner"],scanner_path,"exec"),scanner,scanner)
 '''
@@ -1794,7 +2651,53 @@ def _interpreter_identity() -> TrustedInterpreterIdentity:
     return TrustedInterpreterIdentity(str(resolved), identity)
 
 
-def _open_windows_path(path: Path, *, directory: bool) -> int:
+def _close_owned_descriptors(fds: list[int]) -> tuple[tuple[int, BaseException], ...]:
+    failures: list[tuple[int, BaseException]] = []
+    for fd in reversed(tuple(dict.fromkeys(fds))):
+        try:
+            os.close(fd)
+        except BaseException as exc:
+            failures.append((fd, exc))
+        else:
+            while fd in fds:
+                fds.remove(fd)
+    return tuple(failures)
+
+
+def _raise_capture_primary(
+    primary: BaseException,
+    traceback,
+    cleanup_failures: tuple[tuple[int, BaseException], ...],
+) -> None:
+    if cleanup_failures:
+        try:
+            setattr(primary, "publication_gate_descriptor_cleanup_failures", cleanup_failures)
+        except BaseException as retain_error:
+            cleanup_failures = (*cleanup_failures, (-1, retain_error))
+        raise primary.with_traceback(traceback) from cleanup_failures[0][1]
+    raise primary.with_traceback(traceback)
+
+
+def _open_owned_descriptor(open_descriptor: Callable[[], int], owned_fds: list[int] | None) -> int:
+    descriptor: int | None = None
+    try:
+        descriptor = open_descriptor()
+        if owned_fds is not None and descriptor not in owned_fds:
+            owned_fds.append(descriptor)
+        return descriptor
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        failures: tuple[tuple[int, BaseException], ...] = ()
+        if descriptor is not None and (
+            owned_fds is None or descriptor not in owned_fds
+        ):
+            failures = _close_owned_descriptors([descriptor])
+        _raise_capture_primary(primary, traceback, failures)
+
+
+def _open_windows_path(
+    path: Path, *, directory: bool, owned_fds: list[int] | None = None,
+) -> int:
     import ctypes
     import msvcrt
     from ctypes import wintypes
@@ -1808,24 +2711,60 @@ def _open_windows_path(path: Path, *, directory: bool) -> int:
     desired_access = 0 if directory else 0x80000000
     share_mode = 0x00000001 | (0x00000002 | 0x00000004 if directory else 0)
     flags = 0x00200000 | (0x02000000 if directory else 0x00000080)
-    handle = create_file(str(path), desired_access, share_mode, None, 3, flags, None)
     invalid = ctypes.c_void_p(-1).value
-    if handle in (None, invalid):
-        raise OSError(ctypes.get_last_error(), "CreateFileW")
+    handle = None
+    descriptor: int | None = None
+    native_handle_owned = False
+    transfer_in_progress = False
     try:
-        return msvcrt.open_osfhandle(
+        handle = create_file(str(path), desired_access, share_mode, None, 3, flags, None)
+        if handle in (None, invalid):
+            raise OSError(ctypes.get_last_error(), "CreateFileW")
+        native_handle_owned = True
+        transfer_in_progress = True
+        descriptor = msvcrt.open_osfhandle(
             int(handle), os.O_RDONLY | getattr(os, "O_BINARY", 0)
         )
-    except Exception:
-        ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(handle)
-        raise
+        transfer_in_progress = False
+        native_handle_owned = False
+        if owned_fds is not None:
+            owned_fds.append(descriptor)
+        return descriptor
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        cleanup_failures: list[tuple[int, BaseException]] = []
+        if descriptor is not None and (
+            owned_fds is None or descriptor not in owned_fds
+        ):
+            cleanup_failures.extend(_close_owned_descriptors([descriptor]))
+        if transfer_in_progress and handle not in (None, invalid):
+            try:
+                setattr(primary, "publication_gate_native_handle_outcome", {
+                    "handle": int(handle),
+                    "ownership": "uncertain-during-crt-transfer",
+                    "closeAttempted": False,
+                })
+            except BaseException as retain_error:
+                cleanup_failures.append((int(handle), retain_error))
+        elif native_handle_owned:
+            try:
+                closed = ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(handle)
+                if not closed:
+                    cleanup_failures.append((int(handle), OSError(
+                        ctypes.get_last_error(), "CloseHandle"
+                    )))
+            except BaseException as cleanup_error:
+                cleanup_failures.append((int(handle), cleanup_error))
+        _raise_capture_primary(primary, traceback, tuple(cleanup_failures))
 
 
-def _open_windows_source(path: Path) -> int:
-    return _open_windows_path(path, directory=False)
+def _open_windows_source(path: Path, *, owned_fds: list[int] | None = None) -> int:
+    return _open_windows_path(path, directory=False, owned_fds=owned_fds)
 
 
-def _capture_directory(path: Path) -> tuple[int, tuple[int, ...]]:
+def _capture_directory(
+    path: Path, *, owned_fds: list[int] | None = None,
+) -> tuple[int, tuple[int, ...]]:
     path_identity = _directory_generation(path)
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
     if os.name == "posix":
@@ -1834,22 +2773,31 @@ def _capture_directory(path: Path) -> tuple[int, tuple[int, ...]]:
         if nofollow is None or directory_flag is None:
             raise ValueError("directory-open-unavailable")
         flags |= nofollow | directory_flag
-    fd = (
-        _open_windows_path(path, directory=True)
-        if os.name == "nt"
-        else os.open(path, flags)
+    fd = _open_owned_descriptor(
+        lambda: (
+            _open_windows_path(path, directory=True, owned_fds=owned_fds)
+            if os.name == "nt"
+            else os.open(path, flags)
+        ),
+        owned_fds,
     )
     try:
         opened_identity = _directory_identity(os.fstat(fd))
         if opened_identity != path_identity:
             raise ValueError("directory-open-identity")
         return fd, opened_identity
-    except Exception:
-        os.close(fd)
-        raise
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        failures = (
+            () if owned_fds is not None and fd in owned_fds
+            else _close_owned_descriptors([fd])
+        )
+        _raise_capture_primary(primary, traceback, failures)
 
 
-def _capture_source_node(path: Path, role: str) -> tuple[int, SourceNode]:
+def _capture_source_node(
+    path: Path, role: str, *, owned_fds: list[int] | None = None,
+) -> tuple[int, SourceNode]:
     path_identity = _regular_identity(path, single_link=True)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
     nofollow = getattr(os, "O_NOFOLLOW", None)
@@ -1857,7 +2805,14 @@ def _capture_source_node(path: Path, role: str) -> tuple[int, SourceNode]:
         if nofollow is None:
             raise ValueError("nofollow-unavailable")
         flags |= nofollow
-    fd = _open_windows_source(path) if os.name == "nt" else os.open(path, flags)
+    fd = _open_owned_descriptor(
+        lambda: (
+            _open_windows_source(path, owned_fds=owned_fds)
+            if os.name == "nt"
+            else os.open(path, flags)
+        ),
+        owned_fds,
+    )
     try:
         opened = os.fstat(fd)
         opened_identity = _stat_identity(opened)
@@ -1885,13 +2840,18 @@ def _capture_source_node(path: Path, role: str) -> tuple[int, SourceNode]:
             role, str(path), opened_identity,
             int(opened.st_nlink), len(source), hashlib.sha256(source).hexdigest(), source,
         )
-    except Exception:
-        os.close(fd)
-        raise
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        failures = (
+            () if owned_fds is not None and fd in owned_fds
+            else _close_owned_descriptors([fd])
+        )
+        _raise_capture_primary(primary, traceback, failures)
 
 
 def _capture_interpreter_handle(
     identity: InterpreterIdentity,
+    *, owned_fds: list[int] | None = None,
 ) -> int:
     path = Path(identity.absolute_resolved_path)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
@@ -1900,7 +2860,14 @@ def _capture_interpreter_handle(
         if nofollow is None:
             raise ValueError("nofollow-unavailable")
         flags |= nofollow
-    fd = _open_windows_source(path) if os.name == "nt" else os.open(path, flags)
+    fd = _open_owned_descriptor(
+        lambda: (
+            _open_windows_source(path, owned_fds=owned_fds)
+            if os.name == "nt"
+            else os.open(path, flags)
+        ),
+        owned_fds,
+    )
     try:
         opened = os.fstat(fd)
         opened_identity = _stat_identity(opened)
@@ -1911,25 +2878,73 @@ def _capture_interpreter_handle(
         ):
             raise ValueError("interpreter-open-identity")
         return fd
-    except Exception:
-        os.close(fd)
-        raise
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        failures = (
+            () if owned_fds is not None and fd in owned_fds
+            else _close_owned_descriptors([fd])
+        )
+        _raise_capture_primary(primary, traceback, failures)
 
 
 def _layout_for_gate(gate: Path) -> tuple[SourceLayout, Path]:
     parts = gate.parts
-    matches = [
+    # Source packs overlap the generic component suffix. Pick the longest
+    # declared exact suffix, and refuse ties instead of resolving by table order.
+    matches = tuple(
         layout for layout in SOURCE_LAYOUTS
         if len(parts) >= len(layout.gate_suffix)
         and tuple(parts[-len(layout.gate_suffix):]) == layout.gate_suffix
-    ]
-    if len(matches) != 1:
+    )
+    if not matches:
         raise ValueError("layout")
-    layout = matches[0]
+    longest = max(len(layout.gate_suffix) for layout in matches)
+    selected = tuple(layout for layout in matches if len(layout.gate_suffix) == longest)
+    if len(selected) != 1:
+        raise ValueError("layout-ambiguous")
+    layout = selected[0]
     trust_root = gate.parent
     for _index in range(layout.trust_root_up):
         trust_root = trust_root.parent
     return layout, trust_root
+
+
+def _observe_root_locator(
+    gate: Path, layout: SourceLayout, logical_root: Path,
+) -> RootLocatorIdentity:
+    value = os.lstat(logical_root)
+    raw_target = None
+    if _is_link_or_reparse(value):
+        tag = int(getattr(value, "st_reparse_tag", 0))
+        if os.name == "nt":
+            if tag == stat.IO_REPARSE_TAG_SYMLINK:
+                kind = "symlink"
+            elif tag == stat.IO_REPARSE_TAG_MOUNT_POINT:
+                kind = "junction"
+            else:
+                raise ValueError("root-locator-kind")
+        elif stat.S_ISLNK(value.st_mode):
+            kind = "symlink"
+        else:
+            raise ValueError("root-locator-kind")
+        raw_target = os.readlink(logical_root)
+    else:
+        _directory_identity(value)
+        kind = "directory"
+    # Only the selected root is resolved. Fixed descendants are acquired with
+    # the ordinary/no-follow owners, so in-component links remain observable.
+    physical_root = logical_root.resolve(strict=True)
+    physical_gate = physical_root / layout.role_paths[0][1]
+    root_identity = _directory_generation(physical_root)
+    if _directory_identity(os.stat(logical_root)) != root_identity:
+        raise ValueError("root-terminal-identity")
+    gate_identity = _regular_identity(gate, single_link=True)
+    if _regular_identity(physical_gate, single_link=True) != gate_identity:
+        raise ValueError("logical-gate-identity")
+    return RootLocatorIdentity(
+        str(gate), str(logical_root), kind, _stat_identity(value), raw_target,
+        str(physical_root), root_identity, str(physical_gate), gate_identity,
+    )
 
 
 def _component_paths(trust_root: Path, paths: tuple[Path, ...]) -> tuple[tuple[str, Path], ...]:
@@ -1945,15 +2960,15 @@ def _component_paths(trust_root: Path, paths: tuple[Path, ...]) -> tuple[tuple[s
 
 
 def _capture_path_components(
-    trust_root: Path, paths: tuple[Path, ...],
+    trust_root: Path, paths: tuple[Path, ...], *, owned_fds: list[int] | None = None,
 ) -> tuple[tuple[int, ...], tuple[PathComponentIdentity, ...]]:
-    fds: list[int] = []
+    fds = owned_fds if owned_fds is not None else []
     components: list[PathComponentIdentity] = []
     by_name: dict[str, int] = {}
     try:
         for name, path in _component_paths(trust_root, paths):
             if name == "." or os.name != "posix":
-                fd, identity = _capture_directory(path)
+                fd, identity = _capture_directory(path, owned_fds=fds)
             else:
                 parent_name, _separator, basename = name.rpartition("/")
                 parent_fd = by_name[parent_name or "."]
@@ -1962,60 +2977,57 @@ def _capture_path_components(
                     os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
                     | getattr(os, "O_NOFOLLOW") | getattr(os, "O_DIRECTORY")
                 )
-                fd = os.open(basename, flags, dir_fd=parent_fd)
-                try:
-                    identity = _directory_identity(os.fstat(fd))
-                    named_identity = _directory_identity(os.stat(
-                        basename, dir_fd=parent_fd, follow_symlinks=False
-                    ))
-                    if identity != expected_identity or named_identity != identity:
-                        raise ValueError("directory-open-identity")
-                except Exception:
-                    os.close(fd)
-                    raise
-            fds.append(fd)
+                fd = _open_owned_descriptor(
+                    lambda: os.open(basename, flags, dir_fd=parent_fd), fds
+                )
+                identity = _directory_identity(os.fstat(fd))
+                named_identity = _directory_identity(os.stat(
+                    basename, dir_fd=parent_fd, follow_symlinks=False
+                ))
+                if identity != expected_identity or named_identity != identity:
+                    raise ValueError("directory-open-identity")
             by_name[name] = fd
             components.append(PathComponentIdentity(name, "directory", identity))
         return tuple(fds), tuple(components)
-    except Exception:
-        for fd in fds:
-            os.close(fd)
-        raise
+    except BaseException as primary:
+        if owned_fds is not None:
+            raise
+        traceback = primary.__traceback__
+        cleanup_failures = _close_owned_descriptors(fds)
+        _raise_capture_primary(primary, traceback, cleanup_failures)
 
 
 def _capture_source_closure() -> tuple[tuple[int, ...], CanonicalSourceClosure]:
     gate = Path(os.path.abspath(__file__))
-    layout, trust_root_path = _layout_for_gate(gate)
-    parent = gate.parent
-    posix_helper = (
-        gate.parents[2] / "process_supervision" / "posix_process_group.py"
-        if layout.name == "universal"
-        else parent / "process_supervision" / "posix_process_group.py"
-    )
-    paths = (
-        ("gate", gate),
-        ("hook_common", parent / "hook_common.py"),
-        ("classifier", parent.parent / "hooks" / "check-machine-local-path.py"),
-        ("posix_helper", posix_helper),
-        ("scanner", parent / "check-publication-safety.py"),
-    )
+    layout, logical_root = _layout_for_gate(gate)
+    locator = _observe_root_locator(gate, layout, logical_root)
+    trust_root_path = Path(locator.physical_root)
+    paths = tuple((role, trust_root_path / name) for role, name in layout.role_paths)
     fds: list[int] = []
     nodes: list[SourceNode] = []
     try:
-        component_paths = (gate,) + tuple(path for _role, path in paths)
+        component_paths = tuple(path for _role, path in paths)
         component_fds, components = _capture_path_components(
-            trust_root_path, component_paths
+            trust_root_path, component_paths, owned_fds=fds
         )
-        fds.extend(component_fds)
         for role, path in paths:
-            fd, node = _capture_source_node(path, role)
-            fds.append(fd)
+            fd, node = _capture_source_node(path, role, owned_fds=fds)
             nodes.append(node)
         bootstrap_digest = hashlib.sha256(_SCAN_BOOTSTRAP.encode("utf-8")).hexdigest()
         interpreter_identity = _interpreter_identity()
-        fds.append(_capture_interpreter_handle(interpreter_identity))
-        digest_owner = hashlib.sha256(b"publication-safety-closure-v2\0")
+        _capture_interpreter_handle(interpreter_identity, owned_fds=fds)
+        if (
+            components[0].identity != locator.physical_root_identity
+            or nodes[0].file_identity != locator.gate_identity
+            or _observe_root_locator(gate, layout, logical_root) != locator
+        ):
+            raise ValueError("root-locator-capture-drift")
+        digest_owner = hashlib.sha256(b"publication-safety-closure-v3\0")
         digest_owner.update(layout.name.encode("ascii") + b"\0")
+        digest_owner.update(json.dumps(
+            (layout.role_paths, tuple(getattr(locator, name) for name in locator.__dataclass_fields__)),
+            ensure_ascii=True, separators=(",", ":"),
+        ).encode("ascii"))
         digest_owner.update(bootstrap_digest.encode("ascii"))
         for component in components:
             digest_owner.update(b"\0" + component.root_relative_name.encode("utf-8") + b"\0")
@@ -2027,12 +3039,12 @@ def _capture_source_closure() -> tuple[tuple[int, ...], CanonicalSourceClosure]:
         gate_identity = nodes[0].file_identity
         return tuple(fds), CanonicalSourceClosure(
             layout, trust_root, components, tuple(nodes), digest_owner.hexdigest(),
-            gate_identity, bootstrap_digest, interpreter_identity,
+            gate_identity, bootstrap_digest, interpreter_identity, locator,
         )
-    except Exception:
-        for fd in fds:
-            os.close(fd)
-        raise
+    except BaseException as primary:
+        traceback = primary.__traceback__
+        cleanup_failures = _close_owned_descriptors(fds)
+        _raise_capture_primary(primary, traceback, cleanup_failures)
 
 
 def _recheck_source_closure(
@@ -2045,11 +3057,24 @@ def _recheck_source_closure(
     node_fds = fds[component_count:component_count + len(before.nodes)]
     interpreter_fd = fds[-1]
     gate = Path(os.path.abspath(__file__))
-    layout, trust_root_path = _layout_for_gate(gate)
+    layout, logical_root = _layout_for_gate(gate)
     if layout != before.layout:
         raise ValueError("layout-drift")
+    locator = _observe_root_locator(gate, layout, logical_root)
+    if locator != before.root_locator:
+        raise ValueError("root-locator-drift")
+    trust_root_path = Path(locator.physical_root)
+    paths = tuple(trust_root_path / name for _role, name in layout.role_paths)
+    if (
+        tuple(node.role for node in before.nodes) != tuple(role for role, _name in layout.role_paths)
+        or tuple(node.expected_path for node in before.nodes) != tuple(map(str, paths))
+        or before.trust_root != before.components[0]
+        or before.trust_root.identity != locator.physical_root_identity
+        or before.gate_identity != locator.gate_identity
+    ):
+        raise ValueError("component-relation-drift")
     current_component_paths = _component_paths(
-        trust_root_path, (gate,) + tuple(Path(node.expected_path) for node in before.nodes)
+        trust_root_path, paths
     )
     if tuple(name for name, _path in current_component_paths) != tuple(
         component.root_relative_name for component in before.components
@@ -2112,18 +3137,362 @@ def _recheck_source_closure(
         != before.bootstrap_digest
     ):
         raise ValueError("gate-drift")
+    if _observe_root_locator(gate, layout, logical_root) != locator:
+        raise ValueError("root-locator-recheck-drift")
     return before
 
 
-def _closure_payload(closure: CanonicalSourceClosure) -> bytes:
-    return json.dumps(
-        {
-            node.role: base64.b64encode(node.source).decode("ascii")
-            for node in closure.nodes if node.role != "gate"
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("ascii")
+def _closure_payload(
+    closure: CanonicalSourceClosure,
+    review_document: object,
+    canonical_bytes: object,
+) -> bytes:
+    if tuple(node.role for node in closure.nodes) != SOURCE_ROLE_ORDER:
+        raise ValueError("source-role-closure")
+    if type(review_document) is not dict or set(review_document) != {
+        "schemaVersion", "repositoryObservation", "snapshot", "snapshotId",
+    }:
+        raise ValueError("review-payload-shape")
+    if type(review_document.get("schemaVersion")) is not int or review_document["schemaVersion"] != 1:
+        raise ValueError("review-payload-version")
+    if re.fullmatch(r"[0-9a-f]{64}", review_document.get("snapshotId", "")) is None:
+        raise ValueError("review-snapshot-id")
+    snapshot = review_document.get("snapshot")
+    if type(snapshot) is not dict or set(snapshot) != {
+        "schemaVersion", "status", "origin", "rawBase64", "rawSha256", "diagnostic",
+    }:
+        raise ValueError("review-snapshot-shape")
+    repository_observation = review_document.get("repositoryObservation")
+    if type(repository_observation) is not dict or set(repository_observation) != {
+        "status", "repository", "diagnostic",
+    }:
+        raise ValueError("review-repository-observation-shape")
+    sources = {
+        node.role: base64.b64encode(node.source).decode("ascii")
+        for node in closure.nodes if node.role != "gate"
+    }
+    if len(sources) != 7 or tuple(sources) != SOURCE_ROLE_ORDER[1:]:
+        raise ValueError("source-role-cardinality")
+    encoder = canonical_bytes
+    if not callable(encoder):
+        raise ValueError("policy-canonical-encoder")
+    payload = encoder({
+        "payloadVersion": 1,
+        "sources": sources,
+        "review": review_document,
+    })
+    if type(payload) is not bytes or not payload.isascii():
+        raise ValueError("canonical-payload-bytes")
+    return payload
+
+
+REPOSITORY_QUERY_ORDER = ("topLevel", "commonGit", "worktreeGit", "objectFormat")
+REPOSITORY_QUERY_SUFFIXES = {
+    "topLevel": ("--show-toplevel",),
+    "commonGit": ("--path-format=absolute", "--git-common-dir"),
+    "worktreeGit": ("--absolute-git-dir",),
+    "objectFormat": ("--show-object-format",),
+}
+
+
+def _capture_repository_observation(
+    policy_module: object,
+    selected_root: Path,
+    git_executable: str,
+) -> dict:
+    plan = policy_module.repository_query_plan(selected_root)
+    if (
+        type(plan) is not policy_module.RepositoryQueryPlanV1
+        or plan.root != selected_root
+    ):
+        raise ValueError("repository-query-plan")
+    queries = plan.queries
+    if type(queries) is not tuple or len(queries) != len(REPOSITORY_QUERY_ORDER):
+        raise ValueError("repository-query-cardinality")
+    prefix = ("--no-optional-locks", "-C", str(selected_root), "rev-parse")
+    results = []
+    deadline = time.monotonic() + ORACLE_TIMEOUT_SECONDS
+    for index, (query, key) in enumerate(zip(queries, REPOSITORY_QUERY_ORDER)):
+        expected_args = (*prefix, *REPOSITORY_QUERY_SUFFIXES[key])
+        if (
+            type(query) is not policy_module.RepositoryQueryV1
+            or query.key != key
+            or type(query.git_args) is not tuple
+            or query.git_args != expected_args
+        ):
+            raise ValueError("repository-query-contract")
+        timeout = max(0.0, deadline - time.monotonic())
+        try:
+            outcome = _run_process(
+                [git_executable, *query.git_args], timeout, str(plan.root)
+            )
+        except BaseException as primary:
+            process_outcome = getattr(
+                primary, "publication_gate_process_outcome", None
+            )
+            if type(process_outcome) is dict and set(process_outcome) == {
+                "returncode", "stdout", "stderr", "complete", "resourcesSettled",
+            }:
+                failure_kind = (
+                    "unsettled"
+                    if process_outcome["resourcesSettled"] is not True
+                    else "cancelled"
+                    if isinstance(primary, KeyboardInterrupt)
+                    else "execution-error"
+                )
+                results.append(policy_module.RepositoryQueryResultV1(
+                    key, query.git_args, process_outcome["returncode"],
+                    process_outcome["stdout"], process_outcome["stderr"],
+                    False, process_outcome["resourcesSettled"], failure_kind,
+                ))
+            try:
+                setattr(primary, "publication_review_query_plan", plan)
+                setattr(primary, "publication_review_query_results", tuple(results))
+                setattr(primary, "publication_review_query_index", index)
+            except BaseException as capture_failure:
+                raise primary from capture_failure
+            raise
+        if outcome is None:
+            result = policy_module.RepositoryQueryResultV1(
+                key, query.git_args, None, None, None,
+                False, True, "none-result",
+            )
+        else:
+            if (
+                type(outcome) is not ProcessResult
+                or type(outcome.returncode) is not int
+                or type(outcome.stdout) is not bytes
+                or type(outcome.stderr) is not bytes
+            ):
+                raise ValueError("repository-query-outcome")
+            result = policy_module.RepositoryQueryResultV1(
+                key, query.git_args, outcome.returncode, outcome.stdout,
+                outcome.stderr, True, True,
+                None if outcome.returncode == 0 else "execution-error",
+            )
+        results.append(result)
+    observation = policy_module.repository_from_query_results(plan, tuple(results))
+    if type(observation) is not dict or set(observation) != {
+        "status", "repository", "diagnostic",
+    }:
+        raise ValueError("repository-observation")
+    return observation
+
+
+def _capture_review_payload(
+    modules: CapturedReviewModules,
+    closure: CanonicalSourceClosure,
+    selected_root: Path,
+    git_executable: str,
+) -> CapturedReviewPayload:
+    policy_module = modules.policy_module
+    if (
+        sys.modules.get("_orchestrarium_publication_review_policy_v1")
+        is not policy_module
+        or getattr(policy_module, "POLICY_MODULE_CONTRACT_ID", None)
+        != "orchestrarium.publication-review-policy.module.v1"
+    ):
+        raise ValueError("policy-module-identity")
+    origin = policy_module.resolve_trusted_origin()
+    policy_read = policy_module.read_policy_snapshot(origin, selected_root)
+    if type(policy_read) is not policy_module.PolicyReadV1:
+        raise ValueError("policy-read-result")
+    snapshot = policy_read.snapshot
+    snapshot_id = policy_read.snapshot_id
+    if (
+        type(snapshot) is not dict
+        or type(policy_read.usable_records) is not tuple
+        or type(policy_read.issues) is not tuple
+        or policy_module.H(
+            "orchestrarium.publication-review.snapshot.v1", snapshot
+        ) != snapshot_id
+    ):
+        raise ValueError("policy-snapshot-result")
+
+    if policy_read.usable_records:
+        repository_observation = _capture_repository_observation(
+            policy_module, selected_root, git_executable
+        )
+    else:
+        repository_observation = {
+            "status": "not-requested",
+            "repository": None,
+            "diagnostic": "not-needed",
+        }
+    repository = repository_observation["repository"]
+    origin_is_outside = False
+    if repository_observation["status"] == "captured":
+        origin_is_outside = policy_module.origin_is_outside_repository(
+            snapshot, repository
+        )
+        if type(origin_is_outside) is not bool:
+            raise ValueError("policy-origin-exclusion")
+
+    review_document = {
+        "schemaVersion": 1,
+        "repositoryObservation": repository_observation,
+        "snapshot": snapshot,
+        "snapshotId": snapshot_id,
+    }
+    payload = _closure_payload(closure, review_document, policy_module.C)
+    return CapturedReviewPayload(
+        modules, snapshot, snapshot_id, repository_observation, repository,
+        origin_is_outside, payload, hashlib.sha256(payload).hexdigest(),
+    )
+
+
+def _decode_used_decisions(
+    policy_module: object,
+    encoded: str,
+    failure_id: str,
+) -> list[list[str]]:
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+        if base64.b64encode(raw).decode("ascii") != encoded:
+            raise ValueError("used-list base64")
+        value = _strict_json(raw.decode("ascii", errors="strict"), list, failure_id)
+    except PrRouteDenied:
+        raise
+    except Exception:
+        raise PrRouteDenied(failure_id) from None
+    if (
+        type(value) is not list
+        or not value
+        or any(
+            type(row) is not list
+            or len(row) != 2
+            or type(row[0]) is not str
+            or type(row[1]) is not str
+            for row in value
+        )
+    ):
+        raise PrRouteDenied(failure_id)
+    if policy_module.C(value) != raw:
+        raise PrRouteDenied(failure_id)
+    return value
+
+
+def _verify_used_review_currentness(
+    captured_review: CapturedReviewPayload,
+    qualification: QualifiedPublicationEvidence,
+    repository_workdir: str,
+    git_executable: str,
+    failure_id: str,
+) -> tuple[dict, list[list[str]]]:
+    policy_module = captured_review.policy_module
+    if (
+        captured_review.repository is None
+        or not captured_review.origin_is_outside_repository
+        or qualification.policy_snapshot_id != captured_review.snapshot_id
+    ):
+        raise PrRouteDenied(failure_id)
+    used_list = _decode_used_decisions(
+        policy_module, qualification.used_decisions_b64, failure_id
+    )
+    fresh_observation = _capture_repository_observation(
+        policy_module, Path(repository_workdir), git_executable
+    )
+    if fresh_observation["status"] != "captured":
+        raise PrRouteDenied(failure_id)
+    fresh_repository = fresh_observation["repository"]
+    if not policy_module.origin_is_outside_repository(
+        captured_review.snapshot, fresh_repository
+    ):
+        raise PrRouteDenied(failure_id)
+    finalization = policy_module.verify_used(
+        captured_review.snapshot, fresh_repository, used_list
+    )
+    finalization_keys = {
+        "inputSnapshotId", "usedList", "currentSnapshotId", "repositorySha256",
+        "status", "reason", "resourcesSettled",
+    }
+    if (
+        type(finalization) is not dict
+        or set(finalization) != finalization_keys
+        or finalization["inputSnapshotId"] != captured_review.snapshot_id
+        or finalization["usedList"] != used_list
+        or type(finalization["currentSnapshotId"]) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", finalization["currentSnapshotId"]) is None
+        or finalization["repositorySha256"]
+        != policy_module.H(
+            "orchestrarium.publication-review.repository.v1",
+            captured_review.repository,
+        )
+        or finalization["status"] != "valid"
+        or finalization["reason"] != "none"
+        or finalization["resourcesSettled"] is not True
+    ):
+        raise PrRouteDenied(failure_id)
+    return finalization, used_list
+
+
+def _release_captured_review_modules(modules: CapturedReviewModules) -> None:
+    failures = []
+    for name, module in reversed(modules.registered):
+        if sys.modules.get(name) is not module:
+            failures.append(name)
+            continue
+        del sys.modules[name]
+    if failures:
+        raise ValueError("captured-module-settlement")
+
+
+def _load_captured_review_modules(
+    closure: CanonicalSourceClosure,
+) -> CapturedReviewModules:
+    if tuple(node.role for node in closure.nodes) != SOURCE_ROLE_ORDER:
+        raise ValueError("source-role-closure")
+    source_by_role = {node.role: node.source for node in closure.nodes}
+    if set(source_by_role) != set(SOURCE_ROLE_ORDER):
+        raise ValueError("source-role-cardinality")
+    linked_name = "_orchestrarium_linked_runtime_subroots_v1"
+    policy_name = "_orchestrarium_publication_review_policy_v1"
+    if linked_name in sys.modules or policy_name in sys.modules:
+        raise ValueError("captured-module-slot")
+    registered: list[tuple[str, object]] = []
+    try:
+        linked = types.ModuleType(linked_name)
+        linked.__file__ = "<closure>/linked_runtime_subroots.py"
+        sys.modules[linked_name] = linked
+        registered.append((linked_name, linked))
+        exec(
+            compile(source_by_role["linked_runtime_subroots"], linked.__file__, "exec"),
+            linked.__dict__, linked.__dict__,
+        )
+        if sys.modules.get(linked_name) is not linked:
+            raise ValueError("linked-module-identity")
+
+        policy = types.ModuleType(policy_name)
+        policy.__file__ = "<closure>/publication_review_policy.py"
+        sys.modules[policy_name] = policy
+        registered.append((policy_name, policy))
+        exec(
+            compile(source_by_role["publication_review_policy"], policy.__file__, "exec"),
+            policy.__dict__, policy.__dict__,
+        )
+        if (
+            sys.modules.get(policy_name) is not policy
+            or getattr(policy, "POLICY_MODULE_CONTRACT_ID", None)
+            != "orchestrarium.publication-review-policy.module.v1"
+            or getattr(policy, "POLICY_MODULE_KEY", None) != policy_name
+            or getattr(policy, "POLICY_INJECTION_KEY", None)
+            != "__injected_review_policy_module__"
+        ):
+            raise ValueError("policy-module-identity")
+        return CapturedReviewModules(policy, linked, tuple(registered))
+    except BaseException as primary:
+        if registered:
+            try:
+                _release_captured_review_modules(
+                    CapturedReviewModules(
+                        sys.modules.get(policy_name),
+                        sys.modules.get(linked_name),
+                        tuple(registered),
+                    )
+                )
+            except BaseException as cleanup:
+                raise primary from cleanup
+        raise
 
 
 class GateSettlementState(str, Enum):
@@ -2164,6 +3533,8 @@ class GateSettlementCertificate:
         ticks = tuple(row.observed_at_monotonic_tick for row in self.streams + self.workers)
         return (
             self.observed_return_code is not None
+            and type(self.child_identity) is int
+            and self.child_identity > 0
             and 1 <= self.attempts_used <= SCAN_SETTLEMENT_MAX_ENTRIES
             and all(row.ownership != "owned" or row.closed_observed for row in self.streams)
             and all(row.terminal in {"not-started", "joined"} for row in self.workers)
@@ -2190,31 +3561,45 @@ class GateSettlement:
 class _OwnedWorker:
     worker: threading.Thread
     start: str = "not-started"
+    name: str = "worker"
 
 
 class ChildSupervisor:
     """Single immediate owner for a launched scanner child and its workers."""
 
     def __init__(
-        self, process, *, attempt_seconds: float = SCAN_SETTLEMENT_ATTEMPT_SECONDS,
+        self, process=None, *, attempt_seconds: float = SCAN_SETTLEMENT_ATTEMPT_SECONDS,
     ) -> None:
-        self.process = process
+        self.process = None
         self.supervisor_id = f"supervisor:{id(self)}"
-        self.child_identity = int(process.pid)
+        self.child_identity: int | None = None
         self.workers: list[_OwnedWorker] = []
         self._attempt_seconds = attempt_seconds
         self._attempts_used = 0
         self._operation_errors: list[str] = []
+        self._operation_failures: list[tuple[str, BaseException]] = []
         self._settlement: GateSettlement | None = None
+        if process is not None:
+            self.adopt_process(process)
 
-    def start_worker(self, worker: threading.Thread) -> None:
-        owned = _OwnedWorker(worker)
+    def _record_operation_failure(self, name: str, failure: BaseException) -> None:
+        self._operation_errors.append(name)
+        self._operation_failures.append((name, failure))
+
+    def adopt_process(self, process) -> None:
+        if self.process is not None:
+            raise RuntimeError("child supervisor already owns a process")
+        self.process = process
+        self.child_identity = int(process.pid)
+
+    def start_worker(self, worker: threading.Thread, *, name: str = "worker") -> None:
+        owned = _OwnedWorker(worker, "starting", name)
         self.workers.append(owned)
         try:
             worker.start()
             owned.start = "started"
-        except BaseException:
-            self._operation_errors.append("worker-start")
+        except BaseException as exc:
+            self._record_operation_failure("worker-start", exc)
             raise
 
     @property
@@ -2231,6 +3616,8 @@ class ChildSupervisor:
     def settle(self) -> GateSettlement:
         if self._settlement is not None and self._settlement.complete:
             return self._settlement
+        if self.process is None:
+            return GateSettlement(GateSettlementState.FAILED_UNSETTLED, None, False)
         if self._attempts_used >= SCAN_SETTLEMENT_MAX_ENTRIES:
             return self._settlement or GateSettlement(
                 GateSettlementState.FAILED_UNSETTLED, None, False
@@ -2238,75 +3625,133 @@ class ChildSupervisor:
         self._attempts_used += 1
         deadline = time.monotonic() + self._attempt_seconds
         process = self.process
-        return_code = None
+        return_code: int | None = None
         try:
             return_code = process.poll()
-        except BaseException:
-            self._operation_errors.append("poll")
-
-        stream_rows: list[GateTransportObservation] = []
-        stdin = process.stdin
-        if stdin is not None:
-            try:
-                stdin.close()
-                stream_rows.append(GateTransportObservation("stdin", "owned", True, None, time.monotonic()))
-            except BaseException:
-                self._operation_errors.append("stdin-close")
-                stream_rows.append(GateTransportObservation("stdin", "owned", False, "stdin-close", time.monotonic()))
-        else:
-            stream_rows.append(GateTransportObservation("stdin", "absent", True, None, time.monotonic()))
-
+        except BaseException as exc:
+            self._record_operation_failure("poll", exc)
         if return_code is None:
             try:
                 process.terminate()
-            except BaseException:
-                self._operation_errors.append("terminate")
+            except BaseException as exc:
+                self._record_operation_failure("terminate", exc)
             try:
                 return_code = process.wait(timeout=self._remaining(deadline))
-            except BaseException:
-                self._operation_errors.append("wait")
+            except BaseException as exc:
+                self._record_operation_failure("wait", exc)
+                try:
+                    return_code = process.poll()
+                except BaseException as poll_exc:
+                    self._record_operation_failure("post-wait-poll", poll_exc)
             if return_code is None:
                 try:
                     process.kill()
-                except BaseException:
-                    self._operation_errors.append("kill")
+                except BaseException as exc:
+                    self._record_operation_failure("kill", exc)
                 try:
                     return_code = process.wait(timeout=self._remaining(deadline))
-                except BaseException:
-                    self._operation_errors.append("kill-wait")
+                except BaseException as exc:
+                    self._record_operation_failure("kill-wait", exc)
+        try:
+            observed_return_code = process.poll()
+            if observed_return_code is not None:
+                return_code = observed_return_code
+        except BaseException as exc:
+            self._record_operation_failure("final-poll", exc)
 
-        for name, stream in (("stdout", process.stdout), ("stderr", process.stderr)):
+        worker_rows: list[GateWorkerObservation] = []
+        worker_terminals: dict[str, list[str]] = {}
+        for owned in self.workers:
+            worker = owned.worker
+            terminal = "unobserved"
+            if owned.start == "not-started":
+                terminal = "not-started"
+            elif owned.start in {"starting", "started"}:
+                try:
+                    alive = worker.is_alive()
+                except BaseException as exc:
+                    self._record_operation_failure("worker-observe", exc)
+                    alive = None
+                if alive is True:
+                    try:
+                        worker.join(timeout=self._remaining(deadline))
+                    except BaseException as exc:
+                        self._record_operation_failure("worker-join", exc)
+                    try:
+                        alive = worker.is_alive()
+                    except BaseException as exc:
+                        self._record_operation_failure("worker-observe", exc)
+                        alive = None
+                if alive is True:
+                    terminal = "live"
+                elif alive is False:
+                    if owned.start == "started":
+                        terminal = "joined"
+                    else:
+                        try:
+                            if worker.ident is None and worker.native_id is None:
+                                terminal = "unobserved"
+                            else:
+                                terminal = "joined"
+                        except BaseException as exc:
+                            self._record_operation_failure("worker-identity", exc)
+                            terminal = "unobserved"
+                elif owned.start == "starting":
+                    terminal = "unobserved"
+            worker_terminals.setdefault(owned.name, []).append(terminal)
+            worker_rows.append(GateWorkerObservation(id(worker), owned.start, terminal, time.monotonic()))
+
+        process_reaped = return_code is not None
+        workers_terminal = all(
+            row.terminal in {"not-started", "joined"} for row in worker_rows
+        )
+        stream_rows: list[GateTransportObservation] = []
+        stream_values: list[tuple[str, object | None]] = []
+        for name in ("stdin", "stdout", "stderr"):
+            try:
+                stream_values.append((name, getattr(process, name)))
+            except BaseException as exc:
+                self._record_operation_failure(name + "-observe", exc)
+                stream_values.append((name, None))
+        can_close_streams = process_reaped and workers_terminal
+        for name, stream in stream_values:
             if stream is None:
-                stream_rows.append(GateTransportObservation(name, "absent", True, None, time.monotonic()))
+                # A missing standard pipe is an actual observation, not an
+                # unowned participant invented by the supervisor.
+                stream_rows.append(GateTransportObservation(
+                    name, "absent", True, None, time.monotonic()
+                ))
+                continue
+            try:
+                already_closed = bool(stream.closed)
+            except BaseException as exc:
+                already_closed = False
+                self._record_operation_failure(name + "-observe", exc)
+            if already_closed:
+                stream_rows.append(GateTransportObservation(
+                    name, "owned", True, None, time.monotonic()
+                ))
+                continue
+            if not can_close_streams:
+                reason = "process-unreaped" if not process_reaped else "worker-unsettled"
+                stream_rows.append(GateTransportObservation(
+                    name, "owned", False, reason, time.monotonic()
+                ))
                 continue
             try:
                 stream.close()
-                stream_rows.append(GateTransportObservation(name, "owned", True, None, time.monotonic()))
-            except BaseException:
-                self._operation_errors.append(name + "-close")
-                stream_rows.append(GateTransportObservation(name, "owned", False, name + "-close", time.monotonic()))
+            except BaseException as exc:
+                self._record_operation_failure(name + "-close", exc)
+            try:
+                closed = bool(stream.closed)
+            except BaseException as exc:
+                closed = False
+                self._record_operation_failure(name + "-observe", exc)
+            stream_rows.append(GateTransportObservation(
+                name, "owned", closed, None if closed else name + "-close",
+                time.monotonic(),
+            ))
 
-        worker_rows: list[GateWorkerObservation] = []
-        for owned in self.workers:
-            worker = owned.worker
-            terminal = "not-started" if owned.start != "started" else "unobserved"
-            if owned.start == "started":
-                try:
-                    worker.join(timeout=self._remaining(deadline))
-                except BaseException:
-                    self._operation_errors.append("worker-join")
-                try:
-                    terminal = "live" if worker.is_alive() else "joined"
-                except BaseException:
-                    self._operation_errors.append("worker-observe")
-            worker_rows.append(GateWorkerObservation(id(worker), owned.start, terminal, time.monotonic()))
-
-        try:
-            observed = process.poll()
-            if observed is not None:
-                return_code = observed
-        except BaseException:
-            self._operation_errors.append("final-poll")
         participant_ticks = tuple(row.observed_at_monotonic_tick for row in stream_rows + worker_rows)
         verified = max(time.monotonic(), (max(participant_ticks) + 1e-9) if participant_ticks else 0.0)
         certificate = GateSettlementCertificate(
@@ -2325,30 +3770,71 @@ def _run_snapshot_child(
     pending: PendingScanInvocation, payload: bytes, repository_workdir: str,
 ) -> tuple[LaunchedScanInvocation, tuple[TrustedExecutionRecord, ...]]:
     prefix = "PGG" if pending.binding.route == "generic" else "PRG"
-    try:
-        process = subprocess.Popen(
-            list(pending.exact_argv), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, shell=False,
-            cwd=repository_workdir,
-        )
-    except OSError:
-        raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from None
-    supervisor = ChildSupervisor(process)
-    launched = LaunchedScanInvocation(
-        pending, process.pid, supervisor, pending.invocation_id,
-        pending.attempt_id, pending.binding, pending.exact_argv,
-        pending.result_slot,
-    )
-    with pending._transition_lock:
-        if pending.state is not PendingState.PREPARED:
-            pending.state = PendingState.FAILED
-            raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
-        pending.child_identity = process.pid
-        pending.supervisor = supervisor
-        pending.state = PendingState.CHILD_OWNED
+    captured_review = pending.captured_review
+    if (
+        captured_review is None
+        or type(payload) is not bytes
+        or payload != captured_review.payload_bytes
+        or hashlib.sha256(payload).hexdigest() != captured_review.payload_sha256
+    ):
+        raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+    supervisor = ChildSupervisor()
+    process = None
+    launched: LaunchedScanInvocation | None = None
+    settlement: GateSettlement | None = None
     output = {"stdout": bytearray(), "stderr": bytearray()}
     overflow = threading.Event()
-    lock = threading.Lock()
+    output_lock = threading.Lock()
+    reader_failures: list[BaseException] = []
+    feeder_failures: list[BaseException] = []
+    bounded = False
+    primary_failure: BaseException | None = None
+    primary_traceback = None
+    settlement_failures: list[BaseException] = []
+
+    def retain_child_outcome(primary: BaseException) -> None:
+        actual_streams = []
+        if process is not None:
+            for name in ("stdin", "stdout", "stderr"):
+                try:
+                    actual_streams.append(getattr(process, name, None))
+                except BaseException as exc:
+                    settlement_failures.append(exc)
+                    actual_streams.append(None)
+        actual_workers = tuple(
+            {"name": owned.name, "start": owned.start, "worker": owned.worker}
+            for owned in supervisor.workers
+        )
+        try:
+            actual_return_code = None if process is None else process.returncode
+        except BaseException as exc:
+            settlement_failures.append(exc)
+            actual_return_code = None
+        outcome = {
+            "childIdentity": supervisor.child_identity,
+            "returnCode": actual_return_code,
+            "stdout": bytes(output["stdout"]),
+            "stderr": bytes(output["stderr"]),
+            "boundedCompletion": bounded,
+            "settlement": settlement,
+            "readerFailures": tuple(reader_failures),
+            "feederFailures": tuple(feeder_failures),
+            "settlementFailures": tuple(settlement_failures),
+            "operationFailures": tuple(supervisor._operation_failures),
+            "workers": actual_workers,
+            "streams": tuple(actual_streams),
+            "process": process,
+            "supervisor": supervisor,
+        }
+        try:
+            setattr(primary, "publication_gate_child_outcome", outcome)
+        except BaseException as retain_error:
+            settlement_failures.append(retain_error)
+            outcome["settlementFailures"] = tuple(settlement_failures)
+            try:
+                setattr(primary, "publication_gate_child_outcome", outcome)
+            except BaseException:
+                pass
 
     def drain(name: str, stream) -> None:
         try:
@@ -2356,13 +3842,14 @@ def _run_snapshot_child(
                 chunk = stream.read(8192)
                 if not chunk:
                     return
-                with lock:
+                with output_lock:
                     total = len(output["stdout"]) + len(output["stderr"])
                     if total + len(chunk) > SCAN_OUTPUT_BYTE_CAP:
                         overflow.set()
                         return
                     output[name].extend(chunk)
-        except (OSError, ValueError):
+        except BaseException as exc:
+            reader_failures.append(exc)
             overflow.set()
 
     def feed() -> None:
@@ -2370,44 +3857,154 @@ def _run_snapshot_child(
             assert process.stdin is not None
             process.stdin.write(payload)
             process.stdin.close()
-        except (BrokenPipeError, OSError, ValueError):
-            pass
+        except BaseException as exc:
+            feeder_failures.append(exc)
 
-    assert process.stdout is not None and process.stderr is not None
-    workers = (
-        threading.Thread(target=feed),
-        threading.Thread(target=drain, args=("stdout", process.stdout)),
-        threading.Thread(target=drain, args=("stderr", process.stderr)),
-    )
-    bounded = False
-    setup_failure = False
     try:
-        for worker in workers:
-            supervisor.start_worker(worker)
+        process = subprocess.Popen(
+            list(pending.exact_argv), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, shell=False,
+            cwd=repository_workdir,
+        )
+        supervisor.adopt_process(process)
+        launched = LaunchedScanInvocation(
+            pending, process.pid, supervisor, pending.invocation_id,
+            pending.attempt_id, pending.binding, pending.exact_argv,
+            pending.result_slot,
+        )
+        with pending._transition_lock:
+            if pending.state is not PendingState.PREPARED:
+                pending.state = PendingState.FAILED
+                raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+            pending.child_identity = process.pid
+            pending.supervisor = supervisor
+            pending.state = PendingState.CHILD_OWNED
+        if process.stdout is None or process.stderr is None or process.stdin is None:
+            raise RuntimeError("scanner child pipe unavailable")
+        workers = (
+            ("stdin", lambda: threading.Thread(target=feed)),
+            ("stdout", lambda: threading.Thread(target=drain, args=("stdout", process.stdout))),
+            ("stderr", lambda: threading.Thread(target=drain, args=("stderr", process.stderr))),
+        )
+        for name, construct in workers:
+            worker = construct()
+            supervisor.start_worker(worker, name=name)
         deadline = time.monotonic() + SCAN_TIMEOUT_SECONDS
-        while (
-            process.poll() is None
-            and not overflow.is_set()
-            and time.monotonic() < deadline
-        ):
+        while True:
+            return_code = process.poll()
+            if return_code is not None:
+                bounded = not overflow.is_set()
+                break
+            if overflow.is_set() or time.monotonic() >= deadline:
+                break
             time.sleep(0.01)
-        bounded = process.poll() is not None and not overflow.is_set()
-    except Exception:
-        setup_failure = True
+    except BaseException as exc:
+        primary_failure = exc
+        primary_traceback = exc.__traceback__
     finally:
-        with pending._transition_lock:
-            if pending.state is PendingState.CHILD_OWNED:
-                pending.state = PendingState.SETTLING
-        settlement = supervisor.settle()
-        if not settlement.complete:
-            settlement = supervisor.settle()
-        with pending._transition_lock:
-            pending.settlement = settlement
-            pending.state = (
-                PendingState.SETTLED if settlement.complete else PendingState.FAILED
-            )
-    if setup_failure:
+        if process is not None:
+            if supervisor.process is None:
+                try:
+                    # The Popen object has already been acquired by this
+                    # invocation. If the first adoption was interrupted, bind
+                    # that exact object back to the same owner before any
+                    # settlement attempt; do not rely on a successful return
+                    # from the interrupted handoff.
+                    supervisor.process = process
+                    supervisor.child_identity = int(process.pid)
+                except BaseException as exc:
+                    settlement_failures.append(exc)
+            if supervisor.process is process and supervisor.child_identity is None:
+                try:
+                    supervisor.child_identity = int(process.pid)
+                except BaseException as exc:
+                    settlement_failures.append(exc)
+            try:
+                with pending._transition_lock:
+                    if pending.state is PendingState.CHILD_OWNED:
+                        pending.state = PendingState.SETTLING
+            except BaseException as exc:
+                settlement_failures.append(exc)
+            for _index in range(SCAN_SETTLEMENT_MAX_ENTRIES):
+                try:
+                    settlement = supervisor.settle()
+                except BaseException as exc:
+                    settlement_failures.append(exc)
+                    continue
+                if settlement.complete:
+                    break
+            try:
+                with pending._transition_lock:
+                    pending.settlement = settlement
+                    if pending.state in {PendingState.CHILD_OWNED, PendingState.SETTLING}:
+                        pending.state = (
+                            PendingState.SETTLED
+                            if (
+                                primary_failure is None
+                                and not reader_failures
+                                and not feeder_failures
+                                and not settlement_failures
+                                and isinstance(settlement, GateSettlement)
+                                and settlement.complete
+                                and settlement.execution_eligible
+                                and bounded
+                                and not overflow.is_set()
+                            )
+                            else PendingState.FAILED
+                        )
+            except BaseException as exc:
+                settlement_failures.append(exc)
+                try:
+                    with pending._transition_lock:
+                        pending.state = PendingState.FAILED
+                except BaseException as state_error:
+                    settlement_failures.append(state_error)
+        else:
+            try:
+                with pending._transition_lock:
+                    if pending.state is PendingState.PREPARED:
+                        pending.state = PendingState.FAILED
+            except BaseException as exc:
+                settlement_failures.append(exc)
+
+    if process is None:
+        if primary_failure is not None:
+            if isinstance(primary_failure, OSError):
+                raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from primary_failure
+            raise primary_failure.with_traceback(primary_traceback)
         raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
+
+    if primary_failure is None and reader_failures:
+        primary_failure = reader_failures[0]
+        primary_traceback = primary_failure.__traceback__
+    if primary_failure is None and feeder_failures:
+        primary_failure = feeder_failures[0]
+        primary_traceback = primary_failure.__traceback__
+    if primary_failure is None and settlement_failures:
+        primary_failure = settlement_failures[0]
+        primary_traceback = primary_failure.__traceback__
+
+    if primary_failure is None and (
+        not isinstance(settlement, GateSettlement)
+        or not settlement.complete
+        or not settlement.execution_eligible
+    ):
+        primary_failure = PrRouteDenied(prefix + "-SCAN-EXECUTION")
+        primary_traceback = primary_failure.__traceback__
+    if primary_failure is not None:
+        retain_child_outcome(primary_failure)
+        try:
+            setattr(primary_failure, "publication_gate_child_settlement_failures", tuple(settlement_failures))
+        except BaseException:
+            pass
+        if isinstance(primary_failure, PrRouteDenied):
+            raise primary_failure.with_traceback(primary_traceback)
+        if isinstance(primary_failure, Exception):
+            raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from primary_failure
+        raise primary_failure.with_traceback(primary_traceback)
+    if launched is None or not isinstance(settlement, GateSettlement):
+        raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+
     execution = TrustedExecutionRecord(
         pending, launched, pending.result_slot,
         bounded,
@@ -2446,30 +4043,38 @@ def _run_authoritative_scan(
 ) -> ConsumedAuthoritativeEvidence:
     prefix = "PGG" if binding.route == "generic" else "PRG"
     fds: tuple[int, ...] = ()
+    modules: CapturedReviewModules | None = None
+    primary_failure: BaseException | None = None
     try:
-        fds, closure_before = _capture_source_closure()
-        interpreter_before = _interpreter_identity()
-        if closure_before.interpreter_identity != interpreter_before:
-            raise ValueError("interpreter-capture")
-    except Exception:
-        for fd in fds:
-            os.close(fd)
-        raise PrRouteDenied(prefix + "-SCAN-PROVENANCE") from None
-    invocation_id = secrets.token_hex(32)
-    attempt_id = secrets.token_hex(16)
-    argv = (
-        interpreter_before.absolute_resolved_path, "-I", "-c", _SCAN_BOOTSTRAP,
-        "--gate-git-executable", git_exe,
-        "--range", binding.remote, binding.destination,
-        "--range-source", binding.source_oid,
-    )
-    pending = PendingScanInvocation(
-        invocation_id, attempt_id, binding, closure_before,
-        interpreter_before, argv, object(),
-    )
-    try:
+        try:
+            fds, closure_before = _capture_source_closure()
+            interpreter_before = _interpreter_identity()
+            if closure_before.interpreter_identity != interpreter_before:
+                raise ValueError("interpreter-capture")
+            modules = _load_captured_review_modules(closure_before)
+            captured_review = _capture_review_payload(
+                modules, closure_before, Path(repository_workdir), git_exe
+            )
+        except PrRouteDenied:
+            raise
+        except Exception as exc:
+            if hasattr(exc, "publication_review_query_results"):
+                raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from exc
+            raise PrRouteDenied(prefix + "-SCAN-PROVENANCE") from None
+        invocation_id = secrets.token_hex(32)
+        attempt_id = secrets.token_hex(16)
+        argv = (
+            interpreter_before.absolute_resolved_path, "-I", "-c", _SCAN_BOOTSTRAP,
+            "--gate-git-executable", git_exe,
+            "--range", binding.remote, binding.destination,
+            "--range-source", binding.source_oid,
+        )
+        pending = PendingScanInvocation(
+            invocation_id, attempt_id, binding, closure_before,
+            interpreter_before, argv, object(), captured_review,
+        )
         launched, records = _run_snapshot_child(
-            pending, _closure_payload(closure_before), repository_workdir
+            pending, captured_review.payload_bytes, repository_workdir
         )
         try:
             closure_after = _recheck_source_closure(fds, closure_before)
@@ -2499,13 +4104,59 @@ def _run_authoritative_scan(
             else 0.0
         )
         freshness_tick = max(time.monotonic(), certificate_tick + 1e-9)
+
+        def finalize_review(
+            qualification: QualifiedPublicationEvidence,
+        ) -> tuple[dict, list[list[str]]]:
+            return _verify_used_review_currentness(
+                captured_review,
+                qualification,
+                repository_workdir,
+                git_exe,
+                prefix + "-SCAN-REFUSAL",
+            )
+
         return pending.correlate_and_consume_once(
             launched, records, closure_after, interpreter_after,
             binding_after, freshness_tick,
+            finalize_review=finalize_review,
         )
+    except BaseException as exc:
+        primary_failure = exc
+        raise
     finally:
+        cleanup_failures: list[BaseException] = []
+        if modules is not None:
+            try:
+                _release_captured_review_modules(modules)
+            except BaseException as exc:
+                cleanup_failures.append(exc)
         for fd in fds:
-            os.close(fd)
+            try:
+                os.close(fd)
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+        if cleanup_failures:
+            if primary_failure is not None:
+                try:
+                    setattr(
+                        primary_failure,
+                        "publication_gate_finalization_cleanup_failures",
+                        tuple(cleanup_failures),
+                    )
+                except BaseException:
+                    pass
+                raise primary_failure from cleanup_failures[0]
+            failure = PrRouteDenied(prefix + "-SCAN-PROVENANCE")
+            try:
+                setattr(
+                    failure,
+                    "publication_gate_finalization_cleanup_failures",
+                    tuple(cleanup_failures),
+                )
+            except BaseException:
+                pass
+            raise failure from cleanup_failures[0]
 
 
 def _run_text(
@@ -2532,12 +4183,53 @@ def _normalize_repository_workdir(repository_workdir: str) -> str:
     if type(repository_workdir) is not str or not repository_workdir:
         raise PrRouteDenied("PRG-WORKDIR-INVALID")
     try:
-        selected = Path(repository_workdir).resolve(strict=True)
-    except (OSError, RuntimeError):
+        candidate = Path(repository_workdir)
+        if not candidate.is_absolute():
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        selected = candidate.resolve(strict=True)
+        if (
+            not selected.is_dir()
+            or os.path.normcase(str(selected)) != os.path.normcase(repository_workdir)
+        ):
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        # Case folding may make a reparse alias look like the selected root.
+        # Require every lexical component to remain an ordinary directory.
+        for count in range(1, len(candidate.parts) + 1):
+            _directory_generation(Path(*candidate.parts[:count]))
+    except (OSError, RuntimeError, ValueError):
         raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
-    if not selected.is_dir() or str(selected) != repository_workdir:
+    return str(selected)
+
+
+def _prepare_selected_repository_workdir(
+    literal_context: tuple[str, str] | None,
+    repository_workdir: str,
+    repository_workdir_source: str,
+) -> str | None:
+    """Qualify the selected E and preserve only P-proved literal absence."""
+    if (
+        type(repository_workdir) is not str
+        or type(repository_workdir_source) is not str
+    ):
         raise PrRouteDenied("PRG-WORKDIR-INVALID")
-    return repository_workdir
+    if literal_context is not None and (
+        type(literal_context) is not tuple
+        or len(literal_context) != 2
+        or any(type(value) is not str for value in literal_context)
+        or any(not value or "\x00" in value for value in literal_context)
+        or not Path(literal_context[0]).is_absolute()
+        or not Path(literal_context[1]).is_absolute()
+    ):
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    if repository_workdir_source in {"tool", "envelope"}:
+        return _normalize_repository_workdir(repository_workdir)
+    if (
+        repository_workdir_source == ""
+        and repository_workdir == ""
+        and literal_context is not None
+    ):
+        return None
+    raise PrRouteDenied("PRG-WORKDIR-INVALID")
 
 
 def _prove_repository_root(repository_workdir: str, git_exe: str) -> str:
@@ -2667,7 +4359,7 @@ def _repo_record(value: object, expected: str, failure_id: str) -> tuple[str, st
 
 def _verify_pr_oracle(
     grant: ActivePrGrant, literal: LiteralPushCommand, repository_workdir: str
-) -> tuple[PushTarget, str]:
+) -> VerifiedPrOracle:
     deadline = time.monotonic() + ORACLE_TIMEOUT_SECONDS
     git_exe = literal.executable
     gh_exe = _resolve_executable("gh", repository_workdir)
@@ -2831,7 +4523,9 @@ def _verify_pr_oracle(
     local_head_rows = local_head_text.splitlines()
     if len(local_head_rows) != 1 or not object_format.matches(local_head_rows[0]):
         raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
-    return target, local_head_rows[0].lower()
+    return VerifiedPrOracle(
+        target, local_head_rows[0].lower(), pr_id, head_repo_id
+    )
 
 
 def _build_parsed_transcript_commands(
@@ -2981,44 +4675,30 @@ def _evaluate_active_pr_route(
     repository_workdir_source: str,
 ) -> bool:
     try:
-        effective = parsed.effective_publications
-        if (
-            parsed.strict_projection.status != "canonical"
-            or len(effective.records) != 1
-            or effective.records[0].kind != "DIRECT"
-        ):
-            raise PrRouteDenied("PRG-COMMAND-SHAPE")
-        dialect = _pr_command_dialect(dialect)
-        literal = _parse_pr_literal_shape(parsed, dialect)
-        if literal.repository_root is None:
-            repository_workdir = _normalize_repository_workdir(
-                repository_workdir
+        try:
+            prepared = _prepare_pr_push(
+                command, dialect, parsed, repository_workdir,
+                repository_workdir_source,
             )
-        else:
-            command_root = _normalize_repository_workdir(
-                literal.repository_root
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape("legacy", dialect, parsed, "legacy-strict")
+            raise
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
             )
-            if repository_workdir_source == "tool":
-                tool_root = _normalize_repository_workdir(repository_workdir)
-                if tool_root != command_root:
-                    raise PrRouteDenied("PRG-WORKDIR-INVALID")
-            elif repository_workdir_source != "envelope":
-                raise PrRouteDenied("PRG-WORKDIR-INVALID")
-            repository_workdir = command_root
-        git_exe = _resolve_executable("git", repository_workdir)
-        if git_exe is None:
-            raise PrRouteDenied("PRG-REMOTE-MISMATCH")
-        literal = _bind_pr_literal_executable(literal, git_exe)
-        repository_workdir = _prove_repository_root(
-            repository_workdir, git_exe
-        )
-        target, local_head = _verify_pr_oracle(
-            grant, literal, repository_workdir
-        )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape("legacy", dialect, parsed, "oracle")
+            raise
         binding = PushScanBinding(
-            "strict", target.remote, target.destination, local_head, local_head
+            "strict", verified.target.remote, verified.target.destination,
+            verified.local_head, verified.local_head,
         )
-        _run_authoritative_scan(binding, repository_workdir, git_exe)
+        _run_authoritative_scan(
+            binding, prepared.repository_workdir, prepared.git_exe
+        )
         return True
     except PrRouteDenied:
         raise
@@ -3026,56 +4706,496 @@ def _evaluate_active_pr_route(
         raise PrRouteDenied("PRG-INTERNAL") from None
 
 
+def _prepare_pr_push(
+    command: str,
+    dialect: str,
+    parsed: ShellParseResult,
+    repository_workdir: str,
+    repository_workdir_source: str,
+) -> PreparedPrPush:
+    effective = parsed.effective_publications
+    if (
+        parsed.strict_projection.status != "canonical"
+        or len(effective.records) != 1
+        or effective.records[0].kind != "DIRECT"
+    ):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    dialect = _pr_command_dialect(dialect)
+    literal = _parse_pr_literal_shape(parsed, dialect)
+    literal_context = absolute_literal_root_context(parsed)
+    selected_workdir = _prepare_selected_repository_workdir(
+        literal_context, repository_workdir, repository_workdir_source
+    )
+    if literal.repository_root is None:
+        if selected_workdir is None:
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = selected_workdir
+    else:
+        command_root = _normalize_repository_workdir(literal.repository_root)
+        if literal_context is None:
+            if repository_workdir_source == "tool":
+                if selected_workdir != command_root:
+                    raise PrRouteDenied("PRG-WORKDIR-INVALID")
+            elif repository_workdir_source != "envelope":
+                raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = command_root
+    git_exe = _resolve_executable("git", repository_workdir)
+    if git_exe is None:
+        raise PrRouteDenied("PRG-REMOTE-MISMATCH")
+    literal = _bind_pr_literal_executable(literal, git_exe)
+    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    return PreparedPrPush(literal, repository_workdir, git_exe)
+
+
+def _raise_command_shape(
+    route: str,
+    dialect: str,
+    parsed: ShellParseResult,
+    stage: str,
+) -> None:
+    effective = parsed.effective_publications
+    direct = (
+        len(effective.records) == 1
+        and effective.records[0].kind == "DIRECT"
+    )
+    safe_dialect = dialect if dialect in {"powershell", "posix", "unsupported"} else "other"
+    strict = parsed.strict_projection.status
+    if strict not in {"canonical", "noncanonical"}:
+        strict = "other"
+    allowed_stages = {
+        "projection", "command-context", "git-global", "target",
+        "executable", "dialect", "root", "oracle", "legacy-strict",
+    }
+    safe_stage = stage if stage in allowed_stages else "projection"
+    error = PrRouteDenied("PRG-COMMAND-SHAPE")
+    error.command_shape_diagnostic = (
+        route if route in {"simple", "legacy"} else "legacy",
+        safe_dialect,
+        "true" if direct else "false",
+        strict,
+        safe_stage,
+    )
+    raise error
+
+
+def _prepare_simple_pr_push(
+    dialect: str,
+    parsed: ShellParseResult,
+    repository_workdir: str,
+    repository_workdir_source: str,
+) -> PreparedPrPush:
+    effective = parsed.effective_publications
+    if (
+        parsed.dialect != dialect
+        or dialect not in {"posix", "powershell"}
+        or not effective.exact_complete
+        or len(effective.records) != 1
+        or effective.records[0].kind != "DIRECT"
+        or len(parsed.commands) != 1
+        or len(parsed.pushes) != 1
+        or parsed.normalizations
+    ):
+        _raise_command_shape("simple", dialect, parsed, "projection")
+    push = effective.records[0].push
+    command = push.command
+    if (
+        push is not parsed.pushes[0]
+        or not push.only_direct_push
+        or not push.only_executable_command
+        or push.shell_context not in {"top-level", "call-operator"}
+        or command.control_keywords
+        or (
+            command.boundary_before != "start"
+            and not (
+                push.shell_context == "call-operator"
+                and command.boundary_before == "&"
+            )
+        )
+        or (
+            command.boundary_after != "end"
+            and not command.trailing_linebreak_only
+        )
+        or push.environment_assignments
+        or push.option_status != "GPO-PARSED"
+        or push.push_options
+        or push.dry_run
+        or len(push.positionals) != 2
+        or push.repository_context not in {"ambient", "redirected"}
+    ):
+        _raise_command_shape("simple", dialect, parsed, "command-context")
+    global_options = tuple(push.git_global_options)
+    literal_context = absolute_literal_root_context(parsed)
+    selected_workdir = _prepare_selected_repository_workdir(
+        literal_context, repository_workdir, repository_workdir_source
+    )
+    if global_options:
+        if len(global_options) != 2 or global_options[0] != "-C":
+            _raise_command_shape("simple", dialect, parsed, "git-global")
+        command_root = _normalize_repository_workdir(global_options[1])
+        if literal_context is None:
+            if repository_workdir_source == "tool":
+                if selected_workdir != command_root:
+                    raise PrRouteDenied("PRG-WORKDIR-INVALID")
+            elif repository_workdir_source != "envelope":
+                raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = command_root
+    else:
+        if push.repository_context != "ambient":
+            _raise_command_shape("simple", dialect, parsed, "command-context")
+        if selected_workdir is None:
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = selected_workdir
+    remote, refspec = push.positionals
+    if not REMOTE_NAME_REGEX.fullmatch(remote):
+        _raise_command_shape("simple", dialect, parsed, "target")
+    prefix = "HEAD:refs/heads/"
+    if not refspec.startswith(prefix):
+        _raise_command_shape("simple", dialect, parsed, "target")
+    head_ref = refspec[len(prefix):]
+    if not _portable_pr_head_ref(head_ref):
+        _raise_command_shape("simple", dialect, parsed, "target")
+    git_exe = _resolve_executable("git", repository_workdir)
+    if git_exe is None:
+        raise PrRouteDenied("PRG-REMOTE-MISMATCH")
+    raw_executable = command.executable
+    if Path(raw_executable).is_absolute():
+        literal_executable = raw_executable
+    elif Path(raw_executable).name == raw_executable and raw_executable.casefold() in {
+        "git", "git.exe",
+    }:
+        literal_executable = git_exe
+    else:
+        _raise_command_shape("simple", dialect, parsed, "executable")
+    prepared_dialect = dialect
+    literal = LiteralPushCommand(
+        prepared_dialect, literal_executable, remote, refspec,
+        PushTarget(remote, f"refs/heads/{head_ref}", head_ref),
+        repository_workdir if global_options else None,
+    )
+    try:
+        literal = _bind_pr_literal_executable(literal, git_exe)
+    except PrRouteDenied as exc:
+        if exc.failure_id == "PRG-COMMAND-SHAPE":
+            _raise_command_shape("simple", dialect, parsed, "executable")
+        raise
+    try:
+        repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    except PrRouteDenied as exc:
+        if exc.failure_id == "PRG-COMMAND-SHAPE":
+            _raise_command_shape("simple", dialect, parsed, "root")
+        raise
+    return PreparedPrPush(literal, repository_workdir, git_exe)
+
+
+def _discover_unique_open_pr(
+    prepared: PreparedPrPush,
+) -> tuple[ActivePrGrant, str, str]:
+    gh_exe = _resolve_executable("gh", prepared.repository_workdir)
+    if gh_exe is None:
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    _, text = _run_text(
+        [
+            gh_exe, "pr", "list", "--state", "open", "--head",
+            prepared.literal.target.head_ref, "--limit", "2", "--json",
+            "id,number,url,headRefName,headRepository",
+        ],
+        time.monotonic() + ORACLE_TIMEOUT_SECONDS,
+        "PRG-PR-UNAVAILABLE",
+        prepared.repository_workdir,
+    )
+    rows = _strict_json(text, list, "PRG-PR-UNAVAILABLE")
+    if len(rows) != 1 or not isinstance(rows[0], dict):
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    row = rows[0]
+    match = (
+        PR_URL_REGEX.fullmatch(row.get("url"))
+        if isinstance(row.get("url"), str) else None
+    )
+    head_repository = row.get("headRepository")
+    if (
+        match is None
+        or row.get("number") != int(match.group("number"))
+        or row.get("headRefName") != prepared.literal.target.head_ref
+        or not isinstance(row.get("id"), str)
+        or NODE_ID_REGEX.fullmatch(row["id"]) is None
+        or not isinstance(head_repository, dict)
+        or not isinstance(head_repository.get("id"), str)
+        or NODE_ID_REGEX.fullmatch(head_repository["id"]) is None
+    ):
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    return (
+        ActivePrGrant(
+            match.group("url"), match.group("owner"), match.group("repo"),
+            int(match.group("number")),
+        ),
+        row["id"],
+        head_repository["id"],
+    )
+
+
+def _evaluate_simple_pr_route(
+    intent: SimplePrIntent,
+    current_marker: bool,
+    preflight: PreflightResult,
+) -> bool:
+    if not intent.sha256:
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+    prepared = _prepare_simple_pr_push(
+        preflight.dialect, preflight.parsed,
+        preflight.repository_workdir, preflight.repository_workdir_source,
+    )
+    identity = _repository_identity(prepared.repository_workdir)
+    sidecar_path = _binding_sidecar_path(preflight.transcript_path)
+    existing = _read_binding_state(sidecar_path)
+    pending = PrBindingState(
+        intent.record, intent.sha256, "pending", identity,
+        prepared.literal.remote, prepared.literal.target.head_ref,
+        None, None, None,
+    )
+    verified: VerifiedPrOracle | None = None
+    if existing is None and not current_marker:
+        grant = intent.prior_scoped_grant
+        if grant is None:
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
+            )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape(
+                    "simple", preflight.dialect, preflight.parsed, "oracle"
+                )
+            raise
+        existing = PrBindingState(
+            intent.record, intent.sha256, "bound", identity,
+            prepared.literal.remote, prepared.literal.target.head_ref,
+            grant.url, verified.pr_id, verified.head_repository_id,
+        )
+        _write_binding_state(sidecar_path, existing, expected=None)
+    elif existing is None:
+        _write_binding_state(sidecar_path, pending, expected=None)
+        existing = pending
+    elif not _same_binding_anchor(existing, intent):
+        if not current_marker:
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        _write_binding_state(sidecar_path, pending, expected=existing)
+        existing = pending
+    if (
+        existing.repository_identity != identity
+        or existing.remote != prepared.literal.remote
+        or existing.head_ref != prepared.literal.target.head_ref
+    ):
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    if existing.state == "revoked":
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    if verified is not None:
+        pass
+    elif existing.state == "pending":
+        if not current_marker:
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        grant, pr_id, head_repository_id = _discover_unique_open_pr(prepared)
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
+            )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape(
+                    "simple", preflight.dialect, preflight.parsed, "oracle"
+                )
+            raise
+        if (
+            verified.pr_id != pr_id
+            or verified.head_repository_id != head_repository_id
+        ):
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        bound = PrBindingState(
+            intent.record, intent.sha256, "bound", identity,
+            prepared.literal.remote, prepared.literal.target.head_ref,
+            grant.url, pr_id, head_repository_id,
+        )
+        _write_binding_state(sidecar_path, bound, expected=existing)
+        existing = bound
+    else:
+        match = PR_URL_REGEX.fullmatch(existing.pr_url or "")
+        if match is None:
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        grant = ActivePrGrant(
+            match.group("url"), match.group("owner"), match.group("repo"),
+            int(match.group("number")),
+        )
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
+            )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape(
+                    "simple", preflight.dialect, preflight.parsed, "oracle"
+                )
+            raise
+        if (
+            verified.pr_id != existing.pr_id
+            or verified.head_repository_id != existing.head_repository_id
+        ):
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+    binding = PushScanBinding(
+        "strict", verified.target.remote, verified.target.destination,
+        verified.local_head, verified.local_head,
+    )
+    _run_authoritative_scan(binding, prepared.repository_workdir, prepared.git_exe)
+    return True
+
+
+def _revoke_simple_binding(transcript_path: str) -> None:
+    path = _binding_sidecar_path(transcript_path)
+    existing = _read_binding_state(path)
+    if existing is None or existing.state == "revoked":
+        return
+    _write_binding_state(
+        path, existing._replace(state="revoked"), expected=existing
+    )
+
+
+
+
+def _complete_generic_publication(preflight: PreflightResult) -> bool:
+    """One owner for mandatory generic command, binding and scan completion."""
+    grammar = preflight.generic_decision
+    if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
+        raise PrRouteDenied(grammar.status)
+    remote, destination, source = grammar.binding
+    literal_context = (
+        absolute_literal_root_context(preflight.parsed)
+        if preflight.parsed is not None else None
+    )
+    selected_workdir = preflight.repository_workdir
+    selected_source = preflight.repository_workdir_source
+    generic_push_path = (
+        preflight.reason_id == "PFP-CONSENT-GENERIC"
+        or (
+            preflight.reason_id == "PFP-HEAVY"
+            and preflight.push_instruction is True
+        )
+    )
+    selected_workdir = _prepare_selected_repository_workdir(
+        literal_context, selected_workdir, selected_source
+    )
+    if selected_workdir is None and not generic_push_path:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+
+    literal_executable = None
+    if literal_context is not None:
+        literal_executable, raw_repository_root = literal_context
+        repository_workdir = _normalize_repository_workdir(raw_repository_root)
+    else:
+        if selected_workdir is None:
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = selected_workdir
+
+    git_exe = _resolve_executable("git", repository_workdir)
+    if git_exe is None:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    if literal_executable is not None:
+        _bind_literal_executable_identity(
+            literal_executable, git_exe, "PGG-EXECUTABLE-MISMATCH"
+        )
+    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    binding = _resolve_generic_scan_binding(
+        remote, destination, source, repository_workdir, git_exe
+    )
+    _run_authoritative_scan(binding, repository_workdir, git_exe)
+    return True
 
 
 def evaluate_heavy(preflight: PreflightResult) -> bool:
     """Evaluate only transcript history, PR, scan, receipt and deny policy."""
     validate_preflight_result(preflight)
-    history_entries, history_status = read_transcript_history(
-        preflight.transcript_path,
-        byte_cap=TRANSCRIPT_HISTORY_BYTE_CAP,
-        record_cap=TRANSCRIPT_HISTORY_RECORD_CAP,
-        line_byte_cap=TRANSCRIPT_HISTORY_LINE_BYTE_CAP,
+    if preflight.reason_id == "PFP-CONSENT-GENERIC":
+        return _complete_generic_publication(preflight)
+    pr_state, pr_grant, history_status = _recover_stable_pr_grant(preflight)
+    transcript_diagnostic = _with_transcript_read_status(
+        preflight.transcript_diagnostic, history_status, "not-run"
     )
-    suffix_recovery = history_status == HISTORY_STATUS_LIMIT
-    if suffix_recovery:
-        history_entries, history_status = _read_stable_transcript_suffix(
-            preflight.transcript_path
-        )
     if history_status != HISTORY_STATUS_FOUND:
-        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
-    pr_state, pr_grant = _derive_pr_grant(
-        history_entries, preflight.repository_workdir
-    )
+        raise PrRouteDenied(
+            "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
+        )
     if pr_state == "malformed":
         raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    if pr_state == "revoked":
+        _revoke_simple_binding(preflight.transcript_path)
+        return False
     if pr_state == "active" and pr_grant is not None:
         return _evaluate_active_pr_route(
             pr_grant, preflight.command, preflight.dialect, preflight.parsed,
             preflight.repository_workdir, preflight.repository_workdir_source,
         )
-    if suffix_recovery:
-        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
-    grammar = preflight.generic_decision
+    if pr_state == "simple" and isinstance(pr_grant, SimplePrIntent):
+        return _evaluate_simple_pr_route(
+            pr_grant, preflight.simple_pr_approval, preflight
+        )
     if preflight.push_instruction:
-        if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
-            raise PrRouteDenied(grammar.status)
-        remote, destination, source = grammar.binding
-        repository_workdir = _normalize_repository_workdir(
-            preflight.repository_workdir
-        )
-        git_exe = _resolve_executable("git", repository_workdir)
-        if git_exe is None:
-            raise PrRouteDenied("PRG-WORKDIR-INVALID")
-        repository_workdir = _prove_repository_root(
-            repository_workdir, git_exe
-        )
-        binding = _resolve_generic_scan_binding(
-            remote, destination, source, repository_workdir, git_exe
-        )
-        _run_authoritative_scan(binding, repository_workdir, git_exe)
-        return True
+        return _complete_generic_publication(preflight)
     return False
+
+_TRANSCRIPT_FAILURE_IDS = frozenset((
+    "PRG-TRANSCRIPT-UNAVAILABLE",
+))
+
+
+def _with_transcript_read_status(
+    diagnostic: TranscriptDiagnostic | None,
+    history: str,
+    recovery: str,
+) -> TranscriptDiagnostic | None:
+    if diagnostic is None:
+        return None
+    return validate_transcript_diagnostic(
+        diagnostic._replace(history=history, recovery=recovery)
+    )
+
+
+def _denial_scope(failure_id: str) -> str:
+    if failure_id == "PGG-PARSE-UNCERTAIN":
+        return "Command parsing incomplete"
+    if failure_id in _TRANSCRIPT_FAILURE_IDS:
+        return "Publication denied"
+    if failure_id.startswith("PGG-"):
+        return "Generic scan-derived publication denied"
+    return "PR-scoped publication denied"
+
+
+def _format_transcript_diagnostic(diagnostic: TranscriptDiagnostic) -> str:
+    checked = validate_transcript_diagnostic(diagnostic)
+    return (
+        "Transcript diagnostics: "
+        f"envelope={checked.envelope}; current-turn={checked.current_turn}; "
+        f"history={checked.history}; recovery={checked.recovery}."
+    )
+
+
+def _format_command_shape_diagnostic(value: object) -> str:
+    if (
+        not isinstance(value, tuple)
+        or len(value) != 5
+        or value[0] not in {"simple", "legacy"}
+        or value[1] not in {"powershell", "posix", "unsupported", "other"}
+        or value[2] not in {"true", "false"}
+        or value[3] not in {"canonical", "noncanonical", "other"}
+        or value[4] not in {
+            "projection", "command-context", "git-global", "target",
+            "executable", "dialect", "root", "oracle", "legacy-strict",
+        }
+    ):
+        return ""
+    return (
+        "Command diagnostics: "
+        f"route={value[0]}; dialect={value[1]}; direct={value[2]}; "
+        f"strict={value[3]}; stage={value[4]}."
+    )
+
 
 def _format_gate_denial(failure_id: str) -> str:
     if failure_id not in SCAN_DENIAL_REASONS:
@@ -3084,11 +5204,7 @@ def _format_gate_denial(failure_id: str) -> str:
         failure_id,
         "Retry only after the publication gate can complete its checks normally.",
     )
-    scope = (
-        "Generic scan-derived publication denied"
-        if failure_id.startswith("PGG-")
-        else "PR-scoped publication denied"
-    )
+    scope = _denial_scope(failure_id)
     return f"{failure_id}: {scope}. {remediation}"
 
 
@@ -3103,14 +5219,22 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         )
     if result.outcome == "ALLOW_FINAL":
         return 0
+    if result.outcome == "ABSTAIN" and result.continuation == "NONE":
+        return 0
 
     failure_id: str | None = result.failure_id
+    transcript_diagnostic = result.transcript_diagnostic
+    command_shape_diagnostic = None
     if result.continuation == "EVALUATE_HEAVY":
         try:
             if evaluate_heavy(result):
                 return 0
         except PrRouteDenied as exc:
             failure_id = exc.failure_id
+            transcript_diagnostic = exc.transcript_diagnostic
+            command_shape_diagnostic = getattr(
+                exc, "command_shape_diagnostic", None
+            )
         except Exception:
             pass
 
@@ -3121,7 +5245,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         **SCAN_DENIAL_REASONS,
         "PRG-AUTH-MALFORMED": "Use the exact version-1 PR approval or revocation line in a genuine user message.",
         "PRG-TRANSCRIPT-UNAVAILABLE": "Retry from a readable current session transcript; summaries cannot authorize publication.",
-        "PRG-COMMAND-SHAPE": "Use one exact absolute Git literal: `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>`.",
+        "PRG-COMMAND-SHAPE": "Use one solitary direct `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>` for a simple bound grant; existing Version 1 grants retain the exact absolute Git literal requirement.",
         "PRG-PR-UNAVAILABLE": "Restore authenticated GitHub state access, then retry so the pull request can be checked afresh.",
         "PRG-PR-STATE": "The pull request is not open; obtain a new grant only for an open pull request.",
         "PRG-BINDING-DRIFT": "Refresh the pull-request binding and retry with a current exact grant if needed.",
@@ -3136,10 +5260,11 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         "PGG-COMPOUND-CONTEXT": "Run one direct push as a solitary shell command before using scan-derived credit.",
         "PGG-LEXICAL-NORMALIZATION": "Use one literal unnormalized push command.",
         "PGG-OPTION-ARITY": "Use only complete documented push option forms.",
-        "PGG-PARSE-UNCERTAIN": "Use one exact solitary direct push command.",
+        "PGG-PARSE-UNCERTAIN": "Provide the exact command and tool_name from the tool envelope, plus syntax/dialect metadata, so command parsing can be diagnosed.",
         "PGG-REPOSITORY-REDIRECT": "Use the ambient repository without command-local repository redirection.",
         "PGG-ENV-PREFIX": "Run the push without an environment-assignment prefix.",
         "PGG-GIT-GLOBAL-OPTION": "Run the push without Git global options before the push subcommand.",
+        "PGG-EXECUTABLE-MISMATCH": "Use the same absolute Git executable in the command and the gate's selected executable for the explicit repository root.",
         "PGG-PUSH-OPTION": "Use only the documented output-only push options with scan-derived credit.",
         "PGG-REMOTE-CARDINALITY": "Name exactly one remote and one refspec.",
         "PGG-REFSPEC-CARDINALITY": "Name exactly one remote and one refspec.",
@@ -3156,8 +5281,36 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             reason = _format_gate_denial(failure_id)
         else:
             remediation = pr_reasons.get(failure_id, pr_reasons["PRG-INTERNAL"])
-            scope = "Generic scan-derived publication denied" if failure_id.startswith("PGG-") else "PR-scoped publication denied"
+            if (
+                failure_id == "PRG-TRANSCRIPT-UNAVAILABLE"
+                and transcript_diagnostic is not None
+                and (
+                    transcript_diagnostic.history == "limit"
+                    or transcript_diagnostic.recovery == "limit"
+                )
+            ):
+                remediation = (
+                    "Cannot verify historical publication permission within "
+                    "bounded transcript history; summaries cannot authorize "
+                    "publication. Ask the user to send a fresh "
+                    "`[approve-publication]` in their latest genuine user "
+                    "message before retrying one generic push."
+                )
+            scope = _denial_scope(failure_id)
             reason = f"{failure_id}: {scope}. {remediation}"
+            if (
+                failure_id in _TRANSCRIPT_FAILURE_IDS
+                and transcript_diagnostic is not None
+            ):
+                reason += " " + _format_transcript_diagnostic(
+                    transcript_diagnostic
+                )
+            if failure_id == "PRG-COMMAND-SHAPE":
+                detail = _format_command_shape_diagnostic(
+                    command_shape_diagnostic
+                )
+                if detail:
+                    reason += " " + detail
     else:
         reason = (
         "Git-push publication gate: this Bash command runs `git push` (an "

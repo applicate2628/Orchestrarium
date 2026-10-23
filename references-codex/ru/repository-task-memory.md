@@ -18,14 +18,14 @@
 
 ## Обязательный набор артефактов
 
-Для любой нетривиальной работы, маршрутизированной через `$lead`, папка item должна содержать эти артефакты:
+Для lead-managed работы, кроме принятого quick-fix, папка item должна содержать эти артефакты. Quick-fix использует только существующий four-fact `status.md` до первой mutation.
 
 | Артефакт | Требуется когда | Владелец контента | Назначение |
 |----------|----------------|-------------------|------------|
 | `roadmap.md` | до старта нетривиальной delivery-работы | `$product-manager`, или `$lead` при фиксации прямого human admission source | почему этот item существует, какой outcome принят, что явно вне scope |
 | `brief.md` | до старта нетривиальной delivery-работы | `$lead` | bounded source of truth для scope, стадии, рисков, владельцев и must-not-break surfaces |
-| `status.md` | до старта нетривиальной delivery-работы | `$lead` | interruption-safe recovery log с frontmatter, текущим состоянием, active/completed agents, опциональным состоянием `REVISE` loop и следующим действием |
-| `plan.md` | до старта реализации или ревью | `$planner` | утверждённый план фазы и чеклист выполнения |
+| `status.md` | до старта нетривиальной delivery-работы | `$lead` | interruption-safe recovery log в существующей quick-fix four-fact или staged lifecycle форме |
+| `plan.md` | до старта реализации или ревью, когда выбранный маршрут допускает Plan stage | `$planner` | утверждённый план фазы и чеклист выполнения |
 | `closure.md` | до перемещения в архив | `$lead` | финальная запись outcome, residual risk и расположения архива |
 
 Дополнительные артефакты требуются когда workflow их запрашивает:
@@ -47,8 +47,8 @@
 
 ## Применение и восстановление
 
-- `$lead` не должен продолжать нетривиальную delivery-работу без `roadmap.md`, `brief.md` и `status.md`, когда tracked task memory включён.
-- `$lead` не должен начинать реализацию или независимое ревью без `plan.md` и требуемых upstream принятых артефактов.
+- `$lead` не должен продолжать lead-managed non-quick-fix delivery-работу без `roadmap.md`, `brief.md` и `status.md`, когда tracked task memory включён.
+- `$lead` не должен начинать реализацию или независимое ревью без требуемых upstream принятых артефактов и, когда выбранный маршрут допускает Plan stage, `plan.md`.
 - `$lead` не должен перемещать item в архив без `closure.md`, когда tracked task memory включён.
 - Если текущая стадия зависит от upstream-артефактов: research, design, specialist constraints, plan фазы или требуемых review reports — эти артефакты должны существовать и быть актуальными до продолжения работы.
 - После каждого принятого артефакта, прерывания или существенного изменения маршрута `$lead` обновляет `status.md` в конфигурируемой recovery location.
@@ -58,7 +58,8 @@
 ## Технические notes и история решений
 
 - Используйте `notes.md` или `notes/` для технических находок, открытий реализации, отклонённых альтернатив, миграционных замечаний и follow-up идей, которые должны пережить текущую сессию.
-- Используйте `status.md` как rich execution-state template из `skills/lead/subagent-contracts.md`: frontmatter, текущее состояние, active/completed agents, опциональное состояние `REVISE` loop и следующее действие.
+- Используйте существующие формы `status.md` из `skills/lead/subagent-contracts.md`: quick-fix содержит только task, current step, last result и next action; staged work использует свои lifecycle fields и validation owner. Не добавляйте третью schema; legacy sectioned statuses остаются читаемыми.
+- Implementation и QA передают и повторяют одни и те же accepted criteria, named regression guard и observed result через существующие handoff/status carriers; отдельная acceptance-record schema не требуется.
 - Используйте `closure.md` для финальной записи закрытия до перемещения item из `active/`.
 - Используйте `design.md` или `adr.md` для принятых долгосрочных технических решений. Заметка не заменяет принятый артефакт решения.
 

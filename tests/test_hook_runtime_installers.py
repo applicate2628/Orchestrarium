@@ -32,10 +32,10 @@ INFORMATIONAL_REMINDER_HOOK_STEMS = frozenset(
 )
 CWD_SCANNING_HOOK_STEMS = frozenset({"check-scratch-valuables"})
 CANONICAL_TRUST_GUIDANCE = (
-    "After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for all 12 affected entries.",
+    "After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for all 13 affected entries.",
     "Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.",
     "`codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.",
-    "The trust modal does not time out and the operator must review all 12 entries before making the explicit choice.",
+    "The trust modal does not time out and the operator must review all 13 entries before making the explicit choice.",
 )
 BYPASS_TOKENS = (
     "bypass_" + "hook_trust",
@@ -136,7 +136,7 @@ def _owned_python_targets(platform: str) -> tuple[Path, ...]:
     )
 
 
-@pytest.mark.parametrize(("platform", "expected_count"), (("codex", 12), ("claude", 13)))
+@pytest.mark.parametrize(("platform", "expected_count"), (("codex", 13), ("claude", 13)))
 def test_hook_specs_membership_is_owned_by_universal_manifest(
     platform: str, expected_count: int
 ) -> None:
@@ -246,7 +246,10 @@ def test_python_production_installer_owns_ordered_hook_transaction() -> None:
 
 def test_hook_health_runtime_and_inventory_are_codex_only() -> None:
     assert "check-hook-health.py" not in PRODUCTION_INSTALLER.RUNTIME_HELPERS
-    assert PRODUCTION_INSTALLER.CODEX_RUNTIME_HELPERS == ("check-hook-health.py",)
+    assert PRODUCTION_INSTALLER.CODEX_RUNTIME_HELPERS == (
+        "check-hook-health.py",
+        "universal_hooks_manifest.py",
+    )
     source = inspect.getsource(PRODUCTION_INSTALLER.install)
     assert 'if provider == "codex":' in source
     assert "include_codex_helpers=True" in source
@@ -254,6 +257,145 @@ def test_hook_health_runtime_and_inventory_are_codex_only() -> None:
         PRODUCTION_INSTALLER._runtime_file_destinations
     )
     assert "codex-hook-inventory.json" not in " ".join(PRODUCTION_INSTALLER.RUNTIME_HELPERS)
+
+
+@pytest.mark.parametrize("provider", ("claude", "codex"))
+def test_canonical_lead_stage_delivers_installed_health_manifest(
+    tmp_path: Path, provider: str
+) -> None:
+    (tmp_path / provider).mkdir()
+    helper_target = tmp_path / provider / "skills" / "lead" / "scripts"
+    destinations = {
+        destination: source
+        for source, destination in PRODUCTION_INSTALLER._runtime_file_destinations(
+            ROOT, helper_target, include_codex_helpers=True
+        )
+    }
+    assert destinations[helper_target / "check-hook-health.py"] == (
+        ROOT / "scripts" / "check-hook-health.py"
+    )
+    assert destinations[helper_target / "universal_hooks_manifest.py"] == (
+        ROOT / "scripts" / "universal_hooks_manifest.py"
+    )
+    staged = PRODUCTION_INSTALLER._stage_canonical_lead_tree(
+        ROOT, ROOT / "src.codex" / "skills" / "lead", helper_target
+    )
+    try:
+        health_path = staged.path / "scripts" / "check-hook-health.py"
+        manifest_path = staged.path / "scripts" / "universal_hooks_manifest.py"
+        assert health_path.is_file()
+        assert manifest_path.is_file()
+        assert manifest_path.read_bytes() == (
+            ROOT / "scripts" / "universal_hooks_manifest.py"
+        ).read_bytes()
+
+        installed_health = _load(health_path, f"installed_health_{provider}")
+        source_manifest = _load(
+            ROOT / "scripts" / "universal_hooks_manifest.py",
+            f"source_manifest_{provider}",
+        )
+        assert installed_health._manifest_stems(staged.path, provider) == set(
+            source_manifest.registered_hook_stems(provider)
+        )
+    finally:
+        shutil.rmtree(staged.path)
+
+
+def test_production_installed_claude_health_uses_manifest_without_repo_root(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    install = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "install-claude.py"),
+            "--target",
+            str(project),
+            "--force",
+            "--allow-unsafe-target",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=240,
+        check=False,
+    )
+    assert install.returncode == 0, install.stdout + install.stderr
+
+    installed_root = project / ".agents" / "skills" / "lead"
+    health_path = installed_root / "scripts" / "check-hook-health.py"
+    manifest_path = installed_root / "scripts" / "universal_hooks_manifest.py"
+    settings = project / ".claude" / "settings.json"
+    assert health_path.is_file()
+    assert manifest_path.read_bytes() == (
+        ROOT / "scripts" / "universal_hooks_manifest.py"
+    ).read_bytes()
+
+    installed = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            str(health_path),
+            "--target",
+            str(settings),
+            "--platform",
+            "claude",
+            "--verify-fires",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert "PASS claude" in installed.stdout
+
+    missing_scripts = tmp_path / "missing" / "skills" / "lead" / "scripts"
+    missing_scripts.mkdir(parents=True)
+    missing_health = missing_scripts / health_path.name
+    shutil.copy2(health_path, missing_health)
+    missing = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            str(missing_health),
+            "--target",
+            str(settings),
+            "--platform",
+            "claude",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert missing.returncode == 1
+    assert "hook manifest is unavailable" in missing.stderr
+
+    source_compat = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            str(missing_health),
+            "--target",
+            str(settings),
+            "--platform",
+            "claude",
+            "--repo-root",
+            str(ROOT),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert source_compat.returncode == 0, source_compat.stdout + source_compat.stderr
 
 
 def test_installer_derives_touched_identities_from_before_after_hooks_json(
@@ -325,6 +467,28 @@ def test_installer_derives_touched_identities_from_before_after_hooks_json(
         assert canonical_script == ROOT / "scripts" / "check-hook-health.py"
     assert FakeHealth.generated
     assert not [call for call in invocations if "--codex-trust-mode" in call]
+    retirement_calls = [
+        call for call in invocations
+        if "--remove" in call and "check-mcp-momentum" in call
+    ]
+    assert len(retirement_calls) == 1
+    retirement = retirement_calls[0]
+    assert retirement[retirement.index("--hook-event") + 1] == "PreToolUse"
+    assert retirement[retirement.index("--script-path") + 1] == str(
+        installed_root / "hooks" / "check-mcp-momentum.py"
+    )
+    assert retirement[retirement.index("--tool-matcher") + 1] == "Grep|Bash|PowerShell|shell_command|exec_command"
+    registration_calls = [
+        call
+        for call in invocations
+        if "--script-marker" in call and "--script-path" in call and "--remove" not in call
+    ]
+    assert len(registration_calls) == len(specs)
+    seen_statuses = {
+        call[call.index("--script-marker") + 1]: call[call.index("--status-message") + 1]
+        for call in registration_calls
+    }
+    assert seen_statuses == PRODUCTION_INSTALLER._CODEX_HOOK_STATUS_MESSAGES
 
 
 def _health_envelope(

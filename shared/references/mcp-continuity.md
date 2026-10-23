@@ -1,22 +1,22 @@
 # MCP Continuity
 
-Model Context Protocol (MCP) continuity means keeping relevant connected tools visible at three points where tool choice can drift: session start or compaction, the start of each user turn, and a code-navigation shell search.
+Model Context Protocol (MCP) continuity restores tool-discovery guidance at session start or compaction. Turn and parallel reminders carry workflow continuity; Claude also sends a nonblocking advisory for qualifying code-navigation choices.
 
 ## Shared semantic core
 
-One dependency-free policy module, `scripts/universal-hooks/scripts/mcp_continuity_policy.py`, owns the shared semantics for all three event adapters:
+One dependency-free policy module, `scripts/universal-hooks/scripts/mcp_continuity_policy.py`, owns startup discovery, turn continuity and the classifier used by Claude's provider-specific search adapter:
 
 | Event | Adapter | Shared behavior |
 | --- | --- | --- |
 | `SessionStart` | `mcp-usage-reminder.py` | Reintroduces the full MCP discovery and use guidance after a new session or compaction. |
-| `UserPromptSubmit` | `turn-anchor-reminder.py` | Adds a short checkpoint requiring runtime discovery of relevant MCP tools before ad hoc repository search. |
-| `PreToolUse` | `check-mcp-momentum.py` | Classifies a qualifying code-navigation search before provider-specific advisory or force-mode enforcement. |
+| `UserPromptSubmit` | `turn-anchor-reminder.py` | Adds a short checkpoint for active-task continuation and delegation posture, without repeating tool-choice guidance. |
+| Claude `PreToolUse` | `agents/scripts/check-mcp-momentum.py` | Uses the shared search classifier to send a nonblocking advisory; the root force-mode advisory restates the existing mandatory MCP-use duties. |
 
 The policy admits exactly `Grep`, `Bash`, `PowerShell`, `shell_command`, and `exec_command`. Shell-shaped inputs read `tool_input.command`; `exec_command` reads `tool_input.cmd` and accepts `command` as a compatibility shape. Shell text is untrusted data: the policy tokenizes it and never executes it.
 
 ## Stateful and indexed freshness
 
-The session reminder and turn anchor treat a repository, project, branch,
+The session guidance and standing tool-use rules treat a repository, project, branch,
 worktree, or indexed-input change as invalidating an earlier result from a
 connected stateful or indexed MCP. The agent must use that server's own
 status/freshness probe; if it reports stale or pending state, run its documented
@@ -24,9 +24,16 @@ sync, update, or reindex operation, confirm freshness again, then repeat the
 intended query. As an explicitly non-normative workflow example, CodeGraph uses
 `status -> sync -> fresh status -> repeat query`; this name never selects a tool.
 
+When selecting or changing a project, or recovering stale state, the reported project/index identity matches the selected root before use;
+known omitted coverage is reported with the result. If instructions conflict
+with an installed tool, inspect its own supported entrypoint, help, and version
+before acting; do not invent or reimplement that tool's pipeline. Before treating graph call, dependency, or blast-radius output as exact decision evidence, match the qualified symbol plus declaring type/file where applicable to the requested target; distinguish direct calls, callback/indirect reachability, and fuzzy suggestions. Ambiguous/unmatched rows require source verification; do not declare them exact.
+
 This is capability-based, not a per-provider or per-server registry: a
 stateless or live MCP does not need a refresh. A failed refresh is reported
-explicitly and stale output is not presented as current.
+explicitly and stale output is not presented as current. The selection, change,
+and recovery guard is not a per-call version check, requires no new vendor API,
+and never directs an automatic deep or large-language-model build.
 
 ## Navigation classification
 
@@ -44,16 +51,17 @@ The exact task-memory exemption is intentionally narrow. It does not create a ge
 
 ## Delivery and privacy boundary
 
-The shared classifier does not choose whether a provider advises or denies.
-Codex remains warn-only. Claude remains warn-only for `mcpMode: auto` and for
-dispatched-agent envelopes, but a root Claude conversation in effective
-`mcpMode: force` denies each qualifying search and requires runtime tool
-discovery as the only availability source. Exact `[approve-mcp-fallback:v1]` in the
-bounded host-projected `user`-role record grants one Claude root recovery turn;
-assistant and tool text cannot mint it. This projection is not authenticated
-authorization, and a forged host-shaped user record can satisfy it. An
-unresolved mode still allows with a stable diagnostic. All paths are
-process fail-open and mutate no persistent state.
+The shared classifier does not decide compliance or tool permission. Codex uses
+startup guidance and workflow reminders, without a search-audit registration.
+Claude sends a nonblocking advisory for `mcpMode: auto`, dispatched-agent
+envelopes, and a root conversation in effective `mcpMode: force`. Under the
+existing force duty, runtime tool discovery and the relevant tool schema are
+required, as is use of a fitting MCP within the existing alternative-path
+restrictions; selected-root and currentness checks still apply. Runtime
+discovery is the only availability source. The advisory does not determine
+compliance, grant permission, or override a host refusal. An unresolved mode
+still emits a stable diagnostic advisory. All paths are process fail-open and
+mutate no persistent state.
 
 The universal policy does not read home-directory MCP configuration, infer
 availability from configured names, or select a tool from a name registry.
@@ -61,11 +69,10 @@ Qualifying advisory paths emit one generic runtime-discovery checkpoint. Named
 tools in documentation are explicitly non-normative examples and never
 selection logic.
 
-Advisory paths influence the next model action and cannot prove obedience. The
-Claude root-force denial is an action-level guard only for searches admitted by
-the shared classifier; it does not prove MCP success or cover tools outside its
-matcher. Installed-source identity and long-turn behavior require separate
-post-install verification.
+Advisory paths influence the next model action and cannot prove obedience. The turn anchor projects the shared **Primary-task continuity and side work** rule: brief inline answers, prompt eligible substantive side delegation and ready primary continuation without waiting for the side result. A synthetic payload test proves delivery of this context only. Both-pack receiving and an actual current-flow observation do not prove universal future model compliance; another provider's model-behavior trial is not mandatory.
+The Claude root-force advisory does not determine compliance, prove MCP
+success, or cover tools outside its matcher. Installed-source identity and
+long-turn behavior require separate post-install verification.
 
 Provider-specific event envelopes, matcher registration, and installed paths live in the [Codex addendum](../../references-codex/mcp-continuity.md) and [Claude Code addendum](../../references-claude/mcp-continuity.md).
 

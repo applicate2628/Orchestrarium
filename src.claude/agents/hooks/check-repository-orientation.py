@@ -28,6 +28,7 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
 from hook_common import (  # noqa: E402
+    acquire_tool_input,
     CURRENT_TURN_BYTE_CAP,
     STATUS_FOUND,
     emit_advisory,
@@ -45,9 +46,14 @@ _HISTORICAL_RE = re.compile(r"(?im)^\s*USER-APPROVED HISTORICAL SCOPE:\s*\S")
 _EVIDENCE_RE = re.compile(r"(?:^|,)\s*[^,;\s]+:\d+(?:-\d+)?(?:\s*(?:,|$))")
 _REQUIRED_FIELDS = ("scope", "status", "workflow", "protected", "evidence")
 _STATUSES = {"live", "mutable", "frozen", "archived", "deprecated", "superseded", "conflict"}
+_RECORD_GRAMMAR = (
+    "`REPOSITORY ORIENTATION: scope=<repo-relative path>; "
+    "status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; "
+    "workflow=<entry point>; protected=<paths|none>; "
+    "evidence=<path:line>[,<path:line>...]`"
+)
 _EXEMPT_SEGMENTS = {".scratch", ".reports", ".plans", "work-items"}
 _STALE_SEGMENTS = {"archive": "archived", "deprecated": "deprecated", "superseded": "superseded", "frozen": "frozen"}
-_SHELL_TOOLS = {"bash", "shell_command", "exec_command"}
 _MUTATION_TOOLS = {"edit", "write", "notebookedit", "apply_patch"}
 _SEPARATORS = set(";|&()")
 _SHELL_KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "!"}
@@ -71,21 +77,6 @@ def _nearest_git_root(start: Path) -> Path | None:
             current = current.parent
     except Exception:
         return None
-
-
-def _target_strings(tool_input: dict) -> list[str]:
-    targets: list[str] = []
-    for key in ("file_path", "notebook_path", "path"):
-        value = tool_input.get(key)
-        if isinstance(value, str) and value.strip():
-            targets.append(value.strip())
-    patch = tool_input.get("patch") or tool_input.get("input")
-    if isinstance(patch, str):
-        targets.extend(
-            match.group(1).strip()
-            for match in re.finditer(r"(?m)^\*\*\* (?:Add|Update|Delete) File:\s*(.+)$", patch)
-        )
-    return targets
 
 
 def _as_path(value: str, cwd: Path) -> Path:
@@ -219,25 +210,33 @@ def _risky_shell_target(command: str, cwd: Path, root: Path) -> tuple[bool, Path
     return False, cwd
 
 
-def _parse_record(prose: str) -> dict[str, str] | None:
+def _parse_record(prose: str) -> tuple[dict[str, str] | None, str | None]:
     matches = _RECORD_RE.findall(prose)
     if len(matches) != 1:
-        return None
+        return None, None
     fields: dict[str, str] = {}
     for item in matches[0].split(";"):
         if "=" not in item:
-            return None
+            return None, "field entries must use `key=value` and semicolon separators"
         key, value = (part.strip() for part in item.split("=", 1))
         if not key or not value or key in fields:
-            return None
+            return None, "field entries must be nonempty and appear exactly once"
         fields[key] = value
-    if any(not fields.get(field) for field in _REQUIRED_FIELDS):
-        return None
+    missing = next((field for field in _REQUIRED_FIELDS if not fields.get(field)), None)
+    if missing is not None:
+        return None, f"required field {missing} is missing or empty"
     if fields["status"].lower() not in _STATUSES:
-        return None
+        return None, (
+            "field status must be one of live, mutable, frozen, archived, "
+            "deprecated, superseded, conflict; values are literal unquoted "
+            "text, so do not wrap them in backticks"
+        )
     if not _EVIDENCE_RE.search(fields["evidence"]):
-        return None
-    return fields
+        return None, (
+            "field evidence must contain at least one path:line citation; "
+            "values are literal unquoted text, so do not wrap them in backticks"
+        )
+    return fields, None
 
 
 def _scope_contains(scope: str, targets: list[Path], root: Path) -> bool:
@@ -279,23 +278,23 @@ def main() -> int:
             return 0
         cwd_value = envelope.get("cwd")
         cwd = Path(cwd_value).resolve(strict=False) if isinstance(cwd_value, str) and cwd_value else Path.cwd().resolve()
-        raw_targets = _target_strings(tool_input)
+        acquired = acquire_tool_input(envelope.get("tool_name"), tool_input)
+        tool_name = acquired.operation
+        raw_targets = acquired.targets if acquired.resolved else ()
         target_paths = [_as_path(value, cwd) for value in raw_targets]
         root = _nearest_git_root(target_paths[0] if target_paths else cwd) or _nearest_git_root(cwd)
         if root is None:
             return 0
 
-        tool_name = str(envelope.get("tool_name", "")).lower()
         risky = False
         action_targets: list[Path] = []
         if tool_name in _MUTATION_TOOLS:
             repository_targets = [path for path in target_paths if _inside(path, root)]
             action_targets = [path for path in repository_targets if not _is_exempt(path, root)]
             risky = bool(action_targets)
-        elif tool_name in _SHELL_TOOLS:
-            command = tool_input.get("command")
-            if isinstance(command, str) and command:
-                risky, shell_target = _risky_shell_target(command, cwd, root)
+        elif acquired.command is not None:
+            if acquired.resolved:
+                risky, shell_target = _risky_shell_target(acquired.command, cwd, root)
                 action_targets = [shell_target]
         if not risky:
             return 0
@@ -309,7 +308,7 @@ def main() -> int:
         if current_turn_status != STATUS_FOUND:
             return 0
         prose = "\n".join(filter(None, (extract_assistant_prose(entry) for entry in current_turn)))
-        record = _parse_record(prose)
+        record, record_rejection = _parse_record(prose)
         valid = (
             record is not None
             and record["status"].lower() != "conflict"
@@ -317,12 +316,20 @@ def main() -> int:
         )
         messages: list[str] = []
         if not valid:
-            messages.append(
-                "[repository-orientation AUDIT] risky repository action lacks exactly one valid, "
-                "in-scope `REPOSITORY ORIENTATION:` record with scope/status/workflow/protected/"
-                "evidence and a path:line citation, or records status=conflict. This is a warn-only "
-                "backstop; the shared repository-orientation rule remains binding. AUDIT mode -- allowing."
-            )
+            if record_rejection is not None:
+                messages.append(
+                    "[repository-orientation AUDIT] submitted `REPOSITORY ORIENTATION:` record was "
+                    f"rejected: {record_rejection}. Expected grammar: {_RECORD_GRAMMAR}. "
+                    "This is a warn-only backstop; the shared repository-orientation rule remains "
+                    "binding. AUDIT mode -- allowing."
+                )
+            else:
+                messages.append(
+                    "[repository-orientation AUDIT] risky repository action lacks exactly one valid, "
+                    "in-scope `REPOSITORY ORIENTATION:` record with scope/status/workflow/protected/"
+                    "evidence and a path:line citation, or records status=conflict. This is a warn-only "
+                    "backstop; the shared repository-orientation rule remains binding. AUDIT mode -- allowing."
+                )
 
         required_status = _stale_requirement(action_targets, root)
         historical_scope = bool(_HISTORICAL_RE.search(prose))

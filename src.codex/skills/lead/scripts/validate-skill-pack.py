@@ -405,7 +405,8 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'Codex addendum keeps the exact addendum-only H2 skeleton',
   '## Codex-specific runtime notes',
   '## Codex-side repository concretization',
-  '## Shared core now owns'),
+  '## Shared core now owns',
+  '## Terms and Abbreviations'),
  ('check_absent',
   '@ROOT/references-codex/subagent-operating-model.md',
   '## 1. Main rule for the lead',
@@ -431,12 +432,8 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   '120',
   'Codex addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
-  '@ROOT/shared/references/subagent-operating-model.md',
-  '257a472ee180e3eb7fcc5a6b938040d43475cfb26cc58264ec5b28e40c42ac18',
-  'shared subagent-operating-model matches the current canonical normalized fingerprint'),
- ('check_normalized_sha256',
   '@ROOT/references-codex/subagent-operating-model.md',
-  'a5f83fa995e0623d8a28f0c661f449281f745405c926f0e9e8904b5852ecf0e4',
+  'f3be465870726ae3bbfc2631788693c2435bd6683d466cc804b1fc88b7deaae1',
   'Codex addendum matches the current canonical normalized fingerprint'),
  ('direct', 'role_index_codex', 'role_index_codex'),
  ('check_openai_yaml_interface',
@@ -739,7 +736,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   '@ROOT/src.codex/skills/explain-simply/SKILL.md'),
  ('check_common_skill_body_pin',
   'github-pr-review-bot',
-  '5155539778884ba6a25589c03af2fc717ebd9c1d7ed65dce504bedf9c37445ed',
+  'aea0d0e4529326d6347368ce6d811e7f398a4cb0ee18df8504444e8d4f621935',
   '@ROOT/src.codex/skills/github-pr-review-bot/SKILL.md'),
  ('check_contains',
   '@ROOT/src.codex/skills/github-pr-review-bot/SKILL.md',
@@ -767,16 +764,20 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'github-pr-review-bot prioritizes exact post-trigger current-head findings'),
  ('check_common_skill_body_pin',
   'generalize-from-instance',
-  '7233fcd0d38ccb87e2b95d5f95af3811aa5224e873591eaefd397d3c20b9fea4',
+  'c55e0d9389abce424e778c41816127c76948d67d92233e9afb26ab4d92cfaf97',
   '@ROOT/src.codex/skills/generalize-from-instance/SKILL.md'),
  ('check_common_skill_body_pin',
+  'implementation-to-theory',
+  '2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78',
+  '@ROOT/src.codex/skills/implementation-to-theory/SKILL.md'),
+ ('check_common_skill_body_parity',
   'manual-repo-transfer',
-  '2ca88a24317c81cc18c5f2cc6125895d06ae790a19195ce4a3359428b2c51ea0',
-  '@ROOT/src.codex/skills/manual-repo-transfer/SKILL.md'),
- ('check_common_skill_body_pin',
+  'src.codex/skills/manual-repo-transfer/SKILL.md',
+  'src.claude/skills/manual-repo-transfer/SKILL.md'),
+ ('check_common_skill_body_parity',
   'repo-cleanup',
-  'e618521a08476c7ae31a03a2cba02a1b885d50fb0455bd7e765681b948502623',
-  '@ROOT/src.codex/skills/repo-cleanup/SKILL.md'),
+  'src.codex/skills/repo-cleanup/SKILL.md',
+  'src.claude/skills/repo-cleanup/SKILL.md'),
  ('check_common_skill_body_pin',
   'mathtype-book-page',
   '615499de68dc03fccb23954e8ed94662076a9a744a493b71232ebdcce55357be',
@@ -795,7 +796,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   '@ROOT/src.codex/skills/vcpkg-ports-updater/SKILL.md'),
  ('check_common_skill_body_pin',
   'windows-gui-manual-testing',
-  'b3a029e6784d1d9e37f789b8b512f31f5e5c2161ca6807dc8a140854042ae6c8',
+  '7dd186bbeee1fab2eb44e2d4f1c4772ffea87d918605efdcc00a5a8fb3c272b8',
   '@ROOT/src.codex/skills/windows-gui-manual-testing/SKILL.md'),
  ('direct', 'common_pin_completeness', 'common_pin_completeness'),
  ('direct', 'layering_codex', 'layering_codex'),
@@ -826,8 +827,8 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'external-dispatch does not record consultant fallback approvals'),
  ('check_contains',
   '@ROOT/src.codex/skills/lead/subagent-contracts.md',
-  'Read and normalize `.agents/.agents-mode.yaml` before trusting its flags.',
-  'subagent-contracts require read-time agents-mode normalization'),
+   '- Read the effective Codex overlay and normalize its effective values in memory through the existing per-key resolver before trusting its flags. If the local canonical file is absent, continue resolving the effective overlay in this order: local legacy `.agents/.agents-mode`, pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, then shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it. Comment-free, partial, or older-layout files are valid compatibility input for reads; a routing read does not rewrite its input.',
+  'subagent contracts preserve Codex in-memory routing'),
  ('check_contains',
   '@ROOT/src.codex/skills/lead/subagent-contracts.md',
   'agent-runs.jsonl format',
@@ -876,7 +877,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'subagent-contracts reject none for superseded mechanisms'),
  ('check_contains',
   '@ROOT/src.codex/skills/qa-engineer/SKILL.md',
-  'cannot return `PASS` until it verifies the disposition field against the diff',
+  'Verify disposition for the mechanism changed or superseded in the commissioned slice',
   'QA gate verifies dead/superseded code disposition before PASS'),
  ('check_contains',
   '@ROOT/src.codex/AGENTS.codex.md',
@@ -928,12 +929,19 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'operating-model carries the A3 physical-state reconciliation trigger'),
  ('check_contains',
   '@ROOT/src.codex/skills/init-project/SKILL.md',
-  'normalize it to the current canonical format before presenting or trusting the current values.',
+  'Normalize effective values in memory through the dispatch owner\'s existing per-key read order before '
+  'presenting or trusting them. Use any global fallback as the starting point for project-local review; '
+  'do not rewrite borrowed/global configuration on read. Persist the explicitly selected project '
+  'configuration to the canonical project-local `.yaml` path only within the authorized configuration '
+  'write in Step 7, and do not recreate legacy files.',
   'init-project normalizes existing agents-mode before reading values'),
  ('check_contains',
   '@ROOT/src.codex/skills/init-project/SKILL.md',
-  'Any read of `.agents/.agents-mode.yaml` that drives a decision should normalize the file to the current '
-  'canonical format before trusting the flags.',
+  'For decision-driving reads, use the dispatch owner\'s per-key precedence (local `.agents/.agents-mode.yaml`, '
+  'local legacy `.agents/.agents-mode`, pack-local global `~/.codex/.agents-mode.yaml`, pack-local global '
+  'legacy `~/.codex/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults) '
+  'and the in-memory normalization in Step 1; inspection grants no write to the source overlay. '
+  'Persist only the explicitly selected authorized project configuration in Step 7.',
   'init-project requires read-time agents-mode normalization'),
  ('check_contains',
   '@ROOT/src.codex/skills/second-opinion/SKILL.md',
@@ -945,11 +953,11 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'shared governance no longer allows adapter-host metadata for external execution'),
  ('check_contains',
   '@AGENTS',
-  'must use direct external launch',
+  'use orchestrating runtime/approved wrapper, never an internal relay',
   'shared governance requires direct external launch'),
  ('check_contains',
   '@AGENTS',
-  'substantive task prompt must use file-based prompt delivery',
+  'file-based prompt via stdin/file, never argv',
   'shared governance requires file-based external CLI prompts'),
  ('check_contains',
   '@AGENTS',
@@ -961,7 +969,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'shared governance requires state synchronization ownership discipline'),
  ('check_contains',
   '@AGENTS',
-  'split-brain state sync as an architecture bug',
+  'Split-brain sync is an architecture bug',
   'shared governance rejects split-brain state synchronization'),
  ('check_contains',
   '@AGENTS',
@@ -969,7 +977,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'shared governance requires traceable state synchronization diagnostics'),
  ('check_contains',
   '@AGENTS',
-  'verify every subagent result before accepting it',
+  'verify before acceptance/forwarding/completion',
   'shared governance requires verification before trusting subagent results'),
  ('check_contains',
   '@AGENTS',
@@ -981,7 +989,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'shared governance requires terminology and abbreviation explanations in documents'),
  ('check_contains',
   '@AGENTS',
-  'concrete observable data',
+  'capture observable wording/error/log/return/repro or `file:line`; verify the causal chain',
   'shared governance requires measured evidence before root-cause or fix claims'),
  ('check_contains',
   '@AGENTS',
@@ -1025,8 +1033,8 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'external-worker requires direct external launch'),
  ('check_contains',
   '@ROOT/src.codex/skills/external-worker/SKILL.md',
-  'file-based prompt delivery',
-  'external-worker requires file-based external CLI prompts'),
+   'file/stdin delivery',
+   'external-worker requires file/stdin prompt delivery'),
  ('check_absent',
   '@ROOT/src.codex/skills/external-reviewer/SKILL.md',
   'Adapter host runtime:',
@@ -1037,8 +1045,8 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'external-reviewer requires direct external launch'),
  ('check_contains',
   '@ROOT/src.codex/skills/external-reviewer/SKILL.md',
-  'file-based prompt delivery',
-  'external-reviewer requires file-based external CLI prompts'),
+   'file/stdin delivery',
+   'external-reviewer requires file/stdin prompt delivery'),
  ('check_contains',
   '@ROOT/src.codex/skills/lead/external-dispatch.md',
   'approved thin wrapper',
@@ -1568,7 +1576,7 @@ _APAT_ACTIONS = (
     *(("check_contains", "@SKILLS/architect/SKILL.md", f'<!-- APAT-SEMANTIC id="AP{number}.', f"APAT-E006-INSTALLED-MISSING: codex architect AP{number} marker") for number in range(6)),
     ("check_contains", "@SKILLS/architect/SKILL.md", "<!-- APAT-BLOCK:ARCHITECT-DISPOSITION:BEGIN -->", "APAT-E006-INSTALLED-MISSING: codex architect AP0-AP5 projection section marker"),
     ("check_contains", "@SKILLS/architecture-reviewer/SKILL.md", "<!-- APAT-BLOCK:ARCHITECTURE-REVIEW:BEGIN -->", "APAT-E006-INSTALLED-MISSING: codex architecture-reviewer APAT projection section marker"),
-    ("check_contains", "@SKILLS/architecture-reviewer/SKILL.md", "each tempting but unsuitable pattern has explicit negative evidence", "APAT-E006-INSTALLED-MISSING: codex architecture-reviewer APAT negative-selection wording"),
+    ("check_contains", "@SKILLS/architecture-reviewer/SKILL.md", "each evidence-triggered candidate that is rejected has explicit negative evidence; an unadmitted pattern needs no invented rejection", "APAT-E006-INSTALLED-MISSING: codex architecture-reviewer APAT negative-selection wording"),
 )
 
 _APAT_DEV_ACTIONS = (
@@ -1607,15 +1615,6 @@ _UI_CONTINUITY_DEV_ACTIONS = (
     ),
 )
 
-_CODEX_HOOK_HEALTH_DEV_ACTIONS = (
-    (
-        "check_normalized_sha256",
-        "@ROOT/scripts/check-hook-health.py",
-        "1ce4ce47e923c1dc92ea6ecae3ff79872b77217eae75d4d58b0f47a53b6bf2bb",
-        "CODEX-HOOK-HEALTH-SIDECAR-DRIFT: root helper source matches its pinned payload",
-    ),
-)
-
 _SOURCE_ONLY_MAINTAINER_PREFIXES = (
     "@ROOT/README.md",
     "@ROOT/shared/schemas/agent-runs.schema.json",
@@ -1651,11 +1650,28 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 # assertion may never leak into the installed-pack action set as an index moves.
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:35]
-    + _DECLARED_ACTIONS[142:305]
+    + _DECLARED_ACTIONS[141:305]
     + _DECLARED_ACTIONS[323:330]
-    # Include declaration 373 so its @ROOT/docs prefix routes it to dev_repo.
+    # Include declaration 372 so its @ROOT/docs prefix routes it to dev_repo.
     + _DECLARED_ACTIONS[367:374]
     + _APAT_ACTIONS
+    + (
+        (
+            "check_contains", "@SKILLS/lead/SKILL.md",
+            "apply the current-owner reuse check",
+            "lead skill requires current-owner reuse before approach or assignment",
+        ),
+        (
+            "check_contains", "@SKILLS/lead/subagent-contracts.md",
+            "An accepted plan is an input, not proof the capability is still missing",
+            "specialist handoff requires current-owner reuse before implementation",
+        ),
+        (
+            "check_common_skill_body_pin", "post-spawn-cleanup",
+            "afc6e1c2bccc547c2fbe4ee77a8d98e1ca546203662218817c6f8699bb6dc5ac",
+            "@SKILLS/post-spawn-cleanup/SKILL.md",
+        ),
+    )
 )
 
 ACTIONS = (
@@ -1671,7 +1687,7 @@ ACTIONS = (
         _DECLARED_ACTIONS[35:51]
         + _DECLARED_ACTIONS[58:76]
         + _DECLARED_ACTIONS[86:122]
-        + _DECLARED_ACTIONS[129:142]
+        + _DECLARED_ACTIONS[129:141]
         + _DECLARED_ACTIONS[319:322]
         + _DECLARED_ACTIONS[330:335]
         + _DECLARED_ACTIONS[336:343]
@@ -1682,7 +1698,26 @@ ACTIONS = (
         )
         + _APAT_DEV_ACTIONS
         + _UI_CONTINUITY_DEV_ACTIONS
-        + _CODEX_HOOK_HEALTH_DEV_ACTIONS,
+        + (
+            (
+                "check_contains",
+                "@ROOT/src.codex/skills/consultant/SKILL.md",
+                "Read the effective Codex overlay and normalize its effective values in memory through the existing per-key resolver before routing. Valid sparse, comment-free, or older-layout files are compatibility input for routing reads; do not rewrite them merely to read or trust their flags.",
+                "consultant reads the Codex overlay in memory",
+            ),
+            (
+                "check_contains",
+                "@ROOT/src.codex/skills/consultant/SKILL.md",
+                "If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override. Persist canonical formatting only within an authorized install/configuration write, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys.",
+                "consultant preserves precedence and authorized-write boundary",
+            ),
+            (
+                "check_contains",
+                "@ROOT/src.codex/skills/lead/subagent-contracts.md",
+                "Do not recreate a legacy file or synthesize a local override on read alone. Persist canonical formatting only within an authorized install/configuration write, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys and removing retired canonical keys.",
+                "subagent contracts restrict Codex writes to authorization",
+            ),
+        ),
     ),
     (
         "dev_repo_nonstandalone",

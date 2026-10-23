@@ -45,7 +45,7 @@ The user does not need to type `/agents-perf` for this flow to fire. Apply it tr
    - If performance reviewer returns `BLOCKED` → present to user with classification (`BLOCKED:dependency` or `BLOCKED:prerequisite`)
 
 7. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
-   - If issue from registry → update `work-items/performance/<file>` status
+   - If the issue came from the configured bug registry, return its evidence and proposed disposition to the root/lifecycle owner under that registry's existing contract; do not create or route to a performance-specific registry.
    - With an active `work-items/active/<slug>/`, write only its canonical artifact and return concise result/provenance for the root ledger. With no active item, a meaningful standalone result MAY use one `.reports/` summary.
 
 8. **Report.** Present:
@@ -58,7 +58,7 @@ The user does not need to type `/agents-perf` for this flow to fire. Apply it tr
 ## Rules
 
 - **Every stage MUST be invoked via the Agent tool** with the specified `subagent_type`. Do not role-play specialists inline.
-- When fixing an issue from the registry, update its file (the status enum `open | fixed | wontfix` is owned by `$performance-engineer`): set `status: fixed` only after the performance reviewer confirms AND the user approves; `wontfix` records an accepted-tradeoff reason. If the reviewer says REVISE, keep `status: open`.
+- When fixing a recorded performance issue, preserve the configured bug registry's schema and statuses owned by its canonical QA contract. Require QA confirmation, `$performance-reviewer` confirmation and user approval before proposing a fix disposition; an unresolved `REVISE` keeps the bug open. The lifecycle owner alone applies the authorized disposition and terminalization/archive transaction. Preserve accepted-tradeoff reasons and the surviving identity for a duplicate under that same contract.
 - **Save recovery state** between stages in `work-items/active/<date>-<slug>/` per the recovery rule in CLAUDE.md: `status.md` + the accepted artifact from each completed stage.
 - Follow evidence-based completion: show measured results, not estimates.
 - Confirm the bottleneck before optimizing — do not guess.

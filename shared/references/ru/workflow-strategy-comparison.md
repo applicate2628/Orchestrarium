@@ -26,7 +26,7 @@
 | Bias на self-approval | `Builder / blocker separation` | Builder и blocking reviewer должны быть разными |
 | Известный bounded review risk | `Claim-Verify` | Дефолт, когда risk surface понятен |
 | Новый или внешне exposed review risk | `Adversarial` | Дефолт, когда blind spots важнее скорости |
-| Критичный change с execution и blind-spot риском одновременно | `Claim-Verify + Adversarial` | Запускать по очереди, сохраняя независимость reviewer'ов |
+| Критичные риски исполнения и слепых зон | `Claim-Verify` или `Adversarial` в зависимости от допущенного риска | Дополнительный независимый ракурс — только для конкретного непокрытого риска или обязательной проверки; сохраняйте все обязательные проверки, управляющие входы и независимость проверяющего. Сочетание названий само по себе не требует двух последовательных ревью. |
 | Drift scope или priority | `Re-intake` | Возвращать к `product-manager` |
 | Несколько фаз должны слиться в один результат | `Integration ownership` | Назначать одного owner до QA |
 | Stop-and-wait churn | `Rolling loop` | `PASS` двигает дальше, `REVISE` следует заданному shared spine пределу последовательных циклов для одной роли и одного артефакта, `BLOCKED` должен быть редким |

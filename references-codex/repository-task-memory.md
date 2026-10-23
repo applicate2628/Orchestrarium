@@ -22,14 +22,14 @@ is authoritative. This Codex addendum adds no alternate topology or schema.
 
 ## Mandatory artifact set
 
-For any non-trivial work routed through `$lead`, the item folder must contain these artifacts:
+For lead-managed work other than an admitted quick-fix, the item folder must contain these artifacts. A quick-fix uses only its existing four-fact `status.md` before its first mutation.
 
 | Artifact | Required when | Content owner | Purpose |
 |---|---|---|---|
 | `roadmap.md` | before non-trivial delivery work starts | `$product-manager`, or `$lead` when recording a direct human admission source | why this item exists, what outcome is admitted, what is explicitly out of scope |
 | `brief.md` | before non-trivial delivery work starts | `$lead` | bounded source of truth for scope, stage, risks, owners, and must-not-break surfaces |
-| `status.md` | before non-trivial delivery work starts | `$lead` | interruption-safe recovery log with frontmatter, current state, active/completed agents, optional `REVISE` loop state, and next action |
-| `plan.md` | before implementation or review starts | `$planner` | approved phase plan and execution checklist |
+| `status.md` | before non-trivial delivery work starts | `$lead` | interruption-safe recovery log in the existing quick-fix four-fact or staged lifecycle form |
+| `plan.md` | before implementation or review starts when the selected route admits a Plan stage | `$planner` | approved phase plan and execution checklist |
 | `closure.md` | before moving to archive | `$lead` | final record of outcome, residual risk, and archive location |
 
 Additional artifacts are required when the workflow calls for them:
@@ -51,8 +51,8 @@ Additional artifacts are required when the workflow calls for them:
 
 ## Enforcement and recovery
 
-- `$lead` must not continue non-trivial delivery work without `roadmap.md`, `brief.md`, and `status.md` when tracked task memory is enabled.
-- `$lead` must not start implementation or independent review without `plan.md` and the required upstream accepted artifacts.
+- `$lead` must not continue lead-managed non-quick-fix delivery work without `roadmap.md`, `brief.md`, and `status.md` when tracked task memory is enabled.
+- `$lead` must not start implementation or independent review without the upstream accepted artifacts and, when the selected route admits a Plan stage, `plan.md`.
 - `$lead` must not move an item to archive without `closure.md` when tracked task memory is enabled.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
 - After every accepted artifact, interruption, or material route change, `$lead` updates `status.md` in the configured recovery location.
@@ -62,7 +62,8 @@ Additional artifacts are required when the workflow calls for them:
 ## Technical notes and decision history
 
 - Use `notes.md` or `notes/` for technical findings, implementation discoveries, rejected alternatives, migration caveats, and follow-up ideas that should survive the current session.
-- Use `status.md` for the rich execution-state template from `skills/lead/subagent-contracts.md`: frontmatter, current state, active/completed agents, optional `REVISE` loop state, and next action.
+- Use the existing `status.md` forms from `skills/lead/subagent-contracts.md`: quick-fix carries only task, current step, last result, and next action; staged work uses its lifecycle fields and validation owner. Do not add a third schema; legacy sectioned statuses remain readable.
+- Implementation and QA pass forward and echo the same accepted criteria, named regression guard, and observed result through the existing handoff/status carriers; no separate acceptance-record schema is required.
 - Use `closure.md` for the final closeout record before an item leaves `active/`.
 - Use `design.md` or `adr.md` for accepted long-lived technical decisions. A note is not a substitute for an accepted decision artifact.
 

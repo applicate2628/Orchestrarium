@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 from collections import Counter
 from enum import Enum
 import hashlib
@@ -11,13 +12,14 @@ import importlib.util
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Iterator
 from urllib.parse import quote
 
 _GIT_EXECUTABLE = globals().get("__injected_git_executable__", "git")
@@ -128,55 +130,178 @@ PosixProcessGroupError = _POSIX_PROCESS_GROUP.PosixProcessGroupError
 PosixProcessGroupOwnerV1 = _POSIX_PROCESS_GROUP.PosixProcessGroupOwnerV1
 
 
+def _load_windows_job_module():
+    module_name = "_orchestrarium_windows_job_v1"
+    injected = globals().get("__injected_windows_job_module__")
+    if injected is not None:
+        if (
+            getattr(injected, "__name__", None) != module_name
+            or getattr(injected, "__file__", None)
+            != "<closure>/process_supervision/windows_job.py"
+            or sys.modules.get(module_name) is not injected
+        ):
+            raise RuntimeError("Windows Job injected contract mismatch")
+        module = injected
+    else:
+        script = Path(__file__)
+        if str(script).startswith("<closure>/"):
+            raise RuntimeError("Windows Job held module unavailable")
+        script = script.resolve()
+        candidates = [script.parent / "process_supervision" / "windows_job.py"]
+        if script.parent.name == "scripts" and script.parent.parent.name == "universal-hooks":
+            candidates.append(script.parents[2] / "process_supervision" / "windows_job.py")
+        elif (
+            script.parents[0].name == "scripts"
+            and script.parents[1].name == "lead"
+            and script.parents[2].name == "skills"
+            and script.parents[3].name == "src.codex"
+        ):
+            candidates.append(script.parents[4] / "scripts" / "process_supervision" / "windows_job.py")
+        elif (
+            script.parents[0].name == "scripts"
+            and script.parents[1].name == "agents"
+            and script.parents[2].name == "src.claude"
+        ):
+            candidates.append(script.parents[3] / "scripts" / "process_supervision" / "windows_job.py")
+        available = tuple(path for path in candidates if path.is_file())
+        if len(available) != 1:
+            raise RuntimeError("Windows Job helper unavailable or ambiguous")
+        existing = sys.modules.get(module_name)
+        if existing is not None:
+            module = existing
+        else:
+            spec = importlib.util.spec_from_file_location(module_name, available[0])
+            if spec is None or spec.loader is None:
+                raise RuntimeError("Windows Job helper unavailable or ambiguous")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                sys.modules.pop(module_name, None)
+                raise
+    try:
+        marker = module.WINDOWS_JOB_MODULE_CONTRACT_V1
+        owner_type = module.WindowsJobOwnerV1
+        error_type = module.WindowsJobError
+        contract = module.windows_job_module_contract_v1()
+    except (AttributeError, TypeError):
+        raise RuntimeError("Windows Job module contract mismatch") from None
+    if (
+        marker != "orchestrarium.windows-job.module.v1"
+        or contract != (marker, owner_type, error_type)
+        or not isinstance(owner_type, type)
+        or not isinstance(error_type, type)
+        or not issubclass(error_type, RuntimeError)
+    ):
+        raise RuntimeError("Windows Job module contract mismatch")
+    return module
+
+
+if os.name == "nt":
+    _WINDOWS_JOB = _load_windows_job_module()
+    WindowsJobOwnerV1 = _WINDOWS_JOB.WindowsJobOwnerV1
+    WindowsJobError = _WINDOWS_JOB.WindowsJobError
+    _WINDOWS_JOB_COORDINATOR = _WINDOWS_JOB.WindowsInheritanceCoordinatorV1()
+else:
+    class WindowsJobError(RuntimeError):
+        """Non-Windows type placeholder for platform-neutral exception clauses."""
+
+
 _SCANNER_EXEMPT_PATHS = frozenset({
     "scripts/universal-hooks/scripts/check-publication-safety.py",
     "src.codex/skills/lead/scripts/check-publication-safety.py",
     "src.claude/agents/scripts/check-publication-safety.py",
 })
-_SIMPLE_PATTERNS = (
-    re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"ghp_[A-Za-z0-9]{36}"),
-    re.compile(r"sk-[A-Za-z0-9]{20,}"),
-    re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"),
-    re.compile(r"ANTHROPIC_[A-Z_]*(?:KEY|TOKEN)[^A-Za-z0-9_]?\s*[:=]"),
-    re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+"),
-    re.compile(r"BEGIN RSA PRIVATE KEY"),
-    re.compile(r"BEGIN OPENSSH PRIVATE KEY"),
-    re.compile(r"BEGIN PRIVATE KEY"),
-    re.compile(r"private_key"),
-    re.compile(r"secret_key"),
-    re.compile(r"/private/var/folders/"),
-    re.compile(r"/var/folders/"),
-    re.compile(r"^Human:\s*"),
-    re.compile(r"^Assistant:\s*"),
-    re.compile(r"^\$\s+"),
-    re.compile(r"^>>>\s+"),
-    re.compile(r"\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]"),
+_SIMPLE_RULES = (
+    (True, re.compile(r"AKIA[0-9A-Z]{16}")),
+    (True, re.compile(r"ghp_[A-Za-z0-9]{36}")),
+    (True, re.compile(r"sk-[A-Za-z0-9]{20,}")),
+    (True, re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}")),
+    (True, re.compile(r"ANTHROPIC_[A-Z_]*(?:KEY|TOKEN)[^A-Za-z0-9_]?\s*[:=]")),
+    (True, re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+")),
+    (True, re.compile(r"BEGIN RSA PRIVATE KEY")),
+    (True, re.compile(r"BEGIN OPENSSH PRIVATE KEY")),
+    (True, re.compile(r"BEGIN PRIVATE KEY")),
+    (False, re.compile(r"private_key")),
+    (False, re.compile(r"secret_key")),
+    (True, re.compile(r"/private/var/folders/")),
+    (True, re.compile(r"/var/folders/")),
+    (False, re.compile(r"^Human:\s*")),
+    (False, re.compile(r"^Assistant:\s*")),
+    (False, re.compile(r"^\$\s+")),
+    (False, re.compile(r"^>>>\s+")),
+    (False, re.compile(r"\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]")),
+)
+_BINARY_ASCII_RUN = re.compile(rb"[\x09\x20-\x7e]+")
+_IDENTIFIER_PREFIX = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:(?:::|[-._:/\\])[A-Za-z_][A-Za-z0-9_]*)*(?:::|[-._:/\\])?$"
 )
 _VALUE = r"[A-Za-z0-9_./+=-]"
 _DIGIT_SHAPE = rf"(?:{_VALUE}{{5,}}[0-9]{_VALUE}*|{_VALUE}*[0-9]{_VALUE}{{5,}})"
 _QUOTED = rf"""["'`!@#$%^&*?|](?:{_VALUE}{{12,}}|{_DIGIT_SHAPE})["'`!@#$%^&*?|]"""
 _BARE = rf"(?:[A-Za-z0-9_+/=-]{{5,}}[0-9][A-Za-z0-9_+/=-]*|[A-Za-z0-9_+/=-]*[0-9][A-Za-z0-9_+/=-]{{5,}})"
+_CALLABLE_RHS = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\s*\("
+)
+_PUBLIC_TOKEN_AUTH_CUE = "AUTH"
+_PUBLIC_TOKEN_CREDENTIAL_CUES = (
+    _PUBLIC_TOKEN_AUTH_CUE, "ACCESS", "API", "BEARER", "REFRESH", "SESSION", "OAUTH", "JWT",
+    "CREDENTIAL", "SECRET", "IDENTITY", "CSRF", "PASSWORD",
+)
+_PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS = frozenset(
+    {"accessibilitytoken", "authorshiptoken", "capitaltoken", "rapidtoken"}
+)
+_PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS = tuple(
+    sorted(
+        {
+            *(cue.lower() for cue in _PUBLIC_TOKEN_CREDENTIAL_CUES),
+            "authentication",
+            "authorization",
+            "authorisation",
+        },
+        key=lambda value: (-len(value), value),
+    )
+)
+_PUBLIC_TOKEN_LOWER_CREDENTIAL_PREFIX_PATTERN = "|".join(
+    re.escape(stem)
+    for stem in _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS
+)
+_PUBLIC_TOKEN_LOWER_CREDENTIAL_SUFFIX_PATTERN = "|".join(
+    re.escape(stem) for stem in _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS
+)
+_CONCATENATED_CREDENTIAL_TOKEN = re.compile(
+    rf"(?<![A-Za-z0-9])(?P<credential_token_identifier>(?i:"
+    rf"(?:(?:{_PUBLIC_TOKEN_LOWER_CREDENTIAL_PREFIX_PATTERN})[a-z0-9]*|"
+    rf"[a-z0-9]*(?:{_PUBLIC_TOKEN_LOWER_CREDENTIAL_SUFFIX_PATTERN}))token))"
+    rf"\s*[:=]\s*(?P<rhs_value>{_QUOTED}|{_BARE})"
+)
 _KEYWORDS = (
     ("password", r"password", "Password", "PASSWORD"),
     ("secret", r"secret", "Secret", "SECRET"),
     ("token", r"token", "Token", "TOKEN"),
     ("api-key", r"api[_-]?key", "ApiKey", "APIKEY"),
 )
-_VALUE_RULES = tuple(
+_VALUE_RULES = (("token", _CONCATENATED_CREDENTIAL_TOKEN),) + tuple(
     (
         family,
         re.compile(
             rf"(?:(?<![A-Za-z])(?i:{keyword})|(?<=[a-z]){title}|"
             rf"(?<=[A-Z]){title}|(?<=[A-Za-z]){upper})"
-            rf"\s*[:=]\s*(?:{_QUOTED}|{_BARE})",
+            rf"\s*[:=]\s*(?P<rhs_value>{_QUOTED}|{_BARE})",
         ),
     )
     for family, keyword, title, upper in _KEYWORDS
 )
 _VALUE_PATTERNS = tuple(pattern for _family, pattern in _VALUE_RULES)
+_IDENTIFIER_COMPONENT = re.compile(
+    r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+"
+)
+_PUBLIC_TOKEN_ANNOTATION_SUFFIX = re.compile(
+    r"[ \t,;)\]}]+(?:# orchestrarium:public-token|// orchestrarium:public-token)[ \t]*$"
+)
 _SCANNER_REGEX_CATALOG_LINE = re.compile(
-    r"""re\.compile\([rubfRUBF]*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\),?"""
+    r"""(?P<binary_rule>\((?:True|False),\s*)?re\.compile\([rubfRUBF]*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\)(?(binary_rule)\)),?"""
 )
 
 _MAX_COMMITS = 10_000
@@ -199,7 +324,8 @@ _SCAN_DEADLINE_SECONDS = 240.0
 _MAX_TREE_VISITS = _MAX_SUBJECTS
 _MAX_TREE_FRONTIER = _MAX_OBJECTS
 _MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
-_MAX_REMOTE_REFS = 256
+# Budget base refnames and optional tag peels within the parent-graph byte cap.
+_MAX_REMOTE_REFS = _MAX_PARENT_GRAPH_BYTES // (2 * _MAX_PATH_BYTES)
 _RECEIPT_DOMAIN = b"publication-safety-range-receipt-v3"
 _OBJECT_REQUEST_TIMEOUT_SECONDS = 5.0
 OBJECT_REAP_ATTEMPT_SECONDS = 3.0
@@ -292,12 +418,21 @@ class ScanSubject:
 
 
 @dataclass(frozen=True)
+class StagedEntry:
+    status: str
+    source_path: str | None
+    destination_path: str
+
+
+@dataclass(frozen=True)
 class Finding:
     failure_id: str
     subject_kind: str
     locator: str
     line: int
     detector_class: str
+    display_locator: str | None = None
+    staged_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -309,6 +444,14 @@ class Refusal:
 
 def _refusal(failure_id: str, reason: str, *, phase: str | None = None) -> Refusal:
     return Refusal(failure_id, phase or _REFUSAL_PHASES.get(failure_id, "input"), reason)
+
+
+def _review_failure_reason(exc: BaseException) -> str | None:
+    message = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ""
+    for reason in ("review-policy", "review-evaluation", "review-receiving"):
+        if message == reason or message.startswith(reason + "-"):
+            return reason
+    return None
 
 
 @dataclass(frozen=True)
@@ -494,6 +637,7 @@ class TreeEntry:
     kind: str
     name: bytes
     oid: str
+    mode: str = ""
 
 
 @dataclass(frozen=True)
@@ -545,6 +689,16 @@ class ScanOutcome:
     coverage: CoverageProof | None = None
     reap_certificate: ReaderReapCertificate | None = None
     history: HistoryProof | None = None
+    review: "ReviewedEvidence | None" = None
+
+
+@dataclass(frozen=True)
+class ReviewedEvidence:
+    snapshot_id: str
+    used_decisions: tuple[tuple[str, str], ...]
+    applied: int
+    applied_set: str
+    used_token: str
 
 
 def _run_git(
@@ -568,138 +722,83 @@ def _run_git(
     )
 
 
-def _owned_process_group_kwargs() -> dict[str, object]:
-    """Create one independently addressable process tree for a bounded child."""
-    return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+def _windows_job_argv(argv: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    executable = shutil.which(argv[0])
+    if executable is None or not os.path.isabs(executable):
+        raise OSError("owned executable is unavailable")
+    return (executable, *argv[1:])
 
 
-def _windows_process_rows() -> tuple[tuple[int, int], ...] | None:
-    """Return one Toolhelp process snapshot without launching another process."""
-    import ctypes
-    from ctypes import wintypes
-
-    class PROCESSENTRY32W(ctypes.Structure):
-        _fields_ = (
-            ("dwSize", wintypes.DWORD),
-            ("cntUsage", wintypes.DWORD),
-            ("th32ProcessID", wintypes.DWORD),
-            ("th32DefaultHeapID", ctypes.c_size_t),
-            ("th32ModuleID", wintypes.DWORD),
-            ("cntThreads", wintypes.DWORD),
-            ("th32ParentProcessID", wintypes.DWORD),
-            ("pcPriClassBase", wintypes.LONG),
-            ("dwFlags", wintypes.DWORD),
-            ("szExeFile", wintypes.WCHAR * 260),
-        )
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
-    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-    kernel32.Process32FirstW.argtypes = (
-        wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)
+def _run_windows_owned_process(
+    argv: list[str], *, text: bool, timeout: float | None,
+    env: dict[str, str] | None,
+) -> subprocess.CompletedProcess:
+    if timeout is None or timeout < 0:
+        raise ValueError("Windows owned process requires a finite timeout")
+    resolved = _windows_job_argv(argv)
+    job = WindowsJobOwnerV1.launch(
+        executable=resolved[0], argv=resolved, cwd=os.getcwd(),
+        environment=env, stdin="null", stdout="pipe", stderr="pipe",
+        coordinator=_WINDOWS_JOB_COORDINATOR,
     )
-    kernel32.Process32FirstW.restype = wintypes.BOOL
-    kernel32.Process32NextW.argtypes = (
-        wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)
-    )
-    kernel32.Process32NextW.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
-    invalid_handle = ctypes.c_void_p(-1).value
-    if snapshot == invalid_handle:
-        return None
-    rows: list[tuple[int, int]] = []
+    streams: list[object] = []
+    workers: list[threading.Thread] = []
+    chunks: dict[str, list[bytes]] = {"stdout": [], "stderr": []}
+    read_errors: list[BaseException] = []
+    settled = False
     try:
-        entry = PROCESSENTRY32W()
-        entry.dwSize = ctypes.sizeof(entry)
-        if not kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
-            return None
-        while True:
-            rows.append((int(entry.th32ProcessID), int(entry.th32ParentProcessID)))
-            if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
-                break
+        for name in ("stdout", "stderr"):
+            fd = getattr(job, f"take_{name}_fd")()
+            if fd is None:
+                raise RuntimeError("owned Job output pipe unavailable")
+            stream = None
+            try:
+                stream = os.fdopen(fd, "rb", buffering=0)
+                streams.append(stream)
+            except BaseException:
+                if stream is None:
+                    os.close(fd)
+                else:
+                    stream.close()
+                raise
+
+            def drain(source=stream, target=name):
+                try:
+                    while data := source.read(_READ_CHUNK_BYTES):
+                        chunks[target].append(data)
+                except BaseException as exc:
+                    read_errors.append(exc)
+
+            worker = threading.Thread(target=drain, name=f"publication-{name}")
+            worker.start()
+            workers.append(worker)
+        deadline = time.monotonic() + timeout
+        exit_code = job.wait(deadline)
+        expired = exit_code is None
+        cleanup_deadline = time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS
+        closure = job.settle(cleanup_deadline, terminate=True)
+        settled = True
+        for worker in workers:
+            worker.join(max(0.0, cleanup_deadline - time.monotonic()))
+        if not closure.complete or any(worker.is_alive() for worker in workers) or read_errors:
+            raise RuntimeError("owned Job did not settle")
+        stdout = b"".join(chunks["stdout"])
+        stderr = b"".join(chunks["stderr"])
+        if text:
+            stdout = stdout.decode("utf-8", "replace")
+            stderr = stderr.decode("utf-8", "replace")
+        if expired:
+            raise subprocess.TimeoutExpired(argv, timeout, output=stdout, stderr=stderr)
+        return subprocess.CompletedProcess(argv, exit_code, stdout, stderr)
     finally:
-        kernel32.CloseHandle(snapshot)
-    return tuple(rows)
-
-
-def _windows_terminate_pid(pid: int, timeout: float) -> None:
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenProcess.argtypes = (
-        wintypes.DWORD, wintypes.BOOL, wintypes.DWORD
-    )
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
-    kernel32.TerminateProcess.restype = wintypes.BOOL
-    kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
-    kernel32.WaitForSingleObject.restype = wintypes.DWORD
-    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    handle = kernel32.OpenProcess(0x0001 | 0x00100000, False, pid)
-    if not handle:
-        return
-    try:
-        kernel32.TerminateProcess(handle, 1)
-        milliseconds = max(1, min(0xFFFFFFFE, int(timeout * 1000)))
-        kernel32.WaitForSingleObject(handle, milliseconds)
-    finally:
-        kernel32.CloseHandle(handle)
-
-
-class _OwnedProcessSettlement:
-    """One owner for terminate, direct-reap ordering, and group-empty proof."""
-
-    def __init__(self, pid: int) -> None:
-        self.pid = pid
-        self._known_windows_pids = {pid}
-
-    def _windows_live_members(self) -> set[int] | None:
-        rows = _windows_process_rows()
-        if rows is None:
-            return None
-        changed = True
-        while changed:
-            changed = False
-            for child_pid, parent_pid in rows:
-                if (
-                    parent_pid in self._known_windows_pids
-                    and child_pid not in self._known_windows_pids
-                ):
-                    self._known_windows_pids.add(child_pid)
-                    changed = True
-        return {
-            process_pid
-            for process_pid, _parent_pid in rows
-            if process_pid in self._known_windows_pids
-        }
-
-    def terminate(self, deadline: float) -> bool:
-        live = self._windows_live_members()
-        if live is None:
-            return False
-        for process_pid in sorted(live, reverse=True):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return False
-            _windows_terminate_pid(process_pid, min(0.1, remaining))
-        return True
-
-    def verify_empty(self, deadline: float) -> bool:
-        while True:
-            live = self._windows_live_members()
-            if live is None:
-                return False
-            if not live:
-                return True
-            if time.monotonic() >= deadline:
-                return False
-            if not self.terminate(deadline):
-                return False
-            time.sleep(0.01)
+        if not settled:
+            closure = job.close()
+            if not closure.complete:
+                raise RuntimeError("owned Job did not settle")
+        for stream in streams:
+            stream.close()
+        for worker in workers:
+            worker.join(_PROCESS_TREE_CLEANUP_SECONDS)
 
 
 def _run_owned_process(
@@ -710,14 +809,12 @@ def _run_owned_process(
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a bounded process and settle its whole owned tree on timeout."""
+    if os.name == "nt":
+        return _run_windows_owned_process(argv, text=text, timeout=timeout, env=env)
     process_group_owner: PosixProcessGroupOwnerV1 | None = None
     try:
-        process_kwargs: dict[str, object]
-        if os.name == "nt":
-            process_kwargs = _owned_process_group_kwargs()
-        else:
-            process_group_owner = PosixProcessGroupOwnerV1.acquire()
-            process_kwargs = process_group_owner.popen_kwargs
+        process_group_owner = PosixProcessGroupOwnerV1.acquire()
+        process_kwargs = process_group_owner.popen_kwargs
         process = subprocess.Popen(
             argv,
             stdin=subprocess.DEVNULL,
@@ -729,8 +826,7 @@ def _run_owned_process(
             env=env,
             **process_kwargs,
         )
-        if process_group_owner is not None:
-            process_group_owner.bind_process_group(process.pid)
+        process_group_owner.bind_process_group(process.pid)
     except BaseException:
         if process_group_owner is not None:
             try:
@@ -749,40 +845,20 @@ def _run_owned_process(
         pending_error = exc
         stdout, stderr = None, None
     cleanup_deadline = time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS
-    if os.name == "nt":
-        settlement = _OwnedProcessSettlement(process.pid)
-        termination_started = settlement.terminate(cleanup_deadline)
-        if process.poll() is None:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
+    try:
+        closure = process_group_owner.settle(
+            _PROCESS_TREE_CLEANUP_SECONDS,
+            direct_process=process,
+        )
+        group_settled = closure.complete
+    except PosixProcessGroupError:
+        group_settled = False
+    if group_settled:
         try:
             remaining = max(0.0, cleanup_deadline - time.monotonic())
             stdout, stderr = process.communicate(timeout=remaining)
-        except subprocess.TimeoutExpired:
-            termination_started = False
-        group_settled = (
-            termination_started
-            and process.poll() is not None
-            and settlement.verify_empty(cleanup_deadline)
-        )
-    else:
-        assert process_group_owner is not None
-        try:
-            closure = process_group_owner.settle(
-                _PROCESS_TREE_CLEANUP_SECONDS,
-                direct_process=process,
-            )
-            group_settled = closure.complete
-        except PosixProcessGroupError:
+        except (subprocess.TimeoutExpired, OSError, ValueError):
             group_settled = False
-        if group_settled:
-            try:
-                remaining = max(0.0, cleanup_deadline - time.monotonic())
-                stdout, stderr = process.communicate(timeout=remaining)
-            except (subprocess.TimeoutExpired, OSError, ValueError):
-                group_settled = False
     if not group_settled:
         raise RuntimeError("owned process group did not settle")
     if pending_error is not None:
@@ -851,29 +927,266 @@ class _AsyncioDirectProcessObservation:
         return self._returncode
 
 
+class _WindowsAsyncPipeReader:
+    """Bounded thread-to-StreamReader bridge for a native anonymous pipe."""
+
+    def __init__(self, fd: int, loop: asyncio.AbstractEventLoop) -> None:
+        self.fd = fd
+        self.loop = loop
+        self.reader = asyncio.StreamReader(limit=_READ_CHUNK_BYTES)
+        self.reader.set_transport(self)
+        self._can_read = threading.Event()
+        self._can_read.set()
+        self._closed = False
+        self._fd_closed = False
+        self._ack_lock = threading.Lock()
+        self._pending_ack: threading.Event | None = None
+        self._thread = threading.Thread(target=self._pump, name="publication-pipe-read")
+        self._thread.start()
+
+    def pause_reading(self) -> None:
+        self._can_read.clear()
+
+    def resume_reading(self) -> None:
+        self._can_read.set()
+
+    def _deliver(self, data: bytes | None, error: OSError | None,
+                 acknowledged: threading.Event) -> None:
+        try:
+            if self._closed:
+                return
+            if error is not None:
+                self.reader.set_exception(error)
+            elif data:
+                self.reader.feed_data(data)
+            else:
+                self.reader.feed_eof()
+        finally:
+            acknowledged.set()
+
+    def _pump(self) -> None:
+        while not self._closed:
+            self._can_read.wait()
+            if self._closed:
+                break
+            try:
+                data, error = os.read(self.fd, _READ_CHUNK_BYTES), None
+            except OSError as exc:
+                data, error = None, exc
+            acknowledged = threading.Event()
+            with self._ack_lock:
+                if self._closed:
+                    break
+                self._pending_ack = acknowledged
+            try:
+                self.loop.call_soon_threadsafe(self._deliver, data, error, acknowledged)
+            except RuntimeError:
+                with self._ack_lock:
+                    self._pending_ack = None
+                break
+            acknowledged.wait()
+            with self._ack_lock:
+                if self._pending_ack is acknowledged:
+                    self._pending_ack = None
+            if not data:
+                break
+
+    def close(self, deadline: float) -> bool:
+        with self._ack_lock:
+            self._closed = True
+            pending_ack = self._pending_ack
+        if pending_ack is not None:
+            pending_ack.set()
+        self._can_read.set()
+        self._thread.join(max(0.0, deadline - time.monotonic()))
+        if not self._fd_closed:
+            try:
+                os.close(self.fd)
+            except OSError:
+                return False
+            self._fd_closed = True
+        return not self._thread.is_alive()
+
+
+class _WindowsAsyncPipeWriter:
+    def __init__(self, fd: int) -> None:
+        self.fd = fd
+        self._pending: bytes | None = None
+        self._task: asyncio.Task[None] | None = None
+        self._closed = False
+        self._fd_closed = False
+
+    def write(self, data: bytes) -> None:
+        if self._closed or self._pending is not None or (
+            self._task is not None and not self._task.done()
+        ):
+            raise OSError("owned Job input pipe is unavailable")
+        self._pending = bytes(data)
+
+    def _write_all(self, data: bytes) -> None:
+        view = memoryview(data)
+        while view:
+            written = os.write(self.fd, view)
+            if written <= 0:
+                raise OSError("owned Job input pipe short write")
+            view = view[written:]
+
+    async def drain(self) -> None:
+        if self._pending is not None:
+            data, self._pending = self._pending, None
+            self._task = asyncio.create_task(asyncio.to_thread(self._write_all, data))
+        if self._task is not None:
+            await asyncio.shield(self._task)
+
+    def close(self) -> None:
+        self._closed = True
+        self._pending = None
+
+    def is_closing(self) -> bool:
+        return self._closed
+
+    async def wait_closed(self) -> None:
+        try:
+            if self._task is not None:
+                await asyncio.shield(self._task)
+        finally:
+            if not self._fd_closed and (
+                self._task is None or self._task.done()
+            ):
+                os.close(self.fd)
+                self._fd_closed = True
+
+
+class _WindowsOwnedAsyncProcess:
+    """Async byte-pipe view of one creation-time Job-owned process."""
+
+    def __init__(self, job, bridges: list[_WindowsAsyncPipeReader],
+                 stdin, stdout, stderr) -> None:
+        self.job = job
+        self.pid = job.pid
+        self.stdin = stdin
+        self.stdout = stdout
+        self.stderr = stderr
+        self._bridges = bridges
+
+    @property
+    def returncode(self) -> int | None:
+        return self.job.poll()
+
+    async def wait(self) -> int:
+        while True:
+            code = self.job.poll()
+            if code is not None:
+                return code
+            await asyncio.sleep(0.01)
+
+    def terminate(self) -> None:
+        if not self.job.terminate_job():
+            raise WindowsJobError("WJOB-JOB-TERMINATE", "settlement")
+
+    def kill(self) -> None:
+        self.terminate()
+
+    async def close_io(self) -> bool:
+        deadline = time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS
+        closed = True
+        if self.stdin is not None:
+            self.stdin.close()
+            try:
+                await asyncio.wait_for(
+                    self.stdin.wait_closed(),
+                    timeout=max(0.001, deadline - time.monotonic()),
+                )
+            except (OSError, asyncio.TimeoutError):
+                closed = False
+        for bridge in self._bridges:
+            if not bridge.close(deadline):
+                closed = False
+        return closed
+
+
+async def _create_windows_owned_async_process(argv: tuple[str, ...], **kwargs):
+    resolved = _windows_job_argv(argv)
+    modes = {}
+    for name in ("stdin", "stdout", "stderr"):
+        value = kwargs.get(name, asyncio.subprocess.DEVNULL)
+        if value == asyncio.subprocess.PIPE:
+            modes[name] = "pipe"
+        elif value == asyncio.subprocess.DEVNULL:
+            modes[name] = "null"
+        else:
+            raise ValueError("unsupported owned Job stream policy")
+    job = WindowsJobOwnerV1.launch(
+        executable=resolved[0], argv=resolved, cwd=kwargs.get("cwd", os.getcwd()),
+        environment=kwargs.get("env"), coordinator=_WINDOWS_JOB_COORDINATOR,
+        **modes,
+    )
+    loop = asyncio.get_running_loop()
+    bridges: list[_WindowsAsyncPipeReader] = []
+    pending_bridge: _WindowsAsyncPipeReader | None = None
+    stdin = stdout = stderr = None
+    try:
+        for name in ("stdout", "stderr"):
+            if modes[name] == "null":
+                continue
+            fd = getattr(job, f"take_{name}_fd")()
+            if fd is None:
+                raise RuntimeError("owned Job output pipe unavailable")
+            try:
+                bridge = _WindowsAsyncPipeReader(fd, loop)
+            except BaseException:
+                os.close(fd)
+                raise
+            pending_bridge = bridge
+            bridges.append(bridge)
+            pending_bridge = None
+            if name == "stdout":
+                stdout = bridge.reader
+            else:
+                stderr = bridge.reader
+        if modes["stdin"] == "pipe":
+            fd = job.take_stdin_fd()
+            if fd is None:
+                raise RuntimeError("owned Job input pipe unavailable")
+            try:
+                stdin = _WindowsAsyncPipeWriter(fd)
+            except BaseException:
+                os.close(fd)
+                raise
+        return _WindowsOwnedAsyncProcess(job, bridges, stdin, stdout, stderr)
+    except BaseException:
+        job.close()
+        if stdin is not None:
+            stdin.close()
+            await stdin.wait_closed()
+        if pending_bridge is not None:
+            pending_bridge.close(time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS)
+        for bridge in bridges:
+            bridge.close(time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS)
+        raise
+
+
 async def _create_owned_async_process(
     argv: tuple[str, ...],
     **kwargs,
 ) -> tuple[
-    asyncio.subprocess.Process,
+    asyncio.subprocess.Process | _WindowsOwnedAsyncProcess,
     PosixProcessGroupOwnerV1 | None,
     _AsyncioDirectProcessObservation | None,
 ]:
+    if os.name == "nt":
+        process = await _create_windows_owned_async_process(argv, **kwargs)
+        return process, None, None
     process_group_owner: PosixProcessGroupOwnerV1 | None = None
     direct_observation: _AsyncioDirectProcessObservation | None = None
-    process_kwargs: dict[str, object]
-    if os.name == "nt":
-        process_kwargs = _owned_process_group_kwargs()
-    else:
-        process_group_owner = await _acquire_posix_process_group_owner()
-        process_kwargs = process_group_owner.popen_kwargs
+    process_group_owner = await _acquire_posix_process_group_owner()
+    process_kwargs = process_group_owner.popen_kwargs
     try:
         process = await asyncio.create_subprocess_exec(
             *argv, **kwargs, **process_kwargs
         )
-        if process_group_owner is not None:
-            process_group_owner.bind_process_group(process.pid)
-            direct_observation = _AsyncioDirectProcessObservation(process)
+        process_group_owner.bind_process_group(process.pid)
+        direct_observation = _AsyncioDirectProcessObservation(process)
         return process, process_group_owner, direct_observation
     except BaseException:
         if process_group_owner is not None:
@@ -919,34 +1232,49 @@ async def _wait_owned_async_direct(
 
 
 async def _settle_owned_async_process(
-    process: asyncio.subprocess.Process,
+    process: asyncio.subprocess.Process | _WindowsOwnedAsyncProcess,
     process_group_owner: PosixProcessGroupOwnerV1 | None,
     direct_observation: _AsyncioDirectProcessObservation | None,
     timeout_seconds: float = _PROCESS_TREE_CLEANUP_SECONDS,
     *,
     drain_readers: tuple[asyncio.StreamReader | None, ...] = (),
+    close_io: bool = True,
 ) -> bool:
     cleanup_deadline = time.monotonic() + timeout_seconds
     if os.name == "nt":
-        settlement = _OwnedProcessSettlement(process.pid)
-        termination_started = await asyncio.to_thread(
-            settlement.terminate, cleanup_deadline
-        )
-        if process.returncode is None:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
+        if not isinstance(process, _WindowsOwnedAsyncProcess):
+            return False
         try:
-            remaining = max(0.0, cleanup_deadline - time.monotonic())
-            await asyncio.wait_for(process.wait(), timeout=remaining)
-        except Exception:
-            return False
-        if not termination_started or process.returncode is None:
-            return False
-        return await asyncio.to_thread(
-            settlement.verify_empty, cleanup_deadline
-        )
+            closure = process.job.settle(cleanup_deadline, terminate=True)
+        except WindowsJobError:
+            process.job.close()
+            closure = None
+
+        async def finish_io() -> bool:
+            drained = True
+            try:
+                for reader in drain_readers:
+                    if not await _drain_owned_async_reader(reader, cleanup_deadline):
+                        drained = False
+            finally:
+                io_closed = await process.close_io() if close_io else True
+            return bool(
+                closure is not None and closure.complete
+                and closure.direct_exit_code == process.returncode
+                and drained and io_closed
+            )
+
+        finish_task = asyncio.create_task(finish_io())
+        cancelled: asyncio.CancelledError | None = None
+        while True:
+            try:
+                complete = await asyncio.shield(finish_task)
+                break
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+        if cancelled is not None:
+            raise cancelled
+        return complete
 
     if process_group_owner is None or direct_observation is None:
         return False
@@ -1032,6 +1360,615 @@ def _safe_locator(path: str, subject_kind: str) -> str:
     )
 
 
+@dataclass(frozen=True)
+class _TextObservation:
+    line: str
+    line_number: int
+    line_start: int
+    family: str | None
+    leaf_index: int
+    pattern: re.Pattern[str]
+    match: re.Match[str]
+
+    @property
+    def diagnostic_class(self) -> str:
+        return (
+            f"simple-{self.leaf_index + 1}"
+            if self.family is None else f"value-{self.family}"
+        )
+
+
+def _text_lines(text: str) -> Iterator[tuple[int, int, str]]:
+    """Keep original character coordinates across every splitlines separator."""
+    offset = 0
+    for number, segment in enumerate(text.splitlines(keepends=True), 1):
+        pieces = segment.splitlines()
+        yield number, offset, pieces[0] if pieces else ""
+        offset += len(segment)
+
+
+def _selected_text_lines(text: str, path: str, subject_kind: str) -> Iterator[tuple[int, int, str]]:
+    scanner = subject_kind != "commit-message" and path.replace("\\", "/") in _SCANNER_EXEMPT_PATHS
+    for number, offset, line in _text_lines(text):
+        if not scanner or not _intentional_scanner_line(line):
+            yield number, offset, line
+
+
+def _matching_starts(pattern: re.Pattern[str], line: str) -> Iterator[re.Match[str]]:
+    position = 0
+    while position <= len(line):
+        match = pattern.search(line, position)
+        if match is None:
+            return
+        if match.end() <= match.start():
+            raise RuntimeError("review-evaluation-zero-width")
+        yield match
+        position = match.start() + 1
+
+
+def _line_observations(
+    line: str,
+    line_number: int,
+    line_start: int,
+    subject_kind: str,
+    *,
+    binary: bool = False,
+) -> Iterator[_TextObservation]:
+    for index, (binary_rule, pattern) in enumerate(_SIMPLE_RULES):
+        if binary and not binary_rule:
+            continue
+        for match in _matching_starts(pattern, line):
+            yield _TextObservation(line, line_number, line_start, None, index, pattern, match)
+    for index, (family, pattern) in enumerate(_VALUE_RULES):
+        for match in _matching_starts(pattern, line):
+            if _is_callable_rhs(line, match):
+                continue
+            if binary:
+                if _is_public_key_token_match(line, family, match):
+                    continue
+            elif _is_annotated_public_token_match(line, family, match, subject_kind):
+                continue
+            yield _TextObservation(line, line_number, line_start, family, index, pattern, match)
+
+
+def _assignment_coordinates(observation: _TextObservation) -> tuple[int, ...] | None:
+    """Reconstruct only the actual regex assignment, without parsing a language."""
+    match, line = observation.match, observation.line
+    if observation.family is None:
+        return None
+    rhs_start, rhs_end = match.span("rhs_value")
+    separator_end = rhs_start
+    while separator_end > match.start() and line[separator_end - 1].isspace():
+        separator_end -= 1
+    separator_start = separator_end - 1
+    if separator_start < match.start() or line[separator_start] not in {":", "="}:
+        return None
+    identifier_end = separator_start
+    while identifier_end > match.start() and line[identifier_end - 1].isspace():
+        identifier_end -= 1
+    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    identifier_start = prefix.start() if prefix is not None else match.start()
+    if identifier_end <= identifier_start:
+        return None
+    return identifier_start, identifier_end, separator_start, separator_end, rhs_start, rhs_end
+
+
+def _observation_key(observation: _TextObservation) -> tuple:
+    assignment = _assignment_coordinates(observation)
+    if observation.family is None:
+        return ("simple", observation.leaf_index, observation.match.span())
+    if assignment is not None:
+        return ("value", observation.family, assignment)
+    # An unproved assignment must remain an independent unresolved observation.
+    return ("unproved", observation.leaf_index, observation.match.span())
+
+
+def _build_detector_catalog(digest: Callable[[str, object], str]) -> tuple[tuple[dict, ...], dict]:
+    definitions: list[dict] = []
+    leaf_lookup: dict[tuple[str, int], tuple[dict, str]] = {}
+    for index, (_binary, pattern) in enumerate(_SIMPLE_RULES):
+        leaf = {"pattern": pattern.pattern, "flags": pattern.flags}
+        leaf_id = "simple-" + digest("orchestrarium.publication-review.detector-leaf.v1", leaf)
+        definition = {
+            "schemaVersion": 1, "ruleId": leaf_id,
+            "normalFormId": "nf-simple-match-v1", "domain": "blob-text-v1",
+            "engine": "python-re-matching-starts-v1", "coordinate": "utf8-original-bytes-v1",
+            "equivalence": "exact-match-v1", "leaves": [{"leafId": leaf_id, **leaf}],
+            "exclusions": ["scanner-self-v1"],
+        }
+        detector = {"ruleId": leaf_id, "meaningSha256": digest("orchestrarium.publication-review.detector.v1", definition)}
+        definitions.append(definition)
+        leaf_lookup[("simple", index)] = (detector, leaf_id)
+    for family in sorted({family for family, _pattern in _VALUE_RULES}):
+        leaves: list[dict] = []
+        indices: list[tuple[int, str]] = []
+        for index, (actual_family, pattern) in enumerate(_VALUE_RULES):
+            if actual_family != family:
+                continue
+            leaf = {"pattern": pattern.pattern, "flags": pattern.flags}
+            leaf_id = "leaf-" + digest("orchestrarium.publication-review.detector-leaf.v1", leaf)
+            leaves.append({"leafId": leaf_id, **leaf})
+            indices.append((index, leaf_id))
+        definition = {
+            "schemaVersion": 1, "ruleId": f"value-{family}-v1",
+            "normalFormId": "nf-value-assignment-v1", "domain": "blob-text-v1",
+            "engine": "python-re-matching-starts-v1", "coordinate": "utf8-original-bytes-v1",
+            "equivalence": "exact-assignment-v1", "leaves": sorted(leaves, key=lambda row: row["leafId"]),
+            "exclusions": ["callable-rhs-v1", "public-token-v1", "scanner-self-v1"],
+        }
+        detector = {"ruleId": definition["ruleId"], "meaningSha256": digest("orchestrarium.publication-review.detector.v1", definition)}
+        definitions.append(definition)
+        for index, leaf_id in indices:
+            leaf_lookup[("value", index)] = (detector, leaf_id)
+    return tuple(sorted(definitions, key=lambda row: row["ruleId"])), leaf_lookup
+
+
+def _original_byte_boundaries(raw: bytes) -> tuple[str, tuple[int, ...]]:
+    text = raw.decode("utf-8", "strict")
+    if text.encode("utf-8", "strict") != raw:
+        raise ValueError("review-evaluation-byte-map")
+    boundaries = [0]
+    for scalar in text:
+        boundaries.append(boundaries[-1] + len(scalar.encode("utf-8", "strict")))
+    if boundaries[-1] != len(raw):
+        raise ValueError("review-evaluation-byte-map")
+    return text, tuple(boundaries)
+
+
+def _byte_region(raw: bytes, start: int, end: int) -> dict:
+    if type(start) is not int or type(end) is not int or not 0 <= start < end <= len(raw):
+        raise ValueError("review-evaluation-region")
+    return {"startByte": start, "endByteExclusive": end, "sha256": hashlib.sha256(raw[start:end]).hexdigest()}
+
+
+def _analyze_review_candidates(
+    raw: bytes,
+    path: str,
+    *,
+    subject_kind: str,
+    digest: Callable[[str, object], str],
+    canonical: Callable[[object], bytes],
+) -> tuple[dict, ...]:
+    text, boundaries = _original_byte_boundaries(raw)
+    _definitions, leaves = _build_detector_catalog(digest)
+    groups: dict[tuple, list[_TextObservation]] = {}
+    for line_number, line_start, line in _selected_text_lines(text, path, subject_kind):
+        for observation in _line_observations(line, line_number, line_start, subject_kind):
+            groups.setdefault((line_start, _observation_key(observation)), []).append(observation)
+    result: list[dict] = []
+    for observations in groups.values():
+        first = observations[0]
+        detector, _leaf_id = leaves[("simple" if first.family is None else "value", first.leaf_index)]
+
+        def region(start: int, end: int) -> dict:
+            return _byte_region(raw, boundaries[first.line_start + start], boundaries[first.line_start + end])
+
+        assignment = None
+        if first.family is None:
+            start, end = first.match.span()
+            normal_form = "nf-simple-match-v1"
+        else:
+            coordinates = _assignment_coordinates(first)
+            if coordinates is None:
+                # Detection remains visible; no missing witness can be credited.
+                result.append({"detector": detector, "candidate": None,
+                               "line": first.line_number, "detectorClass": first.diagnostic_class})
+                continue
+            identifier_start, identifier_end, separator_start, separator_end, start, end = coordinates
+            assignment = {"identifier": region(identifier_start, identifier_end),
+                          "delimiter": region(separator_start, separator_end), "rhs": region(start, end)}
+            normal_form = "nf-value-assignment-v1"
+        candidate_region = region(start, end)
+        contributors: list[dict] = []
+        for observation in observations:
+            _detector, leaf_id = leaves[("simple" if observation.family is None else "value", observation.leaf_index)]
+            contributor = {"leafId": leaf_id, "fullMatch": region(*observation.match.span())}
+            if contributor not in contributors:
+                contributors.append(contributor)
+        contributors.sort(key=lambda row: (row["leafId"], row["fullMatch"]["startByte"],
+                                          row["fullMatch"]["endByteExclusive"], row["fullMatch"]["sha256"]))
+        candidate = {"normalFormId": normal_form, **candidate_region,
+                     "assignment": assignment, "contributors": contributors}
+        candidate["occurrenceSha256"] = digest("orchestrarium.publication-review.occurrence.v1", {"detector": detector, **candidate})
+        result.append({"detector": detector, "candidate": candidate,
+                       "line": first.line_number, "detectorClass": first.diagnostic_class})
+    return tuple(sorted(result, key=lambda row: (
+        row["candidate"]["startByte"] if row["candidate"] is not None else -1,
+        row["candidate"]["endByteExclusive"] if row["candidate"] is not None else -1,
+        row["detector"]["ruleId"], canonical(row["candidate"]),
+    )))
+
+
+def _project_analyzed_review_candidate(
+    raw: bytes, detector: dict, review_region: dict, rows: tuple[dict, ...],
+) -> dict:
+    if not isinstance(review_region, dict) or set(review_region) != {"startByte", "endByteExclusive", "sha256"}:
+        raise ValueError("review-evaluation-region")
+    if _byte_region(raw, review_region["startByte"], review_region["endByteExclusive"]) != review_region:
+        raise ValueError("review-evaluation-region")
+    selected: list[dict] = []
+    for row in rows:
+        if row["detector"] != detector:
+            continue
+        candidate = row["candidate"]
+        if candidate is None:
+            raise ValueError("review-evaluation-unproved")
+        intervals = [(item["fullMatch"]["startByte"], item["fullMatch"]["endByteExclusive"])
+                     for item in candidate["contributors"]]
+        contained = all(review_region["startByte"] <= start < end <= review_region["endByteExclusive"]
+                        for start, end in intervals)
+        intersects = any(start < review_region["endByteExclusive"] and end > review_region["startByte"]
+                         for start, end in intervals)
+        if intersects and not contained:
+            raise ValueError("review-evaluation-straddling")
+        if contained:
+            selected.append(candidate)
+    if len(selected) != 1:
+        raise ValueError("review-evaluation-unique-candidate")
+    return selected[0]
+
+
+def _load_review_policy_module():
+    module_name = "_orchestrarium_publication_review_policy_v1"
+    injection_names = (
+        "__injected_review_policy_module__", "__injected_review_policy_snapshot__",
+        "__injected_review_repository_observation__", "__injected_review_execution__",
+    )
+    present = tuple(name in globals() for name in injection_names)
+    if any(present):
+        if not all(present):
+            raise RuntimeError("review-policy-injection")
+        module = globals()[injection_names[0]]
+        if (
+            globals()[injection_names[3]] != "gate-captured-v1"
+            or getattr(module, "__name__", None) != module_name
+            or getattr(module, "__file__", None) != "<closure>/publication_review_policy.py"
+            or sys.modules.get(module_name) is not module
+            or getattr(module, "POLICY_MODULE_CONTRACT_ID", None)
+            != "orchestrarium.publication-review-policy.module.v1"
+        ):
+            raise RuntimeError("review-policy-injection")
+        return module
+    if str(__file__).startswith("<closure>/"):
+        raise RuntimeError("review-policy-injection")
+    path = Path(__file__).resolve().with_name("publication_review_policy.py")
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        if (
+            getattr(existing, "__file__", None) != str(path)
+            or getattr(existing, "POLICY_MODULE_CONTRACT_ID", None)
+            != "orchestrarium.publication-review-policy.module.v1"
+        ):
+            raise RuntimeError("review-policy-module")
+        return existing
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("review-policy-module")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+        if getattr(module, "POLICY_MODULE_CONTRACT_ID", None) != "orchestrarium.publication-review-policy.module.v1":
+            raise RuntimeError("review-policy-module")
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+def detector_definitions(policy_module) -> dict[str, dict]:
+    definitions, _leaves = _build_detector_catalog(policy_module.H)
+    return {definition["ruleId"]: {
+        "detector": {"ruleId": definition["ruleId"], "meaningSha256": policy_module.H("orchestrarium.publication-review.detector.v1", definition)},
+        "definition": definition,
+    } for definition in definitions}
+
+
+def resolve_review_detector(diagnostic_class: str, *, policy_module) -> dict:
+    _definitions, leaves = _build_detector_catalog(policy_module.H)
+    for index in range(len(_SIMPLE_RULES)):
+        if diagnostic_class == f"simple-{index + 1}":
+            return leaves[("simple", index)][0]
+    for index, (family, _pattern) in enumerate(_VALUE_RULES):
+        if diagnostic_class == f"value-{family}":
+            return leaves[("value", index)][0]
+    raise ValueError("unknown-detector")
+
+
+def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, policy_module) -> dict:
+    if not isinstance(raw, bytes) or not isinstance(path, bytes) or not path or b"\0" in path:
+        return {"complete": False, "candidates": (), "unresolved": (),
+                "refusal": _refusal("PS-INPUT-REFUSAL", "review-evaluation")}
+    decoded_path = path.decode("utf-8", "surrogateescape")
+    try:
+        rows = _analyze_review_candidates(raw, decoded_path, subject_kind=subject_kind,
+            digest=policy_module.H, canonical=policy_module.C)
+    except UnicodeError:
+        return {"complete": True, "candidates": (), "unresolved": tuple(_content_hits(
+            raw.decode("utf-8", "replace"), decoded_path, lambda _line: (), subject_kind=subject_kind,
+        )), "refusal": None}
+    except (ValueError, RuntimeError):
+        return {"complete": False, "candidates": (), "unresolved": (),
+                "refusal": _refusal("PS-INPUT-REFUSAL", "review-evaluation")}
+    candidates = tuple(row for row in rows if row["candidate"] is not None)
+    unresolved = tuple(Finding(
+        "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
+        subject_kind, _safe_locator(decoded_path, subject_kind), row["line"], row["detectorClass"],
+    ) for row in rows if row["candidate"] is None)
+    return {"complete": True, "candidates": candidates, "unresolved": unresolved, "refusal": None}
+
+
+def project_review_candidate(raw: bytes, path: bytes, detector: dict, review_region: dict, *, policy_module) -> dict:
+    definitions = detector_definitions(policy_module)
+    if not isinstance(detector, dict) or definitions.get(detector.get("ruleId"), {}).get("detector") != detector:
+        return {"status": "unrepresented", "candidate": None, "reason": "unknown-detector"}
+    try:
+        _original_byte_boundaries(raw)
+    except (UnicodeError, ValueError):
+        return {"status": "unavailable", "candidate": None, "reason": "unproved-byte-map"}
+    analysis = analyze_review_candidates(raw, path, subject_kind="tracked-blob", policy_module=policy_module)
+    if not analysis["complete"] or analysis["refusal"] is not None:
+        return {"status": "unavailable", "candidate": None, "reason": "incomplete-evaluation"}
+    if analysis["unresolved"]:
+        return {"status": "unavailable", "candidate": None, "reason": "unproved-byte-map"}
+    try:
+        candidate = _project_analyzed_review_candidate(raw, detector, review_region, analysis["candidates"])
+    except (ValueError, KeyError, TypeError) as exc:
+        reason = {
+            "review-evaluation-region": "invalid-region",
+            "review-evaluation-straddling": "no-candidate",
+            "review-evaluation-unique-candidate": "multiple-candidates",
+        }.get(str(exc), "incomplete-evaluation")
+        if reason == "multiple-candidates":
+            count = sum(row["detector"] == detector and all(
+                review_region["startByte"] <= item["fullMatch"]["startByte"] < item["fullMatch"]["endByteExclusive"] <= review_region["endByteExclusive"]
+                for item in row["candidate"]["contributors"]
+            ) for row in analysis["candidates"])
+            reason = "no-candidate" if count == 0 else "multiple-candidates"
+        return {"status": "ambiguous" if reason == "multiple-candidates" else "unrepresented", "candidate": None, "reason": reason}
+    return {"status": "bound", "candidate": candidate, "reason": "none"}
+
+
+def _capture_review_repository(policy_module, selected_root: Path, deadline: float) -> tuple[dict, tuple]:
+    try:
+        plan = policy_module.repository_query_plan(selected_root)
+    except Exception as exc:
+        # Missing metadata grants no credit; it is not an ordinary-clean veto.
+        # Retain the actual failed acquisition beside the other caller outcomes.
+        return {"status": "unavailable", "repository": None, "diagnostic": "metadata-unavailable"}, (exc,)
+    rows = []
+    for query in plan.queries:
+        try:
+            result = _run_range_git(list(query.git_args), text=False, timeout=_remaining_seconds(deadline))
+        except BaseException as exc:
+            failure = (
+                "timeout" if isinstance(exc, (subprocess.TimeoutExpired, TimeoutError))
+                else "cancelled" if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError))
+                else "execution-error"
+            )
+            rows.append(policy_module.RepositoryQueryResultV1(
+                query.key, query.git_args, None,
+                getattr(exc, "stdout", None), getattr(exc, "stderr", None), False, None, failure,
+            ))
+            if not isinstance(exc, Exception):
+                raise
+            break
+        raw_complete = isinstance(result.stdout, bytes) and isinstance(result.stderr, bytes)
+        rows.append(policy_module.RepositoryQueryResultV1(
+            query.key, query.git_args, result.returncode, result.stdout, result.stderr,
+            raw_complete, True, None if raw_complete else "incomplete-capture",
+        ))
+        if not raw_complete or result.returncode != 0:
+            break
+    try:
+        observation = policy_module.repository_from_query_results(plan, tuple(rows))
+    except Exception as exc:
+        return {"status": "unavailable", "repository": None, "diagnostic": "metadata-unavailable"}, (*rows, exc)
+    return observation, tuple(rows)
+
+
+class ReviewEvaluation:
+    """One run's matching and application evidence; policy and Git IO stay outside."""
+
+    def __init__(self, *, policy_module, policy_read, repository_observation: dict, execution: str):
+        if execution not in {"standalone-v1", "gate-captured-v1"}:
+            raise RuntimeError("review-policy-execution")
+        decoded = policy_module.decode_policy_snapshot(policy_read.snapshot)
+        if decoded.snapshot_id != policy_read.snapshot_id or decoded.usable_records != policy_read.usable_records:
+            raise RuntimeError("review-policy-snapshot")
+        self.policy = policy_module
+        self.read = decoded
+        self.repository_observation = repository_observation
+        self.execution = execution
+        self.unresolved = 0
+        self._analysis: dict[tuple, dict] = {}
+        self._applications: list[tuple[dict, dict, dict, dict]] = []
+        self._applied_keys: set[tuple] = set()
+
+    @property
+    def repository(self) -> dict | None:
+        observation = self.repository_observation
+        if not isinstance(observation, dict) or set(observation) != {"status", "repository", "diagnostic"}:
+            raise RuntimeError("review-policy-repository")
+        if observation["status"] == "captured" and observation["diagnostic"] == "none" and isinstance(observation["repository"], dict):
+            return observation["repository"]
+        if observation in (
+            {"status": "not-requested", "repository": None, "diagnostic": "not-needed"},
+            {"status": "unavailable", "repository": None, "diagnostic": "metadata-unavailable"},
+            {"status": "unavailable", "repository": None, "diagnostic": "unprovable-native-identity"},
+        ):
+            return None
+        raise RuntimeError("review-policy-repository")
+
+    def _authority(self, raw: bytes, subject: dict, row: dict, analysis: dict) -> tuple[dict, dict] | None:
+        repository = self.repository
+        if repository is None:
+            return None
+        # Policy's pure origin boundary check is the only source of origin credit.
+        if not self.policy.origin_is_outside_repository(self.read.snapshot, repository):
+            return None
+        choices = []
+        for record in self.read.usable_records:
+            if record["repository"] != repository or subject["mode"] not in record["modes"]:
+                continue
+            if subject["mode"] == "range-blob-text":
+                scope = record["rangeScope"]
+                if scope is None or (scope["kind"] == "exact-commits" and subject["commitOid"] not in scope["commits"]):
+                    continue
+            for occurrence in record["occurrences"]:
+                if any(occurrence[key] != subject[key] for key in (
+                    "rawPathBase64", "blobOid", "blobSha256", "blobByteCount", "gitMode",
+                )) or occurrence["detector"] != row["detector"] or occurrence["candidate"] != row["candidate"]:
+                    continue
+                if any(_byte_region(raw, context["region"]["startByte"], context["region"]["endByteExclusive"]) != context["region"]
+                       for context in occurrence["contexts"]):
+                    continue
+                try:
+                    projected = _project_analyzed_review_candidate(raw, occurrence["detector"], occurrence["reviewRegion"], analysis["candidates"])
+                except (ValueError, TypeError, KeyError):
+                    continue
+                if projected != occurrence["candidate"]:
+                    continue
+                choices.append((record["id"], occurrence["id"], record["recordSha256"], record, occurrence))
+        if not choices:
+            return None
+        selected = min(choices, key=lambda choice: choice[:3])
+        return selected[3], selected[4]
+
+    def scan_text_subject(
+        self, raw: bytes, path: str, find_machine_paths, *, subject_kind: str,
+        mode: str, commit_oid: str | None, raw_path: bytes, blob_oid: str, git_mode: str,
+        machine_path_lines: frozenset[int] | None = None, display_locator: str | None = None,
+        staged_index: int | None = None,
+    ) -> list[Finding]:
+        if not self.read.usable_records or self.repository is None:
+            findings = _content_hits(raw.decode("utf-8", "replace"), path, find_machine_paths,
+                subject_kind=subject_kind, machine_path_lines=machine_path_lines,
+                display_locator=display_locator, staged_index=staged_index)
+            self.unresolved += len(findings)
+            return findings
+        key = (raw_path, blob_oid, git_mode, subject_kind, hashlib.sha256(raw).digest())
+        analysis = self._analysis.get(key)
+        if analysis is None:
+            analysis = analyze_review_candidates(raw, raw_path, subject_kind=subject_kind, policy_module=self.policy)
+            self._analysis[key] = analysis
+        if not analysis["complete"] or analysis["refusal"] is not None:
+            raise RuntimeError("review-evaluation")
+        repository = self.repository
+        subject = {
+            "repositorySha256": self.policy.H("orchestrarium.publication-review.repository.v1", repository) if repository is not None else "",
+            "mode": mode, "commitOid": commit_oid,
+            "rawPathBase64": base64.b64encode(raw_path).decode("ascii"), "blobOid": blob_oid,
+            "blobSha256": hashlib.sha256(raw).hexdigest(), "blobByteCount": len(raw), "gitMode": git_mode,
+        }
+        findings = [replace(finding, display_locator=display_locator, staged_index=staged_index)
+                    for finding in analysis["unresolved"]]
+        locator = _safe_locator(path, subject_kind)
+        for row in analysis["candidates"]:
+            selected = self._authority(raw, subject, row, analysis) if git_mode in {"100644", "100755"} else None
+            if selected is None:
+                findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, row["line"], row["detectorClass"], display_locator, staged_index))
+                continue
+            record, occurrence = selected
+            binding = {"decisionId": record["id"], "occurrenceId": occurrence["id"],
+                       "detector": occurrence["detector"], "reviewRegion": occurrence["reviewRegion"],
+                       "candidate": occurrence["candidate"], "contexts": occurrence["contexts"],
+                       "modes": record["modes"], "rangeScope": record["rangeScope"],
+                       "repositorySha256": subject["repositorySha256"]}
+            application = {"subject": subject, "occurrenceSha256": row["candidate"]["occurrenceSha256"],
+                           "bindingSha256": self.policy.H("orchestrarium.publication-review.binding.v1", binding),
+                           "decisionId": record["id"], "recordSha256": record["recordSha256"], "occurrenceId": occurrence["id"]}
+            applied_key = (self.policy.C(subject), self.policy.C(row["detector"]), self.policy.C(row["candidate"]))
+            if applied_key in self._applied_keys:
+                raise RuntimeError("review-evaluation-duplicate")
+            self._applied_keys.add(applied_key)
+            self._applications.append((subject, row["candidate"], row["detector"], application))
+        for number, _offset, line in _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind):
+            if (machine_path_lines is None or number in machine_path_lines) and find_machine_paths(line):
+                findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, number, "machine-path", display_locator, staged_index))
+        self.unresolved += len(findings)
+        return findings
+
+    def evidence(self) -> ReviewedEvidence | None:
+        if not self._applications:
+            return None
+        if self.unresolved:
+            raise RuntimeError("review-evaluation-unresolved")
+        applications = sorted(self._applications, key=lambda item: (
+            item[0]["mode"], item[0]["commitOid"] or "", base64.b64decode(item[0]["rawPathBase64"], validate=True),
+            item[0]["blobOid"], item[0]["gitMode"], item[1]["startByte"], item[1]["endByteExclusive"],
+            item[2]["ruleId"], self.policy.C(item[1]),
+        ))
+        digest = self.policy.applied_set_digest(
+            row for _subject, _candidate, _detector, row in applications
+        )
+        used = set()
+        for _subject, _candidate, _detector, row in applications:
+            used.add((row["decisionId"], row["recordSha256"]))
+        ordered_used = tuple(sorted(used))
+        token = base64.b64encode(self.policy.C([list(row) for row in ordered_used])).decode("ascii")
+        return ReviewedEvidence(self.read.snapshot_id, ordered_used, len(applications), digest, token)
+
+
+def _prepare_review_evaluation(selected_root: Path, deadline: float, *, need_repository: bool = True):
+    policy = _load_review_policy_module()
+    exchanges = []
+    captured = globals().get("__injected_review_execution__") == "gate-captured-v1"
+    if captured:
+        policy_read = policy.decode_policy_snapshot(globals()["__injected_review_policy_snapshot__"])
+        observation = globals()["__injected_review_repository_observation__"]
+        execution = "gate-captured-v1"
+    else:
+        policy_read = policy.read_policy_snapshot(policy.resolve_trusted_origin(), selected_root)
+        observation = {"status": "not-requested", "repository": None, "diagnostic": "not-needed"}
+        execution = "standalone-v1"
+        if policy_read.usable_records and need_repository:
+            observation, exchange = _capture_review_repository(policy, selected_root, deadline)
+            exchanges.append(exchange)
+    evaluation = ReviewEvaluation(policy_module=policy, policy_read=policy_read,
+                                  repository_observation=observation, execution=execution)
+    # Force validation even when lexical evaluation subsequently has no candidates.
+    evaluation.repository
+    return evaluation, exchanges
+
+
+def _finalize_review_evaluation(
+    outcome: ScanOutcome, evaluation: ReviewEvaluation, selected_root: Path,
+    deadline: float, selection_recheck: Callable[[], bool], exchanges: list,
+) -> ScanOutcome:
+    if outcome.kind != "clean":
+        return outcome
+    if evaluation.unresolved:
+        return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "review-evaluation"))
+    evidence = evaluation.evidence()
+    if evidence is None:
+        return outcome
+    if evaluation.execution == "standalone-v1":
+        if not selection_recheck():
+            return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "review-receiving"))
+        observation, exchange = _capture_review_repository(evaluation.policy, selected_root, deadline)
+        exchanges.append(exchange)
+        if observation["status"] != "captured":
+            return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "review-receiving"))
+        finalization = evaluation.policy.verify_used(
+            evaluation.read.snapshot, observation["repository"], [list(row) for row in evidence.used_decisions],
+        )
+        expected_repository = evaluation.policy.H("orchestrarium.publication-review.repository.v1", evaluation.repository)
+        if (
+            not isinstance(finalization, dict)
+            or set(finalization) != {"inputSnapshotId", "usedList", "currentSnapshotId", "repositorySha256", "status", "reason", "resourcesSettled"}
+            or finalization["status"] != "valid" or finalization["reason"] != "none"
+            or finalization["resourcesSettled"] is not True
+            or finalization["inputSnapshotId"] != evidence.snapshot_id
+            or finalization["usedList"] != [list(row) for row in evidence.used_decisions]
+            or finalization["repositorySha256"] != expected_repository
+            or not isinstance(finalization["currentSnapshotId"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", finalization["currentSnapshotId"]) is None
+        ):
+            return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "review-receiving"))
+    return replace(outcome, review=evidence)
+
+
 def _content_hits(
     text: str,
     path: str,
@@ -1039,53 +1976,39 @@ def _content_hits(
     *,
     subject_kind: str = "tracked-blob",
     max_findings: int | None = None,
+    machine_path_lines: frozenset[int] | None = None,
+    display_locator: str | None = None,
+    staged_index: int | None = None,
 ) -> list[Finding]:
     findings: list[Finding] = []
-    normalized_path = path.replace("\\", "/")
-    scanner = (
-        subject_kind != "commit-message"
-        and normalized_path in _SCANNER_EXEMPT_PATHS
-    )
     locator = _safe_locator(path, subject_kind)
-    for line_number, line in enumerate(text.splitlines(), 1):
-        if max_findings is not None and len(findings) >= max_findings:
-            break
-        if scanner and _intentional_scanner_line(line):
-            continue
-        for index, pattern in enumerate(_SIMPLE_PATTERNS):
-            if pattern.search(line):
+    for line_number, line_start, line in _selected_text_lines(text, path, subject_kind):
+        seen: set[tuple] = set()
+        for observation in _line_observations(line, line_number, line_start, subject_kind):
+            key = _observation_key(observation)
+            if key in seen:
+                continue
+            seen.add(key)
+            if max_findings is None or len(findings) < max_findings:
                 findings.append(Finding(
                     "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
-                    subject_kind,
-                    locator,
-                    line_number,
-                    f"simple-{index + 1}",
+                    subject_kind, locator, line_number, observation.diagnostic_class,
+                    display_locator, staged_index,
                 ))
-                if max_findings is not None and len(findings) >= max_findings:
-                    break
-                break
-        else:
-            for family, pattern in _VALUE_RULES:
-                if pattern.search(line):
-                    findings.append(Finding(
-                        "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
-                        subject_kind,
-                        locator,
-                        line_number,
-                        f"value-{family}",
-                    ))
-                    if max_findings is not None and len(findings) >= max_findings:
-                        break
-                    break
-        if max_findings is not None and len(findings) >= max_findings:
-            continue
-        if find_machine_paths(line):
+        if (
+            (machine_path_lines is None or line_number in machine_path_lines)
+            and find_machine_paths(line)
+        ):
+            if max_findings is not None and len(findings) >= max_findings:
+                continue
             findings.append(Finding(
                 "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
                 subject_kind,
                 locator,
                 line_number,
                 "machine-path",
+                display_locator,
+                staged_index,
             ))
     return findings
 
@@ -1094,18 +2017,317 @@ def _is_binary(raw: bytes) -> bool:
     return b"\0" in raw
 
 
-def _tracked_files() -> tuple[list[str], dict[str, bytes]]:
-    names = _run_git(["diff", "--cached", "--name-only", "--diff-filter=ACMRTUXB", "-z", "--"])
+def _is_callable_rhs(line: str, match: re.Match[str]) -> bool:
+    return _CALLABLE_RHS.match(line, match.start("rhs_value")) is not None
+
+
+def _is_public_token_credential_identifier(line: str, match: re.Match[str]) -> bool:
+    credential_identifier = match.groupdict().get("credential_token_identifier")
+    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    identifier_suffix = (
+        credential_identifier
+        if credential_identifier is not None
+        else line[match.start():match.start() + len("token")]
+    )
+    identifier = (prefix.group(0) if prefix is not None else "") + identifier_suffix
+    components = tuple(
+        component_match.group(0).upper()
+        for component_match in _IDENTIFIER_COMPONENT.finditer(identifier)
+    )
+    public_lexical_start = next(
+        (
+            index
+            for index in range(len(components))
+            if "".join(components[index:]).casefold()
+            in _PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS
+        ),
+        None,
+    )
+    credential_components = (
+        components if public_lexical_start is None else components[:public_lexical_start]
+    )
+    has_credential_cue = (
+        credential_identifier is not None
+        and credential_identifier.casefold()
+        not in _PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS
+    ) or any(
+        component in _PUBLIC_TOKEN_CREDENTIAL_CUES
+        or component.startswith(_PUBLIC_TOKEN_AUTH_CUE)
+        for component in credential_components
+    )
+    return has_credential_cue
+
+
+def _is_annotated_public_token_match(
+    line: str,
+    family: str,
+    match: re.Match[str],
+    subject_kind: str,
+) -> bool:
+    if family != "token" or subject_kind == "commit-message":
+        return False
+    if _is_public_token_credential_identifier(line, match):
+        return False
+    rhs = match.group("rhs_value")
+    if len(rhs) < 2 or rhs[0] not in {"'", '"'} or rhs[-1] != rhs[0]:
+        return False
+    annotation_match = _PUBLIC_TOKEN_ANNOTATION_SUFFIX.fullmatch(
+        line[match.end("rhs_value"):]
+    )
+    return annotation_match is not None
+
+
+def _is_public_key_token_match(line: str, family: str, match: re.Match[str]) -> bool:
+    if family != "token":
+        return False
+    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    identifier = (prefix.group(0) if prefix is not None else "") + line[
+        match.start():match.start() + len("Token")
+    ]
+    return identifier == "publicKeyToken"
+
+
+def _binary_content_hits(
+    raw: bytes,
+    path: str,
+    find_machine_paths,
+    *,
+    max_findings: int | None = None,
+) -> list[Finding]:
+    findings: list[Finding] = []
+    locator = _safe_locator(path, "history-blob")
+    for line_number, raw_line in enumerate(raw.splitlines(), 1):
+        for raw_run in _BINARY_ASCII_RUN.findall(raw_line):
+            line = raw_run.decode("ascii")
+            seen: set[tuple] = set()
+            for observation in _line_observations(
+                line, line_number, 0, "history-blob", binary=True
+            ):
+                key = _observation_key(observation)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if max_findings is None or len(findings) < max_findings:
+                    findings.append(Finding(
+                        "PS-FINDING-CONTENT", "history-blob", locator,
+                        line_number, observation.diagnostic_class,
+                    ))
+            if find_machine_paths(line) and (
+                max_findings is None or len(findings) < max_findings
+            ):
+                findings.append(Finding(
+                    "PS-FINDING-CONTENT",
+                    "history-blob",
+                    locator,
+                    line_number,
+                    "machine-path",
+                ))
+    return findings
+
+
+_STAGED_HUNK_HEADER = re.compile(
+    rb"^@@ -([0-9]+)(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@(?: .*)?$"
+)
+_STAGED_OID = re.compile(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})")
+_STAGED_INDEX_ENTRY = re.compile(
+    rb"(?P<mode>[0-7]{6}) (?P<oid>[0-9a-f]{40}|[0-9a-f]{64}) 0\t(?P<path>.*)\0",
+    re.DOTALL,
+)
+
+
+def _parse_staged_entries(raw: bytes) -> tuple[StagedEntry, ...]:
+    if not raw:
+        return ()
+    if not raw.endswith(b"\0"):
+        raise RuntimeError("malformed staged name-status output")
+    fields = raw[:-1].split(b"\0")
+    entries: list[StagedEntry] = []
+    destinations: set[str] = set()
+    index = 0
+
+    def take_path() -> str:
+        nonlocal index
+        if index >= len(fields) or not fields[index]:
+            raise RuntimeError("malformed staged name-status output")
+        value = fields[index].decode("utf-8", "surrogateescape")
+        index += 1
+        return value
+
+    while index < len(fields):
+        try:
+            status = fields[index].decode("ascii", "strict")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("malformed staged name-status output") from exc
+        index += 1
+        if not status:
+            raise RuntimeError("malformed staged name-status output")
+        code = status[0]
+        source_path: str | None = None
+        if code in {"R", "C"}:
+            score = status[1:]
+            if not score.isdigit() or len(score) > 3 or int(score) > 100:
+                raise RuntimeError("malformed staged rename/copy status")
+            source_path = take_path()
+            destination_path = take_path()
+        elif code in {"A", "M"} and len(status) == 1:
+            destination_path = take_path()
+        elif code in {"T", "U", "X", "B"}:
+            raise RuntimeError("unsupported staged status")
+        else:
+            raise RuntimeError("malformed staged name-status output")
+        if destination_path in destinations:
+            raise RuntimeError("ambiguous staged destination")
+        destinations.add(destination_path)
+        entries.append(StagedEntry(status, source_path, destination_path))
+    return tuple(entries)
+
+
+def _staged_blob_oid(revision: str) -> str:
+    proc = _run_git(
+        ["rev-parse", "--verify", "--end-of-options", revision],
+        timeout=30,
+    )
+    value = proc.stdout.strip()
+    if proc.returncode or _STAGED_OID.fullmatch(value) is None:
+        raise RuntimeError("could not resolve staged blob")
+    return value.decode("ascii")
+
+
+def _staged_index_binding(path: str) -> tuple[str, str, bytes]:
+    proc = _run_git(["ls-files", "--stage", "-z", "--", path], timeout=30)
+    match = _STAGED_INDEX_ENTRY.fullmatch(proc.stdout)
+    if (
+        proc.returncode
+        or match is None
+        or match.group("path").decode("utf-8", "surrogateescape") != path
+    ):
+        raise RuntimeError("could not resolve staged index entry")
+    mode = match.group("mode").decode("ascii")
+    if mode not in {"100644", "100755", "120000", "160000"}:
+        raise RuntimeError("unsupported staged mode")
+    return mode, match.group("oid").decode("ascii"), match.group("path")
+
+
+def _staged_index_entry(path: str) -> tuple[str, str]:
+    mode, oid, _raw_path = _staged_index_binding(path)
+    return mode, oid
+
+
+def _staged_post_image(oid: str) -> bytes:
+    proc = _run_git(["cat-file", "blob", oid], timeout=30)
+    if proc.returncode:
+        raise RuntimeError("could not read staged post-image")
+    return proc.stdout
+
+
+def _staged_added_line_numbers(old_oid: str, new_oid: str) -> frozenset[int]:
+    if old_oid == new_oid:
+        return frozenset()
+    proc = _run_git(
+        [
+            "diff", "--text", "--unified=0", "--no-color", "--no-ext-diff",
+            "--no-textconv", old_oid, new_oid,
+        ],
+        timeout=30,
+    )
+    if proc.returncode:
+        raise RuntimeError("could not diff staged blobs")
+
+    added: set[int] = set()
+    old_remaining: int | None = None
+    new_remaining: int | None = None
+    new_line = 0
+    saw_hunk = False
+
+    def finish_hunk() -> None:
+        if old_remaining not in {None, 0} or new_remaining not in {None, 0}:
+            raise RuntimeError("malformed staged blob diff")
+
+    for raw_line in proc.stdout.splitlines():
+        if raw_line.startswith(b"@@"):
+            finish_hunk()
+            match = _STAGED_HUNK_HEADER.fullmatch(raw_line)
+            if match is None:
+                raise RuntimeError("malformed staged blob diff")
+            old_remaining = int(match.group(2) or b"1")
+            new_line = int(match.group(3))
+            new_remaining = int(match.group(4) or b"1")
+            saw_hunk = True
+            continue
+        if old_remaining is None or new_remaining is None:
+            continue
+        if raw_line == b"\\ No newline at end of file":
+            continue
+        prefix = raw_line[:1]
+        if prefix == b"-" and old_remaining > 0:
+            old_remaining -= 1
+        elif prefix == b"+" and new_remaining > 0:
+            if new_line < 1:
+                raise RuntimeError("malformed staged blob diff")
+            added.add(new_line)
+            new_line += 1
+            new_remaining -= 1
+        elif prefix == b" " and old_remaining > 0 and new_remaining > 0:
+            old_remaining -= 1
+            new_line += 1
+            new_remaining -= 1
+        else:
+            raise RuntimeError("malformed staged blob diff")
+    finish_hunk()
+    if not saw_hunk:
+        raise RuntimeError("ambiguous staged blob diff")
+    return frozenset(added)
+
+
+def _tracked_files(*, review_bindings: dict[str, tuple[str, str, bytes]] | None = None) -> tuple[
+    list[str],
+    dict[str, bytes],
+    dict[str, frozenset[int] | None],
+]:
+    names = _run_git(
+        [
+            "diff", "--cached", "--name-status", "-z", "--find-renames",
+            "--diff-filter=ACMRTUXB", "--",
+        ],
+        timeout=30,
+    )
     if names.returncode:
         raise RuntimeError("could not enumerate staged tracked files")
-    paths = [part.decode("utf-8", "surrogateescape") for part in names.stdout.split(b"\0") if part]
+    entries = _parse_staged_entries(names.stdout)
+    paths = [entry.destination_path for entry in entries]
     blobs: dict[str, bytes] = {}
-    for path in paths:
-        proc = _run_git(["show", f":{path}"])
-        if proc.returncode:
-            raise RuntimeError(f"could not read staged content for {path!r}")
-        blobs[path] = proc.stdout
-    return paths, blobs
+    machine_path_lines: dict[str, frozenset[int] | None] = {}
+    for entry in entries:
+        path = entry.destination_path
+        binding = _staged_index_binding(path)
+        new_mode, new_oid, _raw_path = binding
+        if review_bindings is not None:
+            review_bindings[path] = binding
+        if new_mode == "160000":
+            blobs[path] = b""
+            machine_path_lines[path] = frozenset()
+            continue
+        raw = _staged_post_image(new_oid)
+        blobs[path] = raw
+        code = entry.status[0]
+        if code in {"A", "C"}:
+            machine_path_lines[path] = None
+            continue
+        old_path = entry.source_path if code == "R" else path
+        if old_path is None:
+            raise RuntimeError("missing staged source path")
+        old_oid = _staged_blob_oid(f"HEAD:{old_path}")
+        if code == "R" and entry.status == "R100" and old_oid != new_oid:
+            raise RuntimeError("ambiguous pure rename")
+        if _is_binary(raw):
+            machine_path_lines[path] = frozenset()
+            continue
+        selected = _staged_added_line_numbers(old_oid, new_oid)
+        line_count = len(raw.decode("utf-8", "replace").splitlines())
+        if any(line_number > line_count for line_number in selected):
+            raise RuntimeError("staged line outside post-image")
+        machine_path_lines[path] = selected
+    return paths, blobs, machine_path_lines
 
 
 def _length_frame(value: bytes) -> bytes:
@@ -1220,7 +2442,7 @@ async def _read_git_lines_bounded(
             stderr=asyncio.subprocess.DEVNULL,
             env=env,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, WindowsJobError):
         return _refusal("PS-MSG-SPAWN", "selection")
     if process.stdout is None:
         if not await _settle_owned_async_process(
@@ -1330,18 +2552,16 @@ def _remote_probe_binding(
             config_count = int(raw_count, 10)
         if config_count > 1024:
             return _refusal("PS-MSG-RANGE", "remote-binding")
-        expected_entries = {
-            f"GIT_CONFIG_{kind}_{index}"
-            for index in range(config_count)
-            for kind in ("KEY", "VALUE")
-        }
-        actual_entries = {
-            key for key in child_env
-            if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
-        }
-        # Validate the entire indexed namespace, not only the next slot: sparse,
-        # orphaned, or noncanonical indices must not survive the append boundary.
-        if actual_entries != expected_entries:
+        for index in range(config_count):
+            if (
+                f"GIT_CONFIG_KEY_{index}" not in child_env
+                or f"GIT_CONFIG_VALUE_{index}" not in child_env
+            ):
+                return _refusal("PS-MSG-RANGE", "remote-binding")
+        if (
+            f"GIT_CONFIG_KEY_{config_count}" in child_env
+            or f"GIT_CONFIG_VALUE_{config_count}" in child_env
+        ):
             return _refusal("PS-MSG-RANGE", "remote-binding")
         child_env.update({
             "GIT_CONFIG_COUNT": str(config_count + 1),
@@ -1425,8 +2645,6 @@ async def _remote_destination_oid(
 def _parse_remote_ref_tip_oids(
     rows: tuple[bytes, ...], object_format: GitObjectFormat
 ) -> tuple[RemoteRefTip, ...] | Refusal:
-    if not rows:
-        return _refusal("PS-MSG-RANGE", "remote-refs")
     if len(rows) > 2 * _MAX_REMOTE_REFS:
         return _refusal("PS-MSG-LIMIT", "remote-ref-count")
     line_cap = object_format.hex_length + 1 + _MAX_PATH_BYTES + len(b"^{}")
@@ -1455,8 +2673,6 @@ def _parse_remote_ref_tip_oids(
         destination[base_ref] = oid
     if len(refs) > _MAX_REMOTE_REFS:
         return _refusal("PS-MSG-LIMIT", "remote-ref-count")
-    if not refs:
-        return _refusal("PS-MSG-RANGE", "remote-refs")
     if any(refname not in refs for refname in peeled_refs):
         return _refusal("PS-MSG-FRAME", "remote-ref")
     return tuple(
@@ -1674,7 +2890,7 @@ async def _read_git_oid_lines_bounded(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, WindowsJobError):
         return _refusal("PS-MSG-SPAWN", "selection")
     if process.stdout is None:
         if not await _settle_owned_async_process(
@@ -2025,7 +3241,7 @@ class _AsyncGitObjectReader:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError, WindowsJobError):
             self._state = ReaderState.SPAWN_FAILED
             return _refusal("PS-MSG-SPAWN", "spawn")
         if self._process.stdin is None or self._process.stdout is None:
@@ -2165,26 +3381,22 @@ class _AsyncGitObjectReader:
             self._poisoned = True
             return _refusal("PS-MSG-READ", "pipe")
 
-    async def _wait_step(self, deadline: float, errors: list[str], phase: str) -> bool:
+    async def _discard_stdout(self, deadline: float) -> tuple[bool, bool]:
+        """Drain fixed chunks to EOF without retaining child output."""
         process = self._process
-        if process is None:
-            return True
+        if process is None or process.stdout is None:
+            return True, False
+        observed_data = False
         try:
-            if os.name == "nt":
-                await self._within(process.wait(), deadline)
-            else:
-                if self._direct_observation is None:
-                    errors.append(phase)
-                    return False
-                await self._within(
-                    asyncio.shield(self._direct_observation.task), deadline
+            while True:
+                chunk = await self._within(
+                    process.stdout.read(_READ_CHUNK_BYTES), deadline
                 )
-            return process.returncode is not None
-        except asyncio.TimeoutError:
-            return False
-        except Exception:
-            errors.append(phase)
-            return process.returncode is not None
+                if not chunk:
+                    return True, observed_data
+                observed_data = True
+        except (asyncio.TimeoutError, OSError, RuntimeError, ValueError):
+            return False, observed_data
 
     async def _drive_finalizer(self) -> _ReaderFinalizerResult:
         process = self._process
@@ -2227,23 +3439,17 @@ class _AsyncGitObjectReader:
             None,
             loop.time(),
         )
-        if os.name == "nt":
-            terminal = await self._wait_step(deadline, errors, "wait")
-            if not terminal:
-                try:
-                    process.terminate()
-                except Exception:
-                    errors.append("terminate")
-                terminal = await self._wait_step(
-                    deadline, errors, "terminate-wait"
-                )
-            if not terminal:
-                errors.append("terminate-wait")
+        drain_task = (
+            asyncio.create_task(self._discard_stdout(deadline))
+            if process.stdout is not None
+            else None
+        )
         terminal = await _settle_owned_async_process(
             process,
             self._process_group_owner,
             self._direct_observation,
             self._settle_timeout,
+            close_io=os.name != "nt",
         )
         if not terminal:
             errors.append("group-settle")
@@ -2253,22 +3459,33 @@ class _AsyncGitObjectReader:
             terminal and process.returncode is not None,
             loop.time(),
         )
-        if process.stdout is not None and child.terminal_observed:
+        if drain_task is not None:
             try:
-                trailing = False
-                while True:
-                    chunk = await self._within(
-                        process.stdout.read(_READ_CHUNK_BYTES), deadline
+                drained, trailing = await asyncio.shield(drain_task)
+                if not drained:
+                    errors.append("stdout-drain")
+                    stdout = TransportObservation(
+                        "owned", "unobserved", False, "stdout-drain", loop.time()
                     )
-                    if not chunk:
-                        break
-                    trailing = True
-                if trailing:
+                elif trailing and not self._poisoned:
                     errors.append("stdout-trailing")
-                stdout = TransportObservation("owned", "output-eof", True, None, loop.time())
+                    stdout = TransportObservation(
+                        "owned", "output-eof", True, None, loop.time()
+                    )
+                else:
+                    stdout = TransportObservation(
+                        "owned", "output-eof", True, None, loop.time()
+                    )
             except Exception:
+                if not drain_task.done():
+                    drain_task.cancel()
                 errors.append("stdout-drain")
-                stdout = TransportObservation("owned", "unobserved", False, "stdout-drain", loop.time())
+                stdout = TransportObservation(
+                    "owned", "unobserved", False, "stdout-drain", loop.time()
+                )
+        if isinstance(process, _WindowsOwnedAsyncProcess):
+            if not await process.close_io():
+                errors.append("pipe-close")
         if child.terminal_observed and stdin.observed and stdout.observed:
             return _ReaderFinalizerResult(None, child, stdin, stdout, tuple(errors))
         self._state = ReaderState.REAP_PENDING
@@ -2406,7 +3623,7 @@ def _parse_tree(
             kind = "gitlink"
         else:
             return _refusal("PS-MSG-FRAME", "tree-mode")
-        entries.append(TreeEntry(kind, name, raw_oid.hex()))
+        entries.append(TreeEntry(kind, name, raw_oid.hex(), mode.decode("ascii")))
         offset = oid_end
     return tuple(entries)
 
@@ -2570,6 +3787,8 @@ async def _acquire_history(
     find_machine_paths,
     coverage_recorder: CoverageRecorder,
     scan_deadline: float,
+    *,
+    review_evaluation: "ReviewEvaluation | None" = None,
 ) -> tuple[HistoryProof, CoverageProof, tuple[Finding, ...]] | Refusal:
     commit_set = set(selection.expected_oids)
     object_types: dict[str, str] = {}
@@ -2686,6 +3905,7 @@ async def _acquire_history(
     visited_tree_ids: set[str] = set()
     tree_visits = 0
     subjects: list[tuple[str, bytes, str]] = []
+    subject_modes: dict[tuple[str, bytes, str], str] = {}
     subject_set: set[tuple[str, bytes, str]] = set()
     for commit_oid in selection.expected_oids:
         guard = _tree_traversal_guard(
@@ -2753,6 +3973,7 @@ async def _acquire_history(
                         return _refusal("PS-MSG-COVERAGE", "duplicate-subject")
                     subject_set.add(subject)
                     subjects.append(subject)
+                    subject_modes[subject] = entry.mode
                     if len(subjects) > _MAX_SUBJECTS:
                         return _refusal("PS-MSG-LIMIT", "subject-count")
 
@@ -2766,6 +3987,12 @@ async def _acquire_history(
 
     binary_blobs = {oid for oid, raw in blob_contents.items() if _is_binary(raw)}
     text_blobs = set(blob_contents) - binary_blobs
+    subjects_by_path: dict[tuple[bytes, str], list[tuple[str, str]]] = {}
+    if review_evaluation is not None:
+        for commit_oid, raw_path, blob_oid in sorted(subjects):
+            subjects_by_path.setdefault((raw_path, blob_oid), []).append(
+                (commit_oid, subject_modes[(commit_oid, raw_path, blob_oid)])
+            )
     for path, blob_oid in sorted(blob_paths):
         decoded_path = path.decode("utf-8", "surrogateescape")
         _append_findings(
@@ -2775,13 +4002,32 @@ async def _acquire_history(
         line_refusal = _line_limit_refusal(raw)
         if line_refusal is not None:
             return line_refusal
-        _append_findings(findings, _content_hits(
-            raw.decode("utf-8", "replace"),
-            decoded_path,
-            find_machine_paths,
-            subject_kind="history-blob",
-            max_findings=max(0, _MAX_FINDINGS - len(findings)),
-        ))
+        if blob_oid in binary_blobs:
+            content_findings = _binary_content_hits(
+                raw,
+                decoded_path,
+                find_machine_paths,
+                max_findings=max(0, _MAX_FINDINGS - len(findings)),
+            )
+        elif review_evaluation is not None:
+            content_findings = []
+            for commit_oid, git_mode in subjects_by_path[(path, blob_oid)]:
+                if asyncio.get_running_loop().time() >= scan_deadline:
+                    return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+                _append_findings(content_findings, review_evaluation.scan_text_subject(
+                    raw, decoded_path, find_machine_paths, subject_kind="history-blob",
+                    mode="range-blob-text", commit_oid=commit_oid, raw_path=path,
+                    blob_oid=blob_oid, git_mode=git_mode,
+                ))
+        else:
+            content_findings = _content_hits(
+                raw.decode("utf-8", "replace"),
+                decoded_path,
+                find_machine_paths,
+                subject_kind="history-blob",
+                max_findings=max(0, _MAX_FINDINGS - len(findings)),
+            )
+        _append_findings(findings, content_findings)
 
     canonical_subjects = tuple(sorted(subjects))
     canonical_paths = tuple(sorted((blob, path) for path, blob in blob_paths))
@@ -2816,6 +4062,7 @@ async def _scan_range_async(
     coverage_observer: Callable[[CoverageEvent, str], None] | None = None,
     coverage_fault: CoverageFaultPort | None = None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
+    review_evaluation: "ReviewEvaluation | None" = None,
 ) -> ScanOutcome:
     wall_deadline = time.monotonic() + scan_timeout
     request = _range_request(remote, destination, source_revision)
@@ -2853,12 +4100,17 @@ async def _scan_range_async(
                 if remaining <= 0:
                     acquisition = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
                 else:
+                    review_arguments = (
+                        {"review_evaluation": review_evaluation}
+                        if review_evaluation is not None else {}
+                    )
                     acquisition = await _acquire_history(
                         selection,
                         reader,
                         find_machine_paths,
                         coverage_recorder,
                         loop.time() + remaining,
+                        **review_arguments,
                     )
                 if isinstance(acquisition, Refusal):
                     pending = ScanOutcome(
@@ -2872,10 +4124,14 @@ async def _scan_range_async(
                 refusal=_refusal("PS-MSG-READ", "cancelled"),
                 selection=selection,
             )
-        except Exception:
+        except Exception as exc:
             pending = ScanOutcome(
                 "refusal", "range",
-                refusal=_refusal("PS-MSG-READ", "unexpected"),
+                refusal=(
+                    _refusal("PS-INPUT-REFUSAL", reason)
+                    if (reason := _review_failure_reason(exc)) is not None
+                    else _refusal("PS-MSG-READ", "unexpected")
+                ),
                 selection=selection,
             )
 
@@ -2947,6 +4203,8 @@ def _scan_range(
     *,
     source_revision: str | None = None,
     tip_resolver: Callable[[float | None], str] | None = None,
+    review_evaluation: "ReviewEvaluation | None" = None,
+    scan_timeout: float = _SCAN_DEADLINE_SECONDS,
 ) -> ScanOutcome:
     try:
         return asyncio.run(_scan_range_async(
@@ -2955,6 +4213,8 @@ def _scan_range(
             find_machine_paths,
             source_revision=source_revision,
             tip_resolver=tip_resolver,
+            review_evaluation=review_evaluation,
+            scan_timeout=scan_timeout,
         ))
     except KeyboardInterrupt:
         return ScanOutcome(
@@ -3053,14 +4313,53 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _filename_findings(path: str, subject_kind: str) -> list[Finding]:
+def _filename_findings(
+    path: str,
+    subject_kind: str,
+    *,
+    display_locator: str | None = None,
+    staged_index: int | None = None,
+) -> list[Finding]:
     base = Path(path).name
     locator = _safe_locator(path, subject_kind)
     if base == ".env":
-        return [Finding("PS-FINDING-CONTENT", subject_kind, locator, 1, "filename-env")]
+        return [Finding(
+            "PS-FINDING-CONTENT", subject_kind, locator, 1, "filename-env",
+            display_locator, staged_index,
+        )]
     if base.casefold() == "secret.md":
-        return [Finding("PS-FINDING-CONTENT", subject_kind, locator, 1, "filename-secret")]
+        return [Finding(
+            "PS-FINDING-CONTENT", subject_kind, locator, 1, "filename-secret",
+            display_locator, staged_index,
+        )]
     return []
+
+
+def _staged_display_locator(path: str, find_machine_paths) -> str:
+    normalized = path.replace("\\", "/")
+    segments = normalized.split("/")
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or re.match(r"^[A-Za-z]:", normalized) is not None
+        or any(not segment or segment in {".", ".."} for segment in segments)
+        or any(ord(char) < 32 or ord(char) == 127 for char in normalized)
+    ):
+        return "redacted"
+    if _filename_findings(normalized, "tracked-blob"):
+        return "redacted"
+    if _content_hits(
+        normalized,
+        normalized,
+        find_machine_paths,
+        subject_kind="commit-message",
+        max_findings=1,
+    ):
+        return "redacted"
+    try:
+        return _encode_receipt_token(normalized)
+    except (UnicodeError, ValueError):
+        return "redacted"
 
 
 def _scan_content_blobs(
@@ -3068,19 +4367,55 @@ def _scan_content_blobs(
     paths: list[str],
     blobs: dict[str, bytes],
     find_machine_paths,
+    *,
+    machine_path_lines_by_path: dict[str, frozenset[int] | None] | None = None,
+    review_evaluation: "ReviewEvaluation | None" = None,
+    review_bindings: dict[str, tuple[str, str, bytes]] | None = None,
 ) -> ScanOutcome:
     findings: list[Finding] = []
     subject_kind = "path-blob" if mode == "path" else "tracked-blob"
-    for path in paths:
-        findings.extend(_filename_findings(path, subject_kind))
+    if machine_path_lines_by_path is not None and (
+        mode != "tracked" or set(machine_path_lines_by_path) != set(paths)
+    ):
+        raise RuntimeError("staged machine-path selection mismatch")
+    for one_based_index, path in enumerate(paths, 1):
+        staged_index = one_based_index if machine_path_lines_by_path is not None else None
+        display_locator = (
+            _staged_display_locator(path, find_machine_paths)
+            if staged_index is not None
+            else None
+        )
+        findings.extend(_filename_findings(
+            path,
+            subject_kind,
+            display_locator=display_locator,
+            staged_index=staged_index,
+        ))
         raw = blobs[path]
         if _is_binary(raw):
+            continue
+        content_arguments = {
+            "subject_kind": subject_kind,
+            "machine_path_lines": (
+                machine_path_lines_by_path[path]
+                if machine_path_lines_by_path is not None else None
+            ),
+            "display_locator": display_locator,
+            "staged_index": staged_index,
+        }
+        if review_evaluation is not None and review_bindings is not None:
+            git_mode, blob_oid, raw_path = review_bindings[path]
+            findings.extend(review_evaluation.scan_text_subject(
+                raw, path, find_machine_paths, **content_arguments,
+                mode="staged-blob-text", commit_oid=None, raw_path=raw_path,
+                blob_oid=blob_oid, git_mode=git_mode,
+            ))
             continue
         findings.extend(_content_hits(
             raw.decode("utf-8", "replace"),
             path,
             find_machine_paths,
-            subject_kind=subject_kind,
+            **content_arguments,
         ))
     return ScanOutcome(
         "findings" if findings else "clean",
@@ -3108,12 +4443,43 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
                     f"line={finding.line} class={finding.detector_class}"
                 )
             else:
-                lines.append(
-                    f"{finding.failure_id} kind={finding.subject_kind} "
-                    f"line={finding.line} class={finding.detector_class}"
-                )
+                if (
+                    finding.subject_kind == "tracked-blob"
+                    and finding.display_locator is not None
+                    and finding.staged_index is not None
+                    and finding.staged_index > 0
+                ):
+                    lines.append(
+                        f"{finding.failure_id} kind=tracked-blob "
+                        f"locator={finding.display_locator} "
+                        f"staged-index={finding.staged_index} "
+                        f"line={finding.line} class={finding.detector_class}"
+                    )
+                else:
+                    lines.append(
+                        f"{finding.failure_id} kind={finding.subject_kind} "
+                        f"line={finding.line} class={finding.detector_class}"
+                    )
         lines.append("publication-safety scan found potential tracked-content leak markers")
         return "", "\n".join(lines), 1
+    review_suffix = ""
+    if outcome.review is not None:
+        review = outcome.review
+        if (
+            outcome.kind != "clean" or outcome.mode not in {"tracked", "range"}
+            or type(review.applied) is not int or review.applied <= 0
+            or not review.used_decisions
+            or tuple(sorted(set(review.used_decisions))) != review.used_decisions
+            or re.fullmatch(r"[0-9a-f]{64}", review.snapshot_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", review.applied_set) is None
+            or re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", review.used_token) is None
+        ):
+            return "", "publication-safety: refusing id=PS-INPUT-REFUSAL reason=review-policy phase=input", 2
+        review_suffix = (
+            f", policy-snapshot={review.snapshot_id}, used-decisions={review.used_token}, "
+            f"applied={review.applied}, applied-set={review.applied_set}, "
+            "unresolved=0, evaluation=complete)"
+        )
     if outcome.mode == "range":
         selection = outcome.selection
         coverage = outcome.coverage
@@ -3140,15 +4506,14 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
                 2,
             )
         try:
+            line = _serialize_range_receipt_v3(
+                history, selection.remote, selection.destination, selection.source,
+                selection.tip, object_format=selection.object_format,
+            )
+            if review_suffix:
+                line = line.replace("publication-safety: clean", "publication-safety: qualified", 1)[:-1] + review_suffix
             return (
-                _serialize_range_receipt_v3(
-                    history,
-                    selection.remote,
-                    selection.destination,
-                    selection.source,
-                    selection.tip,
-                    object_format=selection.object_format,
-                ),
+                line,
                 "",
                 0,
             )
@@ -3160,6 +4525,10 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
                 2,
             )
     count = outcome.file_count
+    if review_suffix:
+        if count <= 0:
+            return "", "publication-safety: refusing id=PS-INPUT-REFUSAL reason=review-policy phase=input", 2
+        return f"publication-safety: qualified (staged, examined={count}" + review_suffix, "", 0
     noun = "file" if count == 1 else "files"
     if count == 0 and outcome.mode == "tracked":
         return "publication-safety: clean (tracked, examined 0 files -- nothing staged)", "", 0
@@ -3188,19 +4557,67 @@ def main(argv: list[str] | None = None) -> int:
         find_machine_paths = _path_finder(script)
         if args.range:
             remote, dst = args.range
-            return _emit_outcome(_scan_range(
+            review_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+            review_evaluation, exchanges = _prepare_review_evaluation(repo_root, review_deadline)
+            outcome = _scan_range(
                 remote,
                 dst,
                 find_machine_paths,
                 source_revision=args.range_source,
+                review_evaluation=review_evaluation if review_evaluation.read.usable_records else None,
+                scan_timeout=_remaining_seconds(review_deadline),
+            )
+
+            def recheck_range() -> bool:
+                selection = outcome.selection
+                if selection is None:
+                    return False
+                return _confirm_tip(selection.tip, lambda timeout=None: _resolve_commit(
+                    selection.source, timeout, object_format=selection.object_format,
+                ), _remaining_seconds(review_deadline)) is None
+
+            return _emit_outcome(_finalize_review_evaluation(
+                outcome, review_evaluation, repo_root, review_deadline, recheck_range, exchanges,
             ))
         elif args.path or args.legacy_path:
             mode = "path"
             paths, blobs = _path_files(args.path or args.legacy_path)
+            machine_path_lines_by_path = None
+            review_evaluation = None
+            review_bindings = None
         else:
             mode = "tracked"
-            paths, blobs = _tracked_files()
-        return _emit_outcome(_scan_content_blobs(mode, paths, blobs, find_machine_paths))
+            review_bindings = {}
+            paths, blobs, machine_path_lines_by_path = _tracked_files(review_bindings=review_bindings)
+            review_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+            need_repository = any(
+                not _is_binary(blobs[path]) and _content_hits(
+                    blobs[path].decode("utf-8", "replace"), path, lambda _line: (), max_findings=1,
+                ) for path in paths
+            )
+            review_evaluation, exchanges = _prepare_review_evaluation(
+                repo_root, review_deadline, need_repository=need_repository,
+            )
+        outcome = _scan_content_blobs(
+            mode,
+            paths,
+            blobs,
+            find_machine_paths,
+            machine_path_lines_by_path=machine_path_lines_by_path,
+            review_evaluation=(review_evaluation if review_evaluation is not None and review_evaluation.read.usable_records else None),
+            review_bindings=review_bindings,
+        )
+        if review_evaluation is not None:
+            def recheck_staged() -> bool:
+                current_bindings = {}
+                current_paths, current_blobs, current_lines = _tracked_files(review_bindings=current_bindings)
+                return (current_paths == paths and current_bindings == review_bindings
+                        and current_blobs == blobs and current_lines == machine_path_lines_by_path)
+
+            outcome = _finalize_review_evaluation(
+                outcome, review_evaluation, repo_root, review_deadline, recheck_staged, exchanges,
+            )
+        return _emit_outcome(outcome)
     except KeyboardInterrupt:
         print(
             "publication-safety: refusing id=PS-INPUT-REFUSAL "
@@ -3209,7 +4626,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     except RuntimeError as exc:
-        if exc.args == ("not inside a git repository",):
+        review_reason = _review_failure_reason(exc)
+        if review_reason is not None:
+            print(
+                "publication-safety: refusing id=PS-INPUT-REFUSAL "
+                f"phase=input reason={review_reason}", file=sys.stderr,
+            )
+        elif exc.args == ("not inside a git repository",):
             print(
                 "publication-safety: refusing id=PS-INPUT-REFUSAL "
                 "phase=input reason=not inside a git repository",

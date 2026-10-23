@@ -11,13 +11,10 @@ Decision algorithm (fail-open on malformed envelopes and unreadable state):
   1. Read the Stop JSON envelope from stdin.
   2. If stop_hook_active is true -> exit 0 to avoid recursive Stop loops.
   3. Read last_assistant_message directly from the envelope.
-  4. If the message contains [acknowledge-passive-stop] -> exit 0.
-  5. If it is a user handoff phrase ("waiting for your response", etc.)
-     -> exit 0.
-  6. Detect passive polling with strong and weak phrase tiers.
-  7. If passive polling is detected, inspect only the current transcript turn
-     for a relevant state/time/status probe.
-  8. If no relevant probe is present, emit {"decision":"block","reason":"..."}.
+  4. Acquire affirmative passive assertions with local predicate polarity.
+  5. Within that passive branch, preserve the existing override, user-handoff,
+     current-turn probe, and passive denial behavior.
+  6. For non-passive messages, exit 0 silently.
 """
 from __future__ import annotations
 
@@ -29,8 +26,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from hook_common import (
     CURRENT_TURN_BYTE_CAP,
+    NO_OBSERVED_FAILURE,
     STATUS_FOUND,
+    acquire_tool_input,
+    extract_model_tool_calls_with_ids,
     extract_text,
+    extract_tool_outputs_with_ids,
     parse_envelope,
     read_stdin_utf8,
     scan_current_turn_boundary,
@@ -51,32 +52,22 @@ def resolve_runtime_config(environ: Mapping[str, str]) -> StopRuntimeConfig:
 
 OVERRIDE_MARKER_REGEX = re.compile(r"\[acknowledge-passive-stop\]", re.IGNORECASE)
 
-USER_HANDOFF_REGEX = re.compile(
+PASSIVE_ASSERTION_REGEX = re.compile(
     r"(?ix)"
-    r"waiting\s+for\s+(your\s+)?(response|input|approval|confirmation|feedback|answer|decision)|"
-    r"waiting\s+for\s+your\s+(reply|review)|"
-    r"жду\s+(твоего\s+|вашего\s+)?(подтверждени|ответа\s+от\s+тебя|решени|реакц|инструкци|указани|команд|отмашк)|"
-    r"дай\s+знать|"
-    r"let\s+me\s+know\s+(if|when|whether)|"
-    r"когда\s+будешь\s+готов|"
-    r"i'?ll\s+continue\s+when\s+you"
+    r"\b(?:am|is|are|will|shall|be|i'm|we're)?\s*waiting\s+for\s+"
+    r"(?:bot|review|ci|build|job|notification|reply|deploy|pipeline)\b|"
+    r"\b(?:will|shall)\s+wait\b|"
+    r"\bexpecting\s+(?:response|reply|notification)\b|"
+    r"\b(?:review|ci)\s+(?:is\s+)?pending\b|"
+    r"\bshould\s+(?:respond|arrive|come|reply)\s+in\s+\d+|"
+    r"жду\s+(?:ответа\s+бота|уведомлен\w*)|"
+    r"буду\s+ждать\b|"
+    r"бот\s+ответит\b|должен\s+ответить\s+в"
 )
-
-STRONG_POLLING_REGEX = re.compile(
-    r"(?ix)"
-    r"жду\s+ответа\s+бота|"
-    r"жду\s+уведомлен|"
-    r"бот\s+ответит|"
-    r"waiting\s+for\s+(bot|review|CI|build|job|notification|reply|deploy|pipeline)|"
-    r"review.*pending|"
-    r"CI.*pending|"
-    r"expecting\s+(response|reply|notification)|"
-    r"должен\s+ответить\s+в|"
-    r"3-5\s*мин|"
-    r"should\s+(respond|arrive|come|reply)\s+in\s+\d+"
-)
-
-WEAK_POLLING_REGEX = re.compile(r"(?ix)waiting\s+for|will\s+wait|буду\s+ждать|жду\b")
+_CLAUSE_BREAK = re.compile(r"[;.!?\n]+|\b(?:but|and|however)\b|\b(?:но|и|однако)\b", re.IGNORECASE)
+_QUOTE_OR_CODE = re.compile(r"```.*?```|`[^`]*`|\"[^\"]*\"|“[^”]*”|(?<!\w)'[^'\n]+'", re.DOTALL)
+_NEGATION = re.compile(r"(?i)\b(?:not|never|no|don't|doesn't|won't|cannot|can't|isn't|aren't|wasn't|weren't|не|нет)\b")
+_UNRESOLVED_CLAUSE = re.compile(r"(?i)^\s*(?:if|when|unless|если|когда)\b|\b(?:said|says|reported|quoted|написал|сказал)\b")
 
 ASYNC_NOUN_REGEX = re.compile(
     r"(?ix)\b(bot|review|notification|task|job|pipeline|reply|webhook|event)\b|"
@@ -86,7 +77,7 @@ ASYNC_NOUN_REGEX = re.compile(
 TIME_ESTIMATE_REGEX = re.compile(r"(?ix)\d+\s*(min|minute|hour|sec|мин|час|секунд)")
 
 OUTPUT_TOOL_NAMES = {"taskoutput", "monitor", "bashoutput", "powershelloutput"}
-SHELL_TOOL_NAMES = {"bash", "powershell", "shell", "shell_command"}
+SHELL_TOOL_NAMES = {"bash", "powershell", "shell", "shell_command", "exec_command"}
 READ_TOOL_NAMES = {"read"}
 
 SHELL_PROBE_REGEX = re.compile(
@@ -133,26 +124,26 @@ def main(config: StopRuntimeConfig) -> int:
         if not isinstance(last_message, str) or not last_message.strip():
             return 0
 
-        if OVERRIDE_MARKER_REGEX.search(last_message):
-            return 0
-        if USER_HANDOFF_REGEX.search(last_message):
-            return 0
-        if not _detect_passive_polling(last_message):
+        if _detect_passive_polling(last_message):
+            if OVERRIDE_MARKER_REGEX.search(last_message):
+                return 0
+            transcript_path = envelope.get("transcript_path") or ""
+            if not transcript_path:
+                return 0
+            _last_user, current_turn_entries, current_turn_status = (
+                scan_current_turn_boundary(
+                    str(transcript_path), byte_cap=CURRENT_TURN_BYTE_CAP
+                )
+            )
+            if current_turn_status != STATUS_FOUND:
+                return 0
+            if _has_relevant_probe(current_turn_entries) is not False:
+                return 0
+            reason = _deny_reason()
+        else:
             return 0
 
-        transcript_path = envelope.get("transcript_path") or ""
-        if not transcript_path:
-            return 0
-        _last_user, current_turn_entries, current_turn_status = scan_current_turn_boundary(
-            str(transcript_path), byte_cap=CURRENT_TURN_BYTE_CAP
-        )
-        if current_turn_status != STATUS_FOUND:
-            return 0
-
-        if _has_relevant_probe(current_turn_entries):
-            return 0
-
-        print(json.dumps({"decision": "block", "reason": _deny_reason()}))
+        print(json.dumps({"decision": "block", "reason": reason}))
         return 0
     except Exception:
         return 0
@@ -167,22 +158,155 @@ def _is_truthy(value: object) -> bool:
 
 
 def _detect_passive_polling(text: str) -> bool:
-    if STRONG_POLLING_REGEX.search(text):
-        return True
-    if not WEAK_POLLING_REGEX.search(text):
-        return False
-    return bool(ASYNC_NOUN_REGEX.search(text) or TIME_ESTIMATE_REGEX.search(text))
+    # Remove mentions before splitting clauses; only the speaker's assertion
+    # can enter the existing current-turn probe gate.
+    visible = _QUOTE_OR_CODE.sub(lambda match: " " * len(match.group()), text)
+    # A question's predicate is mentioned, not asserted by the speaker.
+    visible = re.sub(r"[^;.!?\n]*\?", " ", visible)
+    for clause in _CLAUSE_BREAK.split(visible):
+        if not clause.strip() or _UNRESOLVED_CLAUSE.search(clause):
+            continue
+        for match in PASSIVE_ASSERTION_REGEX.finditer(clause):
+            prefix = clause[:match.start()]
+            # Negation belongs to this predicate, not an adjacent clause.
+            near = " ".join(prefix.split()[-4:])
+            negatives = list(_NEGATION.finditer(near))
+            if len(negatives) > 1 or negatives:
+                continue
+            candidate = match.group()
+            if re.search(r"(?i)\b(?:will|shall)\s+wait\b|буду\s+ждать", candidate):
+                if not (ASYNC_NOUN_REGEX.search(clause[match.start():]) or TIME_ESTIMATE_REGEX.search(clause[match.start():])):
+                    continue
+            return True
+    return False
 
 
-def _has_relevant_probe(entries: list[dict]) -> bool:
+def _has_relevant_probe(entries: list[dict]) -> bool | None:
+    """True: relevant invocation; False: known absence; None: opaque acquisition.
+
+    A completed opaque transport does not establish probe success. Its semantic
+    acquisition is unavailable, so this quality hook returns no verdict.
+    """
     for entry in entries:
         for tool_name, tool_input in _iter_tool_uses(entry):
             if _is_relevant_tool_call(tool_name, tool_input):
                 return True
+    if _has_completed_opaque_transport(entries):
+        return None
     return False
 
 
+def _has_completed_opaque_transport(entries: list[dict]) -> bool:
+    calls: dict[str, list[int]] = {}
+    results: dict[str, list[tuple[int, str]]] = {}
+    for index, entry in enumerate(entries):
+        for call_id, _call_text in extract_model_tool_calls_with_ids(entry):
+            calls.setdefault(call_id, []).append(index)
+        for result in extract_tool_outputs_with_ids(entry):
+            results.setdefault(result.call_id, []).append((index, result.execution_status))
+
+    for index, entry in enumerate(entries):
+        call = entry.get("payload")
+        if not isinstance(call, dict) or call.get("type") != "custom_tool_call":
+            continue
+        call_id = call.get("call_id")
+        opaque_input = call.get("input")
+        if (
+            call.get("name") != "exec" or call.get("status") != "completed"
+            or not isinstance(call_id, str) or not call_id.strip()
+            or not isinstance(opaque_input, str) or not opaque_input.strip()
+            or not _has_no_tool_error(call)
+            or calls.get(call_id) != [index]
+        ):
+            continue
+        paired = results.get(call_id, [])
+        if len(paired) != 1:
+            continue
+        result_index, execution_status = paired[0]
+        if result_index <= index or execution_status != NO_OBSERVED_FAILURE:
+            continue
+        output = entries[result_index].get("payload")
+        if (
+            isinstance(output, dict)
+            and output.get("type") == "custom_tool_call_output"
+            and _opaque_output_completed(output)
+        ):
+            return True
+    return False
+
+
+def _has_no_tool_error(record: dict) -> bool:
+    return all(key not in record or record[key] is False for key in ("is_error", "isError"))
+
+
+def _opaque_output_completed(output: dict) -> bool:
+    if not _has_no_tool_error(output):
+        return False
+    if "status" in output and output["status"] != "completed":
+        return False
+    blocks = output.get("output")
+    if not isinstance(blocks, list) or len(blocks) < 2:
+        return False
+    if any(
+        not isinstance(block, dict) or block.get("type") not in {"input_text", "text"}
+        or not isinstance(block.get("text"), str)
+        for block in blocks
+    ):
+        return False
+    frame_lines = blocks[0]["text"].splitlines()
+    if not frame_lines or frame_lines[0].strip() != "Script completed":
+        return False
+    if not extract_text({"content": blocks[1:]}).strip():
+        return False
+    return all(_opaque_body_usable(block["text"]) for block in blocks[1:])
+
+
+def _opaque_body_usable(text: str) -> bool:
+    """Inspect execution receipts, never subject status or JavaScript input."""
+    try:
+        body = json.loads(text)
+    except json.JSONDecodeError as exc:
+        # Neither supported container can certify a malformed receipt. Only
+        # inspect the parsed prefix, so later log/key mentions are not metadata.
+        return not re.search(
+            r'^\s*[\[{][\s\S]*"(?:exit_code|session_id|chunk_id|wall_time_seconds|original_token_count)"\s*:',
+            text[:exc.pos],
+        )
+    records = body if isinstance(body, list) else [body]
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if not _has_no_tool_error(record):
+            return False
+        shell_receipt = "exit_code" in record or (
+            "output" in record and any(
+                key in record for key in ("session_id", "chunk_id", "wall_time_seconds", "original_token_count")
+            )
+        )
+        if shell_receipt and (
+            type(record.get("exit_code")) is not int or record["exit_code"] != 0
+            or not isinstance(record.get("output"), str)
+            or record.get("session_id") is not None
+        ):
+            return False
+    return True
+
+
 def _iter_tool_uses(entry: dict) -> list[tuple[str, object]]:
+    payload = entry.get("payload")
+    if isinstance(payload, dict):
+        entry = payload
+    if entry.get("type") == "function_call":
+        arguments = entry.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                return []
+        name = entry.get("name")
+        if isinstance(name, str) and isinstance(arguments, dict):
+            return [(name, arguments)]
+        return []
     uses: list[tuple[str, object]] = []
 
     content = entry.get("content")
@@ -214,28 +338,19 @@ def _iter_tool_uses(entry: dict) -> list[tuple[str, object]]:
 
 
 def _is_relevant_tool_call(tool_name: str, tool_input: object) -> bool:
-    name = tool_name.strip().lower()
-    input_text = _stringify_tool_input(tool_input)
-    combined = f"{tool_name}\n{input_text}\n{extract_text({'content': tool_input})}"
+    name = tool_name.strip().lower().rsplit(".", 1)[-1]
 
     if name in OUTPUT_TOOL_NAMES:
         return True
-    if name in SHELL_TOOL_NAMES and SHELL_PROBE_REGEX.search(input_text):
-        return True
-    if name in READ_TOOL_NAMES and READ_PROBE_PATH_REGEX.search(input_text):
-        return True
-    if name.endswith("read") and READ_PROBE_PATH_REGEX.search(input_text):
-        return True
-    if (name.endswith("bash") or name.endswith("powershell")) and SHELL_PROBE_REGEX.search(combined):
-        return True
+    if not isinstance(tool_input, dict):
+        return False
+    if name in SHELL_TOOL_NAMES or name.endswith(("bash", "powershell")):
+        acquired = acquire_tool_input(tool_name, tool_input)
+        return acquired.resolved and acquired.command is not None and bool(SHELL_PROBE_REGEX.search(acquired.command))
+    if name in READ_TOOL_NAMES or name.endswith("read"):
+        path = tool_input.get("file_path") or tool_input.get("path")
+        return isinstance(path, str) and bool(READ_PROBE_PATH_REGEX.search(path))
     return False
-
-
-def _stringify_tool_input(tool_input: object) -> str:
-    try:
-        return json.dumps(tool_input, ensure_ascii=False)
-    except Exception:
-        return str(tool_input)
 
 
 def _deny_reason() -> str:

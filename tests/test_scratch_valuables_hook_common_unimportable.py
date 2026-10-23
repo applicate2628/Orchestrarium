@@ -31,16 +31,10 @@ any) appears in the hook's own output, both when `hook_common` is present
 (pinning that a broken install reports NEITHER project, rather than
 substituting the wrong one).
 
-THE CHOSEN CONTRACT: fail loud, matching every sibling audit (see
-check-scratch-valuables.py's own import-site comment for the full
-reasoning). A broken install now raises an uncaught `ImportError` before
-`main()` is ever entered, so `_resolve_root` is never reached and no report
--- right or wrong -- is ever printed. This hook's own `.sh`/`.ps1` wrappers
-unconditionally exit 0 regardless of the Python process's exit code
-(measured: neither propagates `$?`/`$LASTEXITCODE`, unlike the six
-PreToolUse audit wrappers), so this fix does not change the hook's
-documented "never block a session" contract -- it only stops the wrapper
-from ever having invented data to relay in the first place.
+THE CURRENT CONTRACT: the Python entrypoint acquires its required helper
+inside the process error boundary. A missing helper exits 0 with empty stdout
+and stderr before root resolution or scanning. No fallback parser or invented
+inventory is allowed.
 
 WHY THE FIXTURE COPIES THE HOOK INTO AN ISOLATED TEMP DIRECTORY rather than
 hiding/renaming the real `hook_common.py` in place: this repository's
@@ -139,10 +133,8 @@ class ScratchValuablesHookCommonUnimportableTests(unittest.TestCase):
     def test_broken_install_reports_neither_projects_inventory(self) -> None:
         """Pins the chosen contract for the defect itself: with `hook_common`
         unimportable, the hook must not scan ANY root and print it as if it
-        were the right one. It may fail loudly (nonzero exit, stderr naming
-        the missing module) but stdout must never contain either project's
-        content -- not the wrong one (the original defect) and not a
-        coincidentally-right one (which would just be luck, not a fix)."""
+        were the right one. The Python entry exits silently with zero before
+        root resolution or either project's inventory can be reported."""
         for label, hook_path in HOOKS:
             with self.subTest(hook=label):
                 tmp_root = Path(tempfile.mkdtemp())
@@ -154,10 +146,7 @@ class ScratchValuablesHookCommonUnimportableTests(unittest.TestCase):
                     hook_path, cwd=proj_a, envelope=envelope, with_hook_common=False
                 )
 
-                self.assertNotEqual(
-                    result.returncode, 2,
-                    "must not BLOCK a session -- this hook's own contract never denies",
-                )
+                self.assertEqual(result.returncode, 0)
                 self.assertEqual(
                     result.stdout, "",
                     "a broken install must report NEITHER project's inventory -- "
@@ -166,10 +155,7 @@ class ScratchValuablesHookCommonUnimportableTests(unittest.TestCase):
                 )
                 self.assertNotIn("KEEPME_projA", result.stdout)
                 self.assertNotIn("KEEPME_projB", result.stdout)
-                self.assertIn(
-                    "hook_common", result.stderr,
-                    "the failure must name the missing module, not just fail generically",
-                )
+                self.assertEqual(result.stderr, "")
 
 
 if __name__ == "__main__":

@@ -81,7 +81,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Iterator, Sequence
 
 
@@ -132,6 +132,7 @@ class RootInspection:
     is_directory: bool
     is_link_or_reparse: bool
     identity: tuple[int, int, int, int, int] | None
+    is_regular_file: bool = False
 
 
 @dataclass(frozen=True)
@@ -396,6 +397,7 @@ def inspect_root_no_follow(path: Path) -> RootInspection:
         stat_module.S_ISDIR(info.st_mode),
         linked,
         _identity_parts(info),
+        stat_module.S_ISREG(info.st_mode),
     )
 
 
@@ -424,13 +426,21 @@ def inspect_owned_namespace(owner_root: Path) -> OwnedNamespaceInspection:
                 leaves = list(entries)
             for entry in leaves:
                 leaf = inspect_root_no_follow(Path(entry.path))
-                if leaf.is_link_or_reparse or not leaf.is_directory:
+                tombstone = re.fullmatch(
+                    r"\..+\.orchestrarium-delete-[0-9a-f]{16}", entry.name
+                ) is not None
+                valid_original = leaf.is_directory or leaf.is_regular_file
+                if (
+                    leaf.is_link_or_reparse
+                    or (tombstone and not leaf.is_directory)
+                    or (not tombstone and not valid_original)
+                ):
                     raise OwnedTreeClassificationError(
                         "SCRATCH-INVENTORY-UNSAFE",
                         f"unsafe scratch evidence namespace entry: {run.name}/{entry.name}",
                     )
                 path = Path(entry.path)
-                if re.fullmatch(r"\..+\.orchestrarium-delete-[0-9a-f]{16}", entry.name):
+                if tombstone:
                     tombstones.add(path)
                 else:
                     originals.add(path)
@@ -622,6 +632,133 @@ def classify_owned_tree(tree_root: Path, repository_root: Path) -> OwnedTreeSnap
         all_git_recoverable=unique_paths == set() if unique_paths is not None else False,
         git_check_complete=unique_paths is not None,
     )
+
+
+def release_target_absent(target: Path, repository_root: Path) -> bool:
+    """Prove absence at an ordinary no-follow repository component boundary."""
+    target = Path(target)
+    repository_root = Path(repository_root)
+    try:
+        relative = target.relative_to(repository_root)
+    except ValueError as exc:
+        raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target escapes repository") from exc
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target is not canonical")
+    if any("\x00" in part for part in relative.parts) or (os.name == "nt" and any(
+        os.path.isreserved(part) if hasattr(os.path, "isreserved") else (
+            any(char in '<>:"|?*' or ord(char) < 32 for char in part)
+            or part.endswith((".", " ")) or PureWindowsPath(part).is_reserved()
+        ) for part in relative.parts
+    )):
+        raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target has a malformed component")
+    cursor = repository_root
+    if not stat_module.S_ISDIR(_path_lstat(cursor).st_mode):
+        raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "repository root is not ordinary")
+    for part in relative.parts:
+        cursor /= part
+        try:
+            info = _path_lstat(cursor)
+        except OwnedTreeClassificationError as exc:
+            if isinstance(exc.__cause__, FileNotFoundError):
+                return True
+            raise
+        if cursor != target and not stat_module.S_ISDIR(info.st_mode):
+            raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target parent is not ordinary")
+    return False
+
+
+def snapshot_release_tree(
+    tree_root: Path,
+    repository_root: Path,
+    *,
+    original_root: Path | None = None,
+    verify_link_targets: bool = True,
+) -> tuple[dict[str, str], ...]:
+    """Opt-in exact no-follow inventory for one retained release root.
+
+    The ordinary classifier above remains strict: it never admits a link. A
+    replay may inventory a partially removed tombstone without dereferencing
+    vanished in-root link targets; the lifecycle owner checks those targets
+    against the receipt only when they are outside the released root.
+    """
+    tree_root = Path(tree_root)
+    repository_root = Path(os.path.abspath(repository_root))
+    original_root = Path(original_root) if original_root is not None else tree_root
+    rows: list[dict[str, str]] = []
+    stack: list[tuple[Path, Path]] = [(tree_root, Path("."))]
+    files = 0
+    total_bytes = 0
+    while stack:
+        path, relative = stack.pop()
+        info = path.lstat()
+        if _stat_is_link_or_reparse(info) or (_HAS_ISJUNCTION and os.path.isjunction(path)):
+            if not stat_module.S_ISLNK(info.st_mode):
+                raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "non-symlink reparse entry")
+            raw_target = os.readlink(path)
+            raw_bytes = os.fsencode(raw_target)
+            # Windows exposes the native substitute name for absolute links.
+            # Strip its namespace prefix only for lexical repository matching;
+            # keep the original bytes in the bound raw-text digest.
+            lexical_target = raw_target[4:] if raw_target.startswith("\\\\?\\") else raw_target
+            logical_link = original_root if relative == Path(".") else original_root / relative
+            target = Path(os.path.normpath(
+                lexical_target if os.path.isabs(lexical_target)
+                else os.path.join(logical_link.parent, lexical_target)
+            ))
+            try:
+                target_relative = target.relative_to(repository_root)
+            except ValueError as exc:
+                raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target escapes repository") from exc
+            if not target_relative.parts or any(part in {"", ".", ".."} for part in target_relative.parts):
+                raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target is not canonical")
+            target_class = "inside-root" if target == original_root or original_root in target.parents else "repository"
+            row = {
+                "path": relative.as_posix(), "kind": "symlink",
+                "rawTargetSha256": hashlib.sha256(raw_bytes).hexdigest(),
+                "targetPath": target_relative.as_posix(), "targetClass": target_class,
+            }
+            if verify_link_targets:
+                if release_target_absent(target, repository_root):
+                    row["targetKind"] = "absent"
+                else:
+                    target_kind, target_sha256 = release_target_digest(target, repository_root)
+                    row["targetKind"] = target_kind
+                    row["targetSha256"] = target_sha256
+            rows.append(row)
+        elif stat_module.S_ISDIR(info.st_mode):
+            rows.append({"path": relative.as_posix(), "kind": "directory"})
+            with os.scandir(path) as entries:
+                children = sorted(entries, key=lambda entry: entry.name)
+            stack.extend((Path(entry.path), relative / entry.name) for entry in reversed(children))
+        elif stat_module.S_ISREG(info.st_mode):
+            files += 1
+            total_bytes += int(info.st_size)
+            if files > MAX_OWNED_TREE_FILES or total_bytes > MAX_OWNED_TREE_BYTES:
+                raise OwnedTreeClassificationError("SCRATCH-INVENTORY-LIMIT", "release tree exceeds file or byte limit")
+            rows.append({
+                "path": relative.as_posix(), "kind": "file",
+                "sha256": _read_regular_file_identity(path, info)[0],
+            })
+        else:
+            raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "non-ordinary release entry")
+        if len(rows) > MAX_OWNED_TREE_ENTRIES:
+            raise OwnedTreeClassificationError("SCRATCH-INVENTORY-LIMIT", "release tree exceeds entry limit")
+    return tuple(sorted(rows, key=lambda row: row["path"]))
+
+
+def release_target_digest(target: Path, repository_root: Path) -> tuple[str, str]:
+    """Bind a no-follow ordinary file or link-free directory target payload."""
+    info = _path_lstat(Path(target))
+    if stat_module.S_ISREG(info.st_mode):
+        return "file", _read_regular_file_identity(Path(target), info)[0]
+    if stat_module.S_ISDIR(info.st_mode):
+        rows = snapshot_release_tree(target, repository_root, verify_link_targets=False)
+        if any(row["kind"] == "symlink" for row in rows):
+            raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target directory contains a chained link")
+        return "directory", hashlib.sha256(
+            json.dumps(rows, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+    raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "link target is not ordinary")
 
 
 def _iter_candidate_files(scratch_root: Path, denylist: JunkDenylist) -> Iterator[Path]:

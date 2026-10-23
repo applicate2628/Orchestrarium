@@ -12,6 +12,41 @@ from pathlib import Path
 import pytest
 
 
+def test_cli_environment_roundtrip_preserves_native_names_and_many_rows() -> None:
+    runner = _load_runner()
+    nonce = b"e" * 32
+    directory = "d" * 64
+    header = _header(runner, nonce, (sys.executable, "-c", "pass"), b"")
+    pairs = [(f"Row_{index}", "x") for index in range(129)] + [("Ω (native)", "a=b")]
+    header["environment"] = [{"name": name, "value": value} for name, value in pairs]
+    header["parentPid"] = os.getppid()
+    header["parentStartMarker"] = runner.get_process_start_marker(os.getppid())
+    header["claimDirectoryIdentitySha256"] = directory
+    header["capabilitySha256"] = runner.capability_binding_sha256(nonce, directory)
+    decoded = runner.decode_request_bundle(runner.encode_request_bundle(header, b""))
+    capability = runner.decode_capability_binding(
+        runner.encode_capability_binding(nonce, directory), platform="posix"
+    )
+    owner = runner.ProcessRunnerV1()
+    request = None
+    try:
+        request = runner._header_to_request(decoded, capability, directory, owner)
+        assert tuple((row.name, row.value) for row in request.environment) == tuple(pairs)
+        runner.validate_process_request(request)
+    finally:
+        if request is not None:
+            request.capture_sink_binding.close()
+        assert owner.close().outcome == "closed"
+
+
+def test_cli_environment_header_overflow_is_not_truncated() -> None:
+    runner = _load_runner()
+    header = _header(runner, b"h" * 32, (sys.executable, "-c", "pass"), b"")
+    header["environment"] = [{"name": "A", "value": "x" * runner.MAX_JSON_HEADER_BYTES}]
+    with pytest.raises(runner.ProcessSupervisionError):
+        runner.encode_request_bundle(header, b"")
+
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER_PATH = ROOT / "scripts" / "process_supervision" / "process_runner.py"
 CHILD = ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py"

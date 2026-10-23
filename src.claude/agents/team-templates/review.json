@@ -5,14 +5,14 @@
   "requiresLead": false,
   "chain": ["research", "QA", "review"],
   "roles": [
-    { "agentType": "analyst", "stage": "research", "required": true },
-    { "agentType": "qa-engineer", "stage": "QA", "required": true },
-    { "agentType": "architecture-reviewer", "stage": "review", "required": true },
-    { "agentType": "security-reviewer", "stage": "review", "required": true },
-    { "agentType": "performance-reviewer", "stage": "review", "required": true },
+    { "agentType": "analyst", "stage": "research", "whenNeeded": "unresolved factual baseline or explicitly requested factual investigation outcome" },
+    { "agentType": "qa-engineer", "stage": "QA", "whenNeeded": "missing accepted verification evidence or explicitly requested Quality Assurance outcome" },
+    { "agentType": "architecture-reviewer", "stage": "review", "whenNeeded": "architecture or code-quality objective" },
+    { "agentType": "security-reviewer", "stage": "review", "whenNeeded": "authentication, authorization, trust-boundary, credential, or vulnerability trigger" },
+    { "agentType": "performance-reviewer", "stage": "review", "whenNeeded": "hard latency, throughput, service-level agreement (SLA), or performance-budget trigger" },
     { "agentType": "accessibility-reviewer", "stage": "review", "whenNeeded": "user-facing UI" }
   ],
-  "requiredRoles": ["analyst", "qa-engineer", "architecture-reviewer", "security-reviewer", "performance-reviewer"],
-  "minRoles": 5,
-  "notes": "security-reviewer and performance-reviewer are mandatory for this template (no default waivers). Any exception must be explicitly documented in the work-item claims."
+  "requiredRoles": [],
+  "minRoles": 1,
+  "notes": "Select the reviewer named by the objective and add helpers only when their whenNeeded evidence applies. Every triggered role is mandatory; a missing triggered verdict blocks completion. Dedicated critical templates retain their required risk gates."
 }

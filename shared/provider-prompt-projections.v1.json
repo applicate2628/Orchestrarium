@@ -4,17 +4,17 @@
   "files": {
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "74c50557ec916abc853a49106e2098ebd79718133a92ee2eceef831c2ebe0b2b",
+      "sha256": "2a092075858da4603dccb7aca1682191dff3475dff4e84f930a57537a3012f55",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
       "source": "scripts/process_supervision/process_runner.py",
-      "sha256": "fb1c34d2eb56882f4af50baba385507437f66177666b31ae4edafb254dee1e33",
+      "sha256": "69de09b3bfb695ae27311b547966fd06ef06379d2753f13b6f5b8264d68895a9",
       "destination": "scripts/process_supervision/process_runner.py"
     },
     "invoke-codex-prompt.py": {
       "source": "scripts/invoke-codex-prompt.py",
-      "sha256": "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665",
+      "sha256": "04fbc5fae33e623f0b10f783b6753947e4d8a5e62ab06bc058b9df776b76f79b",
       "destination": "scripts/invoke-codex-prompt.py"
     },
     "invoke-claude-prompt.py": {
@@ -34,12 +34,12 @@
     },
     "external-prompt-governance.md": {
       "source": "shared/external-prompt-governance.md",
-      "sha256": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
+      "sha256": "de85ff6ebdc1aace6d55a116ec42766e576c65a34dfe2445ac99a023fb5b7d04",
       "destination": "scripts/external-prompt-governance.md"
     },
     "external-role-taxonomy.v1.json": {
       "source": "shared/external-role-taxonomy.v1.json",
-      "sha256": "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce",
+      "sha256": "469ad1b8bf93b56f0323456413961ca7e01dd9a1890a66d766e564bc03d489b8",
       "destination": "scripts/external-role-taxonomy.v1.json"
     }
   }

@@ -131,7 +131,8 @@ VALIDATOR_ENVIRONMENT_ALLOWLIST = (
 )
 
 
-LAW_ID_RE = re.compile(r"\b(A[1-9]|B[1-3]|C[1-6]|D[1-5])\b")
+LAW_ID_PATTERN = r"(?:A[1-9]|B[1-3]|C[1-6]|D[1-5]|M)"
+LAW_ID_RE = re.compile(rf"\b{LAW_ID_PATTERN}\b")
 ACTION_SCOPES = frozenset(
     {"all", "dev_repo", "dev_repo_nonstandalone", "installed"}
 )
@@ -475,7 +476,11 @@ def detect_layout(script: Path, provider: str, requested_root: Path | None = Non
                     dev_repo=True,
                     standalone=not (root / "src.codex").is_dir(),
                     pack=root / "src.claude",
-                    skills=root / "src.claude/skills",
+                    skills=(
+                        root / "src.codex/skills"
+                        if (root / "src.codex").is_dir()
+                        else root / "src.claude/skills"
+                    ),
                     scripts=root / "src.claude/agents/scripts",
                     agents_text=_read(root / "shared/AGENTS.shared.md"),
                 )
@@ -743,6 +748,33 @@ class Validator:
                 f"common-skill {name} body drifted from its provider-local body pin "
                 f"(expected {expected}, actual {actual})"
             )
+
+    def check_common_skill_body_parity(
+        self, name: str, codex_file: str, claude_file: str
+    ) -> None:
+        sources = (codex_file, claude_file)
+        if self.layout.standalone:
+            local = sources[0 if self.layout.provider == "codex" else 1]
+            path = self.path(local)
+            if path.is_file() and skill_frontmatter_valid(path, name):
+                self.ok(
+                    f"common-skill {name} local skill valid; "
+                    "cross-provider parity not applicable"
+                )
+            else:
+                self.fail(f"common-skill {name} local skill missing or frontmatter invalid")
+            return
+        for source in sources:
+            if not self.is_file(source):
+                self.fail(
+                    f"common-skill {name} cross-provider body parity "
+                    f"(file missing: {source})"
+                )
+                return
+        digests = tuple(common_skill_body_sha256(self.path(source).read_bytes()) for source in sources)
+        (self.ok if digests[0] == digests[1] else self.fail)(
+            f"common-skill {name} cross-provider body parity (historical Source comparison)"
+        )
 
     def _run_python(
         self,
@@ -1141,7 +1173,12 @@ def layering_ids_resolve(path: Path) -> tuple[bool, tuple[str, ...]]:
     text = _read(path)
     unresolved = []
     for law_id in sorted(set(LAW_ID_RE.findall(text))):
-        if not re.search(rf"\*\*[^*]*\({law_id}(?:\)| )[^*]*\*\*", text):
+        if not re.search(
+            rf"(?m)^\s*[-*]\s+\*\*[^*\n]*\("
+            rf"(?:{LAW_ID_PATTERN}/)*{re.escape(law_id)}"
+            rf"(?:/{LAW_ID_PATTERN})*(?:\)| )[^*\n]*\*\*",
+            text,
+        ):
             unresolved.append(law_id)
     return not unresolved, tuple(unresolved)
 
@@ -1341,11 +1378,11 @@ def _direct(
             _verdict(
                 validator,
                 name in common_skill_pin_names,
-                f"common-skill {name} has an applicable provider-local body pin",
-                f"common-skill body pins missing: {name}",
+                f"common-skill {name} has an applicable body check",
+                f"common-skill body checks missing: {name}",
             )
         for name in sorted(common_skill_pin_names - live_names):
-            validator.fail(f"common-skill body pins extra: {name}")
+            validator.fail(f"common-skill body checks extra: {name}")
         return
     if kind == "layering_codex":
         owned = codex_owned_skill_names(layout.agents_text, utility_skills)
@@ -1384,7 +1421,7 @@ def _direct(
                 f"{role} in role index but {path} missing",
             )
         for name in sorted(common):
-            path = layout.pack / "skills" / name / "SKILL.md"
+            path = layout.skills / name / "SKILL.md"
             _verdict(
                 validator,
                 path.is_file(),
@@ -1403,32 +1440,37 @@ def _direct(
                 )
         return
     if kind == "curated_registry":
-        roles = extract_roles(layout.agents_text, "## Role index")
-        for role in roles:
-            skill = layout.pack / "skills" / role / "SKILL.md"
-            if not skill.is_file():
-                continue
-            _verdict(
-                validator,
-                role in curated_role_skills,
-                f"{role} skill surface is in the curated role-skill registry",
-                f"{role} has skills/{role}/SKILL.md but is not in the curated "
-                f"role-skill registry ({' '.join(sorted(curated_role_skills))}) "
-                "— roles-as-skills allowlist violation",
-            )
+        label = "Claude inline role identities match the curated role-skill registry"
+        content = validator._read_or_fail("@PACK/CLAUDE.md", label)
+        if content is None:
+            return
+        section = validator._h2(content, "## Delegation rule")
+        clauses = re.findall(
+            r"^- The curated inline role identities are exactly ([^\n.]*)\.",
+            section,
+            re.MULTILINE,
+        )
+        identities = re.findall(r"`([^`]+)`", clauses[0]) if len(clauses) == 1 else []
+        valid_clause = len(clauses) == 1 and not re.sub(
+            r"`[^`]*`|,|\band\b|\s+", "", clauses[0]
+        )
+        _verdict(
+            validator,
+            bool(curated_role_skills) and bool(identities) and valid_clause
+            and len(identities) == len(set(identities))
+            and frozenset(identities) == curated_role_skills,
+            label,
+            f"{label} (missing, empty or mismatched provider clause; "
+            f"expected {' '.join(sorted(curated_role_skills))}, "
+            f"actual {' '.join(identities) or 'none'})",
+        )
         return
     if kind == "layering_claude":
         paths = sorted((layout.pack / "agents").glob("*.md"))
         paths.extend(
-            layout.pack / "skills" / role / "SKILL.md"
-            for role in (
-                "lead",
-                "product-manager",
-                "analyst",
-                "architect",
-                "planner",
-            )
-            if (layout.pack / "skills" / role / "SKILL.md").is_file()
+            layout.skills / role / "SKILL.md"
+            for role in sorted(curated_role_skills)
+            if (layout.skills / role / "SKILL.md").is_file()
         )
         for path in paths:
             passed, unresolved = layering_ids_resolve(path)
@@ -1470,7 +1512,7 @@ def _direct(
     if kind == "skill_frontmatter":
         for directory in sorted(
             path
-            for path in (layout.pack / "skills").iterdir()
+            for path in layout.skills.iterdir()
             if path.is_dir()
         ):
             path = directory / "SKILL.md"
@@ -1658,7 +1700,11 @@ def validate_pack(
         common_skill_pin_names = frozenset(
             action[1]
             for action in applicable_actions
-            if len(action) >= 2 and action[0] == "check_common_skill_body_pin"
+            if len(action) >= 2
+            and action[0] in {
+                "check_common_skill_body_pin",
+                "check_common_skill_body_parity",
+            }
         )
         for action in applicable_actions:
             operation, *args = action

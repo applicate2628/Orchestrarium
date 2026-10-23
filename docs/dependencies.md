@@ -13,9 +13,9 @@ live on your machine; only the rules (in the role files and `CLAUDE.md` /
 
 ## How an edge is declared
 
-An optional `Depends-on:` line in the dependent item's `status.md`
-`## Current state` block (the same place the `Epic:` join-key lives), but
-**multi-valued** — a work-item may depend on several:
+`Depends-on:` is a top-level optional scalar field in the dependent item's
+current staged `status.md`, alongside other optional relations such as `Epic:`.
+It is **multi-valued** — a work-item may depend on several:
 
 ```
 Depends-on: <slug>, <slug>
@@ -76,10 +76,10 @@ scanning the active set (Codex has no commands):
 gate verdicts are runtime stops. They are related but NOT the same mechanism, and
 the difference that matters is the RESOLUTION:
 
-- `BLOCKED:prerequisite` is the in-flight discovery of unplanned adjacent work (a
-  broken module, a missing migration); it is resolved by filing that work in the
-  bug registry — NOT by adding a `Depends-on` edge (bugs are not dependency
-  targets).
+- `BLOCKED:prerequisite` is an in-flight hold for required adjacent work or input;
+  retain its actual cause, owner and next action in artifact/recovery and resume
+  only after the prerequisite is verified. Propose a configured-registry bug only
+  under QA admission; do not add a `Depends-on` edge (bugs are not targets).
 - `BLOCKED:dependency` is an EXTERNAL blocker (missing tool, access, info)
   surfaced to the user.
 - `Depends-on` is neither: a standing, planned work-item→work-item dependency
@@ -116,9 +116,9 @@ entry, a guessed status word, or a missing record never grants readiness.
 - **blocked-by**: an item's `Depends-on` targets that are not yet done (derived).
 - **ready-set**: active items whose every dependency is done (or have none).
 - **dangling**: a `Depends-on` slug with no matching work-item.
-- **BLOCKED:prerequisite**: the transient gate verdict when an agent discovers
-  unplanned adjacent work mid-run, resolved by filing it in the bug registry —
-  distinct from `Depends-on` (a planned work-item→work-item edge), not its
-  "persisted form".
+- **BLOCKED:prerequisite**: in-flight hold for required adjacent work or input; keep
+  its actual cause, owner and next action, and resume only after verified resolution.
+  A configured-registry bug proposal requires QA admission; it remains distinct
+  from `Depends-on` (a planned work-item→work-item edge), not its "persisted form".
 - **BLOCKED:dependency**: the separate gate verdict for an external blocker
   surfaced to the user — NOT modeled by `Depends-on`.

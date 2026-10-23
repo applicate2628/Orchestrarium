@@ -24,14 +24,13 @@ description: "External worker: run eligible worker roles externally."
 
 ## External execution
 
-- Read and normalize `.agents/.agents-mode.yaml` to the current canonical format before trusting its flags.
 - Honor the contract-resolved `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`; this role does not reimplement their resolution.
-- Resolve config, provider, model/profile, workdir, fallback, and transport under the shared external-dispatch contract; do not reproduce its resolution logic here.
+- Resolve config, provider, model/profile, workdir, fallback, and transport through the shared external-dispatch owner; consume effective values in memory and do not rewrite configuration on a routing read. Persisted normalization belongs only to an authorized install/configuration write.
 - Luna mechanical dispatch is native-only. External-worker never realizes or falls back for it; the native caller consumes `RoleDispatchPolicyV1` from the installed `AGENTS.md`.
 - Do not honor `reserve` for worker-side lanes. It is a supplemental read-only candidate only in `advisory.*` and `review.*` profile orders after primary `claude`/`codex`, and `reserveResolver` must not turn it into a worker transport, primary-Claude retry, or implementation/editing fallback.
 - Keep explicit-only and unavailable providers out of shipped and repo-local `auto` profiles.
-- Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
-- Use file-based prompt delivery for substantive task prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
+- Never select `gpt-6.1-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
+- For substantive prompts, prefer the working approved wrapper and its file/stdin delivery. If a helper is defective, use only the declared owner-equivalent route under shared Assistance and external-dispatch when every selected provider/capability, input, creator-resource, real-terminal, independent-receiving, and provenance guarantee remains satisfied. A helper failure alone does not establish provider unavailability; report any unmet guarantee without automatic fallback, internal relay, host-denial bypass, or fabricated wrapper frame.
 - If the selected Claude CLI path fails for a worker artifact, do not convert that same primary `claude` run to the secret-backed wrapper. Treat Claude as unavailable or reroute honestly.
 - This adapter is a direct external launch contract. Do not spawn it as an internal specialist or helper; the orchestrator must launch the selected external provider directly or fail closed.
 - A spawned internal subagent is still internal even if the prompt assigns it an external-provider label. That is a routing violation, not a valid external-worker execution path.
@@ -42,6 +41,7 @@ description: "External worker: run eligible worker roles externally."
 ## Execution recipe
 
 - Use the approved thin wrapper owned by `../lead/external-dispatch.md`; that owner supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. Do not retype the schema, consume wrapper-private captures, or substitute a direct closure/manual sidecar path.
+- When explicit Kimi engineering is policy-admitted, require the `engineering` mutation class and a taxonomy mapping from the assigned profession to `external-worker`. A validated capability file may select only the caller-scoped worker tools, cwd, and artifact needed by that assignment; cwd selection is not a sandbox, the result remains nonauthorizing, and the integration owner independently verifies every change. Omission of the file preserves empty tools, Model Context Protocol servers, and subagents with permission `reject`.
 - Await the wrapper's terminal return, then apply the owner's stall/timeout and tracked-ledger rules; never duplicate a still-running launch.
 - Accept completion only when the shared run-completion oracle passes; a failed oracle is `UNVERIFIED`, not a worker artifact.
 

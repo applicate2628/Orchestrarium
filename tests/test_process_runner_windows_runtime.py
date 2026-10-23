@@ -14,6 +14,81 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows environment equality")
+def test_windows_environment_uses_native_ordinal_relation_and_empty_boundary() -> None:
+    runner = _load_runner()
+    api = runner._WindowsKernelV1()
+    relation = api.k32.CompareStringOrdinal("ß", 1, "SS", 2, True)
+    assert relation in (1, 3) and "ß".casefold() == "SS".casefold()
+    pairs = (("ß", "one"), ("SS", "two"))
+    block, duplicate = api.serialize_environment(pairs)
+    expected = pairs if relation == 1 else tuple(reversed(pairs))
+    assert block == "\0".join(f"{name}={value}" for name, value in expected) + "\0\0"
+    assert not duplicate
+    runner._validate_environment(tuple(runner.EnvironmentRowV1(*pair) for pair in pairs), api)
+    with pytest.raises(runner.ProcessSupervisionError):
+        runner._validate_environment((runner.EnvironmentRowV1("Path", "a"), runner.EnvironmentRowV1("PATH", "b")), api)
+    runner._validate_environment((), api)
+    runner._validate_environment((runner.EnvironmentRowV1("A", "x" * 32763),), api)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows API ownership")
+def test_environment_validation_and_creation_share_the_acquired_api() -> None:
+    runner = _load_runner()
+    seen = []
+
+    class API(runner._WindowsKernelV1):
+        def __bool__(self):
+            return False
+
+        def serialize_environment(self, items):
+            seen.append(id(self))
+            return super().serialize_environment(items)
+
+    api = API()
+    owner = runner.ProcessRunnerV1(windows_api=api)
+    request = _request(runner, (sys.executable, "-c", "print('ENV-OWNER-OK')"))
+    try:
+        result = owner.run(request)
+        assert result.target_exit_code == 0 and result.failure_id is None
+        assert result.resources_closed
+        assert len(seen) >= 2 and set(seen) == {id(api)}
+    finally:
+        request.capture_sink_binding.close()
+        assert owner.close().outcome == "closed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows comparison failure")
+def test_environment_native_comparison_failure_is_safe_and_not_a_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner()
+    api = runner._WindowsKernelV1()
+    monkeypatch.setattr(api.k32, "CompareStringOrdinal", lambda *_args: 0)
+    rows = (runner.EnvironmentRowV1("A", "synthetic-secret"), runner.EnvironmentRowV1("B", "other"))
+    with pytest.raises(runner.ProcessSupervisionError) as caught:
+        runner._validate_environment(rows, api)
+    assert caught.value.failure_id == "PSV1-REQUEST-INVALID"
+    assert "synthetic-secret" not in str(caught.value)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="supplied Windows owner API")
+def test_supplied_executable_owner_missing_api_never_chooses_a_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+    runner = _load_runner()
+    request = _request(runner, (sys.executable, "-c", "pass"))
+    owner = types.SimpleNamespace(path=request.resolved_executable, identity_sha256="0" * 64, windows_api=None)
+
+    def forbidden_default():
+        raise AssertionError("provided owner was replaced")
+
+    monkeypatch.setattr(runner, "_WindowsKernelV1", forbidden_default)
+    try:
+        with pytest.raises(runner.ProcessSupervisionError) as caught:
+            runner.validate_process_request(request, owner)
+        assert caught.value.failure_id == "PSV1-EXECUTABLE-UNRESOLVED"
+    finally:
+        request.capture_sink_binding.close()
+
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER_PATH = ROOT / "scripts" / "process_supervision" / "process_runner.py"
 CHILD = ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py"
@@ -136,6 +211,60 @@ def test_suspended_target_cannot_write_first_marker_before_job_verification(tmp_
     assert result.tree.tree_empty is True
     assert marker.read_text(encoding="utf-8") == "started"
     assert port.events == ["process.supervision.windows.job-verified.v1"]
+
+
+def test_windows_environment_block_limit_is_checked_before_launch() -> None:
+    """The generic byte cap must not admit a Windows block over 32767 units."""
+    runner = _load_runner()
+    request = _request(runner, (sys.executable, str(CHILD), "identity"))
+    # "A=" + value + double NUL = 32768 UTF-16 code units, below the generic byte cap.
+    request = runner.dataclasses.replace(
+        request,
+        environment=(runner.EnvironmentRowV1("A", "x" * 32764),),
+    )
+    with pytest.raises(runner.ProcessSupervisionError) as captured:
+        runner.validate_process_request(request)
+    assert captured.value.failure_id == "PSV1-REQUEST-INVALID"
+    assert captured.value.terminal_stage == "request-validation"
+
+
+def test_stdout_fd_transfer_failure_closes_taken_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed lifecycle handoff must not orphan the native binary descriptor."""
+    runner = _load_runner()
+    captured_fds: list[int] = []
+    owner_type = runner._WINDOWS_JOB.WindowsJobProcessV1
+    original_take = owner_type.take_stdout_fd
+    original_transfer = runner.RunLifecycleV1.transfer_resource
+
+    def record_take(self):
+        fd = original_take(self)
+        if fd is not None:
+            captured_fds.append(fd)
+        return fd
+
+    def fail_stdout_transfer(self, name, action, *, state):
+        if name.endswith(":stdout_parent"):
+            raise RuntimeError("injected stdout handoff failure")
+        return original_transfer(self, name, action, state=state)
+
+    monkeypatch.setattr(owner_type, "take_stdout_fd", record_take)
+    monkeypatch.setattr(runner.RunLifecycleV1, "transfer_resource", fail_stdout_transfer)
+    try:
+        with pytest.raises(RuntimeError, match="injected stdout handoff failure"):
+            runner.ProcessRunnerV1().run(
+                _request(runner, (sys.executable, str(CHILD), "identity"))
+            )
+        assert captured_fds
+        with pytest.raises(OSError):
+            os.fstat(captured_fds[-1])
+    finally:
+        for fd in captured_fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 @pytest.mark.parametrize("resume_value", (0, 2, 0xFFFFFFFE, 0xFFFFFFFF))

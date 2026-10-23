@@ -16,6 +16,10 @@ VAK_PROJECTIONS = (
     ROOT / "src.codex" / "skills" / "vak-dissertation-review" / "SKILL.md",
     ROOT / "src.claude" / "skills" / "vak-dissertation-review" / "SKILL.md",
 )
+ARCHIVIST_PROJECTIONS = (
+    ROOT / "src.codex" / "skills" / "knowledge-archivist" / "SKILL.md",
+    ROOT / "src.claude" / "agents" / "knowledge-archivist.md",
+)
 CURRENT_TRUTH_PROJECTIONS = (
     SHARED,
     *CORE_PROJECTIONS,
@@ -60,6 +64,21 @@ STALE_MANDATORY_CLAIMS = (
 
 
 class SessionPersistenceContractTest(unittest.TestCase):
+    def test_duplicate_report_cleanup_preserves_active_canonical_links(self) -> None:
+        for path in ARCHIVIST_PROJECTIONS:
+            rule = next(
+                line for line in path.read_text(encoding="utf-8").splitlines()
+                if line.startswith("- When an active work-item artifact or lane result is duplicated")
+            )
+            with self.subTest(path=path):
+                self.assertIn("Before removing", rule)
+                self.assertIn("inbound Markdown links from active canonical artifacts", rule)
+                self.assertIn("preserve the report", rule.lower())
+                self.assertIn("canonical target or historical identifier", rule)
+                self.assertIn("same change", rule)
+                self.assertIn("After removal", rule)
+                self.assertIn("bounded link-resolution check", rule)
+
     def test_shared_owner_states_the_full_conditional_contract(self) -> None:
         text = SHARED.read_text(encoding="utf-8")
         for required in (

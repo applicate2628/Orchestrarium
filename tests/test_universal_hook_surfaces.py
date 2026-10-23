@@ -75,6 +75,7 @@ class UniversalHookSurfaceTest(unittest.TestCase):
         )
         assert spec is not None and spec.loader is not None
         checker = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = checker
         spec.loader.exec_module(checker)
         for platform in ("claude", "codex"):
             self.assertNotIn(

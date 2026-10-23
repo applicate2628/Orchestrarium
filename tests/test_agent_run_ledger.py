@@ -30,6 +30,245 @@ def run_validator(work_item: Path) -> subprocess.CompletedProcess:
     )
 
 
+def custody_fixture(tmp_path: Path) -> tuple[Path, Path, str, str, str]:
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    subprocess.run(["git", "init", "-q", str(parent)], check=True)
+    subprocess.run(["git", "-C", str(parent), "config", "user.name", "Fixture"], check=True)
+    subprocess.run(["git", "-C", str(parent), "config", "user.email", "fixture@example.invalid"], check=True)
+    (parent / "seed.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(parent), "add", "seed.txt"], check=True)
+    subprocess.run(["git", "-C", str(parent), "commit", "-qm", "seed"], check=True)
+    source = tmp_path / "source"
+    subprocess.run(["git", "-C", str(parent), "worktree", "add", "-q", "-b", "source", str(source)], check=True)
+    item = prepare_valid_work_item(parent)
+    key = "work-items/active/front/review.md"
+    source_artifact = source / key
+    source_artifact.parent.mkdir(parents=True)
+    source_artifact.write_bytes(b"reviewer-approved W bytes\n")
+    decoy = parent / "work-items" / "archive" / "2026-09" / "front" / "review.md"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_bytes(b"different P archive bytes\n")
+    target = {
+        "schemaVersion": 2, "runId": "run-custody-target-001", "workItem": item.name,
+        "role": "architecture-reviewer", "executionRole": "internal", "status": "revise",
+        "gate": "REVISE", "scope": ["review"], "artifact": key, "lane": "architecture",
+        "effort": "medium", "provider": "codex", "startedAt": "2026-09-28T00:00:00Z",
+        "updatedAt": "2026-09-28T00:00:00Z",
+    }
+    raw = json.dumps(target, separators=(",", ":")).encode("utf-8")
+    (item / "agent-runs.jsonl").write_bytes(raw + b"\n")
+    worktree_id = Path(subprocess.check_output(
+        ["git", "-C", str(source), "rev-parse", "--absolute-git-dir"], text=True,
+    ).strip()).name
+    return item, source, key, hashlib.sha256(raw).hexdigest(), worktree_id
+
+
+def custody_append(item: Path, source: Path, key: str, target_sha: str, worktree_id: str,
+                   approved_sha: str, *, effort: str = "medium",
+                   target_id: str = "run-custody-target-001",
+                   closer_id: str = "run-custody-closer-001") -> subprocess.CompletedProcess:
+    return run_ledger(
+        item, "append", "--run-id", closer_id, "--role", "architecture-reviewer",
+        "--execution-role", "internal", "--status", "completed", "--gate", "PASS",
+        "--scope", "review", "--artifact", key, "--event-kind", "standalone",
+        "--closes", target_id, "--artifact-revision", approved_sha,
+        "--lane", "architecture", "--effort", effort, "--provider", "codex",
+        "--evidence", "review:independent review", "--source-worktree", str(source),
+        "--expected-source-worktree-id", worktree_id,
+        "--expected-reviewed-sha256", approved_sha,
+        "--expected-ledger-sha256", hashlib.sha256((item / "agent-runs.jsonl").read_bytes()).hexdigest(),
+        "--target-raw-line-sha256", target_sha,
+    )
+
+
+def test_custody_uses_approved_w_bytes_not_parent_archive(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved = (source / key).read_bytes()
+    approved_sha = hashlib.sha256(approved).hexdigest()
+    before = (item / "agent-runs.jsonl").read_bytes()
+    result = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert result.returncode == 0, result.stderr
+    events = [json.loads(line) for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    custody = events[-1]["reviewArtifactCustody"]
+    assert (item / custody["snapshot"]).read_bytes() == approved
+    assert events[-1]["artifact"] == key
+    assert (item / "agent-runs.jsonl").read_bytes().startswith(before)
+    assert run_validator(item).returncode == 0
+
+
+def test_custody_two_targets_reuse_one_exact_snapshot(tmp_path: Path) -> None:
+    item, source, key, first_sha, worktree_id = custody_fixture(tmp_path)
+    ledger = item / "agent-runs.jsonl"
+    first = json.loads(ledger.read_text(encoding="utf-8"))
+    second = {**first, "runId": "run-custody-target-002"}
+    second_raw = json.dumps(second, separators=(",", ":")).encode("utf-8")
+    ledger.write_bytes(ledger.read_bytes() + second_raw + b"\n")
+    prefix = ledger.read_bytes()
+    approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()
+    first_result = custody_append(item, source, key, first_sha, worktree_id, approved_sha)
+    assert first_result.returncode == 0, first_result.stderr
+    second_result = custody_append(
+        item, source, key, hashlib.sha256(second_raw).hexdigest(), worktree_id,
+        approved_sha, target_id=second["runId"], closer_id="run-custody-closer-002",
+    )
+    assert second_result.returncode == 0, second_result.stderr
+    assert ledger.read_bytes().startswith(prefix)
+    events = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    assert [row["reviewArtifactCustody"]["targetRunId"] for row in events[2:]] == [first["runId"], second["runId"]]
+    assert events[2]["reviewArtifactCustody"]["snapshot"] == events[3]["reviewArtifactCustody"]["snapshot"]
+    assert len(list((item / "review-artifact-custody").iterdir())) == 1
+    assert run_validator(item).returncode == 0
+    (source / key).unlink()
+    assert run_validator(item).returncode == 0
+
+
+def historical_pass_h1_fixture(tmp_path: Path, state: str):
+    fixture_path = ROOT / "tests" / "test_ledger_h1_effective_view.py"
+    spec = importlib.util.spec_from_file_location("custody_h1_fixtures", fixture_path)
+    fixtures = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixtures)
+    validator = load_ledger_module().load_validator()
+    root = tmp_path / state
+    artifacts, items, paths, _ = fixtures.synthetic_artifacts(
+        validator, root, sealed_closer_artifact="target.md",
+    )
+    if state == "revoked":
+        artifacts = fixtures.revoked_artifacts(validator, artifacts)
+    fixtures.materialize_live_artifacts(root, artifacts)
+    item = items[0]
+    (item / "status.md").write_text(valid_status(), encoding="utf-8")
+    source = root / "original-copy.md"
+    source.write_bytes((item / "target.md").read_bytes())
+    raw = (item / "agent-runs.jsonl").read_bytes()
+    target_raw = raw.splitlines()[3]
+    target = json.loads(target_raw)
+    return validator, root, item, source, raw, target_raw, target, paths[0]
+
+
+@pytest.mark.parametrize("missing_before_apply", [False, True], ids=["present-at-apply", "missing-at-apply"])
+@pytest.mark.parametrize("state", ["active", "revoked"])
+def test_historical_pass_custody_preserves_live_and_revoked_h1_authority(
+    tmp_path: Path, state: str, missing_before_apply: bool,
+) -> None:
+    validator, root, item, source, raw, target_raw, target, path = historical_pass_h1_fixture(tmp_path, state)
+    baseline_context = validator.load_effective_ledger_view(root, item, path)
+    baseline_errors = []
+    baseline = validator.derive_event_validity(
+        baseline_context.rows, item, baseline_errors, context=baseline_context,
+    )
+    if missing_before_apply:
+        (item / "target.md").unlink()
+    result = subprocess.run([
+        sys.executable, str(ROOT / "scripts" / "mutate-work-item.py"),
+        "retain-pass-artifact", "--root", str(root), "--slug", item.name,
+        "--run-id", target["runId"], "--raw-line-ordinal", "4",
+        "--expected-raw-line-sha256", hashlib.sha256(target_raw).hexdigest(),
+        "--expected-ledger-sha256", hashlib.sha256(raw).hexdigest(),
+        "--source-artifact", "original-copy.md", "--expected-original-sha256",
+        hashlib.sha256(source.read_bytes()).hexdigest(), "--apply",
+    ], capture_output=True, text=True)
+    assert result.returncode == 0, (state, result.stdout, result.stderr)
+    if not missing_before_apply:
+        (item / "target.md").unlink()
+    context = validator.load_effective_ledger_view(root, item, path)
+    assert context.observation.activation_state == state, context.observation.diagnostics
+    errors = []
+    actual = validator.derive_event_validity(context.rows, item, errors, context=context)
+    assert (actual, errors) == (baseline, baseline_errors)
+    assert (item / "agent-runs.jsonl").read_bytes() == raw
+    assert context.historical_pass_custody
+
+
+def test_custody_refuses_dirty_w_drift_at_unchanged_head(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()
+    before = (item / "agent-runs.jsonl").read_bytes()
+    (source / key).write_bytes(b"different dirty W bytes\n")
+    result = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert result.returncode != 0
+    assert "WI-LEDGER-CUSTODY-SOURCE-DRIFT" in result.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert not (item / "review-artifact-custody").exists()
+
+
+def test_custody_rejects_stale_target_and_wrong_source_identity(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()
+    before = (item / "agent-runs.jsonl").read_bytes()
+    stale = custody_append(item, source, key, "0" * 64, worktree_id, approved_sha)
+    assert stale.returncode != 0 and "WI-LEDGER-CUSTODY-STALE-TARGET" in stale.stderr
+    wrong_source = custody_append(item, source, key, target_sha, "other-worktree", approved_sha)
+    assert wrong_source.returncode != 0 and "WI-LEDGER-CUSTODY-SOURCE-DRIFT" in wrong_source.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert not (item / "review-artifact-custody").exists()
+
+
+def test_custody_rejects_escaping_source_link_even_with_approved_bytes(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved = (source / key).read_bytes()
+    approved_sha = hashlib.sha256(approved).hexdigest()
+    external = tmp_path / "external-review.md"
+    external.write_bytes(approved)
+    (source / key).unlink()
+    try:
+        (source / key).symlink_to(external)
+    except OSError:
+        pytest.skip("host does not permit synthetic file symlink creation")
+    before = (item / "agent-runs.jsonl").read_bytes()
+    result = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert result.returncode != 0 and "WI-LEDGER-CUSTODY-SOURCE-DRIFT" in result.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert not (item / "review-artifact-custody").exists()
+
+
+def test_custody_accepts_in_worktree_link_with_approved_bytes(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved = (source / key).read_bytes()
+    approved_sha = hashlib.sha256(approved).hexdigest()
+    linked_target = source / "review-bytes.md"
+    linked_target.write_bytes(approved)
+    (source / key).unlink()
+    try:
+        (source / key).symlink_to(linked_target)
+    except OSError:
+        pytest.skip("host does not permit synthetic file symlink creation")
+    result = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert result.returncode == 0, result.stderr
+    assert run_validator(item).returncode == 0
+
+
+def test_custody_failed_candidate_cleans_only_new_snapshot(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()
+    # A profession mismatch reaches candidate validation after snapshot creation.
+    event = json.loads((item / "agent-runs.jsonl").read_text().splitlines()[0])
+    event["role"] = "analyst"
+    raw = (json.dumps(event) + "\n").encode()
+    (item / "agent-runs.jsonl").write_bytes(raw)
+    target_sha = hashlib.sha256(raw.rstrip(b"\n")).hexdigest()
+    before = (item / "agent-runs.jsonl").read_bytes()
+    result = custody_append(item, source, key, target_sha, worktree_id, approved_sha, effort="low")
+    assert result.returncode != 0 and "C3" in result.stderr and "authority" in result.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert not (item / "review-artifact-custody" / approved_sha).exists()
+
+
+def test_custody_snapshot_tamper_and_replay_fail_closed(tmp_path: Path) -> None:
+    item, source, key, target_sha, worktree_id = custody_fixture(tmp_path)
+    approved_sha = hashlib.sha256((source / key).read_bytes()).hexdigest()
+    first = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert first.returncode == 0, first.stderr
+    ledger_after = (item / "agent-runs.jsonl").read_bytes()
+    repeated = custody_append(item, source, key, target_sha, worktree_id, approved_sha)
+    assert repeated.returncode != 0 and "WI-LEDGER-CUSTODY-STALE-TARGET" in repeated.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == ledger_after
+    (item / "review-artifact-custody" / approved_sha).write_bytes(b"tampered\n")
+    validated = run_validator(item)
+    assert validated.returncode != 0
+    assert "WI-LEDGER-CUSTODY-SNAPSHOT-MISMATCH" in validated.stdout
+
+
 def load_ledger_module():
     spec = importlib.util.spec_from_file_location("agent_run_ledger", LEDGER)
     assert spec is not None and spec.loader is not None
@@ -171,6 +410,67 @@ def test_append_records_event_and_validator_passes(tmp_path: Path):
     assert event["evidence"][0]["kind"] == "command"
 
 
+def test_append_lock_timeout_fails_loud_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    ledger = load_ledger_module()
+    item = prepare_valid_work_item(tmp_path)
+    lock = item / "agent-runs.jsonl.lock"
+    lock.write_text("pid=fixture-append\n", encoding="utf-8")
+    args = ledger.build_parser().parse_args(
+        [
+            "--work-item", str(item), "append", "--run-id", "lock-append-001",
+            "--role", "qa-engineer", "--execution-role", "internal",
+            "--status", "completed", "--gate", "none", "--scope", "lock diagnostic",
+            "--event-kind", "standalone",
+        ]
+    )
+    before = (item / "agent-runs.jsonl").read_bytes() if (item / "agent-runs.jsonl").exists() else b""
+    monkeypatch.setattr(ledger.time, "sleep", lambda _seconds: None)
+
+    assert ledger.command_append(args) == 1
+
+    captured = capsys.readouterr()
+    assert ledger.APPEND_SUCCESS_MARKER not in captured.out
+    assert "FAIL: ledger locked" in captured.err
+    after = (item / "agent-runs.jsonl").read_bytes() if (item / "agent-runs.jsonl").exists() else b""
+    assert after == before
+    assert lock.read_text(encoding="utf-8") == "pid=fixture-append\n"
+
+
+def test_settle_lock_timeout_fails_loud_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    ledger = load_ledger_module()
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item, "append", "--run-id", "lock-launch-001", "--role", "qa-engineer",
+        "--execution-role", "internal", "--status", "running", "--gate", "none",
+        "--scope", "lock diagnostic", "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    lock = item / "agent-runs.jsonl.lock"
+    lock.write_text("pid=fixture-settle\n", encoding="utf-8")
+    args = ledger.build_parser().parse_args(
+        [
+            "--work-item", str(item), "settle-launch", "--launch-run-id", "lock-launch-001",
+            "--run-id", "lock-terminal-001", "--status", "completed", "--gate", "none",
+            "--started-at", "2026-09-13T00:00:00Z", "--updated-at", "2026-09-13T00:01:00Z",
+        ]
+    )
+    before = (item / "agent-runs.jsonl").read_bytes()
+    monkeypatch.setattr(ledger.time, "sleep", lambda _seconds: None)
+
+    assert ledger.command_settle_launch(args) == 1
+
+    captured = capsys.readouterr()
+    assert ledger.SETTLE_SUCCESS_MARKER not in captured.out
+    assert ledger.SETTLE_ALREADY_MARKER not in captured.out
+    assert "FAIL: ledger locked" in captured.err
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert lock.read_text(encoding="utf-8") == "pid=fixture-settle\n"
+
+
 def test_kimi_unsupported_effort_is_durable_and_validator_accepted(tmp_path: Path):
     item = prepare_valid_work_item(tmp_path)
     common = (
@@ -220,6 +520,55 @@ def test_kimi_unsupported_effort_is_durable_and_validator_accepted(tmp_path: Pat
         for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert [event["effort"] for event in events] == ["unsupported", "unsupported"]
+
+
+def test_kimi_configured_max_with_empty_flags_is_durable_and_validator_accepted(
+    tmp_path: Path,
+):
+    item = prepare_valid_work_item(tmp_path)
+    common = (
+        "--role", "qa-engineer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "max",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--scope", "provider configured effort fixture",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:provider-configured-effort-fixture",
+        "--started-at", "2026-09-14T10:00:00Z",
+        "--updated-at", "2026-09-14T10:00:00Z",
+        "--launch-flags-json", "[]",
+    )
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "dispatch-kimi-configured-max",
+        "--event-kind", "launch",
+        *common,
+    )
+    assert launch.returncode == 0, launch.stderr
+    terminal = run_ledger(
+        item,
+        "append",
+        "--run-id", "evidence-kimi-configured-max",
+        "--event-kind", "terminal",
+        "--launch-run-id", "dispatch-kimi-configured-max",
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--artifact-identity", "sha256:" + "b" * 64,
+        "--external-dispatch-id", "dispatch-kimi-configured-max",
+        "--external-evidence-run-id", "evidence-kimi-configured-max",
+        "--effort-mapping-loss", "none",
+        "--evidence", "command:provider-result-envelope-flushed",
+        *common,
+    )
+    assert terminal.returncode == 0, terminal.stderr
+    validator = run_validator(item)
+    assert validator.returncode == 0, validator.stderr
 
 
 def test_staged_init_and_append_preserve_status_bytes(tmp_path: Path):
@@ -1069,6 +1418,302 @@ def test_append_accepts_codex_external_terminal_without_extended_provenance_ids(
     assert validated.returncode == 0, validated.stdout
 
 
+def test_settle_launch_derives_launch_identity_and_replays_exactly(tmp_path: Path):
+    """A terminal settles one launch without reconstructing its dispatch metadata."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-settle-launch-001",
+        "--role", "external-reviewer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "codex",
+        "--model", "gpt-5.6-sol",
+        "--effort", "high",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "provider evidence",
+        "--event-kind", "launch",
+        "--started-at", "2026-09-12T10:00:00Z",
+        "--updated-at", "2026-09-12T10:00:00Z",
+    )
+    assert launch.returncode == 0, launch.stderr
+    settle = [
+        "settle-launch",
+        "--launch-run-id", "run-settle-launch-001",
+        "--run-id", "run-settle-terminal-001",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:pytest tests/test_agent_run_ledger.py -q",
+        "--notes", "observed terminal outcome",
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--artifact-identity", "sha256:" + "d" * 64,
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    ]
+
+    result = run_ledger(item, *settle)
+    assert result.returncode == 0, result.stderr
+    events = [
+        json.loads(line)
+        for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    terminal = events[-1]
+    assert terminal["eventKind"] == "terminal"
+    assert terminal["launchRunId"] == "run-settle-launch-001"
+    assert terminal["role"] == "external-reviewer"
+    assert terminal["executionRole"] == "external-reviewer"
+    assert terminal["assignedRole"] == "qa-engineer"
+    assert terminal["provider"] == "codex"
+    assert terminal["model"] == "gpt-5.6-sol"
+    assert terminal["scope"] == ["provider evidence"]
+    assert terminal["artifact"] == "reviews/qa.md"
+    assert "externalDispatchId" not in terminal
+    assert "externalEvidenceRunId" not in terminal
+    assert run_validator(item).returncode == 0
+
+    before = (item / "agent-runs.jsonl").read_bytes()
+    replay = run_ledger(item, *settle)
+    assert replay.returncode == 0, replay.stderr
+    assert "already-settled" in replay.stdout
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+    conflicting_settle = [*settle]
+    conflicting_settle[conflicting_settle.index("--notes") + 1] = "different outcome"
+    conflict = run_ledger(item, *conflicting_settle)
+    assert conflict.returncode != 0
+    assert "WI-LEDGER-SETTLE-CONFLICT" in conflict.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+
+def test_settle_migrated_launch_neutrally_replays_and_refuses_drift(tmp_path: Path):
+    """Physical migrated terminals cannot block settlement or authorize a new verdict."""
+    from tests.test_mixed_current_ledger_recovery import _mixed_candidate, _line, _sha
+
+    item = tmp_path / "work-items" / "active" / "mixed-item"
+    _before, candidate, _revise, _orphan = _mixed_candidate(item)
+    (item / "status.md").write_text(valid_status(), encoding="utf-8")
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_bytes(candidate)
+    settle = [
+        "settle-launch", "--launch-run-id", "review-launch-001",
+        "--run-id", "neutral-terminal-001", "--status", "completed", "--gate", "none",
+        "--started-at", "2026-09-08T00:04:00Z", "--updated-at", "2026-09-08T00:04:00Z",
+    ]
+    result = run_ledger(item, *settle)
+    assert result.returncode == 0, result.stderr
+    settled = ledger.read_bytes()
+    assert settled.startswith(candidate)
+    assert len(settled.splitlines()) == len(candidate.splitlines()) + 1
+    replay = run_ledger(item, *settle)
+    assert replay.returncode == 0 and "already-settled" in replay.stdout, replay.stderr
+    assert ledger.read_bytes() == settled
+    conflict = run_ledger(item, *settle, "--notes", "different outcome")
+    assert conflict.returncode != 0 and "WI-LEDGER-SETTLE-CONFLICT" in conflict.stderr
+    assert ledger.read_bytes() == settled
+    collision = {
+        "schemaVersion": 2, "runId": "neutral-terminal-001", "workItem": item.name,
+        "role": "lead", "executionRole": "main", "eventKind": "standalone",
+        "status": "completed", "gate": "none", "scope": ["unrelated result"],
+        "startedAt": "2026-09-08T00:05:00Z", "updatedAt": "2026-09-08T00:05:00Z",
+    }
+    for collision_id in ("neutral-terminal-001", "NEUTRAL-TERMINAL-001"):
+        collided = settled + _line({**collision, "runId": collision_id})
+        ledger.write_bytes(collided)
+        duplicate = run_ledger(item, *settle)
+        assert duplicate.returncode != 0, collision_id
+        assert ledger.read_bytes() == collided
+
+    rows = [json.loads(line) for line in candidate.splitlines()]
+    for mode in ("missing", "digest", "replacement", "revoked"):
+        changed = json.loads(json.dumps(rows))
+        if mode == "missing":
+            changed.pop(3)
+        elif mode == "digest":
+            changed[3]["migratesEventSha256"] = "0" * 64
+        elif mode == "replacement":
+            changed[3]["replacementEvent"]["lane"] = "different-lane"
+        else:
+            anchor = changed[3]
+            digest = _sha(_line(anchor).rstrip(b"\n"))
+            revoke = {key: value for key, value in anchor.items() if key not in {
+                "migratesRunId", "migratesEventSha256", "replacementEvent", "normalizationKind",
+            }}
+            revoke.update(runId="migration-revoke-001", migrationAction="revoke",
+                          revokesMigrationRunId=anchor["runId"], revokesMigrationEventSha256=digest,
+                          evidence=[{"kind": "manual-check", "ref": f"revoke {anchor['runId']} {digest}"}])
+            changed.append(revoke)
+        raw = b"".join(map(_line, changed))
+        ledger.write_bytes(raw)
+        refused = run_ledger(item, *settle)
+        assert refused.returncode != 0, mode
+        assert ledger.read_bytes() == raw, mode
+        assert not (item / "agent-runs.jsonl.tmp").exists()
+        assert not (item / "agent-runs.jsonl.lock").exists()
+
+
+@pytest.mark.parametrize(
+    ("status", "gate", "needs_artifact"),
+    (
+        ("completed", "none", False),
+        ("completed", "PASS", True),
+        ("completed", "REVISE", False),
+        ("revise", "REVISE", False),
+        ("blocked", "none", False),
+        ("blocked", "BLOCKED:prerequisite", False),
+        ("cancelled", "none", False),
+    ),
+)
+def test_settle_launch_accepts_existing_terminal_status_gate_pairs(
+    tmp_path: Path, status: str, gate: str, needs_artifact: bool
+):
+    """Settlement admits the validator's terminal states rather than inventing failed."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-terminal-state-launch",
+        "--role", "qa-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "lifecycle settlement",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    settle = [
+        "settle-launch",
+        "--launch-run-id", "run-terminal-state-launch",
+        "--run-id", "run-terminal-state-result",
+        "--status", status,
+        "--gate", gate,
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    ]
+    if needs_artifact:
+        settle.extend(
+            [
+                "--artifact", "reviews/qa.md",
+                "--evidence", "command:focused lifecycle settlement",
+            ]
+        )
+
+    result = run_ledger(item, *settle)
+    assert result.returncode == 0, result.stderr
+
+
+def test_settle_launch_rejects_unknown_launch_without_writing(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-known-launch",
+        "--role", "qa-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "lifecycle settlement",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    ledger = item / "agent-runs.jsonl"
+    before = ledger.read_bytes()
+
+    result = run_ledger(
+        item,
+        "settle-launch",
+        "--launch-run-id", "run-missing-launch",
+        "--run-id", "run-missing-terminal",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:unknown launch rejection",
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    )
+
+    assert result.returncode != 0
+    assert "launch must identify one V2 launch event" in result.stderr
+    assert ledger.read_bytes() == before
+
+
+@pytest.mark.parametrize("status", ("planned", "running", "failed"))
+def test_settle_launch_rejects_nonterminal_status_without_writing(
+    tmp_path: Path, status: str
+):
+    """A caller cannot encode an in-flight or invented terminal outcome."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-nonterminal-launch",
+        "--role", "qa-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "lifecycle settlement",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    before = (item / "agent-runs.jsonl").read_bytes()
+
+    result = run_ledger(
+        item,
+        "settle-launch",
+        "--launch-run-id", "run-nonterminal-launch",
+        "--run-id", "run-nonterminal-result",
+        "--status", status,
+        "--gate", "none",
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    )
+    assert result.returncode != 0
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+
+def test_settle_launch_refuses_incomplete_external_provenance_without_writing(
+    tmp_path: Path,
+):
+    """External terminal identity remains caller-observed instead of writer-invented."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-provenance-launch",
+        "--role", "external-reviewer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "codex",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "provider evidence",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    before = (item / "agent-runs.jsonl").read_bytes()
+
+    result = run_ledger(
+        item,
+        "settle-launch",
+        "--launch-run-id", "run-provenance-launch",
+        "--run-id", "run-provenance-terminal",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:focused lifecycle settlement",
+        "--terminal-class", "external-nonauthorizing",
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    )
+    assert result.returncode != 0
+    assert "typed terminal requires authorizing" in result.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+
 @pytest.mark.parametrize(
     "encoded",
     (
@@ -1102,6 +1747,68 @@ def test_append_rejects_malformed_or_unsafe_launch_flag_binding(
     assert result.returncode != 0
     ledger = item / "agent-runs.jsonl"
     assert not ledger.exists() or ledger.read_text(encoding="utf-8") == ""
+
+
+def test_claude_explicit_empty_tools_roundtrips_public_writer_and_reader(tmp_path: Path) -> None:
+    spec = importlib.util.spec_from_file_location("empty_tools_producer_fixture", ROOT / "scripts/provider_prompt.py")
+    producer = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = producer
+    spec.loader.exec_module(producer)
+    control = producer.parse_control([
+        "fixture-text-only", "-p", "--output-format", "text", "--model", "opus",
+        "--effort", "xhigh", "--tools", "",
+    ], provider="claude")
+    flags, model, effort = producer.resolved_profile("claude", control.provider_flags)
+    item = prepare_valid_work_item(tmp_path)
+    common = [
+        "--role", "external-reviewer", "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer", "--provider", "claude", "--model", model,
+        "--effort", effort, "--scope", "synthetic empty-tool ledger contract",
+        "--artifact", "reviews/qa.md", "--launch-flags-json", json.dumps(flags),
+    ]
+    launch = run_ledger(
+        item, "append", *common, "--run-id", "fixture-empty-tools-launch",
+        "--status", "running", "--gate", "none", "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stdout + launch.stderr
+    terminal = run_ledger(
+        item, "append", *common, "--run-id", "fixture-empty-tools-terminal",
+        "--status", "completed", "--gate", "PASS", "--event-kind", "terminal",
+        "--launch-run-id", "fixture-empty-tools-launch", "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false", "--actual-execution-path", "direct-external-cli",
+        "--artifact-identity", "sha256:" + hashlib.sha256((item / "reviews/qa.md").read_bytes()).hexdigest(),
+        "--evidence", "artifact:reviews/qa.md",
+    )
+    assert terminal.returncode == 0, terminal.stdout + terminal.stderr
+    events = [json.loads(line) for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [event["launchFlags"] for event in events] == [flags, flags]
+    assert all(event["launchFlags"][event["launchFlags"].index("--tools") + 1] == "" for event in events)
+    assert events[1]["authorizing"] is False and events[1]["launchRunId"] == events[0]["runId"]
+    reader = run_validator(item)
+    assert reader.returncode == 0, reader.stdout + reader.stderr
+
+
+@pytest.mark.parametrize("flag", ("--tools", "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools"))
+def test_persisted_claude_nonempty_tool_lists_preserve_exact_profile(flag: str) -> None:
+    validator = load_ledger_module().load_validator()
+    flags = ["-p", "--model", "opus", "--effort", "xhigh", flag, "Read,Grep"]
+    assert validator.validate_launch_profile("claude", flags) == (tuple(flags), "opus", "xhigh")
+
+
+@pytest.mark.parametrize(
+    "selection",
+    (
+        ("--allowedTools", ""), ("--allowed-tools", ""),
+        ("--disallowedTools", ""), ("--disallowed-tools", ""),
+        ("--tools", " "), ("--tools", ","), ("--tools", "Read,"),
+        ("--tools", "Read,,Grep"), ("--tools", "Read;Bash"),
+        ("--tools", "--permission-mode"), ("--tools",), ("--tools=",),
+    ),
+)
+def test_persisted_claude_other_empty_flags_and_malformed_tools_refuse(selection) -> None:
+    validator = load_ledger_module().load_validator()
+    with pytest.raises(ValueError, match="invalid launch flags"):
+        validator.validate_launch_profile("claude", ["-p", "--model", "opus", "--effort", "xhigh", *selection])
 
 
 def test_terminal_launch_flags_must_match_the_referenced_launch(tmp_path: Path) -> None:
@@ -1199,6 +1906,251 @@ def test_internal_final_closer_binds_one_external_evidence_tuple(tmp_path: Path)
     assert validated.returncode == 0, validated.stdout
 
 
+def _append_external_review_revise(
+    item: Path,
+    *,
+    professional_role: str,
+    artifact_identity: str,
+    scope: str = "workflow-coherence",
+    artifact: str = "reviews/external-review.md",
+) -> subprocess.CompletedProcess:
+    report = item / artifact
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("REVISE\n", encoding="utf-8")
+    return run_ledger(
+        item,
+        "append",
+        "--run-id", "external-review-revise-001",
+        "--role", "external-reviewer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", professional_role,
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "unsupported",
+        "--status", "revise",
+        "--gate", "REVISE",
+        "--scope", scope,
+        "--artifact", artifact,
+        "--artifact-identity", artifact_identity,
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--external-dispatch-id", "external-review-dispatch-001",
+        "--external-evidence-run-id", "external-review-revise-001",
+        "--effort-mapping-loss", "no-native-effort-control",
+        "--evidence", f"review:{artifact}",
+        "--started-at", "2026-09-11T10:00:00Z",
+        "--updated-at", "2026-09-11T10:00:00Z",
+    )
+
+
+def _append_internal_professional_launch(
+    item: Path,
+    *,
+    professional_role: str,
+    scope: str,
+    artifact: str,
+) -> subprocess.CompletedProcess:
+    return run_ledger(
+        item,
+        "append",
+        "--run-id", "native-review-launch-001",
+        "--role", professional_role,
+        "--execution-role", "internal",
+        "--assigned-role", professional_role,
+        "--status", "running",
+        "--gate", "none",
+        "--event-kind", "launch",
+        "--scope", scope,
+        "--artifact", artifact,
+        "--started-at", "2026-09-11T10:00:30Z",
+        "--updated-at", "2026-09-11T10:00:30Z",
+    )
+
+
+def _append_internal_professional_closer(
+    item: Path,
+    *,
+    professional_role: str,
+    artifact_identity: str,
+    scope: str = "workflow-coherence",
+    artifact: str = "reviews/native-review.md",
+    closer_role: str | None = None,
+    event_kind: str = "standalone",
+    target_run_id: str = "external-review-revise-001",
+) -> subprocess.CompletedProcess:
+    report = item / artifact
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("PASS\n", encoding="utf-8")
+    args = [
+        item,
+        "append",
+        "--run-id", "native-review-pass-001",
+        "--role", closer_role or professional_role,
+        "--execution-role", "internal",
+        "--assigned-role", professional_role,
+        "--status", "completed",
+        "--gate", "PASS",
+        "--event-kind", event_kind,
+        "--scope", scope,
+        "--artifact", artifact,
+        "--artifact-identity", artifact_identity,
+        "--closes", target_run_id,
+        "--evidence", f"review:{artifact}",
+        "--started-at", "2026-09-11T10:01:00Z",
+        "--updated-at", "2026-09-11T10:01:00Z",
+    ]
+    if event_kind == "terminal":
+        args.extend(("--launch-run-id", "native-review-launch-001"))
+    return run_ledger(*args)
+
+
+def test_internal_backend_closer_discharges_external_worker_revise_terminal(
+    tmp_path: Path,
+) -> None:
+    item = prepare_valid_work_item(tmp_path)
+    identity = "sha256:" + "a" * 64
+    worker_report = "reviews/worker-report.md"
+    native_report = "reviews/native-backend-qa.md"
+    (item / worker_report).write_text("REVISE\n", encoding="utf-8")
+    external_launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "external-worker-launch-001",
+        "--role", "external-worker",
+        "--execution-role", "external-worker",
+        "--assigned-role", "backend-engineer",
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "unsupported",
+        "--status", "running",
+        "--gate", "none",
+        "--event-kind", "launch",
+        "--scope", "artifact-worker",
+        "--artifact", worker_report,
+        "--started-at", "2026-09-11T11:00:00Z",
+        "--updated-at", "2026-09-11T11:00:00Z",
+    )
+    target = run_ledger(
+        item,
+        "append",
+        "--run-id", "external-worker-revise-001",
+        "--role", "external-worker",
+        "--execution-role", "external-worker",
+        "--assigned-role", "backend-engineer",
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "unsupported",
+        "--status", "revise",
+        "--gate", "REVISE",
+        "--event-kind", "terminal",
+        "--launch-run-id", "external-worker-launch-001",
+        "--scope", "artifact-worker",
+        "--artifact", worker_report,
+        "--artifact-identity", identity,
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--external-dispatch-id", "external-worker-launch-001",
+        "--external-evidence-run-id", "external-worker-revise-001",
+        "--effort-mapping-loss", "no-native-effort-control",
+        "--evidence", f"review:{worker_report}",
+        "--started-at", "2026-09-11T11:00:30Z",
+        "--updated-at", "2026-09-11T11:00:30Z",
+    )
+    native_launch = _append_internal_professional_launch(
+        item,
+        professional_role="backend-engineer",
+        scope="artifact-worker",
+        artifact=native_report,
+    )
+    closer = _append_internal_professional_closer(
+        item,
+        professional_role="backend-engineer",
+        artifact_identity=identity,
+        scope="artifact-worker",
+        artifact=native_report,
+        event_kind="terminal",
+        target_run_id="external-worker-revise-001",
+    )
+
+    for result in (external_launch, target, native_launch):
+        assert result.returncode == 0, result.stdout + result.stderr
+    assert closer.returncode == 0, closer.stdout + closer.stderr
+    validated = run_validator(item)
+    assert validated.returncode == 0, validated.stdout + validated.stderr
+
+
+@pytest.mark.parametrize(
+    ("professional_role", "event_kind"),
+    (("qa-engineer", "terminal"), ("architecture-reviewer", "standalone")),
+)
+def test_internal_professional_closer_discharges_external_reviewer_revise(
+    tmp_path: Path, professional_role: str, event_kind: str
+) -> None:
+    item = prepare_valid_work_item(tmp_path)
+    identity = "sha256:" + "a" * 64
+
+    target = _append_external_review_revise(
+        item,
+        professional_role=professional_role,
+        artifact_identity=identity,
+    )
+    launch = None
+    if event_kind == "terminal":
+        launch = _append_internal_professional_launch(
+            item,
+            professional_role=professional_role,
+            scope="workflow-coherence",
+            artifact="reviews/native-review.md",
+        )
+    closer = _append_internal_professional_closer(
+        item,
+        professional_role=professional_role,
+        artifact_identity=identity,
+        event_kind=event_kind,
+    )
+
+    assert target.returncode == 0, target.stdout + target.stderr
+    if launch is not None:
+        assert launch.returncode == 0, launch.stdout + launch.stderr
+    assert closer.returncode == 0, closer.stdout + closer.stderr
+    validated = run_validator(item)
+    assert validated.returncode == 0, validated.stdout + validated.stderr
+
+
+@pytest.mark.parametrize(
+    ("closer_changes", "diagnostic"),
+    (
+        ({"closer_role": "architecture-reviewer"}, "C3-external-profession-fail"),
+        ({"artifact_identity": "sha256:" + "b" * 64}, "C3-external-artifact-identity-fail"),
+        ({"scope": "different-review-scope"}, "C3-external-scope-fail"),
+        ({"artifact": "reviews/external-review.md"}, "C3-external-report-fail"),
+    ),
+)
+def test_external_reviewer_revise_rejects_unbound_internal_closer(
+    tmp_path: Path, closer_changes: dict[str, str], diagnostic: str
+) -> None:
+    item = prepare_valid_work_item(tmp_path)
+    identity = "sha256:" + "a" * 64
+    professional_role = "qa-engineer"
+    target = _append_external_review_revise(
+        item,
+        professional_role=professional_role,
+        artifact_identity=identity,
+    )
+    closer_args = {
+        "professional_role": professional_role,
+        "artifact_identity": identity,
+    }
+    closer_args.update(closer_changes)
+    closer = _append_internal_professional_closer(item, **closer_args)
+
+    assert target.returncode == 0, target.stdout + target.stderr
+    assert closer.returncode != 0
+    assert diagnostic in closer.stdout + closer.stderr
+
+
 def test_internal_closer_binds_actual_codex_terminal_and_launch_without_extended_ids(tmp_path: Path):
     """A Codex closer uses the terminal ledger identity, never a dispatch-shaped alias."""
 
@@ -1258,3 +2210,208 @@ def test_internal_closer_binds_actual_codex_terminal_and_launch_without_extended
     revised = run_validator(item)
     assert revised.returncode != 0
     assert "internal closer does not bind" in revised.stdout
+
+
+
+def _independent_decision_fixture(root: Path, *, mixed: bool = False):
+    """Reuse decision owners' admitted producers in the public writer's root."""
+    status = root / "work-items" / "active" / "ledger-helper" / "status.md"
+    status.write_text("status: active\n" + status.read_text(encoding="utf-8"), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(
+        "ledger_decision_fixtures", ROOT / "tests" / "test_mutate_work_item.py"
+    )
+    assert spec is not None and spec.loader is not None
+    fixtures = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = fixtures
+    spec.loader.exec_module(fixtures)
+    owner = fixtures.load_module()
+    entries = []
+    count = 1 if mixed else 13
+    for index in range(count):
+        path = root / "work-items" / "decisions" / f"2026-07-{index + 1:02d}-public-h1-{index:02d}.md"
+        fixtures.write(
+            path,
+            fixtures._legacy_h1_decision_record(
+                mode="bold" if mixed or index >= 7 else "plain",
+                status="proposed (deferred)" if mixed or index in {7, 8} else "accepted (frozen)",
+            ),
+        )
+        entries.append(
+            {"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest().upper(), "state": "admitted"}
+        )
+    fixtures._write_decision_h1_manifest(root, entries)
+    if mixed:
+        path = root / "work-items" / "decisions" / "2026-06-30-public-v0.md"
+        fixtures.write(path, fixtures._legacy_v0_decision_record(identity_line=f"id: {path.stem}"))
+        fixtures._write_decision_v0_manifest(
+            root,
+            [{"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest().upper(), "state": "admitted"}],
+        )
+        assert len(owner._preflight_current_decision_v0(root)) == 1
+    assert len(owner._preflight_current_decision_h1(root)) == count
+    assert len(owner.audit_categories(root)) == count + int(mixed)
+    frozen = {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in (root / "work-items" / "decisions").glob("*.md")
+    }
+    for name in ("decision-h1-compatibility.json", "decision-v0-compatibility.json"):
+        path = root / "work-items" / name
+        if path.exists():
+            frozen[path.relative_to(root).as_posix()] = path.read_bytes()
+    return owner, frozen
+
+
+def _decision_public_launch(item: Path):
+    return run_ledger(
+        item, "append",
+        "--run-id", "decision-h1-launch",
+        "--role", "qa-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "lifecycle settlement",
+        "--event-kind", "launch",
+        "--started-at", "2026-09-12T10:00:00Z",
+        "--updated-at", "2026-09-12T10:00:00Z",
+    )
+
+
+def _decision_public_settlement(item: Path, *, result_id: str = "decision-h1-result"):
+    return run_ledger(
+        item, "settle-launch",
+        "--launch-run-id", "decision-h1-launch",
+        "--run-id", result_id,
+        "--status", "completed",
+        "--gate", "PASS",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:focused lifecycle settlement",
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    )
+
+
+def _assert_decision_public_custody(root: Path, item: Path, frozen) -> None:
+    assert all((root / relative).read_bytes() == raw for relative, raw in frozen.items())
+    assert not (item / "agent-runs.jsonl.lock").exists()
+    assert not (item / "agent-runs.jsonl.tmp").exists()
+
+
+def _assert_decision_public_readback(root: Path, item: Path, owner, frozen) -> None:
+    path = item / "agent-runs.jsonl"
+    rows = [json.loads(raw) for raw in path.read_bytes().splitlines()]
+    assert len(rows) == 2
+    launch, terminal = rows
+    assert launch["schemaVersion"] == 2 and launch["eventKind"] == "launch"
+    assert launch["runId"] == "decision-h1-launch" and launch["gate"] == "none"
+    assert launch["status"] == "running" and launch["role"] == "qa-engineer"
+    assert terminal["schemaVersion"] == 2 and terminal["runId"] == "decision-h1-result"
+    assert terminal["launchRunId"] == launch["runId"]
+    assert terminal["status"] == "completed" and terminal["gate"] == "PASS"
+    for field in ("role", "executionRole", "scope"):
+        assert terminal[field] == launch[field]
+    assert owner.resolve_ledger_h1_artifact_set_location(root) is None
+    validator = load_ledger_module().load_validator()
+    context = validator.load_effective_ledger_view(root, item, path.absolute().relative_to(root.absolute()).as_posix())
+    assert context.observation.activation_state == "inactive", context.observation.diagnostics
+    assert not context.observation.failure_ids, context.observation.diagnostics
+    checked = run_validator(item)
+    assert checked.returncode == 0, (checked.stdout, checked.stderr)
+    _assert_decision_public_custody(root, item, frozen)
+
+
+def test_public_append_accepts_independent_decision_h1(tmp_path: Path):
+    root = tmp_path / "repo"
+    item = prepare_valid_work_item(root)
+    owner, frozen = _independent_decision_fixture(root)
+    result = _decision_public_launch(item)
+    if result.returncode != 0:
+        assert not (item / "agent-runs.jsonl").exists()
+        _assert_decision_public_custody(root, item, frozen)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert "RESULT: PASS append" in result.stdout
+    rows = [json.loads(raw) for raw in (item / "agent-runs.jsonl").read_bytes().splitlines()]
+    assert len(rows) == 1 and rows[0]["eventKind"] == "launch"
+    settled = _decision_public_settlement(item)
+    assert settled.returncode == 0, (settled.stdout, settled.stderr)
+    assert "RESULT: PASS settle-launch" in settled.stdout
+    _assert_decision_public_readback(root, item, owner, frozen)
+
+
+def test_public_settle_accepts_independent_decision_h1_after_launch(tmp_path: Path):
+    root = tmp_path / "repo"
+    item = prepare_valid_work_item(root)
+    launch = _decision_public_launch(item)
+    assert launch.returncode == 0, (launch.stdout, launch.stderr)
+    ledger = item / "agent-runs.jsonl"
+    launch_bytes = ledger.read_bytes()
+    rows = [json.loads(raw) for raw in launch_bytes.splitlines()]
+    assert len(rows) == 1 and rows[0]["eventKind"] == "launch"
+    owner, frozen = _independent_decision_fixture(root)
+    settled = _decision_public_settlement(item)
+    if settled.returncode != 0:
+        assert ledger.read_bytes() == launch_bytes
+        _assert_decision_public_custody(root, item, frozen)
+    assert settled.returncode == 0, (settled.stdout, settled.stderr)
+    assert "RESULT: PASS settle-launch" in settled.stdout
+    _assert_decision_public_readback(root, item, owner, frozen)
+    terminal_bytes = ledger.read_bytes()
+    replay = _decision_public_settlement(item)
+    assert replay.returncode == 0 and "already-settled" in replay.stdout
+    assert ledger.read_bytes() == terminal_bytes
+    conflict = _decision_public_settlement(item, result_id="decision-h1-conflicting-result")
+    assert conflict.returncode != 0 and "WI-LEDGER-OPERATION-EFFECT" in conflict.stderr
+    assert ledger.read_bytes() == terminal_bytes
+    _assert_decision_public_custody(root, item, frozen)
+
+
+def test_public_ledger_accepts_mixed_v0_h1_decision_cohort(tmp_path: Path):
+    root = tmp_path / "repo"
+    item = prepare_valid_work_item(root)
+    owner, frozen = _independent_decision_fixture(root, mixed=True)
+    launch = _decision_public_launch(item)
+    if launch.returncode != 0:
+        assert not (item / "agent-runs.jsonl").exists()
+        _assert_decision_public_custody(root, item, frozen)
+    assert launch.returncode == 0, (launch.stdout, launch.stderr)
+    settled = _decision_public_settlement(item)
+    assert settled.returncode == 0, (settled.stdout, settled.stderr)
+    _assert_decision_public_readback(root, item, owner, frozen)
+    for name in ("legacy-ledger-projection-manifests", "legacy-ledger-projections.jsonl", "legacy-ledger-projection-receipts"):
+        assert not (root / "work-items" / name).exists()
+
+
+@pytest.mark.parametrize("participant", ("manifest", "registry", "receipt"))
+def test_public_ledger_independent_decision_cannot_mask_typed_partial(
+    tmp_path: Path, participant: str
+):
+    root = tmp_path / "repo"
+    item = prepare_valid_work_item(root)
+    seeded = _decision_public_launch(item)
+    assert seeded.returncode == 0, (seeded.stdout, seeded.stderr)
+    ledger = item / "agent-runs.jsonl"
+    before = ledger.read_bytes()
+    owner, frozen = _independent_decision_fixture(root)
+    partials = {
+        "manifest": ("legacy-ledger-projection-manifests/partial.json", {"schemaVersion": 2, "policyDecision": owner._SEALED_PREFIX_POLICY}),
+        "registry": ("legacy-ledger-projections.jsonl", {"schemaVersion": 2, "profileId": owner._SEALED_PREFIX_PROFILE}),
+        "receipt": ("legacy-ledger-projection-receipts/partial-v2.json", {"schemaVersion": 2, "ledgerManifestPath": "work-items/legacy-ledger-projection-manifests/partial.json"}),
+    }
+    relative, payload = partials[participant]
+    path = root / "work-items" / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    frozen[path.relative_to(root).as_posix()] = path.read_bytes()
+    appended = run_ledger(
+        item, "append", "--run-id", "decision-h1-refused-extra-launch",
+        "--role", "qa-engineer", "--execution-role", "internal",
+        "--status", "running", "--gate", "none", "--scope", "lifecycle settlement",
+        "--event-kind", "launch", "--started-at", "2026-09-12T10:01:00Z",
+        "--updated-at", "2026-09-12T10:01:00Z",
+    )
+    assert appended.returncode != 0 and "WI-LEDGER-COMPAT-SET-TOPOLOGY" in appended.stderr
+    assert ledger.read_bytes() == before
+    _assert_decision_public_custody(root, item, frozen)
+    settled = _decision_public_settlement(item)
+    assert settled.returncode != 0 and "WI-LEDGER-COMPAT-SET-TOPOLOGY" in settled.stderr
+    assert ledger.read_bytes() == before
+    _assert_decision_public_custody(root, item, frozen)

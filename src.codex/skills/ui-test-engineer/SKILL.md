@@ -40,7 +40,7 @@ description: "Qt UI interactions/regressions: high-DPI, theme, rendering, focus.
 
 ## Bug registry
 
-On `REVISE` or `BLOCKED`, file each finding in `work-items/bugs/<date>-<slug>.md` using the qa-engineer-owned format with `found-by: ui-test-engineer` before returning the verdict. Lead with the control path, theme, DPI, window state, reproduction, and evidence path or frame numbers.
+On `REVISE` or `BLOCKED`, include each finding as an in-band bug registry proposal in the sole returned artifact, using the qa-engineer-owned format and configured registry path (normally `work-items/bugs/<date>-<slug>.md`) with `found-by: ui-test-engineer`. Write the record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. Lead with the control path, theme, DPI, window state, reproduction, and evidence path or frame numbers.
 
 ## Non-goals
 

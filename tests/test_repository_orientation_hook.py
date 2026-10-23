@@ -28,6 +28,7 @@ HOOKS = (
     ROOT / "src.claude" / "agents" / "hooks" / "check-repository-orientation.py",
     ROOT / "src.codex" / "skills" / "lead" / "hooks" / "check-repository-orientation.py",
 )
+CANONICAL_HOOK = ROOT / "scripts" / "universal-hooks" / "hooks" / "check-repository-orientation.py"
 WARNING = "[repository-orientation AUDIT]"
 STALE_WARNING = "[repository-orientation STALE-TARGET AUDIT]"
 
@@ -137,6 +138,24 @@ def run_hook(
 
 
 class RepositoryOrientationHookTests(unittest.TestCase):
+    def test_namespaced_and_shell_carrier_variants_share_action_gate(self) -> None:
+        missing = [claude_user("run the project check")]
+        scoped = [claude_user("run the project check"), claude_assistant(orientation(scope="."))]
+        patch = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"
+        for name, payload in (
+            ("functions.Edit", {"file_path": "src/app.py"}),
+            ("functions.apply_patch", {"input": patch}),
+            ("tools.PowerShell", {"command": "python scripts/run.py"}),
+            ("functions.exec_command", {"cmd": "python scripts/run.py"}),
+            ("exec_command", {"command": "python scripts/run.py"}),
+        ):
+            with self.subTest(name=name):
+                self.assert_warns(missing, tool_name=name, tool_input=payload)
+                self.assert_silent(scoped, tool_name=name, tool_input=payload)
+        for payload in ({"cmd": "", "command": "python scripts/run.py"},
+                        {"cmd": "python scripts/run.py", "command": "python scripts/run.py"}):
+            self.assert_silent(missing, tool_name="functions.exec_command", tool_input=payload)
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.repo = Path(self.temp.name)
@@ -149,7 +168,13 @@ class RepositoryOrientationHookTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def assert_warns(self, entries: list[dict], **kwargs: object) -> None:
+    def assert_warns(
+        self,
+        entries: list[dict],
+        *,
+        expected: str | None = None,
+        **kwargs: object,
+    ) -> None:
         for script in HOOKS:
             with self.subTest(script=script):
                 result = run_hook(script, self.repo, entries, **kwargs)
@@ -162,6 +187,13 @@ class RepositoryOrientationHookTests(unittest.TestCase):
                 specific = payload["hookSpecificOutput"]
                 self.assertEqual(specific["hookEventName"], "PreToolUse")
                 self.assertIn(WARNING, specific["additionalContext"])
+                if expected is not None:
+                    self.assertIn(expected, specific["additionalContext"])
+                    self.assertIn(
+                        "Expected grammar: `REPOSITORY ORIENTATION: "
+                        "scope=<repo-relative path>;",
+                        specific["additionalContext"],
+                    )
 
     def assert_silent(self, entries: list[dict], **kwargs: object) -> None:
         for script in HOOKS:
@@ -216,6 +248,46 @@ class RepositoryOrientationHookTests(unittest.TestCase):
             with self.subTest(record=record):
                 self.assert_warns([claude_user("Update src."), claude_assistant(record)])
 
+    def test_rejected_record_identifies_backtick_and_status_grammar(self) -> None:
+        backticked = (
+            "REPOSITORY ORIENTATION: scope=`src`; status=`ready`; "
+            "workflow=`Обновить тесты`; protected=`none`; evidence=`AGENTS.md:1`"
+        )
+        unrecognized_status = orientation(scope="src", status="ready")
+        cases = (
+            (backticked, "field status must be one of live, mutable, frozen, archived, deprecated, superseded, conflict"),
+            (unrecognized_status, "field status must be one of live, mutable, frozen, archived, deprecated, superseded, conflict"),
+        )
+        for record, expected in cases:
+            with self.subTest(record=record):
+                self.assert_warns(
+                    [claude_user("Update src."), claude_assistant(record)],
+                    expected=expected,
+                )
+
+        self.assert_silent(
+            [
+                claude_user("Update src."),
+                claude_assistant(
+                    orientation(scope="src", workflow="Обновить тесты")
+                ),
+            ]
+        )
+
+    def test_backticked_workflow_and_protected_preserve_existing_acceptance(self) -> None:
+        self.assert_silent(
+            [
+                claude_user("Update src."),
+                claude_assistant(
+                    orientation(
+                        scope="src",
+                        workflow="`entry`",
+                        protected="`none`",
+                    )
+                ),
+            ]
+        )
+
     def test_archived_path_gets_stronger_warning_without_historical_scope(self) -> None:
         archived = self.repo / "Archive" / "snapshot.md"
         archived.parent.mkdir()
@@ -261,12 +333,74 @@ class RepositoryOrientationHookTests(unittest.TestCase):
         )
 
     def test_apply_patch_targets_are_scope_checked(self) -> None:
-        patch = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"
-        self.assert_warns(
-            [claude_user("Update src."), claude_assistant("Applying the patch.")],
-            tool_name="apply_patch",
-            tool_input={"patch": patch},
+        for operation in ("Add", "Update", "Delete"):
+            with self.subTest(operation=operation):
+                patch = (
+                    f"*** Begin Patch\n*** {operation} File: src/app.py\n"
+                    "@@\n-old\n+new\n*** End Patch"
+                )
+                self.assert_warns(
+                    [claude_user("Update src."), claude_assistant("Applying the patch.")],
+                    tool_name="apply_patch",
+                    tool_input={"patch": patch},
+                )
+
+    def test_apply_patch_move_destination_is_scope_checked(self) -> None:
+        patch = (
+            "*** Begin Patch\n"
+            "*** Update File: .scratch/source.md\n"
+            "*** Move to: src/app.py\n"
+            "*** End Patch"
         )
+        self.assert_warns(
+            [claude_user("Move the patch target."), claude_assistant("Applying the patch.")],
+            tool_name="apply_patch",
+            tool_input={"command": patch},
+        )
+        self.assert_silent(
+            [claude_user("Move the patch target."), claude_assistant(orientation(scope="src"))],
+            tool_name="apply_patch",
+            tool_input={"command": patch},
+        )
+
+    def test_apply_patch_move_target_guards_preserve_scratch_and_outside_scope(self) -> None:
+        outside = self.repo.parent / "outside" / "target.py"
+        cases = (
+            ("public-source-to-scratch", "src/app.py", ".scratch/target.md", True),
+            ("scratch-source-to-outside", ".scratch/source.md", str(outside), False),
+        )
+        entries = [claude_user("Move the patch target."), claude_assistant("Applying the patch.")]
+        for name, source, destination, warns in cases:
+            patch = (
+                "*** Begin Patch\n"
+                f"*** Update File: {source}\n"
+                f"*** Move to: {destination}\n"
+                "*** End Patch"
+            )
+            with self.subTest(case=name):
+                assertion = self.assert_warns if warns else self.assert_silent
+                assertion(entries, tool_name="apply_patch", tool_input={"command": patch})
+
+    def test_canonical_apply_patch_carriers_classify_framed_command_without_parsing_bash(self) -> None:
+        patch = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"
+        carriers = (
+            ("patch", "apply_patch", {"patch": patch}, True),
+            ("input", "apply_patch", {"input": patch}, True),
+            ("command", "apply_patch", {"command": patch}, True),
+            ("non-apply-command", "Bash", {"command": patch}, False),
+        )
+        entries = [claude_user("Update src."), claude_assistant("Applying the patch.")]
+        for name, tool_name, tool_input, warns in carriers:
+            with self.subTest(carrier=name):
+                result = run_hook(
+                    CANONICAL_HOOK,
+                    self.repo,
+                    entries,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(bool(result.stdout), warns, result.stdout)
         self.assert_silent(
             [claude_user("Update src."), claude_assistant(orientation(scope="src"))],
             tool_name="apply_patch",

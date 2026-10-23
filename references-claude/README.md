@@ -26,4 +26,6 @@ Use together with:
 
 Provider-backed external CLI prompt delivery inherits the shared file-based prompt rule; use the Claude dispatch docs for the exact Claude-line runtime contract.
 
+GitHub pull-request review-bot coordination inherits the canonical methodology in [shared/references/github-pr-review-bot-protocol.md](../shared/references/github-pr-review-bot-protocol.md). The installed Claude Code operative binding is [src.claude/skills/github-pr-review-bot/SKILL.md](../src.claude/skills/github-pr-review-bot/SKILL.md).
+
 Repository-orientation semantics are shared in `shared/AGENTS.shared.md` and expanded in `shared/references/spine/repository-orientation-and-mechanism-inventory.md`. The Claude Code-specific Bootstrap step 0 and compact operative hook rules live in `src.claude/CLAUDE.md`; [claude-md-structural-enforcement.md](claude-md-structural-enforcement.md) preserves the exhaustive hook behavior, entry-point, installer, removal-command, path, and matcher detail outside the always-loaded entrypoint.

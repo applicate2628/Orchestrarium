@@ -27,13 +27,113 @@ VALIDATORS = (
     ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.py",
     ROOT / "src.claude/agents/scripts/validate-skill-pack.py",
 )
+SHARED_INVARIANT_ACTIONS = (
+    (
+        "shared governance requires direct external launch",
+        "use orchestrating runtime/approved wrapper, never an internal relay",
+    ),
+    (
+        "shared governance requires file-based external CLI prompts",
+        "file-based prompt via stdin/file, never argv",
+    ),
+    (
+        "shared governance rejects split-brain state synchronization",
+        "Split-brain sync is an architecture bug",
+    ),
+    (
+        "shared governance requires verification before trusting subagent results",
+        "verify before acceptance/forwarding/completion",
+    ),
+    (
+        "shared governance requires measured evidence before root-cause or fix claims",
+        "capture observable wording/error/log/return/repro or `file:line`; verify the "
+        "causal chain",
+    ),
+)
 PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.codex/skills/lead/scripts/skill_pack_validator_runtime.py",
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 557  WARN: 0  FAIL: 0",
-    "Checks: 489  |  Passed: 489  |  Warnings: 0  |  Errors: 0",
+    r"^  PASS: [1-9][0-9]*  WARN: 0  FAIL: 0$",
+    r"^  Checks: ([1-9][0-9]*)  \|  Passed: \1  \|  Warnings: 0  \|  Errors: 0$",
+)
+
+PACK_DELIVERY_ACTION_CASES = (
+    ("codex", VALIDATORS[0], "src.codex/skills/external-worker/SKILL.md", "external-worker requires file/stdin prompt delivery"),
+    ("codex", VALIDATORS[0], "src.codex/skills/external-reviewer/SKILL.md", "external-reviewer requires file/stdin prompt delivery"),
+    ("claude", VALIDATORS[1], "src.claude/agents/external-worker.md", "external-worker requires file/stdin prompt delivery"),
+    ("claude", VALIDATORS[1], "src.claude/agents/external-reviewer.md", "external-reviewer requires file/stdin prompt delivery"),
+)
+
+CLAUDE_ADAPTER_READ_WRITE_ACTION_CASES = (
+    (
+        "src.claude/agents/external-worker.md",
+        "external-worker normalizes agents-mode before routing",
+        "external-worker persists normalization only in an authorized write",
+    ),
+    (
+        "src.claude/agents/external-reviewer.md",
+        "external-reviewer normalizes agents-mode before routing",
+        "external-reviewer persists normalization only in an authorized write",
+    ),
+)
+
+PACK_ROUTING_READ_ACTION_CASES = (
+    (
+        "codex", VALIDATORS[0], "src.codex/skills/consultant/SKILL.md",
+        "consultant reads the Codex overlay in memory",
+        ("normalize its effective values in memory", "do not rewrite them merely to read or trust their flags"),
+        (("do not rewrite them merely to read or trust their flags", "rewrite the supplied file during the routing read"),),
+    ),
+    (
+        "codex", VALIDATORS[0], "src.codex/skills/consultant/SKILL.md",
+        "consultant preserves precedence and authorized-write boundary",
+        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only within an authorized install/configuration write"),
+        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+    ),
+    (
+        "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
+        "consultant reads the Claude overlay in memory",
+        ("normalize its effective values in memory", "do not rewrite them merely to read or trust their flags"),
+        (("do not rewrite them merely to read or trust their flags", "rewrite the supplied file during the routing read"),),
+    ),
+    (
+        "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
+        "consultant preserves precedence and authorized-write boundary",
+        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only within an authorized install/configuration write"),
+        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+    ),
+    (
+        "codex", VALIDATORS[0], "src.codex/skills/lead/subagent-contracts.md",
+        "subagent contracts preserve Codex in-memory routing",
+        ("Read the effective Codex overlay and normalize its effective values in memory", "Each key resolves to the highest layer that defines it", "a routing read does not rewrite its input"),
+        (("Each key resolves to the highest layer that defines it", "All keys take one shared global value"), ("a routing read does not rewrite its input", "a routing read rewrites its input to canonical YAML")),
+    ),
+    (
+        "codex", VALIDATORS[0], "src.codex/skills/lead/subagent-contracts.md",
+        "subagent contracts restrict Codex writes to authorization",
+        ("Do not recreate a legacy file or synthesize a local override on read alone", "Persist canonical formatting only within an authorized install/configuration write", "removing retired canonical keys"),
+        (("Do not recreate a legacy file or synthesize a local override on read alone", "Recreate legacy files and synthesize local overrides on routing reads"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+    ),
+    (
+        "claude", VALIDATORS[1], "src.claude/agents/contracts/subagent-contracts.md",
+        "subagent contracts preserve Claude in-memory key restrictions",
+        ("Read the effective Claude overlay and normalize its effective values in memory", "On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode.yaml` file; it remains Codex-line only"),
+        (("normalize its effective values in memory", "write normalized values to disk while routing"), ("do not write `externalClaudeProfile`", "write `externalClaudeProfile`")),
+    ),
+    (
+        "claude", VALIDATORS[1], "src.claude/agents/contracts/subagent-contracts.md",
+        "subagent contracts preserve Claude precedence and read-only routing",
+        ("read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`", "Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "a read does not rewrite its input"),
+        (("pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global", "pack-local global legacy `~/.claude/.agents-mode`, then pack-local global `~/.claude/.agents-mode.yaml`"), ("a read does not rewrite its input", "a read rewrites its input to canonical YAML")),
+    ),
+    (
+        "claude", VALIDATORS[1], "src.claude/agents/contracts/subagent-contracts.md",
+        "subagent contracts restrict Claude writes to authorization",
+        ("Do not recreate a legacy file or synthesize a local override on read alone", "Persist canonical formatting only within an authorized install/configuration write", "removing retired canonical keys"),
+        (("Do not recreate a legacy file or synthesize a local override on read alone", "Recreate legacy files and synthesize local overrides on routing reads"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+    ),
 )
 
 
@@ -48,6 +148,167 @@ def _load(path: Path, name: str):
     finally:
         sys.path.pop(0)
     return module
+
+
+def _run_single_action(
+    runtime,
+    validator: Path,
+    provider: str,
+    action: tuple,
+    candidate: Path,
+    content: str | None,
+):
+    if content is None:
+        candidate.unlink(missing_ok=True)
+    else:
+        candidate.write_text(content, encoding="utf-8")
+    selected = (action[0], str(candidate), *action[2:])
+    return runtime.validate_pack(
+        script=validator,
+        provider=provider,
+        actions=(selected,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    PACK_DELIVERY_ACTION_CASES,
+    ids=("codex-worker", "codex-reviewer", "claude-worker", "claude-reviewer"),
+)
+def test_pack_provider_prompt_actions_require_file_stdin_and_reject_argv_loss(
+    tmp_path: Path,
+    case: tuple[str, Path, str, str],
+) -> None:
+    provider, validator, relative_source, label = case
+    module = _load(validator, f"file_stdin_{provider}_{relative_source.rsplit('/', 1)[-1]}")
+    runtime = module._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(runtime._applicable_actions(module.ACTIONS, layout))
+    matches = tuple(action for action in actions if action[-1] == label)
+    assert len(matches) == 1
+    action = matches[0]
+    assert action[0] == "check_contains"
+    assert action[2] == "file/stdin delivery"
+    assert action[1].replace("@ROOT/", "").endswith(relative_source)
+
+    source = (ROOT / relative_source).read_text(encoding="utf-8")
+    assert "file-based prompt delivery" not in source
+    assert action[2] in source
+    direct_launch = tuple(
+        candidate for candidate in actions
+        if candidate[1] == action[1]
+        and candidate[0] == "check_contains"
+        and candidate[2] == "direct external launch contract"
+    )
+    assert len(direct_launch) == 1
+    assert direct_launch[0][2] == "direct external launch contract"
+
+    candidate = tmp_path / "adapter.md"
+    accepted = _run_single_action(runtime, validator, provider, action, candidate, source)
+    assert accepted.checks == 1
+    assert accepted.errors == 0
+
+    mutated = source.replace(action[2], "argv-only prompt delivery", 1)
+    assert mutated != source
+    rejected = _run_single_action(runtime, validator, provider, action, candidate, mutated)
+    assert rejected.errors == 1
+
+
+@pytest.mark.parametrize(
+    "case",
+    CLAUDE_ADAPTER_READ_WRITE_ACTION_CASES,
+    ids=("claude-worker", "claude-reviewer"),
+)
+def test_claude_adapter_actions_keep_reads_memory_only_and_writes_authorized(
+    tmp_path: Path,
+    case: tuple[str, str, str],
+) -> None:
+    relative_source, read_label, write_label = case
+    validator = VALIDATORS[1]
+    provider = "claude"
+    module = _load(validator, f"claude_read_write_{relative_source.rsplit('/', 1)[-1]}")
+    runtime = module._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(runtime._applicable_actions(module.ACTIONS, layout))
+    read_matches = tuple(action for action in actions if action[-1] == read_label)
+    write_matches = tuple(action for action in actions if action[-1] == write_label)
+    assert len(read_matches) == 1
+    assert len(write_matches) == 1
+    read_action = read_matches[0]
+    write_action = write_matches[0]
+    assert read_action[0] == write_action[0] == "check_contains"
+    assert "consume effective values in memory" in read_action[2]
+    assert "do not rewrite configuration on a routing read" in read_action[2]
+    assert "Persisted normalization belongs only to an authorized install/configuration write" in write_action[2]
+
+    source = (ROOT / relative_source).read_text(encoding="utf-8")
+    assert read_action[2] in source
+    assert write_action[2] in source
+    assert "Read and normalize `.claude/.agents-mode.yaml` to the current canonical format before trusting its flags." not in source
+
+    candidate = tmp_path / "adapter.md"
+    for action, content in ((read_action, read_action[2]), (write_action, source)):
+        accepted = _run_single_action(runtime, validator, provider, action, candidate, content)
+        assert accepted.checks == 1
+        assert accepted.errors == 0
+
+    boundary_mutations = (
+        (read_action, "consume effective values in memory", "write effective values to disk"),
+        (read_action, "do not rewrite configuration on a routing read", "rewrite configuration during a routing read"),
+        (write_action, "Persisted normalization belongs only to an authorized install/configuration write", "Persisted normalization belongs to every routing read"),
+    )
+    for action, old, new in boundary_mutations:
+        assert old in action[2]
+        mutated = source.replace(old, new, 1)
+        assert mutated != source
+        rejected = _run_single_action(runtime, validator, provider, action, candidate, mutated)
+        assert rejected.errors == 1
+
+
+@pytest.mark.parametrize(
+    "case",
+    PACK_ROUTING_READ_ACTION_CASES,
+    ids=tuple(case[3] for case in PACK_ROUTING_READ_ACTION_CASES),
+)
+def test_pack_routing_read_actions_bind_current_paragraphs_and_reject_boundary_loss(
+    tmp_path: Path,
+    case: tuple,
+) -> None:
+    provider, validator, relative_source, label, markers, mutations = case
+    module = _load(validator, f"routing_boundary_{provider}_{label.replace(' ', '_')}")
+    runtime = module._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(runtime._applicable_actions(module.ACTIONS, layout))
+    matches = tuple(action for action in actions if action[-1] == label)
+    assert len(matches) == 1
+    action = matches[0]
+    assert action[0] == "check_contains"
+    assert action[1].replace("@ROOT/", "").endswith(relative_source)
+    for marker in markers:
+        assert marker in action[2]
+
+    source = (ROOT / relative_source).read_text(encoding="utf-8")
+    assert source.count(action[2]) == 1
+    candidate = tmp_path / "contract.md"
+    accepted = _run_single_action(runtime, validator, provider, action, candidate, source)
+    assert accepted.checks == 1
+    assert accepted.errors == 0
+
+    for old, new in mutations:
+        assert old in action[2]
+        mutated_action = action[2].replace(old, new, 1)
+        mutated_source = source.replace(action[2], mutated_action, 1)
+        assert mutated_source != source
+        rejected = _run_single_action(runtime, validator, provider, action, candidate, mutated_source)
+        assert rejected.errors == 1
+
+    if label == "consultant reads the Codex overlay in memory":
+        assert _run_single_action(runtime, validator, provider, action, candidate, "").errors == 1
+        assert _run_single_action(runtime, validator, provider, action, candidate, None).errors == 1
 
 
 def test_work_items_checker_consumes_canonical_slug_predicate_explicitly(
@@ -107,6 +368,13 @@ def test_work_items_checker_consumes_canonical_slug_predicate_explicitly(
     assert resolver_calls == ["safe.dot"]
 
 
+def _has_complete_summary_line(output: str, summary: str) -> bool:
+    return any(
+        re.fullmatch(summary.removesuffix("\n"), line)
+        for line in output.splitlines()
+    )
+
+
 def _run_validator(
     validator: Path,
     summary: str,
@@ -130,8 +398,52 @@ def _run_validator(
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert summary in result.stdout
+    assert _has_complete_summary_line(result.stdout, summary), result.stdout
     return result
+
+
+@pytest.mark.parametrize(
+    ("summary", "line", "expected"),
+    (
+        (EXPECTED_SUMMARIES[0], "  PASS: 1  WARN: 0  FAIL: 0", True),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 1  |  Passed: 1  |  Warnings: 0  |  Errors: 0",
+            True,
+        ),
+        (EXPECTED_SUMMARIES[0], "  PASS: 0  WARN: 0  FAIL: 0", False),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 0  |  Passed: 0  |  Warnings: 0  |  Errors: 0",
+            False,
+        ),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 2  |  Passed: 1  |  Warnings: 0  |  Errors: 0",
+            False,
+        ),
+        (EXPECTED_SUMMARIES[0], "  PASS: 1  WARN: 0  FAIL: 1", False),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 2  |  Passed: 2  |  Warnings: 0  |  Errors: 1",
+            False,
+        ),
+        (EXPECTED_SUMMARIES[0], "  PASS: 1  WARN: 0  FAIL: 01", False),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 2  |  Passed: 2  |  Warnings: 0  |  Errors: 01",
+            False,
+        ),
+        ("VALIDATION PASSED\n", "VALIDATION PASSED", True),
+        ("  RESULT: PASS\n", "  RESULT: PASS", True),
+    ),
+)
+def test_validator_summary_patterns_require_a_complete_clean_success_line(
+    summary: str,
+    line: str,
+    expected: bool,
+) -> None:
+    assert _has_complete_summary_line(line + "\n", summary) is expected
 
 
 def _copy_validator_runtime(destination: Path) -> None:
@@ -171,7 +483,18 @@ def _materialize_installed_pack(
         scripts = pack / "skills" / "lead" / "scripts"
     else:
         pack = target / ".claude"
-        shutil.copytree(ROOT / "src.claude", pack)
+        shutil.copytree(
+            ROOT / "src.claude", pack,
+            ignore=lambda path, names: {"skills"}
+            if Path(path) == ROOT / "src.claude" else set(),
+        )
+        universal_skills = target / ".agents" / "skills"
+        shutil.copytree(ROOT / "src.codex" / "skills", universal_skills)
+        # Fixture receiving uses canonical bodies and the existing projection owner.
+        (pack / "skills").mkdir()
+        for skill in universal_skills.iterdir():
+            if skill.is_dir():
+                _create_directory_link(pack / "skills" / skill.name, skill)
         shutil.copy2(ROOT / "shared" / "AGENTS.shared.md", pack / "AGENTS.md")
         scripts = pack / "agents" / "scripts"
     for name in (
@@ -946,6 +1269,8 @@ def _common_pin_actions(names: tuple[str, ...], candidate: Path) -> tuple[tuple[
     (
         ("matching", 0, None),
         ("missing", 1, "missing: windows-gui-manual-testing"),
+        ("missing-manual", 1, "missing: manual-repo-transfer"),
+        ("parity", 0, None),
         ("extra", 1, "extra: synthetic-common"),
         ("non-applicable-extra", 0, None),
     ),
@@ -964,9 +1289,19 @@ def test_common_pin_completeness_uses_exact_applicable_action_names(
     candidate = tmp_path / "SKILL.md"
     candidate.write_bytes(b"---\nname: fixture\ndescription: fixture\n---\nbody\n")
     applicable_names = names
+    parity_actions: tuple[tuple[str, ...], ...] = ()
     scoped_actions: tuple[tuple[str, object], ...] = ()
     if mutation == "missing":
         applicable_names = tuple(name for name in names if name != "windows-gui-manual-testing")
+    elif mutation in ("missing-manual", "parity"):
+        applicable_names = tuple(name for name in names if name != "manual-repo-transfer")
+        if mutation == "parity":
+            parity_actions = ((
+                "check_common_skill_body_parity",
+                "manual-repo-transfer",
+                "src.codex/skills/manual-repo-transfer/SKILL.md",
+                "src.claude/skills/manual-repo-transfer/SKILL.md",
+            ),)
     elif mutation == "extra":
         applicable_names = (*names, "synthetic-common")
     elif mutation == "non-applicable-extra":
@@ -983,6 +1318,7 @@ def test_common_pin_completeness_uses_exact_applicable_action_names(
         actions=(
             ("direct", "common_pin_completeness", "common pin completeness"),
             *_common_pin_actions(applicable_names, candidate),
+            *parity_actions,
             *scoped_actions,
         ),
         maintainer_only_shared_reference_names=frozenset(),
@@ -995,6 +1331,334 @@ def test_common_pin_completeness_uses_exact_applicable_action_names(
     output = capsys.readouterr().out
     if expected_fragment is not None:
         assert expected_fragment in output
+
+
+@pytest.mark.parametrize("changed_pack", (None, "src.codex", "src.claude", "frontmatter", "missing-claude"))
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_manual_transfer_current_body_parity_in_monorepo(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    changed_pack: str | None,
+    provider: str,
+) -> None:
+    """Catches either unilateral body edit without pinning a source snapshot."""
+    runtime = _load(RUNTIME, f"manual_parity_{provider}_{changed_pack}")
+    assert callable(getattr(runtime.Validator, "check_common_skill_body_parity", None))
+    root = tmp_path / "repo"
+    for relative in (
+        "shared/AGENTS.shared.md",
+        "src.codex/AGENTS.codex.md",
+        "src.codex/skills/manual-repo-transfer/SKILL.md",
+        "src.claude/skills/manual-repo-transfer/SKILL.md",
+    ):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, target)
+    (root / "src.codex/skills/lead/scripts").mkdir(parents=True)
+    (root / "src.claude/agents/scripts").mkdir(parents=True)
+    if changed_pack in ("src.codex", "src.claude"):
+        skill = root / changed_pack / "skills/manual-repo-transfer/SKILL.md"
+        skill.write_bytes(skill.read_bytes() + b"\nfixture body drift\n")
+    elif changed_pack == "frontmatter":
+        skill = root / "src.codex/skills/manual-repo-transfer/SKILL.md"
+        content = skill.read_text(encoding="utf-8")
+        assert "description:" in content
+        skill.write_text(content.replace("description:", "description: fixture ", 1), encoding="utf-8")
+    elif changed_pack == "missing-claude":
+        (root / "src.claude/skills/manual-repo-transfer/SKILL.md").unlink()
+    action = (
+        "check_common_skill_body_parity",
+        "manual-repo-transfer",
+        "src.codex/skills/manual-repo-transfer/SKILL.md",
+        "src.claude/skills/manual-repo-transfer/SKILL.md",
+    )
+    script = root / ("src.codex/skills/lead/scripts" if provider == "codex" else "src.claude/agents/scripts") / "validate-skill-pack.py"
+    result = runtime.validate_pack(
+        script=script,
+        provider=provider,
+        actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=root,
+    )
+    assert result.errors == (1 if changed_pack in ("src.codex", "src.claude", "missing-claude") else 0)
+    assert "cross-provider body parity" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("mutation", ("valid", "missing", "invalid-frontmatter"))
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_manual_transfer_standalone_checks_local_skill_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], provider: str, mutation: str
+) -> None:
+    """Catches a monorepo-only lookup imposed on an installed provider."""
+    runtime = _load(RUNTIME, f"manual_standalone_{provider}")
+    assert callable(getattr(runtime.Validator, "check_common_skill_body_parity", None))
+    target, script = _materialize_installed_pack(tmp_path, provider)
+    local = target / (
+        ".agents/skills/manual-repo-transfer/SKILL.md"
+        if provider == "codex"
+        else ".claude/skills/manual-repo-transfer/SKILL.md"
+    )
+    if mutation == "missing":
+        local.unlink()
+    elif mutation == "invalid-frontmatter":
+        local.write_bytes(b"---\nname: wrong\ndescription: fixture\n---\nbody\n")
+    action = (
+        "check_common_skill_body_parity",
+        "manual-repo-transfer",
+        "src.codex/skills/manual-repo-transfer/SKILL.md",
+        "src.claude/skills/manual-repo-transfer/SKILL.md",
+    )
+    result = runtime.validate_pack(
+        script=script,
+        provider=provider,
+        actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=target,
+    )
+    assert result.errors == (0 if mutation == "valid" else 1)
+    output = capsys.readouterr().out
+    if mutation == "valid":
+        assert "cross-provider parity not applicable" in output
+    else:
+        assert "local skill missing or frontmatter invalid" in output
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+@pytest.mark.parametrize("mutation", ("prose", "required-heading"))
+def test_shared_blueprint_checks_contract_without_whole_file_snapshot(
+    tmp_path: Path,
+    provider: str,
+    mutation: str,
+) -> None:
+    """Catches a lost required section while permitting non-contract prose edits."""
+    runtime = _load(RUNTIME, f"blueprint_contract_{provider}_{mutation}")
+    provider_module = _load(
+        VALIDATORS[0 if provider == "codex" else 1],
+        f"blueprint_actions_{provider}_{mutation}",
+    )
+    root = tmp_path / "repo"
+    for relative in (
+        "shared/AGENTS.shared.md",
+        "src.codex/AGENTS.codex.md",
+        "shared/references/subagent-operating-model.md",
+    ):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, target)
+    (root / "src.codex/skills/lead/scripts").mkdir(parents=True)
+    (root / "src.claude/agents/scripts").mkdir(parents=True)
+    blueprint = root / "shared/references/subagent-operating-model.md"
+    content = blueprint.read_text(encoding="utf-8")
+    if mutation == "prose":
+        content += "\nFixture-only explanatory prose.\n"
+    else:
+        assert "## 8. Gates: what each stage must prove" in content
+        content = content.replace("## 8. Gates: what each stage must prove", "## 8. Gates", 1)
+    blueprint.write_text(content, encoding="utf-8")
+    script = root / ("src.codex/skills/lead/scripts" if provider == "codex" else "src.claude/agents/scripts") / "validate-skill-pack.py"
+    layout = runtime.detect_layout(script, provider, root)
+    actions = tuple(
+        action
+        for action in runtime._applicable_actions(provider_module.ACTIONS, layout)
+        if len(action) >= 2
+        and action[1] == "@ROOT/shared/references/subagent-operating-model.md"
+        and action[0] in {"check_exact_h2_inventory", "check_normalized_sha256"}
+    )
+    result = runtime.validate_pack(
+        script=script,
+        provider=provider,
+        actions=actions,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=root,
+    )
+    assert result.checks == 1
+    assert result.errors == (1 if mutation == "required-heading" else 0)
+
+
+def test_codex_addendum_h2_inventory_accepts_terms_and_rejects_shape_drift(
+    tmp_path: Path,
+) -> None:
+    adapter = _load(VALIDATORS[0], "codex_addendum_h2_inventory")
+    runtime = adapter._ENGINE
+    layout = runtime.detect_layout(VALIDATORS[0], "codex", ROOT)
+    actions = tuple(
+        action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
+        if action[0] == "check_exact_h2_inventory"
+        and action[1] == "@ROOT/references-codex/subagent-operating-model.md"
+    )
+    assert len(actions) == 1
+    action = actions[0]
+    assert action[3:] == (
+        "## Codex-specific runtime notes",
+        "## Codex-side repository concretization",
+        "## Shared core now owns",
+        "## Terms and Abbreviations",
+    )
+    path_resolver = runtime.Validator(layout)
+    try:
+        source = path_resolver.path(action[1]).read_bytes()
+    finally:
+        path_resolver.close()
+    candidate = tmp_path / "codex-addendum.md"
+    redirected = (action[0], str(candidate), *action[2:])
+
+    def check(content: bytes) -> int:
+        candidate.write_bytes(content)
+        result = runtime.validate_pack(
+            script=VALIDATORS[0],
+            provider="codex",
+            actions=(redirected,),
+            maintainer_only_shared_reference_names=frozenset(),
+            utility_skills=frozenset(),
+            curated_role_skills=frozenset(),
+            root=ROOT,
+        )
+        assert result.checks == 1
+        return result.errors
+
+    assert check(source) == 0
+    assert check(source.replace(b"\n## Terms and Abbreviations\n", b"\n", 1)) == 1
+    assert check(source + b"\n## 1. Main rule for the lead\n") == 1
+
+
+@pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))
+def test_initializer_read_contract_accepts_in_memory_and_rejects_boundary_loss(
+    tmp_path: Path, provider: str, validator: Path,
+) -> None:
+    adapter = _load(validator, f"initializer_read_contract_{provider}")
+    runtime = adapter._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(
+        action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
+        if action[0] == "check_contains"
+        and action[1].endswith(("/init-project/SKILL.md", "/agents-init-project.md"))
+        and ("before reading values" in action[-1]
+             or "read-time agents-mode normalization" in action[-1])
+    )
+    assert len(actions) == 2
+    text = (ROOT / actions[0][1].removeprefix("@ROOT/")).read_text(encoding="utf-8")
+    candidate = tmp_path / "initializer.md"
+    selected = tuple((action[0], str(candidate), *action[2:]) for action in actions)
+
+    def check(content: str | None):
+        if content is None:
+            candidate.unlink(missing_ok=True)
+        else:
+            candidate.write_text(content, encoding="utf-8")
+        result = runtime.validate_pack(
+            script=validator, provider=provider, actions=selected,
+            maintainer_only_shared_reference_names=frozenset(),
+            utility_skills=frozenset(), curated_role_skills=frozenset(), root=ROOT,
+        )
+        assert result.checks == 2
+        return result
+
+    accepted = check(text)
+    assert accepted.errors == 0
+    assert accepted.passed == 2
+    losses = (
+        ("Normalize effective values in memory", "Rewrite the configuration file"),
+        ("do not rewrite borrowed/global configuration on read", "rewrite borrowed/global configuration on read"),
+        ("explicitly selected authorized project configuration", "project configuration"),
+        (f"local `.{ 'agents' if provider == 'codex' else 'claude' }/.agents-mode.yaml`",
+         "borrowed provider overlay"),
+    )
+    for clause, replacement in losses:
+        assert clause in text
+        assert check(text.replace(clause, replacement)).errors > 0
+    assert check("").errors == 2
+    assert check(None).errors == 2
+
+
+@pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))
+@pytest.mark.parametrize("surface", ("gui-body", "post-spawn-cleanup-body", "provider-addendum"))
+def test_current_provider_currency_pins_accept_source_and_reject_protected_drift(
+    tmp_path: Path, provider: str, validator: Path, surface: str,
+) -> None:
+    adapter = _load(validator, f"currency_pin_{provider}_{surface}")
+    runtime = adapter._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(
+        action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
+        if (surface == "gui-body" and action[0] == "check_common_skill_body_pin"
+            and action[1] == "windows-gui-manual-testing")
+        or (surface == "post-spawn-cleanup-body" and action[0] == "check_common_skill_body_pin"
+            and action[1] == "post-spawn-cleanup")
+        or (surface == "provider-addendum" and action[0] == "check_normalized_sha256"
+            and action[1].endswith("/subagent-operating-model.md"))
+    )
+    assert len(actions) == 1
+    action = actions[0]
+    file_index = 3 if surface in {"gui-body", "post-spawn-cleanup-body"} else 1
+    path_resolver = runtime.Validator(layout)
+    try:
+        data = path_resolver.path(action[file_index]).read_bytes()
+    finally:
+        path_resolver.close()
+    candidate = tmp_path / "protected.md"
+    redirected = list(action)
+    redirected[file_index] = str(candidate)
+
+    def check(content: bytes | None):
+        if content is None:
+            candidate.unlink(missing_ok=True)
+        else:
+            candidate.write_bytes(content)
+        result = runtime.validate_pack(
+            script=validator, provider=provider, actions=(tuple(redirected),),
+            maintainer_only_shared_reference_names=frozenset(),
+            utility_skills=frozenset(), curated_role_skills=frozenset(), root=ROOT,
+        )
+        assert result.checks == 1
+        return result
+
+    assert check(data).errors == 0
+    clause = (b"found-by: windows-gui-manual-testing" if surface == "gui-body"
+              else b"A genuine host-policy refusal stops that operation"
+              if surface == "post-spawn-cleanup-body"
+              else b"persistence limited to authorized install/configuration writes")
+    assert clause in data
+    assert check(data.replace(clause, b"[removed protected contract]")).errors == 1
+    if surface == "post-spawn-cleanup-body":
+        assert check(b"").errors == 1
+    if surface == "provider-addendum":
+        normalized = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        assert check(normalized.replace(b"\n", b"\r\n")).errors == 0
+    assert check(None).errors == 1
+
+
+@pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))
+def test_initializer_presets_remain_guarded_by_existing_actions(
+    tmp_path: Path, provider: str, validator: Path,
+) -> None:
+    adapter = _load(validator, f"initializer_preset_contract_{provider}")
+    runtime = adapter._ENGINE
+    layout = runtime.detect_layout(validator, provider, ROOT)
+    actions = tuple(
+        action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
+        if action[0] == "check_contains"
+        and ("init-project exposes power-mode preset" in action[-1]
+             or "init-project correctness-first/power-mode presets raise" in action[-1])
+    )
+    assert len(actions) == 3
+    text = (ROOT / actions[0][1].removeprefix("@ROOT/")).read_text(encoding="utf-8")
+    candidate = tmp_path / "presets.md"
+    selected = tuple((action[0], str(candidate), *action[2:]) for action in actions)
+    for content, errors in ((text, 0), (text.replace("review.security: 2", "review.security: 1"), 1)):
+        candidate.write_text(content, encoding="utf-8")
+        result = runtime.validate_pack(
+            script=validator, provider=provider, actions=selected,
+            maintainer_only_shared_reference_names=frozenset(),
+            utility_skills=frozenset(), curated_role_skills=frozenset(), root=ROOT,
+        )
+        assert result.checks == 3
+        assert result.errors == errors
 
 
 def test_layering_codex_derives_common_names_from_the_spine(tmp_path: Path) -> None:
@@ -1197,6 +1861,11 @@ def test_scoped_action_registry_keeps_source_only_maintainer_checks_out_of_insta
         if scope in ("all", "installed")
         for action in actions
     )
+    assert any(
+        action[:2] == ("check_common_skill_body_pin", "post-spawn-cleanup")
+        and action[3] == "@SKILLS/post-spawn-cleanup/SKILL.md"
+        for action in installed_actions
+    )
     assert not any(
         module._is_source_only_maintainer_action(action)
         for action in installed_actions
@@ -1358,6 +2027,98 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
 
 
 @pytest.mark.parametrize(
+    ("body", "expected_passed", "expected_unresolved"),
+    (
+        (
+            "- **Coherent locality (A4/A7/M):** one combined law.\n"
+            "A4 A7 M govern this role.\n",
+            True,
+            (),
+        ),
+        (
+            "- **Coherent locality (A4/A7):** incomplete combined law.\n"
+            "A4 A7 M govern this role.\n",
+            False,
+            ("M",),
+        ),
+        (
+            "A4 A7 M govern this role.\n"
+            "Ordinary prose mentions (A4/A7/M) without defining the laws.\n",
+            False,
+            ("A4", "A7", "M"),
+        ),
+    ),
+)
+def test_layering_ids_resolve_only_from_bold_labeled_definitions(
+    tmp_path: Path,
+    body: str,
+    expected_passed: bool,
+    expected_unresolved: tuple[str, ...],
+) -> None:
+    skill = tmp_path / "SKILL.md"
+    skill.write_text(body, encoding="utf-8")
+    runtime = _load(RUNTIME, f"grouped_layering_ids_{len(body)}")
+
+    passed, unresolved = runtime.layering_ids_resolve(skill)
+
+    assert passed is expected_passed
+    assert unresolved == expected_unresolved
+
+
+@pytest.mark.parametrize(
+    ("provider", "validator"),
+    tuple(zip(("codex", "claude"), VALIDATORS, strict=True)),
+)
+@pytest.mark.parametrize(("label", "required_clause"), SHARED_INVARIANT_ACTIONS)
+def test_provider_shared_invariant_actions_bind_current_clause_and_reject_removal(
+    tmp_path: Path,
+    provider: str,
+    validator: Path,
+    label: str,
+    required_clause: str,
+) -> None:
+    adapter = _load(validator, f"shared_invariant_adapter_{provider}_{len(label)}")
+    matches = tuple(action for action in adapter._DECLARED_ACTIONS if action[-1] == label)
+    assert len(matches) == 1
+    declared = matches[0]
+    assert declared[0] == "check_contains"
+    assert declared[2] == required_clause
+
+    shared_text = (ROOT / "shared/AGENTS.shared.md").read_text(encoding="utf-8")
+    assert shared_text.count(required_clause) == 1
+    candidate = tmp_path / f"{provider}-{len(label)}.md"
+    candidate.write_text(shared_text, encoding="utf-8")
+    action = ("check_contains", str(candidate), required_clause, label)
+    runtime = _load(RUNTIME, f"shared_invariant_runtime_{provider}_{len(label)}")
+
+    accepted = runtime.validate_pack(
+        script=validator,
+        provider=provider,
+        actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+    )
+    assert accepted.errors == 0
+
+    candidate.write_text(
+        shared_text.replace(required_clause, "[removed shared invariant]"),
+        encoding="utf-8",
+    )
+    rejected = runtime.validate_pack(
+        script=validator,
+        provider=provider,
+        actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+    )
+    assert rejected.errors == 1
+
+
+@pytest.mark.parametrize(
     (
         "provider",
         "linked_subtree",
@@ -1381,10 +2142,10 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             "claude",
             "agents",
             ".claude/CLAUDE.md",
-            "agents-design-panel.md",
-            "agents-stale-panel.md",
+            ".claude/commands/agents-help.md",
+            ".claude/commands/agents-stale-help.md",
             "  RESULT: PASS\n",
-            "CLAUDE.md dispatch index exposes the design-panel command",
+            "CLAUDE.md points to the installed command index",
         ),
     ),
 )
@@ -1543,6 +2304,27 @@ def test_production_installer_runtime_inventory_owns_canonical_engine() -> None:
     assert RUNTIME.name in installer.RUNTIME_HELPERS
 
 
+def test_installer_copies_windows_job_owner_from_canonical_runtime(
+    tmp_path: Path,
+) -> None:
+    installer = _load(
+        ROOT / "scripts/production_installer.py",
+        "windows_job_owner_installer_test",
+    )
+    root = tmp_path / "source"
+    source = root / "scripts/process_supervision/windows_job.py"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"WINDOWS_JOB_SENTINEL = True\n")
+    target = tmp_path / "installed/process_supervision/windows_job.py"
+
+    destinations = installer._runtime_file_destinations(root, target.parents[1])
+    assert (source, target) in destinations
+    installer._install_runtime_files(
+        root, target.parents[1], False, destinations=((source, target),)
+    )
+    assert target.read_bytes() == b"WINDOWS_JOB_SENTINEL = True\n"
+
+
 @pytest.mark.parametrize(
     "launcher",
     (
@@ -1559,3 +2341,188 @@ def test_retained_posix_surface_is_only_a_thin_python_launcher(
     assert 'exec "$PYTHON_CMD"' in text
     assert "check_contains" not in text
     assert "check_absent" not in text
+
+
+
+def _minimal_claude_skill_layout(tmp_path: Path):
+    """Synthetic bodies only; never copies or executes lifecycle Source."""
+    module = _load(VALIDATORS[1], "current_claude_skill_owner")
+    runtime = module._ENGINE
+    root = tmp_path / "repo"
+    contents = {
+        "shared/AGENTS.shared.md": "## Role index\n- `$lead`.\n## Common skills\n- `$lead`.\n",
+        "src.codex/AGENTS.codex.md": "fixture provider addendum\n",
+        "src.claude/agents/lead.md": "fixture Claude wrapper\n",
+        "src.claude/commands/agents-status.md": "fixture Claude command\n",
+        "src.claude/CLAUDE.md": (ROOT / "src.claude/CLAUDE.md").read_text(encoding="utf-8"),
+        "src.codex/skills/lead/SKILL.md": (
+            "---\nname: lead\ndescription: fixture\n---\n"
+            "the orchestration owner stays in the main session\n"
+            "apply the current-owner reuse check\n"
+            "<!-- APAT-BLOCK:LEAD-ROUTING:BEGIN -->\n"
+            "is not a universal Architect prelude\n"
+        ),
+        "src.codex/skills/lead/subagent-contracts.md": (
+            "An accepted plan is an input, not proof the capability is still missing\n"
+        ),
+        "src.claude/skills/lead/SKILL.md": (
+            "---\nname: lead\ndescription: historical fixture\n---\n"
+            "hold the Lead role AS the main conversation\n"
+        ),
+    }
+    for relative, content in contents.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    (root / "src.codex/skills/lead/scripts").mkdir()
+    scripts = root / "src.claude/agents/scripts"
+    scripts.mkdir()
+    return module, runtime, root, scripts / "validate-skill-pack.py"
+
+
+@pytest.mark.parametrize(
+    "mutation", ("healthy", "main-context", "reuse", "handoff", "missing", "missing-root", "historical-decoy")
+)
+def test_claude_current_body_actions_use_canonical_owner_and_fail_visibly(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], mutation: str
+) -> None:
+    module, runtime, root, script = _minimal_claude_skill_layout(tmp_path)
+    body = root / "src.codex/skills/lead/SKILL.md"
+    if mutation == "missing":
+        body.unlink()
+    elif mutation == "missing-root":
+        shutil.rmtree(root / "src.codex/skills")
+    elif mutation in ("main-context", "reuse"):
+        pattern = (
+            "the orchestration owner stays in the main session"
+            if mutation == "main-context" else "apply the current-owner reuse check"
+        )
+        body.write_text(body.read_text(encoding="utf-8").replace(pattern, "fixture removed"), encoding="utf-8")
+    elif mutation == "handoff":
+        (body.parent / "subagent-contracts.md").write_text("fixture removed\n", encoding="utf-8")
+    elif mutation == "historical-decoy":
+        (root / "src.claude/skills/lead/SKILL.md").write_text("unrelated historical body\n", encoding="utf-8")
+    actions = tuple(
+        (scope, tuple(action for action in group if
+            action[1].startswith("@SKILLS/lead/")
+            or action[:2] == ("direct", "exists") and action[2].startswith("@SKILLS/lead/")
+        ))
+        for scope, group in module.ACTIONS
+    )
+    layout = runtime.detect_layout(script, "claude", root)
+    assert layout.skills == root / "src.codex/skills"
+    assert not layout.standalone
+    observed = tuple(runtime._applicable_actions(actions, layout))
+    assert any("the orchestration owner stays in the main session" in action for action in observed)
+    assert any("apply the current-owner reuse check" in action for action in observed)
+    assert any("An accepted plan is an input, not proof the capability is still missing" in action for action in observed)
+    exit_code = runtime.run_validator_cli(
+        script=script, provider="claude", actions=actions,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(), curated_role_skills=module.CURATED_ROLE_SKILLS,
+        argv=["--root", str(root)],
+    )
+    failed = mutation not in ("healthy", "historical-decoy")
+    assert exit_code == int(failed)
+    output = capsys.readouterr().out
+    assert ("  RESULT: FAIL" if failed else "  RESULT: PASS") in output
+    assert "Warnings: 0" in output
+
+
+@pytest.mark.parametrize("kind", ("skill_frontmatter", "role_index_claude", "layering_claude"))
+def test_claude_body_enumerators_observe_canonical_mutation(
+    tmp_path: Path, kind: str
+) -> None:
+    module, runtime, root, script = _minimal_claude_skill_layout(tmp_path)
+    body = root / "src.codex/skills/lead/SKILL.md"
+    if kind == "skill_frontmatter":
+        body.write_text("---\nname: wrong\ndescription: fixture\n---\n", encoding="utf-8")
+    elif kind == "role_index_claude":
+        body.unlink()
+    else:
+        body.write_text(body.read_text(encoding="utf-8") + "\nC1\n", encoding="utf-8")
+    result = runtime.validate_pack(
+        script=script, provider="claude", actions=(("direct", kind, kind),), root=root,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(), curated_role_skills=module.CURATED_ROLE_SKILLS,
+    )
+    assert result.errors == 1
+
+
+@pytest.mark.parametrize("mutation", ("healthy-extra-body", "omitted", "extra", "empty", "both-empty", "missing", "unquoted-extra"))
+def test_claude_curated_registry_uses_actual_provider_clause(
+    tmp_path: Path, mutation: str
+) -> None:
+    module, runtime, root, script = _minimal_claude_skill_layout(tmp_path)
+    extra = root / "src.codex/skills/backend-engineer/SKILL.md"
+    extra.parent.mkdir()
+    extra.write_text("---\nname: backend-engineer\ndescription: fixture\n---\n", encoding="utf-8")
+    clause = root / "src.claude/CLAUDE.md"
+    content = clause.read_text(encoding="utf-8")
+    if mutation == "missing":
+        clause.unlink()
+    elif mutation == "omitted":
+        clause.write_text(content.replace("`lead`, `product-manager`,", "`lead`,", 1), encoding="utf-8")
+    elif mutation in ("extra", "unquoted-extra"):
+        extra_name = "`backend-engineer`" if mutation == "extra" else "backend-engineer"
+        clause.write_text(content.replace("and `planner`.", f"`planner`, and {extra_name}.", 1), encoding="utf-8")
+    elif mutation in ("empty", "both-empty"):
+        clause.write_text(re.sub(r"(- The curated inline role identities are exactly )[^\n.]*", r"\1", content), encoding="utf-8")
+    result = runtime.validate_pack(
+        script=script, provider="claude", actions=(("direct", "curated_registry", "curated_registry"),), root=root,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset() if mutation == "both-empty" else module.CURATED_ROLE_SKILLS,
+    )
+    assert result.errors == int(mutation != "healthy-extra-body")
+    assert result.checks == 1
+    validator = runtime.Validator(result.layout)
+    try:
+        assert validator.path("@PACK/agents/lead.md") == root / "src.claude/agents/lead.md"
+        assert validator.path("@PACK/commands/agents-status.md") == root / "src.claude/commands/agents-status.md"
+        assert validator.path("@SCRIPTS/validate-skill-pack.py") == script
+    finally:
+        validator.close()
+
+
+def test_claude_extracted_source_keeps_local_body_and_historical_main_context(
+    tmp_path: Path,
+) -> None:
+    module, runtime, root, script = _minimal_claude_skill_layout(tmp_path)
+    shutil.rmtree(root / "src.codex")
+    layout = runtime.detect_layout(script, "claude", root)
+    assert layout.standalone
+    assert layout.skills == root / "src.claude/skills"
+    applicable = tuple(runtime._applicable_actions(module.ACTIONS, layout))
+    assert not any(action in applicable for action in module._CURRENT_SKILL_ACTIONS)
+    historical = tuple(action for action in applicable if
+        action[0] == "check_contains" and "hold the Lead role AS the main conversation" in action
+    )
+    assert len(historical) == 1
+    result = runtime.validate_pack(
+        script=script, provider="claude", actions=historical, root=root,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(), curated_role_skills=module.CURATED_ROLE_SKILLS,
+    )
+    assert result.passed == 1
+    assert result.errors == 0
+
+
+@pytest.mark.parametrize("validator", VALIDATORS)
+def test_current_owner_reuse_actions_cover_current_source_and_installed_scopes(
+    validator: Path,
+) -> None:
+    module = _load(validator, f"current_reuse_scope_{validator.parent.parent.name}")
+    patterns = (
+        "apply the current-owner reuse check",
+        "An accepted plan is an input, not proof the capability is still missing",
+    )
+    for pattern in patterns:
+        selected = tuple((scope, action) for scope, group in module.ACTIONS
+                         for action in group if pattern in action)
+        assert selected
+        assert all(action[0] == "check_contains" and action[1].startswith("@SKILLS/lead/")
+                   for _, action in selected)
+        assert {scope for scope, _ in selected} == (
+            {"all"} if module.PROVIDER == "codex" else {"dev_repo_nonstandalone", "installed"}
+        )

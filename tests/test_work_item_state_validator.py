@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -202,7 +203,7 @@ def v3_event(**overrides) -> dict:
 
 def test_staged_missing_and_empty_ledgers_remain_invalid(tmp_path: Path) -> None:
     for name, ledger_text, diagnostic in (
-        ("missing", None, "missing ledger"),
+        ("missing", None, "cannot read ledger"),
         ("empty", "", "ledger has no events"),
     ):
         item = tmp_path / "work-items" / "active" / f"staged-{name}-ledger"
@@ -214,6 +215,8 @@ def test_staged_missing_and_empty_ledgers_remain_invalid(tmp_path: Path) -> None
 
         assert result.returncode == 1
         assert diagnostic in result.stdout
+        if ledger_text is None:
+            assert "ledger has no events" not in result.stdout
 
 
 def test_pass_ledger_with_artifact_and_evidence(tmp_path: Path) -> None:
@@ -1004,41 +1007,6 @@ def test_closure_recovery_schema_contract_runbook_and_rollup_parity(tmp_path: Pa
             checker.check_recovery_documentation(duplicate_procedure)
 
 
-def _historical_implementation_lane_receipts() -> Path:
-    """Optional local historical evidence, not fresh product execution coverage."""
-    root = ROOT / ".scratch" / "work-items" / "2026-08-17-fix-append-only-invalid-ledger-event-recovery" / "lead-append-only-scratch-retain-20260821-r1-terminal" / "implementation-lane-baseline"
-    if not root.exists():
-        raise unittest.SkipTest(
-            "optional 2026-08-21 implementation-lane receipts are absent from this checkout"
-        )
-    return root
-
-
-def test_implementation_lane_replays_dirty_declared_producer_delta() -> None:
-    root = _historical_implementation_lane_receipts()
-    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["schemaVersion"] == 2
-    assert len(manifest["entries"]) == 77
-    assert len(manifest["declaredPaths"]["paths"]) == 13
-    assert manifest["exclusiveLane"]["producerWriteObserved"] is False
-    probes = json.loads((root / "negative-probes.json").read_text(encoding="utf-8"))
-    assert len(probes["results"]) == 7
-    assert {row["failureId"] for row in probes["results"]} == {"lane-evidence:path", "lane-evidence:cap", "lane-evidence:identity", "lane-evidence:corrupt", "lane-evidence:baseline-drift"}
-    assert probes["producerWrites"] == 0
-
-
-def test_implementation_lane_forbids_external_side_effects() -> None:
-    root = _historical_implementation_lane_receipts()
-    commands = json.loads((root / "commands.jsonl").read_text(encoding="utf-8"))
-    processes = json.loads((root / "process-network-attempts.jsonl").read_text(encoding="utf-8"))
-    call_path = json.loads((root / "call-path-observation.json").read_text(encoding="utf-8"))
-    assert len(commands["deniedClasses"]) == 12
-    assert commands["forbiddenAttempts"] == []
-    assert processes["networkAttempts"] == processes["forbiddenAttempts"] == processes["activePids"] == []
-    assert call_path["forbiddenEdges"] == []
-    assert call_path["claimBoundary"] == "no claim about arbitrary unobserved installed/runtime state"
-
-
 class _UnittestAdapter(unittest.TestCase):
     """Run existing pytest-style functions under the plan's unittest CLI."""
 
@@ -1066,3 +1034,230 @@ _PYTEST_ONLY_RECOVERY_TESTS = {
 for _name, _function in tuple(globals().items()):
     if _name.startswith("test_") and _name not in _PYTEST_ONLY_RECOVERY_TESTS and callable(_function):
         setattr(_UnittestAdapter, _name, _adapt_test(_function))
+
+
+@pytest.mark.parametrize("fixture,expected", [("closure-invalidation-v2", 0), ("legacy-obligation-migration-v2", 1)])
+def test_obligations_json_exposes_effective_state_without_raw_counts(fixture, expected):
+    item = ROOT / "tests" / "fixtures" / "agent-run-ledger" / fixture
+    before = (item / "agent-runs.jsonl").read_bytes()
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(item), "--obligations-json", "--telemetry"], capture_output=True, text=True)
+    payload = json.loads(result.stdout)
+    assert result.returncode == expected
+    assert payload["schemaVersion"] == 1
+    assert payload["selection"] == "live" and payload["strict"] is True
+    assert payload["ledgerSha256"] == hashlib.sha256(before).hexdigest()
+    assert "telemetry" in payload and "notes" not in payload
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    if expected == 0:
+        assert payload["result"] == "PASS" and payload["diagnostics"] == []
+        assert payload["obligations"] == {"openLaunches": [], "openRevises": [], "unresolvedHistory": []}
+    else:
+        assert payload["result"] == "FAIL"
+        row = payload["obligations"]["openLaunches"][0]
+        assert row["runId"] == "toolchain-luna-profile-floor-20260812-r1"
+        assert row["rawLineOrdinal"] == 1 and len(row["rawLineSha256"]) == 64
+        assert any("unsettled launch:" in message for message in payload["diagnostics"])
+
+
+def test_obligations_json_missing_required_ledger_is_unavailable(tmp_path):
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(tmp_path), "--obligations-json"], capture_output=True, text=True)
+    payload = json.loads(result.stdout)
+    assert result.returncode == 1 and payload["result"] == "FAIL"
+    assert payload["obligations"] is None and payload["ledgerSha256"] is None
+    assert payload["selection"] == "live" and payload["diagnostics"]
+
+
+def test_obligations_json_candidate_and_triage_are_explicit():
+    item = ROOT / "tests" / "fixtures" / "agent-run-ledger" / "closure-invalidation-v2"
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(item), "--ledger-path", str(item / "agent-runs.jsonl"), "--no-strict-revise", "--obligations-json"], capture_output=True, text=True)
+    payload = json.loads(result.stdout)
+    assert payload["selection"] == "candidate" and payload["strict"] is False
+
+
+@pytest.mark.parametrize("suffix,cause", [(b'{invalid-json}\n', "invalid JSON"), (b'\xff\n', "cannot read ledger"), (b'"' + b'x' * 200000 + b'"\n', "bounded line length")], ids=["malformed-json", "invalid-utf8", "oversize-line"])
+def test_obligations_json_incomplete_acquisition_is_null(tmp_path, suffix, cause):
+    item = tmp_path / "partial"
+    shutil.copytree(ROOT / "tests" / "fixtures" / "agent-run-ledger" / "closure-invalidation-v2", item)
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_bytes(ledger.read_bytes() + suffix)
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(item), "--obligations-json"], capture_output=True, text=True)
+    payload = json.loads(result.stdout)
+    assert result.returncode == 1 and payload["result"] == "FAIL"
+    assert payload["obligations"] is None
+    assert any(cause in value for value in payload["diagnostics"])
+
+
+def test_load_jsonl_count_limit_records_incomplete_in_same_pass(tmp_path, monkeypatch):
+    module = load_validator_module()
+    monkeypatch.setattr(module, "MAX_LEDGER_EVENTS", 1)
+    observed = []
+    errors = []
+    events = module.load_jsonl(tmp_path / "unused", errors, source_bytes=b'{}\n{}\n', ledger_acquisition_complete_out=observed)
+    assert events == [] and observed == [False]
+    assert any("bounded event count" in value for value in errors)
+
+
+def test_obligations_json_approved_ledger_free_is_explicit(tmp_path):
+    write(tmp_path / "status.md", minimal_quick_fix_status())
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(tmp_path), "--obligations-json"], capture_output=True, text=True)
+    payload = json.loads(result.stdout)
+    assert result.returncode == 0 and payload["selection"] == "ledger-free"
+    assert payload["ledgerSha256"] is None and payload["obligations"]["openLaunches"] == []
+
+
+def _selection_revise_fixture(tmp_path):
+    item = tmp_path / "closure-invalidation-v2"
+    write(item / "status.md", minimal_quick_fix_status())
+    write(item / "design.md", "# Accepted synthetic design.\n")
+    fixture = ROOT / "tests" / "fixtures" / "agent-run-ledger" / "closure-invalidation-v2" / "agent-runs.jsonl"
+    captured = fixture.read_bytes().splitlines(keepends=True)[0]
+    return item, captured
+
+
+@pytest.mark.parametrize("initially_present", [True, False], ids=["present-delete", "absent-appear"])
+def test_obligations_selection_is_frozen_across_validation_boundary(tmp_path, monkeypatch, capsys, initially_present):
+    module = load_validator_module()
+    item, captured = _selection_revise_fixture(tmp_path)
+    ledger = item / "agent-runs.jsonl"
+    if initially_present:
+        ledger.write_bytes(captured)
+        baseline = module.validate_work_item(item)
+        assert len(baseline) == 1 and "open REVISE obligation: fixture-revise-run" in baseline[0]
+    original = module.validate_work_item
+    def interpose(*args, **kwargs):
+        if initially_present:
+            ledger.unlink()
+        else:
+            ledger.write_bytes(captured)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(module, "validate_work_item", interpose)
+    result = module.main(["--work-item", str(item), "--obligations-json"])
+    observed = json.loads(capsys.readouterr().out)
+    if initially_present:
+        assert result == 1 and observed["result"] == "FAIL"
+        assert observed["selection"] == "live"
+        assert observed["ledgerSha256"] == hashlib.sha256(captured).hexdigest()
+        assert [row["runId"] for row in observed["obligations"]["openRevises"]] == ["fixture-revise-run"]
+    else:
+        assert result == 0 and observed["result"] == "PASS"
+        assert observed["selection"] == "ledger-free" and observed["ledgerSha256"] is None
+        assert observed["obligations"] == {"openLaunches": [], "openRevises": [], "unresolvedHistory": []}
+        assert ledger.exists()  # this absent snapshot is no longer current
+
+
+def test_selected_api_read_failure_is_not_successful_empty_acquisition(tmp_path, monkeypatch):
+    module = load_validator_module()
+    item, captured = _selection_revise_fixture(tmp_path)
+    selected = item / "agent-runs.jsonl"
+    selected.write_bytes(captured)
+    original = module.read_ledger_bytes
+    def fail_selected(path, *args, **kwargs):
+        if path == selected:
+            raise OSError("controlled selected acquisition failure")
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(module, "read_ledger_bytes", fail_selected)
+    acquired = []
+    errors = module.validate_work_item(item, ledger_acquisition_complete_out=acquired)
+    assert any("cannot read ledger:" in value and "controlled selected acquisition failure" in value for value in errors)
+    assert acquired == [False]
+    observed = module._obligations_observation(item, None, True, {})
+    assert observed["result"] == "FAIL" and observed["obligations"] is None
+    assert any("controlled selected acquisition failure" in value for value in observed["diagnostics"])
+
+
+def test_captured_empty_present_does_not_become_ledger_free(tmp_path):
+    module = load_validator_module()
+    item, _captured = _selection_revise_fixture(tmp_path)
+    acquired = []
+    errors = module.validate_work_item(item, selected_ledger_bytes=b"", ledger_acquisition_complete_out=acquired)
+    assert any("ledger has no events:" in value for value in errors)
+    assert acquired == [True]
+
+
+def test_frozen_absence_refuses_required_candidate_and_inconsistent_selection(tmp_path, monkeypatch):
+    module = load_validator_module()
+    item, captured = _selection_revise_fixture(tmp_path)
+    selected = item / "agent-runs.jsonl"
+    selected.write_bytes(captured)
+    original = Path.read_bytes
+    def refuse_reacquisition(path):
+        assert path != selected, "frozen selection must not reacquire selected bytes"
+        return original(path)
+    monkeypatch.setattr(Path, "read_bytes", refuse_reacquisition)
+    acquired = []
+    errors = module.validate_work_item(item, selected_ledger_bytes=captured, selected_ledger_absent=True, ledger_acquisition_complete_out=acquired)
+    assert any("inconsistent captured selected ledger presence/absence" in value for value in errors)
+    assert acquired == []
+    acquired = []
+    errors = module.validate_work_item(item, ledger_path=selected, selected_ledger_absent=True, ledger_acquisition_complete_out=acquired)
+    assert any("missing ledger:" in value for value in errors) and acquired == [False]
+    write(item / "status.md", minimal_staged_status())
+    acquired = []
+    errors = module.validate_work_item(item, selected_ledger_absent=True, ledger_acquisition_complete_out=acquired)
+    assert any("missing ledger:" in value for value in errors) and acquired == [False]
+
+
+def test_archive_authority_preserves_migrated_review_and_neutral_settlement(tmp_path):
+    module = load_validator_module()
+    events = [
+        ledger_event(schemaVersion=2, runId="authority-launch", eventKind="launch", status="running", gate="none"),
+        ledger_event(schemaVersion=2, runId="authority-migrated-review", eventKind="terminal", launchRunId="authority-launch", status="revise", gate="REVISE"),
+        ledger_event(schemaVersion=2, runId="authority-neutral-terminal", eventKind="terminal", launchRunId="authority-launch", gate="none"),
+    ]
+    rows = list(module._runtime_rows_from_events(events))
+    rows[1] = replace(rows[1], epoch="migration-replaced")
+    masks = module._derive_authority_masks(rows, [True] * 3, tmp_path, policy="archive")
+    assert masks[0].launch_eligible
+    assert tuple(vars(masks[1]).values()) == (False, False, True, False, False)
+    assert masks[2].terminal_eligible
+    assert masks == module._derive_authority_masks(rows, [True] * 3, tmp_path)
+    assert not any(
+        any(vars(mask).values())
+        for mask in module._derive_authority_masks(rows, [False] * 3, tmp_path, policy="archive")
+    )
+
+
+@pytest.mark.parametrize("epoch", ["sealed-prefix", "transferred", "historical-custody"])
+def test_archive_authority_has_no_historical_uplift(tmp_path, epoch):
+    module = load_validator_module()
+    event = ledger_event(schemaVersion=2, runId="historical-launch", eventKind="launch", status="running", gate="none", workItem=tmp_path.name)
+    row = replace(
+        module._runtime_rows_from_events([event])[0], epoch=epoch,
+        authority=module.LedgerAuthorityV1(True, True, True, True, True),
+    )
+    assert module._derive_authority_masks([row], [False], tmp_path)[0].launch_eligible
+    archive_mask = module._derive_authority_masks([row], [False], tmp_path, policy="archive")[0]
+    assert not any(vars(archive_mask).values())
+
+
+@pytest.mark.parametrize("transformation,profile,epoch", [
+    ("migration-replaced", None, "migration-replaced"),
+    ("manifest-projected", ("identity-ledger-v1-string", 1), "raw"),
+    ("manifest-projected", ("identity-record-v0", 1), "manifest-profile"),
+])
+def test_boolean_compatibility_cannot_reconstruct_projected_authority(transformation, profile, epoch):
+    module = load_validator_module()
+    event = ledger_event(schemaVersion=2, eventKind="standalone", gate="none")
+    projected = module.LedgerProjectionRowV1(event, 1, "a" * 64, "b" * 64, transformation, projection_profile=profile)
+    rows = module._runtime_rows_from_projection([projected])
+    assert rows[0].epoch == epoch
+    assert rows[0].projection_transformation == transformation
+    assert rows[0] == replace(rows[0], projection_transformation="raw")
+    assert dict(rows[0].event) == event
+    assert rows[0].projected_event_sha256 == hashlib.sha256(module._canonical_projection_bytes(event)).hexdigest()
+    errors = []
+    assert module._validate_closure_authority(rows, errors, event_validity=[True]) == ([], [])
+    assert len(errors) == 1 and "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS" in errors[0]
+
+
+def test_boolean_compatibility_preserves_unprojected_raw_and_strict_suffix_rows():
+    module = load_validator_module()
+    event = ledger_event(schemaVersion=2, eventKind="standalone", gate="none")
+    raw_errors = []
+    assert module._validate_closure_authority([event], raw_errors, event_validity=[True]) == ([], [])
+    assert raw_errors == []
+    row = module._runtime_rows_from_events([event])[0]
+    for epoch in ("raw", "strict-suffix"):
+        errors = []
+        assert module._validate_closure_authority([replace(row, epoch=epoch)], errors, event_validity=[True]) == ([], [])
+        assert errors == []

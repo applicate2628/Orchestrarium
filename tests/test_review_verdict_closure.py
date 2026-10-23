@@ -57,11 +57,49 @@ def _event(run_id: str, **over) -> dict:
     return base
 
 
+def test_c3_target_profession_is_required_before_role_matching() -> None:
+    target = _event("missing-profession-target", gate="REVISE", status="revise")
+    closer = _event(
+        "concrete-profession-closer", role="qa-engineer", executionRole="internal",
+        gate="PASS", closesRunIds=[target["runId"]],
+    )
+    validity = (
+        vws.LedgerEventValidityV1(False, vws.LedgerAuthorityV1(False, False, True, False, False)),
+        vws.LedgerEventValidityV1(True, vws.LedgerAuthorityV1(False, False, False, True, False)),
+    )
+    for role in (None, "", " \t"):
+        candidate_target = dict(target)
+        candidate_closer = dict(closer)
+        if role is None:
+            candidate_target.pop("role")
+        else:
+            candidate_target["role"] = role
+            candidate_closer["assignedRole"] = role
+        errors = []
+        open_revise, _ = vws._validate_closure_authority(
+            vws._runtime_rows_from_events([candidate_target, candidate_closer]),
+            errors, validity=validity,
+        )
+        assert any("C3-authority-fail" in error for error in errors), (role, errors)
+        assert [event["runId"] for event in open_revise] == ["missing-profession-target"]
+
+    errors = []
+    open_revise, _ = vws._validate_closure_authority(
+        vws._runtime_rows_from_events([
+            target, {**closer, "assignedRole": "architecture-reviewer"},
+        ]), errors, validity=validity,
+    )
+    assert errors == []
+    assert open_revise == []
+
+
 class ClosureFixture(unittest.TestCase):
     def _write(self, events: list[dict]) -> Path:
         import json
 
-        td = Path(tempfile.mkdtemp())
+        root = Path(tempfile.mkdtemp())
+        td = root / "work-items" / "active" / "fixture-item"
+        td.mkdir(parents=True)
         (td / "status.md").write_text(STATUS_MD, encoding="utf-8")
         # PASS-gate events require their artifact to exist inside the work item.
         (td / "design.md").write_text("fixture artifact\n", encoding="utf-8")
@@ -190,7 +228,7 @@ class ClosureFixture(unittest.TestCase):
         errors = self._validate([revise, wrong_lane])
         self.assertTrue(any("lane" in e and "(C3)" in e for e in errors), errors)
 
-    def test_c3_same_provider_lower_effort_fails(self) -> None:
+    def test_c3_descriptive_cross_run_effort_is_not_authority(self) -> None:
         revise = _event(
             "run-00000050-revise", gate="REVISE", status="revise",
             artifact="a.md", effort="xhigh", provider="codex",
@@ -200,7 +238,34 @@ class ClosureFixture(unittest.TestCase):
             closesRunIds=["run-00000050-revise"], evidence=[{"kind": "review", "ref": "x"}],
         )
         errors = self._validate([revise, weak])
-        self.assertTrue(any("effort" in e and "(C3" in e for e in errors), errors)
+        self.assertEqual(errors, [])
+
+    def test_c3_lead_main_requires_truthful_qa_reviewed_role(self) -> None:
+        target = _event(
+            "run-lead-main-revise", role="lead", executionRole="main",
+            gate="REVISE", status="revise", artifact="design.md",
+            lane="qa", effort="medium", provider="codex",
+        )
+        closer = _event(
+            "run-qa-lead-closer", role="qa-engineer", executionRole="internal",
+            gate="PASS", artifact="design.md", lane="qa", effort="medium",
+            provider="codex", reviewedRole="lead",
+            closesRunIds=[target["runId"]],
+            evidence=[{"kind": "review", "ref": "qa re-verification"}],
+        )
+        self.assertEqual(self._validate([target, closer]), [])
+        for changes in (
+            {"reviewedRole": None},
+            {"assignedRole": "lead", "reviewedRole": None},
+            {"assignedRole": "lead"},
+            {"role": "lead", "executionRole": "main"},
+            {"role": "architecture-reviewer"},
+        ):
+            candidate = {**closer, **changes}
+            if candidate.get("reviewedRole") is None:
+                candidate.pop("reviewedRole", None)
+            errors = self._validate([target, candidate])
+            self.assertTrue(any("C3-reviewed-role-fail" in error for error in errors), errors)
 
     # ---------- typed waiver ----------
 
@@ -707,18 +772,17 @@ class ClosureFixture(unittest.TestCase):
             f"requires exactly one ledger event for {target_id}; found 2",
             errors,
         )
-        self.assertIn(
-            "open REVISE obligation: run-atomic-duplicate-target "
-            "(lane='duplicate-protected-position', artifact='a.md') — closes only on "
-            "re-verification PASS (closesRunIds) or a typed disposition, never on "
-            "author belief or validator green",
-            errors,
-        )
-        self.assertIn(
-            "open REVISE obligation: run-atomic-duplicate-target "
-            "(lane='duplicate-correctness-position', artifact='design.md') — closes only on "
-            "re-verification PASS (closesRunIds) or a typed disposition, never on "
-            "author belief or validator green",
+        # A nonunique identity is denied before it can enter the typed
+        # revise-target authority set. The duplicate and exact waiver target-count
+        # diagnostics remain fail-closed; inventing two open-authority positions
+        # would contradict the five-axis reader contract.
+        self.assertFalse(
+            any(
+                error.startswith(
+                    "open REVISE obligation: run-atomic-duplicate-target"
+                )
+                for error in errors
+            ),
             errors,
         )
         self.assertEqual(telemetry.get("closure-accepted", 0), 0, telemetry)
@@ -760,7 +824,7 @@ class ClosureFixture(unittest.TestCase):
         errors = self._validate([revise, author_close])
         self.assertTrue(any("reviewer-side" in e and "(C3)" in e for e in errors), errors)
 
-    def test_effort_omission_is_not_a_bypass(self) -> None:
+    def test_optional_cross_run_effort_may_be_omitted(self) -> None:
         revise = _event(
             "run-00000110-revise", gate="REVISE", status="revise",
             artifact="a.md", effort="xhigh", provider="codex",
@@ -770,7 +834,7 @@ class ClosureFixture(unittest.TestCase):
             closesRunIds=["run-00000110-revise"], evidence=[{"kind": "review", "ref": "x"}],
         )
         errors = self._validate([revise, no_effort])
-        self.assertTrue(any("omits effort" in e for e in errors), errors)
+        self.assertEqual(errors, [])
 
     def test_unclassified_finding_is_not_user_waivable(self) -> None:
         revise = _event("run-00000120-revise", gate="REVISE", status="revise", artifact="a.md")
@@ -984,7 +1048,9 @@ def _recovery(run_id: str, target: dict, target_line: bytes, **over: object) -> 
 
 
 def _recovery_errors(events: list[dict]) -> tuple[list[str], dict[str, int]]:
-    item = Path(tempfile.mkdtemp())
+    root = Path(tempfile.mkdtemp())
+    item = root / "work-items" / "active" / "fixture-item"
+    item.mkdir(parents=True)
     (item / "status.md").write_text(STATUS_MD, encoding="utf-8")
     (item / "design.md").write_text("fixture artifact\n", encoding="utf-8")
     lines = [json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8") for event in events]

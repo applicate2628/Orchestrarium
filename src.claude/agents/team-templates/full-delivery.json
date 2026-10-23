@@ -11,13 +11,15 @@
     { "agentType": "architect", "stage": "design", "required": true },
     { "agentType": "ux-designer", "stage": "design", "whenNeeded": "user-facing work" },
     { "agentType": "algorithm-scientist", "stage": "design", "whenNeeded": "algorithmically sensitive" },
-    { "agentType": "computational-scientist", "stage": "design", "whenNeeded": "scientific/numerical work" },
+    { "agentType": "computational-scientist", "stage": "design", "whenNeeded": "scientific/numerical model" },
     { "agentType": "security-engineer", "stage": "design", "whenNeeded": "security risk exists" },
     { "agentType": "performance-engineer", "stage": "design", "whenNeeded": "performance budget matters" },
     { "agentType": "reliability-engineer", "stage": "design", "whenNeeded": "operability/recovery matters" },
     { "agentType": "planner", "stage": "plan", "required": true },
     { "agentType": "backend-engineer", "stage": "implement", "whenNeeded": "server/API/persistence work" },
     { "agentType": "frontend-engineer", "stage": "implement", "whenNeeded": "client/UI/browser work" },
+    { "agentType": "scientific-software-engineer", "stage": "implement", "whenNeeded": "scientific/numerical implementation" },
+    { "agentType": "computational-scientist", "stage": "QA", "whenNeeded": "independent scientific-conformance-review after scientific-software-engineer and before generic QA" },
     { "agentType": "qa-engineer", "stage": "QA", "required": true },
     { "agentType": "ui-test-engineer", "stage": "QA", "whenNeeded": "Qt UI regressions" },
     { "agentType": "architecture-reviewer", "stage": "review", "whenNeeded": "extensibility/maintainability critical" },
@@ -28,5 +30,5 @@
   ],
   "requiredRoles": ["analyst", "architect", "planner", "qa-engineer"],
   "minRoles": 4,
-  "notes": "Lead coordinates: manages work-items, assigns risk owners, handles re-intake and integration ownership."
+  "notes": "Lead coordinates: manages work-items, assigns risk owners, handles re-intake and integration ownership. Scientific/numerical work invokes computational-scientist as two independent stage-scoped runs: model design first, then scientific-conformance-review after scientific-software-engineer and before generic QA."
 }

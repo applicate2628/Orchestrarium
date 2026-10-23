@@ -46,11 +46,11 @@ This skill runs two ways:
 - Minimize write conflicts and cross-phase ambiguity.
 - If a phase cannot fit inside the architect's Change-Surface Contract (it requires unrelated module edits, shared abstraction churn, dependency-direction changes, or a touch of a protected surface), ESCALATE it as a `REVISE`-to-architect instead of normalizing the expanded surface in the plan.
 - Give each acceptance criterion a stable per-phase id (`AC1`, `AC2`, ...) so `$qa-engineer` can map evidence back to it ("AC3 verified / AC5 failed"). AC-IDs are append-only per phase within a plan revision — never renumber an existing criterion; a removed criterion's id is retired, not reused.
-- Write each acceptance criterion as an absolute, observable assertion with an exact value, count, order, or invariant. Ask `what would this criterion let pass?` for every criterion; if empty output, a no-op, or both modes being equally broken would satisfy it, rewrite it before returning the plan.
+- Derive each acceptance criterion from the accepted contract or oracle; write it as an absolute observable assertion with the contract/oracle's value, count, order, or invariant. Do not invent literals. Ask `what would this criterion let pass?` for every criterion; if empty output, a no-op, or both modes being equally broken would satisfy it, rewrite it before returning the plan.
 - Call out phases that require specialist review before implementation or merge.
 - Split shared or core module changes into explicit enabling phases with tighter review instead of hiding them inside feature work.
 - When planning a non-foundation feature, require the design to specify a stable feature identifier, owner, default state, and a single settings/capability registry entry that gates the feature, and to verify both the enabled and disabled paths (including absence of side effects in the disabled path — no UI, hotkey, command-palette entry, background watcher, network request, or persistence write reaches the feature when its gate is off).
-- If the work item includes an admitted bug or prerequisite issue, always make that fix Phase A. Cleanup, adjacent fixes, and feature work come only after the admitted issue is verified fixed.
+- Prioritize critical-path and concrete enabling phases by dependencies; a blocker delays only dependent phases. Apply Lead's plan-checkpoint rule: choose work that lowers total remaining verified delivery cost when its expected benefit outweighs step, replanning, and rework cost.
 
 ## Non-goals
 

@@ -6,24 +6,37 @@ description: Use when Codex must turn fixture-specific, geometry-specific, datas
 # Generalize From Instance
 
 Use this skill to extract a reusable contract from a working private case without
-preserving the private case as the owner of the behavior. The goal is a general
-implementation that still passes the original case as one regression example.
+preserving that case as the owner of the behavior. A general implementation
+handles valid instances and accepted variation through the correct owner; it does
+not erase legitimate concrete contracts or predict hypothetical variants.
 
 ## Core Rule
 
 Treat the private case as evidence, not as the model.
 
-The accepted output must name the general entity types, their input contracts,
-their ownership boundary, and the verification gate. It must not depend on
-fixture names, file paths, coordinates, result magnitudes, mesh ids, material ids,
-or UI labels that only make sense for one sample.
+Generality, extensibility, low coupling, cohesion, simplicity, and efficiency are
+one architecture tradeoff. Keep each needed change local to the correct owner;
+use the smallest stable seam justified by an accepted requirement, an accepted
+declared future direction, or evidenced domain variability. A current second
+consumer is useful evidence, not a prerequisite. Do not add speculative
+frameworks, duplicate decisions, or cascade edits across unrelated modules.
+Preserve correctness, required performance, user constraints, and external
+contracts.
+
+Concrete does not mean private. Schema-defined identifiers, protocol paths,
+coordinate systems, domain constants, user-selected labels, and supported API
+shapes may be legitimate contracts. Classify them before changing them.
 
 ## Workflow
 
+Apply the workflow proportionally. A single-anchor documentation or test-name
+correction needs only a concise classification, owner, and check; multiple
+anchors or behavior and contract changes need the fuller mapping below.
+
 1. Capture the private anchors.
    List the concrete names, paths, coordinates, ids, labels, result values, or
-   visual features that currently make the work specific. Quote file and line
-   references when code or docs already contain the private assumption.
+   visual features suspected of making the work specific. Quote file and line
+   references when code or docs contain the assumption.
 
 2. Classify each anchor.
    Mark every anchor as one of:
@@ -35,11 +48,14 @@ or UI labels that only make sense for one sample.
 3. Derive the general entities.
    Replace private nouns with owner-owned categories. Prefer categories that come
    from parsed input schemas, runtime metadata, typed records, cell arrays,
-   boundary tags, roles, or explicit config.
+   boundary tags, roles, or explicit config. Generalize over valid instances,
+   accepted future directions, and evidenced domain variability, not imagined
+   semantic variants.
 
 4. Move behavior to the owner.
    Implement the general rule in the module that owns the data contract. Do not
-   add consumer-side patches that special-case the original fixture.
+   add consumer-side patches that special-case the original fixture or repeat the
+   same decision across callers.
 
 5. Preserve the private case as a regression.
    Keep the original case in examples or tests only. If possible, add one
@@ -48,7 +64,8 @@ or UI labels that only make sense for one sample.
 
 6. Document the general contract.
    Say what input fields drive the behavior, what output is produced, what is
-   intentionally example-only, and how the verification proves generality.
+   intentionally example-only, which compatibility behavior remains, and how the
+   verification proves generality.
 
 ## Generality Checks
 
@@ -60,13 +77,19 @@ Before editing, ask:
   magnitudes, or current screenshot layout when an explicit input field exists?
 - Does a function, type, option, test, or heading use a private noun where a
   typed entity name would be clearer?
-- Would the same code handle an added body, port, terminal, material, mode,
-  field, column, or result convention without another branch?
+- Would the same code handle other valid instances and accepted or evidenced
+  variation within its declared contract without a fixture-specific branch? A
+  genuinely new semantic behavior may require new owner-level dispatch and does
+  not prove that the prior implementation was instance-specific.
 - Are hidden defaults safe when the private case omits a field, or should the
   code fail with a concrete diagnostic?
+- Did the change add an abstraction, plugin system, duplicated decision, or
+  multi-module cascade without evidence that the owning contract needs it?
 
-If any answer exposes a private assumption, fix the contract rather than adding
-a compatibility branch.
+If an answer exposes a private assumption, correct it at the owning boundary.
+Preserve authorized external contracts; when compatibility is required, keep it
+in one owner-owned adapter or migration path rather than a fixture-specific
+consumer branch.
 
 ## Implementation Rules
 
@@ -74,17 +97,24 @@ a compatibility branch.
   roles over string matching against private names.
 - Keep examples and validation fixtures named after their physical case, but keep
   production functions and UI groups named after general entities.
-- Preserve original fixture behavior only through the general path.
-- Fail fast on unknown roles or malformed general inputs; do not silently map an
-  unknown value to the private case's default.
+- Preserve supported behavior through the general path or its owner-owned
+  compatibility boundary.
+- Follow the owning contract's unknown-value policy. Reject an unknown value only
+  when required semantic interpretation cannot be performed under that contract;
+  otherwise explicitly preserve, ignore, or round-trip it as the contract allows.
+  Never map an unknown value silently to the private case's default.
 - Keep the diff at the owning boundary. If generalization requires a broader
   interface, state the verified reason before expanding scope.
-- Do not use empirical scaling, fixture-specific ids, hardcoded coordinates, or
-  path-based dispatch as a generalization substitute.
+- Do not use empirical scaling or example-only ids, coordinates, or path dispatch
+  to imitate the original result. A concrete value remains valid when the owning
+  schema, protocol, domain model, or user contract defines it.
 
 ## Output Artifact
 
-Return one compact implementation note with:
+Return only the detail the change needs. For a single-anchor documentation, test,
+or naming correction, a short result naming its classification, owner, and check
+is sufficient. For multiple anchors or behavior and contract changes, return one
+compact implementation note with:
 
 - private anchors found;
 - classification table for `contract`, `example`, `accident`, and `unknown`;
@@ -93,15 +123,22 @@ Return one compact implementation note with:
 - verification commands and evidence;
 - residual assumptions, each labelled `ASSUMPTION (UNVERIFIED)` if not checked.
 
-Use a Markdown table when several anchors or mappings are involved.
+Use a Markdown table only when several anchors or mappings are involved. Do not
+create a new artifact, abstraction, or gate unless the task contract requires it.
 
 ## Gate
 
 The work passes only when:
 
-- the original private case still works through the general path;
-- no production logic depends on fixture paths, names, ids, coordinates, or
-  screenshot-only layout assumptions;
+- the original private case still works through the general path or a required
+  owner-owned compatibility boundary;
+- no production logic depends on example-only or accidental anchors; each
+  remaining concrete path, name, id, coordinate, label, or layout rule is a
+  verified contract owned at the correct boundary;
+- accepted future directions or evidenced domain variation stay local to the
+  owning implementation or stable seam without speculative mechanisms;
+- required correctness, performance, user constraints, and external contracts
+  remain preserved, or an authorized migration is explicit;
 - docs separate general rules from examples;
 - tests or smoke checks exercise the original case and at least one
   non-private variation when practical;

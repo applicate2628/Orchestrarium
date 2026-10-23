@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import re
 import os
 import signal
 import shutil
@@ -38,6 +39,20 @@ assert spec and spec.loader
 owner = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = owner
 spec.loader.exec_module(owner)
+
+
+class _BinaryOutput:
+    def __init__(self):
+        self.buffer = io.BytesIO()
+
+    def getvalue(self):
+        return self.buffer.getvalue().decode("utf-8")
+
+    def write(self, value):
+        return self.buffer.write(value.encode("utf-8"))
+
+    def flush(self):
+        self.buffer.flush()
 
 
 class _FakePosixReceiptOS:
@@ -273,7 +288,7 @@ def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
     )
     process_supervision = scripts / "process_supervision"
     process_supervision.mkdir()
-    for name in ("__init__.py", "process_runner.py"):
+    for name in ("__init__.py", "process_runner.py", "windows_job.py"):
         (process_supervision / name).write_bytes(
             (ROOT / "scripts" / "process_supervision" / name).read_bytes()
         )
@@ -330,7 +345,7 @@ def _make_fake_provider(
         f"sys.stdout.buffer.write({raw_stdout!r}); sys.stdout.buffer.flush()\n"
         if raw_stdout is not None
         else (
-            "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GATE: PASS\\n'}}))\n"
+            f"sys.stdout.buffer.write({_codex_turn(_codex_agent())!r})\n"
             if provider == "codex" and write_result
             else ("print('GATE: PASS')\n" if provider == "claude" and write_result else "")
         )
@@ -504,6 +519,130 @@ def _write_result(
     lifecycle._test_stderr = stderr
 
 
+def _finalize_observed_fixture(*args, **kwargs):
+    """Supply explicit synthetic settled observations for finalizer unit fixtures."""
+    lifecycle = args[6].lifecycle
+    stdout = getattr(lifecycle, "_test_stdout", b"")
+    stderr = getattr(lifecycle, "_test_stderr", b"")
+    def captured(data):
+        return SimpleNamespace(
+            truncated=False, observed_bytes=len(data), persisted_bytes=len(data),
+            digest=owner.hashlib.sha256(data).hexdigest(),
+        )
+    observation = SimpleNamespace(
+        outcome="success", failure_id=None, target_exit_code=args[7],
+        stdin=SimpleNamespace(complete=True), resources_closed=True,
+        tree=SimpleNamespace(tree_empty=True, direct_reaped=True),
+        stdout=captured(stdout), stderr=captured(stderr), cleanup_issues=(),
+    )
+    kwargs.setdefault("process_result", observation)
+    kwargs.setdefault("raw_stdout", stdout)
+    kwargs.setdefault("raw_stderr", stderr)
+    kwargs.setdefault("credential_needles", ())
+    kwargs.setdefault("output_context", owner.ProviderOutputContext(kwargs["credential_needles"]))
+    kwargs.setdefault("attempted", True)
+    if len(args) == 8:
+        args = (*args, owner.provider_stream_result(kwargs["process_result"]))
+    return owner.finalize_reserved_run_once(*args, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_token"),
+    (
+        ("private", "COMPLETE:EXTERNAL_NONAUTHORIZING"),
+        ("last-unsafe", "UNVERIFIED:E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"),
+        ("unsafe-error-marker", "UNVERIFIED:E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"),
+        ("unsafe-nonzero", "UNVERIFIED:E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"),
+        ("absent", "UNVERIFIED:result-materialization"),
+        ("malformed", "UNVERIFIED:result-materialization"),
+        ("empty", "UNVERIFIED:empty"),
+        ("over-limit", "UNVERIFIED:result-materialization"),
+        ("error-marker", "COMPLETE:EXTERNAL_NONAUTHORIZING"),
+        ("no-gate", "UNVERIFIED:no-gate-line"),
+        ("nonzero", "FAILED:nonzero-exit"),
+    ),
+)
+def test_codex_public_projection_preserves_selection_and_genuine_failures(
+    tmp_path, monkeypatch, mode, expected_token
+):
+    private_path = "Q:" + chr(92) + "Users" + chr(92) + "synthetic-owner" + chr(92) + "private.txt"
+    private_credential = b"synthetic-private-canary"
+
+    def record(item_type, text):
+        return json.dumps({
+            "type": "item.completed", "item": {"id": "synthetic-item", "type": item_type, "text": text, "message": text},
+        }).encode("utf-8") + b"\n"
+
+    raw = record("error", private_path)
+    selected = "GATE: PASS\n"
+    if mode in {"last-unsafe", "unsafe-error-marker", "unsafe-nonzero"}:
+        raw += record("agent_message", selected)
+        selected = private_path + "\nGATE: PASS\n"
+    elif mode == "empty":
+        selected = ""
+    elif mode == "no-gate":
+        selected = "safe answer without a terminal verdict\n"
+    if mode != "absent":
+        raw += record("agent_message", selected)
+    if mode == "malformed":
+        raw += b"{\n"
+    raw = _codex_turn(raw)
+    stderr = private_credential + b"\n"
+    if mode in {"error-marker", "unsafe-error-marker"}:
+        stderr += b"ERROR: synthetic failure\n"
+
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="codex")
+    _write_result(lifecycle, raw, stderr=stderr)
+    output = _BinaryOutput()
+    monkeypatch.setattr(owner.sys, "stdout", output)
+    receipt_path = (tmp_path / "projection.receipt").resolve()
+    control = owner.Control(
+        terminal_receipt=receipt_path,
+        result_max_bytes=len(selected.encode("utf-8")) - 1 if mode == "over-limit" else 1024,
+    )
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = _finalize_observed_fixture(
+            control, "codex", "fixture", "high", "fixture", "",
+            _initialized_reserved(receipt, lifecycle),
+            23 if mode in {"nonzero", "unsafe-nonzero"} else 0,
+            credential_needles=(private_credential,),
+        )
+    payload = owner.parse_provider_result(output.getvalue())
+    assert payload["token"] == expected_token
+    assert code == (
+        0 if mode in {"private", "error-marker"} else 23 if mode in {"nonzero", "unsafe-nonzero"} else 1
+    )
+    if mode == "private":
+        assert payload["resultText"] == selected
+        assert payload["primaryOutcome"]["token"] == "COMPLETE:PASS"
+    if mode in {"last-unsafe", "unsafe-error-marker", "unsafe-nonzero"}:
+        assert payload["resultText"] == ""
+        assert payload["exitCode"] == code
+        assert payload["status"] == "blocked"
+        assert payload["gate"] == "none"
+        assert payload["stderrMarkerCount"] == (1 if mode == "unsafe-error-marker" else 0)
+        expected_primary = {
+            "exitCode": 0, "token": "COMPLETE:PASS", "status": "completed",
+            "gate": "PASS", "note": "oracle: final-line GATE: PASS",
+        }
+        if mode == "unsafe-nonzero":
+            expected_primary.update(
+                exitCode=23, token="FAILED:nonzero-exit", status="blocked", gate="none",
+                note="oracle: nonzero exit (23)",
+            )
+        actual_note = payload["primaryOutcome"]["note"]
+        assert actual_note.startswith("codex-native-v1(")
+        assert expected_primary.pop("note") in actual_note
+        assert {k: v for k, v in payload["primaryOutcome"].items() if k != "note"} == expected_primary
+    assert private_path not in output.getvalue()
+    assert private_credential.decode("ascii") not in output.getvalue()
+    assert receipt_path.read_text(encoding="utf-8") == output.getvalue()
+    assert payload["authorizing"] is False
+    assert payload["closesRunIds"] == []
+    assert payload["cleanupStatus"] == "complete"
+    assert not lifecycle.run_dir.exists()
+
+
 def _outcome() -> owner.FinalOutcome:
     return owner.FinalOutcome(
         exit_code=0,
@@ -522,6 +661,178 @@ def _outcome() -> owner.FinalOutcome:
         recovery_retained=False,
         stderr_marker_count=0,
     )
+
+
+@pytest.mark.parametrize("mode", ("codex-auth-file", "claude-bedrock", "claude-direct", "kimi-user-session"))
+@pytest.mark.parametrize("needles", ((), (b"synthetic-known",)))
+def test_output_context_capability_is_independent_of_supported_auth_label(mode, needles):
+    auth = owner.ProviderAuthConfiguration(mode, {}, needles, "credential-file-unscannable")
+    context = owner.resolve_provider_output_context(auth)
+    assert context.needles == needles
+    assert owner.provider_output_safety_scan_terminal(
+        "codex", context.needles, stdout=b"useful result", stderr=b""
+    ) is None
+
+
+@pytest.mark.parametrize("needles", (None, [], (b"",), ("text",), (b"\xff",), (b"x\x00y",)))
+def test_output_context_refuses_degraded_known_value_inputs(needles):
+    with pytest.raises((ValueError, UnicodeDecodeError)):
+        owner.ProviderOutputContext(needles)
+
+
+@pytest.mark.parametrize("channel", ("stdout", "stderr"))
+@pytest.mark.parametrize("content", (
+    "selected-private-canary", json.dumps({"outer": json.dumps({"value": "selected-private-canary"})}),
+    json.dumps({"value": "selected-private-canary"}).replace("s", "\\u0073"),
+))
+def test_output_context_known_value_is_checked_on_both_full_nested_streams(channel, content):
+    streams = {"stdout": b"", "stderr": b""}
+    streams[channel] = content.encode("utf-8")
+    assert owner.provider_output_safety_scan_terminal(
+        "claude", (b"selected-private-canary",), **streams
+    ) == "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+
+
+_SYNTHETIC_MACHINE_PATH_CANARY = str(Path("C:/Users") / "synthetic" / "private")
+
+
+@pytest.mark.parametrize("field,value", (
+    ("token", "token=synthetic-secret"),
+    ("primaryOutcome", {"exitCode": 0, "token": "token=synthetic-secret", "status": "completed", "gate": "PASS", "note": ""}),
+    ("captureDigest", "token=synthetic-secret"),
+    ("cleanupStatus", _SYNTHETIC_MACHINE_PATH_CANARY),
+    ("captureObservedBytes", _SYNTHETIC_MACHINE_PATH_CANARY),
+    ("resultText", json.dumps({"nested": json.dumps({"token": "synthetic-secret"})})),
+    ("note", _SYNTHETIC_MACHINE_PATH_CANARY),
+    ("unknownOrigin", "ordinary"),
+))
+def test_actual_terminal_subject_refuses_spoofed_controls_and_nested_canaries(field, value):
+    line = owner.build_provider_result_line("claude", "opus", "high", "useful", _outcome(), cancelled=False, timed_out=False)
+    payload = owner.parse_provider_result(line)
+    payload[field] = value
+    injected = owner.RESULT_PREFIX + json.dumps(payload, ensure_ascii=True, separators=(",", ":")) + "\n"
+    assert owner._provider_terminal_line_safety("claude", (), injected) is not None
+
+
+def test_terminal_protocol_semantics_visit_full_line_and_preserve_tiny_exact_checks(monkeypatch):
+    normal = owner.build_provider_result_line("claude", "opus", "high", "useful", _outcome(), cancelled=False, timed_out=False)
+    minimal = owner.build_minimal_provider_failure_line("claude", "opus", "high", stable_id="E_SYNTHETIC_FAILURE", cancelled=False, timed_out=False)
+    observed = []
+    generic_subjects = []
+    actual = owner._machine_path_scan_terminal
+    actual_generic = owner._output_credential_class_echo
+    monkeypatch.setattr(owner, "_machine_path_scan_terminal", lambda value: observed.append(value) or actual(value))
+    monkeypatch.setattr(owner, "_output_credential_class_echo", lambda value, **kwargs: generic_subjects.append(value) or actual_generic(value, **kwargs))
+    for line in (normal, minimal):
+        assert owner._provider_terminal_line_safety("claude", (b"token",), line) is None
+        assert line.encode("utf-8") in observed
+        assert line in generic_subjects
+        pending = [owner.parse_provider_result(line)]
+        while pending:
+            item = pending.pop()
+            if isinstance(item, dict):
+                pending.extend(item.keys())
+                pending.extend(item.values())
+            elif isinstance(item, list):
+                pending.extend(item)
+            elif isinstance(item, str):
+                assert item in generic_subjects
+    dynamic = normal.replace('"resultText":"useful"', '"resultText":"token"')
+    assert owner._provider_terminal_line_safety("claude", (b"token",), dynamic) == "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+
+
+@pytest.mark.parametrize("raw", (b"\xff", b"second"))
+def test_required_output_detectors_fail_closed_for_invalid_decode_or_classifier(monkeypatch, raw):
+    if raw == b"second":
+        monkeypatch.setattr(owner, "_machine_path_finder", lambda: None)
+        assert owner._provider_terminal_line_safety("claude", (), owner.build_minimal_provider_failure_line(
+            "claude", "opus", "high", stable_id="E_SYNTHETIC_FAILURE", cancelled=False, timed_out=False
+        )) == "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+    else:
+        with pytest.raises(UnicodeDecodeError):
+            owner.provider_output_safety_scan_terminal("claude", (), stdout=raw, stderr=b"")
+
+
+@pytest.mark.parametrize("attempted", (False, True, None))
+def test_finalizer_distinguishes_prechild_from_missing_attempt_observations(tmp_path, monkeypatch, attempted):
+    lifecycle = _lifecycle(tmp_path, monkeypatch)
+    receipt_path = (tmp_path / "phase.receipt").resolve()
+    output = _BinaryOutput()
+    monkeypatch.setattr(owner.sys, "stdout", output)
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        reserved = _initialized_reserved(receipt, lifecycle)
+        reserved._output_context = owner.ProviderOutputContext(())
+        reserved._attempted = attempted
+        code = owner.finalize_reserved_run_once(
+            owner.Control(terminal_receipt=receipt_path), "claude", "opus", "high",
+            "phase", "", reserved, 7, launch_error="E_SYNTHETIC_SETUP_FAILED",
+        )
+    payload = owner.parse_provider_result(output.getvalue())
+    assert code == 7 and payload["resultText"] == ""
+    expected = "E_SYNTHETIC_SETUP_FAILED" if attempted is False else "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+    assert payload["token"] == "UNVERIFIED:" + expected
+    assert payload["primaryOutcome"]["exitCode"] == 7
+    assert payload["primaryOutcome"]["note"] == "E_SYNTHETIC_SETUP_FAILED"
+    assert receipt_path.read_text(encoding="utf-8") == output.getvalue()
+    assert not lifecycle.run_dir.exists()
+
+
+def test_capture_metadata_requires_actual_runner_observation():
+    forged = owner.StreamCaptureResult(False, 1, 1, "0" * 64, ())
+    with pytest.raises(ValueError, match="capture observation mismatch"):
+        owner.build_provider_result_line(
+            "claude", "opus", "high", "useful", _outcome(), forged,
+            cancelled=False, timed_out=False,
+        )
+
+
+def test_output_replacement_preserves_primary_failure_and_cleanup_uncertainty():
+    original = replace(
+        _outcome(), exit_code=9, primary_exit_code=9,
+        primary_token="FAILED:nonzero-exit", primary_status="blocked", primary_gate="none",
+        primary_note="token=REJECTED_DYNAMIC_DETAIL", cleanup_status="incomplete",
+        cleanup_issue_count=2, recovery_retained=True, stderr_marker_count=3,
+    )
+    rejected = owner.serialized_safety_failure_outcome(original, "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO")
+    line = owner.build_minimal_provider_failure_line(
+        "claude", "opus", "high", stable_id="E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO",
+        cancelled=False, timed_out=False, exit_code=rejected.exit_code,
+        cleanup_status=rejected.cleanup_status, cleanup_issue_count=rejected.cleanup_issue_count,
+        recovery_retained=rejected.recovery_retained, primary_outcome=rejected,
+    )
+    assert owner._provider_terminal_line_safety("claude", (), line) is None
+    payload = owner.parse_provider_result(line)
+    assert payload["exitCode"] == 9 and payload["primaryOutcome"]["exitCode"] == 9
+    assert payload["primaryOutcome"]["token"] == "FAILED:nonzero-exit"
+    assert payload["cleanupStatus"] == "incomplete" and payload["captureRecoveryRetained"] is True
+    assert payload["cleanupIssueCount"] == 2 and "REJECTED_DYNAMIC_DETAIL" not in line
+    assert payload["stderrMarkerCount"] == 3
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows synthetic provider transport")
+@pytest.mark.parametrize("provider,mode", (("codex", "codex-auth-file"), ("claude", "claude-bedrock"), ("claude", "claude-vertex")))
+def test_supported_opaque_transport_executes_synthetic_child_and_delivers_exact_receipt(tmp_path, provider, mode):
+    environment = {
+        key: "" for keys in owner.PROVIDER_AUTH_SECRET_ENV_KEYS_V1.values() for key in keys
+    }
+    environment.update({"CLAUDE_CODE_USE_BEDROCK": "false", "CLAUDE_CODE_USE_VERTEX": "false", "ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE": "0"})
+    if mode == "claude-bedrock":
+        environment["CLAUDE_CODE_USE_BEDROCK"] = "true"
+    elif mode == "claude-vertex":
+        environment["CLAUDE_CODE_USE_VERTEX"] = "true"
+    marker = tmp_path / "synthetic-started"
+    result, item, output_root = _run_transport(
+        tmp_path, provider, environment=environment, launch_marker=marker,
+        raw_stdout=b"GATE: PASS\n" if provider == "claude" else None,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = owner.parse_provider_result(result.stdout)
+    assert marker.exists() and payload["resultText"] == "GATE: PASS\n"
+    assert payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+    assert payload["authorizing"] is False
+    assert (tmp_path / f"{provider}.terminal.receipt").read_text(encoding="utf-8") == result.stdout
+    _assert_external_terminal_is_nonauthorizing(item, payload)
+    assert list(output_root.iterdir()) == []
 
 
 def test_codex_hook_trust_uses_target_sidecar_and_ignores_helper_sibling(
@@ -959,13 +1270,10 @@ def test_reserved_external_run_owns_cleanup_once_and_terminal_state(
                 lambda: calls.append("initialized") or real_cleanup(),
             )
         else:
-            real_release = owner.RunCaptureLifecycle.release_provisional
+            real_release = lifecycle._release_owned
             monkeypatch.setattr(
-                owner.RunCaptureLifecycle,
-                "release_provisional",
-                staticmethod(
-                    lambda path: calls.append("provisional") or real_release(path)
-                ),
+                lifecycle, "_release_owned",
+                lambda: calls.append("provisional") or real_release(),
             )
 
         first = reserved.cleanup_once()
@@ -1007,30 +1315,15 @@ def test_relative_configured_capture_root_is_rejected(
 
 
 @pytest.mark.parametrize(("uid_offset", "mode"), ((1, 0o700), (0, 0o720)))
-def test_posix_configured_capture_root_requires_effective_user_control(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uid_offset: int, mode: int
+def test_posix_capture_root_requires_effective_user_control(
+    monkeypatch: pytest.MonkeyPatch, uid_offset: int, mode: int
 ) -> None:
-    root = (tmp_path / "captures").resolve()
     effective_uid = 1000
-    original_lstat = Path.lstat
-
-    def controlled_lstat(path: Path):
-        metadata = original_lstat(path)
-        if Path(path) != root:
-            return metadata
-        return SimpleNamespace(
-            st_mode=stat.S_IFDIR | mode,
-            st_dev=metadata.st_dev,
-            st_ino=metadata.st_ino,
-            st_uid=effective_uid + uid_offset,
-        )
-
-    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(root))
-    monkeypatch.setattr(owner.sys, "platform", "linux")
     monkeypatch.setattr(owner.os, "geteuid", lambda: effective_uid, raising=False)
-    monkeypatch.setattr(Path, "lstat", controlled_lstat)
-    with pytest.raises(ValueError, match="configured capture root.*owner-controlled"):
-        owner.secure_output_dir("codex")
+    prefix = SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+    root = SimpleNamespace(st_mode=stat.S_IFDIR | mode, st_uid=effective_uid + uid_offset)
+    with pytest.raises(OSError, match="owner|writable"):
+        owner._CaptureNamespaceBinding._posix_authority([prefix, root], final=True)
 
 
 def test_real_symlink_ancestor_is_rejected(
@@ -1066,83 +1359,73 @@ def test_junction_component_probe_is_rejected(
         owner.secure_output_dir("codex")
 
 
-def test_partial_run_directory_hardening_failure_uses_owner_cleanup(
+def test_partial_run_directory_binding_failure_uses_owner_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = (tmp_path / "captures").resolve()
     monkeypatch.setenv("CODEX_PROMPTS_DIR", str(root))
-    original = Path.chmod
-
-    def fail_run_chmod(path: Path, mode: int, *args, **kwargs):
-        if path.parent == root:
-            raise PermissionError("fixture hardening denial")
-        return original(path, mode, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "chmod", fail_run_chmod)
-    with pytest.raises(OSError, match="hardening failed"):
+    original = owner.RunCaptureLifecycle._validate_identity
+    calls = 0
+    def fail_acquired(lifecycle, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise PermissionError("fixture binding denial")
+        return original(lifecycle, **kwargs)
+    monkeypatch.setattr(owner.RunCaptureLifecycle, "_validate_identity", fail_acquired)
+    with pytest.raises(PermissionError, match="binding denial"):
         owner.RunCaptureLifecycle.create("codex", "partial")
     assert list(root.iterdir()) == []
 
 
-def test_configured_capture_root_replacement_during_mkdtemp_is_rejected(
+def test_capture_root_binding_loss_before_child_creation_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = (tmp_path / "captures").resolve()
-    root.mkdir()
     monkeypatch.setenv("CODEX_PROMPTS_DIR", str(root))
-    monkeypatch.setattr(owner, "secure_output_dir", lambda _provider: root)
-    original_lstat = Path.lstat
-    original_mkdtemp = owner.tempfile.mkdtemp
-    replaced = False
-
-    def drifting_lstat(path: Path):
-        metadata = original_lstat(path)
-        if Path(path) != root or not replaced:
-            return metadata
-        return SimpleNamespace(
-            st_mode=metadata.st_mode,
-            st_dev=metadata.st_dev,
-            st_ino=metadata.st_ino + 1,
-        )
-
-    def replacing_mkdtemp(**kwargs):
-        nonlocal replaced
-        result = original_mkdtemp(**kwargs)
-        replaced = True
-        return result
-
-    monkeypatch.setattr(Path, "lstat", drifting_lstat)
-    monkeypatch.setattr(owner.tempfile, "mkdtemp", replacing_mkdtemp)
-    with pytest.raises(OSError, match="configured capture root identity changed"):
+    original = owner._CaptureNamespaceBinding.validate
+    calls = 0
+    def lose_completed_root(binding, **kwargs):
+        nonlocal calls
+        if kwargs.get("final", True):
+            calls += 1
+            if calls == 2:
+                raise OSError("capture root identity changed")
+        return original(binding, **kwargs)
+    monkeypatch.setattr(owner._CaptureNamespaceBinding, "validate", lose_completed_root)
+    with pytest.raises(OSError, match="root identity changed"):
         owner.RunCaptureLifecycle.create("codex", "root-race")
     assert list(root.iterdir()) == []
 
 
-def test_partial_exclusive_child_creation_is_reclaimed(
+def test_partial_exclusive_prompt_creation_is_reclaimed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = (tmp_path / "captures").resolve()
     monkeypatch.setenv("CODEX_PROMPTS_DIR", str(root))
     lifecycle = owner.RunCaptureLifecycle.create("codex", "partial-child")
-    real_open = owner.os.open
-    calls = 0
-
-    def fail_second_open(path, flags, mode=0o777):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise PermissionError("fixture exclusive creation denial")
-        return real_open(path, flags, mode)
-
     with monkeypatch.context() as scoped:
-        scoped.setattr(owner.os, "open", fail_second_open)
+        if os.name == "nt":
+            original = owner.WindowsPrivateObjectOwnerV1.open_relative
+            def deny_prompt(parent, name, **kwargs):
+                if not kwargs["directory"] and kwargs["create"]:
+                    raise PermissionError("fixture exclusive creation denial")
+                return original(parent, name, **kwargs)
+            scoped.setattr(owner.WindowsPrivateObjectOwnerV1, "open_relative", staticmethod(deny_prompt))
+        else:
+            original = owner.os.open
+            def deny_prompt(path, flags, mode=0o777, **kwargs):
+                if flags & os.O_CREAT:
+                    raise PermissionError("fixture exclusive creation denial")
+                return original(path, flags, mode, **kwargs)
+            scoped.setattr(owner.os, "open", deny_prompt)
         with pytest.raises(PermissionError, match="exclusive creation denial"):
             lifecycle.initialize(b"prompt")
     assert not lifecycle.prompt_path.exists()
-    provisional = owner.RunCaptureLifecycle.release_provisional(lifecycle.run_dir)
-    assert provisional.clean
-    assert not provisional.recovery_retained
+    provisional = lifecycle._release_owned()
+    assert provisional.clean and not provisional.recovery_retained
     assert not lifecycle.run_dir.exists()
+    assert lifecycle._namespace.resources == []
 
 
 def test_empty_provisional_directory_uses_only_rmdir(
@@ -1165,25 +1448,345 @@ def test_empty_provisional_directory_uses_only_rmdir(
     assert not provisional.exists()
 
 
+def _codex_record(kind, **fields):
+    return json.dumps({"type": kind, **fields}, ensure_ascii=False).encode("utf-8") + b"\n"
+
+
+def _codex_turn(*items, terminal="turn.completed"):
+    return (
+        _codex_record("thread.started", thread_id="synthetic-thread")
+        + _codex_record("turn.started")
+        + b"".join(items)
+        + (_codex_record(terminal, **(
+            {"usage": {"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1, "reasoning_output_tokens": 0}}
+            if terminal == "turn.completed" else {"error": {"message": "synthetic failure"}}
+        )) if terminal else b"")
+    )
+
+
+def _codex_agent(text="GATE: PASS\n"):
+    return _codex_record("item.completed", item={
+        "id": "synthetic-agent", "type": "agent_message", "text": text,
+    })
+
+
+@pytest.mark.parametrize("ending", ("missing", "failed", "fatal", "contradictory", "late-item"))
+def test_codex_native_terminal_rejects_agent_only_and_invalid_outcomes(ending):
+    data = _codex_turn(_codex_agent(), terminal=None if ending == "missing" else
+                       "turn.failed" if ending == "failed" else "turn.completed")
+    if ending == "fatal":
+        data += _codex_record("error", message="synthetic critical error")
+    elif ending == "contradictory":
+        data += _codex_record("turn.failed", error={"message": "synthetic failure"})
+    elif ending == "late-item":
+        data += _codex_agent()
+    with pytest.raises(owner.ResultMaterializationError):
+        owner.parse_codex_jsonl_result(data, 1024)
+
+
+def _emitted_observation(payload):
+    """Read optional scoped diagnostics; unknown format does not invent zeroes."""
+    return re.match(
+        r"codex-native-v1\(parse=(complete|incomplete),turn=([a-z]+),"
+        r"operationRecords=([0-9]+),unknownRecords=([0-9]+),"
+        r"coverage=(complete|incomplete),diagnosticRecords=([0-9]+),"
+        r"failedOperationRecords=([0-9]+),materialization=(ok|failed)\)(?:; |$)",
+        payload["note"],
+    )
+
+
+def _ordinary_review_receiving(payload, required_text):
+    """Model the original required task predicates, independently of quality."""
+    core = _emitted_observation(payload)
+    observed_forbidden_use = core is not None and int(core.group(3)) > 0
+    return bool(
+        not observed_forbidden_use
+        and payload["status"] == "completed" and payload["gate"] == "PASS"
+        and payload["exitCode"] == 0 and payload["cleanupStatus"] == "complete"
+        and payload["authorizing"] is False
+        and payload["independentVerificationRequired"] is True
+        and payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+        and payload["provider"] == "codex" and payload["model"] == "fixture"
+        and payload["actualExecutionPath"] == "direct-external-cli"
+        and payload["resultText"] == required_text
+    )
+
+
+@pytest.mark.parametrize("operation,accepted", (
+    ("none", True), ("completed", False), ("failed", False),
+    ("attempted", False), ("unknown-status", False),
+    ("unknown-item", True), ("unknown-event", True), ("missing-core", True),
+))
+def test_codex_native_observation_receipt_and_emitted_record_receiver(
+    tmp_path, monkeypatch, operation, accepted
+):
+    records = _codex_record("item.completed", item={
+        "id": "private-diagnostic-id", "type": "error", "message": "private-warning-payload",
+    })
+    if operation in {"completed", "failed", "attempted", "unknown-status"}:
+        status = {"attempted": "in_progress", "unknown-status": "future"}.get(operation, operation)
+        records += _codex_record(
+            "item.started" if operation == "attempted" else "item.completed",
+            item={"id": "private-operation-id", "type": "mcp_tool_call", "status": status,
+                  "server": "private-server", "tool": "private-tool", "arguments": {"private": "payload"},
+                  "result": None, "error": {"message": "private-failure"} if status == "failed" else None},
+        )
+    elif operation == "unknown-item":
+        records += _codex_record("item.completed", item={"id": "private-id", "type": "future-tool"})
+    elif operation == "unknown-event":
+        records += _codex_record("future.event", payload="private-event-payload")
+    elif operation == "missing-core":
+        monkeypatch.setattr(owner._CodexNativeResult, "note", lambda _result: "emitted observation unavailable")
+    required_text = "Synthetic review: supplied packet checked.\nGATE: PASS\n"
+    raw = _codex_turn(records, _codex_agent(required_text))
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="codex")
+    _write_result(lifecycle, raw, stderr=b"ERROR: private-startup-diagnostic\n")
+    output = _BinaryOutput()
+    monkeypatch.setattr(owner.sys, "stdout", output)
+    receipt_path = (tmp_path / "native.receipt").resolve()
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = _finalize_observed_fixture(
+            owner.Control(terminal_receipt=receipt_path), "codex", "fixture", "high", "fixture", "",
+            _initialized_reserved(receipt, lifecycle), 0,
+        )
+    receipt_bytes = receipt_path.read_bytes()
+    retention_root = os.environ.get("ORCHESTRARIUM_TEST_RECEIPTS_DIR")
+    if retention_root is not None:
+        # Preserve exact acquired public receipt bytes in the test caller's
+        # explicit existing sink before assertions or fixture cleanup.
+        target = Path(retention_root).resolve(strict=True) / f"{operation}.provider-result-line"
+        with target.open("xb") as retained:
+            retained.write(receipt_bytes)
+        assert target.read_bytes() == receipt_bytes
+    assert code == 0
+    encoded = receipt_bytes.decode("utf-8")
+    assert encoded == output.getvalue()
+    payload = owner.parse_provider_result(encoded)
+    assert _ordinary_review_receiving(payload, required_text) is accepted
+    core = _emitted_observation(payload)
+    limited_quality = core is None or core.group(4) != "0" or core.group(5) != "complete"
+    assert limited_quality is (operation in {"unknown-status", "unknown-item", "unknown-event", "missing-core"})
+    assert payload["stderrMarkerCount"] == 1
+    assert "diagnostic-health=adverse" in payload["note"]
+    if operation == "missing-core":
+        assert "emitted observation unavailable" in payload["note"]
+        assert "operationRecords=" not in payload["note"]
+    else:
+        assert "diagnosticRecords=1" in payload["note"]
+        assert f"failedOperationRecords={1 if operation == 'failed' else 0}" in payload["note"]
+    assert not lifecycle.run_dir.exists()
+    assert "private-" not in encoded
+    if operation == "none":
+        for field, unavailable_required in (
+            ("token", "UNVERIFIED:result-materialization"), ("exitCode", 1),
+            ("cleanupStatus", "incomplete"), ("authorizing", True),
+            ("independentVerificationRequired", False), ("model", "different-producer"),
+            ("resultText", "GATE: PASS\n"),
+        ):
+            assert not _ordinary_review_receiving({**payload, field: unavailable_required}, required_text)
+
+
+@pytest.mark.parametrize("terminal,cleanup_failed", (
+    ("turn.failed", False), (None, False), ("turn.failed", True),
+))
+def test_codex_native_nonzero_interpretation_and_cleanup_preserve_all_outcomes(
+    tmp_path, monkeypatch, terminal, cleanup_failed
+):
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="codex")
+    _write_result(lifecycle, _codex_turn(_codex_agent(), terminal=terminal),
+                  stderr=b"ERROR: private-native-failure\n")
+    receipt_path = (tmp_path / "native-failure.receipt").resolve()
+    output = _BinaryOutput()
+    monkeypatch.setattr(owner.sys, "stdout", output)
+    if cleanup_failed:
+        original_cleanup = owner.ReservedExternalRunV1.cleanup_once
+        def cleanup(run):
+            result = original_cleanup(run)
+            assert result.clean
+            return owner.CleanupResult(("synthetic-cleanup-failure",))
+        monkeypatch.setattr(owner.ReservedExternalRunV1, "cleanup_once", cleanup)
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = _finalize_observed_fixture(
+            owner.Control(terminal_receipt=receipt_path), "codex", "fixture", "high", "fixture", "",
+            _initialized_reserved(receipt, lifecycle), 23,
+        )
+    encoded = receipt_path.read_text(encoding="utf-8")
+    assert encoded == output.getvalue()
+    payload = owner.parse_provider_result(encoded)
+    assert code == payload["exitCode"] == payload["primaryOutcome"]["exitCode"] == 23
+    assert payload["primaryOutcome"]["token"] == "FAILED:nonzero-exit"
+    assert "oracle: nonzero exit (23)" in payload["primaryOutcome"]["note"]
+    assert payload["token"] == ("UNVERIFIED:E_EXTERNAL_CAPTURE_CLEANUP" if cleanup_failed
+                                 else "UNVERIFIED:result-materialization")
+    assert payload["status"] == "blocked" and payload["gate"] == "none"
+    assert payload["stderrMarkerCount"] == 1
+    assert "materialization=failed)" in payload["note"]
+    assert "result materialization failed" in payload["note"]
+    assert "private-native-failure" not in encoded
+    assert not lifecycle.run_dir.exists()
+
+
+def test_codex_native_partial_stream_retains_observed_operations():
+    raw = _codex_turn(_codex_record("item.started", item={
+        "id": "private-id", "type": "command_execution", "command": "private-command",
+        "aggregated_output": "", "exit_code": None, "status": "in_progress",
+    }), terminal=None) + b'{"type":'
+    with pytest.raises(owner.ResultMaterializationError) as caught:
+        owner.parse_codex_jsonl_result(raw, 1024)
+    observation = caught.value.observation
+    assert observation.operation_records == 1
+    assert "parse=incomplete" in observation.note() and "coverage=incomplete" in observation.note()
+
+
+def test_codex_native_invalid_selected_unicode_retains_partial_observation():
+    raw = _codex_turn(_codex_record("item.started", item={
+        "type": "command_execution", "status": "in_progress",
+    }), _codex_agent())
+    raw = raw.replace(b"GATE: PASS", b"\\ud800")
+    with pytest.raises(owner.ResultMaterializationError) as caught:
+        owner.parse_codex_jsonl_result(raw, 1024)
+    assert caught.value.observation.operation_records == 1
+    assert caught.value.observation.parse_complete is False
+
+
+@pytest.mark.parametrize("item_type", (
+    "command_execution", "file_change", "mcp_tool_call", "collab_tool_call", "web_search",
+))
+def test_codex_native_operation_union_counts_lifecycle_records(item_type):
+    item = {"id": "private-id", "type": item_type}
+    records = b""
+    for event, status in (("item.started", "in_progress"), ("item.updated", "in_progress"),
+                          ("item.completed", "completed")):
+        records += _codex_record(event, item={**item, "status": status})
+    result = owner.parse_codex_jsonl_result(_codex_turn(records, _codex_agent()), 1024)
+    assert result.operation_records == 3 and result.unknown_records == 0
+    assert result.failed_operation_records == 0
+
+
+def test_codex_native_completion_preserves_informational_compatibility():
+    raw = (_codex_record("item.completed", item={"type": "error", "message": "private-warning"})
+           + _codex_record("thread.started") + _codex_record("turn.started")
+           + _codex_agent() + _codex_record("turn.completed", extra_information={"future": True}))
+    result = owner.parse_codex_jsonl_result(raw, 1024)
+    assert result.selected == b"GATE: PASS\n"
+    assert result.unknown_records == 0 and result.diagnostic_records == 1
+
+
+@pytest.mark.parametrize("data", (
+    _codex_agent(),
+    _codex_record("error", message="private-fatal") + _codex_turn(_codex_agent()),
+    _codex_turn(_codex_agent()) + _codex_record("turn.completed"),
+    _codex_record("thread.started") + _codex_record("turn.started") + _codex_record("turn.started") + _codex_agent() + _codex_record("turn.completed"),
+    _codex_turn(_codex_agent()) + b"\n",
+    _codex_turn(_codex_agent()) + b"[]\n",
+    _codex_turn(_codex_agent()) + b"\xff\n",
+    _codex_turn(_codex_agent()) + _codex_record("turn.started"),
+))
+def test_codex_native_framing_and_order_fail_closed(data):
+    with pytest.raises(owner.ResultMaterializationError):
+        owner.parse_codex_jsonl_result(data, 1024)
+
+
+def test_shared_nonzero_primary_survives_non_codex_materialization_failure(tmp_path, monkeypatch):
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="claude")
+    _write_result(lifecycle, b"GATE: PASS\n", stderr=b"ERROR: private-native-failure\n")
+    receipt_path = (tmp_path / "shared-native-failure.receipt").resolve()
+    output = _BinaryOutput()
+    monkeypatch.setattr(owner.sys, "stdout", output)
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = _finalize_observed_fixture(
+            owner.Control(terminal_receipt=receipt_path, result_max_bytes=1), "claude", "fixture", "high", "fixture", "",
+            _initialized_reserved(receipt, lifecycle), 23,
+        )
+    payload = owner.parse_provider_result(output.getvalue())
+    assert code == payload["primaryOutcome"]["exitCode"] == 23
+    assert payload["primaryOutcome"]["token"] == "FAILED:nonzero-exit"
+    assert payload["token"] == "UNVERIFIED:result-materialization"
+    assert payload["stderrMarkerCount"] == 1
+    assert receipt_path.read_text(encoding="utf-8") == output.getvalue()
+    assert not lifecycle.run_dir.exists()
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude", "kimi"))
+def test_shared_public_builder_preserves_complete_safe_notes(provider):
+    core = owner._CodexNativeResult(
+        parse_complete=True, turn="completed", materialization="ok",
+    ).note()
+    note = core + ";" + " safe optional explanation" * 32
+    assert len(core) < 512 < len(note)  # Reproduce the removed presentation ceiling.
+    outcome = replace(_outcome(), note=note, primary_note=note)
+    line = owner.build_provider_result_line(
+        provider, "fixture", "high", "GATE: PASS\n", outcome,
+        cancelled=False, timed_out=False,
+    )
+    assert owner._provider_terminal_line_safety(provider, (), line) is None
+    payload = owner.parse_provider_result(line)
+    assert payload["note"] == payload["primaryOutcome"]["note"] == note
+
+
+def test_long_safe_note_receipt_preserves_native_interpretation_and_cleanup(
+    tmp_path, monkeypatch
+):
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="codex")
+    _write_result(lifecycle, _codex_turn(_codex_agent(), terminal="turn.failed"),
+                  stderr=b"ERROR: private-native-failure\n")
+    actual_note = owner._CodexNativeResult.note
+    safe_prose = ";" + " safe optional explanation" * 32
+    monkeypatch.setattr(owner._CodexNativeResult, "note", lambda result: actual_note(result) + safe_prose)
+    actual_cleanup = owner.ReservedExternalRunV1.cleanup_once
+    def cleanup(run):
+        assert actual_cleanup(run).clean
+        return owner.CleanupResult(("synthetic-cleanup-failure",))
+    monkeypatch.setattr(owner.ReservedExternalRunV1, "cleanup_once", cleanup)
+    actual_scan = owner._provider_terminal_line_safety
+    scanned = []
+    def scan(provider, needles, line):
+        scanned.append(line)
+        return actual_scan(provider, needles, line)
+    monkeypatch.setattr(owner, "_provider_terminal_line_safety", scan)
+    output = _BinaryOutput()
+    monkeypatch.setattr(owner.sys, "stdout", output)
+    receipt_path = (tmp_path / "long-note.receipt").resolve()
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = _finalize_observed_fixture(
+            owner.Control(terminal_receipt=receipt_path), "codex", "fixture", "high", "fixture", "",
+            _initialized_reserved(receipt, lifecycle), 23,
+        )
+    encoded = receipt_path.read_text(encoding="utf-8")
+    payload = owner.parse_provider_result(encoded)
+    assert code == payload["exitCode"] == payload["primaryOutcome"]["exitCode"] == 23
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_CAPTURE_CLEANUP"
+    assert payload["primaryOutcome"]["token"] == "FAILED:nonzero-exit"
+    assert payload["stderrMarkerCount"] == 1 and payload["cleanupStatus"] == "incomplete"
+    assert "current=UNVERIFIED:result-materialization" in payload["note"]
+    for note in (payload["note"], payload["primaryOutcome"]["note"]):
+        assert len(note) > 512
+        assert note.startswith("codex-native-v1(") and "materialization=failed)" in note
+        assert "result materialization failed" in note and safe_prose in note
+    assert "oracle: nonzero exit (23)" in payload["primaryOutcome"]["note"]
+    assert encoded == output.getvalue() and scanned == [encoded]
+    assert "private-native-failure" not in encoded and not lifecycle.run_dir.exists()
+
+
 def test_codex_jsonl_selects_last_complete_agent_message_and_enforces_result_limit() -> None:
     def record(text: str) -> bytes:
         return (
             json.dumps(
                 {
                     "type": "item.completed",
-                    "item": {"type": "agent_message", "text": text},
+                    "item": {"id": "synthetic-agent", "type": "agent_message", "text": text},
                 },
                 separators=(",", ":"),
             ).encode("utf-8")
             + b"\n"
         )
 
-    data = b'{"type":"thread.started"}\n' + record("first") + record("last")
-    assert owner.parse_codex_jsonl_result(data, 4) == b"last"
+    data = _codex_turn(record("first"), record("last"))
+    assert owner.parse_codex_jsonl_result(data, 4).selected == b"last"
     exact = "x" * owner.RESULT_MAX_BYTES_DEFAULT
-    assert len(owner.parse_codex_jsonl_result(record(exact), len(exact))) == len(exact)
+    assert len(owner.parse_codex_jsonl_result(_codex_turn(record(exact)), len(exact)).selected) == len(exact)
     with pytest.raises(owner.ResultMaterializationError, match="exceeds"):
-        owner.parse_codex_jsonl_result(record(exact + "x"), len(exact))
+        owner.parse_codex_jsonl_result(_codex_turn(record(exact + "x")), len(exact))
     with pytest.raises(owner.ResultMaterializationError, match="malformed"):
         owner.parse_codex_jsonl_result(b"{bad}\n", 100)
     with pytest.raises(owner.ResultMaterializationError, match="truncated"):
@@ -1199,14 +1802,14 @@ def test_codex_jsonl_treats_literal_unicode_separators_as_record_data(
         json.dumps(
             {
                 "type": "item.completed",
-                "item": {"type": "agent_message", "text": text},
+                "item": {"id": "synthetic-agent", "type": "agent_message", "text": text},
             },
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
         + b"\n"
     )
-    assert owner.parse_codex_jsonl_result(record, 100) == text.encode("utf-8")
+    assert owner.parse_codex_jsonl_result(_codex_turn(record), 100).selected == text.encode("utf-8")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
@@ -1478,7 +2081,7 @@ def test_provider_adapter_capture_overflow_emits_nonpass_settled_terminal(
     assert payload["captureOverflow"] is True
     assert payload["timedOut"] is False
     assert payload["cancelled"] is False
-    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
     assert payload["gate"] == "none"
     assert payload["status"] == "blocked"
     assert list(output_root.iterdir()) == []
@@ -1572,7 +2175,7 @@ def test_provider_launch_exception_without_settled_streams_emits_and_records_una
     output_root = (tmp_path / "captures").resolve()
     item = _make_work_item(tmp_path, f"exception-{exception_type.__name__}")
     receipt_path = (tmp_path / f"exception-{exception_type.__name__}.receipt").resolve()
-    emitted = io.StringIO()
+    emitted = _BinaryOutput()
     ledger_after_stdout: list[bool] = []
     original_record_terminal = owner.record_terminal
 
@@ -1615,7 +2218,7 @@ def test_provider_launch_exception_without_settled_streams_emits_and_records_una
     events = _ledger_events(item)
     assert code == expected_code
     assert payload["schema"] == "orchestrarium.provider-result.v2"
-    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
     assert payload["gate"] == "none"
     assert payload["cleanupStatus"] == "complete"
     assert payload["captureRecoveryRetained"] is False
@@ -1757,10 +2360,10 @@ def test_oversize_finalize_is_nonpass_and_preserves_secure_recovery(
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     _write_result(lifecycle, b"123456789")
     receipt_path = (tmp_path / "oversize-finalize.receipt").resolve()
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", stream)
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
-        code = owner.finalize_reserved_run_once(
+        code = _finalize_observed_fixture(
             owner.Control(result_max_bytes=8, terminal_receipt=receipt_path),
             "claude",
             "opus",
@@ -1787,7 +2390,7 @@ def test_unlaunched_ledger_failure_uses_one_v2_envelope_without_durable_ledger_c
 ) -> None:
     lifecycle = _lifecycle(tmp_path, monkeypatch, provider=provider)
     receipt_path = (tmp_path / f"{provider}-{failure_name.replace(' ', '-')}.receipt").resolve()
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     ledger_calls: list[list[str]] = []
     popen_calls: list[object] = []
     monkeypatch.setattr(owner.sys, "stdout", stream)
@@ -1884,15 +2487,15 @@ def test_explicit_none_ledger_role_cannot_masquerade_as_roleless() -> None:
         owner.external_role_provenance(control, "claude")
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows native provider refusal")
-@pytest.mark.parametrize("provider", ("codex", "claude"))
+@pytest.mark.skipif(os.name != "nt", reason="Windows native parser preflight")
+@pytest.mark.parametrize("provider", ("claude", "codex"))
 def test_windows_native_provider_refuses_before_prompt_capture_or_launch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     provider: str,
 ) -> None:
-    """Native Windows providers fail before auth, prompt, capture, or child work."""
+    """Missing Claude or explicit untrusted Codex declarations fail before prompt work."""
 
     executable = tmp_path / f"{provider}.exe"
     executable.write_bytes(b"native-provider-fixture")
@@ -1909,9 +2512,10 @@ def test_windows_native_provider_refuses_before_prompt_capture_or_launch(
         "resolve_provider_auth_configuration",
         lambda *_args, **_kwargs: (
             calls.append("auth")
-            or SimpleNamespace(
+            or owner.ProviderAuthConfiguration(
+                mode="codex-api-key" if provider == "codex" else "claude-direct",
                 child_environment={},
-                needles=(),
+                needles=(b"synthetic-credential",),
                 output_scan_disposition="environment-exact",
             )
         ),
@@ -1941,12 +2545,168 @@ def test_windows_native_provider_refuses_before_prompt_capture_or_launch(
     code = owner.launch(
         provider,
         ["fixture", *_terminal_receipt_args(tmp_path, f"native-{provider}")],
+        **({"native_parser_contract": object()} if provider == "codex" else {}),
     )
 
     assert code != 0
-    assert owner.E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE in capsys.readouterr().err
-    assert calls == [f"resolve:{provider}"]
+    failure = "PSV1-ARGV-ATTESTATION" if provider == "codex" else "PSV1-ARGV-CODEC-UNSUPPORTED"
+    assert failure in capsys.readouterr().err
+    assert calls == [f"resolve:{provider}", "auth"]
     assert not marker.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows trusted native preflight")
+@pytest.mark.parametrize("route", ("operator", "thin-default", "wrong-context"))
+def test_trusted_native_preflight_holds_then_releases_image_before_prompt_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    route: str,
+) -> None:
+    thin_default = route == "thin-default"
+    executable = tmp_path / "different name λ.exe"
+    shutil.copy2(Path(sys.executable).resolve(), executable)
+    monkeypatch.setattr(
+        owner, "resolve_provider_command",
+        lambda _provider: _resolved_command(
+            str(Path(sys.executable).resolve()) if route == "wrong-context" else str(executable),
+            *(["fixture.py"] if route == "wrong-context" else [])
+        ),
+    )
+    monkeypatch.setattr(
+        owner, "resolve_provider_auth_configuration",
+        lambda *_a, **_k: owner.ProviderAuthConfiguration(
+            mode="codex-api-key", child_environment={}, needles=(b"synthetic-credential",),
+            output_scan_disposition="environment-exact",
+        ),
+    )
+    prepared = []
+    original_prepare = owner.ProcessRunnerV1.prepare_native_windows_launch
+
+    def record_prepare(runner, **kwargs):
+        result = original_prepare(runner, **kwargs)
+        prepared.append((result, kwargs["parser_contract"]))
+        return result
+
+    monkeypatch.setattr(owner.ProcessRunnerV1, "prepare_native_windows_launch", record_prepare)
+
+    def prompt_failure(*_args, **_kwargs):
+        assert len(prepared) == 1
+        declaration = prepared[0][1]
+        assert (declaration.family, declaration.domain, declaration.codec) == (
+            "msvcrt-v1", "wide-utf16-v1", "msvcrt-v1"
+        )
+        assert declaration.origin == ("installed-integration" if thin_default else "accepted-operator")
+        raise ValueError("synthetic prompt failure")
+
+    monkeypatch.setattr(owner, "prompt_bytes", prompt_failure)
+    monkeypatch.setattr(
+        owner, "run_provider_process",
+        lambda *_a, **_k: pytest.fail("task launched after prompt failure"),
+    )
+    runner_module = sys.modules[owner.WindowsParserContractV1.__module__]
+    contract = runner_module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="accepted test operator declares the Python wide CRT parser",
+        origin="accepted-operator",
+    )
+    args = ["fixture", *_terminal_receipt_args(tmp_path, "trusted-native")]
+    if thin_default:
+        entry_spec = importlib.util.spec_from_file_location(
+            "codex_thin_default_test", ROOT / "scripts/invoke-codex-prompt.py"
+        )
+        assert entry_spec and entry_spec.loader
+        entry = importlib.util.module_from_spec(entry_spec)
+        entry_spec.loader.exec_module(entry)
+        monkeypatch.setitem(sys.modules, "provider_prompt", owner)
+        code = entry.main(args)
+    else:
+        code = owner.launch("codex", args, native_parser_contract=contract)
+    assert code != 0
+    if route == "wrong-context":
+        assert "PSV1-ARGV-ATTESTATION" in capsys.readouterr().err
+        assert not prepared
+        return
+    assert "E_EXTERNAL_PROMPT_INVALID" in capsys.readouterr().err
+    assert len(prepared) == 1
+    assert prepared[0][0].executable_owner.descriptor == -1
+    assert prepared[0][0].lifecycle.observation.resources_closed
+    with executable.open("r+b"):
+        pass
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows pre-adoption interruption")
+def test_native_preparation_prompt_interrupt_settles_without_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctypes
+    import msvcrt
+    import time
+    from ctypes import wintypes
+
+    module = sys.modules[owner.WindowsParserContractV1.__module__]
+    monkeypatch.setattr(module, "RUNNER_CLOSE_TIMEOUT_SECONDS", 0.15)
+    runner = module.ProcessRunnerV1()
+    retained = []
+    original = runner.prepare_native_windows_launch
+
+    def prepare(**kwargs):
+        prepared = original(**kwargs)
+        held = prepared.executable_owner
+        retained.append((prepared, [msvcrt.get_osfhandle(held.descriptor), *held.parent_handles]))
+        return prepared
+
+    monkeypatch.setattr(runner, "prepare_native_windows_launch", prepare)
+    monkeypatch.setattr(owner, "_resolve_launch_provider_command",
+                        lambda *_a: ([FIXTURE_PYTHON_EXECUTABLE], None))
+    calls = []
+    monkeypatch.setattr(owner, "resolve_provider_auth_configuration",
+                        lambda *_a: calls.append("synthetic-auth") or owner.ProviderAuthConfiguration(
+                            mode="codex-api-key",
+                            child_environment={}, needles=(b"synthetic-credential",),
+                            output_scan_disposition=owner.AUTH_OUTPUT_SCAN_ENVIRONMENT_EXACT,
+                        ))
+
+    def interrupt(*_args, **_kwargs):
+        calls.append("prompt")
+        raise KeyboardInterrupt("synthetic pre-adoption interruption")
+
+    monkeypatch.setattr(owner, "prompt_bytes", interrupt)
+    monkeypatch.setattr(owner, "run_provider_process", lambda *_a, **_k: pytest.fail("task after interruption"))
+    reserved = SimpleNamespace(adopt_auxiliary_cleanup=lambda _action: pytest.fail("premature capture adoption"))
+    prevalidated = SimpleNamespace(
+        control=owner.parse_control(["fixture"]), topic="fixture", flags=(),
+        model="synthetic", effort="synthetic", role_provenance=None, provenance=None,
+    )
+    contract = module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="accepted test operator declares the Python wide CRT parser",
+        origin="accepted-operator",
+    )
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetHandleInformation.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetHandleInformation.restype = wintypes.BOOL
+    flags = wintypes.DWORD()
+    try:
+        started = time.monotonic()
+        with pytest.raises(KeyboardInterrupt, match="synthetic pre-adoption"):
+            with runner:
+                owner._launch_with_runner(
+                    "codex", [], runner, prevalidated=prevalidated, reserved_run=reserved,
+                    native_parser_contract=contract,
+                )
+        assert calls == ["synthetic-auth", "prompt"] and len(retained) == 1
+        prepared, handles = retained[0]
+        assert len(handles) > 1
+        assert not any(kernel.GetHandleInformation(handle, ctypes.byref(flags)) for handle in handles)
+        assert prepared.executable_owner.descriptor == -1 and not prepared.executable_owner.parent_handles
+        assert prepared.lifecycle.observation.resources_closed and not runner._active
+        assert time.monotonic() - started < 0.15
+        assert runner.close().outcome == "closed"
+    finally:
+        for prepared, _handles in retained:
+            prepared.executable_owner.close()
+            runner._release_lifecycle(prepared.lifecycle)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="live Windows provider resolver")
@@ -1957,7 +2717,7 @@ def test_live_windows_native_provider_resolver_returns_typed_denial(
     capsys: pytest.CaptureFixture[str],
     provider: str,
 ) -> None:
-    """The installed native resolver path remains a zero-prompt typed denial."""
+    """Without an accepted declaration, a live native executable stays zero-prompt."""
 
     resolution = owner.resolve_provider_command(provider)
     if (
@@ -1969,9 +2729,10 @@ def test_live_windows_native_provider_resolver_returns_typed_denial(
     monkeypatch.setattr(
         owner,
         "resolve_provider_auth_configuration",
-        lambda *_args, **_kwargs: SimpleNamespace(
+        lambda *_args, **_kwargs: owner.ProviderAuthConfiguration(
+            mode="codex-api-key" if provider == "codex" else "claude-direct",
             child_environment={},
-            needles=(),
+            needles=(b"synthetic-credential",),
             output_scan_disposition="environment-exact",
         ),
     )
@@ -1992,7 +2753,7 @@ def test_live_windows_native_provider_resolver_returns_typed_denial(
     )
 
     assert code != 0
-    assert owner.E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE in capsys.readouterr().err
+    assert "PSV1-ARGV-CODEC-UNSUPPORTED" in capsys.readouterr().err
 
 
 def test_path_discovered_provider_inside_physical_repository_is_rejected_before_sensitive_work(
@@ -2418,7 +3179,7 @@ def test_initialized_cleanup_exception_is_once_only_and_truthfully_incomplete(
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     _write_result(lifecycle, b"GATE: PASS\n")
     receipt_path = (tmp_path / "cleanup-exception.receipt").resolve()
-    output = io.StringIO()
+    output = _BinaryOutput()
     calls: list[str] = []
     monkeypatch.setattr(owner.sys, "stdout", output)
     monkeypatch.setattr(
@@ -2447,7 +3208,7 @@ def test_initialized_cleanup_exception_is_once_only_and_truthfully_incomplete(
     assert reserved.finalized is True
     assert payload["cleanupStatus"] == "incomplete"
     assert payload["cleanupIssueCount"] == 2
-    assert payload["captureRecoveryRetained"] is False
+    assert payload["captureRecoveryRetained"] is True
     assert "cleanup-retention-unknown" in payload["cleanupDiagnostic"]
 
 
@@ -2459,7 +3220,7 @@ def test_cleanup_preserves_verified_false_recovery_retention(
     _write_result(lifecycle, b"GATE: PASS\n")
     real_cleanup = lifecycle.cleanup
     receipt_path = (tmp_path / "verified-not-retained.receipt").resolve()
-    monkeypatch.setattr(owner.sys, "stdout", io.StringIO())
+    monkeypatch.setattr(owner.sys, "stdout", _BinaryOutput())
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
         reserved = _initialized_reserved(receipt, lifecycle)
         monkeypatch.setattr(
@@ -2720,6 +3481,47 @@ def test_recovery_write_failure_after_successful_purge_returns_bounded_cleanup_r
     assert not any(lifecycle.root.glob(".capture-tombstone-*"))
 
 
+@pytest.mark.parametrize(
+    ("exit_code", "status", "gate", "token", "expected_exit"),
+    (
+        (0, "completed", "PASS", "COMPLETE:PASS", 0),
+        (0, "revise", "REVISE", "COMPLETE:REVISE", 0),
+        (0, "blocked", "BLOCKED", "COMPLETE:BLOCKED", 1),
+        (0, "blocked", "none", "UNVERIFIED:no-gate-line", 1),
+        (37, "blocked", "none", "UNVERIFIED:no-gate-line", 37),
+    ),
+)
+def test_clean_cleanup_exit_mapping_preserves_terminal_semantics(
+    exit_code: int,
+    status: str,
+    gate: str,
+    token: str,
+    expected_exit: int,
+) -> None:
+    terminal = owner.TerminalResult(
+        Path("<fixture>"), status, gate, "fixture note", token, 0
+    )
+
+    outcome = owner.combine_terminal_outcomes(
+        exit_code, terminal, owner.CleanupResult(()), None, external=True
+    )
+
+    assert outcome.exit_code == expected_exit
+    assert (outcome.token, outcome.status, outcome.gate, outcome.note) == (
+        token,
+        status,
+        gate,
+        "fixture note",
+    )
+    assert (
+        outcome.primary_exit_code,
+        outcome.primary_token,
+        outcome.primary_status,
+        outcome.primary_gate,
+        outcome.primary_note,
+    ) == (exit_code, token, status, gate, "fixture note")
+
+
 def test_settle_once_converts_unexpected_cleanup_failure_to_combined_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2740,7 +3542,7 @@ def test_settle_once_converts_unexpected_cleanup_failure_to_combined_terminal(
     assert outcome.cleanup_issue_count == 1
 
 
-@pytest.mark.parametrize("failure_stage", ("write", "flush"))
+@pytest.mark.parametrize("failure_stage", ("write", "flush", "zero", "missing-buffer"))
 def test_stdout_failure_is_nonzero_after_receipt_commit_without_terminal_ledger(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2753,10 +3555,17 @@ def test_stdout_failure_is_nonzero_after_receipt_commit_without_terminal_ledger(
     recorded: dict[str, object] = {}
 
     class BrokenOutput:
-        def write(self, _text: str) -> None:
+        @property
+        def buffer(self):
+            if failure_stage == "missing-buffer":
+                raise AttributeError("no binary buffer")
+            return self
+
+        def write(self, value) -> int:
             events.append("write")
             if failure_stage == "write":
                 raise OSError("C:\\private\\stdout-canary")
+            return 0 if failure_stage == "zero" else len(value)
 
         def flush(self) -> None:
             events.append("flush")
@@ -2774,7 +3583,7 @@ def test_stdout_failure_is_nonzero_after_receipt_commit_without_terminal_ledger(
     monkeypatch.setattr(owner.sys, "stderr", stderr)
     monkeypatch.setattr(owner, "record_terminal", record)
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
-        code = owner.finalize_reserved_run_once(
+        code = _finalize_observed_fixture(
             owner.Control(ledger="item", terminal_receipt=receipt_path),
             "claude",
             "opus",
@@ -2785,12 +3594,46 @@ def test_stdout_failure_is_nonzero_after_receipt_commit_without_terminal_ledger(
             0,
         )
     assert code != 0
-    assert events == (["write"] if failure_stage == "write" else ["write", "flush"])
+    assert events == ([] if failure_stage == "missing-buffer" else ["write", "flush"] if failure_stage == "flush" else ["write"])
     assert recorded == {}
     assert owner.parse_provider_result(receipt_path.read_text(encoding="utf-8"))["gate"] == "PASS"
     assert "E_EXTERNAL_PROVIDER_RESULT_STDOUT_FAILED" in stderr.getvalue()
     assert "C:\\private\\stdout-canary" not in stderr.getvalue()
     assert "C:\\private\\stdout-canary" not in receipt_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("initialized", (False, True))
+def test_terminal_partial_binary_writes_match_committed_receipt(tmp_path, monkeypatch, initialized):
+    lifecycle = _lifecycle(tmp_path, monkeypatch) if initialized else None
+    if lifecycle is not None:
+        _write_result(lifecycle, b"GATE: PASS\n")
+    output = bytearray()
+
+    class PartialOutput:
+        @property
+        def buffer(self):
+            return self
+
+        def write(self, data):
+            count = min(7, len(data))
+            output.extend(data[:count])
+            return count
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(owner.sys, "stdout", PartialOutput())
+    path = (tmp_path / "partial.receipt").resolve()
+    with owner.TerminalReceiptV1.reserve(path) as receipt:
+        reserved = _initialized_reserved(receipt, lifecycle) if initialized else owner.ReservedExternalRunV1(receipt)
+        if initialized:
+            code = _finalize_observed_fixture(owner.Control(), "claude", "opus", "xhigh", "fixture", "", reserved, 0)
+        else:
+            code = owner.finalize_reserved_run_once(owner.Control(), "claude", "opus", "xhigh", "fixture", "", reserved, 1)
+    assert code == (0 if initialized else 1)
+    assert bytes(output) == path.read_bytes()
+    assert output.endswith(b"\n") and b"\r" not in output
+    owner.parse_provider_result(output.decode("utf-8"))
 
 
 def test_terminal_sequence_is_cleanup_scan_receipt_write_flush_then_ledger(
@@ -2818,9 +3661,14 @@ def test_terminal_sequence_is_cleanup_scan_receipt_write_flush_then_ledger(
         real_commit(line)
 
     class Output:
-        def write(self, value: str) -> None:
+        @property
+        def buffer(self):
+            return self
+
+        def write(self, value) -> int:
             events.append("write")
-            emitted.append(value)
+            emitted.append(bytes(value).decode("utf-8"))
+            return len(value)
 
         def flush(self) -> None:
             events.append("flush")
@@ -2836,7 +3684,7 @@ def test_terminal_sequence_is_cleanup_scan_receipt_write_flush_then_ledger(
     monkeypatch.setattr(owner.sys, "stdout", Output())
     monkeypatch.setattr(owner, "record_terminal", record)
     try:
-        code = owner.finalize_reserved_run_once(
+        code = _finalize_observed_fixture(
             owner.Control(ledger="item", terminal_receipt=receipt_path),
             "claude",
             "opus",
@@ -2849,7 +3697,8 @@ def test_terminal_sequence_is_cleanup_scan_receipt_write_flush_then_ledger(
     finally:
         receipt.close()
     assert code == 0
-    assert events == ["cleanup", "scan", "receipt", "write", "flush", "ledger"]
+
+    assert events == ["scan", "cleanup", "scan", "receipt", "write", "flush", "ledger"]
     payload = owner.parse_provider_result("".join(emitted))
     assert payload["gate"] == "PASS"
     assert "ledgerStatus" not in payload
@@ -2872,6 +3721,7 @@ def test_serialized_line_scan_failure_commits_only_minimal_blocked_envelope(
     _write_result(lifecycle, b"GATE: PASS\n")
     receipt_path = (tmp_path / f"{stable_id}.receipt").resolve()
     observed: list[bytes] = []
+    actual_scan = owner.provider_output_safety_scan_terminal
 
     def scan(
         _provider,
@@ -2879,18 +3729,20 @@ def test_serialized_line_scan_failure_commits_only_minimal_blocked_envelope(
         *,
         stdout: bytes,
         stderr: bytes,
-        serialized_line: bool,
+        serialized_line: bool = False,
     ):
-        assert serialized_line is True
-        observed.append(stdout + stderr)
-        return stable_id
+        if serialized_line:
+            observed.append(stdout + stderr)
+            if b"PRIVATE_DYNAMIC_DETAIL" in stdout:
+                return stable_id
+        return actual_scan(_provider, _needles, stdout=stdout, stderr=stderr, serialized_line=serialized_line)
 
     monkeypatch.setattr(owner, "provider_output_safety_scan_terminal", scan)
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", stream)
     dynamic_detail = "PRIVATE_DYNAMIC_DETAIL"
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
-        code = owner.finalize_reserved_run_once(
+        code = _finalize_observed_fixture(
             owner.Control(terminal_receipt=receipt_path),
             "claude",
             "opus",
@@ -2905,7 +3757,7 @@ def test_serialized_line_scan_failure_commits_only_minimal_blocked_envelope(
     encoded = receipt_path.read_text(encoding="utf-8")
     payload = owner.parse_provider_result(encoded)
     assert code == 1
-    assert len(observed) == 1 and dynamic_detail.encode("utf-8") in observed[0]
+    assert len(observed) == 2 and dynamic_detail.encode("utf-8") in observed[0]
     assert stream.getvalue() == encoded
     assert payload["resultText"] == ""
     assert payload["status"] == "blocked"
@@ -2923,7 +3775,7 @@ def test_full_builder_failure_uses_independent_minimal_receipt(
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     _write_result(lifecycle, b"GATE: PASS\n")
     receipt_path = (tmp_path / "builder-failure.receipt").resolve()
-    output = io.StringIO()
+    output = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", output)
     monkeypatch.setattr(
         owner,
@@ -2934,7 +3786,7 @@ def test_full_builder_failure_uses_independent_minimal_receipt(
     )
 
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
-        code = owner.finalize_reserved_run_once(
+        code = _finalize_observed_fixture(
             owner.Control(terminal_receipt=receipt_path),
             "claude",
             "opus",
@@ -2962,7 +3814,7 @@ def test_ledger_failure_after_stdout_returns_nonzero_with_stable_id_and_no_leak(
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     _write_result(lifecycle, b"GATE: PASS\n")
     receipt_path = (tmp_path / "ledger-failure.receipt").resolve()
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     stderr = io.StringIO()
     monkeypatch.setattr(owner.sys, "stdout", stream)
     monkeypatch.setattr(owner.sys, "stderr", stderr)
@@ -2972,7 +3824,7 @@ def test_ledger_failure_after_stdout_returns_nonzero_with_stable_id_and_no_leak(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("C:\\private\\ledger-canary")),
     )
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
-        code = owner.finalize_reserved_run_once(
+        code = _finalize_observed_fixture(
             owner.Control(ledger="item", terminal_receipt=receipt_path),
             "claude",
             "opus",
@@ -3089,21 +3941,31 @@ def test_envelope_contains_no_prompt_raw_stderr_or_capture_paths(
         b"GATE: PASS\n",
         stderr=b"ERROR: credential-like-secret-must-not-escape\n",
     )
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", stream)
     receipt_path = (tmp_path / "redaction.receipt").resolve()
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
-        code = owner.finalize_reserved_run_once(
+        code = _finalize_observed_fixture(
             owner.Control(terminal_receipt=receipt_path),
             "claude", "opus", "xhigh", "fixture", "",
             _initialized_reserved(receipt, lifecycle), 0,
         )
     encoded = stream.getvalue()
     payload = owner.parse_provider_result(encoded)
-    assert code == 0
+    assert code == 1
     assert payload["token"] == "UNVERIFIED:err-markers"
+    assert payload["status"] == "blocked"
     assert payload["gate"] == "none"
+    assert payload["note"] == "oracle: err markers present (1)"
+    assert payload["primaryOutcome"] == {
+        "exitCode": 0,
+        "token": "UNVERIFIED:err-markers",
+        "status": "blocked",
+        "gate": "none",
+        "note": "oracle: err markers present (1)",
+    }
     assert payload["stderrMarkerCount"] == 1
+    assert receipt_path.read_text(encoding="utf-8") == encoded
     assert "credential-like-secret" not in encoded
     assert "fixture prompt" not in encoded
     assert str(lifecycle.root) not in encoded
@@ -3113,13 +3975,13 @@ def test_finalizer_counts_fatal_stderr_markers_after_first_64_kib(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lifecycle = _lifecycle(tmp_path, monkeypatch)
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", stream)
     stderr = (b"x" * (64 * 1024)) + b"\nFATAL: first\nAPI Error: second\n"
     receipt_path = (tmp_path / "late-stderr.receipt").resolve()
 
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
-        code = owner.finalize_reserved_run_once(
+        code = _finalize_observed_fixture(
             owner.Control(terminal_receipt=receipt_path),
             "claude",
             "opus",
@@ -3133,7 +3995,7 @@ def test_finalizer_counts_fatal_stderr_markers_after_first_64_kib(
         )
 
     payload = owner.parse_provider_result(stream.getvalue())
-    assert code == 0
+    assert code == 1
     assert payload["token"] == "UNVERIFIED:err-markers"
     assert payload["gate"] == "none"
     assert payload["stderrMarkerCount"] == 2
@@ -3216,30 +4078,33 @@ def test_real_transport_emits_one_envelope_then_path_free_terminal_ledger(
     ),
 )
 @pytest.mark.parametrize("stream_name", ("stdout", "stderr"))
-def test_exact_child_credential_echo_is_blocked_before_v2_result_materialization(
+def test_exact_child_credential_is_refused_only_on_selected_public_output(
     tmp_path: Path,
     provider: str,
     auth_environment: dict[str, str],
     credential_key: str,
     stream_name: str,
 ) -> None:
-    """Every direct provider credential becomes an exact raw-byte scan needle."""
+    """Known credentials guard selected output while private stderr stays private."""
 
     secret = auth_environment[credential_key].encode("ascii")
     if provider == "codex":
-        stdout = json.dumps(
+        stdout = _codex_turn(json.dumps(
             {
                 "type": "item.completed",
-                "item": {"type": "agent_message", "text": "GATE: PASS\\n"},
+                "item": {
+                    "id": "synthetic-agent",
+                    "type": "agent_message",
+                    "text": (secret.decode("ascii") + "\n" if stream_name == "stdout" else "")
+                    + "GATE: PASS\n",
+                },
             }
-        ).encode("utf-8") + b"\n"
+        ).encode("utf-8") + b"\n")
     else:
         stdout = b"GATE: PASS\n"
-    if stream_name == "stdout":
+    if stream_name == "stdout" and provider != "codex":
         stdout = secret + b"\n" + stdout
-        stderr = b""
-    else:
-        stderr = secret + b"\n"
+    stderr = secret + b"\n" if stream_name == "stderr" else b""
     result, _item, _output_root = _run_transport(
         tmp_path,
         provider,
@@ -3249,11 +4114,25 @@ def test_exact_child_credential_echo_is_blocked_before_v2_result_materialization
         with_ledger=False,
     )
 
-    assert result.returncode != 0
     payload = owner.parse_provider_result(result.stdout)
     assert payload["schema"] == "orchestrarium.provider-result.v2"
-    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
-    assert payload["resultText"] == ""
+    if stream_name == "stdout":
+        assert result.returncode != 0
+        assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+        assert payload["resultText"] == ""
+    else:
+        assert result.returncode == 0
+        assert payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+        assert payload["resultText"] == "GATE: PASS\n"
+    expected_primary = {
+        "exitCode": 0, "token": "COMPLETE:PASS", "status": "completed",
+        "gate": "PASS", "note": "oracle: final-line GATE: PASS",
+    }
+    if provider == "codex":
+        expected_primary["note"] = owner.parse_codex_jsonl_result(stdout, 1024).note() + "; " + expected_primary["note"]
+    assert payload["primaryOutcome"] == expected_primary
+    assert payload["exitCode"] == result.returncode
+    assert payload["stderrMarkerCount"] == 0
     assert secret.decode("ascii") not in result.stdout
     assert secret.decode("ascii") not in result.stderr
 
@@ -3508,7 +4387,7 @@ def test_cloud_auth_source_controls_are_unscannable_even_with_exact_environment_
         ),
     ),
 )
-def test_unscannable_auth_refuses_before_prompt_lifecycle_ledger_or_provider_launch(
+def test_supported_opaque_auth_reaches_prompt_and_capture_setup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -3516,7 +4395,10 @@ def test_unscannable_auth_refuses_before_prompt_lifecycle_ledger_or_provider_lau
     environment: dict[str, str],
 ) -> None:
     calls: list[str] = []
+    if provider == "codex":
+        environment = {**environment, "CODEX_HOME": str(tmp_path.resolve())}
     monkeypatch.setattr(owner.os, "environ", environment)
+    monkeypatch.setattr(owner, "require_codex_hook_trust", lambda *_args: 0)
     monkeypatch.setattr(
         owner,
         "resolve_provider_command",
@@ -3534,11 +4416,11 @@ def test_unscannable_auth_refuses_before_prompt_lifecycle_ledger_or_provider_lau
         "prompt_bytes",
         lambda *_args, **_kwargs: calls.append("prompt") or b"task",
     )
-    monkeypatch.setattr(
-        owner.RunCaptureLifecycle,
-        "create",
-        lambda *_args, **_kwargs: calls.append("lifecycle"),
-    )
+    def stop_registered_capture(lifecycle, *_args, **_kwargs):
+        assert lifecycle._namespace is None
+        calls.append("lifecycle")
+        raise PermissionError("fixture capture setup denial")
+    monkeypatch.setattr(owner.RunCaptureLifecycle, "_acquire", stop_registered_capture)
     monkeypatch.setattr(
         owner,
         "run_ledger",
@@ -3559,8 +4441,8 @@ def test_unscannable_auth_refuses_before_prompt_lifecycle_ledger_or_provider_lau
     )
 
     assert code != 0
-    assert "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE" in capsys.readouterr().err
-    assert calls == ["binary", "auth"]
+    assert "E_EXTERNAL_CAPTURE_SETUP" in capsys.readouterr().err
+    assert calls == ["binary", "auth", "prompt", "lifecycle"]
 
 
 @pytest.mark.parametrize(
@@ -3571,7 +4453,7 @@ def test_unscannable_auth_refuses_before_prompt_lifecycle_ledger_or_provider_lau
         ("environment-exact", ()),
     ),
 )
-def test_finalizer_refuses_nonopaque_launch_without_exact_nonempty_credential_coverage(
+def test_finalizer_uses_output_context_instead_of_coverage_labels(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     disposition: str | None,
@@ -3597,7 +4479,7 @@ def test_finalizer_refuses_nonopaque_launch_without_exact_nonempty_credential_co
         "claude",
     )
     lifecycle = _lifecycle(tmp_path, monkeypatch)
-    stream = io.StringIO()
+    stream = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", stream)
 
     receipt_path = (tmp_path / f"coverage-{disposition}.receipt").resolve()
@@ -3614,15 +4496,23 @@ def test_finalizer_refuses_nonopaque_launch_without_exact_nonempty_credential_co
             owner.provider_stream_result(process_result),
             credential_needles=needles,
             auth_output_scan_disposition=disposition,
+            output_context=owner.ProviderOutputContext(needles) if disposition is not None else None,
+            attempted=True,
             raw_stdout=raw_stdout,
             raw_stderr=raw_stderr,
             process_result=process_result,
         )
 
-    assert code != 0
     payload = owner.parse_provider_result(stream.getvalue())
-    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
-    assert payload["resultText"] == ""
+    if disposition is None:
+        assert code != 0
+        assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+        assert payload["resultText"] == ""
+    else:
+        assert code == 0
+        assert payload["resultText"] == "GATE: PASS\n"
+        assert payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+    assert receipt_path.read_text(encoding="utf-8") == stream.getvalue()
 
 
 @pytest.mark.parametrize("blocked_flag", ("--setting-sources", "--settings"))
@@ -4081,3 +4971,393 @@ def test_launch_fails_closed_when_private_run_directory_cannot_be_created(
         ],
     ) == 1
     assert not started
+
+
+@pytest.mark.parametrize(("subject", "concrete"), (
+    (b"api_key: synthetic-colon-secret", True),
+    (b"password=synthetic-assignment-secret", True),
+    (br'{"api_\u006bey":"synthetic-quoted-secret"}', True),
+    (b"token: ordinary-count", True),
+    (b"region: ordinary", False),
+    (b"api_key: \nregion: ordinary", False),
+    (b"password:\r SYNTHETIC-C4-NEXT-LINE\r", False),
+    (b"password:\r\n SYNTHETIC-C4-NEXT-LINE\r\n", False),
+    (b"password: synthetic-secret\rregion: ordinary", True),
+    (b"password: 0\rregion: ordinary", True),
+    (b"password:", False),
+    (b"password: null\rregion: ordinary", False),
+    (b'password: ""\rregion: ordinary', False),
+    (b'"password": \r"synthetic-secret"', True),
+    (b'"password": \r0', True),
+    (b'"api_key": \n"synthetic-quoted-secret"', True),
+    (b'"api_key"\r\n:\t\nnull', False),
+    (b"api_key: null", False),
+    (b'api_key: "null"', True),
+    (b'{"api_key":null}', False),
+    (b"api_key: []", False),
+    (b"api_key: {}", False),
+    (b"api_key: [0]", True),
+    (b'api_key: {"value":0}', True),
+    (b'{"api_key":0}', True),
+    (b'{"api_key":false}', True),
+    (b"api_key: <API_KEY>", False),
+    (b"api_key: ${API_KEY}", False),
+))
+def test_capture_correction_line_local_credential_grammar(subject, concrete):
+    failure = owner.credential_scan_terminal((), stdout=subject, stderr=b"")
+    assert (failure == "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO") is concrete
+
+
+def test_capture_correction_required_label_json_failure_stays_visible():
+    with pytest.raises(ValueError):
+        owner.credential_scan_terminal((), stdout=b'api_key: {"broken"', stderr=b"")
+    with pytest.raises(ValueError):
+        owner.credential_scan_terminal((), stdout=b'"api_key": \nregion: ordinary', stderr=b"")
+    with pytest.raises(ValueError):
+        owner.credential_scan_terminal((), stdout=b'"api_key": \n', stderr=b"")
+
+
+@pytest.mark.parametrize("concrete", (False, True))
+@pytest.mark.parametrize("line_break", ("\n", "\r"))
+def test_capture_correction_actual_nested_json_strings_keep_grammar_semantics(concrete, line_break):
+    dynamic = "api_key: synthetic-nested-secret" if concrete else line_break.join(("api_key: null", "password: <PASSWORD>", "secret:", "region: ordinary"))
+    subject = json.dumps({"note": json.dumps({"message": dynamic})}).encode()
+    failure = owner.credential_scan_terminal((), stdout=subject, stderr=b"")
+    assert (failure == "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO") is concrete
+
+
+@pytest.mark.parametrize("boundary", ("pending", "root-acquired", "capture-acquired", "promotion-assigned", "promoted-return"))
+def test_capture_correction_registered_interrupts_release_actual_owner_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
+):
+    root = (tmp_path / "captures").resolve()
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(root))
+    class FixtureBaseException(BaseException):
+        pass
+    primary = (
+        KeyboardInterrupt() if boundary in {"pending", "promotion-assigned"}
+        else SystemExit(17) if boundary in {"root-acquired", "promoted-return"}
+        else FixtureBaseException("synthetic primary")
+    )
+    release_calls = []
+    real_release = owner.RunCaptureLifecycle._release_owned
+    def release(lifecycle):
+        release_calls.append(lifecycle)
+        return real_release(lifecycle)
+    monkeypatch.setattr(owner.RunCaptureLifecycle, "_release_owned", release)
+    real_acquire = owner.RunCaptureLifecycle._acquire
+    real_namespace = owner._CaptureNamespaceBinding.acquire
+    real_adopt = owner.ReservedExternalRunV1.adopt_lifecycle
+    seen = []
+    if boundary in {"pending", "capture-acquired"}:
+        def interrupt_acquire(lifecycle, *args):
+            seen.append(lifecycle)
+            if boundary == "capture-acquired":
+                real_acquire(lifecycle, *args)
+                assert lifecycle._child_resource is not None
+            raise primary
+        monkeypatch.setattr(owner.RunCaptureLifecycle, "_acquire", interrupt_acquire)
+    elif boundary == "root-acquired":
+        def interrupt_namespace(binding, path):
+            real_namespace(binding, path)
+            assert binding.resources
+            raise primary
+        monkeypatch.setattr(owner._CaptureNamespaceBinding, "acquire", interrupt_namespace)
+    elif boundary == "promotion-assigned":
+        def interrupt_adopt(reserved, lifecycle):
+            seen.append(lifecycle)
+            reserved.lifecycle = lifecycle
+            assert reserved._pending_capture is lifecycle and reserved.state == "absent"
+            raise primary
+        monkeypatch.setattr(owner.ReservedExternalRunV1, "adopt_lifecycle", interrupt_adopt)
+    receipt_path = (tmp_path / "interrupt.receipt").resolve()
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        reserved = owner.ReservedExternalRunV1(receipt)
+        target = owner.ReservedExternalRunV1.acquire_capture.__code__
+        original_trace = sys.gettrace()
+        def interrupt_return(frame, event, arg):
+            if frame.f_code is target and event == "line":
+                candidate = frame.f_locals.get("lifecycle")
+                if candidate is not None and reserved.lifecycle is candidate and reserved._pending_capture is None:
+                    seen.append(candidate)
+                    raise primary
+            return interrupt_return
+        try:
+            if boundary == "promoted-return":
+                sys.settrace(interrupt_return)
+            with pytest.raises(type(primary)) as caught:
+                reserved.acquire_capture("codex", "interrupt")
+        finally:
+            sys.settrace(original_trace)
+        assert caught.value is primary
+        first = reserved.cleanup_once()
+        assert first is reserved.cleanup_once() and first.clean
+        assert len(release_calls) == 1
+        lifecycle = release_calls[0]
+        assert lifecycle._child_resource is None and lifecycle._prompt_resource is None
+        if lifecycle._namespace is not None:
+            assert lifecycle._namespace.resources == []
+        assert reserved.state == "cleaned" and reserved._pending_capture is None
+        assert not lifecycle.run_dir or not lifecycle.run_dir.exists()
+        assert not root.exists() or list(root.iterdir()) == []
+
+
+def test_capture_correction_partial_fsync_interrupt_scrubs_provisional_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = (tmp_path / "captures").resolve()
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(root))
+    primary = KeyboardInterrupt()
+    receipt_path = (tmp_path / "partial.receipt").resolve()
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        reserved = owner.ReservedExternalRunV1(receipt)
+        lifecycle = reserved.acquire_capture("codex", "partial")
+        with monkeypatch.context() as scoped:
+            scoped.setattr(owner.os, "fsync", lambda _fd: (_ for _ in ()).throw(primary))
+            with pytest.raises(KeyboardInterrupt) as caught:
+                lifecycle.initialize(b"SYNTHETIC-PARTIAL-PROMPT")
+        assert caught.value is primary and lifecycle._prompt_resource is None
+        result = reserved.cleanup_once()
+        assert result.clean and not lifecycle.run_dir.exists()
+        assert lifecycle._namespace.resources == []
+
+
+
+def test_capture_correction_owned_close_failure_keeps_primary_and_retention_truth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = (tmp_path / "captures").resolve()
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(root))
+    lifecycle = owner.RunCaptureLifecycle.create("codex", "close-fault")
+    lifecycle.initialize(b"SYNTHETIC-CLOSE-PROMPT")
+    original = lifecycle._close_child
+    attempts = []
+    def fail_once_before_close():
+        attempts.append(True)
+        if len(attempts) == 1:
+            raise OSError("synthetic close failed before effect")
+        original()
+    monkeypatch.setattr(lifecycle, "_close_child", fail_once_before_close)
+    result = lifecycle.cleanup()
+    assert not result.clean and result.recovery_retained
+    assert "OSError" in result.issues
+    assert lifecycle.run_dir.exists() and lifecycle.prompt_path.read_bytes() == b""
+    assert lifecycle._child_resource is None and lifecycle._namespace.resources == []
+    assert lifecycle.cleanup() is result
+
+
+@pytest.mark.parametrize("surface", ("stdout", "stderr", "nested", "serialized"))
+def test_capture_correction_quoted_multiline_visits_every_output_surface(surface):
+    subject = '"api_\\u006bey"\r\n:\t\n"synthetic-quoted-secret"'
+    if surface == "serialized":
+        line = owner.build_provider_result_line(
+            "claude", "opus", "high", subject, _outcome(),
+            cancelled=False, timed_out=False,
+        )
+        failure = owner._provider_terminal_line_safety("claude", (), line)
+    else:
+        streams = {"stdout": b"", "stderr": b""}
+        streams["stderr" if surface == "stderr" else "stdout"] = (
+            json.dumps({"note": json.dumps({"message": subject})})
+            if surface == "nested" else subject
+        ).encode()
+        failure = owner.provider_output_safety_scan_terminal("claude", (), **streams)
+    assert failure == "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+
+
+@pytest.mark.parametrize("failure", (OSError("ordinary"), KeyboardInterrupt(), SystemExit(23)))
+def test_capture_correction_binding_close_preserves_primary_and_unknown_effect(monkeypatch, failure):
+    binding = owner._CaptureNamespaceBinding()
+    binding.resources = [101, 102, 103]
+    calls = []
+    monkeypatch.setattr(owner, "os", SimpleNamespace(name="nt"))
+    def close(resource):
+        calls.append(resource)
+        if resource == 103:
+            raise failure
+        if resource == 102:
+            raise SystemExit(29)
+    monkeypatch.setattr(binding, "_close_windows", close)
+    expected = failure if not isinstance(failure, Exception) else SystemExit
+    with pytest.raises(BaseException) as caught:
+        binding.close()
+    if expected is not SystemExit:
+        assert caught.value is expected
+    else:
+        assert isinstance(caught.value, SystemExit) and caught.value.code == 29
+    assert calls == [103, 102, 101]
+    assert binding.resources == [102, 103]
+    assert binding._uncertain_closes == {(True, 102), (True, 103)}
+    assert "capture-binding-close-effect-unknown" in binding._close_issues
+    assert binding.close() and calls == [103, 102, 101]
+
+
+def test_capture_correction_pending_unknown_owner_remains_reachable(monkeypatch):
+    lifecycle = owner.RunCaptureLifecycle()
+    lifecycle._namespace = owner._CaptureNamespaceBinding()
+    lifecycle._namespace.resources = [101]
+    first = KeyboardInterrupt()
+    calls = []
+    monkeypatch.setattr(owner, "os", SimpleNamespace(name="nt"))
+    def close(resource):
+        calls.append(resource)
+        raise first
+    monkeypatch.setattr(lifecycle._namespace, "_close_windows", close)
+    reserved = owner.ReservedExternalRunV1(SimpleNamespace(close=lambda: None))
+    reserved._pending_capture = lifecycle
+    with pytest.raises(KeyboardInterrupt) as caught:
+        reserved.cleanup_once()
+    assert caught.value is first
+    result = reserved._cleanup_result
+    assert result is not None and not result.clean
+    assert lifecycle._settled is not None and not lifecycle._settled.clean
+    assert reserved.state == "cleaned" and reserved._pending_capture is lifecycle
+    assert lifecycle._namespace.resources == [101]
+    assert reserved.cleanup_once() is result and calls == [101]
+
+
+def test_capture_correction_closed_ack_interrupt_finishes_siblings_and_keeps_truth(monkeypatch):
+    lifecycle = owner.RunCaptureLifecycle()
+    binding = lifecycle._namespace = owner._CaptureNamespaceBinding()
+    binding.resources = [101, 102, 103]
+    first = KeyboardInterrupt()
+    calls = []
+    monkeypatch.setattr(owner, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(binding, "_close_windows", calls.append)
+    acknowledge = binding._forget_closed_resource
+    def interrupted(resource, *, native):
+        if resource == 103:
+            raise first
+        acknowledge(resource, native=native)
+    monkeypatch.setattr(binding, "_forget_closed_resource", interrupted)
+    reserved = owner.ReservedExternalRunV1(SimpleNamespace(close=lambda: None))
+    reserved._pending_capture = lifecycle
+    with pytest.raises(KeyboardInterrupt) as caught:
+        reserved.cleanup_once()
+    assert caught.value is first and calls == [103, 102, 101]
+    assert binding.resources == [] and binding._uncertain_closes == set()
+    assert binding._closed_resources == {(True, 103)}
+    result = reserved._cleanup_result
+    assert result is not None and not result.clean
+    assert "capture-resource-close-bookkeeping-failed" in result.issues
+    assert not any("effect-unknown" in issue for issue in result.issues)
+    assert reserved._pending_capture is lifecycle
+    assert reserved.cleanup_once() is result and binding.close()
+    assert calls == [103, 102, 101]
+
+
+@pytest.mark.parametrize("case", ("body-cleanup-close", "cleanup", "close", "finalized"))
+def test_capture_correction_reserved_context_always_closes_receipt_and_keeps_primary(case):
+    body = SystemExit(17) if case == "body-cleanup-close" else None
+    first = KeyboardInterrupt()
+    later = SystemExit(23)
+    close_failure = OSError("synthetic receipt close")
+    calls = []
+    def close():
+        calls.append("receipt")
+        if case in {"body-cleanup-close", "close"}:
+            raise close_failure
+    reserved = owner.ReservedExternalRunV1(SimpleNamespace(close=close))
+    def interrupt(error):
+        def cleanup():
+            calls.append(error)
+            raise error
+        return cleanup
+    if case in {"body-cleanup-close", "cleanup"}:
+        reserved._auxiliary_cleanup = [interrupt(later), interrupt(first)]
+    if case == "finalized":
+        reserved.finalized = True
+    if body is not None:
+        with pytest.raises(SystemExit) as caught:
+            with reserved:
+                raise body
+        assert caught.value is body and body.code == 17
+        assert "reserved run cleanup incomplete" in body.__notes__
+        assert "terminal receipt close incomplete" in body.__notes__
+    elif case in {"cleanup", "close"}:
+        with pytest.raises(BaseException) as caught:
+            with reserved:
+                pass
+        assert caught.value is (first if case == "cleanup" else close_failure)
+    else:
+        with reserved:
+            pass
+    assert calls.count("receipt") == 1 and calls[-1] == "receipt"
+    if case in {"body-cleanup-close", "cleanup"}:
+        assert calls[:2] == [first, later]
+        result = reserved._cleanup_result
+        assert result is not None and not result.clean
+        assert reserved.cleanup_once() is result and calls.count(first) == 1
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows HANDLE-to-CRT transfer surface")
+@pytest.mark.parametrize("stage", ("fd-stored", "pre-conversion", "unknown-conversion"))
+def test_capture_transfer_one_owner_preserves_phase_and_primary(monkeypatch, stage):
+    import ctypes
+    import msvcrt
+    born = SimpleNamespace(st_dev=2, st_ino=3, st_mode=stat.S_IFREG | 0o600)
+    path = SimpleNamespace(name="prompt.md", lstat=lambda: born)
+    lifecycle = owner.RunCaptureLifecycle()
+    lifecycle._namespace = owner._CaptureNamespaceBinding()
+    lifecycle.prompt_path = path
+    monkeypatch.setattr(lifecycle, "_validate_identity", lambda: None)
+    monkeypatch.setattr(lifecycle, "_validate_child", lambda _path: None)
+    closes = []
+    native = lambda value: closes.append(("native", value))
+    monkeypatch.setattr(lifecycle._namespace, "_close_windows", native)
+    monkeypatch.setattr(owner, "os", SimpleNamespace(
+        name="nt", O_WRONLY=os.O_WRONLY, O_BINARY=os.O_BINARY,
+        fstat=lambda _fd: born, write=lambda _fd, value: len(value),
+        fsync=lambda _fd: None, close=lambda value: closes.append(("fd", value)),
+    ))
+    free = lambda _descriptor: None
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_a, **_k: SimpleNamespace(LocalFree=free))
+    monkeypatch.setattr(owner.WindowsPrivateObjectOwnerV1, "current_user_security_descriptor", lambda: (None, "synthetic"))
+    monkeypatch.setattr(owner.WindowsPrivateObjectOwnerV1, "open_relative", lambda *_a, **_k: 101)
+    primary = SystemExit(17) if stage == "pre-conversion" else KeyboardInterrupt()
+    def verify(*_args):
+        assert lifecycle._prompt_native_resource == 101
+        assert lifecycle._prompt_identity == (2, 3)
+        if stage == "pre-conversion":
+            raise primary
+    monkeypatch.setattr(owner.WindowsPrivateObjectOwnerV1, "verify_handle_dacl", verify)
+    def convert(handle, _flags):
+        assert handle == 101 and lifecycle._prompt_conversion_attempted
+        if stage == "unknown-conversion":
+            raise primary
+        return 37
+    monkeypatch.setattr(msvcrt, "open_osfhandle", convert)
+    fired = False
+    target = lifecycle.write_new.__code__
+    previous_trace = sys.gettrace()
+    def trace(frame, event, _arg):
+        nonlocal fired
+        if stage == "fd-stored" and not fired and event == "line" and frame.f_code is target and lifecycle._prompt_resource == 37:
+            fired = True
+            raise primary
+        return trace
+    try:
+        sys.settrace(trace)
+        with pytest.raises(BaseException) as caught:
+            lifecycle.write_new(path, b"synthetic")
+    finally:
+        sys.settrace(previous_trace)
+    assert caught.value is primary
+    if stage == "fd-stored":
+        assert fired and closes == [("fd", 37)]
+        assert lifecycle._prompt_resource is None and lifecycle._prompt_native_resource is None
+    elif stage == "pre-conversion":
+        assert closes == [("native", 101)] and not lifecycle._prompt_conversion_attempted
+    else:
+        assert closes == [] and lifecycle._prompt_native_resource == 101
+        assert lifecycle._prompt_resource is None and lifecycle._prompt_conversion_attempted
+    reserved = owner.ReservedExternalRunV1(SimpleNamespace(close=lambda: None))
+    reserved._pending_capture = lifecycle
+    result = reserved.cleanup_once()
+    assert result.clean is (stage != "unknown-conversion")
+    if stage == "unknown-conversion":
+        assert "capture-prompt-transfer-effect-unknown" in result.issues
+        assert reserved._pending_capture is lifecycle and lifecycle._has_unresolved_resources()
+    count = len(closes)
+    assert reserved.cleanup_once() is result and len(closes) == count
+    assert all(kind != "native" or value != 37 for kind, value in closes)

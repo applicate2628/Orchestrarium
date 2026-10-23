@@ -4,17 +4,15 @@ Show a compact status dashboard for the current project.
 
 ## Steps
 
-1. **Active work-items.** Check if `work-items/active/` exists and contains subdirectories. For each one, read `status.md` and display:
-   - Slug, template, orchestration weight (light/full-lead; legacy `orchestrator:` values read main→light, lead→full-lead)
-   - Current stage and main conv role (orchestrating/waiting/reviewing/idle)
-   - Active agents (role + status) — if any are running
-   - Last completed agent and its result
-   - Priority (if the `## Current state` block has a `Priority: high | medium | low` line): render it as `prio:high` / `prio:medium` / `prio:low` — NOT a bare `[high]` — so it never collides with the bug/perf severity `[high]` brackets elsewhere on the dashboard
-   - Next action
+1. **Active work-items.** Check if `work-items/active/` exists and contains subdirectories. For each one:
+   - **Current status formats.** A current staged record reads `template` and `status` from frontmatter plus top-level `Task`, `Current step`, `Last result`, and `Next action` scalars. A current quick-fix four-fact record reads its existing `Task`, `Current step`, `Last result`, and `Next action` list items. Read optional top-level `Priority:`, `Epic:`, and `Depends-on:` scalars when present; none is mandatory.
+   - **Execution ledger.** Read `agent-runs.jsonl` for launched/running/terminal roles, the last completed result, and model/effort only when the runtime reported those values. Do not infer absent model/effort metadata or require a `status.md` Active agents table.
+   - **Legacy sectioned fallback.** Only when the record is neither current staged nor quick-fix, read legacy `## Current state`, `## Active agents`, and `## Completed agents` sections plus old `orchestrator:`/`orchestration:` values. This fallback may maintain an existing legacy record; it is not the current write shape.
+   - Render a present top-level `Priority: high | medium | low` as `prio:high` / `prio:medium` / `prio:low` — not a bare `[high]` — so it never collides with bug/performance severity brackets elsewhere on the dashboard.
    - Blocked-by (if any): the item's open `Depends-on` targets — see the Dependencies sub-bullet
    If no active work-items, say "No active chains."
    - **Epics.** Also check `work-items/epics/` for epic `.md` files. For each, read `status:` and `## Children`, then derive k/n done by resolving each child slug across `work-items/active/` + `work-items/archive/`; only a unique archive location counts as done. Active status or closure text records evidence but does not terminalize the child. Show `Epic | goal | k/n done | status`; flag any epic at `ready-to-close (n/n)` and any `Epic:` value with no matching epic file. If no epics, say "No epics."
-   - **Dependencies.** For each active item, read the optional `Depends-on: <slug>, <slug>` line in its `status.md` `## Current state` block. Resolve each target slug across THREE physical locations — `work-items/active/`, `work-items/archive/YYYY-MM/`, and `work-items/backlog/` — using the SAME done-predicate as the Epics roll-up for completion (a backlog match is existence only: an admitted item is never `done`). Derive: `blocked-by` = the item's targets that are NOT done; `ready-set` = active items whose every target is done (or which have none). Flag a **dangling** `Depends-on` (a target slug that resolves in none of the three locations — note bugs/epics/decisions are NOT valid targets, only work-items) — and state explicitly: a dangling target is ALSO folded into `blocked-by`, never treated as satisfied, so `dangling` and `blocked` are NOT mutually exclusive (an unresolvable dependency is not evidence of readiness). Do NOT run cycle detection (out of MVP scope — cycle-freedom is a `$lead` authoring rule). Show the blocked count and the ready-set; if every item is ready, say "No blockers." Treat `work-items/index.md` as a compatibility snapshot only.
+   - **Dependencies.** For each active item, read the optional top-level `Depends-on: <slug>, <slug>` scalar in its current staged `status.md`; use the legacy `## Current state` lookup only through the compatibility fallback above. Resolve each target slug across THREE physical locations — `work-items/active/`, `work-items/archive/YYYY-MM/`, and `work-items/backlog/` — using the SAME done-predicate as the Epics roll-up for completion (a backlog match is existence only: an admitted item is never `done`). Derive: `blocked-by` = the item's targets that are NOT done; `ready-set` = active items whose every target is done (or which have none). Flag a **dangling** `Depends-on` (a target slug that resolves in none of the three locations — note bugs/epics/decisions are NOT valid targets, only work-items) — and state explicitly: a dangling target is ALSO folded into `blocked-by`, never treated as satisfied, so `dangling` and `blocked` are NOT mutually exclusive (an unresolvable dependency is not evidence of readiness). Do NOT run cycle detection (out of MVP scope — cycle-freedom is a `$lead` authoring rule). Show the blocked count and the ready-set; if every item is ready, say "No blockers." Treat `work-items/index.md` as a compatibility snapshot only.
    - **Backlog.** Read admitted-but-not-started items from `work-items/backlog/`. For each backlog candidate, show slug + priority + one-liner from its owning file. If the physical backlog is absent or empty, say "Backlog empty."
 
 2. **Project policies.** Read `.claude/CLAUDE.md` and check for `## Project policies` section.
@@ -49,12 +47,13 @@ Show a compact status dashboard for the current project.
 === Claude Code Pack Status ===
 
 Active chains: <count or "none">
-  <slug> — <template> (orchestration: <light|full-lead>) <prio:high|prio:medium|prio:low, or omit if no Priority>
-    Stage: <current> | Main conv: <role>
-    Active agents: <role> (running), <role> (running)
-    Last completed: <role> → <PASS|REVISE|BLOCKED>
+  <slug> — <template> <prio:high|prio:medium|prio:low, or omit if no Priority>
+    Task: <active objective>
+    Current step: <current execution step>
+    Active agents: <role> (running), <role> (running), or none — from agent-runs.jsonl
+    Last result: <accepted result plus last completed ledger verdict>
     Blocked-by: <open Depends-on targets, or omit line if none>
-    Next: <action>
+    Next action: <action>
 
 Dependencies: <blocked count or "no blockers">
   Ready to start: <ready-set slugs, or "none">

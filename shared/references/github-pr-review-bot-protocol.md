@@ -1,0 +1,54 @@
+# GitHub Pull-Request Review Bot Protocol
+
+This document is the canonical provider-neutral methodology for coordinating one hosted review run without misattributing another run's evidence. The installed Codex and Claude Code copies of `github-pr-review-bot/SKILL.md` remain self-contained operative bindings because this maintainer reference is not installed.
+
+## Evidence identity
+
+Every decision is bound to the hosted repository, pull request, current `headRefOid`, and exact `@codex review` issue-comment identifier. Local ancestry, remembered status, summary prose, and elapsed time are not substitutes for current complete hosted state.
+
+On the Representational State Transfer (REST) issue-comment surface, use `IssueCommentOrder = (parsed UTC created_at, numeric stable REST issue-comment ID)` after complete pagination. This is an Orchestrarium total-order convention for that one surface, not a GitHub chronology guarantee. It selects the newest exact trigger and orders later issue-comment evidence, but it does not correlate an otherwise unbound result with one of several overlapping runs. Missing, malformed, duplicate, or incomplete ordering input makes the affected classification indeterminate.
+
+Cross-surface timestamps do not inherit the REST tie-breaker. Same-time evidence from a REST review, REST issue comment, and Graph Query Language (GraphQL) review thread is incomparable unless that surface provides an independent exact correlation.
+
+## Connector author identity
+
+Use one author predicate for success, failure, finding, and in-progress evidence:
+
+- REST objects require `user.login == "chatgpt-codex-connector[bot]"` and `user.type == "Bot"`. If an embedded REST author type differs, a fresh authoritative connector-account lookup must return `Bot` and match both nonempty numeric REST user ID and node ID on that reaction; otherwise identity is indeterminate.
+- GraphQL objects require the exact same-node pair `author.login == "chatgpt-codex-connector"` and `author.__typename == "Bot"`, as returned by that queried surface.
+- A numeric REST `user.id` may be recorded as evidence, but it is not a separately invented allowlist. Do not translate the REST `[bot]` suffix onto GraphQL, strip it from REST, or borrow an author field from another surface.
+
+Absent, null, mismatched, or incompletely fetched author fields make that signal indeterminate. A generic "bot-authored" label is not sufficient identity evidence.
+
+## Overlapping-run attribution
+
+An intrinsically correlated signal, such as a reaction attached to one exact trigger, belongs to that trigger. Even then, it cannot make the whole head clean while another exact trigger on the same `(repository, pull request, headRefOid)` remains unresolved.
+
+A submitted review or REST issue-comment result that carries no exact trigger identifier may bind only when complete hosted state leaves exactly one unresolved earlier exact trigger candidate on the same head. If two or more candidates remain, ordering the result after them does not identify its owner: leave the evidence and all affected runs indeterminate. Do not fail or dismiss a run, mutate retry state, or create another trigger until ownership is reconciled.
+
+## Clean and failure semantics
+
+A clean result is semantic, not phrase-pinned. Connector author identity, current-head reviewed-commit binding, post-trigger order, complete collections, explicit unambiguous final no-findings meaning, no current findings, and no unresolved current connector threads are all required. An automatic `New commits` run additionally needs unique hosted run evidence and a reaction timestamp strictly later than the verified run start or observed head transition, never poll time or commit-author time. Wording, emoji, and boilerplate may change. Summary-only completion remains nonauthorizing.
+
+Failure signatures are the opposite: each retryable or non-retryable terminal signature is an exact repo-local predicate with its normalized body, surface, connector author identity, current-head binding, ordering, and unresolved-trigger attribution. Error-like prose that is not exact-listed remains indeterminate.
+
+## Authorization continuity
+
+The installed `$github-pr-review-bot` skill owns the operative cycle rule: check the publication gate's latest genuine grant, exact revocation, and later user no-push state before asking again. For new consent, the public marker is the standalone whole genuine-user message `[approve-pr-publication]`, raw or inside one balanced pair of single backticks or double asterisks. Only a current-turn marker initializes the stored binding. Lead behaviorally reuses an active same-PR grant only for ordinary corrections, exact thread resolution, and the next trigger within the user-admitted task; unrelated same-branch work requires fresh consent. The gate mechanically binds repository, remote, head branch, and pull request, not semantic task scope or branch-wide consent. Another target or branch, wider scope, revocation, a reset after lost binding state, or a later no-push instruction requires fresh authorization. Current-head binding, protection, human review, and fresh leak/range checks remain mandatory.
+
+Publication-gate source selection uses the canonical source layout or a complete materialized component with its fixed gate and five helper roles. A linked logical root is admitted only when the captured native kind, identity, and raw target continue to identify the same physical root and gate; names of outer deployment directories do not select a component. The existing captured-root extent, descendant no-follow identity checks, host-approval premise, authoritative unpublished-range scan, version-3 receipt, one-use consumption, and cleanup remain required. A raw source projection that lacks its required helpers continues to refuse. This corrects layout selection and root binding; it does not alter consent, history or revocation, retry, pull-request scope, or human review.
+
+For the existing direct generic shell-text route, a POSIX (Portable Operating System Interface) backslash-plus-line-feed continuation may be qualified only with an exact complete parse, the declared dialect `posix`, no candidate, data-region, wrapper, or nested uncertainty, and the original acquired command, identity, and lexical record. The parser must record each exact, ordered, nonoverlapping, in-range span whose source bytes are one backslash followed by a line-feed, with quote and context information that marks it as a continuation; a single-quoted or data-literal pair remains literal. A non-executing literal-argument comparison must agree with the parser’s single effective command-token vector, including empty quoted arguments. The comparison removes only those recorded spans; it does not replace or rewrite the original command, and no shell expansion or evaluation occurs. Qualification alone never grants consent, allows a push, establishes a repository binding, or substitutes for a scan. All existing generic grammar and gate-owned current repository, remote, destination, source, and commit binding; the fresh nonempty version-3 range scan and receipt; one-use consumption; and human review remain required. Other unproved normalization forms retain their existing treatment. Strict pull-request routes and dry-run behavior are unchanged.
+
+Authorization is reduced only from original genuine-user JSONL records that remain physically present in the transcript. For routes requiring full history, the gate reads the complete stable transcript forward with bounded memory through the existing stream reducer: each pass is bounded by the opened descriptor's initial byte frontier plus one growth sentinel, and the second pass verifies that same frontier. Growth or shrinkage discards the attempt; identity drift allows only the existing one fresh retry; invalid input remains unavailable; compaction summaries never reconstruct authorization. The current marker binds exactly one verified repository, remote, open pull request, and head branch in one fixed transcript-adjacent state record. Missing or corrupt state resets historical simple-marker consent and denies; exact revocation persists `revoked` before denial. Existing exact Version 1 URL, equal-Markdown-link, and numeric grants remain supported compatibility input. An absent or revoked result remains denied, malformed reserved syntax remains malformed, and any invalid or unstable transcript remains unavailable before the existing pull-request oracle or range scan can run.
+
+## Retry lineage
+
+A terminal failure and its authorized successor are one lineage with at most one successor trigger. Retry is never automatic. Before creation, apply the authorization-continuity rule and record the creating transition. Count the retry only after a complete hosted refresh uniquely binds the successor trigger identifier, creation time, and unchanged head. A definite failed create requires proof that no successor exists; an ambiguous create enters reconciliation and cannot be repeated. A failed successor cannot authorize another successor.
+
+## Terms and Abbreviations
+
+- `GraphQL`: Graph Query Language.
+- `PR`: Pull Request.
+- `REST`: Representational State Transfer.
+- `UTC`: Coordinated Universal Time.

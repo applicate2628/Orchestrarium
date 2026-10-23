@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import shlex
 import types
@@ -12,14 +13,331 @@ from typing import NamedTuple, get_args, get_origin, get_type_hints
 
 from hook_common import (
     CURRENT_TURN_BYTE_CAP,
+    HISTORY_STATUSES,
     STATUS_FOUND,
+    TURN_BOUNDARY_STATUSES,
+    acquire_tool_input,
     extract_user_typed_text,
+    normalize_tool_operation,
     parse_envelope,
     read_stdin_utf8,
     scan_current_turn_boundary,
 )
 
 APPROVE_MARKER_REGEX = re.compile(r"\[approve-publication\]", re.IGNORECASE)
+SIMPLE_PR_APPROVAL_MARKER = "[approve-pr-publication]"
+PR_GRANT_PREFIX = "[approve-pr-publication:v1 pr="
+PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
+PR_RESERVED_PREFIXES = (
+    "[approve-pr-publication:", "[revoke-pr-publication:",
+    "[approve-pr-publication pr=", "[approve-publication pr=",
+)
+PR_URL_REGEX = re.compile(
+    r"^(?P<url>https://github\.com/"
+    r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/"
+    r"(?P<repo>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/pull/"
+    r"(?P<number>[1-9][0-9]*))$"
+)
+PR_GRANT_NUMBER_REGEX = re.compile(r"^[1-9][0-9]*$")
+PR_GRANT_MARKDOWN_REGEX = re.compile(
+    r"^\[(?P<label>[^\]]+)\]\((?P<destination>[^)]+)\)$"
+)
+_QUESTION_REPLY_OPEN = "<send_user_message_question_reply>\n"
+_QUESTION_REPLY_CLOSE = "\n</send_user_message_question_reply>"
+
+
+class PublicationUserReply(NamedTuple):
+    kind: str
+    answers: tuple[str, ...]
+
+    @property
+    def text(self) -> str:
+        """Compatibility view; a batch never becomes flattened authority."""
+        if self.kind == "recognized-malformed" or len(self.answers) != 1:
+            return ""
+        return self.answers[0].strip() if self.kind == "plain" else self.answers[0]
+
+    def publication_action(self) -> tuple[str, str]:
+        """One atomic event disposition, using existing per-answer grammars."""
+        choices: set[tuple[str, str]] = set()
+        malformed = self.kind == "recognized-malformed"
+        revoked = False
+        for answer in self.answers:
+            normalized = normalize_publication_approval_text(answer)
+            if normalized == PR_REVOKE_MARKER:
+                revoked = True
+            elif is_simple_pr_approval(answer):
+                choices.add(("simple", SIMPLE_PR_APPROVAL_MARKER))
+            else:
+                grant = parse_publication_pr_grant(answer)
+                if grant is not None:
+                    choices.add(("targeted", f"[approve-pr-publication:v1 pr={grant.url}]"))
+                elif normalized.startswith(PR_RESERVED_PREFIXES):
+                    malformed = True
+                elif (
+                    APPROVE_MARKER_REGEX.fullmatch(normalized)
+                    or _has_publication_signal(answer, APPROVE_MARKER_REGEX)
+                ):
+                    choices.add(("generic", "[approve-publication]"))
+        if revoked:
+            return "revoked", PR_REVOKE_MARKER
+        if malformed or len(choices) > 1:
+            return "malformed", ""
+        return next(iter(choices)) if choices else ("neutral", "")
+
+
+class PublicationPrGrant(NamedTuple):
+    url: str
+    owner: str
+    repo: str
+    number: int
+
+
+def normalize_publication_approval_text(text: str) -> str:
+    """Remove at most one accepted display wrapper from a whole approval."""
+    normalized = text.strip()
+    for wrapper in ("`", "**"):
+        if (
+            normalized.startswith(wrapper)
+            and normalized.endswith(wrapper)
+            and len(normalized) > len(wrapper) * 2
+        ):
+            return normalized[len(wrapper):-len(wrapper)]
+    return normalized
+
+
+def extract_publication_user_reply(entry: object) -> PublicationUserReply:
+    """Validate the entire observed UI reply, preserving answer boundaries."""
+    preserved = extract_user_typed_text(entry, preserve_outer_whitespace=True)
+    text = preserved.strip()  # transport framing/blank compatibility, not authority input
+    if not text.startswith("<send_user_message_question_reply>"):
+        return PublicationUserReply("plain", (preserved if text else "",))
+    if not (text.startswith(_QUESTION_REPLY_OPEN) and text.endswith(_QUESTION_REPLY_CLOSE)):
+        return PublicationUserReply("recognized-malformed", ())
+    encoded = text[len(_QUESTION_REPLY_OPEN):-len(_QUESTION_REPLY_CLOSE)]
+    try:
+        payload = json.loads(encoded)
+    except (TypeError, ValueError):
+        return PublicationUserReply("recognized-malformed", ())
+    if type(payload) is not list or not payload:
+        return PublicationUserReply("recognized-malformed", ())
+    answers: list[str] = []
+    malformed = False
+    for member in payload:
+        if (
+            type(member) is not dict
+            or set(member) != {"questionItemId", "question", "answer"}
+            or any(type(member[key]) is not str for key in member)
+        ):
+            malformed = True
+        else:
+            answers.append(member["answer"])
+    # Retained valid answers in a malformed carrier may only preserve an
+    # explicit revocation; publication_action forbids every positive effect.
+    return PublicationUserReply(
+        "recognized-malformed" if malformed else "structured-answer", tuple(answers)
+    )
+
+
+def parse_publication_pr_grant(text: str) -> PublicationPrGrant | None:
+    """Parse only a whole, targeted grant; never infer target identity."""
+    normalized = normalize_publication_approval_text(text)
+    target: str
+    if normalized.startswith(PR_GRANT_PREFIX) and normalized.endswith("]"):
+        target = normalized[len(PR_GRANT_PREFIX):-1]
+        if PR_GRANT_NUMBER_REGEX.fullmatch(target):
+            return PublicationPrGrant(target, "", "", int(target))
+        markdown = PR_GRANT_MARKDOWN_REGEX.fullmatch(target)
+        if markdown:
+            if markdown.group("label") != markdown.group("destination"):
+                return None
+            target = markdown.group("label")
+    else:
+        for prefix in ("[approve-publication pr=", "[approve-pr-publication pr="):
+            if normalized.startswith(prefix) and normalized.endswith("]"):
+                target = normalized[len(prefix):-1]
+                break
+        else:
+            return None
+    match = PR_URL_REGEX.fullmatch(target)
+    if match is None or match.group("owner") in (".", "..") or match.group("repo") in (".", ".."):
+        return None
+    return PublicationPrGrant(
+        match.group("url"), match.group("owner"), match.group("repo"),
+        int(match.group("number")),
+    )
+
+
+def is_simple_pr_approval(text: str) -> bool:
+    """Accept only the three finite whole-message display forms."""
+    return normalize_publication_approval_text(text) == SIMPLE_PR_APPROVAL_MARKER
+
+
+def _publication_quote_end(text: str, start: int) -> int:
+    """Consume boundary-opened quotes, nesting different pairs and escapes.
+
+    ASCII single/double, curly single/double and guillemets are pairs. A
+    word-internal apostrophe is not a delimiter. Unclosed quotes own the tail.
+    """
+    pairs = {"'": "'", '"': '"', "‘": "’", "“": "”", "«": "»"}
+    stack = [pairs[text[start]]]
+    index = start + 1
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        internal = (
+            char in {"'", "’"} and index > 0 and index + 1 < len(text)
+            and text[index - 1].isalnum() and text[index + 1].isalnum()
+        )
+        if not internal and char == stack[-1]:
+            stack.pop()
+            if not stack:
+                return index + 1
+        elif not internal and char in pairs and (
+            index == 0 or not (text[index - 1].isalnum() or text[index - 1] == "_")
+        ):
+            stack.append(pairs[char])
+        index += 1
+    return len(text)
+
+
+def _reject_publication_json_constant(value: str) -> None:
+    raise ValueError("nonstandard JSON constant: " + value)
+
+
+def _publication_json_frame_end(text: str, start: int) -> int | None:
+    """None: no admitted candidate; -1: admitted malformed data; else end.
+
+    A tentative header owns no range until its complete unambiguous end AND
+    lexical JSON start. Decode original JSON before inspecting its closer.
+    """
+    if start + 1 == len(text) or text[start + 1].isspace() or text[start + 1] in "/!?":
+        return None
+    index = start + 1
+    quote = None
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+        elif char in "\"'":
+            quote = char
+        elif char == "<":
+            return None
+        elif char == ">":
+            break
+        index += 1
+    if index == len(text) or quote is not None:
+        return None
+    header_end = index + 1
+    index = header_end
+    while index < len(text) and text[index] in " \t\r\n":
+        index += 1
+    if index == len(text):
+        return None
+    first = text[index]
+    candidate = first in '{["' or first in "0123456789" or (
+        first == "-" and index + 1 < len(text) and text[index + 1] in "0123456789"
+    )
+    if not candidate:
+        candidate = any(
+            text.startswith(literal, index) and (
+                index + len(literal) == len(text)
+                or text[index + len(literal)] in " \t\r\n<"
+            ) for literal in ("true", "false", "null")
+        )
+    if not candidate:
+        return None
+    header = re.fullmatch(r"<([A-Za-z_][A-Za-z0-9_.:-]*)[ \t\r\n]*>", text[start:header_end])
+    if header is None:
+        return -1
+    try:
+        _value, end = json.JSONDecoder(parse_constant=_reject_publication_json_constant).raw_decode(text, index)
+    except (ValueError, RecursionError):
+        return -1
+    while end < len(text) and text[end] in " \t\r\n":
+        end += 1
+    close = re.match(r"</" + re.escape(header[1]) + r"[ \t\r\n]*>", text[end:])
+    return end + close.end() if close is not None else -1
+
+
+def _publication_eligible_text(text: str) -> str:
+    """Qualify original occurrences only; NUL masks cannot splice words.
+
+    Fences open after at most three spaces with >=3 equal backticks/tildes;
+    close with the same character and at least that run length, then spaces.
+    Four spaces/a tab own an indented line. Blockquote lazy continuation lasts
+    until a blank line. Inline backticks close only with an equal-length run.
+    Quotes open at nonword boundaries. This is publication syntax, not markup
+    rendering or a general-purpose parser. Raw answers are never rewritten.
+    """
+    eligible = list(text)
+    index = 0
+    blockquote = False
+    while index < len(text):
+        end = None
+        if index == 0 or text[index - 1] == "\n":
+            line_end = text.find("\n", index)
+            line_end = len(text) if line_end < 0 else line_end + 1
+            line = text[index:line_end]
+            if not line.strip():
+                blockquote = False
+            elif blockquote or re.match(r" {0,3}>", line):
+                blockquote = True
+                end = line_end
+            elif line.startswith(("    ", "\t")):
+                end = line_end
+            else:
+                fence = re.match(r" {0,3}(`{3,}|~{3,})", line)
+                if fence is not None:
+                    delimiter = fence[1]
+                    closing = re.compile(r" {0,3}" + re.escape(delimiter[0]) +
+                                         "{" + str(len(delimiter)) + r",}[ \t]*(?:\r?\n|$)")
+                    end = line_end
+                    while end < len(text):
+                        next_end = text.find("\n", end)
+                        next_end = len(text) if next_end < 0 else next_end + 1
+                        if closing.fullmatch(text[end:next_end]):
+                            end = next_end
+                            break
+                        end = next_end
+        if end is None and text[index] == "`":
+            run = re.match(r"`+", text[index:])[0]
+            end = len(text)
+            for closing in re.finditer(r"`+", text[index + len(run):]):
+                if len(closing[0]) == len(run):
+                    end = index + len(run) + closing.end()
+                    break
+        if end is None and text[index] in "\"'‘“«" and (
+            index == 0 or not (text[index - 1].isalnum() or text[index - 1] == "_")
+        ):
+            end = _publication_quote_end(text, index)
+        if end is None and text[index] == "<":
+            end = _publication_json_frame_end(text, index)
+            if end == -1:
+                return ""  # admitted malformed data cannot authorize any suffix
+        if end is not None:
+            eligible[index:end] = "\0" * (end - index)
+            index = end
+        else:
+            index += 1
+    return "".join(eligible)
+
+
+def _has_publication_signal(answer: str, pattern: re.Pattern[str]) -> bool:
+    eligible = _publication_eligible_text(answer)
+    # Match ORIGINAL bytes first: masking must not create a regex boundary or
+    # whitespace sequence that was absent from the acquired answer.
+    return any(
+        eligible[match.start():match.end()] == match[0]
+        for match in pattern.finditer(answer)
+    )
+
 
 class DataRegion(NamedTuple):
     kind: str
@@ -231,10 +549,25 @@ class GenericPushDecision(NamedTuple):
     status: str
     binding: tuple[str, str, str] | None
 
+class TranscriptDiagnostic(NamedTuple):
+    envelope: str
+    current_turn: str
+    history: str
+    recovery: str
+
 class PrRouteDenied(Exception):
-    def __init__(self, failure_id: str):
+    def __init__(
+        self,
+        failure_id: str,
+        transcript_diagnostic: TranscriptDiagnostic | None = None,
+    ):
         super().__init__(failure_id)
         self.failure_id = failure_id
+        self.transcript_diagnostic = (
+            validate_transcript_diagnostic(transcript_diagnostic)
+            if transcript_diagnostic is not None
+            else None
+        )
 
 def _wrapper_option(
     spelling: str,
@@ -493,8 +826,6 @@ class WrapperGrammarRegistry:
                 return row
         return None
 
-MARKER_MAX_MESSAGE_LENGTH = 200
-
 PUSH_INSTRUCTION_REGEX = re.compile(
     r"(?ix)"
     r"\bpush\b|git\s+push|\bpublish\b|"
@@ -549,7 +880,9 @@ def _mask_non_newlines(chars: list[str], start: int, end: int) -> None:
         if chars[index] not in "\r\n":
             chars[index] = " "
 
-def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
+def _posix_heredoc_specs(
+    line: str, quote: str | None = None
+) -> tuple[list[tuple[str, bool]], bool, str | None]:
     """Return literal heredoc delimiters from one command line.
 
     The parse is all-or-nothing.  POSIX ``<<<`` is an ordinary here-string
@@ -559,7 +892,6 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
     grammar and make the whole header uncertain.
     """
     specs: list[tuple[str, bool]] = []
-    quote: str | None = None
     index = 0
     while index < len(line):
         character = line[index]
@@ -593,7 +925,7 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
         while index < len(line) and line[index] in " \t":
             index += 1
         if index >= len(line):
-            return [], False
+            return [], False, quote
 
         value: list[str] = []
         while index < len(line) and line[index] not in " \t;|&()<>":
@@ -601,14 +933,14 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
             if character == "\\":
                 index += 1
                 if index >= len(line):
-                    return [], False
+                    return [], False, quote
                 value.append(line[index])
                 index += 1
                 continue
             if character == "'":
                 end = line.find("'", index + 1)
                 if end < 0:
-                    return [], False
+                    return [], False, quote
                 value.extend(line[index + 1:end])
                 index = end + 1
                 continue
@@ -618,7 +950,7 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
                     character = line[index]
                     if character == "\\":
                         if index + 1 >= len(line):
-                            return [], False
+                            return [], False, quote
                         escaped = line[index + 1]
                         if escaped in '$`"\\':
                             value.append(escaped)
@@ -628,22 +960,22 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
                         index += 1
                         continue
                     if character in "$`":
-                        return [], False
+                        return [], False, quote
                     value.append(character)
                     index += 1
                 if index >= len(line):
-                    return [], False
+                    return [], False, quote
                 index += 1
                 continue
             if character in "$`":
-                return [], False
+                return [], False, quote
             value.append(character)
             index += 1
         delimiter = "".join(value)
         if not delimiter:
-            return [], False
+            return [], False, quote
         specs.append((delimiter, strip_tabs))
-    return specs, True
+    return specs, True, quote
 
 def _powershell_data_regions(command: str) -> tuple[tuple[DataRegion, ...], str]:
     lines = command.splitlines(keepends=True)
@@ -757,10 +1089,11 @@ def _mask_shell_data_regions(command: str, dialect: str) -> tuple[str, tuple[Dat
         pending_regions.extend(ps_regions)
 
     line_index = 0
+    posix_quote: str | None = None
     while line_index < len(lines):
         content = _line_content(lines[line_index])
         if dialect in ("posix", "posix-compat"):
-            specs, valid = _posix_heredoc_specs(content)
+            specs, valid, posix_quote = _posix_heredoc_specs(content, posix_quote)
             if not valid:
                 return command, (), "SCG-AMBIGUOUS-DATA"
             if specs:
@@ -1644,7 +1977,7 @@ def _assemble_command_records(
             boundary_after,
             False,
             _nesting_context(dialect, boundary_before, boundary_after),
-            boundary_before == "start" and boundary_after != "end"
+            bool(boundary_after)
             and all(character in "\r\n" for character in boundary_after),
             "exact",
             normalization_state,
@@ -2001,11 +2334,233 @@ def find_git_push_records(parsed: ShellParseResult) -> list[GitPushInvocation]:
     """Return the one parser-owned effective publication projection."""
     return [record.push for record in parsed.effective_publications.records]
 
+def _has_static_posix_continuation_proof(parsed: ShellParseResult) -> bool:
+    """Qualify one existing lexical record; never produce a replacement parse.
+
+    Static fragments follow the shell's quoted/unquoted literal productions,
+    independently of Git spelling or Unicode character categories. Expansion,
+    pattern and unresolved shell productions cannot be certified by token
+    equality. Full raw coverage cannot substitute for this context proof.
+    """
+    identity = parsed.identity
+    lexical = parsed.lexical
+    if (
+        parsed.dialect != "posix" or identity.dialect != "posix"
+        or identity.input_kind != "SHELL_TEXT" or identity.depth != 0
+        or identity.parent is not None or identity.wrapper_id is not None
+        or parsed.status != "SCG-PARSED" or parsed.candidates
+        or parsed.data_regions or lexical.data_regions
+        or parsed.wrapper_projections or parsed.children
+        or len(parsed.commands) != 1 or len(parsed.segments) != 1
+        or lexical.segments != parsed.segments
+        or not parsed.normalizations
+        or parsed.normalizations != lexical.operations
+        or parsed.normalizations != lexical.removed_spans
+        or len(parsed.effective_publications.records) != 1
+        or parsed.effective_publications.records[0].kind != "DIRECT"
+    ):
+        return False
+    command = parsed.commands[0]
+    segment = parsed.segments[0]
+    if command.tokens != segment.tokens or command.token_records != segment.token_records:
+        return False
+    raw = parsed.raw_command
+    operations = parsed.normalizations
+    atoms = lexical.atoms
+    for values in (operations, atoms):
+        previous_end = 0
+        for item in values:
+            span = item.source_span
+            if (
+                type(span) is not tuple or len(span) != 2
+                or any(type(value) is not int for value in span)
+                or not 0 <= previous_end <= span[0] < span[1] <= len(raw)
+            ):
+                return False
+            previous_end = span[1]
+    cursor = atom_index = operation_index = 0
+    quote = None
+    groups: dict[int, list[LexicalAtom]] = {}
+    ordinary_equals_memberships: set[int] = set()
+    comparison: list[str] = []
+    while atom_index < len(atoms) or operation_index < len(operations):
+        is_operation = operation_index < len(operations) and (
+            atom_index == len(atoms)
+            or operations[operation_index].source_span[0] <= atoms[atom_index].source_span[0]
+        )
+        item = operations[operation_index] if is_operation else atoms[atom_index]
+        start, end = item.source_span
+        if start < cursor:
+            return False
+        # Only actual quote delimiters may be absent from the existing atoms.
+        # This validates their provenance; it does not tokenize raw text again.
+        for delimiter in raw[cursor:start]:
+            if delimiter not in ("'", '"') or (quote is not None and delimiter != quote):
+                return False
+            quote = delimiter if quote is None else None
+        comparison.append(raw[cursor:start])
+        if is_operation:
+            if (
+                item.kind != "posix-continuation" or raw[start:end] != "\\\n"
+                or quote == "'"
+                or item.contribution != ("quoted-argument" if quote == '"' else "command-token")
+            ):
+                return False
+            operation_index += 1
+        else:
+            expected_state = "ordinary" if quote is None else "single-quoted" if quote == "'" else "double-quoted"
+            value = raw[start:end]
+            if len(value) != 1 or value != item.value or item.state != expected_state:
+                return False
+            raw_operator = quote is None and value in "();<>|&\n"
+            if item.operator_capable != raw_operator or item.literalized != (quote is not None):
+                return False
+            if item.operator_capable:
+                if not (value == "\n" and command.trailing_linebreak_only and not raw[start:].strip("\n")):
+                    return False
+            elif quote is None and value in " \t":
+                if item.token_membership != -1:
+                    return False
+            else:
+                # Literalness comes from the verified raw quote production:
+                # single-quote data is inert; double-quote ordinary data is
+                # inert except expansion/escape introducers. Unquoted WORD
+                # data additionally excludes pattern, brace and tilde/history
+                # productions. These syntax forms remain unproved here; no
+                # character-domain or Git/ref alphabet supplies the proof.
+                # NUL has no literal source-word representation in this
+                # carrier; retained CR/LF are outside the admitted LF-removal
+                # class. Other Unicode data is classified by shell context,
+                # never by an identifier/printable-character category.
+                literal = value not in "\0\r\n"
+                if quote != "'" and value in "$`\\":
+                    literal = False
+                if quote is None and value in "*?[{!":
+                    literal = False
+                if quote is None and value == "~":
+                    prefix = groups.get(item.token_membership, [])
+                    assignment_prefix = item.token_membership in ordinary_equals_memberships
+                    if not prefix or (
+                        prefix[-1].state == "ordinary"
+                        and (prefix[-1].value == "=" or (assignment_prefix and prefix[-1].value == ":"))
+                    ):
+                        literal = False
+                if not literal or item.token_membership < 0:
+                    return False
+                groups.setdefault(item.token_membership, []).append(item)
+                if item.state == "ordinary" and item.value == "=":
+                    ordinary_equals_memberships.add(item.token_membership)
+            comparison.append(value)
+            atom_index += 1
+        cursor = end
+    for delimiter in raw[cursor:]:
+        if delimiter not in ("'", '"') or (quote is not None and delimiter != quote):
+            return False
+        quote = delimiter if quote is None else None
+    comparison.append(raw[cursor:])
+    if quote is not None or len(groups) != len(command.token_records):
+        return False
+    for group, token in zip(groups.values(), command.token_records, strict=True):
+        if (
+            "".join(atom.value for atom in group) != token.value
+            or tuple(atom.source_span for atom in group) != token.source_spans
+            or tuple(dict.fromkeys(atom.state for atom in group)) != token.states
+        ):
+            return False
+    try:
+        return tuple(shlex.split("".join(comparison), comments=False, posix=True)) == command.tokens
+    except ValueError:
+        return False
+
+
+def absolute_literal_root_context(parsed: ShellParseResult) -> tuple[str, str] | None:
+    """Project literal A/R selection independently of route acceptance."""
+    if type(parsed) is not ShellParseResult:
+        return None
+    identity = parsed.identity
+    effective = parsed.effective_publications
+    if (
+        parsed.dialect not in {"posix", "powershell"}
+        or identity.dialect != parsed.dialect or identity.input_kind != "SHELL_TEXT"
+        or identity.depth != 0 or identity.parent is not None
+        or identity.wrapper_id is not None
+        or parsed.candidates or parsed.children or parsed.wrapper_projections
+        or parsed.normalizations or parsed.lexical.operations or parsed.lexical.removed_spans
+        or len(parsed.commands) != 1 or len(parsed.pushes) != 1
+        or parsed.status != "SCG-PARSED" or not effective.exact_complete
+        or len(effective.records) != 1
+        or effective.eligible_direct_generic != effective.records
+    ):
+        return None
+    record = effective.records[0]
+    command = parsed.commands[0]
+    push = record.push
+    argv = command.tokens
+    if (
+        record.kind != "DIRECT" or record.certainty != "exact"
+        or record.identity != identity or push != parsed.pushes[0]
+        or push.command != command
+        or command.environment_assignments or command.control_keywords
+        or command.normalization_state != "literal"
+        or len(argv) < 4 or argv[1] != "-C" or argv[3] != "push"
+        or tuple(token.value for token in command.token_records) != argv
+    ):
+        return None
+    executable, root = argv[0], argv[2]
+    if any(not value or "\x00" in value or not Path(value).is_absolute()
+           for value in (executable, root)):
+        return None
+    if (
+        command.boundary_before != "start" and not (
+            parsed.dialect == "powershell" and command.boundary_before == "&"
+            and push.shell_context == "call-operator"
+        )
+    ) or (
+        command.boundary_after != "end" and not command.trailing_linebreak_only
+    ) or (
+        push.shell_context not in {"top-level", "call-operator"}
+        or push.environment_assignments
+        or push.executable != executable or command.arguments != argv[1:]
+        or push.git_global_options != ("-C", root)
+        or push.git_global_occurrences != (OptionOccurrence("-C", "required-value", "neutral", 1),)
+        or push.post_subcommand_tokens != argv[4:]
+        or push.repository_context != "redirected"
+    ):
+        return None
+    if (
+        parsed.dialect == "powershell" and command.boundary_before == "start"
+        and command.token_records[0].states != ("ordinary",)
+    ):
+        return None
+    # Inspect the existing atoms, never reinterpret raw shell syntax. Quoting
+    # alone does not make an expansion-bearing token a literal selection.
+    for atom in parsed.lexical.atoms:
+        if atom.token_membership < 0:
+            continue
+        if atom.state == "single-quoted":
+            continue
+        if atom.state not in {"ordinary", "double-quoted"}:
+            return None
+        if any(character in "$`" for character in atom.value):
+            return None
+        if atom.state == "ordinary" and (
+            any(character in "*?[{" for character in atom.value)
+            or (
+                atom.source_span == command.token_records[atom.token_membership].source_spans[0]
+                and atom.value == ("~" if parsed.dialect == "posix" else "@")
+            )
+        ):
+            return None
+    return executable, root
+
 def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     projection = parsed.effective_publications
     if not projection.exact_complete:
         return GenericPushDecision("PGG-PARSE-UNCERTAIN", None)
-    if parsed.normalizations:
+    if (
+        parsed.normalizations or parsed.lexical.operations or parsed.lexical.removed_spans
+        or any(command.normalization_state != "literal" for command in parsed.commands)
+    ) and not _has_static_posix_continuation_proof(parsed):
         return GenericPushDecision("PGG-LEXICAL-NORMALIZATION", None)
     if (
         len(parsed.commands) != 1
@@ -2016,19 +2571,28 @@ def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     push = projection.eligible_direct_generic[0].push
     if not isinstance(push.command, ExecutableCommand):
         return GenericPushDecision("PGG-PARSE-UNCERTAIN", None)
-    if push.command.control_keywords or push.shell_context != "top-level" or (
-        push.command.boundary_before != "start"
+    literal_context = absolute_literal_root_context(parsed)
+    canonical_literal_root = (
+        literal_context is not None
+        and _is_exact_direct_literal(parsed.raw_command, parsed)
+        and len(parsed.strict_projection.argv) == 6
+        and push.positionals == parsed.strict_projection.argv[4:]
+        and not push.push_options and not push.push_option_occurrences
+    )
+    if push.command.control_keywords or (not canonical_literal_root and (
+        push.shell_context != "top-level"
+        or push.command.boundary_before != "start"
         or (
             push.command.boundary_after != "end"
             and not push.command.trailing_linebreak_only
         )
-    ):
+    )):
         return GenericPushDecision("PGG-COMPOUND-CONTEXT", None)
-    if push.repository_context != "ambient":
+    if push.repository_context != "ambient" and not canonical_literal_root:
         return GenericPushDecision("PGG-REPOSITORY-REDIRECT", None)
     if push.environment_assignments:
         return GenericPushDecision("PGG-ENV-PREFIX", None)
-    if push.git_global_options:
+    if push.git_global_options and not canonical_literal_root:
         return GenericPushDecision("PGG-GIT-GLOBAL-OPTION", None)
     if push.option_status in ("GPO-MISSING-VALUE", "GPO-AMBIGUOUS"):
         return GenericPushDecision("PGG-OPTION-ARITY", None)
@@ -2142,11 +2706,12 @@ def _project_scan_execution_graph(
     return False
 
 def resolve_command_dialect(tool_name: object) -> CommandDialectResolution:
-    if tool_name == "PowerShell":
+    operation = normalize_tool_operation(tool_name)
+    if operation == "powershell":
         return CommandDialectResolution("powershell", True)
-    if tool_name == "Bash":
+    if operation == "bash":
         return CommandDialectResolution("posix", True)
-    if tool_name in ("shell_command", "exec_command"):
+    if operation in ("shell_command", "exec_command"):
         return CommandDialectResolution(
             "powershell" if os.name == "nt" else "posix", True
         )
@@ -2282,19 +2847,30 @@ class PreflightResult(NamedTuple):
     failure_id: str | None
     repository_workdir: str = ""
     repository_workdir_source: str = ""
+    transcript_diagnostic: TranscriptDiagnostic | None = None
+    simple_pr_approval: bool = False
 
 
-_OUTCOMES = frozenset(("ALLOW_FINAL", "DEFER"))
+_OUTCOMES = frozenset(("ALLOW_FINAL", "ABSTAIN", "DEFER"))
 _CONTINUATIONS = frozenset(("NONE", "RENDER_DENY", "EVALUATE_HEAVY"))
 _DIALECTS = frozenset(("posix", "powershell", "unsupported"))
 _CURRENT_TURN_STATUSES = frozenset(
     ("found", "absent", "unreadable", "invalid", "limit", "not-in-window")
 )
+_TRANSCRIPT_NOT_RUN = "not-run"
+_TRANSCRIPT_ENVELOPE_STATUSES = frozenset(
+    ("missing", "null", "non-string", "empty-string", "string")
+)
+_TRANSCRIPT_CURRENT_TURN_STATUSES = frozenset(
+    (_TRANSCRIPT_NOT_RUN, *TURN_BOUNDARY_STATUSES)
+)
+_TRANSCRIPT_HISTORY_STATUSES = frozenset((_TRANSCRIPT_NOT_RUN, *HISTORY_STATUSES))
 _PREFLIGHT_REASONS = frozenset((
     "PFP-ALLOW-SUBAGENT", "PFP-ALLOW-NO-COMMAND", "PFP-ALLOW-NON-PUSH",
     "PFP-DENY-PARSE", "PFP-ALLOW-DRY-RUN", "PFP-DENY-TRANSCRIPT",
-    "PFP-ALLOW-USER-APPROVED", "PFP-HEAVY", "PFP-DENY-KNOWN",
+    "PFP-CONSENT-GENERIC", "PFP-HEAVY", "PFP-DENY-KNOWN",
     "PFP-DENY-INTERNAL", "PFP-ALLOW-MALFORMED",
+    "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE",
 ))
 _GENERIC_STATUSES = frozenset((
     "PGG-ADMISSIBLE", "PGG-PARSE-UNCERTAIN", "PGG-LEXICAL-NORMALIZATION",
@@ -2313,14 +2889,18 @@ _PREFLIGHT_BRANCHES = {
     "PFP-ALLOW-NON-PUSH": (
         "ALLOW_FINAL", "NONE", frozenset(("command", "dialect", "parsed")), None,
     ),
+    "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE": (
+        "ABSTAIN", "NONE", frozenset(("command", "dialect", "parsed")), None,
+    ),
     "PFP-ALLOW-DRY-RUN": (
         "ALLOW_FINAL", "NONE", frozenset(("command", "dialect", "parsed")), None,
     ),
-    "PFP-ALLOW-USER-APPROVED": (
-        "ALLOW_FINAL", "NONE",
+    "PFP-CONSENT-GENERIC": (
+        "DEFER", "EVALUATE_HEAVY",
         frozenset((
             "command", "dialect", "transcript_path", "parsed",
-            "current_turn_status", "generic_decision",
+            "current_turn_status", "generic_decision", "repository_workdir",
+            "repository_workdir_source",
         )),
         None,
     ),
@@ -2362,15 +2942,50 @@ _PREFLIGHT_OPTIONAL_DEFAULTS = {
 }
 
 
-def _repository_workdir(envelope: dict, tool_input: dict) -> tuple[str, str]:
-    explicit = "workdir" in tool_input
-    raw = tool_input["workdir"] if explicit else envelope.get("cwd")
+def validate_transcript_diagnostic(
+    diagnostic: object,
+) -> TranscriptDiagnostic:
+    if type(diagnostic) is not TranscriptDiagnostic:
+        raise TypeError("foreign transcript diagnostic")
+    if diagnostic.envelope not in _TRANSCRIPT_ENVELOPE_STATUSES:
+        raise ValueError("invalid transcript envelope status")
+    if diagnostic.current_turn not in _TRANSCRIPT_CURRENT_TURN_STATUSES:
+        raise ValueError("invalid transcript current-turn status")
+    if diagnostic.history not in _TRANSCRIPT_HISTORY_STATUSES:
+        raise ValueError("invalid transcript history status")
+    if diagnostic.recovery not in _TRANSCRIPT_HISTORY_STATUSES:
+        raise ValueError("invalid transcript recovery status")
+    if diagnostic.envelope != "string":
+        if (
+            diagnostic.current_turn != _TRANSCRIPT_NOT_RUN
+            or diagnostic.history != _TRANSCRIPT_NOT_RUN
+            or diagnostic.recovery != _TRANSCRIPT_NOT_RUN
+        ):
+            raise ValueError("unread transcript has reader status")
+    elif diagnostic.current_turn == _TRANSCRIPT_NOT_RUN:
+        raise ValueError("string transcript lacks current-turn status")
+    if diagnostic.history not in ("limit", "found") and diagnostic.recovery != _TRANSCRIPT_NOT_RUN:
+        raise ValueError("unexpected transcript recovery status")
+    return diagnostic
+
+
+def _repository_workdir(
+    envelope: dict, tool_input: dict, *, allow_absent: bool = False,
+) -> tuple[str, str]:
+    if "workdir" in tool_input:
+        raw, source = tool_input["workdir"], "tool"
+    elif "cwd" in envelope:
+        raw, source = envelope["cwd"], "envelope"
+    elif allow_absent:
+        return "", ""
+    else:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
     if type(raw) is not str or not raw or "\x00" in raw:
         raise PrRouteDenied("PRG-WORKDIR-INVALID")
     candidate = Path(raw)
     if not candidate.is_absolute():
         raise PrRouteDenied("PRG-WORKDIR-INVALID")
-    return raw, "tool" if explicit else "envelope"
+    return raw, source
 
 
 def _validate_declared_value(value: object, annotation: object, path: str) -> None:
@@ -2480,24 +3095,53 @@ def validate_preflight_result(result: object) -> PreflightResult:
         raise ValueError("invalid preflight failure identifier")
     if result.repository_workdir_source not in ("", "tool", "envelope"):
         raise ValueError("invalid repository workdir source")
+    if result.transcript_diagnostic is not None:
+        validate_transcript_diagnostic(result.transcript_diagnostic)
+        if result.outcome == "ABSTAIN":
+            raise ValueError("unexpected branch field: transcript_diagnostic")
     branch = _PREFLIGHT_BRANCHES[result.reason_id]
     expected_outcome, expected_continuation, present_fields, expected_failure = branch
     if (result.outcome, result.continuation) != (
         expected_outcome, expected_continuation
     ):
         raise ValueError("preflight reason is inconsistent with its branch")
+    empty_workdir_pair = result.repository_workdir == "" and result.repository_workdir_source == ""
+    if (result.repository_workdir == "") != (result.repository_workdir_source == ""):
+        raise ValueError("partial repository workdir pair")
+    literal_absence = False
+    if empty_workdir_pair and result.reason_id in {"PFP-CONSENT-GENERIC", "PFP-HEAVY"}:
+        if (
+            result.parsed is None
+            or result.command != result.parsed.raw_command
+            or result.dialect != result.parsed.dialect
+            or absolute_literal_root_context(result.parsed) is None
+            or result.generic_decision is None
+            or result.generic_decision != classify_generic_push(result.parsed)
+            or (result.reason_id == "PFP-CONSENT-GENERIC" and (
+                result.current_turn_status != STATUS_FOUND
+                or result.generic_decision.status != "PGG-ADMISSIBLE"
+            ))
+        ):
+            raise ValueError("missing repository workdir lacks literal selection context")
+        literal_absence = True
     for field, default in _PREFLIGHT_OPTIONAL_DEFAULTS.items():
         value = getattr(result, field)
         if field in present_fields:
+            if literal_absence and field in {"repository_workdir", "repository_workdir_source"}:
+                continue
             if value == default or (type(value) is str and not value):
                 raise ValueError(f"missing branch field: {field}")
         elif value != default:
             raise ValueError(f"unexpected branch field: {field}")
     if (
-        result.reason_id not in {"PFP-ALLOW-USER-APPROVED", "PFP-HEAVY"}
+        result.reason_id not in {"PFP-CONSENT-GENERIC", "PFP-HEAVY"}
         and result.push_instruction
     ):
         raise ValueError("unexpected branch push instruction")
+    if result.reason_id == "PFP-CONSENT-GENERIC" and result.current_turn_status != STATUS_FOUND:
+        raise ValueError("generic consent requires a genuine current-turn boundary")
+    if result.reason_id != "PFP-HEAVY" and result.simple_pr_approval:
+        raise ValueError("unexpected simple PR approval")
     if expected_failure == "REGISTERED":
         if result.failure_id not in _PREFLIGHT_FAILURE_IDS:
             raise ValueError("missing registered preflight failure")
@@ -2521,12 +3165,16 @@ def _result(
     failure_id: str | None = None,
     repository_workdir: str = "",
     repository_workdir_source: str = "",
+    transcript_diagnostic: TranscriptDiagnostic | None = None,
+    simple_pr_approval: bool = False,
 ) -> PreflightResult:
     return validate_preflight_result(PreflightResult(
         outcome, reason_id, continuation, command, dialect, transcript_path,
         parsed, current_turn_status, generic_decision, push_instruction, failure_id,
         repository_workdir,
         repository_workdir_source,
+        transcript_diagnostic,
+        simple_pr_approval,
     ))
 
 
@@ -2534,12 +3182,14 @@ def build_preflight(envelope: dict) -> PreflightResult:
     try:
         if envelope.get("agent_id"):
             return _result("ALLOW_FINAL", "PFP-ALLOW-SUBAGENT", "NONE")
+        operation = normalize_tool_operation(envelope.get("tool_name"))
+        if operation not in {"bash", "powershell", "shell_command", "exec_command"}:
+            return _result("ALLOW_FINAL", "PFP-ALLOW-NO-COMMAND", "NONE")
         tool_input = envelope.get("tool_input")
-        if not isinstance(tool_input, dict):
-            return _result("ALLOW_FINAL", "PFP-ALLOW-NO-COMMAND", "NONE")
-        command = tool_input.get("command")
-        if not isinstance(command, str) or not command:
-            return _result("ALLOW_FINAL", "PFP-ALLOW-NO-COMMAND", "NONE")
+        acquired = acquire_tool_input(envelope.get("tool_name"), tool_input)
+        if not acquired.resolved or acquired.command is None:
+            raise PrRouteDenied("PGG-PARSE-UNCERTAIN")
+        command = acquired.command
         resolution = resolve_command_dialect(envelope.get("tool_name"))
         parsed = parse_shell_command(command, resolution.dialect)
         resolution, parsed = _recover_mislabeled_command_dialect(
@@ -2558,43 +3208,83 @@ def build_preflight(envelope: dict) -> PreflightResult:
             )
         if not pushes and not minus_c_candidate:
             return _result(
-                "DEFER", "PFP-DENY-PARSE", "RENDER_DENY",
+                "ABSTAIN", "PFP-ABSTAIN-NO-PUBLICATION-EVIDENCE", "NONE",
                 command=command, dialect=resolution.dialect, parsed=parsed,
-                failure_id="PGG-PARSE-UNCERTAIN",
             )
         if _has_solitary_direct_dry_credit(parsed):
             return _result(
                 "ALLOW_FINAL", "PFP-ALLOW-DRY-RUN", "NONE",
                 command=command, dialect=resolution.dialect, parsed=parsed,
             )
-        transcript_path = envelope.get("transcript_path") or ""
-        if not transcript_path:
+        if "transcript_path" not in envelope:
+            envelope_status = "missing"
+            transcript_path = ""
+        else:
+            raw_transcript_path = envelope.get("transcript_path")
+            if raw_transcript_path is None:
+                envelope_status = "null"
+                transcript_path = ""
+            elif type(raw_transcript_path) is not str:
+                envelope_status = "non-string"
+                transcript_path = ""
+            elif not raw_transcript_path:
+                envelope_status = "empty-string"
+                transcript_path = ""
+            else:
+                envelope_status = "string"
+                transcript_path = raw_transcript_path
+        if envelope_status != "string":
             return _result(
                 "DEFER", "PFP-DENY-TRANSCRIPT", "RENDER_DENY",
                 command=command, dialect=resolution.dialect, parsed=parsed,
                 failure_id="PRG-TRANSCRIPT-UNAVAILABLE",
+                transcript_diagnostic=TranscriptDiagnostic(
+                    envelope_status,
+                    _TRANSCRIPT_NOT_RUN,
+                    _TRANSCRIPT_NOT_RUN,
+                    _TRANSCRIPT_NOT_RUN,
+                ),
             )
         last_user, _after_user, status = scan_current_turn_boundary(
             transcript_path, byte_cap=CURRENT_TURN_BYTE_CAP
         )
-        user_text = (
-            extract_user_typed_text(last_user)
+        reply = (
+            extract_publication_user_reply(last_user)
             if status == STATUS_FOUND and last_user is not None
-            else ""
+            else PublicationUserReply("plain", ())
         )
-        instruction = PUSH_INSTRUCTION_REGEX.search(user_text) is not None
+        action, _ = reply.publication_action()
+        instruction = action not in {"malformed", "revoked"} and any(
+            _has_publication_signal(answer, PUSH_INSTRUCTION_REGEX) for answer in reply.answers
+        )
         grammar = classify_generic_push(parsed)
-        if APPROVE_MARKER_REGEX.search(user_text) and len(user_text) <= MARKER_MAX_MESSAGE_LENGTH:
+        transcript_diagnostic = TranscriptDiagnostic(
+            envelope_status,
+            status,
+            _TRANSCRIPT_NOT_RUN,
+            _TRANSCRIPT_NOT_RUN,
+        )
+        literal_context = absolute_literal_root_context(parsed)
+        allow_absent = (
+            literal_context is not None
+            and (action != "generic" or (
+                status == STATUS_FOUND and grammar.status == "PGG-ADMISSIBLE"
+            ))
+        )
+        repository_workdir, repository_workdir_source = _repository_workdir(
+            envelope, tool_input, allow_absent=allow_absent
+        )
+        if action == "generic":
             return _result(
-                "ALLOW_FINAL", "PFP-ALLOW-USER-APPROVED", "NONE",
+                "DEFER", "PFP-CONSENT-GENERIC", "EVALUATE_HEAVY",
                 command=command, dialect=resolution.dialect,
                 transcript_path=transcript_path, parsed=parsed,
                 current_turn_status=status, generic_decision=grammar,
                 push_instruction=instruction,
+                repository_workdir=repository_workdir,
+                repository_workdir_source=repository_workdir_source,
+                transcript_diagnostic=transcript_diagnostic,
             )
-        repository_workdir, repository_workdir_source = _repository_workdir(
-            envelope, tool_input
-        )
         return _result(
             "DEFER", "PFP-HEAVY", "EVALUATE_HEAVY",
             command=command, dialect=resolution.dialect,
@@ -2602,6 +3292,8 @@ def build_preflight(envelope: dict) -> PreflightResult:
             current_turn_status=status, generic_decision=grammar,
             push_instruction=instruction, repository_workdir=repository_workdir,
             repository_workdir_source=repository_workdir_source,
+            transcript_diagnostic=transcript_diagnostic,
+            simple_pr_approval=action == "simple",
         )
     except PrRouteDenied as exc:
         return _result(

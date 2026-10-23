@@ -12,9 +12,11 @@ Reference for routing, interaction types, periodic controls, and role aliases. R
 
 ## Workflow economy projection
 
-Apply the binding shared **Workflow economy (binding)** rule. This Claude projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. Kimi may be selected explicitly only for read-only research/review with independent verification and nonauthorizing results; Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
+Apply the binding shared **Workflow economy (binding)** rule. This Claude projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. At a natural readiness or decision point, if a bounded independent read-only alternative view would materially reduce unresolved ambiguity or compare consequential options, Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder. Otherwise no Kimi call or skip record is required. Selection never enters `auto` or creates a gate or counter; current availability or quota claims require evidence, and the existing wrapper-only fixed `kimi-code/k3`, independently verified, nonauthorizing contract remains. Omission of the capability file preserves empty tools/servers/subagents and permission `reject`; validated selections may admit read tools/servers or scoped worker tools only under the policy-owned task mutation class and role mapping. Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
 
-## Template-based routing
+## Routing examples
+
+Resolve the template and evidence triggers first. Each listed role is a candidate; include it only when its artifact is required by accepted uncertainty, contract, or risk. Preserve mandatory security, performance, geometry, scientific, human, and publication gates.
 
 Team templates in `.claude/agents/team-templates/` define the team composition and execution chain for each task type.
 
@@ -35,21 +37,23 @@ When the main conversation (holding the Lead role) needs to decide between roles
 
 - A handoff interrupt or worker stall without an artifact is not a completed `REVISE` artifact.
 - Record the interruption in `status.md`, keep the stage open, and either re-dispatch the same role with a narrower slice or route to the proper factual role.
+- A root-owned external job that outlives a model turn follows the Lead skill's **Conditional external-run monitoring** rule; this projection adds no second polling or recovery-state owner. On accepted terminal results use the same [work-cycle owner](../../skills/lead/SKILL.md#work-cycle-ownership-recipe), rather than treating run settlement as task closure.
 - The lead must not synthesize the missing artifact or replace missing factual work inline.
 - On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
+- Apply the shared Engineering hygiene **Artifact disposition and project hygiene** rule in `AGENTS.md` at existing producer/handoff acceptance. A proved selected manual-deletion handoff fulfills that agent disposition while physical entries remain accounted for; do not automatically wait for human emptying or claim deletion. Explicit physical-deletion duties, unproved/denied dispositions, live resources, valuable/foreign evidence and unfinished lifecycle obligations retain their existing owners and hold only dependent actions. The bounded host-policy-denied empty-directory deferral remains distinct and does not settle denied cleanup. No extra cleanup invocation or stage is required.
 
 ## Primary-task lock
 
-- Maintain exactly one primary in-progress task at a time.
-- Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
-- After handling a side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- Follow the shared **Primary-task continuity and side work** rule in AGENTS.md; retain the admitted primary outcome and next authorized action.
+- Answer brief questions inline. Promptly delegate eligible substantive admitted side work to matching non-spawning specialists under existing authority, capacity, full resource surfaces and gates; continue ready primary work in the same turn without waiting for the side result.
+- Defer conflicting side work with its owner/resume point or use already-authorized validated isolation; preserve manual modes and explicit user stop/pause/cancel/reprioritization and native Goal holds.
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
 - If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
-- When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
-- Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
+- When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away. For each unresolved blocked action, record the exact action, current blocking reason, concrete resume condition, and next step. After a relevant condition changes, and again before completion, reassess the affected action from current evidence; an old denial without that reassessment is not current blockage evidence, and reassessment grants no permission, bypass, retry, deletion, or other mutation authority.
+- Before a task-done claim, item switch or wider readiness handoff, apply the Lead-owned [work-cycle terminal decision](../../skills/lead/SKILL.md#work-cycle-ownership-recipe): continue the ready required action or execute existing close and observe its archive/receipt/read-model result. Reconcile the original admitted outcome, requested roots and task/Git obligations; preserve unrelated/unknown state and retain exact refusal/resume evidence.
 - Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
-- Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task.
+- When an independently verified scope is accepted, Lead creates a timely local Git commit checkpoint if the scope is coherent and separable, staging only that scope. Any open gate blocks its dependent changes; unrelated ready work and eligible checkpoints continue. The checkpoint preserves evidence and is neither completion nor publication. Human review, leak checking, and explicit publication authority still govern push and release.
 
 ## External adapter routing
 
@@ -62,7 +66,7 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 - `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
-- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses the Codex/Claude pair only. Explicit user override may choose Kimi for a policy-admitted read-only research/review lane; the fixed Kimi transport remains independently verified and nonauthorizing. Grok remains unavailable and must not be launched or probed in 1.x.
+- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses the Codex/Claude pair only. Explicit user or Lead override may choose Kimi for a policy-admitted read-only lane or mapped `external-worker` engineering lane; its validated capability selection and fixed transport remain independently verified and nonauthorizing. Grok remains unavailable and must not be launched or probed in 1.x.
 - The Claude-line canonical schema may include the shared `externalModelMode` and `externalCodexProfile`; `externalClaudeProfile` remains Codex-line only.
 - The team template JSON does not change; routing substitutions happen at execution time.
 - `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.
@@ -85,7 +89,7 @@ For lead-managed work, consultant input at closeout is optional unless a repo-lo
 
 - The check uses `$consultant` as an advisory-only closure sweep; it does not replace reviewers, QA, or human/CI gates.
 - Follow the configured `consultantMode` honestly for any requested closure check.
-- If the selected consultant path is unavailable, disabled, or would downgrade in a way the current mode does not allow, do not mark the batch closed; record the miss and escalate to the user instead.
+- When an explicitly requested or repo-policy-required consultant check remains an admitted obligation under an enabled mode, report an unavailable or incompatible selected path as that scoped miss; do not switch routes or fabricate consultant output. `consultantMode: disabled` waives consultant closeout and creates no unused consultant deliverable or batch blocker.
 - The memo must end with both:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
   - The continuation prompt must begin with a direct imperative to continue and name the next concrete action.
@@ -140,7 +144,7 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Refactor debt scan | `$architecture-reviewer` | Milestone close | Admit bounded refactor item |
 | Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive, reconcile physical roots, and regenerate `work-items/README.md` |
 | Board refresh | `$knowledge-archivist` | Every delivery wave (post-wave sync pass) | Refresh `work-items/README.md` against git and the tree |
-| Registry governance reconciliation | `$knowledge-archivist` | Accepted task-memory governance change, all-registry request, or milestone-wide cleanup | Run one complete structural plus semantic-currency matrix across every current registry; placement-only success is not overall `PASS`; route non-consistent rows to semantic owners through `$lead` |
+| Registry governance reconciliation | `$knowledge-archivist` | Verified change to cross-registry schema, lifecycle, or relations; all-registry request; or milestone-wide cleanup | Run one complete structural plus semantic-currency matrix across every current registry; placement-only success is not overall `PASS`; route non-consistent rows to semantic owners through `$lead` |
 | Governance alignment | `$knowledge-archivist` | Governance change | Propagate to all governance files in same commit |
 | Documentation sync | `$knowledge-archivist` | Skill, role, or template added/removed/renamed | Update README, INSTALL, install scripts per root CLAUDE.md checklists |
 | Batch-close consultant-check | `$lead` | Only when explicitly requested by lead or repo-local lane policy and `consultantMode` is enabled | Satisfy the requested consultant sweep or keep the batch open and escalate honestly |
@@ -151,6 +155,7 @@ These pairings are not derivable from classification alone — lead must know th
 
 | Work type | Design role | Implementation role | QA / Review |
 | --- | --- | --- | --- |
+| Scientific modeling / numerical methods | `$computational-scientist (model)` | `$scientific-software-engineer` | `$computational-scientist (scientific-conformance-review; independent run)` + `$qa-engineer` |
 | Scientific / data visualization | `$computational-scientist` | `$visualization-engineer` | `$qa-engineer` |
 | Geometry / spatial computation | `$computational-scientist` | `$geometry-engineer` | `$qa-engineer` + `$architecture-reviewer` |
 | Qt model-view heavy | — | `$model-view-engineer` | `$qa-engineer` + `$ui-test-engineer` (both) |
@@ -159,18 +164,20 @@ These pairings are not derivable from classification alone — lead must know th
 
 ## Design-panel and review-loop selection
 
+Use review-loop for an explicit user loop/full-review request, materially competing owner/contract/seam solutions, unresolved coupling without one falsifying oracle, repeated review/fix failure or moving same-class manifestations, or newly evidenced complexity. Resolve missing factual premises first. A verified one-owner local cause, settled contract and one clear falsifying oracle may use the bounded exact-delta route when no mandatory trigger applies. Record the reason at the decision boundary; file count and `design-decision` alone do not mandate a loop. Follow the operative review-loop binding for route admission.
+
 Two independence techniques exist at different stages; pick the one that matches the stage:
 
-- **Design-panel** (`/agents-design-panel`, contract `agents/contracts/design-panel.md`) is independence at **generation**: N≥2 independently-framed design lanes on one pinned problem, converged through one mandatory synthesis, BEFORE a single design exists. Use it for the two admitted triggers — a high-surface-count mechanical sweep, or an open architecture choice — not for an ordinary single-architect design.
+- **Design-panel** (`/agents-design-panel`, contract `agents/contracts/design-panel.md`) is independence at **generation**: N≥2 independently-framed design lanes on one pinned problem, converged through one mandatory synthesis, BEFORE a single design exists. A high-surface-count sweep or open architecture choice can establish eligibility, not dispatch. Keep the ordinary single-architect route unless expressly requested or Root separately admits the panel for a concrete generation need/benefit.
 - **Review-loop** (`/agents-review-loop`, contract `agents/contracts/review-loop.md`) is independence at **verification**: multiple scope angles converge on ONE already-written fix-design artifact across autonomous rounds.
 
-Composition is sequential, not competing: design-panel generates and synthesizes once → `design.md` → optionally `/agents-review-loop` verifies that one artifact to convergence → `$planner`. Do not restate either contract's operative rules here; route to the binding.
+Design-panel generates and synthesizes once into `design.md`; then reassess the existing mandatory review-loop triggers. Required verification remains required; other review needs admission. A panel alone adds no loop or Planner. Continue only the next selected authorized stage, preserving explicit full-loop requests and unresolved owner/seam risk. Route to each operative binding rather than restating its rules.
 
 ## How to instruct reviewers
 
-**Claim-Verify**: pass the claims list from the builder's artifact. Tell the reviewer: *"Verify each claim against the artifact. Also identify any risk surfaces not covered by any claim."*
+**Claim-Verify**: when an accepted Architect or domain artifact has numbered `{ guarantee, single-owner, enforcement-probe }` claims, pass that accepted Architect or domain artifact/revision unchanged in `Approved inputs` to implementation and review. The implementer does not author, reorder, replace, or become owner of those claims; it maps each upstream claim number to its implementation surface and observed evidence/result. Give the reviewer the upstream claims and implementation evidence side by side, plus the accepted constraints and claim identity needed for independent challenge, without requiring the entire unused design prose. Missing or changed claims return `REVISE` to their Architect or domain owner. No upstream claims means no synthetic claim set; use the accepted criteria and named regression guard. Tell the reviewer: *"Verify each claim against the implementation evidence. Also identify any risk surfaces not covered by any claim."*
 
-**Adversarial**: pass the implementation artifact only. Tell the reviewer: *"Do not read the upstream design package. Assume an adversary with full knowledge of the implementation. Find the three highest-probability failure or attack vectors and show the exact mechanism for each."*
+**Adversarial**: Pass original admission and genuine user amendments, unchanged accepted contracts/upstream owner claims and their immutable revision, protected surfaces, named guard and actual implementation evidence. Do not reconstruct authority from the implementation. To avoid anchoring, withhold prior reviewer verdicts and unaccepted builder persuasion/self-review, not governing inputs. With no upstream claim set, use accepted criteria without inventing claims. Retain the required remainder, Root owner and next action; a review assignment does not narrow the original outcome. Challenge unanticipated adversaries or failure mechanisms and report only substantiated material findings with exact evidence. Zero supported findings is representable; label speculative questions with their owner/falsifier, and zero findings cannot supply missing mandatory proof.
 
 ## Common alias map
 
@@ -212,13 +219,7 @@ When any role discovers a bug, risk, or improvement opportunity outside the appr
 
 ## Artifact invalidation protocol
 
-When an upstream artifact is revised after downstream artifacts have already been accepted:
-
-1. **Mark downstream artifacts as stale.** In `status.md`, add `stale-since: <timestamp>` to the affected artifact references.
-2. **The orchestrator must re-validate** each stale artifact before it is used as input to further stages. Re-validation means either:
-   - Confirming the downstream artifact is unaffected by the upstream change (annotate why), or
-   - Re-running the downstream stage with the updated upstream artifact.
-3. **Scope**: research → design → plan → implementation. A change to research may invalidate design; a change to design may invalidate the plan. Implementation artifacts are invalidated if their plan phase changed.
+Apply the producing-scope and accepted-baseline rule in [Subagent Contracts](subagent-contracts.md#handoff-template).
 
 ## REVISE iteration cap
 
@@ -252,6 +253,12 @@ Before launching work in parallel:
    - Checks for unintended interactions (e.g., both agents modified a shared import file that wasn't in either change surface)
    - If conflicts exist, resolve before advancing to the next stage
 5. **If a parallel agent returns REVISE or BLOCKED**, handle it independently — other parallel agents are not affected unless the finding impacts their change surface.
+
+## Reviewed publication exceptions
+
+Keep content-exception approval separate from permission to publish. Receive the actual bounded `security-reviewer` result and its exact repository/object/path/region/context scope; copied role/report/hash/ledger text is not authority. Root's trusted caller uses the existing policy owner for promotion at the configured global publication policy origin, with actual preimages, writer serialization and independent persisted readback. Preview has no effect; mutation requires positive apply. If a post-replacement outcome is uncertain, preserve the actual state and recovery evidence; never replay an older active policy to undo revocation. Existing assistance and same-owner equivalent guarantees still apply without a new permission ceremony.
+
+Then run the appropriate fresh complete scan. An explicit `qualified` staged result is pre-commit evidence only. An actual push still requires the existing human authority and the gate's own fresh nonempty Version 3 range receiving, with eight captured code roles, settled children and final current used-decision verification. An unchanged valid decision can be reused for a later new scan; no previous scan receipt is reusable. Retain all unresolved findings and failed outcomes, and hold only the dependent action on changed/unknown used authority. Scoped exception or Source acceptance never closes the original task, replaces installed receiving or grants publication.
 
 ## Artifact persistence protocol
 
@@ -290,7 +297,7 @@ An active work-item means the current task has `work-items/active/<slug>/`, not 
 
 Trivial work with no recovery or preservation value writes nothing. With no active work-item, a meaningful standalone result MAY use one `.reports/` summary and an explicitly requested standalone plan MAY use one `.plans/` snapshot. Provider-backed or external-adapter provenance remains in the active item ledger/artifact or the one standalone summary. See `AGENTS.md` § "Session persistence rule".
 
-Epic location is part of lifecycle state. Lead owns closure/reopening decisions and content; the knowledge archivist moves the same file, reconciles physical lifecycle roots, and regenerates `work-items/README.md`. A slug must resolve to exactly one active or archived file; missing and duplicate targets are invalid and callers never select one copy by traversal order or recency.
+Epic location is part of lifecycle state. Lead owns closure and explicitly admitted successor decisions and content; the knowledge archivist performs the admitted rollback-safe archive/read-model transition, reconciles physical lifecycle roots and regenerates `work-items/README.md`. Close only after every child uniquely resolves archived and the substantive epic goal is met, with strict UTC `Closed` and nonempty `Outcome`, `Evidence` and `Residual risk` fields, then read back archive, active absence, terminal fields, links and unique identities. A successfully archived epic remains immutable. Renewed scope uses an explicitly admitted current successor linked through the existing reopening owner; never move the archived identity back. If a child reopens, Root reconciles its renewed scope and epic/successor relationship under that contract, rather than automatically reversing the epic archive. A slug must resolve to exactly one active or archived file; missing and duplicate targets are invalid and callers never select one copy by traversal order or recency.
 
 **Standalone chains** (no active work-item): admit work needing stages, recovery, or continuation as a work-item; otherwise, preserve only meaningful one-off results or explicitly requested one-off plans through the optional standalone surfaces.
 

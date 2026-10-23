@@ -29,64 +29,140 @@ TRUST_BOUNDARY = (
     "credentials, or external actions."
 )
 PROTECTED_EXISTING_ROLE_DIGESTS = {
-    "algorithm-scientist": "1bc7c60b30f1bb360a502ee955e41513a80d3e3f9e222e5a673817a7e421c8bd",
-    "analyst": "422cd2cb2cc5bd6e23a0e97cfabf5353d99db31d44196696d6e8cb73aa7eb95a",
-    "architect": "bcdd83abcb3e5d99e0dd0963d622b475ea11d450bb16f1af1bc93855891ff4fb",
-    "architecture-reviewer": "239a91ef35b54cc640372132b51662bcbe0da88dded68ff53d339621689df8c3",
-    "backend-engineer": "4c6e06300e8c906130c900bd8a1738d17c2115ca647b77a259b94531f5f8769a",
-    "computational-scientist": "7ddcfb3afe6d9032d03d3da6468662a961819ceacf5252caccccfc69744cc9d3",
-    "default": "b38bb7c4a05f93bd54a11c9a06d2bbdae9bed353db4fdd2f42b4abb9fd3ba3e1",
-    "explorer": "282f68e0e509fa2d9eb2bf77e841f69809f67fc19d3cb74eee3e93247673e5db",
-    "knowledge-archivist": "0672b994f41d3a5d69ba2f8d719d19cb90e9d7fe6ed720c9daa09009ec4f2349",
-    "planner": "0531687c0a106c0f44d4c0bb5c5e4b98c2618c99387bbbc443eb108b4eed930f",
-    "platform-engineer": "e5d44b7fafc7ec8ab3c69b4086bdda5e5430974334f90fc407b5bb78ace8a4cf",
-    "qa-engineer": "65a5dd03a4196a99d00c72c81aa98e1470eeac0c6d9b453a3147c836c146ca9b",
-    "security-engineer": "ceb53c8db3d77f75beea76a9cc27120d7623a60661cca3dac92b01a35ce06a0c",
-    "security-reviewer": "0f9b75713128885b8db86b32a9ecb3e756b0022add169a89fc10d615745445f1",
-    "worker": "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475",
+    "algorithm-scientist": "cd2bbbaf5f4173f07bfe18cea39d90dd0cc341630b77b5dac0d82d9f92b57d7e",
+    "architect": "71f3d9e27019de2e133d8947a33cdb69ab38261824fab36bcb18c7f7f3ff0792",
+    "architecture-reviewer": "5e404f6643d8992dd7cd4a40e8a5d3ae4f7f388381907aa230b6b0fa15ac458a",
+    "computational-scientist": "4169e5ac3442e542b0249879595b6974b78e0924b377613b5b427a6488171901",
+    "default": "90e5b43a727a1f6c42ed3bee05e033a2cd83eef102d9030301227f99b79c8d53",
+    "platform-engineer": "3e4c199ba984cbfba080249ad28c645ffbf78a08daf8519e0aa058e7f92aaa40",
+    "security-engineer": "6e53fa663da8eed31ab4012354ee9bebf24f16ecb9cdaa517a7f196dcfd1969e",
+    "security-reviewer": "f22614caec4561e5cb0833e6264081b42c46570936fe1d2b62e8534c17ee214d",
+    "worker": "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815",
+}
+SOL_MIGRATED_ROLE_METADATA = {
+    "explorer": (
+        "Read-heavy codebase exploration agent.",
+        "read-only",
+        (
+            "Read-only evidence-gathering overlay under the universal AGENTS.md rules.",
+            "Stay in exploration mode, gather factual findings efficiently, and return clear pointers.",
+            "Do not edit or drift into implementation unless explicitly requested.",
+        ),
+    ),
+    "analyst": (
+        "Evidence-first repository and system analyst.",
+        "read-only",
+        (
+            "Treat AGENTS.md as the base contract and activate $analyst for the assigned subtask.",
+            "Gather factual evidence, preserve uncertainty, and return one bounded analysis artifact.",
+            "Do not edit implementation files unless the parent explicitly assigns implementation.",
+        ),
+    ),
+    "planner": (
+        "Ordered implementation and delivery planner.",
+        "read-only",
+        (
+            "Treat AGENTS.md as the base contract and activate $planner for the assigned subtask.",
+            "Produce ordered phases, acceptance criteria, and rollback notes from accepted evidence.",
+            "Do not implement the plan or widen the approved scope.",
+        ),
+    ),
+    "backend-engineer": (
+        "Backend and service implementation specialist.",
+        "workspace-write",
+        (
+            "Treat AGENTS.md as the base contract and activate $backend-engineer.",
+            "Implement only the approved backend slice and return concrete verification evidence.",
+            "Preserve surrounding contracts and ownership boundaries.",
+        ),
+    ),
+    "qa-engineer": (
+        "Test strategy, regression, and delivery gate specialist.",
+        "read-only",
+        (
+            "Treat AGENTS.md as the base contract and activate $qa-engineer.",
+            "Verify the admitted implementation against its acceptance criteria and likely regressions.",
+            "Return PASS, REVISE, or BLOCKED with fresh evidence and do not implement fixes.",
+        ),
+    ),
+    "knowledge-archivist": (
+        "Canonical documentation and lifecycle registry specialist.",
+        "workspace-write",
+        (
+            "Treat AGENTS.md as the base contract and activate $knowledge-archivist.",
+            "Own only the assigned canonical records, lifecycle mechanics, links, and derived indexes.",
+            "Preserve immutable archives and return one bounded artifact.",
+        ),
+    ),
 }
 STOCK_FAST_POLICY_SHA256 = "dcab8e4da55b05475f9b9c507a3a9a97679a0c7b72006ff7ffca4b95ccd13451"
 STOCK_FAST_MANIFEST_SHA256 = "842b1b29fae7d41a0b2422d8711652b3e6d7c720406c3ce3fc13259518f82115"
+STOCK_FAST_FIXTURE_ROOT = (
+    ROOT
+    / "tests"
+    / "fixtures"
+    / "native-luna-policy-priors"
+    / "5ca19c135b987ec37b77bc00a9c73ef6dea8351e"
+)
+STOCK_FAST_POLICY_FIXTURE = STOCK_FAST_FIXTURE_ROOT / "role-routing-policy.v1.json"
+STOCK_FAST_MANIFEST_FIXTURE = (
+    STOCK_FAST_FIXTURE_ROOT / "orchestrarium-role-manifest.json"
+)
 
 
 def _stock_fast_policy_manifest_pair() -> tuple[bytes, bytes]:
-    policy = POLICY_PATH.read_text(encoding="utf-8")
-    policy = policy.replace('    "mechanical",\n    "balanced"', '    "fast",\n    "balanced"')
-    policy = policy.replace(
-        '''    "luna-high": {
-      "modelTier": "mechanical",
-      "effort": "high",
-      "codexModel": "gpt-5.6-luna"
-    },''',
-        '''    "micro-low": {
-      "modelTier": "fast",
-      "effort": "low",
-      "codexModel": "gpt-5.6-luna"
-    },
-    "fast-medium": {
-      "modelTier": "fast",
-      "effort": "medium",
-      "codexModel": "gpt-5.6-luna"
-    },
-    "fast-high": {
-      "modelTier": "fast",
-      "effort": "high",
-      "codexModel": "gpt-5.6-luna"
-    },''',
-    )
-    policy = policy.replace('"luna-high"', '"fast-high"')
-    policy = policy.replace(
-        '"requiredModelTier": "mechanical"', '"requiredModelTier": "fast"'
-    )
-    policy_bytes = policy.encode("utf-8")
-    manifest = (AGENTS_SOURCE / installer.CODEX_ROLE_MANIFEST).read_text(encoding="utf-8")
-    manifest = manifest.replace(
-        hashlib.sha256(POLICY_PATH.read_bytes()).hexdigest(), STOCK_FAST_POLICY_SHA256
-    )
-    manifest_bytes = manifest.encode("utf-8")
+    policy_bytes = STOCK_FAST_POLICY_FIXTURE.read_bytes()
+    manifest_bytes = STOCK_FAST_MANIFEST_FIXTURE.read_bytes()
     assert hashlib.sha256(policy_bytes).hexdigest() == STOCK_FAST_POLICY_SHA256
     assert hashlib.sha256(manifest_bytes).hexdigest() == STOCK_FAST_MANIFEST_SHA256
     return policy_bytes, manifest_bytes
+
+
+def _stock_native_contract_prior_pair(kind: str) -> tuple[bytes, bytes]:
+    if kind == "fast":
+        return _stock_fast_policy_manifest_pair()
+    fixture = ROOT / "tests/fixtures/native-luna-policy-priors/default-model-unbinding"
+    policy = (fixture / "role-routing-policy.v1.json").read_bytes()
+    manifest = (fixture / "orchestrarium-role-manifest.json").read_bytes()
+    assert hashlib.sha256(policy).hexdigest() == "0a7ecdc12d3fd802b32bd7d41f78129bbdb8a5681beb1f1382d46e6b2fb82b90"
+    assert hashlib.sha256(manifest).hexdigest() == "1362c1206cb957b879109e33c577047c0d6b7b65860f602d1f51f400a6967d77"
+    return policy, manifest
+
+
+def _seed_native_contract_prior(project: Path, kind: str) -> tuple[Path, Path]:
+    lead = project / ".agents/skills/lead"
+    policy = lead / "shared/role-routing-policy.v1.json"
+    manifest = lead / "shared/orchestrarium-role-manifest.json"
+    old_policy, old_manifest = _stock_native_contract_prior_pair(kind)
+    policy.write_bytes(old_policy)
+    manifest.write_bytes(old_manifest)
+    if kind == "default-unbinding":
+        from tests.test_native_role_slice_a import INTERMEDIATE_MIGRATABLE_ROLE_BYTES
+        (project / ".codex/agents/default.toml").write_bytes(
+            INTERMEDIATE_MIGRATABLE_ROLE_BYTES["default"]
+        )
+    # Bind the complete synthetic predecessor before callers inject drift/faults.
+    fixture_digest = installer._tree_sha256(lead, ignore_runtime_cache=True)
+    assert fixture_digest is not None
+    (lead.parent / installer._LEAD_RECEIPT_NAME).write_bytes(
+        installer._lead_receipt_bytes(fixture_digest)
+    )
+    return policy, manifest
+
+
+@pytest.mark.parametrize("live_policy", (None, b'{"mutated": true}\n'))
+def test_stock_fast_fixture_is_independent_of_live_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, live_policy: bytes | None
+) -> None:
+    replacement = tmp_path / "live-policy.json"
+    if live_policy is not None:
+        replacement.write_bytes(live_policy)
+    monkeypatch.setattr(sys.modules[__name__], "POLICY_PATH", replacement)
+
+    policy_bytes, manifest_bytes = _stock_fast_policy_manifest_pair()
+
+    assert hashlib.sha256(policy_bytes).hexdigest() == STOCK_FAST_POLICY_SHA256
+    assert hashlib.sha256(manifest_bytes).hexdigest() == STOCK_FAST_MANIFEST_SHA256
 
 
 def _policy() -> dict:
@@ -455,7 +531,6 @@ def test_luna_path_kind_missing_leaf_preserves_path_and_parent_guards(
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
                 st_file_attributes=0x400,
-                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
             )
 
     def reparsed_lstat(path: object, *args: object, **kwargs: object) -> object:
@@ -492,7 +567,6 @@ def test_luna_path_kind_accepts_stable_special_leaf_as_other_without_content_rea
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
                 st_file_attributes=getattr(metadata, "st_file_attributes", 0),
-                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
             )
 
     def special_lstat(path: object, *args: object, **kwargs: object) -> object:
@@ -803,7 +877,6 @@ def test_luna_worker_target_must_be_existing_ordinary_file_below_exact_root(
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
                 st_file_attributes=getattr(metadata, "st_file_attributes", 0),
-                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
             )
 
     def raced_lstat(path: object, *args: object, **kwargs: object) -> object:
@@ -844,7 +917,6 @@ def test_luna_target_walk_rejects_reparse_component_and_metadata_error(
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
                 st_file_attributes=0x400,
-                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
             )
 
     def reparsed_lstat(path: object, *args: object, **kwargs: object) -> object:
@@ -917,7 +989,6 @@ def test_luna_exact_root_walk_rejects_reparse_ancestor_for_literal_plan(
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
                 st_file_attributes=0x400,
-                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
             )
 
     def reparsed_lstat(path: object, *args: object, **kwargs: object) -> object:
@@ -953,19 +1024,15 @@ def test_luna_exact_root_walk_rejects_reparse_ancestor_for_literal_plan(
         "powershell",
         "pwsh",
         "cmd",
-        "mcp__shell__exec",
-        "shell.v2",
-        "mcp__runtime__default",
-        "auto.tool",
-        "mcp__PowerShell__read",
-        "mcp__power--shell__read",
-        "mcp__cmd__read",
-        "mcp__bash__read",
-        "mcp__terminal__read",
-        "mcp__command__read",
-        "mcp__exec__read",
-        "mcp__shell--command__read",
-        "mcp__exec--command__read",
+        "runtimedefault",
+        "shellcommand",
+        "execcommand",
+        "terminal",
+        "command",
+        "exec",
+        "RUNTIME__DEFAULT",
+        "shell._:-command",
+        "exec::command",
         "*",
     ),
 )
@@ -1022,14 +1089,14 @@ def test_luna_tools_preserve_exact_membership_and_explicit_empty_selection(
         duplicate, observed_git_root=ROOT
     )["valid"] is False
 
-    normalized_duplicate = _luna_literal_plan()
-    normalized_duplicate["allowedTools"] = [
+    raw_distinct = _luna_literal_plan()
+    raw_distinct["allowedTools"] = [
         "mcp__server__read",
         "MCP--server--read",
     ]
     assert resolver.validate_luna_execution_plan(
-        normalized_duplicate, observed_git_root=ROOT
-    )["valid"] is False
+        raw_distinct, observed_git_root=ROOT
+    )["valid"] is True
 
     exact_root = tmp_path / "exact-root"
     target = exact_root / "shared" / "example.txt"
@@ -1048,6 +1115,100 @@ def test_luna_tools_preserve_exact_membership_and_explicit_empty_selection(
     assert resolver.validate_luna_execution_plan(
         worker, observed_git_root=exact_root
     )["valid"] is False
+
+
+@pytest.mark.parametrize(
+    "tool_id",
+    (
+        "mcp__graft__graft_find_code",
+        "mcp__graft__graft_find_all",
+        "mcp__synthetic__any",
+        "mcp__synthetic__default",
+        "mcp__synthetic__command",
+        "shell.v2",
+        "functions.exec",
+        "tools.exec_command",
+    ),
+)
+def test_luna_tool_identity_preserves_raw_qualified_names(tool_id: str) -> None:
+    """Structural identity does not prove endpoint capability or dispatch authority."""
+
+    resolver = _resolver_module()
+    assert resolver._luna_tool_identity(tool_id) == tool_id
+    plan = _luna_literal_plan()
+    plan["allowedTools"] = [tool_id]
+    assert resolver.validate_luna_execution_plan(
+        plan, observed_git_root=ROOT
+    ) == {
+        "schemaVersion": 1,
+        "valid": True,
+        "stableId": None,
+        "fallback": "none",
+        "authorizing": False,
+    }
+
+
+@pytest.mark.parametrize("tool_id", ("MCP__server__read", "mcp--server--read"))
+def test_luna_tool_identity_keeps_case_and_delimiters_distinct(tool_id: str) -> None:
+    """Exact identities do not acquire aliases from casefolding or token splitting."""
+
+    resolver = _resolver_module()
+    original = "mcp__server__read"
+    assert resolver._luna_tool_identity(tool_id) == tool_id
+    assert resolver._valid_luna_tools([original, tool_id]) is True
+    assert resolver._valid_luna_tools([tool_id, tool_id]) is False
+
+
+@pytest.mark.parametrize("tool_id", (None, 0, "", "ｍｃｐ__server__read", "Kimi.read"))
+def test_luna_tool_identity_rejects_unsupported_raw_grammar(tool_id: object) -> None:
+    """Unsupported Unicode compatibility spellings are not rewritten into IDs."""
+
+    resolver = _resolver_module()
+    assert resolver._luna_tool_identity(tool_id) is None
+
+
+def test_luna_scout_observed_tools_preserve_exact_identity_and_order() -> None:
+    """Only exact acquired IDs satisfy scope and returned observation equality."""
+
+    resolver = _resolver_module()
+    plan = _luna_literal_plan()
+    plan["allowedTools"] = ["mcp__server__read", "MCP__server__read"]
+    facts = _luna_literal_facts()
+    facts["observedTools"] = ["mcp__server__read", "MCP__server__read"]
+    arguments = {"consumer_purpose": "facts-only", "observed_git_root": ROOT}
+    assert resolver.validate_scout_facts(
+        plan, facts, observed_tools=list(facts["observedTools"]), **arguments
+    )["valid"] is True
+    assert resolver.validate_scout_facts(
+        plan,
+        facts,
+        observed_tools=list(reversed(facts["observedTools"])),
+        **arguments,
+    )["stableId"] == "E_LUNA_FACTS_INVALID"
+    assert resolver.validate_scout_facts(
+        plan, facts, observed_tools=["mcp--server--read"], **arguments
+    )["stableId"] == "E_LUNA_TOOL_SCOPE_VIOLATION"
+    assert resolver.validate_scout_facts(
+        plan,
+        facts,
+        observed_tools=["mcp__server__read", "mcp__server__read"],
+        **arguments,
+    )["stableId"] == "E_LUNA_EXECUTION_ATTESTATION_UNAVAILABLE"
+
+
+def test_luna_worker_rejects_two_distinct_raw_tool_ids(tmp_path: Path) -> None:
+    """A second actual tool cannot be folded into the worker one-tool contract."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    target = exact_root / "shared" / "example.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("before\n", encoding="utf-8")
+    plan = _worker_plan(exact_root=exact_root, tool="mcp__server__read")
+    plan["allowedTools"] = ["mcp__server__read", "MCP__server__read"]
+    assert resolver.validate_luna_execution_plan(
+        plan, observed_git_root=exact_root
+    )["stableId"] == "E_LUNA_PLAN_INVALID"
 
 
 def test_scout_plan_rejects_worker_only_operation_fields() -> None:
@@ -1232,7 +1393,7 @@ def test_luna_facts_require_explicit_facts_only_consumption() -> None:
 
 
 def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> None:
-    """Catches a Luna corridor that admits a lower effort, Terra, or a non-mechanical role."""
+    """Named mechanical V1 stays exact while ordinary producers may select Luna effort."""
 
     policy = _policy()
     resolved = _resolve(tmp_path)["rolePolicy"]
@@ -1242,8 +1403,10 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
     assert policy["profiles"]["luna-high"] == {
         "modelTier": "mechanical",
         "effort": "high",
-        "codexModel": "gpt-5.6-luna",
+        "codexModel": "gpt-6-luna",
+        "useCriteria": policy["profiles"]["luna-high"]["useCriteria"],
     }
+    assert policy["profiles"]["luna-high"]["useCriteria"]
     assert {
         name: policy["taskClasses"][name]
         for name in ("micro", "mechanical-read", "mechanical")
@@ -1281,22 +1444,43 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
     luna_profiles = {
         name
         for name, profile in policy["profiles"].items()
-        if profile["codexModel"] == "gpt-5.6-luna"
+        if profile["codexModel"] == "gpt-6-luna"
+    }
+    assert luna_profiles == {"luna-high", "luna-xhigh"}
+    assert policy["profiles"]["luna-xhigh"] == {
+        "modelTier": "mechanical",
+        "effort": "xhigh",
+        "codexModel": "gpt-6-luna",
+        "useCriteria": policy["profiles"]["luna-xhigh"]["useCriteria"],
+    }
+    assert policy["profiles"]["luna-xhigh"]["useCriteria"]
+    assert {
+        task for task, record in policy["taskClasses"].items()
+        if "luna-xhigh" in record.get("admissibleProfiles", ())
+    } == {"exploration", "engineering"}
+    assert {
+        name for name, record in {**policy["roles"], **policy["skillOnlyRoles"]}.items()
+        if "luna-xhigh" in record["allowedProfiles"]
+    } == {
+        "explorer", "analyst", "product-analyst", "worker", "backend-engineer",
+        "platform-engineer", "scientific-software-engineer", "knowledge-archivist",
+        "frontend-engineer", "qt-ui-engineer", "model-view-engineer", "data-engineer",
+        "toolchain-engineer", "geometry-engineer", "graphics-engineer", "visualization-engineer",
     }
     luna_consumers = {
         role_name
         for role_name, role in policy["roles"].items()
         if luna_profiles.intersection(role["allowedProfiles"])
     }
-    assert luna_consumers == {"mechanical-scout", "mechanical-worker"}
-    assert policy["roles"]["explorer"] == {
-        "defaultProfile": "balanced-high",
-        "allowedProfiles": [
-            "balanced-medium",
-            "balanced-high",
-            "frontier-high",
-        ],
+    assert luna_consumers == {
+        "mechanical-scout", "mechanical-worker", "explorer", "analyst", "worker",
+        "backend-engineer", "platform-engineer", "knowledge-archivist",
+        "scientific-software-engineer",
     }
+    assert policy["roles"]["explorer"]["defaultProfile"] == "frontier-high"
+    assert luna_profiles.intersection(
+        policy["roles"]["explorer"]["allowedProfiles"]
+    ) == {"luna-high", "luna-xhigh"}
     assert "mechanical-scout" not in policy["taskRoleEligibility"]["review"]
     assert "mechanical-worker" not in policy["taskRoleEligibility"]["engineering"]
 
@@ -1309,7 +1493,8 @@ def test_luna_policy_and_dispatch_are_speed_neutral() -> None:
     assert policy["profiles"]["luna-high"] == {
         "modelTier": "mechanical",
         "effort": "high",
-        "codexModel": "gpt-5.6-luna",
+        "codexModel": "gpt-6-luna",
+        "useCriteria": policy["profiles"]["luna-high"]["useCriteria"],
     }
     assert not {"luna-low", "luna-medium"}.intersection(policy["profiles"])
     for task_name in ("micro", "mechanical-read", "mechanical"):
@@ -1337,7 +1522,7 @@ def test_luna_policy_and_dispatch_are_speed_neutral() -> None:
         "executionContract",
     }
     assert decision["requestedProfile"] == "luna-high"
-    assert decision["requestedModel"] == "gpt-5.6-luna"
+    assert decision["requestedModel"] == "gpt-6-luna"
     assert decision["requestedEffort"] == "high"
     assert decision["fallback"] == "none"
     serialized = json.dumps({"policy": policy, "decision": decision}).casefold()
@@ -1472,7 +1657,7 @@ def test_luna_roles_are_native_required_only_when_feature_is_enabled() -> None:
 
 
 def test_luna_semantic_task_matrix_never_authorizes_write_or_decision() -> None:
-    """No task wording gives Luna authority to decide, recommend, or author a patch."""
+    """Named mechanical task wording cannot grant decision or patch-authoring authority."""
 
     resolver = _resolver_module()
     for task_class, role_name in (
@@ -1511,7 +1696,7 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
         assert role == {
             "name": role_name,
             "description": role["description"],
-            "model": "gpt-5.6-luna",
+            "model": "gpt-6-luna",
             "model_reasoning_effort": "high",
             "sandbox_mode": sandbox,
             "developer_instructions": role["developer_instructions"],
@@ -1528,13 +1713,57 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
     assert "mechanical-worker" not in installer._READ_ONLY_ROLES
     assert "mechanical-worker" in installer._BOUNDED_WRITE_ROLES
     for role_name, expected_digest in PROTECTED_EXISTING_ROLE_DIGESTS.items():
-        assert hashlib.sha256(
-            (AGENTS_SOURCE / f"{role_name}.toml").read_bytes()
-        ).hexdigest() == expected_digest
+        # Preserve the frozen Sol 6 baseline: only the approved model-token
+        # migration may differ; effort, authority, sandbox and all other bytes
+        # must still match. Current model identity is asserted independently.
+        role_bytes = (AGENTS_SOURCE / f"{role_name}.toml").read_bytes()
+        role = tomllib.loads(role_bytes.decode("utf-8"))
+        assert manifest["roles"][role_name] == {
+            "relativePath": f"{role_name}.toml",
+            "sha256": hashlib.sha256(role_bytes).hexdigest(),
+        }
+        if "model" not in role:
+            description = _resolver_module().describe_ordinary_native_role_options(
+                role_name,
+                "recovery",
+                {
+                    "explicitModelControl": True,
+                    "explicitReasoningEffortControl": True,
+                },
+                repo_root=ROOT,
+            )
+            assert description["status"] == "available"
+            assert description["defaultInvocation"]["mode"] == "generic-explicit-profile"
+            assert description["defaultAgentTypeCapability"] == "not-applicable"
+            assert "model_reasoning_effort" not in role
+        else:
+            assert role["model"] == "gpt-6.1-sol"
+            assert role_bytes.count(b'model = "gpt-6.1-sol"') == 1
+            prior_bytes = role_bytes.replace(
+                b'model = "gpt-6.1-sol"', b'model = "gpt-6-sol"', 1
+            )
+            assert hashlib.sha256(prior_bytes).hexdigest() == expected_digest
 
 
-def test_installer_migrates_only_the_exact_stock_fast_policy_manifest_pair(
-    tmp_path: Path,
+def test_sol_migrated_roles_keep_independent_nonmodel_contract() -> None:
+    """The manifest checks bytes; this baseline guards unchanged role authority."""
+    for name, (description, sandbox, role_lines) in SOL_MIGRATED_ROLE_METADATA.items():
+        role = tomllib.loads((AGENTS_SOURCE / f"{name}.toml").read_text(encoding="utf-8"))
+        assert set(role) == {
+            "name", "description", "model", "model_reasoning_effort",
+            "sandbox_mode", "developer_instructions",
+        }
+        assert role["name"] == name
+        assert role["description"] == description
+        assert role["sandbox_mode"] == sandbox
+        assert role["developer_instructions"] == "\n".join(
+            (*role_lines, TRUST_BOUNDARY, "")
+        )
+
+
+@pytest.mark.parametrize("prior_kind", ("fast", "default-unbinding"))
+def test_installer_migrates_only_the_exact_stock_native_policy_manifest_pair(
+    tmp_path: Path, prior_kind: str,
 ) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -1548,13 +1777,15 @@ def test_installer_migrates_only_the_exact_stock_fast_policy_manifest_pair(
     manifest = lead / "shared" / "orchestrarium-role-manifest.json"
     installed_agents = project / ".codex" / "agents"
     config = project / ".codex" / "config.toml"
+    config.write_bytes(b'model = "gpt-6-astra"\n# unrelated user setting\n' + config.read_bytes())
     protected = {
         path.relative_to(project).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (config, *sorted(installed_agents.glob("*.toml")))
     }
-    old_policy, old_manifest = _stock_fast_policy_manifest_pair()
-    policy.write_bytes(old_policy)
-    manifest.write_bytes(old_manifest)
+    _seed_native_contract_prior(project, prior_kind)
+    sibling = project / ".agents/user-retention-state"
+    sibling.mkdir()
+    (sibling / "sentinel").write_bytes(b"user-owned sibling")
 
     assert installer.install("codex", arguments) == 0
     assert policy.read_bytes() == POLICY_PATH.read_bytes()
@@ -1565,36 +1796,20 @@ def test_installer_migrates_only_the_exact_stock_fast_policy_manifest_pair(
         path.relative_to(project).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (config, *sorted(installed_agents.glob("*.toml")))
     } == protected
-
-
-def test_installer_rejects_drifted_stock_fast_pair_before_mutation(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    arguments = [
-        "--force", "--no-hypothesis-hook", "--target", str(project),
-        "--allow-unsafe-target",
-    ]
+    assert (lead / "scripts/resolve-agents-mode.py").read_bytes() == RESOLVER.read_bytes()
+    assert (installed_agents / "default.toml").read_bytes() == (AGENTS_SOURCE / "default.toml").read_bytes()
+    focal = (policy, manifest, config, installed_agents / "default.toml",
+             lead / "scripts/resolve-agents-mode.py")
+    identities = {path: installer._CreateOnlyMutablePath._identity(path) for path in focal}
     assert installer.install("codex", arguments) == 0
-    lead = project / ".agents" / "skills" / "lead"
-    policy = lead / "shared" / "role-routing-policy.v1.json"
-    manifest = lead / "shared" / "orchestrarium-role-manifest.json"
-    old_policy, old_manifest = _stock_fast_policy_manifest_pair()
-    policy.write_bytes(old_policy)
-    manifest.write_bytes(old_manifest[:-2] + b" \n")
-    before = {
-        path.relative_to(project).as_posix(): path.read_bytes()
-        for path in sorted(project.rglob("*")) if path.is_file()
-    }
-
-    assert installer.install("codex", arguments) == 1
-    assert {
-        path.relative_to(project).as_posix(): path.read_bytes()
-        for path in sorted(project.rglob("*")) if path.is_file()
-    } == before
+    assert {path: installer._CreateOnlyMutablePath._identity(path) for path in focal} == identities
+    assert (sibling / "sentinel").read_bytes() == b"user-owned sibling"
+    assert not list((project / ".agents").glob(".orchestrarium-migration-retention-*"))
 
 
-def test_installer_rolls_back_stock_policy_when_manifest_migration_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("drift", ("fast-manifest", "default-policy", "default-manifest", "mixed"))
+def test_installer_rejects_drifted_or_mixed_stock_native_pair_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: str,
 ) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -1606,22 +1821,263 @@ def test_installer_rolls_back_stock_policy_when_manifest_migration_fails(
     lead = project / ".agents" / "skills" / "lead"
     policy = lead / "shared" / "role-routing-policy.v1.json"
     manifest = lead / "shared" / "orchestrarium-role-manifest.json"
-    old_policy, old_manifest = _stock_fast_policy_manifest_pair()
-    policy.write_bytes(old_policy)
-    manifest.write_bytes(old_manifest)
-    original = installer._CreateOnlyMutablePath.migrate_exact_file
-
-    def fail_manifest(self, relative: Path, expected_digest: str, payload: bytes):
-        if Path(relative).name == "orchestrarium-role-manifest.json":
-            raise RuntimeError("forced manifest migration failure")
-        return original(self, relative, expected_digest, payload)
-
-    monkeypatch.setattr(
-        installer._CreateOnlyMutablePath, "migrate_exact_file", fail_manifest
+    policy, manifest = _seed_native_contract_prior(
+        project, "fast" if drift == "fast-manifest" else "default-unbinding"
     )
+    if drift == "default-policy":
+        policy.write_bytes(policy.read_bytes() + b" ")
+    elif drift == "mixed":
+        policy.write_bytes(_stock_fast_policy_manifest_pair()[0])
+    else:
+        manifest.write_bytes(manifest.read_bytes() + b" ")
+    before = {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in sorted(project.rglob("*")) if path.is_file()
+    }
+
+    def transaction_entered(*_args, **_kwargs):
+        raise AssertionError("transaction entered for rejected prior pair")
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", transaction_entered)
     assert installer.install("codex", arguments) == 1
-    assert policy.read_bytes() == old_policy
-    assert manifest.read_bytes() == old_manifest
+    assert {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in sorted(project.rglob("*")) if path.is_file()
+    } == before
+
+
+@pytest.mark.parametrize("prior_kind", ("fast", "default-unbinding"))
+@pytest.mark.parametrize("fault", ("manifest-migration", "replacement-transfer", "after-native-leaf"))
+def test_installer_rolls_back_stock_native_pair_and_leaf_after_migration_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prior_kind: str, fault: str,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = [
+        "--force", "--no-hypothesis-hook", "--target", str(project),
+        "--allow-unsafe-target",
+    ]
+    assert installer.install("codex", arguments) == 0
+    lead = project / ".agents" / "skills" / "lead"
+    policy = lead / "shared" / "role-routing-policy.v1.json"
+    manifest = lead / "shared" / "orchestrarium-role-manifest.json"
+    _seed_native_contract_prior(project, prior_kind)
+    focal = (policy, manifest, project / ".codex/config.toml",
+             project / ".codex/agents/default.toml", lead / "scripts/resolve-agents-mode.py")
+    before = {path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path)) for path in focal}
+    original = installer._CreateOnlyMutablePath.migrate_exact_file
+    original_publish = installer._InstallTransaction._publish_retained
+    reached = False
+
+    def fail_manifest(self, relative: Path, expected_digest: str, payload: bytes, **kwargs):
+        nonlocal reached
+        if Path(relative).name == "orchestrarium-role-manifest.json":
+            reached = True
+            raise RuntimeError("forced manifest migration failure")
+        return original(self, relative, expected_digest, payload, **kwargs)
+
+    def fail_after_native(*_args, **_kwargs):
+        nonlocal reached
+        reached = True
+        assert policy.read_bytes() == POLICY_PATH.read_bytes()
+        assert manifest.read_bytes() == (AGENTS_SOURCE / installer.CODEX_ROLE_MANIFEST).read_bytes()
+        assert (project / ".codex/agents/default.toml").read_bytes() == (AGENTS_SOURCE / "default.toml").read_bytes()
+        raise RuntimeError("forced post-native-leaf failure")
+
+    def fail_transfer(transaction, source, target, **kwargs):
+        nonlocal reached
+        migration = kwargs.get("migration")
+        if (
+            not reached
+            and migration is not None
+            and Path(target) == policy
+            and Path(source) == migration.prepared_path
+            and migration.leaf_path == policy
+        ):
+            reached = True
+            assert not policy.exists()
+            assert migration.tombstone_path.read_bytes() == before[policy][0]
+            assert installer._CreateOnlyMutablePath._identity(
+                migration.tombstone_path
+            ) == before[policy][1]
+            assert Path(source).is_file()
+            assert Path(source).read_bytes() == POLICY_PATH.read_bytes()
+            raise RuntimeError("forced replacement transfer failure")
+        return original_publish(transaction, source, target, **kwargs)
+
+    if fault == "manifest-migration":
+        monkeypatch.setattr(installer._CreateOnlyMutablePath, "migrate_exact_file", fail_manifest)
+    elif fault == "replacement-transfer":
+        monkeypatch.setattr(installer._InstallTransaction, "_publish_retained", fail_transfer)
+    else:
+        monkeypatch.setattr(installer, "_merge_codex_agents", fail_after_native)
+    result = installer.install("codex", arguments)
+    assert reached
+    assert result == 1
+    assert {path: path.read_bytes() for path in focal} == {path: data for path, (data, _identity) in before.items()}
+    for path in (project / ".codex/config.toml", project / ".codex/agents/default.toml"):
+        assert installer._CreateOnlyMutablePath._identity(path) == before[path][1]
+    assert not list((project / ".agents").glob(".orchestrarium-migration-retention-*"))
+
+
+def test_stock_pair_retention_foreign_member_refuses_cleanup_and_preserves_prior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
+    assert installer.install("codex", arguments) == 0
+    _seed_native_contract_prior(project, "default-unbinding")
+    original = installer._finalize_canonical_lead_receipt
+    retained = {}
+    private = None
+
+    def foreign_member(plan, target, owner, reclaimed=()):
+        nonlocal private
+        private = next(iter(owner.transaction._migration_retention))
+        retained.update({path: path.read_bytes() for path in private.iterdir()})
+        (private / "foreign").write_bytes(b"foreign member")
+        return original(plan, target, owner, reclaimed)
+
+    monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", foreign_member)
+    assert installer.install("codex", arguments) == 1
+    assert "E_ROLLBACK_SETTLEMENT_FAILED" in capsys.readouterr().err
+    assert private is not None
+    assert (private / "foreign").read_bytes() == b"foreign member"
+    assert retained and all(path.read_bytes() == data for path, data in retained.items())
+
+
+@pytest.mark.parametrize("fault", ("replaced-storage", "cleanup-denied"))
+def test_stock_pair_retention_settlement_refuses_changed_storage_or_cleanup_denial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], fault: str,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
+    assert installer.install("codex", arguments) == 0
+    _seed_native_contract_prior(project, "default-unbinding")
+    finalize = installer._finalize_canonical_lead_receipt
+    dispose_node = installer._InstallTransaction._dispose_node
+    private = None
+    private_transaction = None
+    denial_hits = 0
+    moved = None
+    retained = {}
+
+    def alter_storage(plan, target, owner, reclaimed=()):
+        nonlocal private, private_transaction, moved
+        private_transaction = owner.transaction
+        private = next(iter(owner.transaction._migration_retention))
+        for record in owner.transaction._slice_a_migrated:
+            if record.tombstone_path.parent == private:
+                assert record.old_identity == owner._identity(record.tombstone_path)
+                assert record.old_identity[0] == private.stat().st_dev
+        if fault == "replaced-storage":
+            retained.update({path.name: path.read_bytes() for path in private.iterdir()})
+            moved = private.with_name(private.name + "-original")
+            private.rename(moved)
+            private.mkdir()
+            (private / "foreign").write_bytes(b"foreign replacement")
+        return finalize(plan, target, owner, reclaimed)
+
+    def deny_cleanup(transaction, path, expected):
+        nonlocal denial_hits
+        if (
+            fault == "cleanup-denied"
+            and transaction is private_transaction
+            and Path(path) == private
+        ):
+            denial_hits += 1
+            assert expected.kind == "directory"
+            assert private.is_dir() and not list(private.iterdir())
+            raise PermissionError("injected retention cleanup denial")
+        return dispose_node(transaction, path, expected)
+
+    monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", alter_storage)
+    monkeypatch.setattr(installer._InstallTransaction, "_dispose_node", deny_cleanup)
+    result = installer.install("codex", arguments)
+    assert private is not None
+    if fault == "cleanup-denied":
+        assert denial_hits >= 1
+    assert result == 1
+    assert "E_ROLLBACK_SETTLEMENT_FAILED" in capsys.readouterr().err
+    assert private is not None and private.is_dir()
+    if fault == "replaced-storage":
+        assert (private / "foreign").read_bytes() == b"foreign replacement"
+        assert moved is not None
+        assert all((moved / name).read_bytes() == data for name, data in retained.items())
+    else:
+        assert not list(private.iterdir())
+
+
+def test_stock_pair_retention_different_device_refuses_before_prior_rename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
+    assert installer.install("codex", arguments) == 0
+    policy, manifest = _seed_native_contract_prior(project, "default-unbinding")
+    before = {
+        path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path))
+        for path in (policy, manifest)
+    }
+    source_stat = Path.stat
+    publish = installer._InstallTransaction._publish_retained
+    volume_hits = 0
+    renamed_prior = False
+
+    def different_device(path, *args, **kwargs):
+        nonlocal volume_hits
+        metadata = source_stat(path, *args, **kwargs)
+        if path == project / ".agents":
+            volume_hits += 1
+            fields = list(metadata)
+            fields[2] += 1
+            return os.stat_result(fields)
+        return metadata
+
+    def record_publication(transaction, source, target, **kwargs):
+        nonlocal renamed_prior
+        migration = kwargs.get("migration")
+        if (
+            migration is not None
+            and migration.leaf_path in (policy, manifest)
+            and Path(source) == migration.leaf_path
+        ):
+            renamed_prior = True
+        return publish(transaction, source, target, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", different_device)
+    monkeypatch.setattr(installer._InstallTransaction, "_publish_retained", record_publication)
+    result = installer.install("codex", arguments)
+    assert volume_hits >= 1
+    assert result == 1
+    assert "migration retention volume" in capsys.readouterr().err
+    assert not renamed_prior
+    assert {
+        path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path))
+        for path in (policy, manifest)
+    } == before
+    assert not list((project / ".agents").glob(".orchestrarium-migration-retention-*"))
+
+
+def test_stock_pair_retention_dry_run_never_reserves_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
+    assert installer.install("codex", arguments) == 0
+    policy, manifest = _seed_native_contract_prior(project, "default-unbinding")
+    before = (policy.read_bytes(), manifest.read_bytes(), (project / ".codex/agents/default.toml").read_bytes())
+
+    def reservation_forbidden(*args, **kwargs):
+        raise AssertionError("retention reserved during dry-run")
+
+    monkeypatch.setattr(installer._InstallTransaction, "reserve_migration_retention", reservation_forbidden)
+    assert installer.install("codex", arguments + ["--dry-run"]) == 0
+    assert (policy.read_bytes(), manifest.read_bytes(), (project / ".codex/agents/default.toml").read_bytes()) == before
+    assert not list((project / ".agents").glob(".orchestrarium-migration-retention-*"))
 
 
 @pytest.mark.parametrize("mode", ("repo", "target", "global"))
@@ -1860,7 +2316,7 @@ def test_resolve_role_dispatch_policy_only() -> None:
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
         "requestedProfile": "luna-high",
-        "requestedModel": "gpt-5.6-luna",
+        "requestedModel": "gpt-6-luna",
         "requestedEffort": "high",
         "sandbox": "read-only",
         "fallback": "none",
@@ -1873,7 +2329,7 @@ def test_resolve_role_dispatch_policy_only() -> None:
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
         "requestedProfile": "luna-high",
-        "requestedModel": "gpt-5.6-luna",
+        "requestedModel": "gpt-6-luna",
         "requestedEffort": "high",
         "sandbox": "read-only",
         "fallback": "none",

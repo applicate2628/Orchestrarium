@@ -15,6 +15,10 @@ design. The later host-correlated action SEN-2 is retired and
 ships SEN-0 and SEN-1 only. T-14/T-20 are unchanged: HALT remains absent, and operator-directed NOTICE
 remains unreliable on Codex.
 
+## Current continuation policy
+
+The shipped one-shot reconciliation follows the [shared primary-task rule](../shared/references/spine/delegation-principles.md): a standalone answer ends only with no active primary task; a required user decision pauses only dependent work; independent ready work continues. Evidence-backed task completion, explicit pause/cancellation/reprioritization, or every remaining authorized action being concretely blocked may end the turn. The existing re-entry allowance is unchanged and does not guarantee model obedience. The runtime measurements below retain their stated historical version bounds.
+
 ## The fact
 
 At the `Stop` hook event, on **both** the Claude Code line and the Codex line, `decision: "block"` is a

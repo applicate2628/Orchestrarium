@@ -73,6 +73,7 @@ _CHANGELOG_BASENAME = re.compile(r"^(RELEASE_NOTES|CHANGELOG|HISTORY)", re.IGNOR
 
 
 def _is_excluded(path: Path) -> bool:
+    """Classify paths relative to the selected repository, excluding no ancestors."""
     parts = {p.lower() for p in path.parts}
     if parts & _EXCLUDED_PARTS:
         return True
@@ -513,9 +514,31 @@ def _iter_files():
                 continue
             if path.suffix.lower() not in TEXT_SUFFIXES:
                 continue
-            if _is_excluded(path):
+            if _is_excluded(path.relative_to(ROOT)):
                 continue
             yield path
+
+
+def test_live_tree_exclusions_ignore_checkout_ancestors(tmp_path):
+    """The real loaded ROOT may contain excluded ancestor names outside the repo."""
+    import importlib.util
+
+    checkout = tmp_path / "archive" / ".scratch" / "checkout"
+    source = checkout / "tests" / "test_lead_invariant.py"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(Path(__file__).read_bytes())
+    live = checkout / "shared" / "live-source.md"
+    historical = checkout / "shared" / "archive" / "historical.md"
+    historical.parent.mkdir(parents=True)
+    for path in (live, historical):
+        path.write_text("# Controlled leaf.\n", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("lead_ancestor_regression", source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.ROOT == checkout.resolve()
+    assert list(module._iter_files()) == [live]
+    assert live.is_absolute()  # callers still receive absolute paths
 
 
 def _line_verdict(line: str):

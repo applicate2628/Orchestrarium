@@ -620,6 +620,7 @@ def test_global_transaction_inventory_excludes_unrelated_provider_home(
         mode_target=mode_target,
         registration=registration,
         shared_mode_target=home / ".agents-mode.yaml",
+        canonical_skills_target=home / ".agents" / "skills",
     )
     assert target not in paths
     assert all(

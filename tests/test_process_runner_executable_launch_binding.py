@@ -87,15 +87,15 @@ def test_windows_launch_owner_blocks_leaf_write_delete_and_parent_rename(
     assert renamed.is_dir()
 
 
-def test_public_process_wire_shapes_expose_only_the_portable_expected_pin() -> None:
-    """The private launch owner stays internal; only the portable Kimi pin is public."""
+def test_process_shapes_keep_launch_owner_internal_and_native_contract_python_only() -> None:
+    """The new parser contract is Python-only; public result and wire remain separate."""
     module = _load_runner()
     assert tuple(field.name for field in dataclasses.fields(module.ProcessRequestV1)) == (
         "schema_version", "argv", "resolved_executable", "cwd", "environment",
         "stdin_bytes", "deadline_monotonic", "capture_policy", "capture_sink_binding",
         "settle_policy", "cancellation_probe", "diagnostic_port",
         "windows_argv_profile_id", "request_id", "policy_id",
-        "expected_executable_binding",
+        "expected_executable_binding", "windows_parser_contract",
     )
     assert "executable_launch_owner" not in {
         field.name for field in dataclasses.fields(module.ProcessResultV1)

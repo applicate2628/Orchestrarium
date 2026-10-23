@@ -5,7 +5,7 @@ description: "Architect: design architecture and contracts from research."
 
 # Architect (delegate wrapper)
 
-This subagent is the Claude-side delegate registration for the role skill `architect`. The role contract itself lives in the skill (`.claude/skills/architect/SKILL.md`); this file only exposes the skill as a spawnable fresh-context subagent.
+This subagent is the Claude-side delegate registration for the role skill `architect`. The universal Architect skill (`.agents/skills/architect/SKILL.md`, sourced from `src.codex/skills/architect/SKILL.md`) is the sole role-contract body owner; this file retains dispatched Claude authority and exposes the skill as a spawnable fresh-context subagent.
 
 ## When to spawn this subagent vs invoke the Skill directly
 

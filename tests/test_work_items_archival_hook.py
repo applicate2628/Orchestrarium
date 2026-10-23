@@ -38,7 +38,7 @@ class TestArchivalStopAdapterRetirement(unittest.TestCase):
 
     def test_production_registration_has_no_archival_stop_entry(self) -> None:
         installer = _load_installer()
-        for provider, expected_count in (("codex", 12), ("claude", 13)):
+        for provider, expected_count in (("codex", 13), ("claude", 13)):
             specs = installer._hook_specs(provider, REPO_ROOT / "unused")
             self.assertEqual(len(specs), expected_count)
             self.assertNotIn(

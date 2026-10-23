@@ -384,6 +384,49 @@ def _run_isolated_install(provider: str, target: Path) -> Path:
     return target / (".agents" if provider == "codex" else ".claude")
 
 
+def _run_scoped_install(
+    provider: str, anchor: Path, scope: str
+) -> tuple[Path, Path]:
+    anchor.mkdir(parents=True)
+    script = ROOT / "scripts" / f"install-{provider}.py"
+    command = [sys.executable, str(script)]
+    if scope == "project":
+        command.extend(
+            ("--target", str(anchor), "--force", "--allow-unsafe-target")
+        )
+    elif scope == "global":
+        command.extend(("--global", "--force"))
+    else:
+        raise ValueError(f"unsupported install scope: {scope}")
+
+    environment = os.environ.copy()
+    environment["USERPROFILE"] = str(anchor)
+    environment["HOME"] = str(anchor)
+    environment["ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"] = "1"
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"UI-CONTINUITY-CONTRACT-DRIFT: {provider} {scope} install failed\n"
+        f"{result.stdout}\n{result.stderr}"
+    )
+    canonical_root = anchor / ".agents"
+    provider_root = (
+        canonical_root
+        if provider == "codex" and scope == "project"
+        else anchor / f".{provider}"
+    )
+    return canonical_root, provider_root
+
+
 def test_claim_01_causal_rule_is_not_pixel_or_api_freeze() -> None:
     contract = _english()
     _assert_tokens(
@@ -674,3 +717,57 @@ def test_claim_14_bilingual_live_pack_and_protected_projection_parity(tmp_path: 
             assert role_text.count(pointer) == 1
             assert (role_file.parent / pointer).resolve() == leaf.resolve()
         shutil.rmtree(target)
+
+
+@pytest.mark.parametrize(
+    ("provider", "scope"),
+    (
+        ("codex", "project"),
+        ("codex", "global"),
+        ("claude", "project"),
+        ("claude", "global"),
+    ),
+)
+def test_install_projects_ui_contract_to_canonical_agents_root_for_every_scope(
+    tmp_path: Path, provider: str, scope: str
+) -> None:
+    anchor = tmp_path / f"{provider}-{scope}"
+    try:
+        canonical_root, provider_root = _run_scoped_install(provider, anchor, scope)
+        canonical_leaf = (
+            canonical_root / "contracts" / "ui-transition-continuity.md"
+        )
+        assert canonical_leaf.is_file(), (
+            "UI-CONTINUITY-CONTRACT-DRIFT: "
+            f"{provider} {scope} install omitted canonical contract leaf"
+        )
+        assert canonical_leaf.read_bytes() == ENGLISH.read_bytes()
+
+        provider_leaf = (
+            provider_root / "contracts" / "ui-transition-continuity.md"
+        )
+        assert provider_leaf.read_bytes() == ENGLISH.read_bytes(), (
+            "UI-CONTINUITY-CONTRACT-DRIFT: "
+            f"{provider} {scope} install changed provider contract projection"
+        )
+
+        role_root = (
+            canonical_root / "skills"
+            if provider == "codex"
+            else provider_root / "agents"
+        )
+        pointer = (
+            "../../contracts/ui-transition-continuity.md"
+            if provider == "codex"
+            else "../contracts/ui-transition-continuity.md"
+        )
+        expected_leaf = canonical_leaf if provider == "codex" else provider_leaf
+        for role in ROLES:
+            role_file = role_root / (
+                f"{role}/SKILL.md" if provider == "codex" else f"{role}.md"
+            )
+            role_text = role_file.read_text(encoding="utf-8")
+            assert role_text.count(pointer) == 1
+            assert (role_file.parent / pointer).resolve() == expected_leaf.resolve()
+    finally:
+        shutil.rmtree(anchor, ignore_errors=True)

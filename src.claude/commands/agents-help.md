@@ -4,7 +4,7 @@ Display a comprehensive overview of the skill-pack for the user.
 
 ## Steps
 
-1. **Read CLAUDE.md.** Read `.claude/CLAUDE.md` to get the delegation rule, templates table, role index, and project policies (if configured).
+1. **Read the installed owners.** Read `.claude/CLAUDE.md` for the Claude delta, sibling `AGENTS.md` for shared governance and the role index, and `.claude/agents/team-templates/*.json` for template routing. Project policies may precede the managed block in `.claude/CLAUDE.md`.
 
 2. **Display the following sections in order:**
 
@@ -31,7 +31,7 @@ Exactly five roles can be adopted inline instead of dispatched — no fresh cont
 | `/agents-bugfix` | Fix a bug (analyst → implementer → QA) |
 | `/agents-test` | Write or verify tests for specified code |
 | `/agents-research` | Investigate a question (analyst → architect) |
-| `/agents-design` | Full research-to-plan chain (analyst → architect → planner) |
+| `/agents-design` | Research/design under the selected route; Planner only when planning is admitted |
 | `/agents-design-panel` | Design panel: N≥2 independently-framed design lanes + mandatory Lead synthesis (generation-side analog of `/agents-review-loop`) |
 | `/agents-security` | Security review (security-engineer → security-reviewer) |
 | `/agents-second-opinion` | Get a second opinion via consultant (Codex; preserves routing prefs) |
@@ -49,11 +49,11 @@ Exactly five roles can be adopted inline instead of dispatched — no fresh cont
 
 ### Decision tree
 
-Show the template selection decision tree from CLAUDE.md.
+Show the compact selection order from `.claude/CLAUDE.md`, applying shared admission rules from `AGENTS.md`.
 
 ### Templates
 
-Show the templates table from CLAUDE.md (8 templates with lead/no-lead and use case).
+Show the installed team-template JSON inventory with each template's description, `when`, `requiresLead`, chain, and required roles.
 
 ### Roles by team
 
@@ -82,5 +82,5 @@ If `## Project policies` section exists in CLAUDE.md, show current policies. If 
 ## Rules
 
 - Keep output concise — this is a quick reference, not documentation.
-- Do not read any files beyond CLAUDE.md.
+- Read only `.claude/CLAUDE.md`, sibling `AGENTS.md`, and `.claude/agents/team-templates/*.json`.
 - Do not modify any files.

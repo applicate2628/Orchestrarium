@@ -1,0 +1,4 @@
+interface:
+  display_name: "Post-spawn Cleanup"
+  short_description: "Settle owned spawn resources with identity checks"
+  default_prompt: "Use $post-spawn-cleanup to settle this completed child's owned resources and report verified results and remaining unknowns."

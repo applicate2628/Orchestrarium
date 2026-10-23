@@ -1,5 +1,7 @@
 # Subagent Contracts
 
+Apply the shared **Assistance and owner-equivalent execution (binding)** contract. Working helpers remain preferred; a defective helper permits declared owner-equivalent execution with the same actual data, ownership, serialization, preimages, rollback, truthful provenance, independent readback and resource guarantees. No fabricated helper receipts or host-denial bypass.
+
 Handoff templates and response format for lead-to-specialist delegation.
 
 ## Execution mechanism
@@ -12,13 +14,15 @@ Use this contract when `subagent_type` is `external-worker` or `external-reviewe
 
 - These roles are routing adapters, not new business professions.
 - The `Assigned role` field names the internal role being replaced for provenance.
-- Read and normalize `.claude/.agents-mode.yaml` first. Honor `parallelMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalModelMode`, `externalCodexProfile`, and advisory/review-only `reserve` profile entries when they are present. Drop retired canonical keys during normalization. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode.yaml` file; it remains Codex-line only.
-- If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
+- Read the effective Claude overlay and normalize its effective values in memory through the existing per-key resolver before trusting its flags. Honor `parallelMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalModelMode`, `externalCodexProfile`, and advisory/review-only `reserve` profile entries when present. Drop retired canonical keys from the in-memory effective values. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode.yaml` file; it remains Codex-line only.
+- If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Comment-free, sparse, or older-layout overlays remain valid compatibility input for routing reads; a read does not rewrite its input.
+- Do not recreate a legacy file or synthesize a local override on read alone. Persist canonical formatting only within an authorized install/configuration write, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys and removing retired canonical keys.
 - Resolve external routing in this order: `role eligibility -> provider selection -> CLI availability`.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`. If a request lands in one of those lanes, fail fast with an unsupported-route explanation instead of probing providers.
 - Do not silently fall back to an internal specialist if the external CLI is unavailable; the adapter is disabled and the orchestrator may reroute.
 - Do not satisfy `$external-worker` or `$external-reviewer` by spawning an internal agent/helper/subagent host that merely relays to another CLI. If the current runtime cannot launch the selected external provider directly, the route is unavailable.
 - **Subagent no-spawn-and-wait rule.** A dispatched subagent is NOT re-invoked when a background child it launched (a `run_in_background` shell-out or a background agent) finishes — background-completion notifications go only to the MAIN orchestrating loop. So a subagent must never launch a background child and end its turn "waiting for the notification"; the child strands and the subagent returns an empty result (the recurring `external`-mode consultant role-confusion). A subagent has two compliant paths: complete the work synchronously in-turn (a single blocking shell-out it parses before returning), or return a result telling the orchestrating runtime to own the long-running/background step and feed the outcome back. The orchestrating runtime — which receives background-completion notifications — owns any launch that cannot finish inside one subagent turn.
+- A root-owned long-running external job uses the Lead skill's **Conditional external-run monitoring** rule; this handoff contract adds no second polling, activation, or recovery-state owner.
 - `external-worker` covers the full worker-side lane.
 - `external-reviewer` covers review and QA-side work.
 - `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses the Codex/Claude pair only. Kimi is explicit-only for policy-admitted read-only research/review, independently verified and nonauthorizing; Grok remains unavailable in 1.x.
@@ -36,7 +40,7 @@ For external adapters, include the provenance header from `external-dispatch.md`
 Role:
 Goal:
 Approved inputs:
-- <accepted artifact or fact>
+- <accepted artifact or fact; for a file, its complete portable path relative to the concrete base directory identity declared in Scope>
 Allowed tools:
 - <exact task-scoped tool or MCP identifier discovered immediately before this spawn, or none>
 Scope:
@@ -56,6 +60,7 @@ Dead/superseded code disposition:
 Cleanup disposition:
 - <owned child process trees, temp/capture paths, and isolation worktrees: `cleaned` | `preserved` + reason | `none`>
 - ResourceRowV1 for every selected resource: <category; creator/adopter role + run; exact identity; preexisting flag; settlement probe and current result; disposition>
+- When no resource is selected, Cleanup disposition is `none` and no `ResourceRowV1` is required; do not invent a row.
 Evidence discipline:
 - <cite each decision-driving claim with an in-repo file:line, installed-dependency surface check, versioned official docs/upstream source URL, or target-environment smoke test preserved under .scratch/; otherwise label it ASSUMPTION (UNVERIFIED) with the resolving step; never use "should work", "should be fine", "probably", "likely", "I think", "based on training data", "in general", or "this pattern usually works" as a correctness-driver>
 Defect-class inventory:
@@ -72,13 +77,29 @@ Gate to next stage:
 
 Before dispatch, fill `Diff-invisible invariants`, `Named regression guard`, `Dead/superseded code disposition`, and `Cleanup disposition`. For `Dead/superseded code disposition`, `none` is valid only with a one-line reason. When a change supersedes a mechanism, `none` is invalid. For `Cleanup disposition`, `preserved` requires a reason and `none` means the recipient owns no resource in that category. An implementation or review handoff with any field omitted is incomplete.
 
+For a file `Approved input`, `Scope` names its concrete base directory identity (the repository root, selected worktree root, or producing run root). The receiving side resolves the complete portable relative path against that declared base only; it never infers that workspace, repository, worktree, and run roots are equal. Existing declared-file hash rules remain unchanged. Fact-only inputs are unaffected.
+
 The caller performs fresh discovery before every subagent spawn and records only the exact task-scoped identifiers selected for that run, or `none`. An inherited but unlisted tool remains behaviorally forbidden; blanket Model Context Protocol or whole-runtime authorization is invalid.
+
+When a selected tool's current runtime schema requires a context-dependent argument, the caller supplies that concrete argument from `Scope` or `Approved inputs`, such as the approved project or root identity. Recording only the tool name is incomplete when the recipient cannot derive a required argument. This is caller guidance, not a validator or sandbox. Do not add a handoff field or hardcode tool names.
 
 `Approved inputs` identify the producing run's declared scope and accepted artifact revision when available; no new handoff field is required. Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
 
-Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) report the Dead/superseded code disposition result and its named probe, (d) report the Cleanup disposition for owned child process trees, temp/capture paths, and isolation worktrees as `cleaned`, `preserved` with its reason, or `none`, and (e) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. It also returns a complete current `ResourceRowV1` for every selected owned resource, including branches, locks, handles, generated artifacts, and dead/superseded surfaces; allowed dispositions additionally include `ephemeral-volume-exempt`. An absent/unknown field, ownership/classification gap, invalid exemption, or missing settlement result makes the row `unclassified`; an artifact missing this echo fails the mechanical acceptance gate.
+**Reuse-assessment carry-forward.** Apply shared `Reuse before hand-rolling` through the existing task fields. Before choosing a new design/mechanism, doing nontrivial implementation directly, or assigning it, check the current owner, needed methods, relevant callers/rollback and ready existing solutions. An accepted plan is an input, not proof the capability is still missing. Reuse adequate architecture; resolve stale creation scope before action or assignment, and use/extend the existing owner or name its verified inadequacy and the missing behavior. Root/Lead carries the minimum current evidence through existing Approved inputs, Scope and Acceptance criteria. Before designing or coding, the receiver checks that comparison and returns reuse or the verified gap when an assignment is stale or duplicates existing behavior. Direct-root, light/non-Lead and specialist execution applies the same check within its authorized role and scope. Preserve original useful behavior and required safety, performance, data, authority and publication guarantees; this adds no field, report, stage, checker, standing review or inventory ritual for trivial work. The accepted assessment records the mechanisms checked, meaningful ready alternatives, selected option, evidence-backed rejection reasons and integration tradeoffs. `Constraints` carries the decisive fit requirements; `Acceptance criteria` preserves the accepted choice and its verification. The assessment follows the shared rule's local-inventory-first and conditional-research sequence. An unfamiliar candidate receives a factual fit assessment rather than rejection by a fixed list; tools and dependencies retain normal reason-and-repository-fit admission. If a needed fact is missing, route that bounded question through the existing factual role before deciding the affected choice. The implementer consumes the accepted choice and raises a material conflict to its decision owner rather than inventing a replacement. Ordinary edits and extension of an existing accepted owner gain no new report, web search, stage, checker, or tracking file.
 
-**Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class, the dispatch prompt MUST direct the recipient to enumerate every participant of that class, classify each one, and fix every confirmed instance. A prompt scoped only to the named line is invalid.
+**Admission-to-assignment receiving.** Before a diagnostic or design handoff, Lead carries the original accepted user/product admission and any genuine explicit user scope amendment in `Approved inputs`. Preserve accepted authority/revision references when supplied; hash only declared file inputs, not accepted facts, and send only relevant context. `Scope` distinguishes the effective admitted requirements and declared pipeline/modes from this assignment's allowed boundary. `Acceptance criteria` distinguishes slice acceptance from whole-outcome acceptance. Before diagnosis/design, the receiver compares those levels, identifies its covered subset, and records uncovered required remainder with the original task owner and next action in existing fields/artifacts. Do not infer original scope from the assignment or accept missing/empty coverage, including equal empty values, as equivalent scope; request bounded input correction for the affected decision. Independent ready work may continue with sufficient accepted inputs and unchanged authority. A diagnostic slice and scoped `PASS` remain valid with required remainder retained by Lead; neither Lead nor the specialist may replace genuine user amendment authority. An explicit user amendment identifies removed requirements as removed, not still mandatory. An originally narrow nonempty admission needs no invented decomposition, metric, plan, profile or broader requirement. Trivial inline work and legitimate artifactless lookup retain their exceptions. This input comparison does not replace result correlation, producing-revision checks, conditional PAO/claims/class rules or the existing first actual-scenario profile obligation.
+
+Current-assignment correlation is part of the existing Receiving-side echo, not a new handoff field. Before accepting a result, compare its current host task identity, or the existing ledger `runId` when present, together with the echoed `Scope` and `Expected artifact`, against the dispatch. Hash only declared file `Approved inputs`; fact-only inputs and undeclared files do not gain a hash requirement. A prior `PASS` with any identity, scope, expected-artifact, or declared-input-hash mismatch is stale and nonauthorizing. Trivial inline work and legitimate artifactless fact lookup require neither a ledger nor an artifact nor a new field.
+
+Conditional PAO carry-forward applies only when accepted work already has a Primary Acceptance Oracle (PAO). `Approved inputs` names its accepted revision: a declared file uses its path and SHA-256, while a non-file artifact uses its existing producing task/run identity and revision reference. `Scope` carries its exact scenario, source, configuration, environment, and invocation bounds. `Acceptance criteria` carries success, failure, safety, cleanup, evidence, and owner requirements. The Receiving-side echo records the actual source, configuration, and environment used and compares them with the approved revision and scoped scenario. Any PAO revision, scoped scenario, source, configuration, or environment mismatch makes evidence stale and nonauthorizing. Trivial work and work with no PAO gain no requirement, file, identifier, or field.
+
+When `Approved inputs` contains an accepted Architect or domain artifact with numbered `{ guarantee, single-owner, enforcement-probe }` claims, the implementation artifact preserves each claim number, owner, and probe and maps it to the implementation surface plus observed evidence/result. The implementer does not rewrite the upstream claim set.
+
+Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) report the Dead/superseded code disposition result and its named probe, (d) report the Cleanup disposition for owned child process trees, temp/capture paths, and isolation worktrees as `cleaned`, `preserved` with its reason, or `none`, and (e) when the dispatch cited a defect class, include the class audit — every enumerated participant classified `fixed`, `not-affected`, `out-of-scope`, or `unresolved`; actual defects outside admitted scope must be reported as `out-of-scope` or `unresolved`, never `not-affected`. It also returns a complete current `ResourceRowV1` for every selected owned resource, including branches, locks, handles, generated artifacts, and dead/superseded surfaces; allowed dispositions additionally include `ephemeral-volume-exempt`. An absent/unknown field, ownership/classification gap, invalid exemption, or missing settlement result makes the row `unclassified`; an artifact missing this echo fails the mechanical acceptance gate. For applicable diagnostic/design handoffs, the same returned artifact also echoes the pre-diagnosis/design admission comparison, accepted input references, covered subset and retained remainder owner/action; scoped acceptance does not settle the parent admission.
+
+Implementation and Quality Assurance (QA) receive the same accepted `Acceptance criteria` and `Named regression guard`; each returned artifact echoes both and records the guard's expected and observed result. Implementation and Quality Assurance receive route-appropriate accepted artifacts; a Plan is required only when the selected route admits a Plan stage. Reuse these existing fields; do not add a Primary Acceptance Oracle identifier, status field, ledger field, or file. Both consume the same accepted admission-versus-assignment distinction; parent checks outside the slice retain their owner/action rather than becoming optional checks or mandatory work for this leaf.
+
+**Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class, the dispatch prompt MUST direct the recipient to investigate the full causal/sibling set within the admitted owner and contracts, classify each participant, and fix every confirmed in-scope instance. An actual out-of-scope defect is reported `out-of-scope` or `unresolved`, never `not-affected`; clarify scope before mutation expands. Existing reachable mandatory safety or data-loss owners still apply. If a required contract depends on unresolved outside work, dependent completion cannot claim `PASS`. A prompt scoped only to the named line is invalid.
 
 **Object-axis trigger (mandatory for C1-based clean verdicts, PRE-verdict).** The class-completeness
 trigger above fires AFTER a finding: "you found one — where are its siblings?" This one fires BEFORE
@@ -145,76 +166,59 @@ updated: <YYYY-MM-DD HH:MM>
 
 An admitted `quick-fix` does not add `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or a report before its first mutation. If it is re-classified, keep this work-item and enrich its recovery state to the full format below instead of creating a late unrelated item. After delivery, apply the normal immediate closure/archive rule.
 
+Use existing fields as acceptance carriers: quick-fix writes the objective in `Task`, the accepted criteria and guard reference in `Last result`, and Quality Assurance (QA) in `Next action`; staged work writes the objective in `Task`, the accepted result or reference in `Last result`, the oracle in `Evidence gate`, and the next implementation or QA step in `Next action`.
+
 ### status.md format
 
 ```markdown
 ---
-template: <template name>
-orchestration: light | full-lead
-started: <YYYY-MM-DD>
-updated: <YYYY-MM-DD HH:MM>
+template: staged
+status: active
+started: <YYYY-MM-DDTHH:MM:SSZ>
+updated: <YYYY-MM-DDTHH:MM:SSZ>
 ---
 
-## Current state
-
-- **Primary task**: <one active objective, e.g. "full-impact review of current change set">
-- **Primary task status**: <active | side-interrupted | parked | closed>
-- **Interruption marker**: <none | INTERRUPTED(no-artifact)>
-- **Stage**: <current stage name or number>
-- **Main conv role**: <what main conversation is doing: orchestrating | waiting for agents | reviewing artifact | idle>
-- **Last accepted artifact**: <filename or "none">
-- **Open obligations before closeout**: <none | remaining required work still inside admitted scope>
-- **Epic**: <parent epic slug, or none> — present only when this work-item belongs to an epic; a single bare `Epic: <slug>` line is the join key the epic roll-up reads (see the lead skill `## Epics`)
-- **Depends-on**: <comma-separated work-item slugs, or none> — other work-items this one needs completed first; a single bare `Depends-on: <slug>, <slug>` line is what the derivation reads. A standing, planned inter-work-item dependency edge (distinct from the runtime `BLOCKED:*` gate verdicts). Targets are work-items only, resolved across physical `active/`, `archive/YYYY-MM/`, and `backlog/` locations (a backlog match is existence, not done). A target that resolves nowhere is folded into `blocked-by`, never treated as satisfied. `/agents-status` derives `blocked-by` (open targets) and the ready-set from these lines (see the lead skill `## Dependencies`)
-- **Priority**: <high | medium | low, or none> — scheduling urgency set by `$product-manager` at admission; distinct from bug/perf SEVERITY (defect impact). A low-severity bug can still be high-priority.
-
-## Active agents
-
-| Agent | Role | Model/effort | Status | Launched |
-| --- | --- | --- | --- | --- |
-| <description> | <role> | <model/profile + effort — one-line complexity rationale> | running | <HH:MM> |
-
-## Completed agents
-
-| Agent | Role | Result | Artifact |
-| --- | --- | --- | --- |
-| <description> | <role> | PASS/REVISE/BLOCKED | <filename> |
-
-## REVISE loop
-
-| Field | Value |
-| --- | --- |
-| **Stage** | <stage name where REVISE occurred> |
-| **Iteration** | <1-3, or "escalated"> |
-| **Gate role** | <qa-engineer, security-reviewer, etc.> |
-| **Last finding summary** | <one-line summary of what the gate found> |
-| **Owner of next action** | <implementer role that must fix, or "user" if escalated> |
-
-## Next action
-
-<What happens next: which agent to launch, what artifact to review, or what decision to make.>
+Task: <active objective>
+Current step: <current execution step>
+Last result: <accepted result or criteria/guard reference>
+Next action: <next implementation or QA step>
+Scope boundary: <approved scope and exclusions>
+Owner: <current artifact owner>
+Integration owner: <integration owner>
+Evidence gate: <accepted oracle and required evidence>
 ```
 
-Legacy handling: older `status.md` files may carry `orchestrator: main | lead`. Read `main` as `orchestration: light` and `lead` as `orchestration: full-lead`; do not rewrite old files in bulk. The orchestrator is ALWAYS the main conversation (holding the Lead role) — the retired field encoded orchestration weight, not a different owner, which is why it is renamed. New/updated files write `orchestration:`.
-
-The REVISE loop section is optional — include it only when a stage has returned REVISE and the loop is active. Remove it when the loop resolves (PASS or escalation).
+Legacy sectioned `status.md` records remain readable compatibility input; do not rewrite them in bulk or use their shape for new work. Older records may carry `orchestrator: main | lead`; read `main` as light orchestration and `lead` as full Lead orchestration. The orchestrator remains the root main conversation holding Lead. New work is classified first and uses either the exact quick-fix form or the staged scalar form above.
 
 ### agent-runs.jsonl format
 
 Only the root main conversation holding Lead writes `agent-runs.jsonl`: it records each launch and, after receiving and accepting the assigned artifact and evidence, its terminal outcome. A main-owned validated helper or wrapper may perform that write on the root's behalf.
 
+For every non-trivial provider or subagent dispatch bound to a work-item, append its root-owned running launch event through the existing ledger helper or declared owner-equivalent execution before asking the host to schedule the run; scheduling requires validated canonical admission and independent readback, not a helper success claim. After acceptance, settle that exact open launch through `agent-run-ledger.* settle-launch`; it derives immutable launch metadata and accepts only observed terminal fields and supplied external provenance, so it never reconstructs dispatch identifiers or uses `closesRunIds`. Exact replay is `already-settled`; a conflicting replay fails unchanged. Refresh `status.md` after the terminal append and before the next non-trivial dispatch.
+
 The ledger is machine-readable execution state; `status.md` remains the human-readable recovery summary. A `PASS` in `status.md` is not accepted unless the corresponding ledger event has `gate: "PASS"`, `status: "completed"`, an artifact path, and at least one evidence entry.
 
 Minimum required fields are defined by `shared/schemas/agent-runs.schema.json`: `schemaVersion`, `runId`, `workItem`, `role`, `executionRole`, `status`, `gate`, `scope`, `startedAt`, and `updatedAt`.
 
-When `scripts/agent-run-ledger.*` or an installed equivalent is available, prefer its `append` command so the event is validated and rolled back on failure. Use its `init` command for one-time migration of legacy work items with missing status sections or ledger files. Manual JSONL append is acceptable only when no helper is available.
+Use these authoritative field mappings; they reuse existing schema fields and values:
 
-Before closeout, run `scripts/validate-work-item-state.* --work-item <path>` or the installed equivalent when the repository exposes one. Before broad closeout, interruption recovery, or publication review, run `scripts/check-work-items-state.* --root <repo>` or the installed equivalent to scan all active work items. Closeout is blocked while the ledger contains running agents, duplicate run IDs, missing artifacts for `PASS`, `PASS` without evidence, stale running agents, or inconsistent `BLOCKED` / `REVISE` status.
+| Run owner | `role` | `executionRole` | `assignedRole` |
+| --- | --- | --- | --- |
+| Root main conversation | `lead` | `main` | omit |
+| Native specialist | `toolchain-engineer` | `internal` | omit |
+| External worker assigned analysis | `external-worker` | `external-worker` | `analyst` |
+
+The approved external wrapper owns its full provider provenance. Human artifact labels such as `Execution role` are not JSON values and MUST NOT be copied blindly into `executionRole`.
+
+Prefer `scripts/agent-run-ledger.*` or its installed equivalent so the writer validates the existing `launch`, `terminal`, or `standalone` relation and rolls back a rejected append. Use its `init` command only for one-time migration of legacy work items with missing status sections or ledger files. Never hand-append invented `resume` or `accept` JSON, duplicate identifiers, or guessed role values. If corrupt history or another invalid ledger makes the writer refuse an event, preserve accepted engineering artifacts and route repair to the ledger/lifecycle owner; refusal does not authorize a raw row, bypass validation, or claim closure. Do not invent a bypass or administrative journal. A defective helper permits a declared owner-equivalent transition under the shared assistance contract, preserving actual launch/terminal identities, structured roles/provenance, immutable bindings, exact typed closers, exclusive serialization, preimages/rollback and independent canonical readback; corrupt history remains an owning-invariant blocker.
+
+Before closeout, run `scripts/validate-work-item-state.* --work-item <path>` or the installed equivalent when the repository exposes one. Before broad closeout or interruption recovery, run `scripts/check-work-items-state.* --root <repo>` or the installed equivalent to scan all active work items. Closeout is blocked while the ledger contains running agents, duplicate run IDs, missing artifacts for `PASS`, `PASS` without evidence, stale running agents, or inconsistent `BLOCKED` / `REVISE` status. Publication preflight instead keeps its staged-target scanner and release-note checks; the root and independent human publication approver retain the relevant `REVISE` decision, and unrelated active lifecycle state is not a publication predicate.
 
 No-artifact interruption rule:
 - A handoff interrupt or worker stall without an artifact does not count as a substantive REVISE artifact.
-- Set `Primary task status: side-interrupted` and `Interruption marker: INTERRUPTED(no-artifact)` in `status.md` for orchestrator bookkeeping.
-- Keep the stage open, and either rerun the same role with a tighter slice or route to the proper factual role.
+- Record the interruption through the existing staged scalars: `Current step` names the interrupted stage, `Last result` records that no artifact was returned, and `Next action` names the rerun, factual route, or explicit wait.
+- Without an explicit user pause, preserve same-turn continuation: keep the stage open and either rerun the same role with a tighter slice or route to the proper factual role.
+- An explicit user pause, stop, or cancel remains authoritative: preserve the concrete resume action in `Next action` and resume only when the user authorizes it.
 - The lead must not synthesize the missing artifact or replace missing factual work inline.
 - If the interrupted stage belongs to a full-impact review or verification pass, keep that review as the primary task until a review artifact is emitted or the user explicitly parks/cancels it.
 
@@ -241,7 +245,7 @@ When returning BLOCKED, specify the class:
 | Class | Meaning | Orchestrator action |
 | --- | --- | --- |
 | `BLOCKED:dependency` | Cannot proceed — missing tool, environment, access, or information that no current agent can provide | Present to user for resolution |
-| `BLOCKED:prerequisite` | Discovered adjacent work that must complete first (e.g., broken adjacent module, missing migration) | File in `work-items/bugs/` → user decides priority → resume when resolved |
+| `BLOCKED:prerequisite` | Required adjacent work or input must be resolved before the dependent action proceeds | Retain actual cause, required remainder, owner and next action in the existing artifact/recovery; propose a bug in `work-items/bugs/` only under `qa-engineer`'s bug-admission contract; route unadmitted scope/priority to its admission owner and resume only after the prerequisite is verified |
 
 If no class is specified, treat as `BLOCKED:dependency` (conservative default).
 
@@ -282,7 +286,7 @@ For substantial tasks, prefer a structured closeout in the final summary:
 - **Still open:** remaining required work to satisfy the current request, or `none`
 - **Risks / follow-ups:** residual risks, deferred work, or known limitations
 
-This is a recommended format for user-facing task completion, not a mandatory gate artifact. For pipeline handoffs, use the shared response format above.
+This is a recommended format for user-facing task completion, not a mandatory gate artifact. A root task-completion claim must follow the [Lead terminal decision](../../skills/lead/SKILL.md#work-cycle-ownership-recipe) and cite its actual lifecycle outcome or name the still-open required action, owning cause and resume point. A scoped specialist PASS or stage handoff does not close the root task. For pipeline handoffs, use the shared response format above.
 
 ## Gate questions
 
@@ -295,7 +299,9 @@ Ask these before advancing:
 5. Is the next stage receiving only the context it truly needs?
 6. Is an independent reviewer or human gate still required?
 7. Is the blast radius still inside the approved change surface?
-8. Is any admitted-scope obligation still open even though one sub-batch is finished?
+8. Has the [Lead terminal decision](../../skills/lead/SKILL.md#work-cycle-ownership-recipe) reconciled the original admitted outcome, observed actual closure when terminal, or recorded and continued the exact required next action?
+
+Root consumes the Lead recipe's actual returned runner identities/state before formatting/truncation and its strict selected-item `--obligations-json` receipt after terminal writes/replay, acknowledging recovery metadata and revision/pending causes/action in existing status or the normal validated ledger. Logical lane release and supported host teardown/accounting follow that same owner; host retention is not silently called cleanup. Unavailable output is never a clean receipt; no acknowledgment-only ledger row is added.
 
 ## Terms and Abbreviations
 

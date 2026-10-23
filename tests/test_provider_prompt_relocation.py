@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import runpy
+from types import SimpleNamespace
 import sys
 from pathlib import Path
 
@@ -18,7 +20,13 @@ def test_root_is_the_only_authored_transport_owner() -> None:
     assert not (CLAUDE_SCRIPTS / "provider_prompt.py").exists()
 
 
-def test_codex_and_claude_host_wrappers_remain_thin_adjacent_consumers() -> None:
+def test_codex_and_claude_host_wrappers_remain_thin_adjacent_consumers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+    monkeypatch.setitem(sys.modules, "provider_prompt", SimpleNamespace(
+        launch=lambda provider, argv: calls.append((provider, argv)) or 17,
+    ))
     for provider in ("codex", "claude"):
         python_wrapper = CLAUDE_SCRIPTS / f"invoke-{provider}-prompt.py"
         shell_wrapper = CLAUDE_SCRIPTS / f"invoke-{provider}-prompt.sh"
@@ -26,7 +34,12 @@ def test_codex_and_claude_host_wrappers_remain_thin_adjacent_consumers() -> None
         assert shell_wrapper.is_file()
         python_text = python_wrapper.read_text(encoding="utf-8")
         assert "from provider_prompt import launch" in python_text
-        assert f'launch("{provider}", sys.argv[1:])' in python_text
+        argv = ["fixture", "--prompt-file", "synthetic-task.md"]
+        monkeypatch.setattr(sys, "argv", [str(python_wrapper), *argv])
+        with pytest.raises(SystemExit) as result:
+            runpy.run_path(str(python_wrapper), run_name="__main__")
+        assert result.value.code == 17
+        assert calls.pop() == (provider, argv)
         assert "provider_prompt.py" not in shell_wrapper.read_text(encoding="utf-8")
 
 

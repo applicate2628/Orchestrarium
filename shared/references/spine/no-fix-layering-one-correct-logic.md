@@ -59,11 +59,14 @@ Inside one trust domain: one owner, one check.
 
 ## Failure idiom per layer
 
-The failure-reporting idiom is chosen per LAYER, and is uniform within a layer: process exit at the
-composition root; typed returned status from libraries/leaves; an in-band poison value (e.g.
-NaN-poison) only where no status channel exists. Two idioms for one failure class in one layer = a
-finding. Law D1 of `shared/references/architecture-layering-hygiene.md` is the single owner of this
-policy — this reference and the audit lane cite it, never redefine it.
+The failure-reporting idiom is chosen per LAYER and is uniform for each failure class in that layer:
+process exit at the composition root; the accepted typed failure channel (such as returned status or
+typed exception) from libraries/leaves, preserving cause and caller decision information and every
+contract-required field; a documented in-band poison value (e.g. NaN-poison) only where no status channel
+exists. Translate only at an actual owning boundary, preserving meaning; exceptions do not cross a
+boundary that forbids them. Two idioms for one failure class in one layer = a finding. Law D1 of
+`shared/references/architecture-layering-hygiene.md` is the single owner of this policy — this reference
+and the audit lane cite it, never redefine it.
 
 ## Anti-layering audit (per multi-fix batch)
 

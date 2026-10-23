@@ -1,22 +1,22 @@
 {
   "name": "research",
-  "description": "Investigation and design only \u2014 no implementation",
-  "when": "Exploring a problem space, writing ADRs, evaluating alternatives before committing to delivery",
+  "description": "Bounded factual investigation or decision research \u2014 no implementation",
+  "when": "Investigating a non-trivial fact, writing an Architecture Decision Record (ADR), or evaluating material alternatives before delivery",
   "requiresLead": false,
   "chain": ["research", "design", "plan"],
   "roles": [
     { "agentType": "analyst", "stage": "research", "required": true },
     { "agentType": "product-analyst", "stage": "research", "whenNeeded": "product/business context" },
-    { "agentType": "architect", "stage": "design", "required": true },
+    { "agentType": "architect", "stage": "design", "whenNeeded": "decision, ADR, or material alternatives" },
     { "agentType": "ux-designer", "stage": "design", "whenNeeded": "user-facing problem space" },
     { "agentType": "algorithm-scientist", "stage": "design", "whenNeeded": "mathematical framing" },
     { "agentType": "computational-scientist", "stage": "design", "whenNeeded": "scientific model" },
     { "agentType": "security-engineer", "stage": "design", "whenNeeded": "threat model needed" },
     { "agentType": "performance-engineer", "stage": "design", "whenNeeded": "budget analysis" },
     { "agentType": "reliability-engineer", "stage": "design", "whenNeeded": "failure-mode analysis" },
-    { "agentType": "planner", "stage": "plan", "whenNeeded": "execution plan needed" }
+    { "agentType": "planner", "stage": "plan", "whenNeeded": "user explicitly requests an execution plan" }
   ],
-  "requiredRoles": ["analyst", "architect"],
-  "minRoles": 2,
-  "notes": "Main conversation chains analyst \u2192 architect \u2192 planner. Stops after design/plan artifact. No implementation, no QA."
+  "requiredRoles": ["analyst"],
+  "minRoles": 1,
+  "notes": "A bounded factual investigation defaults to the analyst only; an explicitly user-named role or narrower factual domain specialist remains valid. Add architect for a decision, ADR, or material alternatives. Add planner only when the user explicitly requests an execution plan. Recovery is needed only for continuation. No implementation or QA."
 }

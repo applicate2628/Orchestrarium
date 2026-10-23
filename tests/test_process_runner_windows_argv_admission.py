@@ -3,8 +3,10 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import inspect
+import json
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -16,6 +18,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER_PATH = ROOT / "scripts" / "process_supervision" / "process_runner.py"
 CHILD = ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py"
+_AUTO_KIMI_BINDING = object()
 
 
 def _load_runner():
@@ -36,7 +39,7 @@ def _request(
     profile_id: str,
     *,
     cwd: Path = ROOT,
-    expected_executable_binding=None,
+    expected_executable_binding=_AUTO_KIMI_BINDING,
 ):
     executable = Path(argv[0]).resolve()
     rows = tuple(
@@ -46,7 +49,7 @@ def _request(
     )
     optional = (
         {"expected_executable_binding": expected_executable_binding}
-        if expected_executable_binding is not None
+        if expected_executable_binding is not _AUTO_KIMI_BINDING
         else {
             "expected_executable_binding": module.ExecutableBindingV1(
                 str(executable),
@@ -104,16 +107,10 @@ def _fake_kimi(module, path: Path, payload: bytes = b"synthetic-kimi") -> Path:
 
 
 def _kimi_argv(module, executable: Path, prompt_file: Path) -> tuple[str, ...]:
-    prompt_file.write_bytes(
-        b"---\nname: orchestrarium-bundle-reviewer\n"
-        b"description: Reviews only the context bundled in this file\n"
-        b"tools: []\nsubagents: []\n---\n\nGATE: PASS\n"
-    )
-    skills = prompt_file.parent / "empty-skills"
-    skills.mkdir(exist_ok=True)
+    _ = prompt_file
     return (
         str(executable.resolve()),
-        *module.KimiWindowsProfileV1.build_args(prompt_file, skills),
+        *module.KimiWindowsProfileV1.build_args(),
     )
 
 
@@ -147,6 +144,76 @@ def test_kimi_admission_accepts_exact_caller_binding_without_release_source_pin(
         request_owner.close()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi dynamic binding contract")
+def test_kimi_admission_uses_launch_owner_binding_when_caller_omits_expected_binding(
+    tmp_path: Path,
+) -> None:
+    module = _load_runner()
+    executable = _fake_kimi(module, tmp_path / "kimi.exe", b"current-installed-kimi")
+    owner = module.ProcessRunnerV1()
+    request = _request(
+        module,
+        owner,
+        _kimi_argv(module, executable, tmp_path / "prompt.md"),
+        module.KimiWindowsProfileV1.profile_id,
+        cwd=tmp_path,
+        expected_executable_binding=None,
+    )
+    assert request.expected_executable_binding is None
+
+    try:
+        lifecycle, admission, launch_owner = _admit(module, owner, request)
+        try:
+            assert admission.executable_binding == launch_owner.binding
+            assert admission.executable_binding is not None
+            owner.windows_argv_admission_owner.consume(
+                lifecycle, request, admission, launch_owner
+            )
+        finally:
+            _release(owner, lifecycle)
+    finally:
+        owner.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi resolved-link contract")
+def test_kimi_profile_accepts_resolved_file_symlink_target_with_different_basename(
+    tmp_path: Path,
+) -> None:
+    module = _load_runner()
+    target = _fake_kimi(
+        module, tmp_path / "current-kimi-client.exe", b"current-installed-kimi"
+    )
+    link = tmp_path / "kimi.exe"
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"file symlink unavailable: {exc}")
+    owner = module.ProcessRunnerV1()
+    request = _request(
+        module,
+        owner,
+        _kimi_argv(module, link, tmp_path / "prompt.md"),
+        module.KimiWindowsProfileV1.profile_id,
+        cwd=tmp_path,
+        expected_executable_binding=None,
+    )
+    assert request.resolved_executable == target.resolve()
+    assert request.resolved_executable.name != "kimi.exe"
+
+    try:
+        lifecycle, admission, launch_owner = _admit(module, owner, request)
+        try:
+            assert admission.executable_binding == launch_owner.binding
+            assert admission.executable_binding is not None
+            owner.windows_argv_admission_owner.consume(
+                lifecycle, request, admission, launch_owner
+            )
+        finally:
+            _release(owner, lifecycle)
+    finally:
+        owner.close()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi metadata probe contract")
 @pytest.mark.parametrize("argument", ("--version", "--help"))
 def test_kimi_metadata_probe_profile_allows_only_exact_bound_read_only_argv(
@@ -172,6 +239,38 @@ def test_kimi_metadata_probe_profile_allows_only_exact_bound_read_only_argv(
         lifecycle, admission, launch_owner = _admit(module, owner, request)
         try:
             assert admission.probe_kind == "kimi-metadata-probe-v2"
+            owner.windows_argv_admission_owner.consume(
+                lifecycle, request, admission, launch_owner
+            )
+        finally:
+            _release(owner, lifecycle)
+    finally:
+        owner.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi metadata probe contract")
+@pytest.mark.parametrize("argument", ("--version", "--help"))
+def test_kimi_metadata_probe_uses_launch_owner_binding_when_caller_omits_expected_binding(
+    tmp_path: Path, argument: str
+) -> None:
+    module = _load_runner()
+    executable = _fake_kimi(module, tmp_path / "kimi.exe", b"current-installed-kimi")
+    owner = module.ProcessRunnerV1()
+    request = _request(
+        module,
+        owner,
+        (str(executable), argument),
+        module.KimiWindowsProfileV1.probe_profile_id,
+        cwd=tmp_path,
+        expected_executable_binding=None,
+    )
+    assert request.expected_executable_binding is None
+
+    try:
+        lifecycle, admission, launch_owner = _admit(module, owner, request)
+        try:
+            assert admission.executable_binding == launch_owner.binding
+            assert admission.executable_binding is not None
             owner.windows_argv_admission_owner.consume(
                 lifecycle, request, admission, launch_owner
             )
@@ -278,7 +377,7 @@ def test_admission_owner_has_no_direct_subprocess_escape_hatch() -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
-def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_path: Path) -> None:
+def test_kimi_profile_accepts_only_fixed_acp_transport(tmp_path: Path) -> None:
     module = _load_runner()
     owner = module.ProcessRunnerV1()
     neutral = tmp_path / "neutral root-Москва"
@@ -290,17 +389,17 @@ def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_pat
         module,
         owner,
         _kimi_argv(module, executable, prompt),
-        "kimi-sealed-bundle-text-v1",
+        module.KimiWindowsProfileV1.profile_id,
         cwd=neutral,
     )
 
     lifecycle, admission, launch_owner = _admit(module, owner, request)
     try:
-        assert admission.profile_id == "kimi-sealed-bundle-text-v1"
-        assert admission.probe_kind == "kimi-sealed-bundle-v1"
-        assert admission.prompt_file_canonical == str(prompt.resolve())
-        assert admission.prompt_file_identity
-        assert admission.prompt_file_sha256
+        assert admission.profile_id == "kimi-acp-one-shot-v1"
+        assert admission.probe_kind == "kimi-acp-one-shot-v1"
+        assert admission.prompt_file_canonical is None
+        assert admission.prompt_file_identity is None
+        assert admission.prompt_file_sha256 is None
         owner.windows_argv_admission_owner.consume(
             lifecycle, request, admission, launch_owner
         )
@@ -312,12 +411,10 @@ def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_pat
 @pytest.mark.parametrize(
     "mutate",
     (
-        lambda argv: (*argv[:1], "-m", *argv[2:]),
-        lambda argv: (*argv[:1], "--output-format", "text", "--model", "kimi-code/k3", *argv[5:]),
+        lambda argv: (argv[0], "ACP"),
         lambda argv: (*argv, "--extra"),
-        lambda argv: (*argv[:2], "other-model", *argv[3:]),
-        lambda argv: (*argv[:4], "stream-json", *argv[5:]),
-        lambda argv: (*argv[:6], argv[6] + " "),
+        lambda argv: (argv[0], "--help"),
+        lambda argv: (argv[0], "acp", "--login"),
     ),
 )
 def test_kimi_profile_rejects_argv_variants_without_probe(tmp_path: Path, mutate) -> None:
@@ -332,7 +429,7 @@ def test_kimi_profile_rejects_argv_variants_without_probe(tmp_path: Path, mutate
         module,
         owner,
         tuple(mutate(_kimi_argv(module, executable, prompt))),
-        "kimi-sealed-bundle-text-v1",
+        module.KimiWindowsProfileV1.profile_id,
         cwd=neutral,
     )
     lifecycle = owner._begin_lifecycle()
@@ -344,7 +441,7 @@ def test_kimi_profile_rejects_argv_variants_without_probe(tmp_path: Path, mutate
             owner.windows_argv_admission_owner.admit(
                 lifecycle, request, launch_owner
             )
-        assert caught.value.failure_id == "PSV1-ARGV-CODEC-UNSUPPORTED"
+        assert caught.value.failure_id == "PSV1-ARGV-ATTESTATION"
     finally:
         _release(owner, lifecycle)
 
@@ -366,7 +463,7 @@ def test_kimi_profile_rejects_marker_only_file_when_expected_binding_differs(tmp
         module,
         owner,
         _kimi_argv(module, executable, prompt),
-        "kimi-sealed-bundle-text-v1",
+        module.KimiWindowsProfileV1.profile_id,
         cwd=neutral,
         expected_executable_binding=module.ExecutableBindingV1(
             str(executable.resolve()), executable.stat().st_size, "0" * 64
@@ -387,7 +484,7 @@ def test_kimi_profile_rejects_marker_only_file_when_expected_binding_differs(tmp
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
-def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path: Path) -> None:
+def test_kimi_profile_rejects_argv_mutation_between_admit_and_consume(tmp_path: Path) -> None:
     module = _load_runner()
     owner = module.ProcessRunnerV1()
     neutral = tmp_path / "neutral"
@@ -399,15 +496,17 @@ def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path
         module,
         owner,
         _kimi_argv(module, executable, prompt),
-        "kimi-sealed-bundle-text-v1",
+        module.KimiWindowsProfileV1.profile_id,
         cwd=neutral,
     )
     lifecycle, admission, launch_owner = _admit(module, owner, request)
     try:
-        prompt.write_text("changed\nGATE: PASS\n", encoding="utf-8")
+        changed = dataclasses.replace(
+            request, argv=(request.argv[0], "--help")
+        )
         with pytest.raises(module.ProcessSupervisionError) as caught:
             owner.windows_argv_admission_owner.consume(
-                lifecycle, request, admission, launch_owner
+                lifecycle, changed, admission, launch_owner
             )
         assert caught.value.failure_id == "PSV1-ARGV-ATTESTATION"
     finally:
@@ -516,6 +615,401 @@ def test_unavailable_profiles_deny_without_probe(
         assert calls == []
     finally:
         _release(owner, lifecycle)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows declared parser contract")
+def test_generic_contract_admission_has_no_child_observation_and_rejects_forgery() -> None:
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    executable = str(Path(sys.executable).resolve())
+    contract = module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="trusted test integration declares the Python wide CRT parser",
+        origin="installed-integration",
+    )
+    request = dataclasses.replace(
+        _request(module, owner, (executable, "-c", "pass", "two words"),
+                 "native-parser-contract-v1", expected_executable_binding=None),
+        windows_parser_contract=contract,
+    )
+    lifecycle, admission, launch_owner = _admit(module, owner, request)
+    try:
+        assert admission.probe_kind == "parser-contract-v1"
+        assert admission.probe_requested_argv_sha256 is None
+        assert admission.probe_observed_argv_sha256 is None
+        assert admission._child_evidence_seal is None
+        assert admission.executable_binding == launch_owner.binding
+        forged = dataclasses.replace(
+            admission, probe_observed_argv_sha256=admission.actual_argv_sha256
+        )
+        with pytest.raises(module.ProcessSupervisionError) as caught:
+            owner.windows_argv_admission_owner.consume(lifecycle, request, forged, launch_owner)
+        assert caught.value.failure_id == "PSV1-ARGV-ATTESTATION"
+        owner.windows_argv_admission_owner.consume(lifecycle, request, admission, launch_owner)
+        with pytest.raises(module.ProcessSupervisionError):
+            owner.windows_argv_admission_owner.consume(lifecycle, request, admission, launch_owner)
+    finally:
+        _release(owner, lifecycle)
+        owner.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows held executable preflight")
+def test_native_preparation_reuses_one_owner_and_exact_arguments(monkeypatch) -> None:
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    executable = str(Path(sys.executable).resolve())
+    contract = module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="trusted test integration declares the Python wide CRT parser",
+        origin="installed-integration",
+    )
+    argv = (executable, "-c", "import json,sys;print(json.dumps(sys.argv[1:]))",
+            "", "two words", 'quote"inside', "Москва-😀")
+    deadline = time.monotonic() + 10.0
+    prepared = owner.prepare_native_windows_launch(
+        argv=argv, deadline_monotonic=deadline, parser_contract=contract
+    )
+    monkeypatch.setattr(module, "_acquire_executable_launch_owner",
+                        lambda *_a, **_k: pytest.fail("second executable acquisition"))
+    request = dataclasses.replace(
+        _request(module, owner, argv, "native-parser-contract-v1",
+                 expected_executable_binding=None),
+        deadline_monotonic=deadline, windows_parser_contract=contract,
+    )
+    result = owner.run(request, prepared_native_launch=prepared)
+    assert result.outcome == "success"
+    assert result.target_exit_code == 0
+    assert result.resources_closed and result.tree.tree_empty
+    assert json.loads(request.capture_sink_binding.bytes_for("stdout")) == list(argv[3:])
+    prepared.close()
+    assert owner.close().unsettled_run_token_sha256 == ()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native preparation ownership")
+@pytest.mark.parametrize("check", ("immutable", "idle-close"))
+def test_native_preparation_baseline_is_immutable_and_idle_close_releases_handles(monkeypatch, check) -> None:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    module = _load_runner()
+    monkeypatch.setattr(module, "RUNNER_CLOSE_TIMEOUT_SECONDS", 0.15)
+    owner = module.ProcessRunnerV1()
+    executable = str(Path(sys.executable).resolve())
+    contract = module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="trusted test integration declares the Python wide CRT parser",
+        origin="installed-integration",
+    )
+    argv = (executable, "-c", "pass", "original")
+    prepared = owner.prepare_native_windows_launch(
+        argv=argv, deadline_monotonic=time.monotonic() + 60, parser_contract=contract
+    )
+    held = prepared.executable_owner
+    handles = [msvcrt.get_osfhandle(held.descriptor), *held.parent_handles]
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetHandleInformation.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetHandleInformation.restype = wintypes.BOOL
+    flags = wintypes.DWORD()
+    assert handles and all(kernel.GetHandleInformation(handle, ctypes.byref(flags)) for handle in handles)
+    try:
+        if check == "immutable":
+            for field, value in (
+                ("argv", (*argv[:-1], "changed")),
+                ("deadline_monotonic", prepared.deadline_monotonic + 30),
+                ("parser_contract", dataclasses.replace(contract, basis="changed basis")),
+            ):
+                with pytest.raises(dataclasses.FrozenInstanceError):
+                    setattr(prepared, field, value)
+        started = time.monotonic()
+        result = owner.close()
+        assert result.outcome == "closed" and result.unsettled_run_token_sha256 == ()
+        assert time.monotonic() - started < 0.15
+        assert held.descriptor == -1 and not held.parent_handles
+        assert not any(kernel.GetHandleInformation(handle, ctypes.byref(flags)) for handle in handles)
+        assert prepared.lifecycle.observation.resources_closed
+        assert not owner._active and prepared.lifecycle.wait_settled(time.monotonic())
+        prepared.close()
+        assert owner.close().outcome == "closed"
+    finally:
+        # Failed pre-fix observations still release this fixture's retained owners.
+        held.close()
+        owner._release_lifecycle(prepared.lifecycle)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows immutable generic request")
+def test_native_idle_cleanup_precedes_other_lifecycle_wait_and_preserves_uncertainty(monkeypatch) -> None:
+    module = _load_runner()
+    monkeypatch.setattr(module, "RUNNER_CLOSE_TIMEOUT_SECONDS", 0.15)
+    owner = module.ProcessRunnerV1()
+    # Controlled unsettled non-preparation lifetime; no task or worker exists in this fixture.
+    other = owner._begin_lifecycle()
+    executable = str(Path(sys.executable).resolve())
+    contract = module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="trusted test integration declares the Python wide CRT parser",
+        origin="installed-integration",
+    )
+    prepared = owner.prepare_native_windows_launch(
+        argv=(executable, "-c", "pass"), deadline_monotonic=time.monotonic() + 60,
+        parser_contract=contract,
+    )
+    try:
+        result = owner.close()
+        assert result.outcome == "failed-unsettled"
+        assert result.unsettled_run_token_sha256 == (other.token.sha256,)
+        assert prepared.lifecycle.token.sha256 in result.settled_run_token_sha256
+        assert prepared.executable_owner.descriptor == -1 and not prepared.executable_owner.parent_handles
+        assert prepared.lifecycle.observation.resources_closed
+    finally:
+        prepared.executable_owner.close()
+        other.finalize_once(time.monotonic() + 1)
+        owner._release_lifecycle(other)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native cleanup uncertainty")
+def test_native_preparation_failed_close_remains_unsettled(monkeypatch) -> None:
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    executable = str(Path(sys.executable).resolve())
+    contract = module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="trusted test integration declares the Python wide CRT parser",
+        origin="installed-integration",
+    )
+    prepared = owner.prepare_native_windows_launch(
+        argv=(executable, "-c", "pass"), deadline_monotonic=time.monotonic() + 60,
+        parser_contract=contract,
+    )
+    held = prepared.executable_owner
+    close = held.close
+    prepared.lifecycle.transfer_resource(
+        "executable-launch:task",
+        lambda *_a: (_ for _ in ()).throw(OSError("synthetic close failure")), state="OWNED",
+    )
+    try:
+        with pytest.raises(module.ProcessSupervisionError) as caught:
+            prepared.close()
+        assert caught.value.failure_id == "PSV1-RESOURCE-CLOSE"
+        assert held.descriptor >= 0 and held.parent_handles
+        assert not prepared.lifecycle.observation.resources_closed
+        assert not prepared.lifecycle.wait_settled(time.monotonic())
+        assert owner._active[prepared.lifecycle.token] is prepared.lifecycle
+    finally:
+        # Creator-retained fixture cleanup; the failed product observation is preserved.
+        close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows immutable generic request")
+def test_generic_contract_refuses_list_backed_argv_before_acquisition(monkeypatch) -> None:
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    executable = str(Path(sys.executable).resolve())
+    contract = module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="trusted test integration declares the Python wide CRT parser",
+        origin="installed-integration",
+    )
+    request = dataclasses.replace(
+        _request(module, owner, (executable, "-c", "pass"), "native-parser-contract-v1",
+                 expected_executable_binding=None),
+        argv=[executable, "-c", "pass"], windows_parser_contract=contract,
+    )
+    monkeypatch.setattr(module, "_acquire_executable_launch_owner",
+                        lambda *_a, **_k: pytest.fail("mutable argv acquired an executable"))
+    result = owner.run(request)
+    assert result.failure_id == "PSV1-REQUEST-INVALID" and result.target_exit_code is None
+    assert result.resources_closed and owner.close().unsettled_run_token_sha256 == ()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native preflight failures")
+@pytest.mark.parametrize("path", ("cancel-idle", "expire-idle", "interrupt-admission", "consumed-close", "cancel-consumed", "copied-baseline"))
+def test_native_preparation_terminal_paths_keep_one_cleanup_owner(monkeypatch, path) -> None:
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    executable = str(Path(sys.executable).resolve())
+    contract = module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="trusted test integration declares the Python wide CRT parser",
+        origin="installed-integration",
+    )
+    argv = (executable, "-c", "print('original')")
+    deadline = time.monotonic() + (0.1 if path == "expire-idle" else 5)
+    prepared = owner.prepare_native_windows_launch(
+        argv=argv, deadline_monotonic=deadline, parser_contract=contract
+    )
+    request = dataclasses.replace(
+        _request(module, owner, argv, "native-parser-contract-v1", expected_executable_binding=None),
+        deadline_monotonic=deadline, windows_parser_contract=contract,
+    )
+    if path == "cancel-idle":
+        prepared.lifecycle.request_cancel()
+    elif path == "expire-idle":
+        time.sleep(max(0, deadline - time.monotonic()) + 0.01)
+    elif path == "interrupt-admission":
+        def interrupt(*_a, **_k):
+            raise KeyboardInterrupt("synthetic admission interruption")
+        monkeypatch.setattr(owner.windows_argv_admission_owner, "admit", interrupt)
+    elif path == "copied-baseline":
+        argv = (*argv[:-1], "print('changed')")
+        prepared = dataclasses.replace(prepared, argv=argv, deadline_monotonic=deadline + 30)
+        request = dataclasses.replace(request, argv=argv, deadline_monotonic=deadline + 30)
+    else:
+        original = module._WindowsBackendV1.run
+        def run(backend, *args, **kwargs):
+            prepared.close()
+            assert prepared.executable_owner.descriptor >= 0
+            assert prepared.executable_owner.parent_handles
+            assert not prepared.lifecycle.wait_settled(time.monotonic())
+            replay = owner.run(request, prepared_native_launch=prepared)
+            assert replay.failure_id == "PSV1-ARGV-ATTESTATION"
+            assert prepared.executable_owner.descriptor >= 0
+            if path == "cancel-consumed":
+                prepared.lifecycle.request_cancel()
+            return original(backend, *args, **kwargs)
+        monkeypatch.setattr(module._WindowsBackendV1, "run", run)
+    try:
+        if path == "interrupt-admission":
+            with pytest.raises(KeyboardInterrupt, match="synthetic admission"):
+                owner.run(request, prepared_native_launch=prepared)
+        else:
+            result = owner.run(request, prepared_native_launch=prepared)
+            assert result.resources_closed and not result.cleanup_uncertain and result.tree.tree_empty
+            if path in {"cancel-idle", "cancel-consumed"}:
+                assert result.failure_id == "PSV1-CANCELLED" and result.cancelled
+            elif path == "expire-idle":
+                assert result.failure_id == "PSV1-REQUEST-INVALID" and result.target_exit_code is None
+            elif path == "copied-baseline":
+                assert result.failure_id == "PSV1-ARGV-ATTESTATION" and result.target_exit_code is None
+                assert not prepared.used and prepared.executable_owner.descriptor >= 0
+                prepared.close()
+            else:
+                assert result.outcome == "success" and result.target_exit_code == 0
+                assert request.capture_sink_binding.bytes_for("stdout").strip() == b"original"
+        assert prepared.executable_owner.descriptor == -1 and not prepared.executable_owner.parent_handles
+        assert prepared.lifecycle.observation.resources_closed and not owner._active
+        assert owner.close().unsettled_run_token_sha256 == ()
+    finally:
+        prepared.executable_owner.close()
+        owner._release_lifecycle(prepared.lifecycle)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native preflight failures")
+def test_native_preflight_rejects_missing_tampered_and_unrepresentable_inputs() -> None:
+    module = _load_runner()
+    executable = str(Path(sys.executable).resolve())
+    contract = module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="trusted test integration declares the Python wide CRT parser",
+        origin="installed-integration",
+    )
+    owner = module.ProcessRunnerV1()
+    bad_contract = dataclasses.replace(contract, origin="task-config")
+    cases = (
+        ((executable, "safe"), None, None, "PSV1-ARGV-CODEC-UNSUPPORTED"),
+        ((executable, "safe"), bad_contract, None, "PSV1-ARGV-ATTESTATION"),
+        ((executable, "bad\0value"), contract, None, "PSV1-REQUEST-INVALID"),
+        ((executable, "\ud800"), contract, None, "PSV1-REQUEST-INVALID"),
+        ((executable, "x" * module.MAX_WINDOWS_COMMAND_LINE_UNITS),
+         contract, None, "PSV1-REQUEST-INVALID"),
+        ((executable, "safe"), contract,
+         module.ExecutableBindingV1(executable, 1, "0" * 64),
+         "PSV1-EXECUTABLE-UNRESOLVED"),
+    )
+    for argv, declaration, expected, failure_id in cases:
+        with pytest.raises(module.ProcessSupervisionError) as caught:
+            owner.prepare_native_windows_launch(
+                argv=argv, deadline_monotonic=time.monotonic() + 5,
+                parser_contract=declaration,
+                expected_executable_binding=expected,
+            )
+        assert caught.value.failure_id == failure_id
+    assert owner.close().unsettled_run_token_sha256 == ()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native preparation mutation")
+def test_native_preparation_rejects_changed_argv_before_create(monkeypatch) -> None:
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    executable = str(Path(sys.executable).resolve())
+    contract = module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="trusted test integration declares the Python wide CRT parser",
+        origin="installed-integration",
+    )
+    argv = (executable, "-c", "pass")
+    deadline = time.monotonic() + 5
+    prepared = owner.prepare_native_windows_launch(
+        argv=argv, deadline_monotonic=deadline, parser_contract=contract
+    )
+    monkeypatch.setattr(module._WindowsBackendV1, "run",
+                        lambda *_a, **_k: pytest.fail("task creation after mutation"))
+    request = dataclasses.replace(
+        _request(module, owner, argv, "native-parser-contract-v1",
+                 expected_executable_binding=None),
+        argv=(*argv, "changed"), deadline_monotonic=deadline,
+        windows_parser_contract=contract,
+    )
+    result = owner.run(request, prepared_native_launch=prepared)
+    assert result.failure_id == "PSV1-ARGV-ATTESTATION"
+    assert result.target_exit_code is None
+    assert result.resources_closed
+    assert owner.close().unsettled_run_token_sha256 == ()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native parser family")
+def test_declared_family_roundtrip_uses_real_rust_parser_when_available(tmp_path: Path) -> None:
+    compiler = shutil.which("rustc")
+    if compiler is None:
+        pytest.skip("Rust compiler unavailable; native fixture is optional")
+    module = _load_runner()
+    directory = tmp_path / "native parser fixture"
+    directory.mkdir()
+    executable = directory / "argv echo.exe"
+    source = (
+        "use std::os::windows::ffi::OsStrExt;\n"
+        "fn main() { for arg in std::env::args_os() {\n"
+        "for unit in arg.encode_wide() { print!(\"{unit:04x}\"); }\n"
+        "println!(); } }\n"
+    )
+    compiled = subprocess.run(
+        [compiler, "-", "--crate-name", "argv_echo", "-o", str(executable)],
+        input=source, text=True, capture_output=True, timeout=30,
+    )
+    assert compiled.returncode == 0, compiled.stderr
+    contract = module.accept_windows_parser_contract(
+        family="msvcrt-v1", domain="wide-utf16-v1", codec="msvcrt-v1",
+        basis="trusted fixture declares installed Rust std Windows argv parser",
+        origin="installed-integration",
+    )
+    owner = module.ProcessRunnerV1()
+    variable = ("", "two words", "tab\tinside", 'quote"inside',
+                "C:\\path with space\\", 'slashes\\\"quote', "Москва-😀",
+                "line\nbreak", "& | ; < > % !")
+    argv = (str(executable), *variable)
+    deadline = time.monotonic() + 10
+    prepared = owner.prepare_native_windows_launch(
+        argv=argv, deadline_monotonic=deadline, parser_contract=contract
+    )
+    request = dataclasses.replace(
+        _request(module, owner, argv, "native-parser-contract-v1",
+                 expected_executable_binding=None),
+        deadline_monotonic=deadline, windows_parser_contract=contract,
+    )
+    sink = request.capture_sink_binding
+    result = owner.run(request, prepared_native_launch=prepared)
+    assert result.outcome == "success"
+    assert result.resources_closed and result.tree.tree_empty
+    received = []
+    for encoded in sink.bytes_for("stdout").decode("ascii").splitlines():
+        wide = b"".join(
+            int(encoded[index:index + 4], 16).to_bytes(2, "little")
+            for index in range(0, len(encoded), 4)
+        )
+        received.append(wide.decode("utf-16-le"))
+    assert os.path.normcase(received[0]) == os.path.normcase(str(executable))
+    assert tuple(received[1:]) == variable
+    assert owner.close().unsettled_run_token_sha256 == ()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows argv admission consume contract")

@@ -503,7 +503,7 @@ def test_admitted_unavailable_route_stops_before_prompt_resolution_capture_probe
     )
     monkeypatch.setattr(OWNER, "prompt_bytes", forbidden("prompt_bytes"))
     monkeypatch.setattr(OWNER, "resolve_provider_command", forbidden("resolution"))
-    monkeypatch.setattr(OWNER, "resolve_enrolled_kimi_command", forbidden("enrollment"))
+    monkeypatch.setattr(OWNER, "_resolve_enrolled_kimi_launch", forbidden("resolution"))
     monkeypatch.setattr(OWNER.RunCaptureLifecycle, "create", forbidden("capture"))
     monkeypatch.setattr(OWNER, "ProcessRunnerV1", forbidden("runner"))
     monkeypatch.setattr(OWNER, "ledger_helper", forbidden("ledger"))
@@ -527,8 +527,8 @@ def _accepted_kimi_decision(task_class: str, role: str) -> dict[str, object]:
         "requiredModelTier": "balanced",
         "requiredEffort": "high",
         "mutationClass": "read-only",
-        "nativeEffort": "unsupported",
-        "effortMappingLoss": "no-native-effort-control",
+        "nativeEffort": "high",
+        "effortMappingLoss": "none",
         "finalAuthorizingRole": False,
         "executionAuthorized": True,
         "independentVerification": True,
@@ -562,7 +562,7 @@ def test_policy_rejection_stops_before_kimi_prompt_auth_enrollment_run_ledger_or
     for name in (
         "prompt_bytes",
         "resolve_provider_auth_configuration",
-        "resolve_enrolled_kimi_command",
+        "_resolve_enrolled_kimi_launch",
         "ledger_helper",
         "run_ledger",
         "run_provider_process",
@@ -578,7 +578,7 @@ def test_policy_rejection_stops_before_kimi_prompt_auth_enrollment_run_ledger_or
 
 
 @requires_windows_kimi
-def test_kimi_admission_failure_commits_nonauthorizing_terminal_without_downstream_side_effects(
+def test_kimi_command_resolution_failure_commits_nonauthorizing_terminal_without_downstream_side_effects(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -600,14 +600,14 @@ def test_kimi_admission_failure_commits_nonauthorizing_terminal_without_downstre
     monkeypatch.setattr(
         OWNER,
         "_resolve_enrolled_kimi_launch",
-        lambda: (_ for _ in ()).throw(ValueError("E_KIMI_ADMISSION_EQUIVOCATION")),
+        lambda: (_ for _ in ()).throw(ValueError("E_KIMI_EXECUTABLE_UNAVAILABLE")),
     )
     for name in (
         "prompt_bytes",
         "resolve_provider_auth_configuration",
         "ledger_helper",
         "run_ledger",
-        "materialize_kimi_agent_payload",
+        "_kimi_agent_profile",
         "run_provider_process",
     ):
         monkeypatch.setattr(OWNER, name, forbidden(name))
@@ -616,7 +616,7 @@ def test_kimi_admission_failure_commits_nonauthorizing_terminal_without_downstre
     assert OWNER.launch(
         "kimi",
         [
-            "admission-rejection",
+            "command-resolution-rejection",
             "--task-class",
             "review",
             "--role",
@@ -670,7 +670,7 @@ def test_missing_or_malformed_external_policy_loader_stops_before_kimi_side_effe
         lambda: (_ for _ in ()).throw(RuntimeError("malformed resolver")),
     )
     monkeypatch.setattr(OWNER, "prompt_bytes", forbidden("prompt"))
-    monkeypatch.setattr(OWNER, "resolve_enrolled_kimi_command", forbidden("enrollment"))
+    monkeypatch.setattr(OWNER, "_resolve_enrolled_kimi_launch", forbidden("resolution"))
     monkeypatch.setattr(OWNER, "ProcessRunnerV1", forbidden("runner"))
     monkeypatch.setattr(OWNER.RunCaptureLifecycle, "create", forbidden("capture"))
 
@@ -683,7 +683,7 @@ def test_missing_or_malformed_external_policy_loader_stops_before_kimi_side_effe
 @pytest.mark.parametrize(
     ("task_class", "role"),
     (
-        ("engineering", "backend-engineer"),
+        ("engineering", "lead"),
         ("review", "architecture-reviewer"),
         ("review", "security-reviewer"),
         ("planning", "lead"),
@@ -700,7 +700,7 @@ def test_policy_denies_unadmitted_kimi_roles_before_side_effects(
         return lambda *_args, **_kwargs: pytest.fail(f"{name} reached")
 
     monkeypatch.setattr(OWNER, "prompt_bytes", forbidden("prompt"))
-    monkeypatch.setattr(OWNER, "resolve_enrolled_kimi_command", forbidden("enrollment"))
+    monkeypatch.setattr(OWNER, "_resolve_enrolled_kimi_launch", forbidden("resolution"))
     monkeypatch.setattr(OWNER, "ProcessRunnerV1", forbidden("runner"))
     monkeypatch.setattr(OWNER.RunCaptureLifecycle, "create", forbidden("capture"))
 
@@ -713,6 +713,7 @@ def test_policy_denies_unadmitted_kimi_roles_before_side_effects(
 @pytest.mark.parametrize(
     ("task_class", "role", "execution_role"),
     (
+        ("engineering", "backend-engineer", "external-worker"),
         ("exploration", "explorer", "external-worker"),
         ("exploration", "analyst", "external-worker"),
         ("planning", "planner", "external-worker"),
@@ -745,6 +746,75 @@ def test_authorized_kimi_policy_matrix_binds_policy_role_to_provenance_before_ru
     assert prevalidated.control.ledger_role == role
     assert prevalidated.role_provenance.assigned_role == role
     assert prevalidated.role_provenance.execution_role == execution_role
+
+
+def test_kimi_consultant_wrapper_uses_real_policy_before_every_side_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decisions: list[dict[str, object]] = []
+    real_provenance = OWNER.external_execution_provenance
+
+    def capture_provenance(*args, dispatch_decision, **kwargs):
+        decisions.append(dict(dispatch_decision))
+        return real_provenance(
+            *args, dispatch_decision=dispatch_decision, **kwargs
+        )
+
+    def forbidden(name: str):
+        return lambda *_args, **_kwargs: pytest.fail(f"{name} reached")
+
+    monkeypatch.setattr(OWNER, "external_execution_provenance", capture_provenance)
+    for name in (
+        "prompt_bytes",
+        "resolve_provider_auth_configuration",
+        "resolve_provider_command",
+        "_resolve_enrolled_kimi_launch",
+        "ledger_helper",
+        "run_ledger",
+        "run_provider_process",
+    ):
+        monkeypatch.setattr(OWNER, name, forbidden(name))
+    monkeypatch.setattr(OWNER.RunCaptureLifecycle, "create", forbidden("capture"))
+    monkeypatch.setattr(OWNER, "ProcessRunnerV1", forbidden("runner"))
+
+    prevalidated = OWNER._prevalidate_policy_bound_external_launch(
+        "kimi",
+        [
+            "consultant-planning",
+            "--task-class",
+            "planning",
+            "--role",
+            "consultant",
+        ],
+    )
+
+    assert decisions == [
+        {
+            "schemaVersion": 1,
+            "status": "external-authorized",
+            "stableId": None,
+            "provider": "kimi",
+            "taskClass": "planning",
+            "role": "consultant",
+            "requiredModelTier": "balanced",
+            "requiredEffort": "high",
+            "mutationClass": "read-only",
+            "nativeEffort": "high",
+            "effortMappingLoss": "none",
+            "finalAuthorizingRole": False,
+            "executionAuthorized": True,
+            "independentVerification": True,
+            "fallback": "none",
+        }
+    ]
+    assert prevalidated.control.ledger_role == "consultant"
+    assert prevalidated.role_provenance == OWNER.ExternalRoleProvenance(
+        "consultant", "consultant"
+    )
+    assert prevalidated.provenance is not None
+    assert prevalidated.provenance.assigned_internal_role == "consultant"
+    assert prevalidated.model == "kimi-code/k3"
+    assert prevalidated.effort == "high"
 
 
 def test_kimi_launch_rejects_non_windows_before_runner(

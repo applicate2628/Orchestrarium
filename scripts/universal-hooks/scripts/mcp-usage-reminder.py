@@ -17,12 +17,16 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hook_common import emit_session_start_context
-from mcp_continuity_policy import SESSION_START_CONTEXT
-
-
 def main() -> int:
-    emit_session_start_context(SESSION_START_CONTEXT)
+    try:
+        from hook_common import emit_session_start_context
+        from mcp_continuity_policy import SESSION_START_CONTEXT
+    except Exception:
+        return 0
+    try:
+        emit_session_start_context(SESSION_START_CONTEXT)
+    except Exception:
+        return 0
     return 0
 
 

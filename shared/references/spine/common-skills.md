@@ -14,9 +14,11 @@ Common-skill index (installed names):
 - `$windows-gui-manual-testing` — delegate-style. Windows desktop GUI manual visual verification with screenshots, video frames, or live inspection across toolkit/runtime variants; owns screen capture when no recording exists, hard crop validation, and structural-vs-cosmetic classification of UI issues. Returns an evidence-backed findings package.
 - `$analyzing-video-bugs` — knowledge-style. Extract frames from any UI/animation/layout bug video (user-provided or agent-captured), locate scene transitions, dense-sample around transitions, read the smallest distinguishing frame set.
 - `$bug-hunting` — knowledge-style. Systematic runtime bug investigation via diagnostic logging: log first, never patch on unverified theory, never re-roll on guesses, remove diagnostics in the same commit cycle as the fix.
+- `$post-spawn-cleanup` — knowledge-style. Settle selected resources owned by agent spawns in the existing creator/caller context, using supported lifecycle controls and stable identity evidence; keep logical completion distinct from physical teardown and protect shared or unknown resources.
 - `$mathtype-book-page` — knowledge-style. Bring translated technical-book DOCX pages to accepted MathType format with source-PDF authority, gate discipline, and defective-chunk repair workflow.
 - `$manual-repo-transfer` — knowledge-style. Prepare a Git repository for an offline machine transfer by inventorying dirty, ignored, recovery, and runtime state; create and validate a selected byte-only transfer bundle; and produce preview-only cleanup evidence. Actual transfer waits for current tasks and pull-request gates to pass; it never authorizes deletion, wipe, or publication.
 - `$explain-simply` — knowledge-style. Turn concepts, code paths, results, decisions, or learner notes into reader-tailored plain-language explanations with analogies, explicit assumptions, and term definitions.
+- `$implementation-to-theory` — knowledge-style. Reconstruct the theory, numerical algorithms, and derivation behind existing scientific code with equation-to-implementation traceability, explicit conventions and limitations, and verified technical illustrations; it does not authorize solver changes, expensive computations, or publication.
 
 ## Terms and Abbreviations
 

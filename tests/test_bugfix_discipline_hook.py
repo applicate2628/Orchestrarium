@@ -96,6 +96,31 @@ def denies(p: subprocess.CompletedProcess) -> bool:
     return '"permissionDecision"' in p.stdout and '"deny"' in p.stdout
 
 
+def test_framed_patch_invocation_variants_share_code_guard() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        transcript = Path(directory) / "turn.jsonl"
+        transcript.write_text(
+            json.dumps(user("fix the broken renderer")) + "\n" +
+            json.dumps(assistant("Looking at the failure.")) + "\n",
+            encoding="utf-8",
+        )
+        markdown = "*** Begin Patch\n*** Update File: docs/guide.md\n@@\n-old\n+new\n*** End Patch"
+        code = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"
+        for script in HOOKS:
+            for name in ("apply_patch", "functions.apply_patch"):
+                for key in ("command", "patch", "input"):
+                    envelope = {"transcript_path": str(transcript), "tool_name": name, "tool_input": {key: markdown}}
+                    result = subprocess.run([sys.executable, "-B", str(script)], input=json.dumps(envelope),
+                                            capture_output=True, text=True, encoding="utf-8")
+                    assert result.returncode == 0 and result.stdout == "" and result.stderr == ""
+                for payload in ({"patch": code}, {"patch": markdown, "input": markdown},
+                                {"patch": markdown.replace("*** End Patch", "*** Update File: src/app.py\n@@\n+x\n*** End Patch")}):
+                    envelope = {"transcript_path": str(transcript), "tool_name": name, "tool_input": payload}
+                    result = subprocess.run([sys.executable, "-B", str(script)], input=json.dumps(envelope),
+                                            capture_output=True, text=True, encoding="utf-8")
+                    assert result.returncode == 0 and denies(result) and result.stderr == ""
+
+
 class TestBugfixDisciplineGenuineUser(unittest.TestCase):
     def assert_outcome(self, entries: list[dict], should_deny: bool, tool_name: str = "Edit") -> None:
         for script in HOOKS:
@@ -199,10 +224,16 @@ class TestBugfixDisciplineGenuineUser(unittest.TestCase):
             should_deny=False,
         )
 
-    def test_override_marker_allows(self) -> None:
+    def test_assistant_override_marker_does_not_allow(self) -> None:
         self.assert_outcome(
             [user("fix this broken typo in the heading"),
              assistant("[skip-bugfix-discipline] this is a docs edit, not a bug fix.")],
+            should_deny=True,
+        )
+
+    def test_genuine_user_override_marker_allows(self) -> None:
+        self.assert_outcome(
+            [user("fix this broken typo [skip-bugfix-discipline]"), assistant("Looking now.")],
             should_deny=False,
         )
 
@@ -221,7 +252,7 @@ class TestBugfixDisciplineGenuineUser(unittest.TestCase):
 
     def test_override_marker_in_tool_result_does_not_allow(self) -> None:
         # The marker echoed in tool output (e.g. a grep of a doc that documents
-        # it) must NOT disable the guard — only the assistant's own reply can.
+        # it) must NOT disable the guard — only genuine user text can.
         # 8+ tracked repo files literally contain the marker, so this is reachable.
         self.assert_outcome(
             [user("the service is broken, fix it"), assistant("looking"),
@@ -250,7 +281,7 @@ class TestBugfixDisciplineGenuineUser(unittest.TestCase):
 
     def test_claude_tool_use_input_override_does_not_allow(self) -> None:
         # The marker inside a tool_use input (e.g. editing a doc that documents
-        # the marker) must NOT disable the guard — only the assistant's prose can.
+        # the marker) must NOT disable the guard — only genuine user text can.
         self.assert_outcome(
             [user("the parser is broken, fix it"),
              assistant_tool_use("Edit", {"file_path": "CLAUDE.md",
@@ -340,7 +371,7 @@ class TestBugfixExemptPaths(unittest.TestCase):
     def test_skill_md_absolute_skills_root_exempt(self) -> None:
         # The reported false-positive precedent: a new skill authored under the global skills root.
         self.assert_exempt(
-            {"file_path": r"C:\Users\dev\.claude\skills\vak-dissertation-review\SKILL.md", "content": "x"},
+            {"file_path": r"C:\Users\<you>\.claude\skills\vak-dissertation-review\SKILL.md", "content": "x"},
             exempt=True,
         )
 
@@ -364,6 +395,76 @@ class TestBugfixExemptPaths(unittest.TestCase):
     def test_mydocs_substring_is_not_exempt(self) -> None:
         # 'mydocs' is NOT the '/docs/' path segment -> the file stays guarded.
         self.assert_exempt({"file_path": "src/mydocs/x.py", "content": "x"}, exempt=False)
+
+    def test_apply_patch_docs_only_is_exempt(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/guide.md\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=True, tool_name="apply_patch")
+
+    def test_apply_patch_markdown_report_outside_docs_is_exempt(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: bug-inbox/report.md\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=True, tool_name="apply_patch")
+
+    def test_write_markdown_report_outside_docs_is_exempt(self) -> None:
+        self.assert_exempt({"file_path": "bug-inbox/report.md", "content": "x"}, exempt=True)
+
+    def test_apply_patch_work_item_only_is_exempt(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Add File: work-items/active/x/status.md\n+Status: active\n*** End Patch"},
+                           exempt=True, tool_name="apply_patch")
+
+    def test_apply_patch_patch_field_docs_only_is_exempt(self) -> None:
+        self.assert_exempt({"patch": "*** Begin Patch\n*** Delete File: docs/old.md\n*** End Patch"},
+                           exempt=True, tool_name="apply_patch")
+
+    def test_apply_patch_mixed_docs_and_code_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/guide.md\n@@\n-old\n+new\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_mixed_markdown_report_and_code_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: bug-inbox/report.md\n@@\n-old\n+new\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_declared_paths_share_write_edit_exemption(self) -> None:
+        cases = (
+            ("scratch JSON add", "*** Add File: .scratch/reviews/result.json\n+{}"),
+            ("report update", "*** Update File: .reports/2026-06/result.csv\n@@\n-old\n+new"),
+            ("plan delete", "*** Delete File: .plans/2026-06/state.yaml"),
+            ("task-to-doc move", "*** Update File: work-items/active/x/tool.py\n*** Move to: docs/tool.py\n@@\n-old\n+new"),
+            ("docs text add", "*** Add File: docs/data.txt\n+artifact"),
+        )
+        for label, body in cases:
+            with self.subTest(case=label):
+                self.assert_exempt({"patch": f"*** Begin Patch\n{body}\n*** End Patch"},
+                                   exempt=True, tool_name="apply_patch")
+
+    def test_write_code_under_docs_retains_existing_exemption(self) -> None:
+        self.assert_exempt({"file_path": "docs/tool.py", "content": "x"}, exempt=True)
+
+    def test_apply_patch_move_from_code_to_docs_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: src/app.py\n*** Move to: docs/app.md\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_move_from_docs_to_code_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/guide.md\n*** Move to: src/app.py\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_traversal_out_of_docs_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/../src/app.py\n@@\n-old\n+new\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_unframed_docs_header_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Update File: docs/guide.md\n@@\n-old\n+new"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_malformed_docs_body_still_denies(self) -> None:
+        self.assert_exempt({"command": "*** Begin Patch\n*** Update File: docs/guide.md\nnot a patch hunk\n*** End Patch"},
+                           exempt=False, tool_name="apply_patch")
+
+    def test_apply_patch_ambiguous_carrier_still_denies(self) -> None:
+        patch = "*** Begin Patch\n*** Delete File: docs/old.md\n*** End Patch"
+        self.assert_exempt({"command": patch, "patch": patch}, exempt=False, tool_name="apply_patch")
+
+    def test_write_traversal_out_of_docs_still_denies(self) -> None:
+        self.assert_exempt({"file_path": "docs/../src/app.py", "content": "x"}, exempt=False)
 
 
 if __name__ == "__main__":

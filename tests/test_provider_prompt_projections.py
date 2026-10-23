@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import tarfile
 import shutil
@@ -13,8 +14,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
-from tests.fixtures.git_history import archive_revision
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -325,6 +324,162 @@ def _load_installer():
     return module
 
 
+def _receipted_predecessor(tmp_path: Path):
+    installer = _load_installer()
+    canonical = tmp_path / ".agents" / "skills"
+    peer = tmp_path / ".claude" / "agents" / "scripts"
+    peer.mkdir(parents=True)
+    stage = installer._stage_canonical_lead_tree(
+        ROOT, ROOT / "src.codex" / "skills" / "lead", canonical / "lead" / "scripts",
+    )
+    try:
+        canonical.mkdir(parents=True)
+        shutil.copytree(stage.path, canonical / "lead")
+        for name in TRANSPORT_FILES:
+            target = peer / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((stage.path / "scripts" / name).read_bytes())
+        manifest_relative = Path("shared") / installer.TRANSPORT_PROJECTION_MANIFEST
+        peer_manifest = peer.parent / manifest_relative
+        peer_manifest.parent.mkdir(parents=True)
+        old_payload = (canonical / "lead/scripts/provider_prompt.py").read_bytes() + b"\n# alternate supported generation\n"
+        manifest = json.loads((stage.path / manifest_relative).read_bytes())
+        manifest["packRevision"] = "alternate-supported-generation"
+        manifest["files"]["provider_prompt.py"]["sha256"] = _sha(old_payload)
+        encoded = (json.dumps(manifest, indent=2) + "\n").encode()
+        for base in (canonical / "lead", peer.parent):
+            (base / "scripts/provider_prompt.py").write_bytes(old_payload)
+            (base / manifest_relative).write_bytes(encoded)
+        receipt = canonical / installer._LEAD_RECEIPT_NAME
+        receipt.write_bytes(installer._lead_receipt_bytes(
+            installer._tree_sha256(canonical / "lead", ignore_runtime_cache=True)))
+        return installer, canonical, peer, stage
+    except BaseException:
+        shutil.rmtree(stage.path)
+        raise
+
+
+@pytest.mark.parametrize("change", ("self-consistent-peer", "missing-receipt", "partial", "mixed"))
+def test_general_predecessor_requires_complete_owner_binding(tmp_path: Path, change: str) -> None:
+    installer, canonical, peer, desired = _receipted_predecessor(tmp_path)
+    try:
+        if change == "missing-receipt":
+            (canonical / installer._LEAD_RECEIPT_NAME).unlink()
+        elif change == "partial":
+            (peer / "provider_prompt.py").unlink()
+        elif change == "mixed":
+            (peer / "invoke-codex-prompt.py").write_bytes(b"mixed generation\n")
+        else:
+            changed = (peer / "provider_prompt.py").read_bytes() + b"# foreign change\n"
+            (peer / "provider_prompt.py").write_bytes(changed)
+            path = peer.parent / "shared" / installer.TRANSPORT_PROJECTION_MANIFEST
+            manifest = json.loads(path.read_bytes())
+            manifest["files"]["provider_prompt.py"]["sha256"] = _sha(changed)
+            path.write_bytes((json.dumps(manifest) + "\n").encode())
+        before = installer._InstallTransaction._observe(peer.parent)
+        proof = installer._transport_predecessor(ROOT, canonical, peer)
+        assert proof is None
+        with pytest.raises(ValueError, match="E_TRANSPORT_PROJECTION_PARITY"):
+            installer._stage_claude_transport_projection(ROOT, desired.path / "scripts", peer, predecessor=proof)
+        assert installer._InstallTransaction._observe(peer.parent) == before
+    finally:
+        shutil.rmtree(desired.path)
+
+
+def test_captured_predecessor_survives_only_same_owner_effect(tmp_path: Path) -> None:
+    installer, canonical, peer, desired = _receipted_predecessor(tmp_path)
+    source = tmp_path / "source-skills"
+    source.mkdir()
+    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
+    try:
+        plan = installer._preflight_canonical_skills(source, canonical, root=ROOT, claude_transport_root=peer)
+        try:
+            with installer._InstallTransaction([canonical], enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+                lead = next(skill for skill in plan.skills if skill.name == "lead")
+                owner.replace_exact_tree((canonical / "lead").relative_to(tmp_path), lead.installed_digest, lead.source,
+                                         ignore_runtime_cache=True)
+                installer._apply_canonical_skills_plan(plan, canonical, owner, root=ROOT, claude_transport_root=peer)
+                installer._finalize_canonical_lead_receipt(plan, canonical, owner)
+                transaction.commit()
+            assert (peer / "provider_prompt.py").read_bytes() == (ROOT / "scripts/provider_prompt.py").read_bytes()
+        finally:
+            installer._discard_canonical_skills_plan(plan)
+    finally:
+        shutil.rmtree(desired.path)
+
+
+@pytest.mark.parametrize("changed", ("peer", "receipt", "stage"))
+def test_predecessor_plan_rejects_deterministic_pre_effect_drift(tmp_path: Path, changed: str) -> None:
+    installer, canonical, peer, desired = _receipted_predecessor(tmp_path)
+    source = tmp_path / "source-skills"
+    source.mkdir()
+    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
+    try:
+        plan = installer._preflight_canonical_skills(source, canonical, root=ROOT, claude_transport_root=peer)
+        try:
+            path = {"peer": peer / "provider_prompt.py",
+                    "receipt": canonical / installer._LEAD_RECEIPT_NAME,
+                    "stage": plan.stage.path / "scripts/provider_prompt.py"}[changed]
+            path.write_bytes(path.read_bytes() + b"\nforeign drift\n")
+            before = installer._InstallTransaction._observe(canonical)
+            owner = installer._CreateOnlyMutablePath(tmp_path, installer._InstallTransaction([], enabled=False), dry_run=False)
+            with pytest.raises(ValueError):
+                installer._apply_canonical_skills_plan(plan, canonical, owner, root=ROOT, claude_transport_root=peer)
+            assert installer._InstallTransaction._observe(canonical) == before
+            assert owner.transaction._effects == []
+        finally:
+            installer._discard_canonical_skills_plan(plan)
+    finally:
+        shutil.rmtree(desired.path)
+
+
+def test_unsupported_required_directory_move_refuses_before_coupled_effects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    installer, canonical, peer, desired = _receipted_predecessor(tmp_path)
+    source = tmp_path / "source-skills"
+    source.mkdir()
+    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
+    before = installer._InstallTransaction._observe(canonical)
+    peer_before = installer._InstallTransaction._observe(peer.parent)
+    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(lambda *_args: False))
+    try:
+        with pytest.raises(ValueError, match="required directory no-replace capability unavailable"):
+            installer._preflight_canonical_skills(source, canonical, root=ROOT, claude_transport_root=peer)
+        assert installer._InstallTransaction._observe(canonical) == before
+        assert installer._InstallTransaction._observe(peer.parent) == peer_before
+    finally:
+        shutil.rmtree(desired.path)
+
+
+def test_same_owner_reclaim_and_receipt_effects_preserve_predecessor_currency(tmp_path: Path) -> None:
+    installer, canonical, peer, desired = _receipted_predecessor(tmp_path)
+    source = tmp_path / "source-skills"
+    source.mkdir()
+    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
+    obsolete = source / "lead" / "obsolete-example.txt"
+    obsolete.write_bytes(b"declared obsolete example\n")
+    try:
+        plan = installer._preflight_canonical_skills(source, canonical, root=ROOT, claude_transport_root=peer)
+        try:
+            with installer._InstallTransaction([canonical], enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+                lead = next(skill for skill in plan.skills if skill.name == "lead")
+                owner.replace_exact_tree((canonical / "lead").relative_to(tmp_path), lead.installed_digest, lead.source,
+                                         ignore_runtime_cache=True)
+                reclaimed = installer._reclaim_retired(canonical, {"lead/obsolete-example.txt": _sha(obsolete.read_bytes())},
+                                                      False, transaction=transaction, mutable_owner=owner)
+                installer._finalize_canonical_lead_receipt(plan, canonical, owner, reclaimed)
+                installer._apply_canonical_skills_plan(plan, canonical, owner, root=ROOT, claude_transport_root=peer)
+                installer._finalize_canonical_lead_receipt(plan, canonical, owner, reclaimed)
+                transaction.commit()
+            assert (peer / "provider_prompt.py").read_bytes() == (ROOT / "scripts/provider_prompt.py").read_bytes()
+            assert not (canonical / "lead/obsolete-example.txt").exists()
+        finally:
+            installer._discard_canonical_skills_plan(plan)
+    finally:
+        shutil.rmtree(desired.path)
+
+
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -357,6 +512,9 @@ def test_validator_rejects_provider_taxonomy_digest_literal_mismatch(
     mismatched = (
         'EXTERNAL_ROLE_TAXONOMY_SHA256 = "'
         + ("0" * 64)
+        + '"\n'
+        + 'EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = "'
+        + _sha((source / "shared" / "external-prompt-governance.md").read_bytes())
         + '"\n'
     ).encode("utf-8")
     for path in (
@@ -393,6 +551,56 @@ def test_source_manifest_binds_approved_codex_and_claude_thin_wrappers() -> None
     for name in ("invoke-codex-prompt.py", "invoke-claude-prompt.py"):
         assert manifest["files"][name]["source"] == f"scripts/{name}"
         assert (ROOT / "scripts" / name).is_file()
+
+
+@pytest.mark.parametrize("declaration", ("stale", "missing", "computed", "duplicate", "annotated-shadow"))
+def test_governance_binding_rejects_drift_even_with_rehashed_manifest(tmp_path, declaration):
+    validator = _load_validator()
+    source, canonical, claude, manifest_path = _fixture(tmp_path)
+    module = source / "scripts" / "provider_prompt.py"
+    original = module.read_text(encoding="utf-8")
+    binding = next(line for line in original.splitlines(True) if line.startswith("EXTERNAL_GOVERNANCE_CAPSULE_SHA256"))
+    replacement = {
+        "stale": 'EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = "' + "0" * 64 + '"\n',
+        "missing": "",
+        "computed": 'EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = str("computed")\n',
+        "duplicate": binding + binding,
+        "annotated-shadow": binding + 'EXTERNAL_GOVERNANCE_CAPSULE_SHA256: str = "shadow"\n',
+    }[declaration]
+    payload = original.replace(binding, replacement).encode("utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["provider_prompt.py"]["sha256"] = _sha(payload)
+    for path in (module, canonical / "provider_prompt.py", claude / "provider_prompt.py"):
+        path.write_bytes(payload)
+    encoded = json.dumps(manifest).encode("utf-8")
+    manifest_path.write_bytes(encoded)
+    (source / "shared" / manifest_path.name).write_bytes(encoded)
+    for validate in (
+        lambda: validator.validate_source_manifest(manifest_path, source),
+        lambda: validator.validate_projection_manifest(manifest_path, source, (("canonical", canonical), ("claude-host", claude))),
+    ):
+        with pytest.raises(validator.ProjectionParityError, match="external governance digest literal"):
+            validate()
+
+
+def test_governance_binding_accepts_regenerated_policy_projection(tmp_path):
+    validator = _load_validator()
+    source, canonical, claude, manifest_path = _fixture(tmp_path)
+    spine = source / "shared" / "AGENTS.shared.md"
+    spine.write_bytes(spine.read_bytes().replace(b"# external-prompt-governance.md\n", b"synthetic changed policy\n"))
+    capsule = validator.extract_external_governance_projection(spine)
+    module = source / "scripts" / "provider_prompt.py"
+    payload = module.read_bytes().replace(_sha(b"# external-prompt-governance.md\n").encode(), _sha(capsule).encode())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for name, raw in (("external-prompt-governance.md", capsule), ("provider_prompt.py", payload)):
+        for path in (_authored_transport_path(source, name), canonical / name, claude / name):
+            path.write_bytes(raw)
+        manifest["files"][name]["sha256"] = _sha(raw)
+    encoded = json.dumps(manifest).encode("utf-8")
+    manifest_path.write_bytes(encoded)
+    (source / "shared" / manifest_path.name).write_bytes(encoded)
+    validator.validate_source_manifest(manifest_path, source)
+    validator.validate_projection_manifest(manifest_path, source, (("canonical", canonical), ("claude-host", claude)))
 
 
 def test_governance_capsule_has_shared_authored_source_and_scripts_runtime_destination() -> None:
@@ -438,6 +646,19 @@ def _linked_global_claude(
     return logical, backing
 
 
+def _linked_global_canonical_agents(tmp_path: Path, home: Path) -> tuple[Path, Path]:
+    logical = home / ".agents"
+    backing_parent = tmp_path / "OneDrive - operator"
+    backing_parent.mkdir()
+    backing = backing_parent / "canonical-agents"
+    shutil.move(str(logical), str(backing))
+    try:
+        os.symlink(backing, logical, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    return logical, backing
+
+
 def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     source = tmp_path / "source"
     canonical = tmp_path / "canonical" / "scripts"
@@ -453,8 +674,10 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
             payload = taxonomy_payload
         elif name == "provider_prompt.py":
             taxonomy_digest = hashlib.sha256(taxonomy_payload).hexdigest()
+            governance_digest = _sha(b"# external-prompt-governance.md\n")
             payload = (
                 f'EXTERNAL_ROLE_TAXONOMY_SHA256 = "{taxonomy_digest}"\n'
+                f'EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = "{governance_digest}"\n'
             ).encode("utf-8")
         else:
             payload = f"# {name}\n".encode()
@@ -502,6 +725,96 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         source / "scripts" / "validate-provider-prompt-projections.py",
     )
     return source, canonical, claude, manifest
+
+
+def _write_fixture_taxonomy(source: Path, roles: dict[str, str]) -> None:
+    payload = (
+        json.dumps({"schemaVersion": 1, "roles": roles}, indent=2) + "\n"
+    ).encode("utf-8")
+    (source / "shared" / "external-role-taxonomy.v1.json").write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    (source / "scripts" / "provider_prompt.py").write_text(
+        f'EXTERNAL_ROLE_TAXONOMY_SHA256 = "{digest}"\n'
+        f'EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = "{_sha((source / "shared" / "external-prompt-governance.md").read_bytes())}"\n',
+        encoding="utf-8"
+    )
+
+
+def test_external_role_taxonomy_accepts_current_34_indexed_and_35_mapped_roles(
+    tmp_path: Path,
+) -> None:
+    validator = _load_validator()
+    source, _canonical, _claude, _manifest = _fixture(tmp_path)
+    taxonomy = json.loads(
+        (source / "shared" / "external-role-taxonomy.v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    role_index = (source / "shared" / "AGENTS.shared.md").read_text(
+        encoding="utf-8"
+    ).split("\n## Common skills", 1)[0]
+
+    assert len(set(re.findall(r"\$([a-z][a-z0-9-]+)", role_index))) == 34
+    assert len(taxonomy["roles"]) == 35
+    validator._validate_external_role_taxonomy(source)
+
+
+@pytest.mark.parametrize("mutation", ("missing", "extraneous"))
+def test_external_role_taxonomy_rejects_role_set_drift(
+    tmp_path: Path, mutation: str
+) -> None:
+    validator = _load_validator()
+    source, _canonical, _claude, _manifest = _fixture(tmp_path)
+    taxonomy_path = source / "shared" / "external-role-taxonomy.v1.json"
+    roles = json.loads(taxonomy_path.read_text(encoding="utf-8"))["roles"]
+    if mutation == "missing":
+        del roles["scientific-software-engineer"]
+    else:
+        roles["synthetic-worker"] = "external-worker"
+    _write_fixture_taxonomy(source, roles)
+
+    with pytest.raises(
+        validator.ProjectionParityError,
+        match="E_TRANSPORT_PROJECTION_PARITY: external role taxonomy parity",
+    ):
+        validator._validate_external_role_taxonomy(source)
+
+
+def test_external_role_taxonomy_rejects_duplicate_indexed_role(tmp_path: Path) -> None:
+    validator = _load_validator()
+    source, _canonical, _claude, _manifest = _fixture(tmp_path)
+    governance = source / "shared" / "AGENTS.shared.md"
+    text = governance.read_text(encoding="utf-8")
+    text = text.replace(
+        "- Implementation:",
+        "- Implementation: `$scientific-software-engineer`,",
+        1,
+    )
+    governance.write_bytes(text.encode("utf-8"))
+
+    with pytest.raises(
+        validator.ProjectionParityError,
+        match="E_TRANSPORT_PROJECTION_PARITY: shared role index membership",
+    ):
+        validator._validate_external_role_taxonomy(source)
+
+
+def test_external_role_taxonomy_reports_changed_category_label(tmp_path: Path) -> None:
+    validator = _load_validator()
+    source, _canonical, _claude, _manifest = _fixture(tmp_path)
+    governance = source / "shared" / "AGENTS.shared.md"
+    text = governance.read_text(encoding="utf-8")
+    assert "- Roadmap and orchestration:" in text
+    text = text.replace(
+        "- Roadmap and orchestration:", "- Roadmap/orchestration:", 1
+    )
+    governance.write_bytes(text.encode("utf-8"))
+
+    with pytest.raises(
+        validator.ProjectionParityError,
+        match="E_TRANSPORT_PROJECTION_PARITY: shared role index categories",
+    ):
+        validator._validate_external_role_taxonomy(source)
 
 
 def _run_scoped_validator(
@@ -651,9 +964,102 @@ def test_global_scope_accepts_installer_authorized_linked_claude_agents(
     assert '"projections":["canonical","claude-host"]' in result.stdout
 
 
+def test_global_scope_accepts_installer_authorized_linked_canonical_agents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    logical_claude, _claude_backing = _linked_global_claude(
+        tmp_path, monkeypatch, installer
+    )
+    _logical_agents, _agents_backing = _linked_global_canonical_agents(
+        tmp_path, logical_claude.parent
+    )
+
+    result = _run_scoped_validator("global", ROOT, logical_claude.parent)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '"projections":["canonical","claude-host"]' in result.stdout
+
+
+def test_installed_validator_bootstraps_pinned_authority_through_linked_canonical_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    logical_claude, _claude_backing = _linked_global_claude(
+        tmp_path, monkeypatch, installer
+    )
+    logical_agents, agents_backing = _linked_global_canonical_agents(
+        tmp_path, logical_claude.parent
+    )
+    installed_validator = (
+        agents_backing
+        / "skills"
+        / "lead"
+        / "scripts"
+        / "validate-provider-prompt-projections.py"
+    )
+    shutil.copyfile(VALIDATOR_PATH, installed_validator)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(
+                logical_agents
+                / "skills"
+                / "lead"
+                / "scripts"
+                / "validate-provider-prompt-projections.py"
+            ),
+            "--require",
+            "--scope",
+            "global",
+            "--source-root",
+            str(ROOT),
+            "--install-root",
+            str(logical_claude.parent),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '"projections":["canonical","claude-host"]' in result.stdout
+
+
+def test_global_scope_rejects_linked_leaf_below_authorized_canonical_agents_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    logical_claude, _claude_backing = _linked_global_claude(
+        tmp_path, monkeypatch, installer
+    )
+    _logical_agents, agents_backing = _linked_global_canonical_agents(
+        tmp_path, logical_claude.parent
+    )
+    leaf = agents_backing / "skills" / "lead" / "scripts" / TRANSPORT_FILES[0]
+    replacement = tmp_path / "linked-canonical-provider-prompt.py"
+    shutil.copyfile(leaf, replacement)
+    leaf.unlink()
+    try:
+        os.symlink(replacement, leaf)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"file symlink unavailable: {exc}")
+
+    result = _run_scoped_validator("global", ROOT, logical_claude.parent)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith(
+        "E_TRANSPORT_PROJECTION_PARITY: "
+        "canonical/provider_prompt.py linked runtime authority"
+    )
+
+
 def test_linked_runtime_subroots_helper_is_pinned_to_canonical_digest() -> None:
     validator = _load_validator()
-    expected_digest = "7df6b9d36875eb4588fee959e29dc46adac3ed1753839031ae5d04885b28fb11"
+    expected_digest = "eaf91693f8ccd63c23206e95175f353b503b9cb45e643a25fad82f918fbb26e0"
 
     assert validator._LINKED_RUNTIME_SUBROOTS_SHA256 == expected_digest
     assert _sha((ROOT / "scripts" / "linked_runtime_subroots.py").read_bytes()) == expected_digest
@@ -1010,7 +1416,9 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
         "process_supervision/process_runner.py",
+        "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1027,31 +1435,37 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
         (
             "d1309ee5",
             STOCK_D130_PROJECTION_SHA256,
-                (
-                    "provider_prompt.py",
-                    "process_supervision/process_runner.py",
-                    "invoke-kimi-prompt.py",
-                    "external-role-taxonomy.v1.json",
+            (
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "invoke-kimi-prompt.py",
+                "external-prompt-governance.md",
+                "external-role-taxonomy.v1.json",
             ),
         ),
         (
             "f87414e7",
             STOCK_F874_PROJECTION_SHA256,
-                (
-                    "provider_prompt.py",
-                    "process_supervision/process_runner.py",
-                    "invoke-kimi-prompt.py",
-                    "external-role-taxonomy.v1.json",
+            (
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "invoke-kimi-prompt.py",
+                "external-prompt-governance.md",
+                "external-role-taxonomy.v1.json",
             ),
         ),
         (
             "9a637574",
             STOCK_9A63_PROJECTION_SHA256,
-                (
-                    "provider_prompt.py",
-                    "process_supervision/process_runner.py",
-                    "invoke-kimi-prompt.py",
-                    "external-role-taxonomy.v1.json",
+            (
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "invoke-kimi-prompt.py",
+                "external-prompt-governance.md",
+                "external-role-taxonomy.v1.json",
             ),
         ),
         (
@@ -1060,6 +1474,9 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
             (
                 "provider_prompt.py",
                 "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "external-prompt-governance.md",
+                "external-role-taxonomy.v1.json",
             ),
         ),
         (
@@ -1068,16 +1485,22 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
             (
                 "provider_prompt.py",
                 "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "external-prompt-governance.md",
+                "external-role-taxonomy.v1.json",
             ),
         ),
+        (
+            "7192c914",
+            STOCK_7192_PROJECTION_SHA256,
             (
-                "7192c914",
-                STOCK_7192_PROJECTION_SHA256,
-                (
-                    "provider_prompt.py",
-                    "process_supervision/process_runner.py",
-                ),
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "external-prompt-governance.md",
+                "external-role-taxonomy.v1.json",
             ),
+        ),
     ),
 )
 def test_exact_published_transport_set_is_one_atomic_prior_plan(
@@ -1304,6 +1727,18 @@ def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifes
             STOCK_448E_PROJECTION_SHA256["process_supervision/process_runner.py"],
         ),
         (
+            "scripts/invoke-codex-prompt.py",
+            STOCK_448E_PROJECTION_SHA256["invoke-codex-prompt.py"],
+        ),
+        (
+            "scripts/external-prompt-governance.md",
+            STOCK_448E_PROJECTION_SHA256["external-prompt-governance.md"],
+        ),
+        (
+            "scripts/external-role-taxonomy.v1.json",
+            STOCK_448E_PROJECTION_SHA256["external-role-taxonomy.v1.json"],
+        ),
+        (
             "shared/provider-prompt-projections.v1.json",
             STOCK_448E_PROJECTION_SHA256["provider-prompt-projections.v1.json"],
         ),
@@ -1339,7 +1774,9 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
         "process_supervision/process_runner.py",
+        "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1350,7 +1787,7 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     } == STOCK_8521_PROJECTION_SHA256
 
 
-def test_exact_7872_six_member_transport_is_one_atomic_seven_member_plan(
+def test_exact_7872_six_member_transport_is_one_atomic_nine_member_plan(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
@@ -1367,7 +1804,9 @@ def test_exact_7872_six_member_transport_is_one_atomic_seven_member_plan(
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
         "process_supervision/process_runner.py",
+        "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1639,7 +2078,7 @@ def test_8521_transport_final_parity_failure_restores_original_identities(
     assert not tuple(projection.parent.rglob("*.prior"))
 
 
-def test_8521_transport_real_install_replaces_five_members_then_is_noop(
+def test_8521_transport_real_install_replaces_seven_members_then_is_noop(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
@@ -1674,7 +2113,11 @@ def test_8521_transport_real_install_replaces_five_members_then_is_noop(
     assert after_first[current_manifest.name][1] != before_identities[current_manifest.name]
     for name in set(paths) - {
         "provider_prompt.py",
+        "process_supervision/process_runner.py",
+        "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
+        "external-role-taxonomy.v1.json",
         current_manifest.name,
     }:
         assert after_first[name][1] == before_identities[name]
@@ -1690,7 +2133,7 @@ def test_8521_transport_real_install_replaces_five_members_then_is_noop(
     } == after_first
 
 
-def test_8521_transport_dry_run_reports_five_replacements_without_mutation(
+def test_8521_transport_dry_run_reports_seven_replacements_without_mutation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     installer = _load_installer()
@@ -1708,7 +2151,7 @@ def test_8521_transport_dry_run_reports_five_replacements_without_mutation(
 
     assert installer.install("claude", [*args, "--dry-run"]) == 0
     output = capsys.readouterr().out
-    assert "transport prior 8521b638: 5 replacements" in output
+    assert "transport prior 8521b638: 7 replacements" in output
     assert {
         name: (
             path.read_bytes(),
@@ -1785,7 +2228,12 @@ def test_e7_six_tree_upgrade_rolls_back_after_middle_replacement(
     installer = _load_installer()
     snapshot = tmp_path / "e7-source"
     snapshot.mkdir()
-    archive = archive_revision(ROOT, "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c")
+    archive = subprocess.run(
+        ["git", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(snapshot, filter="data")
     target = tmp_path / "target"
@@ -1806,6 +2254,28 @@ def test_e7_six_tree_upgrade_rolls_back_after_middle_replacement(
         path.relative_to(canonical).as_posix(): path.read_bytes()
         for path in canonical.rglob("*") if path.is_file()
     }
+    e7_current_skill_priors = {
+        skill.name: installer._tree_sha256(skill, ignore_runtime_cache=True)
+        for skill in canonical.iterdir()
+        if skill.is_dir() and (ROOT / "src.codex" / "skills" / skill.name).is_dir()
+    }
+    assert installer.E7_CANONICAL_SKILL_TREE_SHA256 == e7_current_skill_priors
+    # This test owns skill-tree rollback, not admission of unrelated e7 native
+    # roles. Keep the e7 skill trees intact and align only role files whose e7
+    # bytes have no current accepted-prior route.
+    for name in (
+        "analyst",
+        "backend-engineer",
+        "explorer",
+        "knowledge-archivist",
+        "planner",
+        "qa-engineer",
+    ):
+        installed_role = target / ".codex" / "agents" / f"{name}.toml"
+        old_role = snapshot / "src.codex" / "agents" / f"{name}.toml"
+        current_role = ROOT / "src.codex" / "agents" / f"{name}.toml"
+        assert installed_role.read_bytes() == old_role.read_bytes()
+        installed_role.write_bytes(current_role.read_bytes())
     original = installer._CreateOnlyMutablePath.replace_exact_tree
     calls = 0
 
@@ -1841,7 +2311,10 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
     installer = _load_installer()
     snapshot = tmp_path / "e7-source"
     snapshot.mkdir()
-    archive = archive_revision(ROOT, "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c")
+    archive = subprocess.run(
+        ["git", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
+        cwd=ROOT, check=True, capture_output=True,
+    ).stdout
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(snapshot, filter="data")
     target = tmp_path / "target"

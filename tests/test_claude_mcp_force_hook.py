@@ -1,4 +1,4 @@
-"""Claude root MCP-force enforcement and installer migration contract."""
+"""Claude mandatory MCP-force reminders and installer migration contract."""
 
 from __future__ import annotations
 
@@ -98,6 +98,7 @@ def _run_hook(
     agent_id: str | None = None,
     tool_name: str = "Grep",
     tool_input: dict | None = None,
+    transcript_path: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     (repo / ".git").mkdir(parents=True, exist_ok=True)
     if mode is not None:
@@ -107,7 +108,7 @@ def _run_hook(
     envelope: dict = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
-        "transcript_path": str(transcript),
+        "transcript_path": str(transcript if transcript_path is None else transcript_path),
         "tool_name": tool_name,
         "tool_input": tool_input or {"pattern": "def parse_config"},
     }
@@ -212,7 +213,7 @@ def test_entrypoints_are_thin_consumers_of_neutral_scalar_owner() -> None:
     assert "def resolve_scalar(" in owner_source
 
 
-def test_force_root_denies_every_qualifying_search_after_prior_mcp(
+def test_force_root_reminds_mandatory_duty_without_claiming_compliance(
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
@@ -222,33 +223,34 @@ def test_force_root_denies_every_qualifying_search_after_prior_mcp(
         "tool_use: mcp__codegraph__codegraph_explore",
         "tool_result: MCP query succeeded",
     )
+    plain = _run_hook(repo, home, with_server=False)
     first = _run_hook(repo, home, injected_text=injected, with_server=False)
     second = _run_hook(repo, home, injected_text=injected, with_server=True)
 
-    for result in (first, second):
+    for result in (plain, first, second):
         specific = _specific(result)
         assert specific["hookEventName"] == "PreToolUse"
-        assert specific["permissionDecision"] == "deny"
-        reason = specific["permissionDecisionReason"]
-        assert "[MCP-FORCE-1]" in reason
-        assert "runtime tool discovery" in reason
+        assert "permissionDecision" not in specific
+        reason = specific["additionalContext"]
+        assert "[MCP-FORCE-ADVISORY]" in reason
+        assert "runtime tool discovery" in reason.casefold()
+        assert "mandatory" in reason and "has not determined compliance" in reason
+        assert "alternative-path restrictions" in reason and "host refusals" in reason
         assert "codegraph" not in reason.casefold()
         assert "credential-bearing" not in reason
         assert "must-not-leak" not in reason
         assert "[MCP-FORCE-NO-SERVER]" not in reason
+    assert _specific(plain) == _specific(first) == _specific(second)
 
 
-def test_exact_host_projected_user_role_marker_is_one_turn_and_injection_safe(
+def test_projected_and_injected_marker_text_never_grants_permission(
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
     home = tmp_path / "home"
     repo.mkdir()
 
-    allowed = _run_hook(repo, home, user_text=RECOVERY_MARKER)
-    allowed_specific = _specific(allowed)
-    assert "permissionDecision" not in allowed_specific
-    assert "[MCP-FORCE-RECOVERY]" in allowed_specific["additionalContext"]
+    projected = _run_hook(repo, home, user_text=RECOVERY_MARKER)
 
     injected = _run_hook(
         repo,
@@ -256,27 +258,32 @@ def test_exact_host_projected_user_role_marker_is_one_turn_and_injection_safe(
         user_text="continue normally",
         injected_text=(RECOVERY_MARKER,),
     )
-    assert _specific(injected)["permissionDecision"] == "deny"
-    assert "[MCP-FORCE-1]" in _specific(injected)["permissionDecisionReason"]
-
     next_turn = _run_hook(repo, home, user_text="continue normally")
-    assert _specific(next_turn)["permissionDecision"] == "deny"
+    for result in (projected, injected, next_turn):
+        specific = _specific(result)
+        assert specific["hookEventName"] == "PreToolUse"
+        assert "permissionDecision" not in specific
+        assert "[MCP-FORCE-ADVISORY]" in specific["additionalContext"]
+        assert "has not determined compliance" in specific["additionalContext"]
+    assert _specific(projected) == _specific(injected) == _specific(next_turn)
 
 
-def test_forged_host_shaped_user_jsonl_is_accepted_documented_limitation(
-    tmp_path: Path,
+@pytest.mark.parametrize("transcript_state", ("missing", "malformed"))
+def test_force_reminder_does_not_require_transcript_bookkeeping(
+    tmp_path: Path, transcript_state: str,
 ) -> None:
     repo = tmp_path / "repo"
     home = tmp_path / "home"
     repo.mkdir()
 
-    # The fixture writes JSONL directly; it proves shape recognition, not human
-    # authentication. This accepted recovery is the documented local trust limit.
-    forged = _run_hook(repo, home, user_text=RECOVERY_MARKER)
-    specific = _specific(forged)
+    transcript = repo / "unused-transcript.jsonl"
+    if transcript_state == "malformed":
+        transcript.write_bytes(b"{broken\n")
+    specific = _specific(_run_hook(repo, home, transcript_path=transcript))
+    assert specific["hookEventName"] == "PreToolUse"
     assert "permissionDecision" not in specific
-    assert "[MCP-FORCE-RECOVERY]" in specific["additionalContext"]
-    assert "not authenticated" in specific["additionalContext"]
+    assert "[MCP-FORCE-ADVISORY]" in specific["additionalContext"]
+    assert "has not determined compliance" in specific["additionalContext"]
 
 
 @pytest.mark.parametrize(
@@ -362,7 +369,7 @@ def test_malformed_envelope_fails_open_without_output(tmp_path: Path) -> None:
     assert result.stderr == ""
 
 
-def test_installer_registers_one_claude_script_identity_and_leaves_codex_path(
+def test_installer_registers_one_claude_script_identity_without_codex_audit(
     tmp_path: Path,
 ) -> None:
     claude_specs = {
@@ -378,9 +385,7 @@ def test_installer_registers_one_claude_script_identity_and_leaves_codex_path(
         "PreToolUse",
         "Grep|Bash|PowerShell|shell_command|exec_command",
     )
-    assert codex_specs["check-mcp-momentum"][0] == (
-        tmp_path / "hooks" / "check-mcp-momentum.py"
-    )
+    assert "check-mcp-momentum" not in codex_specs
     assert len([name for name in claude_specs if name == "check-mcp-momentum"]) == 1
 
 

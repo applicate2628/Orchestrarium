@@ -72,6 +72,96 @@ def test_repo_cleanup_contract_is_transient_coordinator_only() -> None:
         "REVISE:cleanup-capacity-unresolved",
     ):
         assert required in body
+
+
+def test_work_items_selection_requires_an_exhaustive_immediate_child_census() -> None:
+    for path in (CODEX_SKILL, CLAUDE_SKILL, REFERENCE):
+        text = path.read_text(encoding="utf-8")
+        for required in (
+            "when `work-items/` is selected",
+            "every immediate child exactly once",
+            "`category | derived | repository-local exception | unknown`",
+            "audit `PASS` does not satisfy this census",
+            "`unknown` remains preserved",
+            "yields `REVISE`",
+        ):
+            assert required.casefold() in text.casefold(), (
+                f"{path.relative_to(ROOT)} missing {required!r}"
+            )
+
+
+def test_scratch_is_temporary_until_canonical_results_are_promoted() -> None:
+    spine = SPINE.read_text(encoding="utf-8")
+    for required in (
+        "`.scratch/` is disposable task storage",
+        "before completion, canonically promote load-bearing results",
+        "then settle owned temp state",
+        "Never delete unfinished/foreign/ambiguous/host-denied state",
+    ):
+        assert required in spine
+
+    for path in (CODEX_SKILL, CLAUDE_SKILL):
+        text = path.read_text(encoding="utf-8")
+        for required in (
+            "canonical pointer does not make scratch archival",
+            "promote required results before task completion",
+            "then settle owned temporary scratch",
+        ):
+            assert required in text, f"{path.relative_to(ROOT)} missing {required!r}"
+
+    for relative in (
+        "src.codex/skills/lead/SKILL.md",
+        "src.claude/skills/lead/SKILL.md",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        for required in (
+            "`retain` is transitional, not archival",
+            "promotes required results before task completion",
+            "later settles owned temporary scratch",
+        ):
+            assert required.casefold() in text.casefold(), (
+                f"{relative} missing {required!r}"
+            )
+
+    for relative in (
+        "src.codex/skills/manual-repo-transfer/SKILL.md",
+        "src.claude/skills/manual-repo-transfer/SKILL.md",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        for required in (
+            "promote required scratch results to canonical artifacts",
+            "raw scratch only while recovery requires it",
+        ):
+            assert required.casefold() in text.casefold(), (
+                f"{relative} missing {required!r}"
+            )
+
+
+def test_host_refusal_preserves_target_without_bypass_or_false_pass() -> None:
+    surfaces = (CODEX_SKILL, CLAUDE_SKILL, REFERENCE)
+    required = (
+        "host refuses a validated owner action before execution",
+        "disposition `preserved`",
+        "redacted refusal reason",
+        "pre-action and post-refusal settlement probe results",
+        "no alternate shell, API, provider, command shape, retry, or allow-rule",
+        "same validated action",
+        "root main conversation and its existing current work-item",
+        "independent non-overlapping work continues",
+        "Artifact disposition and project hygiene",
+    )
+    for path in surfaces:
+        text = path.read_text(encoding="utf-8")
+        for fragment in required:
+            assert fragment.casefold() in text.casefold(), (
+                f"{path.relative_to(ROOT)} missing {fragment!r}"
+            )
+
+    body = _body(CODEX_SKILL)
+    assert "owner-action-refused" not in body
+    assert "new refusal disposition" not in body
+
+
 def test_repo_cleanup_fixed_hysteresis_and_report_rows_are_complete() -> None:
     body = _body(CODEX_SKILL)
     for boundary in (
@@ -124,9 +214,55 @@ def test_lead_and_receiving_contracts_fail_closed_on_self_residue() -> None:
         assert "Dead/superseded code disposition" in text
 
 
+def test_lead_intermediate_acceptance_uses_producer_owned_resource_echo() -> None:
+    for relative in (
+        "src.codex/skills/lead/SKILL.md",
+        "src.claude/skills/lead/SKILL.md",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        acceptance = text.split(
+            "Lead acceptance is a mechanical completeness gate:", 1
+        )[1].split("When an accepted artifact asserts a root cause", 1)[0]
+        for bounded_control in (
+            "producing artifact's current receiving-side echo",
+            "`Cleanup disposition`",
+            "`ResourceRowV1`",
+            "no selected owned resources",
+            "without a fresh repository-wide `RepoCleanupReportV1`",
+            "the label alone is not evidence",
+            "unsettled owned resources",
+            "`none` claim contradicted by a row or current evidence",
+            "`REVISE:self-residue`",
+        ):
+            assert bounded_control in acceptance
+
+        for full_cleanup_trigger in (
+            "is required only when",
+            "`$repo-cleanup` is selected",
+            "a transfer contract requires it",
+            "concrete evidence makes the bounded owner inventory insufficient",
+        ):
+            assert full_cleanup_trigger in acceptance
+
+        for preserved_full_report_control in (
+            "current-invocation `RepoCleanupReportV1` with status `PASS`",
+            "same physical repository identity and `HEAD`/unborn state",
+            "missing, stale, incomplete, null, non-`PASS`, or non-zero "
+            "unsettled residue/unclassified rows",
+            "Valid `ephemeral-volume-exempt` rows",
+            "never authorizes cleanup or substitutes for an owner verdict",
+        ):
+            assert preserved_full_report_control in acceptance
+
+        assert (
+            "For every Lead-managed acceptance, require one complete "
+            "current-invocation `RepoCleanupReportV1`"
+        ) not in acceptance
+
+
 def test_transfer_receiving_contract_enforces_one_ordered_cleanup_chain() -> None:
     expected = (
-        "cleanup PASS -> final inventory -> bundle -> trusted verify -> "
+        "cleanup PASS or qualifying deferred residue accounted -> final inventory -> bundle -> trusted verify -> "
         "post-transfer classification"
     )
     for relative in (
@@ -138,6 +274,35 @@ def test_transfer_receiving_contract_enforces_one_ordered_cleanup_chain() -> Non
         assert "current-invocation" in text
         assert "RepoCleanupReportV1" in text
         assert "does not run cleanup again" in text
+
+
+def test_action_local_blockers_and_final_transfer_classification() -> None:
+    operating_model = (ROOT / "shared/references/subagent-operating-model.md").read_text(
+        encoding="utf-8"
+    )
+    assert "bind each prerequisite to the exact action it prevents" in operating_model
+    assert "independently ready admitted work continues" in operating_model
+
+    for relative in (
+        "src.codex/skills/lead/SKILL.md",
+        "src.claude/skills/lead/SKILL.md",
+    ):
+        lead = (ROOT / relative).read_text(encoding="utf-8")
+        assert "grouped gate is not a global stop" in lead
+        assert "independently ready admitted action" in lead
+
+    cleanup = REFERENCE.read_text(encoding="utf-8")
+    assert "selected work-item and owned bug-inbox obligations" in cleanup
+    assert "byte-verified ZIP is only a provisional recovery snapshot" in cleanup
+    assert "explicit direct transfer without cleanup" in cleanup
+
+    for relative in (
+        "src.codex/skills/manual-repo-transfer/SKILL.md",
+        "src.claude/skills/manual-repo-transfer/SKILL.md",
+    ):
+        transfer = (ROOT / relative).read_text(encoding="utf-8")
+        assert "provisional recovery snapshot, not final handoff" in transfer
+        assert "direct transfer without cleanup" in transfer
 
 
 def test_turn_anchor_emits_direct_root_no_self_residue_invariant() -> None:

@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
-"""Validate the AGENTS.md spine: size budget + lose-nothing protection manifest.
+"""Validate spine integrity and report size, with an optional local budget.
 
-Task 6 safety net. `shared/AGENTS.shared.md` is installed VERBATIM as the target
-`AGENTS.md` (install-claude.sh:829-830) and is always-loaded by the main
-conversation. Claude Code warns when a context file exceeds 40,000 chars, so we
-shed weight by moving non-enforcing ELABORATION to on-demand `shared/references/`
-files (read via the Read tool, NOT @import -- imports load at launch and save
-nothing). But every enforceable PROTECTION must stay in the spine, or main-conv
-loses it. Reference docs confirm: @import does not reduce context; on-demand
-reference files do.
+Size is informational unless a selected local budget is supplied through
+--size-cap or validate(size_cap). That budget compares the larger of decoded
+code points and re-encoded UTF-8 bytes; it is not a loader or model-quality
+limit. Required protections remain in the canonical shared governance spine.
 
 This validator fails closed if:
-  (a) the spine exceeds SIZE_CAP in code points or UTF-8 bytes (the size goal), OR
+  (a) the spine exceeds an explicitly selected local size budget, OR
   (b) any required protection token is missing from the spine -- i.e. a cut
       silently dropped a rule's operational teeth (banned-phrase list, trigger,
-      gate name, required probe, safety clause, status label).
+      gate name, required probe, safety clause, status label), OR
+  (c) a named reference pointer is dead or a present extract card is orphaned.
+Missing files and read/decode failures retain their failed/nonzero outcomes.
 
 "A reference link is not enforcement" (Codex design pass): the manifest pins the
 TEACHABLE TEETH that must remain in the always-loaded spine, not merely exist in
@@ -39,15 +37,6 @@ from pathlib import Path
 # The extract lists only current spine cards, so parity needs no compatibility
 # exception for retired or folded names.
 MERGED_INTO_SPINE: frozenset[str] = frozenset()
-
-# Claude Code warns when an always-loaded context file exceeds 40,000 chars.
-# SIZE_CAP is the spine ceiling the validator enforces: 39,900 keeps a 100-unit
-# guard band below the warning; measured as max(code points, UTF-8 bytes)
-# because Claude's own counting unit is unverified and the spine's non-ASCII
-# content makes bytes the binding measure. Headroom comes from assigning each
-# invariant one current owner and keeping provider/domain detail in its existing
-# local owner; do not raise the cap to preserve duplicate cards.
-SIZE_CAP = 39_900
 
 # --- lose-nothing manifest -------------------------------------------------
 # Each entry is an exact substring that MUST remain in the spine. Grouped by
@@ -212,9 +201,10 @@ DESTRUCTIVE_POLARITY_TEETH = [
 ]
 
 GUARD_PRECONDITION_TEETH = [
-    "verify its own inputs satisfy its assumptions",
-    "missing, zero, empty, parse-fallback, both-sides-equal-by-default",
-    "fail closed on each",
+    "check input assumptions",
+    "missing, zero, empty, parse-fallback and both-sides-equal-by-default inputs",
+    "Accept observed contract-valid input",
+    "otherwise fail closed",
     "synthetically-degraded inputs",
     "never silently weaken the invariant",
 ]
@@ -261,8 +251,8 @@ MANIFEST: dict[str, list[str]] = {
 }
 
 
-def validate(spine_path: Path, size_cap: int = SIZE_CAP) -> tuple[bool, list[str]]:
-    """Return (ok, messages). ok is False if size or any manifest token fails."""
+def validate(spine_path: Path, size_cap: int | None = None) -> tuple[bool, list[str]]:
+    """Return integrity verdict/messages, also enforcing any selected budget."""
     messages: list[str] = []
     ok = True
 
@@ -272,13 +262,14 @@ def validate(spine_path: Path, size_cap: int = SIZE_CAP) -> tuple[bool, list[str
     text = spine_path.read_text(encoding="utf-8")
     chars = len(text)
     utf8_bytes = len(text.encode("utf-8"))
-    # Claude Code's 40,000 warning unit is not empirically pinned (bytes vs
-    # code points). max() is conservative under either unit, so the cap holds
-    # regardless; the spine's non-ASCII chars (em-dashes, arrows, Cyrillic)
-    # make UTF-8 bytes the larger, binding measure.
+    # Retain the existing explicit-budget metric; this is not loader raw bytes.
     size = max(chars, utf8_bytes)
 
-    if size <= size_cap:
+    if size_cap is None:
+        messages.append(
+            f"INFO: spine size {size} (code points {chars}, UTF-8 bytes {utf8_bytes}; no local size budget selected)"
+        )
+    elif size <= size_cap:
         messages.append(
             f"PASS: spine size {size} <= {size_cap} (code points {chars}, UTF-8 bytes {utf8_bytes})"
         )
@@ -356,8 +347,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--size-cap",
         type=int,
-        default=SIZE_CAP,
-        help=f"Max spine size, applied to max(code points, UTF-8 bytes) (default: {SIZE_CAP}).",
+        default=None,
+        help="Selected local size budget for max(code points, UTF-8 bytes); omitted: informational size only.",
     )
     args = parser.parse_args(argv)
 
