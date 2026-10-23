@@ -48,6 +48,19 @@ def test_current_claude_reference_mirror_is_contract_complete() -> None:
     assert "PASS: Russian hook-behavior-contracts payload pin" in messages
 
 
+def test_russian_typed_routing_documents_nonblocking_delivery() -> None:
+    paragraph = next(
+        paragraph
+        for paragraph in RU_REFERENCE.read_text(encoding="utf-8").split("\n\n")
+        if paragraph.startswith("**Аудит Typed-routing.**")
+    )
+
+    for required in ("hookSpecificOutput.additionalContext", "stdout", "кодом 0"):
+        assert required in paragraph
+    for stale in ("stderr", "кодом 1"):
+        assert stale not in paragraph
+
+
 @pytest.mark.parametrize(
     ("old", "new", "failure_id"),
     (

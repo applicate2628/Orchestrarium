@@ -24,8 +24,8 @@ USER_CONTROL_MARKER = re.compile(
     r"\[(?:approve|skip|acknowledge|revoke)[^\]\r\n]*\]"
 )
 RU_HOOK_BEHAVIOR_PAYLOAD_PIN = (
-    24_600,
-    "f870d78be219bcf5c6c442a121347dd47bc19e3edb38be5fbaeef583b996b983",
+    24_602,
+    "e9f8496cd0ab27f58086c9627397d56cf20d1ba4a7821f67bf95f8d914b3a5b4",
 )
 
 SHARED_MANIFEST: dict[str, tuple[str | re.Pattern[str], ...]] = {
