@@ -179,8 +179,11 @@ without evidence. Define adoption/update/deletion/reclaim semantics with the exi
 owner. Native-role removal is not whole-pack uninstall or shared-skill ownership.
 
 **Acceptance:** independently read back files, registrations and ownership together;
-probe interruption/rollback, customized or foreign roles, legacy adoption and repeated
-apply. New ordinary roles/releases should be data, not a migration branch each time.
+probe managed rollback, customized or foreign roles, legacy adoption and repeated
+apply. Existing transaction rollback does not prove crash-atomicity: test restart
+after abrupt termination/power loss, reconcile partial persisted state before retry,
+and preserve foreign changes. Reuse the existing owner, not a new recovery service.
+New ordinary roles/releases should be data, not a migration branch each time.
 Verify global/project and provider differences where they affect the accepted contract.
 Coordinate npm through this owner, not a second package state manager.
 
@@ -377,23 +380,46 @@ permission. Reuse existing handoff, prompt composition and installation. No new
 policy platform, hook, transport, mandatory review stage or plugin runtime. If not
 needed, explicitly retire the mechanism rather than silently losing the outcome.
 
-## Delivery order and completion decisions
+## Delivery decisions and next slices
 
-1. Accept this scope register and resolve package-contract recovery, representative
-   evaluation tasks and policy-preference need. Record the execution-platform choices
-   only when their concrete use cases are known. Unknown details remain open.
-2. In parallel where owners are independent: specify npm delivery and native-role
-   lifecycle; trace a real routing caller; design the matched evaluations. Do not
-   sequence all work behind cross-host infrastructure.
-3. Implement bounded, independently reviewed owner-local slices after their contracts
-   are accepted. Evaluate first with existing mechanisms; add a comparator only if
-   it delivers useful improvement. Carry only demonstrated dependencies between
-   packaging, lifecycle, execution portability and continuation.
-4. Verify the selected installed/platform matrix, matched task outcomes and failure
-   cases. Update release/operator documentation from actual evidence. For the 2.0
-   release, Product Manager and Lead explicitly settle every retained outcome as
-   delivered, deferred with owner/next step, or intentionally retired with rationale;
-   one comparator slice is not completion of the entire product plan.
+This is a proposed delivery package, not authorization to implement or a declaration
+that all seven outcomes are mandatory for the first release. Current admission,
+replanning, review, recovery and generalization governance are the foundation, not
+new 2.0 deliverables. Product Manager and Lead must accept the release scope; an
+open optional choice holds only its dependent slice.
+
+**Next bounded work, independently where inputs and owners permit:**
+1. Toolchain Engineer: reconstruct the npm contract and trace the distributable
+   payload/runtime dependencies (item 1). Present supported targets, explicit apply
+   and removal semantics, and external versus bundled Python for decision. Package
+   investigation does not wait for native-role mutation, Rust or cross-host work.
+2. Toolchain Engineer with Architect: define native-role ownership transitions and
+   the legacy-adoption boundary (item 2), using the existing installer transaction.
+   Implement only after that contract is accepted; npm consumes this slice only for
+   lifecycle actions that actually need it, not as a second ownership manager.
+3. Lead and QA Engineer: trace one real admitted routing caller and select matched
+   evaluation tasks/oracles (items 3–4). Start from existing rationale and evidence;
+   identify missing comparative evidence without launching providers. New runs need
+   approved candidates, data and budget. A comparator remains a later decision based
+   on demonstrated benefit, not the first implementation deliverable.
+
+**Separate conditional decisions:** choose an execution use case/platform before
+item 5; compare owner-local Python completion with the bounded Rust alternative,
+not an assumed rewrite. Choose a concrete stopped-handoff need before item 6;
+live takeover is a separate conditional capability. Decide named preferences in
+item 7 only if ordinary instructions fail a recurring need. Neither these choices
+nor Kimi `auto`/Grok integration block the independent work above; each retains its
+own admission, owner and evidence requirement. No optional outcome is silently lost.
+
+After accepting a slice, implement and independently review its smallest coherent
+owner-local change against its outcome's acceptance and the failure probes below.
+For release, verify the selected installed/platform matrix and actual task outcomes;
+settle each retained outcome as delivered, deferred with owner/next step, or explicitly
+retired with rationale. A plan, library selection or comparator alone is not 2.0.
+
+The separate Claude current-version research in PR #16 is outside this 2.0 package.
+Do not absorb its work or make it a release dependency without an identified shared
+contract; consume accepted findings through their existing owners when relevant.
 
 Current-source reconciliation, not a claim about PR merge state or installed behavior:
 - [b719ef77](https://github.com/applicate2628/Orchestrarium/commit/b719ef77bd2ebfad44daa7088c71595c9825403b)
