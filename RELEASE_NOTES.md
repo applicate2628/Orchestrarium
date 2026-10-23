@@ -13,6 +13,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - Decision lifecycle checks now admit valid case variants of current V1 metadata consistently across close, migration, replay and normalization while preserving existing legacy readers, link handling and rollback behavior. Identity normalization reuses the lifecycle owner’s native directory creation/removal, so valid decision maintenance no longer invalidates its own custody checks; malformed, duplicate or mismatched metadata still fails before effects.
 - Shared general-case guidance now requires owner-level mechanisms to work for unfamiliar scenarios valid under the accepted contract, without extending scope to hypothetical behavior.
 - Product Manager keeps the existing ordinary planning skill-only route, while ordinary external dispatch now requires an explicit `external-worker` or `external-reviewer` taxonomy lane. This closes the cross-provider path that previously authorized role eligibility alone; Lead guidance still keeps extra functionality outside delivery until the user explicitly agrees to its bounded scope.
+- Reuse guidance now requires assessing ready-component replacement for task-implicated complex custom code, preferring replacement only when constraints fit and whole-lifecycle complexity, error risk, or maintenance burden falls; superseded logic and tests are retired while required contract coverage remains.
 
 ## 2026-10-22
 
