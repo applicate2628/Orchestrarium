@@ -12,12 +12,12 @@ workstream; it does not wait for Rust, npm or the rest of 2.0.
 
 Replace concrete fragile execution/coordination glue with maintained components,
 without building another framework. OpenAI Agents SDK supplies coordination mechanics;
-Agent Client Protocol (ACP) supplies a common agent transport through adapters.
-They solve different problems: using ACP is not adopting an Agents SDK coordinator,
-and a model API is not a substitute for a provider coding runtime.
+Provider adapters use their selected native SDK or Agent Client Protocol (ACP).
+ACP is local to Kimi/Grok adapters, not the common orchestration abstraction.
+A model API is not a substitute for a provider coding runtime.
 
-This project owns SDK-1 contract fixtures, SDK-2 ACP plumbing replacement,
-SDK-3 structured review and SDK-4 a bounded coordinator mode. Each implementation PR
+This project owns SDK-1 shared contract fixtures, SDK-2 an Agents/Codex vertical
+slice, SDK-3 remaining provider adapters and SDK-4 qualified glue removal. Each implementation PR
 names actual deleted glue and preserved receiving behavior. Native deterministic
 operations, common-hook Rust replacement and npm distribution remain in PR17;
 ranking/evaluation, expanded role lifecycle and cross-host takeover remain in
@@ -36,16 +36,19 @@ moves the SDK design, not the earlier manual-trust documentation/test repair in 
 - One small domain execution-tool boundary carries admitted task/scope/profile/run
   identity to provider adapters and receives results/evidence. It is not a parallel
   schema registry or universal scheduler. Keep protocol/vendor types at adapters.
-- Adapters own transport and provider-specific evidence/capabilities. Prefer one
-  Python ACP client, not mandatory Python and Rust client stacks or proxy services.
+- Adapters own transport and provider-specific evidence/capabilities. Codex and
+  Claude use direct official SDKs; Kimi/Grok use ACP stdio. The optional shared ACP
+  client is an implementation dependency of those two adapters only, not a core
+  protocol, mandatory prerequisite for other adapters or a proxy service.
 - Existing deterministic operations and project-state writers retain their contracts
   and sole ownership. They remain Python today; later Rust replacements from PR17
   are consumed through those boundaries, not prerequisites for SDK integration.
-- Each child has one lifecycle owner: SDK adapter for SDK-created children, native
-  supervision for native-created children. Cancellation acknowledgement proves
-  neither descendant settlement nor rollback. Missing required bounded capture,
-  private-path or settlement evidence holds only that execution lane. A stream-reader
-  limit alone is not a total-output bound.
+- Each process tree has one OS containment/settlement owner. The adapter owns SDK
+  protocol/session cleanup, not a competing tree-kill mechanism. SDK-created
+  descendants must remain within the admitted containment boundary. Cancellation
+  acknowledgement proves neither settlement nor rollback. Missing required capture,
+  private-path or settlement evidence holds that lane; a stream-reader limit alone
+  is not a total-output bound.
 - SDK conversations, traces and RunState are not authoritative work-item/review/run
   ledgers. Source-only operation stores/activation registries remain disabled and
   nonauthorizing; changing SDK or transport does not activate them.
@@ -72,42 +75,88 @@ of the declared contract, not provisioning the environment. Existing CLI-owned A
 operations retain their actual CLI/account prerequisites. No whole-product
 Python-free claim follows from a future native hook port.
 
-## Python SDK and generic provider execution boundary
+## Selected architecture and one source of truth
 
-Evaluate the official
-[manager-as-tools pattern](https://github.com/openai/openai-agents-python/blob/main/docs/multi_agent.md)
-for unified Python coordination that retains control over specialist results.
-The SDK supplies the agent loop and conversation/tool-call/session mechanics, not a
-new homemade scheduler, Orchestrarium policy, project-state authority or permission.
-Use one [Python ACP client](https://github.com/agentclientprotocol/python-sdk) behind
-the Agents execution tool as the common agent transport, not a new wire protocol.
-Keep the existing small domain execution contract; one ACP runtime maps it to the
-protocol without leaking full ACP/Codex types into coordination or state owners.
-Prefer stable ACP version 1; optional/draft extensions require a demonstrated need.
-The [Rust ACP SDK](https://github.com/agentclientprotocol/rust-sdk) is an alternative
-for a proven native-client requirement, not a second mandatory client. No proxy,
-conductor or daemon is required merely to unify adapters.
+The common layer is Python plus the official
+[OpenAI Agents SDK](https://github.com/openai/openai-agents-python), using its
+[manager-as-tools pattern](https://github.com/openai/openai-agents-python/blob/main/docs/multi_agent.md).
+Our small Python executor interface is exposed as an Agents SDK tool. It adapts
+existing domain requests/results, not a new wire protocol or homegrown framework.
+Provider-specific SDK/ACP types never become the coordinator's domain types.
 
-Upstream candidates are [Codex ACP](https://github.com/agentclientprotocol/codex-acp)
-over Codex App Server, [Claude ACP](https://github.com/agentclientprotocol/claude-agent-acp)
-over Claude Agent SDK, [native Kimi ACP](https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/reference/kimi-acp.md),
-and [Grok Build ACP](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md). Protocol availability
-is not Orchestrarium admission or qualified capability/platform coverage: current
-Codex/Claude/Kimi rules remain, and Grok stays unavailable here until separately admitted.
-Codex-specific SDK/protocol extensions are adapter-local only for proven ACP gaps,
-explicitly selected rather than automatic fallback or a second transport for the same
-case. Codex is not restricted to rare tasks; existing admission selects eligible work.
+One source of truth means one canonical owner per contract/state, not one giant
+module or one physical file. Existing governance/profile/admission owners determine
+allowed behavior; current project writers own durable state. Adapters translate
+accepted inputs and observations, not copy rules, decide closure or maintain shadow
+project ledgers. Native provider sessions and SDK conversation history may retain
+transport/conversation state, but neither supersedes authoritative project state.
 
-The tool reuses run/work-item identity, role/scope, admitted route and constraints,
-mapping required task capabilities to ACP rather than inventing parallel schemas.
-Adapters must start an admitted scoped operation and return a verified terminal
-result, using ACP requests/updates/cancellation/permission rather than parallel
-messages. Reconciliation/resume and usage coverage are negotiated capabilities;
-missing usage is unknown, not zero. Missing required capability fails typed
-unsupported before effects. Resume is not a new turn or replay of uncertain effects;
-cancel acknowledgement proves neither rollback nor descendant settlement. Permission
-callbacks use existing human authority, not self-approval or an operating-system sandbox.
-Keep capability data in existing routing, not a new registry.
+Selected adapter implementations:
+- **Codex:** direct [official Python Codex SDK](https://github.com/openai/codex/blob/main/sdk/python/README.md)
+  (`openai-codex`) over Codex App Server. No Codex-to-ACP wrapper and no alternative
+  experimental Agents `codex_tool` for the same operation. The latter is a different
+  integration, not an alias for the selected SDK.
+- **Claude:** direct [official Claude Agent SDK for Python](https://github.com/anthropics/claude-agent-sdk-python).
+  No extra Claude-to-ACP translation. Bind and qualify the SDK's selected bundled
+  or explicit CLI instead of silently changing the installed runtime.
+- **Kimi:** its [native ACP stdio interface](https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/reference/kimi-acp.md).
+  Preserve the existing fixed-profile/readback/cleanup contract. Reuse an official
+  [Python ACP client](https://github.com/agentclientprotocol/python-sdk) only where
+  it demonstrably replaces wire plumbing without weakening those guarantees.
+- **Grok Build:** its [native ACP stdio interface](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md).
+  It remains unavailable under current Orchestrarium execution policy; this is a
+  design target, not activation or permission to probe it. No WebSocket server,
+  relay or alternate transport until a concrete remote use case justifies it.
+
+These are chosen integration paths, not a claim of measured reliability or qualified
+platform support. Pin tested released SDK/CLI combinations in dependency locks;
+upstream development-branch source is not a qualified released package.
+Verify the chosen release exists and supports the required public API;
+do not follow floating `latest`, draft protocol extensions or untested version
+combinations. Prefer the stable ACP core; capability negotiation governs required
+extensions. One selected path per operation, no automatic SDK/ACP/CLI fallback,
+parallel duplicate execution or extra Python/Rust ACP stack.
+
+The executor accepts the existing admitted work-item/run/artifact, role, exact
+provider/profile, scope and constraints. It yields normalized observations and the
+existing nonauthorizing terminal/evidence result through current receiving owners.
+It exposes only operations actually required by the initial workflow: execute and
+cancel, with resume/reconciliation admitted when supported. A native session/call ID
+is mapped to domain identity, never used as authority. External agent output enters
+as untrusted tool/evidence content, not a user instruction or steering command.
+Use supported native external-message semantics when needed and qualify their
+version requirements; never upgrade authority by falling back to plain user text. Capability data stays with
+existing routing/admission. Unsupported required capability is reported before
+effects; absent usage is unknown, not zero. Permission callbacks consult current
+human authority. Cancel acknowledgement is not rollback or descendant settlement.
+
+### Conservative provider boundary requirements
+
+- Codex [high-level API defaults](https://github.com/openai/codex/blob/main/sdk/python/docs/api-reference.md)
+  include `auto_review`. For the first read-only slice explicitly select the SDK's
+  read-only sandbox and `deny_all`; the latter means no approval escalation, not
+  prohibition of all tool execution. Qualify actual filesystem/network/tool scope.
+  High-level constructors do not expose a custom approval callback. The direct
+  low-level [CodexClient](https://github.com/openai/codex/blob/main/sdk/python/src/openai_codex/client.py)
+  does, but its default handler accepts command/file-change requests. Any later
+  approval-required lane must qualify a supported explicit current-authority handler;
+  do not patch private SDK fields, inherit permissive defaults or pretend the
+  high-level client provides a callback it lacks.
+- Codex client environment overrides merge with the parent environment, so an
+  `env` dictionary alone does not prove credential isolation. Its direct-child
+  shutdown does not prove descendant settlement; a line-count stderr buffer is
+  not a byte bound. Qualify clean credential scope, total-output bounds and process
+  settlement through supported interfaces and existing owners. If those required
+  guarantees cannot be supplied, hold that lane; do not add a permissive fallback
+  or claim a library selection has solved the gap.
+- Claude's `allowed_tools` is an auto-approval allowlist, not removal of all other
+  tools. Configure actual tool availability, denials and permission callbacks
+  deliberately; never copy permissive example settings. Qualify instruction loading
+  and resume behavior against the selected CLI version so revised rules are not
+  assumed to replace a saved prompt automatically.
+- Kimi/Grok approval requests use existing authority; no always-approve/yolo mode
+  merely because an upstream automation example uses it. Local stdio avoids new
+  ports/server credentials but still needs bounded capture and owned process cleanup.
 
 The [current result parser](../scripts/provider_prompt.py) requires the v2 execution
 path to be `direct-external-cli`. New SDK-owned routes need one narrowly admitted
@@ -139,16 +188,63 @@ capability receipts and explicit omissions, redaction, and session close/delete
 settlement. Generic ACP availability is not equivalence to this existing adapter.
 
 Application-programming-interface (API) model access, existing CLI capability,
-provider admission and account billing are separate: ACP unifies agent transport,
-not coordinator-model API access. Select and verify each adapter's authentication/
-billing lane and credential environment; no coordinator-key inheritance or default
-fallback may silently switch its intended account/billing route. Codex-specific SDK
-alternatives need particular care with [API-key inheritance](https://github.com/openai/openai-agents-python/blob/main/docs/tools.md#experimental-codex-tool).
+provider admission and account billing are separate. Agents SDK coordinator-model
+API access is not supplied by a Codex/Claude coding-agent subscription or ACP.
+Select and verify each adapter's authentication/billing lane and credential environment; no coordinator-key inheritance or default
+fallback may silently switch its intended account/billing route. Keep coordinator
+credentials out of adapter environments unless explicitly selected; the excluded
+[experimental Codex tool](https://github.com/openai/openai-agents-python/blob/main/docs/tools.md#experimental-codex-tool)
+is not a shortcut around this boundary.
 Explicitly configure and admit trace-export data/destinations before SDK execution;
 SDK model guardrails are not action
 permissions, and traces or session stores are not the authoritative project ledger.
 Reuse existing admission, budget and owner checks at adapter entry, not new global
 gates; a turn limit is not a monetary budget. No coordinator model is selected here.
+
+## Owned process settlement: required before activation
+
+Every process-producing adapter must prove settlement of its owned process tree,
+not just a completed model turn, cancel acknowledgement or closed SDK client.
+This is a required receiving criterion for the first read-only slice too: read-only
+filesystem intent does not prevent a coding runtime from creating children.
+
+Reuse the existing process-supervision owner and its platform containment boundary;
+do not write another general supervisor inside each adapter. Before execution, bind
+which owner controls each process/containment object and which SDK owns session and
+stream cleanup. Native containment and SDK session cleanup are different duties,
+not competing process-tree managers. A supported way to place SDK-created children
+inside that ownership boundary must be qualified before live use; selecting a library
+or observing the parent PID is not evidence that this integration exists.
+
+The bounded candidate is one adapter worker for one domain operation, created within
+existing creator-owned OS containment before SDK initialization. The SDK runtime and
+its descendants inherit that boundary; the supervisor settles it while the worker
+performs protocol/session cleanup. This worker is a process-isolation boundary, not
+another coordinator, daemon, protocol proxy or persistent service. On Windows use
+existing atomic create-in-Job/suspended-start ownership, not adding PIDs after SDK
+spawn. The current generic runner does not admit this SDK-worker route: SDK-1 must
+specify its narrow owner integration and SDK-2 live qualification must prove it.
+Do not claim it already works or bypass unavailable generic execution. POSIX needs
+its own containment and crash-settlement proof; process groups alone are not a
+universal guarantee against escaping descendants.
+
+Acceptance must exercise successful completion, execution error, timeout, user cancel,
+partial spawn/setup failure, coordinator crash and restart with acquired evidence.
+Include a child that outlives its parent and resists ordinary cancellation. Prove no
+owned descendant remains and required I/O/resources are settled, while unrelated
+processes survive. Bind cleanup to creator-retained handles or an equivalently stable
+owned containment identity, never process names or PID/parent-PID ancestry alone.
+Required crash cleanup must be provided by the admitted platform/owner mechanism,
+not an assumed finally block in a process that has already died. Windows and POSIX
+need independent evidence; neither platform's semantics prove the other's.
+
+Keep the operation unsettled under existing failure/recovery semantics when required
+settlement evidence is missing; do not grant a successful terminal result, replay
+uncertain work, or add a permissive fallback. Preserve captured outcomes even when
+cleanup fails. If current public SDK and process-owner boundaries cannot supply the
+required guarantee, the affected route remains unqualified until a narrow owner-level
+integration closes it. Do not silently activate the currently unavailable generic
+runner or introduce a Rust dependency just to claim this is solved.
 
 ## Concrete SDK cases: replacement, deletion and proof
 
@@ -159,10 +255,11 @@ No blanket hook-count reduction follows; host-mode hooks and foreign registratio
 
 1. **Structured read-only review.**
    `scripts/provider_prompt.py:6139–6208` already extracts Codex JSONL but then
-   interprets a prose final line (`GATE: PASS` / `GATE: REVISE`). For a separately
-   admitted SDK-owned reviewer, use [Agents SDK output types](https://github.com/openai/openai-agents-python/blob/main/docs/agents.md#output-types)
-   with a closed verdict and required evidence fields, mapped into the existing
-   receiving owner. Remove that lane's format-only prompt and final-line parser;
+   interprets a prose final line (`GATE: PASS` / `GATE: REVISE`). The Codex executor
+   uses native `output_schema` through the selected Codex SDK for its closed verdict
+   and required evidence fields, mapped into the existing receiving owner.
+   [Agents SDK output types](https://github.com/openai/openai-agents-python/blob/main/docs/agents.md#output-types)
+   validate the coordinator's own output, not the nested executor's result. Remove that lane's format-only prompt and final-line parser;
    retain independent evidence checks, nonauthority, size bounds, failures and
    cleanup. Structured output alone does not require Agents SDK: a provider-native
    schema is the smaller alternative when the existing adapter already supports it.
@@ -184,7 +281,7 @@ No blanket hook-count reduction follows; host-mode hooks and foreign registratio
    late events and incomplete streams; drain required events before completion.
    Preserve genuine-user provenance, host-mode parsing and external CI/reply waits.
    Reuse `tests/test_hook_common.py` and `tests/test_passive_polling_stop.py`.
-3. **ACP transport plumbing, not another Kimi feature.**
+3. **Adapter-local ACP plumbing, not the common layer.**
    Current `scripts/provider_prompt.py:952–1446` already implements Kimi ACP.
    Replace only demonstrated duplicate serialization, request/response multiplexing
    and schema plumbing with the [official Python ACP SDK](https://github.com/agentclientprotocol/python-sdk).
@@ -193,6 +290,7 @@ No blanket hook-count reduction follows; host-mode hooks and foreign registratio
    capabilities and omissions, permissions, bounds, redaction and close/delete
    settlement. Unknown/malformed messages, capability refusal, cancellation and
    cleanup failures must remain distinguishable. No second ACP stack is retained.
+   This cleanup is not a prerequisite for Agents/Codex integration.
 4. **Conversation and paused-call continuation.**
    In the new coordinator mode, use [Sessions](https://github.com/openai/openai-agents-python/blob/main/docs/sessions/index.md)
    and [RunState](https://github.com/openai/openai-agents-python/blob/main/docs/results.md)
@@ -227,50 +325,50 @@ record actual deleted source and retained route coverage; a new dependency plus 
 old glue is not a completed simplification. Upstream interfaces were inspected through
 GitHub on 2026-10-23; implementation must pin and qualify compatible revisions.
 
-## SDK implementation backlog
+## Design-to-implementation plan
 
-1. **SDK-1: freeze the existing execution boundary and fixtures.**
-   Owner: provider integration/QA with Lead. Trace admitted task, role, profile,
-   artifact and run identity through the actual adapter/result/ledger/readback
-   owners named above. Reuse existing fixtures; add only uncovered mismatch,
-   cancellation, approval-resume and historical-record cases. Define one domain
-   execution boundary implemented by adapters, not a new generic framework or
-   duplicate schema. Deliverable: executable acceptance fixtures and exact migration
-   map; production behavior and provider admission unchanged.
-2. **SDK-2: replace ACP wire plumbing in the existing Kimi adapter.**
-   Owner: provider integration. Use the official Python ACP client to remove only
-   serialization/request multiplexing/schema boilerplate it actually replaces.
-   Retain fixed profile, observed capability/readback, permissions, redaction,
-   bounds and close/delete settlement. Same CLI-owned route retains truthful
-   provenance; do not manufacture a new execution path. Deliverable: old/new
-   fixture parity, then one selected production transport with superseded wire
-   plumbing removed. This is protocol reuse, not Agents SDK orchestration or a
-   new Kimi capability. Do not enable additional providers to complete this task.
-3. **SDK-3: remove prose-only review verdict formatting.**
-   Owner: review-result/provider owner. First use native structured output if the
-   admitted provider route supports it without adding a coordinator. Use Agents
-   SDK output types only for an explicitly SDK-owned review route. Map the closed
-   verdict/evidence result through the existing receiving owner; retain semantic
-   review and external nonauthority. Deliverable: malformed/refused/incomplete/
-   mismatched-result tests and removal of the qualified route's format-only prompt
-   and final-line parser. No extra model call to translate prose, no silent model,
-   account or billing change, and no removal of parsers still used by other routes.
-4. **SDK-4: one bounded Agents SDK coordination mode.**
-   Owner: Lead/provider integration. Use manager-as-tools, typed execution events,
-   Sessions and RunState for one agreed workflow, replacing the corresponding
-   model/tool loop, transcript reconstruction and pause/history glue. Reuse the
-   common execution tool from SDK-1/2; provider SDKs stay inside their adapters.
-   Complete the versioned result/ledger chain before activation. Retain one
-   coordinator, current authority on resume, exact operation identity and the
-   existing state/process owners. Deliverable: restart/cancellation/permission/
-   incomplete-stream fixtures and explicit route/dependency configuration. This
-   mode does not run alongside the existing host Lead. If a smaller existing-host
-   solution covers the case, do not add the SDK coordinator just to use the library.
+1. **SDK-1: shared contract and acceptance fixtures.**
+   Provider integration/QA with Lead map existing admission, task/profile/artifact/run
+   identity, observations, cancellation and receiving to one small Python executor
+   boundary. Reuse current fixtures; add only uncovered mismatch, incomplete output,
+   current-authority-on-resume and historical-record cases. No separate framework,
+   policy copy, generic registry or production behavior change.
+2. **SDK-2: Agents SDK + direct Codex SDK vertical slice.**
+   Select one read-only repository review: coordinator receives a bounded review
+   request, invokes the Codex adapter, receives structured findings/verdict and passes
+   them to existing independent receiving/ledger owners. The coordinator is not a
+   second reviewer merely because it repeats the result, and an SDK return is not
+   authority to accept or close the task. Use native structured output where supported,
+   not a second model call to convert prose. Exercise streaming, interruption,
+   terminal capture, cleanup and persisted readback through that complete chain.
+   Begin with stubbed model/SDK observations and isolated fixtures. Choose the actual
+   coordinator profile/account before live qualification; current host-led mode
+   remains unchanged until this separately selected mode qualifies. No ACP dependency
+   is required by this slice.
+3. **SDK-3: other adapters through the same contract.**
+   Add direct Claude Agent SDK, then qualify the existing Kimi ACP implementation
+   against the same domain interface without losing its existing profile/capability
+   evidence. Replace Kimi wire plumbing with a library only where beneficial. Grok
+   stays a nonactivated target until separate admission. Adapter-specific wire and
+   permission semantics remain at the boundary; do not add branches or schemas per
+   provider in the coordinator/domain reducer. Do not instantiate model-API agents
+   as substitutes for these coding runtimes.
+4. **SDK-4: remove qualified glue and close regression coverage.**
+   For supported SDK-owned workflows, replace format-only final-line verdict parsing,
+   rendered-transcript reconstruction, or new custom session/pause/model-tool-loop
+   code with the selected SDK mechanics. Record actual deleted code and consumer
+   coverage; preserve host-mode paths still in use. Sessions/RunState retain only
+   their own history/paused calls; existing project owners retain state and current
+   authority. Compare outcome criteria, dependency/maintenance cost and behavior
+   against the current route before making the new mode a default. Do not claim
+   reduced hook count, faster execution or better model judgment without evidence.
 
-SDK-1 is preparation for the following changes, not a stand-alone abstraction layer.
-SDK-2 and SDK-3 can be separate bounded PRs after their affected contract fixtures;
-SDK-4 depends on the common boundary and its own qualified use case, not Rust/npm.
-No live qualification occurs without the required route, data, budget and permissions.
+Implementation belongs in bounded separate PRs. SDK-1 prepares SDK-2, not a layer
+shipped alone. SDK-2 validates the shared design with a real end-to-end contract;
+SDK-3 reuses it rather than generalizing from hypothetical providers. SDK-4 deletion
+criteria apply within each qualified implementation PR, not an excuse to accumulate
+old glue until a distant cleanup phase. Rust/npm are not prerequisites. No live
+qualification without the applicable route, data, budget and permissions.
 
 ## Verification and completion
 

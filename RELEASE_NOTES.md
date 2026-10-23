@@ -4,7 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-23
 
-- Separated SDK integration into its own design project and SDK-first backlog: preserve execution contracts, replace duplicate ACP plumbing, structure review results and qualify one bounded coordinator mode. The project names removable glue, current authority on resume and complete result-to-ledger receiving; Rust operations and npm delivery remain separate. This documentation does not install dependencies or enable provider execution.
+- Defined an independent SDK integration project with one common Python/Agents SDK coordinator and existing Orchestrarium contract/state owners. Codex and Claude use direct official SDK adapters; ACP stdio stays inside Kimi/Grok adapters, not a universal layer. The plan starts with contract fixtures and an Agents/Codex read-only review slice, then adapter coverage and removal of replaced glue. Explicit approval/account/resume and result-to-ledger boundaries remain. Activation also requires owned descendant-process settlement, including failure, cancellation and coordinator crash, through the existing supervision owner rather than SDK close alone. This design does not install or activate runtimes.
 
 - Windows private-object verification now compares the operating system's rendered discretionary access-control list (DACL) on both sides, avoiding false rejections caused by equivalent numeric and named security identifiers while preserving exact principal, permission, and protection checks.
 - The Russian Claude typed-routing reference now describes the existing nonblocking advisory delivery through stdout and exit code 0, so operators no longer mistake a routing reminder for a failed hook. Hook behavior is unchanged.
