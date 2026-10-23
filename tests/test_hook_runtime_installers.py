@@ -32,10 +32,10 @@ INFORMATIONAL_REMINDER_HOOK_STEMS = frozenset(
 )
 CWD_SCANNING_HOOK_STEMS = frozenset({"check-scratch-valuables"})
 CANONICAL_TRUST_GUIDANCE = (
-    "After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for all 13 affected entries.",
-    "Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.",
+    "After reinstall, if Codex reports hooks awaiting trust, start interactive `codex` — not `codex exec` — and review every affected entry before choosing **Trust all and continue**.",
+    "Do not press Esc and do not choose **`Continue without trusting`** if you intend to activate the reviewed hooks, because affected untrusted hooks remain installed but inactive.",
     "`codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.",
-    "The trust modal does not time out and the operator must review all 13 entries before making the explicit choice.",
+    "The trust modal does not time out and the operator must review every affected entry before making the explicit choice.",
 )
 BYPASS_TOKENS = (
     "bypass_" + "hook_trust",
@@ -1013,15 +1013,21 @@ def test_trust_guidance_contract() -> None:
     assert "install-codex.ps1" not in install
 
 
-def test_trust_guidance_contract_rejects_same_count_mutations() -> None:
+@pytest.mark.parametrize("mutation", ["wrong-choice", "missing-step", "reordered-steps"])
+def test_trust_guidance_contract_rejects_mutations(mutation: str) -> None:
     text = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
-    mutated = text.replace(
-        CANONICAL_TRUST_GUIDANCE[0],
-        CANONICAL_TRUST_GUIDANCE[0].replace(
-            "Trust all and continue", "Continue without trusting"
-        ),
-        1,
-    )
+    # A stale baseline must fail here, not masquerade as rejection of a mutation.
+    _assert_exact_order(text, CANONICAL_TRUST_GUIDANCE)
+    first, second, third, _fourth = CANONICAL_TRUST_GUIDANCE
+    if mutation == "wrong-choice":
+        mutated = text.replace(
+            first, first.replace("Trust all and continue", "Continue without trusting"), 1
+        )
+    elif mutation == "missing-step":
+        mutated = text.replace(second, "", 1)
+    else:
+        mutated = text.replace(second + "\n" + third, third + "\n" + second, 1)
+    assert mutated != text, "Mutation must change the valid original document"
     with pytest.raises(AssertionError):
         _assert_exact_order(mutated, CANONICAL_TRUST_GUIDANCE)
 

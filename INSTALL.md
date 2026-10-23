@@ -251,10 +251,10 @@ python "$HOME/.agents/skills/lead/scripts/check-hook-health.py" --target "$HOME/
 
 #### Codex manual trust step
 
-After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for every affected entry among the twelve current Codex entries.
-Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.
+After reinstall, if Codex reports hooks awaiting trust, start interactive `codex` — not `codex exec` — and review every affected entry before choosing **Trust all and continue**.
+Do not press Esc and do not choose **`Continue without trusting`** if you intend to activate the reviewed hooks, because affected untrusted hooks remain installed but inactive.
 `codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.
-The trust modal does not time out and the operator must review every affected entry before making the explicit choice. An unchanged registration identity requires no repeat trust step.
+The trust modal does not time out and the operator must review every affected entry before making the explicit choice. Native hook keys/current hashes and the host trust state determine whether review is required; an unchanged installer registration identity alone does not establish trust.
 
 #### Hook implementation
 

@@ -2,8 +2,8 @@
 
 Status: standalone documentation/design project, extracted 2026-10-23 from the
 2.0 roadmap. The npm distribution and hybrid Python/Rust target are retained;
-implementation, package/command choices, supported targets and live SDK routes are
-not delivered or qualified. This document grants no provider launch, payment,
+package/command design and qualification targets are specified below; implementation
+and live native/SDK routes are not delivered or qualified. This document grants no provider launch, payment,
 publication, installation or runtime activation authority.
 
 ## Purpose, source baseline and scope
@@ -43,9 +43,9 @@ These scoped corrections do not prove universal agent enforcement or installed r
 **Ownership and change surface:** Product Manager owns package/product scope;
 Lead owns coordination admission and sequencing; Architect and affected existing
 hook, helper, installer, process and state owners accept implementation boundaries.
-Toolchain/Platform Engineer owns the admitted delivery work. This extraction changes
-documentation only, not runtime code, tests, schemas, installed files, configuration,
-state, provider policy or gates. Later implementation belongs in separate PRs.
+Toolchain/Platform Engineer owns the admitted delivery work. This project changes documentation and its narrow manual-trust contract tests,
+not production runtime code, schemas, installed files, configuration, state,
+provider policy or gates. Later runtime implementation belongs in separate PRs.
 
 The existing [shared governance](../shared/AGENTS.shared.md),
 [Lead contract](../src.codex/skills/lead/SKILL.md),
@@ -126,62 +126,68 @@ names logical boundaries; implementation admission fixes names and layout:
 ## npm package and runtime-dependency contract
 
 **Owner:** Toolchain Engineer with Product Manager and the existing installer owner.
-The package contract remains unresolved; there is no selected package name or command.
+These are selected design contracts, not installed commands or published packages.
+The public CLI name is `orchestrarium`; the registry package identifier remains a
+release-time publisher-ownership/name-availability check, not an architecture gap.
 
-npm (the JavaScript package registry/tooling ecosystem) distribution was a separate
-`npm-skillpack-distribution` epic, not text deleted from the routing design.
-[Commit 24d0647](https://github.com/applicate2628/Orchestrarium/commit/24d064741b21e8e84dab78dfa2bfcb7091d972ce)
-names it; [commit e55b246](https://github.com/applicate2628/Orchestrarium/commit/e55b2466281ecc50ad2a940a4de14a5ea90fb98c)
-explicitly preserves NPM/2.0 scope while removing obsolete Gemini/Qwen surfaces.
-Current main has no root `package.json`. The original detailed local-only epic
-was not recovered in this review. Do not invent its package name, commands,
-registry arrangement, update semantics or runtime dependency contract.
+Historical npm scope is recorded in [24d0647](https://github.com/applicate2628/Orchestrarium/commit/24d064741b21e8e84dab78dfa2bfcb7091d972ce)
+and [e55b246](https://github.com/applicate2628/Orchestrarium/commit/e55b2466281ecc50ad2a940a4de14a5ea90fb98c).
+The detailed local-only epic was not recovered; the following is a new explicit
+contract, not a claim to reproduce missing decisions. Current main has no root
+`package.json`.
 
-**Admitted target, not an implemented package:** versioned skill/resource payload
-and a thin npm launcher selecting the supported platform's native Rust binary.
-This is the native part of the hybrid product, not a settled delivery mechanism for
-the Python/Agents SDK coordinator or optional Codex adapter dependencies.
-Package installation/update delivers files; applying to selected projects remains
-explicit. npm uninstall is not full installed-pack removal. Do not introduce hidden
-project mutation in package installation hooks. Define operating-system/architecture
-targets, binary provenance, updates and removal with the existing installer owner;
-unsupported targets fail clearly, not by silently compiling or selecting a fallback.
-Trace all installer and installed-hook/helper resources, including dynamic validators;
-packaging only the entrypoint and skills is insufficient.
+- Ship a thin JavaScript dispatcher, versioned rules/resources and exact-version
+  native platform packages selected through npm `optionalDependencies`. No
+  `postinstall` downloads, compilation, Python setup, providers or project mutation.
+  Missing native binaries fail clearly; no implicit compilation or Python fallback.
+- `orchestrarium apply --provider codex|claude --global` selects global application;
+  `orchestrarium apply --provider codex|claude --target PATH --allow-unsafe-target`
+  selects an explicit project. Preserve current target admission, exact-digest
+  adoption, force/refusal and preservation semantics from
+  `scripts/production_installer.py:585–625` and `INSTALL.md:9–53`.
+  `--dry-run` retains existing preview semantics, not an unproved zero-host-query claim.
+  Repeating `apply` is the existing idempotent reinstall/update operation.
+- npm update changes only the distributable; installed packs change on explicit
+  `apply`. npm uninstall removes only the npm distribution. No complete applied-pack
+  removal command is promised in the first release: the current narrow owned-hook
+  removal is not whole-pack uninstall (`INSTALL.md:287–335`).
+- During staged migration, an explicitly selected legacy installer route may
+  forward to the canonical Python installer with its declared prerequisite; it
+  is not an automatic missing-native fallback. Remove that implementation only
+  after the Rust installer qualifies. Native hook delivery can precede this port.
+- Copy each applied executable and matching resources into the selected scope's
+  existing `.agents/runtime/<release>-<content-digest>/<target>/` directory.
+  Registrations bind this retained pair, never npm cache, mutable `node_modules`,
+  `latest` links or PATH. Extend the existing installer owner/receipts for this
+  resource, not a parallel manager. Failed apply preserves the prior pair and
+  recovery; identity changes retain manual host trust. Initially retain old applied
+  versions; later explicit removal requires proof that no retained configuration
+  references them. No automatic garbage collector/reference-counting service.
+- Python SDK coordination is optional and separately provisioned in an explicitly
+  selected isolated Python environment using a tested dependency lock. Record the
+  exact interpreter and compatible coordinator/native/adapter versions. npm does
+  not provision it; missing/incompatible dependencies fail without hidden pip,
+  environment search, account switch or fallback. Native hooks do not load Python
+  or SDK. Legacy operations still require Python until their replacements qualify.
+- First native qualification target: Windows x64 MSVC
+  (`x86_64-pc-windows-msvc`). Subsequent candidates: Linux x64 GNU
+  (`x86_64-unknown-linux-gnu`) and macOS arm64 (`aarch64-apple-darwin`). All are
+  currently unqualified for the new native product; no other architecture is
+  implicitly supported. Qualify hooks, installer and process runner independently.
 
-Today Python 3.11+ is needed after installation by runtime helpers/hooks, not only
-during setup. The target also retains Python for SDK coordination; replacing native
-hooks/helpers does not make the product Python-free. Define Python/SDK installation,
-compatible versions and optional adapter dependencies separately, without presuming
-an npm package supplies them or adding implicit setup. Declare prerequisites per
-supported route. The current Python production-owner policy remains binding until
-an admitted implementation decision updates the relevant language boundaries and
-their owning documentation together.
+Prove the complete payload from an unpacked archive without a checkout, including
+validators and dynamic resources. Check dependency closure, explicit apply,
+reinstall/update, failure recovery, foreign-file preservation, manual trust and
+survival of applied registrations after npm update/uninstall. No package publication
+or runtime activation is authorized by this design. Expanded native-role lifecycle
+is a dependency only for operations actually needing its broader ownership changes.
 
-Minimize dependencies by actual consumer, not by a zero-dependency slogan. The
-[review ledger loader](../scripts/review_loop_state.py) already supports standard-
-library JSON; YAML ledgers require PyYAML. Prefer that existing JSON path for owned
-machine ledgers where suitable, retaining explicit legacy YAML compatibility. The
-[installed validator source](../scripts/skill_pack_validator_runtime.py) can use
-PyYAML but falls back to weaker string/regular-expression checks when absent.
-That is not equivalent validation. Retain a justified parser where supported YAML
-needs it rather than inventing a parser or silently weakening checks. The inspected
-production imports do not prove a complete dependency closure; development/test
-dependencies are separate. No dependency removal is claimed implemented.
-
-**Open decision and acceptance:** reconstruct the missing package/command contract,
-choose supported native targets and hybrid delivery layout, then prove the payload from an
-unpacked archive without a checkout. Trace runtime dependencies as well as installer ones;
-verify supported parsing with and without optional dependencies, install/reinstall,
-upgrade, explicit apply and the agreed removal scope. Preserve user files and
-rollback. Define binary/resource version binding and retention with the existing
-installer owner: npm update/removal must not silently change or break applied packs
-through mutable or disappearing shared references. Expanded native-role lifecycle
-is a dependency only for package actions that require its broader ownership
-transitions; that separately scoped 2.0 outcome does not block package-contract work
-or existing supported installer operations. Verify the actual dependency closure
-per native/SDK route; do not claim a Python-free product. Publication/paid operations
-require applicable authorization; no removed provider packs return implicitly.
+Minimize dependencies per consumer, not by a zero-dependency slogan. The existing
+`review_loop_state.py` standard-library JSON path avoids PyYAML for suitable owned
+ledgers; keep supported legacy YAML parsing explicit. The weaker string/regex
+fallback in `skill_pack_validator_runtime.py` is not equivalent validation: retain
+an adequate parser rather than silently weakening checks. Test dependencies remain
+separate. Python coordination is retained; there is no whole-product Python-free claim.
 
 ## Python SDK and generic provider execution boundary
 
@@ -224,7 +230,10 @@ The [current result parser](../scripts/provider_prompt.py) requires the v2 execu
 path to be `direct-external-cli`. SDK routes therefore need a narrowly admitted
 provenance/version extension and receiving-parser tests before activation; preserve
 external nonauthority and independent verification, never mislabel an SDK path as CLI.
-This applies to ACP routes too; transport readiness does not establish receiving parity.
+Apply this to genuinely new SDK-owned execution routes, including those using ACP.
+Replacing ACP plumbing inside the existing Kimi CLI-owned lane does not by itself
+change its execution path: retain truthful current provenance and record adapter/
+version evidence. Transport readiness never establishes receiving parity.
 Inventory obsolete prompt/launch/parsing glue per supported host before deleting
 it; retain shared semantic checks and any uncovered existing route.
 For Kimi, preserve its existing ACP model/effort readback, selected/observed
@@ -242,6 +251,77 @@ SDK model guardrails are not action
 permissions, and traces or session stores are not the authoritative project ledger.
 Reuse existing admission, budget and owner checks at adapter entry, not new global
 gates; a turn limit is not a monetary budget. No coordinator model is selected here.
+
+## Concrete SDK cases: replacement, deletion and proof
+
+Use ready components only where their ownership removes existing glue or avoids a
+new duplicate mechanism. These are implementation choices, not qualified live routes.
+No blanket hook-count reduction follows; host-mode hooks and foreign registrations
+(including Graft) remain outside SDK-owned-lane deletion.
+
+1. **First SDK slice: structured read-only review.**
+   `scripts/provider_prompt.py:6139–6208` already extracts Codex JSONL but then
+   interprets a prose final line (`GATE: PASS` / `GATE: REVISE`). For a separately
+   admitted SDK-owned reviewer, use [Agents SDK output types](https://github.com/openai/openai-agents-python/blob/main/docs/agents.md#output-types)
+   with a closed verdict and required evidence fields, mapped into the existing
+   receiving owner. Remove that lane's format-only prompt and final-line parser;
+   retain independent evidence checks, nonauthority, size bounds, failures and
+   cleanup. Structured output alone does not require Agents SDK: a provider-native
+   schema is the smaller alternative when the existing adapter already supports it.
+   An SDK tool wrapping arbitrary ACP prose does not structure the inner result;
+   do not add a model call merely to translate prose into JSON. Qualification covers
+   missing/extra fields, refusal, truncation, unsupported schema, contradictory
+   evidence, wrong run identity and incomplete execution. Legacy parsers/tests stay
+   for uncovered routes (`tests/test_kimi_transport.py` contains existing verdict cases).
+2. **Typed observations instead of rendered-transcript recovery.**
+   `scripts/universal-hooks/scripts/hook_common.py:53–70,695–824` reconstructs call/result
+   correlation and recognizes text such as `Exit code: N`;
+   `check-passive-polling-stop.py:54–105` classifies waiting/probing prose.
+   Use [SDK stream events](https://github.com/openai/openai-agents-python/blob/main/docs/streaming.md),
+   call IDs and lifecycle callbacks for its own operations, or negotiated ACP
+   updates inside adapters. Remove only that lane's transcript-shape reconstruction;
+   feed existing semantic checks explicit observations, not a new policy engine.
+   The executing tool must expose validated exit status: a generic output event is
+   not proof. Test interleaved/duplicate/unknown IDs, missing output, cancellation,
+   late events and incomplete streams; drain required events before completion.
+   Preserve genuine-user provenance, host-mode parsing and external CI/reply waits.
+   Reuse `tests/test_hook_common.py` and `tests/test_passive_polling_stop.py`.
+3. **ACP transport plumbing, not another Kimi feature.**
+   Current `scripts/provider_prompt.py:952–1446` already implements Kimi ACP.
+   Replace only demonstrated duplicate serialization, request/response multiplexing
+   and schema plumbing with the [official Python ACP SDK](https://github.com/agentclientprotocol/python-sdk).
+   Replay `tests/test_kimi_transport.py` fixtures through both transports. Preserve
+   strict message policy, fixed profile, model/effort readback, selected/observed
+   capabilities and omissions, permissions, bounds, redaction and close/delete
+   settlement. Unknown/malformed messages, capability refusal, cancellation and
+   cleanup failures must remain distinguishable. No second ACP stack is retained.
+4. **Conversation and paused-call continuation.**
+   In the new coordinator mode, use [Sessions](https://github.com/openai/openai-agents-python/blob/main/docs/sessions/index.md)
+   and [RunState](https://github.com/openai/openai-agents-python/blob/main/docs/results.md)
+   instead of writing a new history/replay/pause loop. This prevents new glue, not
+   deletion of authoritative work-item/review/agent-run ledgers. Test same-session
+   resume, stale state, restart, missing resume capability and no duplicate tool
+   effects. An uncertain effect is reconciled, not replayed as a new user turn.
+5. **Coordinator loop and approval mechanics, not new authority.**
+   The [manager-as-tools pattern](https://github.com/openai/openai-agents-python/blob/main/docs/multi_agent.md)
+   owns model/tool iteration and specialist returns in SDK mode; remove mechanical
+   dispatch narration only where code actually tracks it. Role selection, scope,
+   budget, independent review and completion obligations stay with their owners.
+   Never run this coordinator alongside a host Lead or substitute API subagents for
+   coding runtimes. [SDK approval interruptions](https://github.com/openai/openai-agents-python/blob/main/docs/human_in_the_loop.md)
+   can retain an exact pending call; they do not grant consent. Local shell/apply-patch
+   approvals are opt-in, and sticky tool-name/type approvals can cross agents or
+   skip destination-policy re-evaluation. Configure per-call decisions without
+   automatic sticky scope widening; test changed arguments/destination, rejection,
+   nested tools, restart and replay, with no effect before required approval.
+
+Do not replace publication/path/ownership checks with SDK guardrails, operating-system
+isolation with permission callbacks, or process settlement with stream cancellation.
+Tool discovery does not prove appropriate MCP use; reminders cannot be removed on
+that basis. Trace/session storage is not project-state authority. For each replacement,
+record actual deleted source and retained route coverage; a new dependency plus all
+old glue is not a completed simplification. Upstream interfaces were inspected through
+GitHub on 2026-10-23; implementation must pin and qualify compatible revisions.
 
 ## State, process and cutover ownership
 
@@ -369,25 +449,40 @@ current release independently of full 2.0 and unfinished generic process support
 
 The next work is bounded preparation and qualification, not a provider launch:
 
-1. Toolchain Engineer reconstructs the npm package/command contract and inventories
-   the complete distributable and runtime dependency closure, including version
-   binding, retention, explicit apply/removal and per-route Python/SDK prerequisites.
+1. Toolchain Engineer implements the selected package/command contract and verifies
+   the complete distributable and runtime dependency closure, including retained
+   version binding, explicit apply and per-route Python/SDK prerequisites.
    Package-contract work can proceed without expanded native-role lifecycle, routing
    evaluation, generic process support or cross-host continuation.
-2. With the existing hook/helper owner, select one small deterministic hook/check,
-   freeze its current input/output/effect contract and baseline, and implement its
-   Rust replacement against isolated cloned fixtures/replayed inputs. Stub providers;
+2. First native slice: `orchestrarium hook mcp-usage-reminder`, owned by the existing
+   hook/helper owner. Its 34-line current entrypoint emits unconditional SessionStart
+   context without reading stdin, scanning transcripts, changing project state or
+   spawning children. Freeze that contract and implement its Rust replacement
+   against isolated cloned fixtures/replayed inputs. Stub providers;
    do not execute paid models, duplicate live effects or introduce packaging-driven
    project mutation. Keep the production Python path until the slice's parity,
    platform, recovery and source-to-installed checks qualify the replacement. Before
    production cutover, obtain the existing owner/Architect acceptance and update the
    binding language-owner policy and owning documentation together.
-   Select direct-native registration or a forwarding-only adapter explicitly: current
-   hook target selection, health classification and mirror membership are Python-only.
-   Update those owners, registration/inventory and relevant tests together; changed
-   hook identity requires the existing manual host-trust and strict health receiving.
-3. Separately specify one bounded SDK coordination use case, the existing domain
-   contract/receiving-version change and obsolete-glue deletion scope. Use fixtures
+   Select direct-native registration; use a temporary forwarding-only adapter only
+   for a verified host limitation, not a permanent extra layer. Current target
+   selection, health classification and mirror membership are Python-only: update
+   those owners, registration/inventory and tests together. Generate the embedded
+   policy from `mcp_continuity_policy.py::SESSION_START_CONTEXT` at build time and
+   compare the exact projection; do not hand-copy a second authored policy.
+   Reuse `test_universal_reminder_hooks.py` and
+   `test_sessionstart_reminder_python_hooks.py`: verify exact JSON/UTF-8/order/newline,
+   stdout/stderr/exit, startup/resume/clear/compaction/subagent inputs, malformed or
+   open stdin (must not block), and output-failure fail-open behavior. Embedding
+   removes Python sibling-import failure; record that packaging difference instead
+   of claiming impossible failure parity. Missing/corrupt native payload remains an
+   installer-integrity failure. Verify build-to-installed identity, reinstall,
+   rollback, owned membership and preservation of foreign hooks. Changed identities
+   require existing manual host trust and strict health receiving, not fixed total
+   installed counts.
+3. First SDK slice: the structured read-only review case above, with an explicit
+   domain receiving-version change and format-only glue deletion. Use provider-native
+   structured output instead if the same result needs no SDK coordinator. Use fixtures
    and stubbed adapters first to probe capability rejection, authentication/billing
    selection, trace-export configuration, result provenance and cancellation ownership.
    Live qualification requires its own accepted route, data, budget and permissions;
@@ -426,8 +521,8 @@ runtime behavior, package availability, installed compatibility or benchmarks.
 
 ## Terms and Abbreviations
 
-- npm: the JavaScript package registry/tooling ecosystem; no package or command is
-  selected by this project.
+- npm: the JavaScript package registry/tooling ecosystem; CLI design is selected,
+  registry identity and actual release availability remain unverified.
 - Rust / Cargo / crate: native programming language / its build and package tool /
   a Rust compilation unit. The target starts with one Cargo package and CLI.
 - Python: the retained coordination language; existing production script ownership
