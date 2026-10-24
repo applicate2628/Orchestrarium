@@ -10,7 +10,7 @@ Lifecycle commands accept the documented repository or work-items root spelling.
 
 ## Files
 
-For Root-managed operations that read or write a work-item ledger, use the finite budget selected at the existing Lead dispatch step. Carry unchanged `--ledger-max-events N --ledger-max-bytes B` through writer, terminal, validator, checker, and lifecycle receivers; Python calls pass `ledger_resource_budget=C`. Omitted compatibility options are limited to intentional low-level diagnostics, not managed admission. Snippets omit this common pair where it is not the example's subject; do not copy a managed invocation without the resolved values.
+Normal public ledger, validation, checker and lifecycle operations omit both numerical ledger options. The owning operation derives finite admission from its actual selected descriptor/captured image and planned effects, then holds one final event/byte pair throughout its atomic transaction and receiving. An automatic terminal selects its current image, including independent completed writes since launch. An explicitly supplied positive `--ledger-max-events N --ledger-max-bytes B` pair remains a hard cap; partial and invalid pairs refuse. Python callers can pass the owning operation's actual `ledger_resource_budget=C`. No manual capacity estimate, history rewrite or unlimited fallback is required. The low-level resolver without selected demand retains its diagnostic defaults.
 
 Each active work item should keep these files together:
 
@@ -39,7 +39,7 @@ This is the public recipe for Lead's **Full-goal completion workflow**, only whe
 Use the source checker, or the corresponding checker in the explicitly selected installed Lead scripts directory. Select by the admitted layout; do not guess from cwd, ancestors or provider names. Verify the selected helper/imported closure after its writers release; a checker hash alone does not prove other changed owners. With the actual coordinator root and epic slug:
 
 ```text
-python -B scripts/check-work-items-state.py --root <explicit-coordinator> --goal <actual-epic> --goal-phase <observe|preclose|final> --ledger-max-events <resolved-events> --ledger-max-bytes <resolved-bytes> --json
+python -B scripts/check-work-items-state.py --root <explicit-coordinator> --goal <actual-epic> --goal-phase <observe|preclose|final> --json
 ```
 
 Consume the completed metadata frame and actual structured version-1 result: admissionId, phase, decision, criteria, roots/members and quote contract/admission/evaluator hashes/references. Match the original scope and current observations. The quote binds observation-time inputs, not an atomic native transaction; quiesce/recheck admitted inputs and native identity before acting. A missing/malformed/pending result is unavailable, not empty/clean. Exit zero may mean ready-for-last-close or eligible; only final/eligible can qualify for native completion.
@@ -79,12 +79,10 @@ The init command creates missing legacy status sections and `agent-runs.jsonl` w
 
 ## Append A Gate Event
 
-An admitted execution uses one matching launch/terminal pair through its selected recording owner: Root for native and already-admitted direct external owner-equivalent execution, or actual supported tracked wrapper on Root's behalf when it runs. A direct external equivalent follows external-dispatch and uses real manual evidence plus Root's exact canonical pair/readback, never wrapper identity. Append a standalone event only for a genuine separate accepted result or substantive main-session gate action outside the pair. Managed calls use the resolved `--ledger-max-events N --ledger-max-bytes B`; polling, progress, readback, or status acknowledgment alone adds no event.
+An admitted execution uses one matching launch/terminal pair through its selected recording owner: Root for native and already-admitted direct external owner-equivalent execution, or actual supported tracked wrapper on Root's behalf when it runs. A direct external equivalent follows external-dispatch and uses real manual evidence plus Root's exact canonical pair/readback, never wrapper identity. Append a standalone event only for a genuine separate accepted result or substantive main-session gate action outside the pair. Ordinary calls preserve omission and let the selected owner admit the current transaction; explicit positive ceilings remain unchanged. Polling, progress, readback, or status acknowledgment alone adds no event.
 
 ```bash
 python scripts/agent-run-ledger.py --work-item work-items/active/<slug> append \
-  --ledger-max-events <resolved-events> \
-  --ledger-max-bytes <resolved-bytes> \
   --role lead \
   --execution-role main \
   --status completed \
@@ -96,8 +94,6 @@ python scripts/agent-run-ledger.py --work-item work-items/active/<slug> append \
 
 ```powershell
 python .\scripts\agent-run-ledger.py --work-item work-items\active\<slug> append `
-  --ledger-max-events <resolved-events> `
-  --ledger-max-bytes <resolved-bytes> `
   --role lead `
   --execution-role main `
   --status completed `
@@ -1092,7 +1088,7 @@ Version 1 records remain nonauthorizing. Version 2 can let the archive validator
 
 ## Selected-item obligation observation
 
-After successful terminal append/settlement, including already-settled replay, run `python -B scripts/validate-work-item-state.py --work-item work-items/active/<slug> --obligations-json --ledger-max-events <resolved-events> --ledger-max-bytes <resolved-bytes>`. Installed Lead uses its sibling validator with the same pair. Deploy the helper before teaching either flag; unsupported options record unavailable observation, never fallback to counts or omitted diagnostic defaults.
+After successful terminal append/settlement, including already-settled replay, run `python -B scripts/validate-work-item-state.py --work-item work-items/active/<slug> --obligations-json`. Installed Lead uses its sibling validator. Omission derives finite read-only admission from the current selected image; an explicit positive pair remains a hard ceiling. Receive the current deployed owner before relying on its omission behavior; an unsupported/stale helper records unavailable observation, never a false clean count.
 
 The optional mode emits one JSON object: `schemaVersion: 1`, `workItem`, `ledgerPath`, `ledgerSha256`, `selection` (`live`, `candidate`, `ledger-free`), `strict`, `obligations`, `diagnostics`, and `result` (`PASS`/`FAIL` for validation). `--telemetry` nests counters. Default text format and exit polarity remain unchanged; required-read secondary diagnostics and error counts have the exception described below. Candidate/non-strict triage is not a completion oracle. Selected bytes are captured once and passed to the existing evaluator; the digest binds that revision. Approved ledger-free quick fixes explicitly identify absent ledger/null digest; required missing ledgers fail.
 

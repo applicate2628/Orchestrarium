@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-25
+
+- Ordinary ledger and lifecycle commands derive finite admission from their selected history and planned writes when both numerical controls are omitted. Valid history can grow beyond the old diagnostic event threshold without manual sizing; explicit event/byte ceilings, complete acquisition, corruption checks and byte-preserving replay remain enforced. Automatic terminal recording acquires its current transaction after independent work.
+
 ## 2026-10-24
 
 - Restore UTF-8 punctuation and Russian examples in the Codex governance capsule and Lead operating model after a text-edit encoding conversion. Approved native-role configuration rules and all ASCII controls remain unchanged.

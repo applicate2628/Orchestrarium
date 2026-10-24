@@ -5227,6 +5227,10 @@ def _ledger_owner():
 
 def ledger_resource_options(control: Control) -> list[str]:
     validator = _ledger_owner().load_validator()
+    if control.ledger_max_events is None and control.ledger_max_bytes is None:
+        if control.resolved_ledger_budget is not None:
+            raise ValueError("WI-LEDGER-RESOURCE-DRIFT: explicit wrapper admission was removed")
+        return []
     budget = validator.resolve_ledger_resource_budget(
         control.ledger_max_events, control.ledger_max_bytes, managed=True,
     )
@@ -5240,17 +5244,19 @@ def ledger_resource_options(control: Control) -> list[str]:
 
 
 def prepare_ledger_admission(control: Control, launch_args: list[str]):
-    """Resolve Root's finite allowance against exact launch and terminal demand."""
+    """Validate producer intent; implicit capacity belongs to the locked writer."""
     writer = _ledger_owner()
     validator = writer.load_validator()
     ledger_resource_options(control)
-    budget = validator.resolve_ledger_resource_budget(
-        control.ledger_max_events, control.ledger_max_bytes, managed=True,
-    )
     # Reuse the actual producer's parsing/serialization, including option position.
     parsed = writer.build_parser().parse_args(launch_args)
     launch = writer.build_event(parsed, validator)
     known = (writer.serialize_event(launch) + "\n").encode("utf-8")
+    if control.ledger_max_events is None and control.ledger_max_bytes is None:
+        return None
+    budget = validator.resolve_ledger_resource_budget(
+        control.ledger_max_events, control.ledger_max_bytes, managed=True,
+    )
     ledger = Path(control.ledger) / "agent-runs.jsonl"
     demand = validator.inspect_ledger_resource_demand(
         ledger, budget, source_bytes=None if ledger.exists() else b"",
@@ -6840,17 +6846,23 @@ def read_back_external_terminal(
         return None
     try:
         validator = _ledger_owner().load_validator()
-        budget = validator.resolve_ledger_resource_budget(
-            control.ledger_max_events, control.ledger_max_bytes,
-        )
+        ledger_resource_options(control)
+        budget = (None if control.ledger_max_events is None and control.ledger_max_bytes is None
+            else validator.resolve_ledger_resource_budget(control.ledger_max_events, control.ledger_max_bytes))
         held = control.resolved_ledger_budget
         if held is not None:
             if (held.max_events, held.max_ledger_bytes) != (budget.max_events, budget.max_ledger_bytes):
                 return None
             budget = validator._ledger_resource_budget(held)
-        item = Path(control.ledger)
+        item = Path(os.path.abspath(control.ledger))
         ledger = item / "agent-runs.jsonl"
-        raw = validator.read_ledger_bytes(ledger, budget)
+        raw, snapshot = validator._read_ledger_image(ledger, budget)
+        lifecycle = validator.load_lifecycle_owner()
+        try:
+            budget, resource_inputs = lifecycle._admit_ledger_operation(
+                item, ledger, raw, ledger_resource_budget=budget, validator=validator)
+        except lifecycle.LifecycleError:
+            return None
         errors = validator.validate_work_item(
             item, selected_ledger_bytes=raw, strict_revise=False,
             ledger_resource_budget=budget,
@@ -6865,6 +6877,13 @@ def read_back_external_terminal(
         if len(terminals) != 1:
             return None
         terminal = terminals[0]
+        try:
+            if snapshot is not None:
+                lifecycle._verify_captured_file(snapshot, "WI-LEDGER-RESOURCE-DRIFT")
+            if any(not predicate.qualify() for predicate in resource_inputs):
+                return None
+        except lifecycle.LifecycleError:
+            return None
     except (OSError, KeyError, TypeError, ValueError):
         return None
     if (

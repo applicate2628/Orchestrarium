@@ -1909,7 +1909,8 @@ def test_retained_consumer_cached_carrier_drift_never_refreshes_approval(tmp_pat
         assert (item if fault != "parent" else item.with_name("moved-custodian")).joinpath(profile["ref"]).read_bytes() == before
 
 
-def test_snapshot_reads_captured_size_and_preserves_drift_refusal(tmp_path: Path):
+@pytest.mark.parametrize('derived', [False, True])
+def test_snapshot_reads_captured_size_and_preserves_drift_refusal(tmp_path: Path, derived):
     module = load_module()
     real_fdopen = module.os.fdopen
     original = b"captured payload"
@@ -1949,11 +1950,11 @@ def test_snapshot_reads_captured_size_and_preserves_drift_refusal(tmp_path: Path
         with patch.object(module, "_open_readonly_nofollow", side_effect=capture_open), \
              patch.object(module.os, "fdopen", side_effect=observed_fdopen):
             if fault in (None, "empty"):
-                snapshot = module._capture_file_snapshot(target, failure_id="WI-SNAPSHOT-COST", maximum_bytes=0 if fault == "empty" else 1024)
+                snapshot = module._capture_file_snapshot(target, failure_id="WI-SNAPSHOT-COST", maximum_bytes=None if derived else 0 if fault == "empty" else 1024)
                 assert snapshot.data == case_bytes
             else:
                 with pytest.raises(module.LifecycleError) as caught:
-                    module._capture_file_snapshot(target, failure_id="WI-SNAPSHOT-COST", maximum_bytes=1024)
+                    module._capture_file_snapshot(target, failure_id="WI-SNAPSHOT-COST", maximum_bytes=None if derived else 1024)
                 assert caught.value.failure_id == "WI-SNAPSHOT-COST"
         if fault in (None, "empty", "growth", "shrink", "rewrite"):
             assert requests == [len(case_bytes) + 1, len(case_bytes) + 1], fault

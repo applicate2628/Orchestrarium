@@ -593,19 +593,23 @@ class LedgerResourceDemandV1:
 def resolve_ledger_resource_budget(
     max_events=None, max_ledger_bytes=None, *, demand=None, managed=False,
 ) -> LedgerResourceBudgetV1:
-    """Check trusted finite input; omission is only a limited diagnostic posture."""
+    """Check a concrete pair/demand; no-input omission retains diagnostic limits."""
     if (max_events is None) != (max_ledger_bytes is None):
         raise ValueError("WI-LEDGER-RESOURCE-INVALID: supply both ledger resource values")
+    if demand is not None and any(type(value) is not int or value < 0
+            for value in (demand.required_events, demand.required_bytes)):
+        raise ValueError("WI-LEDGER-RESOURCE-INVALID: invalid demand")
     if max_events is None:
-        if managed:
+        if demand is not None:
+            max_events = max(1, demand.required_events)
+            max_ledger_bytes = max(1, demand.required_bytes)
+        elif managed:
             raise ValueError("WI-LEDGER-RESOURCE-MISSING: managed entry requires finite resource admission")
-        max_events, max_ledger_bytes = MAX_LEDGER_EVENTS, _JSONL_SCHEMA["maxLedgerBytes"]
+        else:
+            max_events, max_ledger_bytes = MAX_LEDGER_EVENTS, _JSONL_SCHEMA["maxLedgerBytes"]
     budget = LedgerResourceBudgetV1(max_events, max_ledger_bytes)
     if demand is not None:
         required_events, required_bytes = demand.required_events, demand.required_bytes
-        if (type(required_events) is not int or type(required_bytes) is not int
-                or required_events < 0 or required_bytes < 0):
-            raise ValueError("WI-LEDGER-RESOURCE-INVALID: invalid demand")
         if required_events > budget.max_events or required_bytes > budget.max_ledger_bytes:
             raise ValueError(
                 "WI-LEDGER-RESOURCE-INCOMPLETE: admitted operation requires "
@@ -626,9 +630,23 @@ def _ledger_resource_budget(value=None) -> LedgerResourceBudgetV1:
         raise ValueError("WI-LEDGER-RESOURCE-INVALID: finite primitive fields are required") from exc
 
 
+def _operation_ledger_resource_budget(value=None):
+    """Internal omission inherits an already-held lifecycle operation pair."""
+    if value is not None:
+        return _ledger_resource_budget(value)
+    owner = _LIFECYCLE_OWNER
+    if owner is None:
+        return None
+    try:
+        value = owner.ledger_resource_budget_for_current_operation(value)
+    except owner.LifecycleError as exc:
+        raise ValueError(f"{exc.failure_id}: {exc}") from exc
+    return _ledger_resource_budget(value) if value is not None else None
+
+
 def _read_ledger_image(path, ledger_resource_budget=None, *, source_bytes=None):
     """Bound the actual opened input before allocation, including supplied captures."""
-    budget = _ledger_resource_budget(ledger_resource_budget)
+    budget = _operation_ledger_resource_budget(ledger_resource_budget)
     snapshot = None
     if source_bytes is None:
         if isinstance(path, _CapturedHistoryPath):
@@ -638,13 +656,14 @@ def _read_ledger_image(path, ledger_resource_budget=None, *, source_bytes=None):
             try:
                 snapshot = owner._capture_file_snapshot(
                     path, failure_id="WI-LEDGER-RESOURCE-DRIFT", ledger_resource_budget=budget,
+                    maximum_bytes=None,
                 )
                 source_bytes = snapshot.data
             except owner.LifecycleError as exc:
                 raise ValueError(f"{exc.failure_id}: {exc}") from exc
     if not isinstance(source_bytes, bytes):
         raise ValueError("WI-LEDGER-RESOURCE-INVALID: selected capture must be bytes")
-    if len(source_bytes) > budget.max_ledger_bytes:
+    if budget is not None and len(source_bytes) > budget.max_ledger_bytes:
         raise ValueError(
             f"WI-LEDGER-RESOURCE-INCOMPLETE: ledger exceeds admitted byte allowance "
             f"{budget.max_ledger_bytes}: {path}"
@@ -660,7 +679,7 @@ def read_ledger_bytes(path, ledger_resource_budget=None, *, source_bytes=None) -
 def inspect_ledger_resource_demand(
     path, ledger_resource_budget, *, source_bytes=None, known_row_bytes=(),
     unknown_terminal_rows=0, physical_lines=False, expected_sha256=None,
-    participants=None,
+    participants=None, byte_participants=None,
 ) -> LedgerResourceDemandV1:
     """Census a finitely acquired selected image and the caller's admitted batch.
 
@@ -668,17 +687,15 @@ def inspect_ledger_resource_demand(
     produced. Known rows use their exact serialized bytes; unknown genuine
     terminals use the unchanged line protocol bound, not every old open launch.
     """
-    budget = _ledger_resource_budget(ledger_resource_budget)
+    budget = _operation_ledger_resource_budget(ledger_resource_budget)
     if type(unknown_terminal_rows) is not int or unknown_terminal_rows < 0:
         raise ValueError("WI-LEDGER-RESOURCE-INVALID: invalid terminal headroom")
     if source_bytes is None and not isinstance(path, _CapturedHistoryPath):
         owner = load_lifecycle_owner()
         try:
-            if path.lstat().st_size > budget.max_ledger_bytes:
-                raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: selected bytes exceed allowance")
             capture = owner._capture_file_snapshot(
                 path, failure_id="WI-LEDGER-RESOURCE-DRIFT",
-                maximum_bytes=budget.max_ledger_bytes, require_single_link=True,
+                maximum_bytes=None, ledger_resource_budget=budget, require_single_link=True,
             )
         except owner.LifecycleError as exc:
             raise ValueError(f"{exc.failure_id}: {exc}") from exc
@@ -698,7 +715,7 @@ def inspect_ledger_resource_demand(
     for identity, image in selected.items():
         image = read_ledger_bytes(identity, budget, source_bytes=image)
         total_bytes += len(image)
-        if total_bytes > budget.max_ledger_bytes:
+        if budget is not None and total_bytes > budget.max_ledger_bytes:
             raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: participant bytes exceed allowance")
         try:
             with io.StringIO(image.decode("utf-8", errors="strict"), newline="") as stream:
@@ -706,12 +723,23 @@ def inspect_ledger_resource_demand(
         except UnicodeError as exc:
             raise ValueError("WI-LEDGER-RESOURCE-INVALID: census input is not UTF-8") from exc
         total_events += count
-        if total_events > budget.max_events:
+        if budget is not None and total_events > budget.max_events:
             raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: charged rows exceed allowance")
         bindings.append((identity, hashlib.sha256(image).hexdigest(), count, len(image)))
+    # Historical wire inputs are acquired byte evidence for this selection;
+    # their events are already charged by the complete effective ledger group.
+    if byte_participants is not None:
+        for identity, image in byte_participants.items():
+            if identity in selected:
+                raise ValueError("WI-LEDGER-RESOURCE-INVALID: participant has two charge roles")
+            image = read_ledger_bytes(identity, budget, source_bytes=image)
+            total_bytes += len(image)
+            if budget is not None and total_bytes > budget.max_ledger_bytes:
+                raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: participant bytes exceed allowance")
+            bindings.append((identity, hashlib.sha256(image).hexdigest(), 0, len(image)))
     if not isinstance(known_row_bytes, Sequence):
         raise ValueError("WI-LEDGER-RESOURCE-INVALID: known rows must be a finite sequence")
-    if len(known_row_bytes) + unknown_terminal_rows > budget.max_events:
+    if budget is not None and len(known_row_bytes) + unknown_terminal_rows > budget.max_events:
         raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: admitted batch exceeds event allowance")
     writes = tuple(known_row_bytes)
     for row in writes:
@@ -734,7 +762,7 @@ def inspect_ledger_resource_demand(
 def add_ledger_resource_arguments(parser, *, suppress_defaults=False):
     default = argparse.SUPPRESS if suppress_defaults else None
     parser.add_argument("--ledger-max-events", type=int, default=default,
-                        help="Finite operation event allowance; omission is a limited diagnostic")
+                        help="Explicit finite operation event cap; omission derives admission from selected input and effects")
     parser.add_argument("--ledger-max-bytes", type=int, default=default,
                         help="Finite ledger byte allowance; supply with --ledger-max-events")
 
@@ -754,9 +782,12 @@ def load_jsonl(
         fail(errors, f"missing ledger: {path}")
         return []
     events: list[dict] = []
-    budget = _ledger_resource_budget(ledger_resource_budget)
     try:
-        source_bytes = read_ledger_bytes(path, budget, source_bytes=source_bytes)
+        ledger_resource_budget = _operation_ledger_resource_budget(ledger_resource_budget)
+        source_bytes = read_ledger_bytes(path, ledger_resource_budget, source_bytes=source_bytes)
+        budget = (_ledger_resource_budget(ledger_resource_budget) if ledger_resource_budget is not None else
+                  resolve_ledger_resource_budget(demand=inspect_ledger_resource_demand(
+                      path, None, source_bytes=source_bytes)))
     except (OSError, ValueError) as exc:
         fail(errors, f"cannot read ledger: {path}: {exc}")
         return []
@@ -2553,7 +2584,7 @@ class _CurrentEvidenceV1:
             self.predicates[key] = predicate
         return self.predicates[key]
 
-    def read_bytes(self, path, *, maximum_bytes=None):
+    def read_bytes(self, path, *, maximum_bytes=None, require_single_link=False):
         key = ("selected-bytes", path)
         if key not in self.predicates:
             if self.received:
@@ -2565,19 +2596,39 @@ class _CurrentEvidenceV1:
                 try:
                     snapshot = owner._capture_file_snapshot(
                         path, failure_id="WI-LEDGER-CUSTODY-STALE-TARGET",
-                        **({"maximum_bytes": maximum_bytes} if maximum_bytes is not None else {}))
+                        **({"maximum_bytes": maximum_bytes} if maximum_bytes is not None else {}),
+                        require_single_link=require_single_link)
                 except owner.LifecycleError as exc:
                     raise OSError(f"{exc.failure_id}: {exc}") from exc
                 raw = snapshot.data
             self.predicates[key] = _CurrentPredicateV1("bytes", path, True,
                 snapshot=snapshot, expected_bytes=raw)
+        else:
+            predicate = self.predicates[key]
+            if (require_single_link and isinstance(path, Path)
+                and predicate.snapshot is not None
+                and not predicate.snapshot.require_single_link):
+                owner = load_lifecycle_owner()
+                try:
+                    upgraded = owner._capture_file_snapshot(
+                        path, failure_id="WI-LEDGER-CUSTODY-STALE-TARGET",
+                        **({"maximum_bytes": maximum_bytes} if maximum_bytes is not None else {}),
+                        require_single_link=True)
+                except owner.LifecycleError as exc:
+                    raise OSError(f"{exc.failure_id}: {exc}") from exc
+                if (upgraded.data != predicate.expected_bytes
+                    or upgraded.identity != predicate.snapshot.identity
+                    or upgraded.parent_chain != predicate.snapshot.parent_chain):
+                    raise OSError("WI-LEDGER-CUSTODY-STALE-TARGET: selected input changed while tightening link qualification")
+                predicate.snapshot = upgraded
         raw = self.predicates[key].expected_bytes
         if maximum_bytes is not None and len(raw) > maximum_bytes:
             raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: selected input exceeds admitted byte allowance")
         return raw
 
-    def read_selection(self, path, *, maximum_bytes=None):
-        raw = self.read_bytes(path, maximum_bytes=maximum_bytes)
+    def read_selection(self, path, *, maximum_bytes=None, require_single_link=False):
+        raw = self.read_bytes(path, maximum_bytes=maximum_bytes,
+            require_single_link=require_single_link)
         predicate = self.predicates[("selected-bytes", path)]
         if not any(entry is predicate for entry in self.selection_inputs):
             self.selection_inputs.append(predicate)
@@ -6548,10 +6599,11 @@ def _ledger_h1_candidate_group(
     ):
         reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "candidate ledger members are incomplete or mistyped")
         return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics, ledger_resource_budget=ledger_resource_budget)
-    budget = _ledger_resource_budget(ledger_resource_budget)
     total_bytes = sum(len(raw) for raw in artifacts.ledger_bytes_by_path.values() if isinstance(raw, bytes))
     total_lines = sum(raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n"))
                       for raw in artifacts.ledger_bytes_by_path.values() if isinstance(raw, bytes))
+    budget = (_ledger_resource_budget(ledger_resource_budget) if ledger_resource_budget is not None else
+              LedgerResourceBudgetV1(max(1, total_lines), max(1, total_bytes)))
     if total_bytes > budget.max_ledger_bytes or total_lines > budget.max_events:
         message = "WI-LEDGER-RESOURCE-INCOMPLETE: complete H1 participant demand exceeds allowance"
         return _ledger_h1_invalid_contexts(root, artifacts, ["WI-LEDGER-RESOURCE-INCOMPLETE"], [message], ledger_resource_budget=budget)
@@ -6601,6 +6653,9 @@ def _ledger_h1_candidate_group(
         return _ledger_h1_invalid_contexts(
             root, artifacts, failures, diagnostics, ledger_resource_budget=budget
         )
+    if ledger_resource_budget is None:
+        budget = LedgerResourceBudgetV1(max(1, total_lines),
+            max(1, total_bytes + sum(len(raw) for raw in historical_wire_bytes_by_path.values())))
     if historical_wire_bytes_by_path and (
         total_bytes + sum(len(raw) for raw in historical_wire_bytes_by_path.values())
         > budget.max_ledger_bytes
@@ -6610,6 +6665,7 @@ def _ledger_h1_candidate_group(
             root, artifacts, ["WI-LEDGER-RESOURCE-INCOMPLETE"], [message],
             ledger_resource_budget=budget,
         )
+    ledger_resource_budget = budget
     if set(artifacts.ledger_bytes_by_path) != set(ledger_paths):
         reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "candidate ledger keys differ from manifest entries")
     location_records = artifacts.participant_locations_by_path
@@ -7034,7 +7090,7 @@ transition_resource_budget=None) -> LedgerCompatibilityArtifactSetV1 | None:
         )
         if not isinstance(manifest, dict) or not isinstance(manifest.get("entries"), list):
             return None
-        budget = _ledger_resource_budget(ledger_resource_budget)
+        budget = _ledger_resource_budget(ledger_resource_budget) if ledger_resource_budget is not None else None
         charged_bytes = charged_events = 0
         ledger_bytes_by_path: dict[str, bytes] = {}
         participant_locations_by_path: dict[str, object] = {}
@@ -7073,10 +7129,12 @@ transition_resource_budget=None) -> LedgerCompatibilityArtifactSetV1 | None:
             ledger_path = root.joinpath(*PurePosixPath(physical_ledger_path).parts)
             if not ledger_path.is_file() or _is_link_or_reparse(ledger_path):
                 return None
-            remaining = budget.max_ledger_bytes - charged_bytes
-            if remaining <= 0:
-                raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: participant byte allowance exhausted")
-            member_budget = LedgerResourceBudgetV1(budget.max_events, remaining)
+            member_budget = None
+            if budget is not None:
+                remaining = budget.max_ledger_bytes - charged_bytes
+                if remaining <= 0:
+                    raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: participant byte allowance exhausted")
+                member_budget = LedgerResourceBudgetV1(budget.max_events, remaining)
             supplied = (selected_ledger_bytes if selected_ledger_bytes is not None
                         and selected_ledger_path is not None
                         and ledger_path.absolute() == selected_ledger_path.absolute() else None)
@@ -7085,7 +7143,7 @@ transition_resource_budget=None) -> LedgerCompatibilityArtifactSetV1 | None:
                 current_inputs.bind_selection(ledger_path, raw, snapshot=snapshot)
             charged_bytes += len(raw)
             charged_events += raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n"))
-            if charged_events > budget.max_events:
+            if budget is not None and charged_events > budget.max_events:
                 raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: participant physical line allowance exhausted")
             ledger_bytes_by_path[ledger_relative] = raw
             participant_locations_by_path[ledger_relative] = location
@@ -7181,7 +7239,7 @@ def _resolve_ledger_h1_selected(
     selected_ledger_absent: bool = False,
     ledger_acquisition_complete_out: list[bool] | None = None,
     required_ledger_acquisition_by_path: dict[str, list[bool]] | None = None, ledger_resource_budget=None,
-    transition_resource_budget=None,
+    transition_resource_budget=None, resource_artifacts_out=None,
 ) -> _LedgerH1SelectedV1:
     """One metadata-first selection composition for validator and reader."""
     target_errors: list[str] = []
@@ -7273,6 +7331,8 @@ def _resolve_ledger_h1_selected(
         ))
     if ledger_acquisition_complete_out is not None and acquisition_by_path is not None:
         ledger_acquisition_complete_out.extend(acquisition_by_path.get(matches[0], []))
+    if resource_artifacts_out is not None:
+        resource_artifacts_out.append(artifacts)
     return _LedgerH1SelectedV1("member", partition, contexts[matches[0]])
 
 
@@ -8776,13 +8836,21 @@ def obligation_transfer_id(
     ).hexdigest()
 
 
-def _transfer_status_relation(item: Path, errors: list[str], *, _inputs=None) -> tuple[str, str] | None:
+def _transfer_status_relation(
+    item: Path, errors: list[str], *, _inputs=None, selected_status_bytes: bytes | None = None
+) -> tuple[str, str] | None:
     status = item if item.is_file() else item / "status.md"
     if not status.is_file():
         return None
     try:
-        text = (_inputs.read_selection(status).decode("utf-8", errors="strict") if _inputs is not None
-                else status.read_text(encoding="utf-8", errors="strict"))
+        if selected_status_bytes is not None:
+            if not isinstance(selected_status_bytes, bytes):
+                raise ValueError("selected status capture must be bytes")
+            text = selected_status_bytes.decode("utf-8", errors="strict")
+        elif _inputs is not None:
+            text = _inputs.read_selection(status).decode("utf-8", errors="strict")
+        else:
+            text = status.read_text(encoding="utf-8", errors="strict")
     except (OSError, UnicodeError) as exc:
         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer status is unreadable: {exc}")
         return None
@@ -8871,63 +8939,107 @@ def _transfer_stat_key(metadata: os.stat_result) -> tuple[int, ...]:
 
 
 def _read_transfer_authority_bytes(
-    root: Path, path: Path, *, maximum_bytes: int | None = None, _inputs=None
+    root: Path,
+    path: Path,
+    *,
+    maximum_bytes: int | None = None,
+    _inputs=None,
+    require_single_link: bool = False,
+    captured_snapshots_out: dict[str, object] | None = None,
+    preselected_snapshot=None,
 ) -> bytes:
     if _inputs is not None:
         metadata = _transfer_authority_metadata(root, path)
         if maximum_bytes is not None and metadata.st_size > maximum_bytes:
             raise ValueError(f"transfer authority exceeds maximum raw length {maximum_bytes} bytes")
-        return _inputs.read_selection(path, maximum_bytes=maximum_bytes)
+        raw = _inputs.read_selection(
+            path,
+            maximum_bytes=maximum_bytes,
+            require_single_link=require_single_link,
+        )
+        return raw
     if isinstance(path, _CapturedHistoryPath):
         metadata = _transfer_authority_metadata(root, path)
         if maximum_bytes is not None and metadata.st_size > maximum_bytes:
             raise ValueError(f"JSON exceeds maximum raw UTF-8 length {maximum_bytes} bytes")
-        return load_lifecycle_owner()._capture_file_snapshot(path.path,
+        snapshot = load_lifecycle_owner()._capture_file_snapshot(path.path,
             failure_id="WI-OBLIGATION-TRANSFER-OWNER", maximum_bytes=maximum_bytes,
-            acquired_input=path).data
-    before = _transfer_authority_metadata(root, path)
-    if maximum_bytes is not None and before.st_size > maximum_bytes:
+            require_single_link=require_single_link, acquired_input=path)
+        if captured_snapshots_out is not None:
+            captured_snapshots_out[str(path)] = snapshot
+        return snapshot.data
+    observed = _transfer_authority_metadata(root, path)
+    if maximum_bytes is not None and observed.st_size > maximum_bytes:
         raise ValueError(
             f"JSON exceeds maximum raw UTF-8 length {maximum_bytes} bytes"
         )
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
+    if preselected_snapshot is None and captured_snapshots_out is not None:
+        preselected_snapshot = captured_snapshots_out.get(str(path))
+    if preselected_snapshot is not None:
+        if preselected_snapshot.path != path:
+            raise ValueError("preselected transfer snapshot path differs")
+        if require_single_link and not preselected_snapshot.require_single_link:
+            owner = load_lifecycle_owner()
+            try:
+                upgraded = owner._capture_file_snapshot(
+                    path,
+                    failure_id="WI-OBLIGATION-TRANSFER-DRIFT",
+                    maximum_bytes=maximum_bytes,
+                    require_single_link=True,
+                )
+            except owner.LifecycleError as exc:
+                raise ValueError(f"{exc.failure_id}: {exc}") from exc
+            if (upgraded.identity != preselected_snapshot.identity
+                or upgraded.parent_chain != preselected_snapshot.parent_chain
+                or upgraded.data != preselected_snapshot.data):
+                raise ValueError("preselected transfer ledger changed while tightening link qualification")
+            preselected_snapshot = upgraded
+        raw = preselected_snapshot.data
+        if maximum_bytes is not None and len(raw) > maximum_bytes:
+            raise ValueError(f"transfer authority exceeds maximum raw length {maximum_bytes} bytes")
+        if captured_snapshots_out is not None:
+            captured_snapshots_out[str(path)] = preselected_snapshot
+        return raw
+    owner = load_lifecycle_owner()
     try:
-        opened = os.fstat(descriptor)
-        if _transfer_stat_key(opened) != _transfer_stat_key(before):
-            raise ValueError("transfer authority descriptor identity differs")
-        with os.fdopen(descriptor, "rb") as stream:
-            descriptor = -1
-            raw = stream.read(maximum_bytes + 1 if maximum_bytes is not None else -1)
-            after = os.fstat(stream.fileno())
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-    if maximum_bytes is not None and len(raw) > maximum_bytes:
-        raise ValueError(
-            f"JSON exceeds maximum raw UTF-8 length {maximum_bytes} bytes"
+        snapshot = owner._capture_file_snapshot(
+            path,
+            failure_id="WI-OBLIGATION-TRANSFER-OWNER",
+            maximum_bytes=maximum_bytes,
+            require_single_link=require_single_link,
         )
-    path_after = _transfer_authority_metadata(root, path)
-    if (
-        len(raw) != before.st_size
-        or _transfer_stat_key(after) != _transfer_stat_key(before)
-        or _transfer_stat_key(path_after) != _transfer_stat_key(before)
-    ):
-        raise ValueError("transfer authority changed during read")
-    return raw
+    except owner.LifecycleError as exc:
+        raise ValueError(f"{exc.failure_id}: {exc}") from exc
+    if captured_snapshots_out is not None:
+        captured_snapshots_out[str(path)] = snapshot
+    return snapshot.data
 
 
 def _transfer_authority_sha256(
-    root: Path, path: Path, *, maximum_bytes: int, _inputs=None
+    root: Path,
+    path: Path,
+    *,
+    maximum_bytes: int | None,
+    _inputs=None,
+    captured_bytes: bytes | None = None,
 ) -> str:
+    if captured_bytes is not None:
+        if not isinstance(captured_bytes, bytes):
+            raise ValueError("captured transfer authority must be bytes")
+        if maximum_bytes is not None and len(captured_bytes) > maximum_bytes:
+            raise ValueError(
+                f"transfer authority exceeds maximum raw length {maximum_bytes} bytes"
+            )
+        return hashlib.sha256(captured_bytes).hexdigest()
     if isinstance(path, _CapturedHistoryPath) or _inputs is not None:
         return hashlib.sha256(_read_transfer_authority_bytes(root, path, maximum_bytes=maximum_bytes,
             _inputs=_inputs)).hexdigest()
     before = _transfer_authority_metadata(root, path)
-    if before.st_size > maximum_bytes:
+    if maximum_bytes is not None and before.st_size > maximum_bytes:
         raise ValueError(
             f"transfer authority exceeds maximum raw length {maximum_bytes} bytes"
         )
+    limit = before.st_size if maximum_bytes is None else maximum_bytes
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(path, flags)
     digest = hashlib.sha256()
@@ -8939,16 +9051,16 @@ def _transfer_authority_sha256(
         with os.fdopen(descriptor, "rb") as stream:
             descriptor = -1
             while True:
-                remaining = maximum_bytes - total
+                remaining = limit - total
                 chunk = stream.read(
                     min(_TRANSFER_AUTHORITY_DIGEST_CHUNK_BYTES, remaining + 1)
                 )
                 if not chunk:
                     break
                 total += len(chunk)
-                if total > maximum_bytes:
+                if total > limit:
                     raise ValueError(
-                        f"transfer authority exceeds maximum raw length {maximum_bytes} bytes"
+                        f"transfer authority exceeds maximum raw length {limit} bytes"
                     )
                 digest.update(chunk)
             after = os.fstat(stream.fileno())
@@ -8966,21 +9078,246 @@ def _transfer_authority_sha256(
 
 
 def _transfer_receipts(
-    root: Path, errors: list[str], *, ledger_resource_budget=None, _inputs=None
+    root: Path,
+    errors: list[str],
+    *,
+    ledger_resource_budget=None,
+    _inputs=None,
+    selected_source_item: Path | None = None,
+    selected_operation_id: str | None = None,
+    captured_ledger_bytes_out: dict[str, bytes] | None = None,
+    captured_authority_bytes_out: dict[str, bytes] | None = None,
+    captured_snapshots_out: dict[str, object] | None = None,
+    preselected_ledger_snapshots: Mapping[str, object] | None = None,
 ) -> dict[str, tuple[Path, dict, Path]]:
-    receipts: dict[str, tuple[Path, dict, Path]] = {}
-    for path in _transfer_receipt_candidates(root, errors):
-        try:
-            payload = decode_json_object(
-                _read_transfer_authority_bytes(
-                    root, path, maximum_bytes=MAX_TRANSFER_RECEIPT_BYTES, _inputs=_inputs
-                ),
-                source=str(path),
-                maximum_bytes=MAX_TRANSFER_RECEIPT_BYTES,
+    selected_mode = selected_source_item is not None or selected_operation_id is not None
+    if selected_mode and (
+        selected_source_item is None
+        or not isinstance(selected_operation_id, str)
+        or not selected_operation_id
+    ):
+        fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: selected transfer source or operation is invalid")
+        return {}
+
+    candidates = _transfer_receipt_candidates(root, errors)
+    if selected_mode and errors:
+        return {}
+    candidate_set = set(candidates)
+    selected_payloads: dict[Path, dict] = {}
+    selected_paths: list[Path] = []
+    selected_snapshots = captured_snapshots_out if captured_snapshots_out is not None else {}
+
+    if selected_mode:
+        operation_budget = _operation_ledger_resource_budget(ledger_resource_budget)
+        authority_limit = MAX_TRANSFER_RECEIPT_BYTES
+        if operation_budget is not None:
+            authority_limit = min(authority_limit, operation_budget.max_ledger_bytes)
+        current_item = selected_source_item
+        current_operation = selected_operation_id
+        visited: set[tuple[str, str]] = set()
+        while True:
+            try:
+                item_identity = current_item.relative_to(root).as_posix()
+            except ValueError:
+                fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: selected transfer source escapes repository")
+                return {}
+            state = (item_identity, current_operation)
+            if state in visited:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: obligation ownership cycle at {current_operation}")
+                return {}
+            visited.add(state)
+            receipt_path = current_item / "lifecycle-transition-receipt.json"
+            try:
+                receipt_bytes = _read_transfer_authority_bytes(
+                    root,
+                    receipt_path,
+                    maximum_bytes=authority_limit,
+                    _inputs=_inputs,
+                    captured_snapshots_out=captured_snapshots_out,
+                )
+                payload = decode_json_object(
+                    receipt_bytes,
+                    source=str(receipt_path),
+                    maximum_bytes=authority_limit,
+                )
+            except (OSError, ValueError) as exc:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer receipt is unreadable: {exc}")
+                return {}
+            if (
+                payload.get("schemaVersion") != 2
+                or payload.get("owner") != "mutate-work-item:archive-with-successor-v2"
+                or payload.get("operationId") != current_operation
+            ):
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: selected transfer receipt identity differs: {current_operation}")
+                return {}
+            if receipt_path not in candidate_set:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: selected transfer receipt is not a unique archive candidate: {current_operation}")
+                return {}
+            selected_payloads[receipt_path] = payload
+            selected_paths.append(receipt_path)
+            if captured_authority_bytes_out is not None:
+                captured_authority_bytes_out[str(receipt_path)] = receipt_bytes
+
+            lifecycle = load_lifecycle_owner()
+            try:
+                migration_bindings = lifecycle._validate_transfer_migration_receipt_bindings(
+                    root,
+                    payload.get("archivePath"),
+                    payload.get("migrationReceipts"),
+                    failure_id="WI-OBLIGATION-TRANSFER-OWNER",
+                    ledger_resource_budget=ledger_resource_budget,
+                )
+            except lifecycle.LifecycleError as exc:
+                fail(errors, f"{exc.failure_id}: {exc}")
+                return {}
+            migration_limit = (
+                operation_budget.max_ledger_bytes
+                if operation_budget is not None else None
             )
-        except (OSError, ValueError) as exc:
-            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer receipt is unreadable: {exc}")
-            continue
+            for binding in migration_bindings:
+                wire_path = root.joinpath(*PurePosixPath(binding["path"]).parts)
+                try:
+                    wire_bytes = _read_transfer_authority_bytes(
+                        root,
+                        wire_path,
+                        maximum_bytes=migration_limit,
+                        _inputs=_inputs,
+                        captured_snapshots_out=captured_snapshots_out,
+                    )
+                except (OSError, ValueError) as exc:
+                    fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: migration receipt is unavailable: {exc}")
+                    return {}
+                if hashlib.sha256(wire_bytes).hexdigest() != binding["sha256"]:
+                    fail(errors, "WI-OBLIGATION-TRANSFER-DRIFT: migration receipt digest differs")
+                    return {}
+                if captured_authority_bytes_out is not None:
+                    captured_authority_bytes_out[str(wire_path)] = wire_bytes
+
+            obligations = payload.get("obligations")
+            if not isinstance(obligations, list):
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer receipt {current_operation} has no obligation rows")
+                return {}
+            predecessor_ids: set[str] = set()
+            for row in obligations:
+                if not isinstance(row, dict):
+                    fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: obligation row is invalid: {current_operation}")
+                    return {}
+                predecessor = row.get("predecessorOperationId")
+                if predecessor is not None and not isinstance(predecessor, str):
+                    fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: predecessor is invalid: {current_operation}")
+                    return {}
+                if isinstance(predecessor, str):
+                    predecessor_ids.add(predecessor)
+            if len(predecessor_ids) > 1:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: selected obligations have multiple predecessors: {current_operation}")
+                return {}
+
+            status_path = current_item / "status.md"
+            try:
+                _transfer_authority_metadata(root, status_path)
+                if _inputs is not None:
+                    status_bytes = _inputs.read_selection(status_path)
+                else:
+                    lifecycle = load_lifecycle_owner()
+                    status_snapshot = (captured_snapshots_out.get(str(status_path))
+                        if captured_snapshots_out is not None else None)
+                    if status_snapshot is None:
+                        status_snapshot = lifecycle._capture_file_snapshot(
+                            status_path.path if isinstance(status_path, _CapturedHistoryPath) else status_path,
+                            acquired_input=status_path if isinstance(status_path, _CapturedHistoryPath) else None,
+                            failure_id="WI-OBLIGATION-TRANSFER-OWNER")
+                        if captured_snapshots_out is not None:
+                            captured_snapshots_out[str(status_path)] = status_snapshot
+                    else:
+                        lifecycle._verify_captured_file(status_snapshot, "WI-OBLIGATION-TRANSFER-DRIFT",
+                            acquired_input=status_path if isinstance(status_path, _CapturedHistoryPath) else None)
+                    status_bytes = status_snapshot.data
+            except (OSError, ValueError, lifecycle.LifecycleError) as exc:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer source status is unreadable: {exc}")
+                return {}
+            if captured_authority_bytes_out is not None:
+                captured_authority_bytes_out[str(status_path)] = status_bytes
+            relation = _transfer_status_relation(
+                current_item, errors, selected_status_bytes=status_bytes
+            )
+            if errors:
+                return {}
+            if relation is None:
+                if predecessor_ids or payload.get("predecessorOperationId") is not None:
+                    fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: selected predecessor is absent: {current_operation}")
+                    return {}
+                break
+            predecessor_slug, predecessor_operation = relation
+            if predecessor_ids and predecessor_ids != {predecessor_operation}:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: selected predecessor relation differs: {current_operation}")
+                return {}
+            declared_predecessor = payload.get("predecessorOperationId")
+            if declared_predecessor is not None and declared_predecessor != predecessor_operation:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: selected predecessor receipt differs: {current_operation}")
+                return {}
+            lifecycle = load_lifecycle_owner()
+            try:
+                current_item = lifecycle.resolve_category(
+                    root,
+                    f"work-item:{predecessor_slug}",
+                    ledger_resource_budget=ledger_resource_budget,
+                )
+            except lifecycle.LifecycleError as exc:
+                fail(errors, f"{exc.failure_id}: {exc}")
+                return {}
+            current_operation = predecessor_operation
+
+        if errors or any(path not in candidate_set for path in selected_paths):
+            if not errors:
+                fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: selected transfer ancestry is incomplete")
+            return {}
+
+        # Keep the existing repository-wide operation-ID uniqueness audit, but
+        # inspect only unselected receipt metadata; unselected ledgers are not
+        # acquired, hashed, or charged to this operation.
+        operation_paths: dict[str, Path] = {}
+        selected_path_set = set(selected_paths)
+        for path in candidates:
+            if path in selected_path_set:
+                payload = selected_payloads[path]
+            else:
+                try:
+                    raw = _read_transfer_authority_bytes(
+                        root, path, maximum_bytes=MAX_TRANSFER_RECEIPT_BYTES
+                    )
+                    payload = decode_json_object(
+                        raw, source=str(path), maximum_bytes=MAX_TRANSFER_RECEIPT_BYTES
+                    )
+                except (OSError, ValueError) as exc:
+                    fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer receipt is unreadable: {exc}")
+                    continue
+            if payload.get("schemaVersion") != 2 or payload.get("owner") != "mutate-work-item:archive-with-successor-v2":
+                continue
+            operation_id = payload.get("operationId")
+            if not isinstance(operation_id, str) or not operation_id or operation_id in operation_paths:
+                fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: transfer operation identity is duplicate or invalid")
+                continue
+            operation_paths[operation_id] = path
+        if errors:
+            return {}
+        candidates = tuple(selected_paths)
+
+    receipts: dict[str, tuple[Path, dict, Path]] = {}
+    for path in candidates:
+        if path in selected_payloads:
+            payload = selected_payloads[path]
+        else:
+            try:
+                payload = decode_json_object(
+                    _read_transfer_authority_bytes(
+                        root, path, maximum_bytes=MAX_TRANSFER_RECEIPT_BYTES, _inputs=_inputs
+                    ),
+                    source=str(path),
+                    maximum_bytes=MAX_TRANSFER_RECEIPT_BYTES,
+                )
+            except (OSError, ValueError) as exc:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer receipt is unreadable: {exc}")
+                continue
         if payload.get("schemaVersion") != 2 or payload.get("owner") != "mutate-work-item:archive-with-successor-v2":
             continue
         operation_id = payload.get("operationId")
@@ -9017,18 +9354,60 @@ def _transfer_receipts(
             fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer receipt {operation_id} archive identity differs")
             continue
         ledger = archive / "agent-runs.jsonl"
-        try:
-            physical_ledger_sha = _transfer_authority_sha256(
-                root, ledger, maximum_bytes=_ledger_resource_budget(ledger_resource_budget).max_ledger_bytes,
-                _inputs=_inputs
-            )
-        except (OSError, ValueError) as exc:
-            fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer ledger is unavailable: {exc}")
-            continue
+        if selected_mode:
+            operation_budget = _operation_ledger_resource_budget(ledger_resource_budget)
+            ledger_limit = operation_budget.max_ledger_bytes if operation_budget is not None else None
+            selected_snapshot = None
+            if preselected_ledger_snapshots is not None:
+                selected_snapshot = preselected_ledger_snapshots.get(str(ledger))
+            if selected_snapshot is None:
+                selected_snapshot = selected_snapshots.get(str(ledger))
+            try:
+                ledger_bytes = _read_transfer_authority_bytes(
+                    root,
+                    ledger,
+                    maximum_bytes=ledger_limit,
+                    require_single_link=True,
+                    captured_snapshots_out=selected_snapshots,
+                    preselected_snapshot=selected_snapshot,
+                )
+                snapshot = selected_snapshots.get(str(ledger))
+                if snapshot is None:
+                    raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: selected ancestor snapshot is unavailable")
+                if _inputs is not None:
+                    _inputs.bind_selection(ledger, ledger_bytes, snapshot=snapshot)
+                physical_ledger_sha = _transfer_authority_sha256(
+                    root,
+                    ledger,
+                    maximum_bytes=ledger_limit,
+                    captured_bytes=ledger_bytes,
+                )
+            except (OSError, ValueError) as exc:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer ledger is unavailable: {exc}")
+                continue
+            if captured_ledger_bytes_out is not None:
+                previous = captured_ledger_bytes_out.get(str(ledger))
+                if previous is not None and previous != ledger_bytes:
+                    fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: selected transfer ledger images differ: {operation_id}")
+                    continue
+                captured_ledger_bytes_out[str(ledger)] = ledger_bytes
+        else:
+            try:
+                physical_ledger_sha = _transfer_authority_sha256(
+                    root,
+                    ledger,
+                    maximum_bytes=_ledger_resource_budget(ledger_resource_budget).max_ledger_bytes,
+                    _inputs=_inputs,
+                )
+            except (OSError, ValueError) as exc:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer ledger is unavailable: {exc}")
+                continue
         if physical_ledger_sha != ledger_sha256:
             fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer ledger digest differs: {operation_id}")
             continue
         receipts[operation_id] = (path, payload, archive)
+    if selected_mode and errors:
+        return {}
     return receipts
 
 def _receive_transfer_source_state(archive, errors, *, terminal=False, _inputs=None,
@@ -9259,7 +9638,26 @@ def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_b
         fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: successor has no repository root")
         return ()
     source_slug, operation_id = relation
-    receipts = _transfer_receipts(root, errors, ledger_resource_budget=ledger_resource_budget, _inputs=_inputs)
+    lifecycle = load_lifecycle_owner()
+    try:
+        source_item = lifecycle.resolve_category(
+            root,
+            f"work-item:{source_slug}",
+            ledger_resource_budget=ledger_resource_budget,
+        )
+    except lifecycle.LifecycleError as exc:
+        fail(errors, f"{exc.failure_id}: {exc}")
+        return ()
+    receipts = _transfer_receipts(
+        root,
+        errors,
+        ledger_resource_budget=ledger_resource_budget,
+        _inputs=_inputs,
+        selected_source_item=source_item,
+        selected_operation_id=operation_id,
+    )
+    if errors:
+        return ()
     entry = receipts.get(operation_id)
     if entry is None:
         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: successor receipt is absent: {operation_id}")
@@ -10874,6 +11272,11 @@ def validate_work_item(
     Omitted bytes and absence preserve legacy acquisition.
     """
     errors: list[str] = []
+    ledger_resource_budget = _operation_ledger_resource_budget(ledger_resource_budget)
+    # A local parsing pair does not replace the enclosing operation's still-
+    # preparatory admission. Inherited acquisition transports the caller/held
+    # pair; omitted input remains descriptor-bound until actual admission.
+    acquisition_budget = ledger_resource_budget
     if not isinstance(selected_ledger_absent, bool) or (
         selected_ledger_absent and selected_ledger_bytes is not None
     ):
@@ -11015,7 +11418,16 @@ def validate_work_item(
             reduction.publish(obligation_state_out, authority_state_out)
         return errors
     status_path = item / "status.md"
-    status_text = status_path.read_text(encoding="utf-8") if status_path.exists() else ""
+    inputs = _CurrentEvidenceV1()
+    status_bytes = None
+    try:
+        status_bytes = inputs.read_selection(status_path) if status_path.exists() else None
+        status_text = status_bytes.decode("utf-8", errors="strict") if status_bytes is not None else ""
+    except (OSError, UnicodeError, ValueError) as exc:
+        fail(errors, f"WI-LEDGER-CUSTODY-STALE-TARGET: transfer/status input is unreadable: {exc}")
+        if ledger_acquisition_complete_out is not None:
+            ledger_acquisition_complete_out.append(False)
+        return errors
     # V1 keeps an undelegated quick-fix ledger-free.  A staged/full item and an
     # explicitly supplied candidate ledger retain the exact fail-closed behavior.
     ledger_free_quick_fix = (
@@ -11026,7 +11438,6 @@ def validate_work_item(
     )
     raw_metadata: list[dict[str, object]] = []
     ledger_bytes = b""
-    inputs = _CurrentEvidenceV1()
     if not ledger_free_quick_fix:
         if selected_ledger_absent:
             fail(errors, f"missing ledger: {selected_ledger}")
@@ -11045,6 +11456,68 @@ def validate_work_item(
                 if ledger_acquisition_complete_out is not None:
                     ledger_acquisition_complete_out.append(False)
             else:
+                if ledger_resource_budget is None:
+                    transfer_ledger_bytes: dict[str, bytes] = {}
+                    transfer_authority_bytes: dict[str, bytes] = {}
+                    relation_errors: list[str] = []
+                    relation = (
+                        _transfer_status_relation(
+                            item, relation_errors, selected_status_bytes=status_bytes
+                        )
+                        if status_bytes is not None else None
+                    )
+                    if relation_errors:
+                        errors.extend(relation_errors)
+                        if ledger_acquisition_complete_out is not None:
+                            ledger_acquisition_complete_out.append(False)
+                        return errors
+                    if relation is not None:
+                        if root is None:
+                            fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: successor has no repository root")
+                            if ledger_acquisition_complete_out is not None:
+                                ledger_acquisition_complete_out.append(False)
+                            return errors
+                        source_slug, operation_id = relation
+                        lifecycle = load_lifecycle_owner()
+                        try:
+                            source_item = lifecycle.resolve_category(
+                                root, f"work-item:{source_slug}"
+                            )
+                        except lifecycle.LifecycleError as exc:
+                            fail(errors, f"{exc.failure_id}: {exc}")
+                            if ledger_acquisition_complete_out is not None:
+                                ledger_acquisition_complete_out.append(False)
+                            return errors
+                        transfer_errors: list[str] = []
+                        _transfer_receipts(
+                            root,
+                            transfer_errors,
+                            selected_source_item=source_item,
+                            selected_operation_id=operation_id,
+                            _inputs=inputs,
+                            captured_ledger_bytes_out=transfer_ledger_bytes,
+                            captured_authority_bytes_out=transfer_authority_bytes,
+                        )
+                        if transfer_errors:
+                            errors.extend(transfer_errors)
+                            if ledger_acquisition_complete_out is not None:
+                                ledger_acquisition_complete_out.append(False)
+                            return errors
+                        transfer_authority_bytes[str(status_path)] = status_bytes
+                    charged_transfer_authorities = {
+                        identity: raw
+                        for identity, raw in transfer_authority_bytes.items()
+                        if Path(identity).name == "lifecycle-transition-receipt.json"
+                        or Path(identity).parent.name == "ledger-migration-receipts"
+                    }
+                    demand = inspect_ledger_resource_demand(
+                        selected_ledger,
+                        None,
+                        source_bytes=ledger_bytes,
+                        participants=transfer_ledger_bytes,
+                        byte_participants=charged_transfer_authorities,
+                    )
+                    ledger_resource_budget = resolve_ledger_resource_budget(demand=demand)
                 events = load_jsonl(
                     selected_ledger, errors, raw_metadata, ledger_bytes,
                     ledger_acquisition_complete_out=ledger_acquisition_complete_out, ledger_resource_budget=ledger_resource_budget
@@ -11076,7 +11549,7 @@ def validate_work_item(
     _, v3_errors = reduce_v3_events(events)
     errors.extend(v3_errors)
     validate_scratch_ownership(native_effective_events, item, errors)
-    inherited_rows = _inherited_transfer_rows(item, errors, ledger_resource_budget=ledger_resource_budget,
+    inherited_rows = _inherited_transfer_rows(item, errors, ledger_resource_budget=acquisition_budget,
         transition_resource_budget=transition_resource_budget, _inputs=inputs)
     effective_rows = inherited_rows + native_effective_rows
     effective_events = _row_events(effective_rows)
@@ -11229,7 +11702,8 @@ def main(argv: list[str]) -> int:
     lifecycle.add_transition_resource_arguments(parser)
     args = parser.parse_args(argv)
     try:
-        ledger_resource_budget = resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes)
+        ledger_resource_budget = (None if args.ledger_max_events is None and args.ledger_max_bytes is None
+            else resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes))
         transition_resource_budget = lifecycle._transition_cli_budget(args)
         transition_output_ceiling = lifecycle._transition_cli_budget(args, output=True)
     except (ValueError, lifecycle.LifecycleError) as exc:
