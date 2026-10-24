@@ -612,7 +612,7 @@ def test_goal_cli_requires_explicit_scope_and_preserves_default_route(tmp_path: 
 
 
 def test_goal_legacy_receipt_applicability_and_variable_criteria(tmp_path: Path):
-    checker, _owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path, criterion_ids=("scope", "settlement"), legacy=True)
+    checker, owner, roots, goal, write_goal, close_member = _goal_fixture(tmp_path, criterion_ids=("scope", "settlement"), legacy=True)
     for rid, slug in (("A", "a"), ("B", "b"), ("A", "g")):
         close_member(rid, slug)
     record = write_goal(terminal=True)
@@ -621,6 +621,17 @@ def test_goal_legacy_receipt_applicability_and_variable_criteria(tmp_path: Path)
     legacy = next(row for row in observation["members"] if row["slug"] == "historical-member")
     assert legacy["proofProfile"] == "legacy-read-compatible" and legacy["state"] == "delivered-closed"
     assert [row["id"] for row in observation["criteria"]] == ["scope", "settlement"]
+    historical = roots["A"] / "work-items/archive/2026-06/historical-member/closure.md"
+    historical.write_bytes(historical.read_bytes() + b"Lifecycle-schema: work-items-physical-v1\n")
+    record = write_goal(terminal=True)
+    assert owner.observe_readme(roots["A"])["matches"] is True
+    rejected = checker.evaluate_goal_completion(roots["A"], record, phase="final")
+    assert rejected["decision"] == "unverified", rejected
+    assert any(row["code"] == "GC-REFERENCE" and "input-role=strict" in row["detail"]
+        and "work-items/archive/2026-06/historical-member/status.md" in row["detail"]
+        for row in rejected["causes"]), rejected
+    assert not any(row.get("slug") == "historical-member" and row.get("proofProfile") == "modern"
+        for row in rejected["members"])
 
 
 def test_goal_invalid_bindings_and_pending_duties_cannot_become_eligible(tmp_path: Path):

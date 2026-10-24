@@ -692,6 +692,23 @@ def test_selector_requires_persistent_archived_owner_identity(tmp_path: Path) ->
     assert rejected.value.failure_id == "WI-LEDGER-COMPAT-SET-TOPOLOGY"
 
 
+def test_h1_preflight_refuses_catalogue_only_incomplete_owner(tmp_path: Path) -> None:
+    root = tmp_path / "incomplete-owner"
+    support, writer, _reader, request, _items, _paths = activated_relocation_fixture(root)
+    archived = root.joinpath(*request.archive_owner.split("/"))
+    closure = archived / "closure.md"
+    closure.write_bytes(closure.read_bytes() + b"Lifecycle-schema: work-items-physical-v1\n")
+    entry = writer._archived_work_item_entry(archived, input_role="historical-catalogue")
+    assert entry.classification == "WI-CATEGORY-SCHEMA-INVALID"
+    before = support.tree_state(root)
+    with pytest.raises(writer.LifecycleError) as rejected:
+        writer.relocate_ledger_h1_artifact_set(root, request)
+    assert rejected.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+    assert "input-role=strict" in str(rejected.value)
+    assert f"{request.archive_owner}/status.md" in str(rejected.value)
+    assert support.tree_state(root) == before
+
+
 def test_preflight_rejects_noncalendar_archive_month(tmp_path: Path) -> None:
     root = tmp_path / "archive-month"
     support, writer, _reader, request, _items, _paths = activated_relocation_fixture(

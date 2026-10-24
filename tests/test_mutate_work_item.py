@@ -7055,14 +7055,126 @@ def test_legacy_archive_projection_is_informational_and_byte_preserving(
     assert "archive/2026-04/legacy-closed-on/closure.md" in readme
 
 
+@pytest.mark.parametrize("missing", ("status", "closure", "absent-status"))
+def test_incomplete_archive_schema_is_catalogue_only(tmp_path: Path, missing: str) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    item = root / "work-items/archive/2037-02/unfamiliar-record"
+    status = "status: completed\nupdated: 2099-01-01T00:00:00Z\n"
+    closure_text = "Closed: 2099-02-01\nOutcome: Synthetic incomplete history.\n"
+    if missing != "closure":
+        closure_text += LIFECYCLE_SCHEMA_MARKER + "\n"
+    else:
+        status += LIFECYCLE_SCHEMA_MARKER + "\n"
+    write(item / "closure.md", closure_text)
+    if missing != "absent-status":
+        write(item / "status.md", status)
+    before = tree_file_bytes(item)
+    entry, = module.collect_readme_entries(root)
+    assert entry.section == "Archive metadata" and not entry.checked
+    assert entry.classification == "WI-CATEGORY-SCHEMA-INVALID"
+    assert entry.logical_reference == "work-item:unfamiliar-record"
+    assert set(entry.source_paths) == {item / name for name in before}
+    assert module._canonical_timestamp([entry]) == "none"
+    with pytest.raises(module.LifecycleError) as strict:
+        module._archived_work_item_entry(item)
+    assert strict.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+    expected_member = "closure.md" if missing == "closure" else "status.md"
+    assert "input-role=strict" in str(strict.value)
+    assert f"work-items/archive/2037-02/unfamiliar-record/{expected_member}" in str(strict.value)
+    with pytest.raises(ValueError, match="input role"):
+        module._archived_work_item_entry(item, input_role="unknown")
+    assert tree_file_bytes(item) == before
+
+
+def test_incomplete_schema_refresh_is_visible_byte_current_but_audit_strict(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    item = root / "work-items/archive/2037-02/historical"
+    write(item / "status.md", "status: completed\nupdated: 2099-01-01T00:00:00Z\n")
+    write(item / "closure.md", "Closed: 2099-02-01T00:00:00Z\n" + LIFECYCLE_SCHEMA_MARKER + "\n")
+    before = {path: (path.read_bytes(), module._lifecycle_file_identity(path.lstat())) for path in item.iterdir()}
+    result = run_cli("refresh", "--root", str(root))
+    assert result.returncode == 0, result.stdout
+    assert "INFO WI-CATEGORY-SCHEMA-INVALID:" in result.stdout
+    assert "input-role=historical-catalogue" in result.stdout
+    assert "work-items/archive/2037-02/historical/status.md" in result.stdout
+    assert "Version 1 terminal proof unavailable" in result.stdout
+    readme = root / "work-items/README.md"
+    board = readme.read_bytes()
+    assert b"Canonical changes through: none" in board
+    section = board.decode().split("## Archive metadata\n", 1)[1]
+    assert "- [x]" not in section and "- [ ]" not in section
+    observed = module.observe_readme(root)
+    assert observed["matches"] is True
+    assert observed["archiveInventory"] == {"schemaVersion": 1, "acquisitionComplete": True,
+        "classificationComplete": True, "unbound": []}
+    expected = hashlib.sha256()
+    for path, (data, _) in sorted(before.items()):
+        logical = path.relative_to(root / "work-items").as_posix().encode()
+        expected.update(len(logical).to_bytes(8, "big") + logical + len(data).to_bytes(8, "big") + data)
+    assert observed["inputDigest"] == expected.hexdigest()
+    module.check_readme(root)
+    for operation in (module.audit_categories, module.audit):
+        with pytest.raises(module.LifecycleError) as rejected:
+            operation(root)
+        assert rejected.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+        assert "input-role=strict" in str(rejected.value)
+    reset = run_cli("refresh", "--root", str(root), "--reset-static-guide",
+        "--expected-readme-sha256", hashlib.sha256(board).hexdigest())
+    assert reset.returncode == 0 and "INFO WI-CATEGORY-SCHEMA-INVALID:" in reset.stdout
+    assert readme.read_bytes() == board
+    assert all(path.read_bytes() == data and module._lifecycle_file_identity(path.lstat()) == identity
+        for path, (data, identity) in before.items())
+    (item / "status.md").write_bytes(before[item / "status.md"][0] + b"\nIndependent history bytes.\n")
+    assert module.observe_readme(root)["matches"] is False
+    with pytest.raises(module.LifecycleError) as stale:
+        module.check_readme(root)
+    assert stale.value.failure_id == "WI-README-STALE"
+
+
+def test_close_with_unfamiliar_incomplete_history_preserves_rollback_and_selected_input(tmp_path: Path) -> None:
+    slug = "selected-current"
+    module, root, active, instant = _seed_ordinary_ledger_close(tmp_path, slug)
+    historical = root / "work-items/archive/2037-02/unfamiliar-opposite"
+    write(historical / "status.md", marked_status())
+    write(historical / "closure.md", "Closed: 2037-02-01\nOutcome: Synthetic incomplete history.\n")
+    history_before = tree_file_bytes(historical)
+    module.refresh_readme(root)
+    before = tree_file_bytes(root / "work-items")
+    with pytest.raises(module.LifecycleError) as failed:
+        module.close_item(root, slug, closure(instant).encode(), instant, inject_readme_failure=True)
+    assert failed.value.failure_id == "WI-README-STALE"
+    assert tree_file_bytes(root / "work-items") == before
+    original_status = (active / "status.md").read_bytes()
+    (active / "status.md").write_bytes(original_status + (LIFECYCLE_SCHEMA_MARKER + "\n").encode())
+    with pytest.raises(module.LifecycleError) as marked_active:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    assert marked_active.value.failure_id == "WI-LEDGER-UNSETTLED"
+    with pytest.raises(module.LifecycleError) as producer_refusal:
+        module._terminalize_status((active / "status.md").read_bytes())
+    assert producer_refusal.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+    (active / "status.md").write_bytes(original_status)
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+    assert not active.exists() and (archived / module.BUG_DISPOSITIONS_RECEIPT).is_file()
+    assert json.loads((archived / "lifecycle-transition-receipt.json").read_bytes())["schemaVersion"] == 3
+    assert all((archived / name).read_bytes().count(LIFECYCLE_SCHEMA_MARKER.encode()) == 1
+        for name in ("status.md", "closure.md"))
+    assert module.close_item(root, slug, closure(instant).encode(), instant) == archived
+    assert tree_file_bytes(historical) == history_before
+    with pytest.raises(module.LifecycleError) as selected_history:
+        module.close_item(root, historical.name, closure(instant).encode(), instant)
+    assert selected_history.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+    module.check_readme(root)
+
+
 def test_archive_schema_marker_matrix_fails_closed(tmp_path: Path) -> None:
     module = load_module()
     instant = "2026-08-01T00:00:00Z"
     canonical_status = marked_status()
     canonical_closure = marked_closure(instant)
     cases = {
-        "status-only": (canonical_status, closure(instant)),
-        "closure-only": ("status: completed\n", canonical_closure),
+        "unsupported-only": ("", closure(instant) + "Lifecycle-schema: unsupported\n"),
         "duplicate-status": (
             canonical_status + f"{LIFECYCLE_SCHEMA_MARKER}\n",
             canonical_closure,
@@ -7100,12 +7212,88 @@ def test_archive_schema_marker_matrix_fails_closed(tmp_path: Path) -> None:
         item = root / "work-items" / "archive" / "2026-08" / slug
         write(item / "status.md", status)
         write(item / "closure.md", closure_text)
-        try:
+        for operation in (module.collect_readme_entries, lambda _root: module._archived_work_item_entry(item)):
+            with pytest.raises(module.LifecycleError) as failure:
+                operation(root)
+            assert failure.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID", slug
+
+
+@pytest.mark.parametrize("kind", ("absent", "empty", "directory"))
+def test_historical_status_presence_requires_acquired_file_or_true_absence(tmp_path: Path, kind: str) -> None:
+    module = load_module()
+    root, slug, instant = tmp_path / "repo", "selected-current", "2026-10-24T10:00:00Z"
+    seed_active(module, root, slug)
+    write_empty_bug_dispositions(root, slug, instant)
+    item = root / "work-items/archive/2037-02/historical"
+    write(item / "closure.md", marked_closure("2037-02-01T00:00:00Z"))
+    status = item / "status.md"
+    if kind == "directory":
+        status.mkdir()
+    elif kind == "empty":
+        status.write_bytes(b"")
+    close_file = root / "requested-closure.md"
+    write(close_file, closure(instant))
+
+    def snapshot(base):
+        return {path.relative_to(base).as_posix(): (
+            "directory" if path.is_dir() else "file", module._lifecycle_file_identity(path.lstat()),
+            None if path.is_dir() else path.read_bytes()) for path in (base, *sorted(base.rglob("*")))}
+
+    before, archive_before = snapshot(root), snapshot(item)
+    if kind == "directory":
+        with pytest.raises(module.LifecycleError) as rejected:
             module.collect_readme_entries(root)
-        except module.LifecycleError as exc:
-            assert exc.failure_id == "WI-CATEGORY-SCHEMA-INVALID", slug
-        else:
-            raise AssertionError(f"malformed schema pair downgraded to legacy: {slug}")
+        assert rejected.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+        assert "work-items/archive/2037-02/historical/status.md" in str(rejected.value)
+    else:
+        entry = next(row for row in module.collect_readme_entries(root)
+            if row.logical_reference == "work-item:historical")
+        assert entry.classification == "WI-CATEGORY-SCHEMA-INVALID"
+        assert (status in entry.source_paths) is (kind == "empty")
+    refreshed = run_cli("refresh", "--root", str(root))
+    if kind == "directory":
+        assert refreshed.returncode != 0 and "WI-CATEGORY-SCHEMA-INVALID" in refreshed.stdout
+        assert "INFO " not in refreshed.stdout and "README-SHA256:" not in refreshed.stdout
+    else:
+        assert refreshed.returncode == 0 and "INFO WI-CATEGORY-SCHEMA-INVALID:" in refreshed.stdout
+        inputs = [item / "closure.md", root / "work-items/active" / slug / "status.md"]
+        if kind == "empty":
+            inputs.append(status)
+        expected = hashlib.sha256()
+        for path in sorted(inputs):
+            logical = path.relative_to(root / "work-items").as_posix().encode()
+            data = path.read_bytes()
+            expected.update(len(logical).to_bytes(8, "big") + logical + len(data).to_bytes(8, "big") + data)
+        assert module.observe_readme(root)["inputDigest"] == expected.hexdigest()
+    closed = run_cli("close", "--root", str(root), "--slug", slug,
+        "--closure-file", str(close_file), "--terminal-instant", instant)
+    if kind == "directory":
+        assert closed.returncode != 0 and "WI-CATEGORY-SCHEMA-INVALID" in closed.stdout
+        assert "INFO " not in closed.stdout and "README-SHA256:" not in closed.stdout
+        assert snapshot(root) == before
+    else:
+        assert closed.returncode == 0, closed.stdout
+        assert not (root / "work-items/active" / slug).exists()
+    assert snapshot(item) == archive_before
+
+
+def test_archive_schema_acquisition_and_fenced_declarations_stay_strict(tmp_path: Path) -> None:
+    module = load_module()
+    item = tmp_path / "repo/work-items/archive/2037-02/acquired"
+    write(item / "status.md", "status: completed\n```\nLifecycle-schema: unsupported\n```\n")
+    write(item / "closure.md", "Outcome: Synthetic history.\n" + LIFECYCLE_SCHEMA_MARKER + "\n")
+    entry, = module.collect_readme_entries(tmp_path / "repo")
+    assert entry.classification == "WI-CATEGORY-SCHEMA-INVALID"
+    (item / "status.md").write_bytes(b"\xff")
+    with pytest.raises(module.LifecycleError) as utf8:
+        module.collect_readme_entries(tmp_path / "repo")
+    assert utf8.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+    assert "work-items/archive/2037-02/acquired/status.md" in str(utf8.value)
+    (item / "status.md").write_bytes(b"status: completed\n")
+    (item / "closure.md").unlink()
+    with pytest.raises(module.LifecycleError) as missing:
+        module._archived_work_item_entry(item, input_role="historical-catalogue")
+    assert missing.value.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
 
 
 def test_v1_archive_pair_preserves_strict_evidence_status_and_month(

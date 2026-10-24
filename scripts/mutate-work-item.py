@@ -9932,7 +9932,9 @@ def _legacy_retirement_entry(item: Path, metadata: Path,
 def _archived_work_item_entry(item: Path,
     *,
     acquired_input=None, prepared_terminal=None, ledger_resource_budget=None,
-transition_resource_budget=None) -> ReadmeEntry:
+    transition_resource_budget=None, input_role: str = "strict") -> ReadmeEntry:
+    if input_role not in ("strict", "historical-catalogue"):
+        raise ValueError("unsupported archived work-item input role")
     if acquired_input is None and _legacy_completion_recognized(item):
         observation = _require_legacy_terminal(item.parent.parent.parent.parent, item, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         port = observation.acquired_input
@@ -9965,18 +9967,26 @@ transition_resource_budget=None) -> ReadmeEntry:
     )
     if closure_data is None:
         raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", f"archived work-item lacks closure.md: {item}")
+    archive_path = item.relative_to(item.parent.parent.parent.parent).as_posix()
+    source_context = f"input-role={input_role}; archive={archive_path}; member="
+    closure_member = source_context + archive_path + "/closure.md"
+    status_member = source_context + archive_path + "/status.md"
+    status_present = _readme_input_exists(status, prepared_terminal, acquired_input)
+    if status_present and not _readme_input_is_file(status, prepared_terminal, acquired_input):
+        raise LifecycleError("WI-CATEGORY-SCHEMA-INVALID",
+            f"{status_member} must be an ordinary file or supported absence")
     status_data = (
         _readme_input_bytes(status, prepared_terminal, failure_id="WI-README-STALE",
             maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP, acquired_input=acquired_input)
-        if _readme_input_is_file(status, prepared_terminal, acquired_input) else b""
+        if status_present else b""
     )
     if status_data is None:
-        status_data = b""
-    closure_markers = _schema_marker_occurrences(closure_data, "closure.md")
-    status_markers = _schema_marker_occurrences(status_data, "status.md")
+        raise LifecycleError("WI-README-STALE", f"{status_member} present member has no acquired bytes")
+    closure_markers = _schema_marker_occurrences(closure_data, closure_member)
+    status_markers = _schema_marker_occurrences(status_data, status_member)
     fields = _parse_fields(closure_data.decode("utf-8"))
     sources = [closure]
-    if _readme_input_is_file(status, prepared_terminal, acquired_input):
+    if status_present:
         sources.append(status)
 
     if not closure_markers and not status_markers:
@@ -9991,8 +10001,21 @@ transition_resource_budget=None) -> ReadmeEntry:
             LEGACY_READ_CLASSIFICATION,
         )
 
-    _require_canonical_schema_marker(status_markers, "status.md")
-    _require_canonical_schema_marker(closure_markers, "closure.md")
+    declarations = ((status_markers, status_member), (closure_markers, closure_member))
+    for occurrences, member in declarations:
+        if occurrences:
+            _require_canonical_schema_marker(occurrences, member)
+    missing = [member for occurrences, member in declarations if not occurrences]
+    if missing and input_role == "historical-catalogue":
+        return ReadmeEntry(
+            "Archive metadata", f"work-item:{item.name}", archive_path, closure, False,
+            "; ".join(missing) + ": missing canonical schema declaration; "
+            "incomplete historical representation; Version 1 terminal proof unavailable",
+            sources, "WI-CATEGORY-SCHEMA-INVALID",
+        )
+    for occurrences, member in declarations:
+        if not occurrences:
+            _require_canonical_schema_marker(occurrences, member)
     closed = fields.get("closed", "")
     _validate_closure(closure_data, closed)
     expected_month = archive_month(closed)
@@ -10091,7 +10114,7 @@ def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInven
         if prepared_terminal is not None and entity.path == prepared_terminal.archive:
             continue
         if entity.kind in {"work-item", "invalid-work-item"}:
-            entries.append(_archived_work_item_entry(entity.path, prepared_terminal=prepared_terminal, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget))
+            entries.append(_archived_work_item_entry(entity.path, prepared_terminal=prepared_terminal, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, input_role="historical-catalogue"))
         elif entity.kind == "archive-metadata":
             relative = _relative_link(work_items, entity.path)
             entries.append(ReadmeEntry("Archive metadata", f"archive-observation:{relative}", relative,
@@ -10169,7 +10192,7 @@ def _canonical_timestamp(entries: Iterable[ReadmeEntry], *, prepared_terminal=No
             instant = json.loads(raw)["terminalInstant"]
             _strict_utc(instant); instants.append(instant)
             continue
-        if entry.classification in {"WI-ARCHIVE-ENTITY-UNBOUND", "WI-ARCHIVE-METADATA"}:
+        if entry.classification in {"WI-ARCHIVE-ENTITY-UNBOUND", "WI-ARCHIVE-METADATA", "WI-CATEGORY-SCHEMA-INVALID"}:
             continue
         for path in entry.source_paths:
             if path.name == LEGACY_RETIREMENT_FILE:
@@ -10255,6 +10278,7 @@ def _render_readme_bytes(
     static_guide_override: str | None = None, input_digest_out: list[str] | None = None,
     archive_inventory_out: list[dict] | None = None,
     archive_inventory_witness_out: list[ArchiveEntityInventory] | None = None,
+    observations_out: list[str] | None = None,
     prepared_terminal=None, ledger_resource_budget=None,
 transition_resource_budget=None) -> bytes:
     if prepared_terminal is not None:
@@ -10319,6 +10343,9 @@ transition_resource_budget=None) -> bytes:
         archive_inventory_out.append(inventory.observation(work_items))
     if archive_inventory_witness_out is not None:
         archive_inventory_witness_out.append(inventory)
+    if observations_out is not None:
+        observations_out.extend(f"{entry.classification}: {entry.detail}" for entry in entries
+            if entry.classification == "WI-CATEGORY-SCHEMA-INVALID")
     return rendered
 
 
@@ -10373,19 +10400,23 @@ def observe_readme(root: Path, *, ledger_resource_budget=None, transition_resour
 
 
 def refresh_readme(root: Path, *, allow_marker_bootstrap: bool = False,
-                   archive_inventory_out: list[dict] | None = None, ledger_resource_budget=None,) -> str:
+                   archive_inventory_out: list[dict] | None = None,
+                   observations_out: list[str] | None = None, ledger_resource_budget=None,) -> str:
     work_items = _work_items_root(root, ledger_resource_budget=ledger_resource_budget)
     inventories: list[dict] = []
+    observations: list[str] = []
     expected = _render_readme_bytes(
         root,
         allow_marker_bootstrap=allow_marker_bootstrap,
-        archive_inventory_out=inventories, ledger_resource_budget=ledger_resource_budget
+        archive_inventory_out=inventories, observations_out=observations, ledger_resource_budget=ledger_resource_budget
     )
     readme = work_items / "README.md"
     _atomic_write(readme, expected)
     repeated_inventories: list[dict] = []
-    observed = _render_readme_bytes(root, archive_inventory_out=repeated_inventories, ledger_resource_budget=ledger_resource_budget)
-    if observed != expected or inventories != repeated_inventories or _capture_file_snapshot(
+    repeated_observations: list[str] = []
+    observed = _render_readme_bytes(root, archive_inventory_out=repeated_inventories,
+        observations_out=repeated_observations, ledger_resource_budget=ledger_resource_budget)
+    if observed != expected or inventories != repeated_inventories or observations != repeated_observations or _capture_file_snapshot(
         readme,
         failure_id="WI-README-STALE",
         maximum_bytes=len(expected),
@@ -10393,11 +10424,14 @@ def refresh_readme(root: Path, *, allow_marker_bootstrap: bool = False,
         raise LifecycleError("WI-README-STALE", "README byte verification failed")
     if archive_inventory_out is not None:
         archive_inventory_out.append(inventories[0])
+    if observations_out is not None:
+        observations_out.extend(observations)
     return hashlib.sha256(expected).hexdigest()
 
 
 def reset_readme_static_guide(root: Path, expected_readme_sha256: str, *,
-                            archive_inventory_out: list[dict] | None = None, ledger_resource_budget=None,) -> str:
+                            archive_inventory_out: list[dict] | None = None,
+                            observations_out: list[str] | None = None, ledger_resource_budget=None,) -> str:
     if not re.fullmatch(r"[0-9A-Fa-f]{64}", expected_readme_sha256):
         raise LifecycleError(
             "WI-README-REPAIR-TARGET-MISMATCH",
@@ -10413,10 +10447,11 @@ def reset_readme_static_guide(root: Path, expected_readme_sha256: str, *,
     _static_guide(readme, allow_marker_bootstrap=True)
     current = readme.read_bytes()
     inventories: list[dict] = []
+    observations: list[str] = []
     desired = _render_readme_bytes(
         root,
         static_guide_override=_default_static_guide(),
-        archive_inventory_out=inventories, ledger_resource_budget=ledger_resource_budget
+        archive_inventory_out=inventories, observations_out=observations, ledger_resource_budget=ledger_resource_budget
     )
     current_hash = hashlib.sha256(current).hexdigest()
     expected_hash = expected_readme_sha256.casefold()
@@ -10428,14 +10463,18 @@ def reset_readme_static_guide(root: Path, expected_readme_sha256: str, *,
     if current != desired:
         _atomic_write(readme, desired)
     repeated_inventories: list[dict] = []
-    observed = _render_readme_bytes(root, archive_inventory_out=repeated_inventories, ledger_resource_budget=ledger_resource_budget)
-    if observed != desired or inventories != repeated_inventories or readme.read_bytes() != desired:
+    repeated_observations: list[str] = []
+    observed = _render_readme_bytes(root, archive_inventory_out=repeated_inventories,
+        observations_out=repeated_observations, ledger_resource_budget=ledger_resource_budget)
+    if observed != desired or inventories != repeated_inventories or observations != repeated_observations or readme.read_bytes() != desired:
         raise LifecycleError(
             "WI-README-STALE",
             "README static-guide repair failed complete-byte verification",
         )
     if archive_inventory_out is not None:
         archive_inventory_out.append(inventories[0])
+    if observations_out is not None:
+        observations_out.extend(observations)
     return hashlib.sha256(desired).hexdigest()
 
 
@@ -14569,14 +14608,15 @@ def audit_categories(root: Path, *, ledger_resource_budget=None) -> tuple[str, .
     for item in _archived_work_item_candidates(work_items / "archive", ledger_resource_budget=ledger_resource_budget):
         manifest = item / BUG_DISPOSITIONS_MANIFEST
         receipt = item / BUG_DISPOSITIONS_RECEIPT
-        if not manifest.exists() and not receipt.exists():
-            continue
         closure = item / "closure.md"
-        if not closure.is_file():
+        if (manifest.exists() or receipt.exists()) and not closure.is_file():
             raise LifecycleError(
                 "WI-IMMUTABLE-ARCHIVE",
                 f"archived disposition owner lacks closure: {item.name}",
             )
+        _archived_work_item_entry(item, ledger_resource_budget=ledger_resource_budget)
+        if not manifest.exists() and not receipt.exists():
+            continue
         closure_data = closure.read_bytes()
         fields = _parse_fields(closure_data.decode("utf-8"))
         _verify_archived_bug_dispositions(
@@ -30922,6 +30962,7 @@ def main(argv: list[str]) -> int:
             print(result)
         elif args.command == "refresh":
             archive_inventories: list[dict] = []
+            observations: list[str] = []
             if args.reset_static_guide:
                 if not args.expected_readme_sha256:
                     raise LifecycleError(
@@ -30931,7 +30972,7 @@ def main(argv: list[str]) -> int:
                 readme_hash = reset_readme_static_guide(
                     root,
                     args.expected_readme_sha256,
-                    archive_inventory_out=archive_inventories, ledger_resource_budget=ledger_resource_budget
+                    archive_inventory_out=archive_inventories, observations_out=observations, ledger_resource_budget=ledger_resource_budget
                 , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             else:
                 if args.expected_readme_sha256:
@@ -30939,9 +30980,11 @@ def main(argv: list[str]) -> int:
                         "WI-README-REPAIR-TARGET-MISMATCH",
                         "--expected-readme-sha256 requires --reset-static-guide",
                     )
-                readme_hash = refresh_readme(root, archive_inventory_out=archive_inventories, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
+                readme_hash = refresh_readme(root, archive_inventory_out=archive_inventories, observations_out=observations, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             for row in archive_inventories[0]["unbound"]:
                 print(f"INFO WI-ARCHIVE-ENTITY-UNBOUND: {row['path']}")
+            for observation in observations:
+                print(f"INFO {observation}")
             print(f"README-SHA256: {readme_hash}")
         elif args.command == "resolve":
             if args.reference:
