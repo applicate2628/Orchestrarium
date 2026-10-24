@@ -10,6 +10,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Legacy-ledger settlement retires captured validation candidates and newly created rollback participants through the existing lifecycle file owner. Original validation or cancellation failures and independent retirement failures remain separately visible; changed or foreign objects retain the existing ownership refusals.
 
+- Codex native-role registration now receives user configuration through its bound logical-to-storage selection. Supported file aliases and linked ancestors remain intact during planning, updates, exact no-ops and rollback, including creation of an absent ordinary configuration beneath a linked directory. Managed role files keep strict ordinary-file admission, user configuration bytes outside owned changes remain preserved, and native migration retains the original-inode recovery contract.
+
 - Codex base instructions now keep a short hook-safety capsule and require any actor handling hook installation, changes, removal, trust, health, or contract-dependent diagnosis to read the detailed procedure in the existing installed Lead operating-model. Closed experimental history is removed from active instructions; current hook, trust, publication and host guarantees remain under their existing owners.
 
 - Test-only filesystem fixtures and fresh-module loading now have shared concrete owners. Existing test scenarios, native identity and link checks, caller-supplied module names, and fresh import semantics are preserved while duplicate helper bodies are removed.

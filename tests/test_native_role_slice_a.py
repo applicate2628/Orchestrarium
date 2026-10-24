@@ -1603,6 +1603,404 @@ def _make_runtime_directory_link(logical: Path, backing: Path, kind: str) -> Non
         pytest.skip(f"directory junction unavailable: {result.stdout}{result.stderr}")
 
 
+def _config_storage_alias_fixture(tmp_path: Path):
+    storage = tmp_path / "backing/nested/settings.toml"
+    storage.parent.mkdir(parents=True)
+    payload = b'# keep comments\r\n[unrelated]\r\nopaque = "SYNTHETIC_CONFIG_PRIVATE"\r\n'
+    storage.write_bytes(payload)
+    ancestor = tmp_path / "selected-root"
+    ancestor.symlink_to(Path("backing"), target_is_directory=True)
+    logical = tmp_path / ".codex/config.toml"
+    logical.parent.mkdir()
+    logical.symlink_to(Path("../selected-root/nested/settings.toml"))
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    return logical, storage, ancestor, agents, payload
+
+
+def test_config_storage_alias_plan_matches_bound_ordinary_input(tmp_path: Path) -> None:
+    logical, storage, ancestor, agents, payload = _config_storage_alias_fixture(tmp_path)
+    before = _no_follow_inventory(tmp_path)
+    ordinary = installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, storage)
+    selected = installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+    assert selected.config_payload == ordinary.config_payload
+    assert selected.config_payload.startswith(payload)
+    assert len(selected.registrations) == 18
+    assert _no_follow_inventory(tmp_path) == before
+
+
+def test_config_storage_alias_actual_update_rollback_preserves_inode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logical, storage, ancestor, agents, payload = _config_storage_alias_fixture(tmp_path)
+    identity = installer._CreateOnlyMutablePath._identity(storage)
+    alias_identity = installer._CreateOnlyMutablePath._identity(logical)
+    publish = installer._InstallTransaction._publish_retained
+    reached = False
+
+    def fail_after_actual_publish(transaction, source, target, **keywords):
+        nonlocal reached
+        result = publish(transaction, source, target, **keywords)
+        if Path(target) == storage:
+            reached = True
+            raise RuntimeError("selected config post-publication failure")
+        return result
+
+    monkeypatch.setattr(installer._InstallTransaction, "_publish_retained", fail_after_actual_publish)
+    with pytest.raises(RuntimeError, match="selected config post-publication failure"):
+        with installer._InstallTransaction([], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._reconcile_codex_native_config(logical, owner,
+                source_agents=ROOT / "src.codex/agents", target_agents=agents,
+                manifest=installer._source_codex_role_manifest(ROOT, ROOT / "src.codex/agents"))
+    assert reached
+    assert storage.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(storage) == identity
+    assert installer._CreateOnlyMutablePath._identity(logical) == alias_identity
+    assert not list(storage.parent.glob("*.prior"))
+
+
+@pytest.mark.parametrize("planned", (True, False))
+def test_config_storage_alias_update_replay_and_readonly_noop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], planned: bool,
+) -> None:
+    logical, storage, ancestor, agents, payload = _config_storage_alias_fixture(tmp_path)
+    links = {p: (installer._CreateOnlyMutablePath._identity(p), os.readlink(p)) for p in (logical, ancestor)}
+    plan = installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+    with installer._InstallTransaction([], enabled=True) as transaction:
+        owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+        installer._reconcile_codex_native_config(logical, owner, plan=plan if planned else None,
+            source_agents=ROOT / "src.codex/agents", target_agents=agents, manifest=plan.manifest)
+        transaction.commit()
+    assert storage.read_bytes() == plan.config_payload
+    assert storage.read_bytes().startswith(payload)
+    assert tomllib.loads(storage.read_text())['unrelated']['opaque'] == "SYNTHETIC_CONFIG_PRIVATE"
+    assert {p: (installer._CreateOnlyMutablePath._identity(p), os.readlink(p)) for p in links} == links
+    assert not list(storage.parent.glob("*.prior"))
+    def no_writer(*_args, **_kwargs):
+        raise AssertionError("no-op acquired write capability")
+
+    monkeypatch.setattr(installer._CreateOnlyMutablePath, "migrate_exact_file", no_writer)
+    monkeypatch.setattr(installer._CreateOnlyMutablePath, "create_file", no_writer)
+    monkeypatch.setattr(installer._InstallTransaction, "_bind_scalar_parent", no_writer)
+    storage.chmod(0o444)
+    try:
+        replay = installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+        for dry_run in (False, True):
+            transaction = installer._InstallTransaction([], enabled=False)
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=dry_run)
+            installer._reconcile_codex_native_config(logical, owner, plan=replay if planned else None,
+                source_agents=ROOT / "src.codex/agents", target_agents=agents, manifest=plan.manifest)
+    finally:
+        storage.chmod(0o666)
+    assert "SYNTHETIC_CONFIG_PRIVATE" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("drift", ("alias", "ancestor", "referent", "bytes"))
+def test_config_storage_alias_stale_plan_preserves_changed_input(tmp_path: Path, drift: str) -> None:
+    logical, storage, ancestor, agents, payload = _config_storage_alias_fixture(tmp_path)
+    plan = installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+    if drift == "alias":
+        logical.unlink()
+        logical.symlink_to(Path("../backing/nested/settings.toml"))
+    elif drift == "ancestor":
+        ancestor.unlink()
+        ancestor.symlink_to(Path("./backing"), target_is_directory=True)
+    elif drift == "referent":
+        storage.rename(storage.with_suffix(".displaced"))
+        storage.write_bytes(payload)
+    else:
+        storage.write_bytes(payload + b"# foreign input\n")
+    before = _no_follow_inventory(tmp_path)
+    with pytest.raises(ValueError, match="config selection drift"):
+        with installer._InstallTransaction([], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._reconcile_codex_native_config(logical, owner, plan=plan)
+    assert _no_follow_inventory(tmp_path) == before
+
+
+@pytest.mark.parametrize("invalid", ("dangling", "cycle", "directory", "parent-file"))
+def test_config_storage_alias_invalid_selection_is_not_absence(tmp_path: Path, invalid: str) -> None:
+    logical, storage, ancestor, agents, _payload = _config_storage_alias_fixture(tmp_path)
+    logical.unlink()
+    if invalid == "dangling":
+        logical.symlink_to(Path("missing.toml"))
+    elif invalid == "cycle":
+        logical.symlink_to(Path("config.toml"))
+    elif invalid == "directory":
+        logical.symlink_to(storage.parent, target_is_directory=True)
+    else:
+        logical.symlink_to(storage / "child")
+    before = _no_follow_inventory(tmp_path)
+    with pytest.raises((ValueError, OSError)):
+        installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+    assert _no_follow_inventory(tmp_path) == before
+
+
+@pytest.mark.parametrize("legacy", (False, True))
+def test_config_storage_alias_keeps_native_code_leaf_strict(tmp_path: Path, legacy: bool) -> None:
+    logical, _storage, _ancestor, agents, _payload = _config_storage_alias_fixture(tmp_path)
+    name = installer.CODEX_LEGACY_LUNA_ROLE.name if legacy else "worker.toml"
+    (agents / name).symlink_to(ROOT / "src.codex/agents/worker.toml")
+    with pytest.raises(ValueError, match="E_CREATE_ONLY_TYPE_COLLISION"):
+        installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+    assert (agents / name).is_symlink()
+
+
+@pytest.mark.parametrize("boundary", ("prepared", "retained", "published"))
+def test_config_storage_alias_failure_boundaries_restore_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    logical, storage, ancestor, agents, payload = _config_storage_alias_fixture(tmp_path)
+    identity = installer._CreateOnlyMutablePath._identity(storage)
+    plan = installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+    write = installer._InstallTransaction._write_owned_file
+    publish = installer._InstallTransaction._publish_retained
+    reached = False
+
+    def fail_prepared(transaction, path, *args, **kwargs):
+        nonlocal reached
+        result = write(transaction, path, *args, **kwargs)
+        if boundary == "prepared" and Path(path).parent == storage.parent:
+            reached = True
+            raise RuntimeError("selected config boundary failure")
+        return result
+
+    def fail_moved(transaction, source, target, **kwargs):
+        nonlocal reached
+        result = publish(transaction, source, target, **kwargs)
+        if not reached and ((boundary == "retained" and Path(source) == storage)
+                            or (boundary == "published" and Path(target) == storage)):
+            reached = True
+            raise RuntimeError("selected config boundary failure")
+        return result
+
+    monkeypatch.setattr(installer._InstallTransaction, "_write_owned_file", fail_prepared)
+    monkeypatch.setattr(installer._InstallTransaction, "_publish_retained", fail_moved)
+    with pytest.raises(RuntimeError, match="selected config boundary failure"):
+        with installer._InstallTransaction([], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._reconcile_codex_native_config(logical, owner, plan=plan)
+    assert reached
+    assert storage.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(storage) == identity
+    assert not list(storage.parent.glob("*.prior"))
+    assert not list(storage.parent.glob("*.tmp"))
+
+
+def test_config_storage_alias_drift_preserves_primary_and_owned_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logical, storage, ancestor, agents, payload = _config_storage_alias_fixture(tmp_path)
+    private_temp = tmp_path / "private-temp"
+    private_temp.mkdir()
+    monkeypatch.setattr(installer.tempfile, "tempdir", str(private_temp))
+    identity = installer._CreateOnlyMutablePath._identity(storage)
+    plan = installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+    native = installer._InstallTransaction._native_publish_no_replace
+    primary = RuntimeError("selected config native failure")
+    reached = False
+
+    def drift_and_fail(source, target, **kwargs):
+        nonlocal reached
+        result = native(source, target, **kwargs)
+        if not reached and Path(source) == storage:
+            reached = True
+            logical.unlink()
+            logical.write_bytes(b"foreign alias occupant\n")
+            raise primary
+        return result
+
+    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(drift_and_fail))
+    with pytest.raises(installer._InstallFailure) as caught:
+        with installer._InstallTransaction([], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._reconcile_codex_native_config(logical, owner, plan=plan)
+    assert reached
+    assert caught.value.cause is primary or getattr(caught.value.cause, "cause", None) is primary
+    assert logical.read_bytes() == b"foreign alias occupant\n"
+    assert storage.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(storage) == identity
+    assert caught.value.members
+    assert transaction._temporary is None
+    assert not list(private_temp.iterdir())
+
+
+def test_config_storage_alias_collision_retains_original_until_safe_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logical, storage, _ancestor, agents, payload = _config_storage_alias_fixture(tmp_path)
+    private_temp = tmp_path / "private-temp"
+    private_temp.mkdir()
+    monkeypatch.setattr(installer.tempfile, "tempdir", str(private_temp))
+    identity = installer._CreateOnlyMutablePath._identity(storage)
+    plan = installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+    native = installer._InstallTransaction._native_publish_no_replace
+    reached = False
+
+    def occupy_destination(source, target, **kwargs):
+        nonlocal reached
+        if not reached and Path(target) == storage:
+            reached = True
+            storage.write_bytes(b"foreign publication occupant\n")
+        return native(source, target, **kwargs)
+
+    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(occupy_destination))
+    with pytest.raises(installer._InstallFailure) as caught:
+        with installer._InstallTransaction([], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._reconcile_codex_native_config(logical, owner, plan=plan)
+    assert reached
+    assert storage.read_bytes() == b"foreign publication occupant\n"
+    record = transaction._slice_a_migrated[0]
+    assert record.tombstone_path.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(record.tombstone_path) == identity
+    assert caught.value.recovery_path == record.tombstone_path
+    assert caught.value.recovery_path.is_file()
+    # The fixture owns this synthetic foreign object; only its explicit removal
+    # makes the original owner's inverse admissible again.
+    storage.unlink()
+    owner.rollback_migrated(record, replacement_may_be_absent=True)
+    assert storage.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(storage) == identity
+    assert transaction._discard_backup() is None
+
+
+def test_config_storage_alias_opaque_kind_uses_actual_geometry_factory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logical, _storage, _ancestor, agents, _payload = _config_storage_alias_fixture(tmp_path)
+    geometry = installer._linked_runtime_subroots_module(ROOT)
+    original_kind = geometry._link_kind
+    reached = False
+
+    def unsupported_kind(path, metadata):
+        nonlocal reached
+        if path == logical:
+            reached = True
+            raise ValueError("E_RUNTIME_SUBROOT_REPARSE_UNSUPPORTED")
+        return original_kind(path, metadata)
+
+    monkeypatch.setattr(geometry, "_link_kind", unsupported_kind)
+    monkeypatch.setattr(installer, "_linked_runtime_subroots_module", lambda _root: geometry)
+    before = _no_follow_inventory(tmp_path)
+    with pytest.raises(ValueError, match="E_RUNTIME_SUBROOT_REPARSE_UNSUPPORTED"):
+        installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+    assert reached
+    assert _no_follow_inventory(tmp_path) == before
+
+
+def test_config_storage_alias_dry_run_does_not_admit_delta_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logical, _storage, _ancestor, agents, _payload = _config_storage_alias_fixture(tmp_path)
+    plan = installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+    before = _no_follow_inventory(tmp_path)
+
+    def no_writer(*_args, **_kwargs):
+        raise AssertionError("dry-run acquired write capability")
+
+    monkeypatch.setattr(installer._CreateOnlyMutablePath, "migrate_exact_file", no_writer)
+    monkeypatch.setattr(installer._CreateOnlyMutablePath, "create_file", no_writer)
+    transaction = installer._InstallTransaction([], enabled=False)
+    owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=True)
+    installer._reconcile_codex_native_config(logical, owner, plan=plan)
+    assert _no_follow_inventory(tmp_path) == before
+
+
+def test_config_storage_alias_existing_parent_and_absent_ordinary_leaf(tmp_path: Path) -> None:
+    project, storage = tmp_path / "project", tmp_path / "storage"
+    project.mkdir()
+    storage.mkdir()
+    ancestor = project / ".codex"
+    ancestor.symlink_to(Path("../storage"), target_is_directory=True)
+    logical = ancestor / "config.toml"
+    identity = installer._CreateOnlyMutablePath._identity(ancestor)
+    agents = storage / "agents"
+    agents.mkdir()
+    manifest = installer._source_codex_role_manifest(ROOT, ROOT / "src.codex/agents")
+    for record in manifest["roles"].values():
+        relative = record["relativePath"]
+        shutil.copyfile(ROOT / "src.codex/agents" / relative, agents / relative)
+    plan = installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", storage / "agents", logical)
+    assert not plan.config_exists
+    assert plan.config_selection[0] == storage / "config.toml"
+    before = _no_follow_inventory(tmp_path)
+    preview = installer._CreateOnlyMutablePath(project, installer._InstallTransaction([], enabled=False), dry_run=True)
+    installer._reconcile_codex_native_config(logical, preview, plan=plan)
+    assert _no_follow_inventory(tmp_path) == before
+    with installer._InstallTransaction([], enabled=True) as transaction:
+        owner = installer._CreateOnlyMutablePath(project, transaction, dry_run=False)
+        installer._reconcile_codex_native_config(logical, owner, plan=plan)
+        transaction.commit()
+    assert (storage / "config.toml").read_bytes() == plan.config_payload
+    assert installer._CreateOnlyMutablePath._identity(ancestor) == identity
+    _assert_callable_native_role_mappings(logical)
+
+
+def test_config_storage_alias_native_denial_keeps_original_and_settles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    logical, storage, ancestor, agents, payload = _config_storage_alias_fixture(tmp_path)
+    private_temp = tmp_path / "private-temp"
+    private_temp.mkdir()
+    monkeypatch.setattr(installer.tempfile, "tempdir", str(private_temp))
+    plan = installer._preflight_codex_native_roles(ROOT, ROOT / "src.codex/agents", agents, logical)
+    before = _no_follow_inventory(tmp_path)
+    identity = installer._CreateOnlyMutablePath._identity(storage)
+    aliases = {p: (installer._CreateOnlyMutablePath._identity(p), os.readlink(p)) for p in (logical, ancestor)}
+    primary = PermissionError("synthetic selected config native publication denied")
+    reached = False
+
+    def deny_native(source, target, **_kwargs):
+        nonlocal reached
+        assert Path(source) == storage
+        reached = True
+        raise primary
+
+    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(deny_native))
+    with pytest.raises(PermissionError) as caught:
+        with installer._InstallTransaction([], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._reconcile_codex_native_config(logical, owner, plan=plan)
+    assert reached and caught.value is primary
+    assert storage.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(storage) == identity
+    assert {p: (installer._CreateOnlyMutablePath._identity(p), os.readlink(p)) for p in aliases} == aliases
+    assert _no_follow_inventory(tmp_path) == before
+    assert transaction._temporary is None
+    assert not list(private_temp.iterdir())
+    output = capsys.readouterr()
+    assert "SYNTHETIC_CONFIG_PRIVATE" not in output.out + output.err
+
+
+def test_config_storage_alias_public_install_and_later_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    logical, storage, ancestor, agents, payload = _config_storage_alias_fixture(tmp_path)
+    alias_identity = installer._CreateOnlyMutablePath._identity(logical)
+    storage_identity = installer._CreateOnlyMutablePath._identity(storage)
+    reached = False
+
+    def later_failure(*_args, **_kwargs):
+        nonlocal reached
+        reached = True
+        raise RuntimeError("selected config later install failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(installer, "_merge_codex_agents", later_failure)
+        assert installer.install("codex", ["--target", str(tmp_path), "--allow-unsafe-target", "--no-hypothesis-hook"]) == 1
+    assert reached
+    assert storage.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(storage) == storage_identity
+    assert installer._CreateOnlyMutablePath._identity(logical) == alias_identity
+    assert installer.install("codex", ["--target", str(tmp_path), "--allow-unsafe-target", "--no-hypothesis-hook"]) == 0
+    assert storage.read_bytes().startswith(payload)
+    _assert_callable_native_role_mappings(logical)
+    output = capsys.readouterr()
+    assert "SYNTHETIC_CONFIG_PRIVATE" not in output.out + output.err
+
+
 def test_fresh_codex_install_materializes_native_roles_v2_and_canonical_skills(
     tmp_path: Path,
 ) -> None:
@@ -1761,16 +2159,29 @@ def test_proposed_native_config_payload_is_reparsed_before_transaction(
     before = _no_follow_inventory(project)
     config_identity = installer._CreateOnlyMutablePath._identity(config)
 
-    monkeypatch.setattr(
-        installer,
-        "_append_native_role_blocks",
-        lambda _payload, _registrations: b"agents = {",
-    )
+    render_reached = False
+    reparse_reached = False
+    parse_config = installer._parse_codex_config
+
+    def malformed_proposal(_payload, _registrations):
+        nonlocal render_reached
+        render_reached = True
+        return b"agents = {"
+
+    monkeypatch.setattr(installer, "_append_native_role_blocks", malformed_proposal)
+
+    def observe_reparse(payload):
+        nonlocal reparse_reached
+        if payload == b"agents = {":
+            reparse_reached = True
+        return parse_config(payload)
+
+    monkeypatch.setattr(installer, "_parse_codex_config", observe_reparse)
 
     def transaction_entered(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("transaction entered")
 
-    monkeypatch.setattr(installer, "_InstallTransaction", transaction_entered)
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", transaction_entered)
 
     result = installer.install(
         "codex",
@@ -1785,7 +2196,8 @@ def test_proposed_native_config_payload_is_reparsed_before_transaction(
     captured = capsys.readouterr()
 
     assert result == 1
-    assert "E_CREATE_ONLY_CONFIG_INVALID" in captured.err
+    assert render_reached and reparse_reached
+    assert "cause=validation-failed" in captured.err
     assert _no_follow_inventory(project) == before
     assert config.read_bytes() == b"# preserve\n"
     assert installer._CreateOnlyMutablePath._identity(config) == config_identity
@@ -4475,7 +4887,7 @@ def test_lead_tree_rollback_ignores_cache_but_rejects_noncache_drift(
     assert (lead / "changed.txt").read_text(encoding="utf-8") == "drift"
 
 
-def test_config_wrong_type_and_reparse_keep_distinct_failure_ids(
+def test_config_wrong_type_and_selected_alias_keep_distinct_contracts(
     tmp_path: Path,
 ) -> None:
     """F3/F5: filesystem collisions remain distinct from semantic TOML invalidity."""
@@ -4503,8 +4915,11 @@ def test_config_wrong_type_and_reparse_keep_distinct_failure_ids(
         installer._InstallTransaction([], enabled=False),
         dry_run=False,
     )
-    with pytest.raises(ValueError, match="^E_MUTABLE_PATH_REPARSE"):
-        installer._reconcile_codex_native_config(reparse_config, reparse_owner)
+    before = outside.read_bytes()
+    link_identity = installer._CreateOnlyMutablePath._identity(reparse_config)
+    installer._reconcile_codex_native_config(reparse_config, reparse_owner)
+    assert outside.read_bytes() == before
+    assert installer._CreateOnlyMutablePath._identity(reparse_config) == link_identity
 
 
 def test_interrupted_role_creation_rolls_back_only_created_roles(tmp_path: Path) -> None:
