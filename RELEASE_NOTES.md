@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-24
 
+- Installer rollback now settles nested owned children before their containers across scalar and create-only paths, preserving foreign files and each inverse's original ownership. Stock native-role compatibility comparisons also remove their temporary readonly clones through the standard-library lifecycle and retain operation and cleanup failures separately.
+
+- Native-role configuration now separates exact factory provenance from the owned profession instructions. All 18 factory native profiles default apps and plugins to false while main-session settings and compatible user tuning remain preserved. Supported user settings and formatting are preserved during selection and upgrades; configured model/effort candidates remain policy checked, and neither role-file declarations nor a resolver result establish native execution or parent permissions.
+
 - Publication workdir denials now retain closed, non-sensitive categories for the actual failing check, stage, selected source and value type through the existing result channel. Permission decisions, failure identifiers, workdir selection, approval rules and retry behavior remain unchanged; the diagnostic does not establish the cause or executing-code identity of a historical denial or authorize publication. PR preparation shares one root-agreement owner and no longer carries unused internal compatibility paths.
 
 - Historical work-item catalogues now show an acquired incomplete canonical schema pair as an explicit, nonauthorizing Archive metadata observation. Refresh reports the original schema diagnostic and actual historical member while a valid unrelated close can proceed; archive bytes, strict audit and selected Goal/history/replay consumers remain protected. Malformed declarations and invalid complete records still refuse.

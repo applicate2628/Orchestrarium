@@ -863,12 +863,12 @@ def canonical_defaults(repo_root: Path, provider: str, normalizer: Any) -> dict[
     return parse_agents_mode_text(content, normalizer.decode_supported_yaml_scalar)
 
 
-def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
+def load_role_policy(repo_root: Path, *, source_bytes: bytes | None = None) -> tuple[dict[str, Any], Path]:
     path = repo_root / "shared" / "role-routing-policy.v1.json"
     if not _ordinary_file(path):
         raise ValueError(f"E_ROLE_POLICY_INVALID: policy input is not ordinary: {path}")
     try:
-        policy = json.loads(path.read_text(encoding="utf-8"))
+        policy = json.loads((path.read_bytes() if source_bytes is None else source_bytes).decode("utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"E_ROLE_POLICY_INVALID: cannot load {path}: {exc}") from exc
     if not isinstance(policy, dict) or policy.get("schemaVersion") != 1:
@@ -1081,11 +1081,11 @@ def _role_dispatch_decision(
 
 
 def _role_dispatch_invalid(
-    task_class: Any, role: Any, _cause: str
+    task_class: Any, role: Any, _cause: str, *, stage: str = "request", reason: str = "invalid"
 ) -> dict[str, Any]:
     safe_task = task_class if isinstance(task_class, str) else ""
     safe_role = role if isinstance(role, str) else ""
-    return _role_dispatch_decision(
+    result = _role_dispatch_decision(
         status="denied",
         stable_id="E_ROLE_POLICY_INVALID",
         task_class=safe_task[:128],
@@ -1095,6 +1095,80 @@ def _role_dispatch_invalid(
         requested_effort=None,
         sandbox=None,
     )
+    result["configurationDiagnostic"] = {"stage": stage, "reason": reason}
+    return result
+
+
+class NativeRoleContractError(ValueError):
+    """Closed owner-produced diagnostics; no configuration text is reflected."""
+
+    def __init__(self, stage: str, reason: str):
+        super().__init__("native role contract conflict")
+        self.stage, self.reason = stage, reason
+
+
+def validate_native_role_configuration(
+    payload: bytes, role: str, record: dict[str, Any], manifest_version: int,
+) -> dict[str, Any]:
+    """Validate the owned profession without claiming native settings validation."""
+    digest = hashlib.sha256(payload).hexdigest()
+    if manifest_version == 1 and digest != record.get("sha256"):
+        raise NativeRoleContractError("manifest/version", "owned-contract-version-required")
+    try:
+        parsed = tomllib.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+        raise NativeRoleContractError("runtime-TOML", "invalid-TOML") from None
+    if parsed.get("name") != role:
+        raise NativeRoleContractError("owned-profession-contract", "logical-name-mismatch")
+    if type(parsed.get("description")) is not str or not parsed["description"].strip():
+        raise NativeRoleContractError("owned-profession-contract", "description-required")
+    instructions = parsed.get("developer_instructions")
+    if type(instructions) is not str or not instructions:
+        raise NativeRoleContractError("owned-profession-contract", "instructions-required")
+    if manifest_version == 2 and (
+        record.get("developerInstructionsSha256")
+        != hashlib.sha256(instructions.encode("utf-8")).hexdigest()
+    ):
+        raise NativeRoleContractError("owned-profession-contract", "instructions-mismatch")
+    for key in ("model", "model_reasoning_effort"):
+        if key in parsed and (type(parsed[key]) is not str or not parsed[key]):
+            raise NativeRoleContractError("runtime-TOML", "invalid-control")
+    return parsed
+
+
+def _native_snapshot(path: Path) -> tuple[bytes, tuple[Path, tuple[int, ...], str]]:
+    if not _ordinary_file(path):
+        raise NativeRoleContractError("selected-root", "ordinary-file-required")
+    def identity():
+        value = path.stat(follow_symlinks=False)
+        return (value.st_dev, value.st_ino, value.st_mode, value.st_size,
+                value.st_mtime_ns, value.st_ctime_ns)
+    before = identity()
+    payload = path.read_bytes()
+    if identity() != before or not _ordinary_file(path):
+        raise NativeRoleContractError("snapshot-drift", "input-changed")
+    return payload, (path, before, hashlib.sha256(payload).hexdigest())
+
+
+class _NativeRoleSelection(dict):
+    """One transient selection owns its last-check binding, never a global store."""
+
+    def __init__(self, values, snapshots=(), authority=None, carrier=None):
+        super().__init__(values)
+        self.snapshots, self.authority, self.carrier = tuple(snapshots), authority, carrier
+
+    def assert_current(self):
+        try:
+            if self.authority is not None:
+                self.authority.assert_current()
+            for path, identity, digest in self.snapshots:
+                payload, observed = _native_snapshot(path)
+                if observed[1:] != (identity, digest):
+                    raise NativeRoleContractError("snapshot-drift", "input-changed")
+            if self.authority is not None:
+                self.authority.assert_current()
+        except (OSError, ValueError):
+            raise NativeRoleContractError("snapshot-drift", "input-changed") from None
 
 
 def _valid_role_dispatch_request(task_class: Any, role_name: Any) -> bool:
@@ -1116,11 +1190,17 @@ def _load_role_dispatch_contract(
     manifest_path: Path | None = None,
     role_root: Path | None = None,
     linked_authority: Any | None = None,
+    policy_capture: Any | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if not _valid_role_dispatch_request(task_class, role_name):
         return None, _role_dispatch_invalid(task_class, role_name, "request")
+    stage = "policy"
     try:
-        policy, policy_path = load_role_policy(repo_root)
+        if policy_capture is None:
+            policy_bytes, policy_snapshot = _native_snapshot(repo_root / "shared/role-routing-policy.v1.json")
+            policy, policy_path = load_role_policy(repo_root, source_bytes=policy_bytes)
+        else:
+            policy, policy_path, policy_bytes, policy_snapshot = policy_capture
         tasks = policy["taskClasses"]
         roles = policy["roles"]
         eligibility = policy["taskRoleEligibility"]
@@ -1165,6 +1245,7 @@ def _load_role_dispatch_contract(
                 sandbox=None,
             )
 
+        stage = "selected-root"
         manifest_path = manifest_path or (
             repo_root / "src.codex" / "agents" / "orchestrarium-role-manifest.json"
         )
@@ -1176,23 +1257,32 @@ def _load_role_dispatch_contract(
             or not _ordinary_file(manifest_path)
         ):
             raise ValueError("manifest or role root type")
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        stage = "manifest/version"
+        manifest_bytes, manifest_snapshot = _native_snapshot(manifest_path)
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
         if (
             not isinstance(manifest, dict)
-            or manifest.get("schemaVersion") != 1
+            or type(manifest.get("schemaVersion")) is not int
+            or manifest.get("schemaVersion") not in (1, 2)
             or set(manifest) != {
                 "schemaVersion",
                 "packRevision",
                 "policySha256",
                 "roles",
             }
-            or manifest.get("policySha256") != _file_sha256(policy_path)
+            or manifest.get("policySha256") != hashlib.sha256(policy_bytes).hexdigest()
             or not isinstance(manifest.get("roles"), dict)
         ):
             raise ValueError("manifest")
         record = manifest["roles"].get(role_name)
-        if not isinstance(record, dict) or set(record) != {"relativePath", "sha256"}:
+        fields = {"relativePath", "sha256"} | (
+            {"developerInstructionsSha256"} if manifest["schemaVersion"] == 2 else set()
+        )
+        if not isinstance(record, dict) or set(record) != fields:
             raise ValueError("role record")
+        if any(type(record[key]) is not str or re.fullmatch(r"[0-9a-f]{64}", record[key]) is None
+               for key in fields - {"relativePath"}):
+            raise ValueError("role binding")
         if record["relativePath"] != f"{role_name}.toml":
             raise ValueError("role path")
         role_path = (
@@ -1202,12 +1292,11 @@ def _load_role_dispatch_contract(
         )
         if not _ordinary_file(role_path):
             raise ValueError("role type")
-        role_bytes = role_path.read_bytes()
+        stage = "runtime-TOML"
+        role_bytes, role_snapshot = _native_snapshot(role_path)
         if linked_authority is not None:
             linked_authority.assert_current()
-        if record["sha256"] != hashlib.sha256(role_bytes).hexdigest():
-            raise ValueError("role digest")
-        role_toml = tomllib.loads(role_bytes.decode("utf-8"))
+        role_toml = validate_native_role_configuration(role_bytes, role_name, record, manifest["schemaVersion"])
         sandbox = role_toml.get("sandbox_mode")
         expected_sandbox = (
             "read-only"
@@ -1220,19 +1309,20 @@ def _load_role_dispatch_contract(
             else role_toml.get("model") == profile["codexModel"]
             and role_toml.get("model_reasoning_effort") == profile["effort"]
         )
-        if (
-            role_toml.get("name") != role_name
-            or not profile_matches
-            or sandbox != expected_sandbox
-        ):
+        if role_name in _MECHANICAL_ROLES and not profile_matches:
+            raise NativeRoleContractError("configured-profile-policy", "mechanical-profile-conflict")
+        if manifest["schemaVersion"] == 1 and (not profile_matches or sandbox != expected_sandbox):
             raise ValueError("role TOML contract")
+        snapshots = (policy_snapshot, manifest_snapshot, role_snapshot)
+        selection = _NativeRoleSelection({}, snapshots, linked_authority)
+        selection.assert_current()
         return {
             "taskClass": task_class,
             "role": role_name,
             "profile": profile_name,
             "model": profile["codexModel"],
             "effort": profile["effort"],
-            "sandbox": sandbox,
+            "sandbox": expected_sandbox,
             "roleSha256": record["sha256"],
             "policySha256": manifest["policySha256"],
             "executionContract": (
@@ -1244,9 +1334,25 @@ def _load_role_dispatch_contract(
             "task": task,
             "roleConfig": roles[role_name],
             "developerInstructions": str(role_toml.get("developer_instructions", "")),
+            "configuredModel": role_toml.get("model"),
+            "configuredEffort": role_toml.get("model_reasoning_effort"),
+            "roleRoot": role_root,
+            "manifest": manifest,
+            "snapshots": snapshots,
+            "configurationProvenance": {
+                "factorySha256": record["sha256"],
+                "runtimeSha256": hashlib.sha256(role_bytes).hexdigest(),
+                "classification": "stock" if hashlib.sha256(role_bytes).hexdigest() == record["sha256"] else "configured",
+                "manifestVersion": manifest["schemaVersion"],
+                "hostValidation": "not-observed",
+                "sandboxEnforcement": "parent-owned; not-observed",
+            },
         }, None
     except (KeyError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError, tomllib.TOMLDecodeError) as exc:
-        return None, _role_dispatch_invalid(task_class, role_name, str(exc))
+        return None, _role_dispatch_invalid(
+            task_class, role_name, "invalid", stage=exc.stage if isinstance(exc, NativeRoleContractError) else stage,
+            reason=exc.reason if isinstance(exc, NativeRoleContractError) else "invalid",
+        )
 
 
 _ORDINARY_NATIVE_FAILURE_POLICY = {
@@ -1256,8 +1362,8 @@ _ORDINARY_NATIVE_FAILURE_POLICY = {
 }
 
 
-def _ordinary_native_denied(task_class: Any, role: Any, stable_id: str) -> dict[str, Any]:
-    return {
+def _ordinary_native_denied(task_class: Any, role: Any, stable_id: str, *, diagnostic=None) -> dict[str, Any]:
+    result = {
         "schemaVersion": 1,
         "status": "denied",
         "stableId": stable_id,
@@ -1265,6 +1371,9 @@ def _ordinary_native_denied(task_class: Any, role: Any, stable_id: str) -> dict[
         "role": role if isinstance(role, str) else "",
         "fallback": "none",
     }
+    if diagnostic is not None:
+        result["configurationDiagnostic"] = diagnostic
+    return result
 
 
 def _profession_skill_metadata(repo_root: Path, role: str, instructions: str) -> dict[str, Any]:
@@ -1296,7 +1405,8 @@ def _describe_ordinary_native_role_options_in_layout(
             task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
         )
     try:
-        policy, _policy_path = load_role_policy(repo_root)
+        policy_bytes, policy_snapshot = _native_snapshot(repo_root / "shared/role-routing-policy.v1.json")
+        policy, _policy_path = load_role_policy(repo_root, source_bytes=policy_bytes)
     except (OSError, ValueError):
         return _ordinary_native_denied(
             task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
@@ -1328,6 +1438,7 @@ def _describe_ordinary_native_role_options_in_layout(
             "roleConfig": skill_only,
             "developerInstructions": instructions,
             "roleKind": "skill-only",
+            "snapshots": (policy_snapshot,),
         }
         early = None
     else:
@@ -1338,11 +1449,13 @@ def _describe_ordinary_native_role_options_in_layout(
             manifest_path=manifest_path,
             role_root=role_root,
             linked_authority=linked_authority,
+            policy_capture=(policy, _policy_path, policy_bytes, policy_snapshot),
         )
         if contract is not None:
             contract["roleKind"] = "native"
     if early is not None or contract is None or contract["role"] in _MECHANICAL_ROLES:
-        return _ordinary_native_denied(task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID")
+        return _ordinary_native_denied(task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID",
+                                       diagnostic=early.get("configurationDiagnostic") if early else None)
     if not isinstance(host_observation, dict) or set(host_observation) - {
         "explicitModelControl",
         "explicitReasoningEffortControl",
@@ -1403,6 +1516,50 @@ def _describe_ordinary_native_role_options_in_layout(
         return _ordinary_native_denied(
             task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
         )
+    factory_profile = contract["profile"]
+    default_error = None
+    control_source = "policy-explicit-default"
+    if contract["roleKind"] == "native":
+        model, effort = contract["configuredModel"], contract["configuredEffort"]
+        if model is not None and effort is not None:
+            effective = next((option for option in options if option["model"] == model and option["effort"] == effort), None)
+            if effective is None:
+                default_error = {"stage": "configured-profile-policy", "reason": "configured-tuple-not-admitted"}
+            else:
+                contract = {**contract, "profile": effective["profile"], "model": model, "effort": effort}
+                control_source = "role-configuration"
+        elif role != "default" or model is not None or effort is not None:
+            default_error = {"stage": "inherited-control-unresolved", "reason": "effective-tuple-unacquired"}
+    snapshots = list(contract["snapshots"])
+    carrier = None
+    carrier_error = None
+    try:
+        if contract["roleKind"] == "native":
+            if role == "default":
+                carrier = (contract["configuredModel"], contract["configuredEffort"])
+            else:
+                carrier_path = contract["roleRoot"] / "default.toml"
+                if _ordinary_file(carrier_path):
+                    carrier_bytes, carrier_snapshot = _native_snapshot(carrier_path)
+                    parsed_carrier = validate_native_role_configuration(
+                        carrier_bytes, "default", contract["manifest"]["roles"]["default"],
+                        contract["manifest"]["schemaVersion"],
+                    )
+                    carrier = (parsed_carrier.get("model"), parsed_carrier.get("model_reasoning_effort"))
+                    snapshots.append(carrier_snapshot)
+        else:
+            carrier_contract, carrier_early = _load_role_dispatch_contract(
+                repo_root, "recovery", "default", manifest_path=manifest_path, role_root=role_root,
+                linked_authority=linked_authority,
+                policy_capture=(policy, _policy_path, policy_bytes, policy_snapshot),
+            )
+            if carrier_contract is not None:
+                carrier = (carrier_contract["configuredModel"], carrier_contract["configuredEffort"])
+                snapshots.extend(item for item in carrier_contract["snapshots"] if item not in snapshots)
+            elif carrier_early.get("configurationDiagnostic", {}).get("stage") != "selected-root":
+                carrier_error = {"stage": "configured-carrier-conflict", "reason": "carrier-contract-invalid"}
+    except (OSError, ValueError):
+        carrier_error = {"stage": "configured-carrier-conflict", "reason": "carrier-contract-invalid"}
     profession = _profession_skill_metadata(
         repo_root, contract["role"], contract["developerInstructions"]
     )
@@ -1432,7 +1589,7 @@ def _describe_ordinary_native_role_options_in_layout(
         if contract["role"] in reported_agent_types
         else "reported-absent"
     )
-    return {
+    values = {
         "schemaVersion": 1,
         "status": "available",
         "stableId": None,
@@ -1444,6 +1601,21 @@ def _describe_ordinary_native_role_options_in_layout(
         "defaultModelTier": policy["profiles"][contract["profile"]]["modelTier"],
         "defaultModel": contract["model"],
         "defaultEffort": contract["effort"],
+        "factoryDefaultProfile": factory_profile,
+        "defaultConfigurationError": default_error,
+        "configurationProvenance": {
+            **contract.get("configurationProvenance", {"classification": "skill-only", "hostValidation": "not-observed"}),
+            "selectedControlSource": control_source,
+            "genericCarrier": "known" if carrier is not None else "unacquired",
+            "genericProfileCompatibility": {
+                option["profile"]: (
+                    "conflict" if carrier_error or (carrier is not None and any(
+                        pin is not None and pin != value
+                        for pin, value in zip(carrier, (option["model"], option["effort"]))
+                    )) else "compatible" if carrier is not None else "unacquired"
+                ) for option in options
+            },
+        },
         "profession": profession,
         "options": options,
         "hostObservation": copy.deepcopy(host_observation),
@@ -1457,6 +1629,10 @@ def _describe_ordinary_native_role_options_in_layout(
         "failurePolicy": copy.deepcopy(_ORDINARY_NATIVE_FAILURE_POLICY),
         "fallback": "none",
     }
+    if default_error is not None:
+        values.update(defaultProfile=None, defaultModel=None, defaultEffort=None)
+    values["carrierConfigurationError"] = carrier_error
+    return _NativeRoleSelection(values, snapshots, linked_authority, carrier)
 
 
 def describe_ordinary_native_role_options(
@@ -1492,6 +1668,18 @@ def resolve_ordinary_native_dispatch(
     ):
         return _ordinary_native_denied("", "", "E_ORDINARY_NATIVE_SELECTION_INVALID")
     explicit = requested_model is not None
+    if isinstance(description, _NativeRoleSelection):
+        try:
+            description.assert_current()
+        except NativeRoleContractError as error:
+            return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+                "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": error.stage, "reason": error.reason})
+    if not explicit and description.get("defaultConfigurationError"):
+        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic=description["defaultConfigurationError"])
+    if not explicit and description.get("defaultEffort") == "max" and user_approved_max is not True:
+        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": "configured-profile-policy", "reason": "maximum-approval-required"})
     selected = None
     default_mode = description["defaultInvocation"]["mode"]
     if not explicit and default_mode == "named-role-default" and (
@@ -1573,6 +1761,16 @@ def resolve_ordinary_native_dispatch(
             "professionSkill": description["profession"]["skill"],
             "promptPreamble": description["profession"]["instructions"],
         }
+    if invocation["mode"] == "generic-explicit-profile":
+        carrier = getattr(description, "carrier", None)
+        conflict = description.get("carrierConfigurationError")
+        if description.get("configurationProvenance", {}).get("genericProfileCompatibility", {}).get(resolved_profile) == "conflict":
+            conflict = {"stage": "configured-carrier-conflict", "reason": "requested-tuple-overridden"}
+        if carrier is not None and any(pin is not None and pin != value for pin, value in zip(carrier, (resolved_model, resolved_effort))):
+            conflict = {"stage": "configured-carrier-conflict", "reason": "requested-tuple-overridden"}
+        if conflict:
+            return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+                "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic=conflict)
     return {
         "schemaVersion": 1,
         "status": "resolved",
@@ -1592,6 +1790,9 @@ def resolve_ordinary_native_dispatch(
         "invocation": invocation,
         "failurePolicy": copy.deepcopy(_ORDINARY_NATIVE_FAILURE_POLICY),
         "fallback": "none",
+        "configurationProvenance": copy.deepcopy(description.get("configurationProvenance", {})),
+        "runtimeIdentity": "unspecified by runtime",
+        "selectionCurrentness": "verified" if isinstance(description, _NativeRoleSelection) else "unacquired",
     }
 
 

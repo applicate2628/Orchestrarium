@@ -25,6 +25,7 @@ INSTALL_CODEX = ROOT / "scripts" / "install-codex.py"
 INSTALL_CLAUDE = ROOT / "scripts" / "install-claude.py"
 CHECK_HOOK_HEALTH = ROOT / "scripts" / "check-hook-health.py"
 SUPPORTED_NATIVE_FIELDS = {
+    "features",
     "name",
     "description",
     "developer_instructions",
@@ -1365,7 +1366,7 @@ def test_source_native_roles_match_policy_profiles_and_supported_toml_fields() -
     manifest_path = source / "orchestrarium-role-manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    assert manifest["schemaVersion"] == 1
+    assert manifest["schemaVersion"] == 2
     assert manifest["policySha256"] == hashlib.sha256(policy_path.read_bytes()).hexdigest()
     assert set(manifest["roles"]) == set(policy["roles"])
 
@@ -1376,6 +1377,7 @@ def test_source_native_roles_match_policy_profiles_and_supported_toml_fields() -
         profile = policy["profiles"][corridor["defaultProfile"]]
         assert set(parsed) <= SUPPORTED_NATIVE_FIELDS, role_name
         assert parsed["name"] == role_name
+        assert parsed["features"] == {"apps": False, "plugins": False}
         if role_name == "default":
             assert "model" not in parsed
             assert "model_reasoning_effort" not in parsed
@@ -1398,6 +1400,7 @@ def test_source_native_roles_match_policy_profiles_and_supported_toml_fields() -
         assert record == {
             "relativePath": f"{role_name}.toml",
             "sha256": hashlib.sha256(role_bytes).hexdigest(),
+            "developerInstructionsSha256": hashlib.sha256(parsed["developer_instructions"].encode()).hexdigest(),
         }
 
 
@@ -2046,6 +2049,184 @@ def test_native_role_config_registration_is_idempotent_and_byte_exact(
     _assert_callable_native_role_mappings(config)
 
 
+@pytest.mark.parametrize("outer_family", ("scalar", "created"))
+@pytest.mark.parametrize("foreign_child", (False, True))
+def test_inverse_composition_mixed_birth_families_preserves_owners(tmp_path: Path, monkeypatch, outer_family: str, foreign_child: bool) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    outer, sibling = home / "unfamiliar-outer", home / "independent"
+    inner = outer / "unfamiliar-inner"
+    before = _no_follow_inventory(home)
+    original = RuntimeError("original mixed-family operation fault")
+    transaction = installer._InstallTransaction([outer, sibling], enabled=True)
+    disposed = []
+    actual_dispose = transaction._dispose_node
+    def observed_dispose(path, node):
+        result = actual_dispose(path, node)
+        disposed.append(path)
+        return result
+    monkeypatch.setattr(transaction, "_dispose_node", observed_dispose)
+    expected = installer._InstallFailure if foreign_child else RuntimeError
+    with pytest.raises(expected) as raised:
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(home, transaction, dry_run=False)
+            if outer_family == "scalar":
+                transaction.transform_scalar(outer / "seed.yaml", home / "legacy.yaml", lambda _path: b"seed\n", owner)
+                owner._ensure_directory_path(inner)
+            else:
+                owner._ensure_directory_path(outer)
+                transaction.transform_scalar(inner / "seed.yaml", home / "legacy.yaml", lambda _path: b"seed\n", owner)
+            owner.create_file(Path("unfamiliar-outer/unfamiliar-inner/owned.txt"), b"owned")
+            owner.create_file(Path("independent"), b"independent")
+            if foreign_child:
+                (inner / "foreign.txt").write_bytes(b"foreign must survive")
+                foreign_identity = installer._CreateOnlyMutablePath._identity(inner / "foreign.txt")
+            raise original
+    if foreign_child:
+        assert raised.value.cause is original
+        assert (inner / "foreign.txt").read_bytes() == b"foreign must survive"
+        assert installer._CreateOnlyMutablePath._identity(inner / "foreign.txt") == foreign_identity
+        assert outer.exists() and inner.exists()
+    else:
+        assert raised.value is original
+        assert _no_follow_inventory(home) == before
+        assert disposed.index(inner) < disposed.index(outer)
+        assert len(disposed) == len(set(disposed))
+        assert all(entry["consumed"] for entry in transaction._entries if entry["kind"] == "scalar")
+        assert all(record.consumed for record in transaction._slice_a_created)
+
+
+@pytest.mark.parametrize("outer_family", ("scalar", "created"))
+@pytest.mark.parametrize("replace_container", ("parent", "child"))
+def test_inverse_composition_preserves_same_path_replacements(tmp_path: Path, outer_family: str, replace_container: str) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    outer, inner = home / "outer", home / "outer/inner"
+    transaction = installer._InstallTransaction([outer], enabled=True)
+    original = RuntimeError("original replacement fixture fault")
+    with pytest.raises(installer._InstallFailure) as raised:
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(home, transaction, dry_run=False)
+            if outer_family == "scalar":
+                transaction.transform_scalar(outer / "seed", home / "legacy", lambda _path: b"seed", owner)
+                owner._ensure_directory_path(inner)
+            else:
+                owner._ensure_directory_path(outer)
+                transaction.transform_scalar(inner / "seed", home / "legacy", lambda _path: b"seed", owner)
+            selected = outer if replace_container == "parent" else inner
+            selected.rename(home / "preserved-original")
+            selected.mkdir()
+            marker = selected / "replacement"
+            marker.write_bytes(b"replacement must survive")
+            identity = installer._CreateOnlyMutablePath._identity(marker)
+            raise original
+    assert raised.value.cause is original
+    assert marker.read_bytes() == b"replacement must survive"
+    assert installer._CreateOnlyMutablePath._identity(marker) == identity
+    assert (home / "preserved-original").exists()
+
+
+@pytest.mark.parametrize("proof", ("original", "missing-origin", "consumed", "source-consumed", "replacement", "competing"))
+def test_native_parent_scalar_birth_is_unique_current_and_not_duplicated(tmp_path: Path, monkeypatch, proof: str) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    parent = home / "unfamiliar-shared-parent"
+    scalar = parent / "source.yaml"
+    config = parent / "config.toml"
+    before, _ = installer._read_native_config_selection(config, installer._InstallTransaction([], enabled=False))
+    transaction = installer._InstallTransaction([scalar, config], enabled=True)
+    with transaction:
+        owner = installer._CreateOnlyMutablePath(home, transaction, dry_run=False)
+        transaction.transform_scalar(scalar, home / "legacy.yaml", lambda _path: b"mode: test\n", owner)
+        births = [entry for entry in transaction._entries if entry["kind"] == "scalar" and entry["current_path"] == parent]
+        assert len(births) == 1
+        entry = births[0]
+        original = dict(entry)
+        assert not [record for record in transaction._slice_a_created if record.leaf_path == parent]
+        if proof == "original":
+            owner.create_file(Path("unfamiliar-shared-parent/sibling.txt"), b"legitimate child")
+            count = len(transaction._entries)
+            transaction.transform_scalar(scalar, home / "legacy.yaml", lambda _path: b"mode: test\n", owner)
+            assert len(transaction._entries) == count
+        elif proof == "missing-origin":
+            entry["origin"] = None
+        elif proof == "consumed":
+            entry["consumed"] = True
+        elif proof == "source-consumed":
+            actual = transaction._scalar_origin_consumed
+            monkeypatch.setattr(transaction, "_scalar_origin_consumed", lambda candidate: candidate is entry or actual(candidate))
+        elif proof == "replacement":
+            parent.rename(home / "preserved-original")
+            parent.mkdir()
+        elif proof == "competing":
+            transaction._entries.append(dict(entry))
+        if proof == "original":
+            selected, payload = installer._read_native_config_selection(config, transaction, expected=before)
+            assert selected[0] == config and payload is None
+        else:
+            with pytest.raises(ValueError, match="config selection drift"):
+                installer._read_native_config_selection(config, transaction, expected=before)
+        entry.update(original)
+        if proof == "competing":
+            transaction._entries.pop()
+        transaction.commit()
+
+
+@pytest.mark.parametrize("fault_stage", ("scalar", "native"))
+def test_native_parent_fresh_global_fault_rollback_retry(tmp_path: Path, monkeypatch, fault_stage: str) -> None:
+    home = tmp_path / "fresh-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    arguments = ["--force", "--no-hypothesis-hook", "--global"]
+    before = _no_follow_inventory(home)
+    method = "_normalize_agents_mode" if fault_stage == "scalar" else "_install_codex_native_roles"
+    actual = getattr(installer, method)
+    def fail_after_owner(*args, **kwargs):
+        actual(*args, **kwargs)
+        raise RuntimeError("synthetic failure after " + fault_stage)
+    with monkeypatch.context() as fault:
+        fault.setattr(installer, method, fail_after_owner)
+        assert installer.install("codex", arguments) == 1
+    assert _no_follow_inventory(home) == before
+    assert installer.install("codex", arguments) == 0
+    received = _no_follow_inventory(home)
+    assert installer.install("codex", arguments) == 0
+    assert _no_follow_inventory(home) == received
+
+
+@pytest.mark.parametrize("materialization", ("owned", "unowned", "replacement", "prior-replacement"))
+def test_native_config_selection_parent_growth_requires_original_creator(tmp_path: Path, materialization: str) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    parent = home / "unfamiliar-controls-root"
+    config = parent / "config.toml"
+    contract = parent / "contracts/ui-transition-continuity.md"
+    if materialization == "prior-replacement":
+        parent.mkdir()
+    before, before_payload = installer._read_native_config_selection(config, installer._InstallTransaction([], enabled=False))
+    assert before_payload is None
+    transaction = installer._InstallTransaction([config, contract], enabled=True, copy_paths=(contract,))
+    with transaction:
+        owner = installer._CreateOnlyMutablePath(home, transaction, dry_run=False)
+        if materialization == "unowned":
+            parent.mkdir()
+        elif materialization != "prior-replacement":
+            installer._install_ui_continuity_contract(ROOT, parent, False, mutable_owner=owner)
+        if materialization in {"replacement", "prior-replacement"}:
+            parent.rename(home / "preserved-original")
+            parent.mkdir()
+        if materialization == "owned":
+            selected, payload = installer._read_native_config_selection(config, transaction, expected=before)
+            assert selected[0] == before[0] and selected[3] == before[3] and payload is None
+            assert set(dict(before[2])) < set(dict(selected[2]))
+        else:
+            with pytest.raises(ValueError, match="config selection drift"):
+                installer._read_native_config_selection(config, transaction, expected=before)
+        assert not config.exists()
+        transaction.commit()  # Retain this synthetic fixture; no inverse may remove its simulated foreign state.
+
+
 @pytest.mark.parametrize(
     "mapping",
     (
@@ -2067,10 +2248,21 @@ def test_native_role_config_mapping_collision_is_preserved_without_mutation(
 
     result = _run_codex_installer(project, install_hooks=False)
 
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "E_CREATE_ONLY_COLLISION" in result.stderr
-    assert config.read_bytes() == payload
-    assert not (project / ".codex" / "agents" / "analyst.toml").exists()
+    parsed = tomllib.loads(payload.decode())
+    entry = parsed["agents"]["analyst"]
+    compatible = isinstance(entry, dict) and entry.get("config_file") == "agents/analyst.toml"
+    if compatible:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert config.read_bytes().startswith(payload)
+        assert tomllib.loads(config.read_text())["agents"]["analyst"] == entry
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+        with pytest.raises(ValueError, match="E_CREATE_ONLY_COLLISION"):
+            installer._preflight_codex_native_roles(
+                ROOT, ROOT / "src.codex/agents", project / ".codex/agents", config,
+            )
+        assert config.read_bytes() == payload
+        assert not (project / ".codex" / "agents" / "analyst.toml").exists()
 
 
 @pytest.mark.parametrize(
