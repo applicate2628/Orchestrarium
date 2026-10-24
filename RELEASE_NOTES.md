@@ -6,6 +6,14 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Lead can use matching installed plugin methods, including Software Architect for architecture work and Ponytail for reuse and simplification, within the existing assigned role. Reuse guidance checks for already-satisfied behavior, follows a short ready-solution sequence, and preserves required fit; material architecture choices record determining quality priorities from accepted scenarios and constraints. Discovery follows the current host catalog; optional plugins add no installation requirement, mandatory stage, duplicate report or replacement for independent review, and conflicting or unrelated plugin requirements do not expand the task.
 
+- The ordinary-close Source path records schema-version 3 relocation evidence so archived ledgers remain readable by existing history consumers. The bound current-operation result also serves successor startup and affected maintenance paths: inherited obligations keep their actual source identity and target-only authority, genuine source/native failures still refuse, and full historical audit diagnostics remain available. Existing rollback and replay guards are preserved.
+
+- Legacy-ledger settlement retires captured validation candidates and newly created rollback participants through the existing lifecycle file owner. Original validation or cancellation failures and independent retirement failures remain separately visible; changed or foreign objects retain the existing ownership refusals.
+
+- Codex base instructions now keep a short hook-safety capsule and require any actor handling hook installation, changes, removal, trust, health, or contract-dependent diagnosis to read the detailed procedure in the existing installed Lead operating-model. Closed experimental history is removed from active instructions; current hook, trust, publication and host guarantees remain under their existing owners.
+
+- Test-only filesystem fixtures and fresh-module loading now have shared concrete owners. Existing test scenarios, native identity and link checks, caller-supplied module names, and fresh import semantics are preserved while duplicate helper bodies are removed.
+
 
 ## 2026-10-23
 

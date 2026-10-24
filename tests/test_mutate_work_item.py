@@ -2390,6 +2390,184 @@ def write_empty_bug_dispositions(root: Path, item_slug: str, instant: str) -> Pa
     return write_bug_dispositions(root, item_slug, instant, [])
 
 
+def _seed_ordinary_ledger_close(tmp_path, slug="ordinary-ledger"):
+    module = load_module()
+    root = tmp_path / "repo"
+    seed_active(module, root, slug)
+    item = root / "work-items/active" / slug
+    result = run_ledger(item, "append", "--run-id", "ordinary-current-record", "--role", "analyst",
+        "--execution-role", "internal", "--status", "completed", "--gate", "none", "--event-kind", "standalone",
+        "--scope", "actual ordinary lifecycle fixture", "--evidence", "manual-check:synthetic useful current result")
+    assert result.returncode == 0, result.stdout + result.stderr
+    instant = "2026-10-24T00:00:00Z"
+    write_empty_bug_dispositions(root, slug, instant)
+    return module, root, item, instant
+
+
+def test_ordinary_close_settlement_binds_inputs_migrations_and_immutable_retry(tmp_path):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    migrations = item / "ledger-migration-receipts"
+    migrations.mkdir()
+    for name in ("alpha.json", "omega.json"):
+        (migrations / name).write_text(json.dumps({"synthetic": name}), encoding="utf-8")
+    ledger_before = (item / "agent-runs.jsonl").read_bytes()
+    readme_before = (root / "work-items/README.md").read_bytes()
+    (item / "criteria.md").write_bytes(b"Ledger required: True.\n")
+    (item / "acquisition.md").write_bytes(b"Synthetic original history selection.\n")
+    requested_closure = closure(instant).encode()
+    archive = module.close_item(root, item.name, requested_closure, instant)
+    receipt = archive / "lifecycle-transition-receipt.json"
+    raw = receipt.read_bytes()
+    proof = json.loads(raw)
+    assert set(proof) == module.ORDINARY_CLOSE_TRANSITION_SETTLEMENT_FIELDS and len(proof) == 17
+    assert proof["operationId"] == module._ordinary_close_operation_id(proof)
+    assert proof["requestExpectedReadmeSha256"] == hashlib.sha256(readme_before).hexdigest()
+    assert proof["requestClosureSha256"] == hashlib.sha256(requested_closure).hexdigest()
+    assert proof["closureSha256"] == hashlib.sha256((archive / "closure.md").read_bytes()).hexdigest()
+    assert (archive / "agent-runs.jsonl").read_bytes() == ledger_before
+    assert proof["migrationReceipts"] == [{"path": p.relative_to(root).as_posix(), "sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
+                                          for p in sorted((archive / "ledger-migration-receipts").glob("*.json"))]
+    logical = f"work-items/active/{item.name}"
+    direct = module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+        logical_ledger_path=logical + "/agent-runs.jsonl")
+    assert direct.physical_work_item == archive.relative_to(root).as_posix()
+    omitted = {**proof, "migrationReceipts": proof["migrationReceipts"][:1]}
+    receipt.write_bytes(module._migration_receipt_bytes(omitted))
+    with pytest.raises(module.LifecycleError, match="migration receipt set differs"):
+        module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+            logical_ledger_path=logical + "/agent-runs.jsonl")
+    receipt.write_bytes(raw)
+    from tests.test_ledger_h1_effective_view import _capture_current_history
+    validator = module._validator_module()
+    captured = _capture_current_history(validator, root, archive, prepare=False)
+    transfer_errors = []
+    assert validator._transfer_receipts(root, transfer_errors) == {} and transfer_errors == []
+    receiver = validator.load_lifecycle_owner()
+    bound = receiver.resolve_work_item_ledger_location(root, logical_work_item=logical,
+        logical_ledger_path=logical + "/agent-runs.jsonl", acquired_input=captured._current_item.owner_input)
+    assert bound.logical_ledger_path == direct.logical_ledger_path and bound.ledger_sha256 == direct.ledger_sha256
+    assert captured.operation_diagnostics() == ()
+    module.create_candidate(root, "later-legitimate-task", b"Task: Later real item.\nNext action: Start.\nupdated: 2026-10-24T00:00:00Z\n")
+    assert (root / "work-items/README.md").read_bytes() != readme_before
+    assert module.close_item(root, item.name, requested_closure, instant) == archive
+    assert receipt.read_bytes() == raw
+    board = (root / "work-items/README.md").read_bytes()
+    with pytest.raises(module.LifecycleError, match="ordinary replay inputs differ"):
+        module.close_item(root, item.name, requested_closure + b"\n", instant)
+    assert receipt.read_bytes() == raw and (root / "work-items/README.md").read_bytes() == board
+
+
+def test_ordinary_close_settlement_refuses_distinct_invalid_bindings_and_locations(tmp_path):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    archive = module.close_item(root, item.name, closure(instant).encode(), instant)
+    receipt = archive / "lifecycle-transition-receipt.json"
+    original = receipt.read_bytes()
+    proof = json.loads(original)
+    logical = f"work-items/active/{item.name}"
+    cases = []
+    missing = dict(proof); missing.pop("requestExpectedReadmeSha256"); cases.append(missing)
+    for key, value in (("schemaVersion", True), ("owner", module.TRANSITION_OWNER),
+        ("operationId", "close-" + "0" * 64), ("statusSha256", "0" * 64),
+        ("ledgerSha256", "0" * 64), ("requestClosureSha256", "0" * 64),
+        ("archivePath", "work-items/archive/2026-10/other"), ("requestTerminalInstant", "2026-10-25T00:00:00Z"),
+        ("requestExpectedReadmeSha256", ""), ("migrationReceipts", None), ("readmeSha256", "short"),
+        ("readmeSha256", "0" * 64)):
+        case = dict(proof); case[key] = value; cases.append(case)
+    extra = dict(proof, successorPath="work-items/backlog/foreign.md"); cases.append(extra)
+    for case in cases:
+        receipt.write_bytes(module._migration_receipt_bytes(case))
+        before = receipt.read_bytes()
+        with pytest.raises(module.LifecycleError):
+            module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+                logical_ledger_path=logical + "/agent-runs.jsonl")
+        assert receipt.read_bytes() == before
+        board = (root / "work-items/README.md").read_bytes()
+        with pytest.raises(module.LifecycleError):
+            module.close_item(root, item.name, closure(instant).encode(), instant)
+        assert receipt.read_bytes() == before and (root / "work-items/README.md").read_bytes() == board
+    receipt.write_bytes(original)
+    held = archive / "owned-held-proof"
+    receipt.rename(held)
+    with pytest.raises(module.LifecycleError, match="no lifecycle relocation proof"):
+        module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+            logical_ledger_path=logical + "/agent-runs.jsonl")
+    receipt.symlink_to(held.name)
+    with pytest.raises(module.LifecycleError):
+        module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+            logical_ledger_path=logical + "/agent-runs.jsonl")
+    receipt.unlink(); held.rename(receipt)
+    item.mkdir()
+    with pytest.raises(module.LifecycleError, match="one physical lifecycle location"):
+        module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+            logical_ledger_path=logical + "/agent-runs.jsonl")
+    item.rmdir()
+    assert receipt.read_bytes() == original
+
+
+@pytest.mark.parametrize("phase", ["write", "readback", "foreign-replacement"])
+def test_ordinary_close_settlement_failure_uses_owned_rollback(tmp_path, monkeypatch, phase):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    before = {p: p.read_bytes() for p in (item / "status.md", item / "agent-runs.jsonl", root / "work-items/README.md")}
+    original_write, original_verify = module._atomic_write, module._verify_settlement
+    replacement = {}
+    def write(path, data, **kwargs):
+        if phase == "write" and path.name == "lifecycle-transition-receipt.json":
+            raise module.LifecycleError("WI-TEST-PROOF-WRITE", "controlled ordinary proof write failure")
+        return original_write(path, data, **kwargs)
+    def verify(root, receipt, *args, **kwargs):
+        result = original_verify(root, receipt, *args, **kwargs)
+        if phase == "foreign-replacement":
+            foreign = tmp_path / "foreign-replacement.json"
+            replacement["bytes"] = receipt.read_bytes()
+            foreign.write_bytes(replacement["bytes"])
+            os.replace(foreign, receipt)
+            replacement["identity"] = module._lifecycle_file_identity(receipt.lstat())
+        raise module.LifecycleError("WI-TEST-PROOF-READBACK", "controlled ordinary proof receiving failure")
+    monkeypatch.setattr(module, "_atomic_write", write)
+    monkeypatch.setattr(module, "_verify_settlement", verify)
+    with pytest.raises(module.LifecycleError):
+        module.close_item(root, item.name, closure(instant).encode(), instant)
+    archive = root / "work-items/archive/2026-10" / item.name
+    if phase == "foreign-replacement":
+        leaves = [p for p in (archive / "lifecycle-transition-receipt.json", item / "lifecycle-transition-receipt.json") if p.exists()]
+        assert len(leaves) == 1 and leaves[0].read_bytes() == replacement["bytes"]
+        assert module._lifecycle_file_identity(leaves[0].lstat()) == replacement["identity"]
+    else:
+        assert item.is_dir() and not archive.exists() and not (item / "closure.md").exists()
+        assert all(p.read_bytes() == data for p, data in before.items())
+
+
+def test_ordinary_close_output_ceiling_refuses_before_business_effects(tmp_path):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    paths = (item / "status.md", item / "agent-runs.jsonl", root / "work-items/README.md")
+    before = tuple(p.read_bytes() for p in paths)
+    @module._lifecycle_participant
+    def constrained(root):
+        return module.close_item(root, item.name, closure(instant).encode(), instant)
+    with pytest.raises(module.LifecycleError, match="exceeds"):
+        constrained(root, transition_output_ceiling=module.resolve_transition_resource_budget(0, 0, 0))
+    assert tuple(p.read_bytes() for p in paths) == before
+    assert not (root / "work-items/archive/2026-10" / item.name).exists()
+
+
+@pytest.mark.parametrize("presence", ["absent", "empty"])
+def test_ordinary_close_readme_absence_is_not_an_empty_preimage(tmp_path, presence):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    readme = root / "work-items/README.md"
+    if presence == "empty":
+        readme.write_bytes(b"")
+        with pytest.raises(module.LifecycleError, match="ordered generated marker pair"):
+            module.close_item(root, item.name, closure(instant).encode(), instant)
+        assert readme.read_bytes() == b"" and item.is_dir()
+    else:
+        readme.unlink()
+        archive = module.close_item(root, item.name, closure(instant).encode(), instant)
+        proof = json.loads((archive / "lifecycle-transition-receipt.json").read_bytes())
+        assert proof["requestExpectedReadmeSha256"] is None
+        changed = {**proof, "requestExpectedReadmeSha256": hashlib.sha256(b"").hexdigest()}
+        assert module._ordinary_close_operation_id(changed) != proof["operationId"]
+
+
 def test_ordinary_close_updates_standalone_incoming_evidence_links(tmp_path: Path) -> None:
     """NCL1: public close preserves both targets and every non-URI byte."""
     module = load_module()
@@ -2820,7 +2998,7 @@ def test_close_uri_rollback_restores_owned_bytes_or_preserves_concurrent_authori
     status_before, readme_before = (active / "status.md").read_bytes(), (root / "work-items" / "README.md").read_bytes()
     original_refresh = module.refresh_readme
     concurrent = None
-    def fail_after_move(_root):
+    def fail_after_move(_root, *, ledger_resource_budget=None):
         nonlocal concurrent
         if concurrent_authoring:
             concurrent = bug.read_bytes() + b"Concurrent user bytes.\n"

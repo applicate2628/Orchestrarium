@@ -1,5 +1,4 @@
 import hashlib
-import importlib.util
 import json
 import os
 import subprocess
@@ -9,20 +8,13 @@ from pathlib import Path
 
 import pytest
 
+from _module_loading_support import load_module
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WRITER_SCRIPT = ROOT / "scripts" / "mutate-work-item.py"
 READER_FIXTURE_SCRIPT = ROOT / "tests" / "test_ledger_h1_effective_view.py"
 POLICY = "2026-08-28-ledger-h1-compatibility-boundary"
-
-
-def load_module(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def canonical(value: object) -> bytes:

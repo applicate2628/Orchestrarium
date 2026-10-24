@@ -2171,6 +2171,7 @@ class LedgerProjectionRowV1:
     obligation_id: str | None = None
     predecessor_operation_id: str | None = None
     projection_profile: tuple[str, int] | None = None
+    _current_inputs: object | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -2212,6 +2213,15 @@ class HistoricalLedgerHoldV1:
 
 
 @dataclass(frozen=True)
+class _LedgerQualificationObservationV1:
+    diagnostic: str
+    raw_line_ordinal: int
+    raw_line_sha256: str
+    historical_admission_run_id: str | None
+    transferred_obligation_id: str | None = None
+
+
+@dataclass(frozen=True)
 class WorkItemObligationStateV1:
     open_revise: tuple[WorkItemObligationRowV1, ...]
     open_launches: tuple[WorkItemObligationRowV1, ...]
@@ -2229,6 +2239,44 @@ class CapturedWorkItemHistoryObservationV1:
     diagnostics: tuple[str, ...]
     obligations: WorkItemObligationStateV1 | None
     authority_by_raw_line: Mapping[int, LedgerAuthorityV1] | None
+    _current_item: object | None = field(default=None, compare=False, repr=False)
+
+    @staticmethod
+    def _result_diagnostics(result, *, strict):
+        errors = [*result.diagnostics, *result.obligation_diagnostics(strict=strict, history=True)]
+        if result[2] or result[3] or result.context.unresolved_history:
+            fail(errors, "WI-LEGACY-COMPLETION-HISTORY: original history has unresolved obligations")
+        return tuple(errors)
+
+    def operation_diagnostics(self):
+        """Receive the captured observation for current completion, retaining its audit."""
+        item = self._current_item
+        if not self.acquisition_complete or not isinstance(item, _CapturedHistoryPath):
+            return (*self.diagnostics, "WI-LEDGER-OPERATION-RESULT: captured selection unavailable")
+        try:
+            item.verify()
+            selected = item._at(item.binding.repository_root / item.binding.original_ledger_path)
+            if self.selection == "absent":
+                expected = (f"missing ledger: {selected}",) if item.binding.criteria.ledger_required else ()
+                if (not selected.exists() and self.ledger_sha256 is None and self.obligations is None
+                    and self.authority_by_raw_line is None and self.diagnostics == expected):
+                    return expected
+                return (*self.diagnostics, "WI-LEDGER-OPERATION-RESULT: captured absence association differs")
+        except (OSError, RuntimeError, ValueError, TypeError) as exc:
+            return (*self.diagnostics, f"WI-LEDGER-OPERATION-RESULT: captured selection changed: {exc}")
+        state = self.obligations
+        result = state._current_result if type(state) is WorkItemObligationStateV1 else None
+        owner = _context_evaluation(result.context) if type(result) is _CurrentReductionV1 else None
+        if (self.selection != "present" or owner is None or not owner.target_matches(item)
+            or self.ledger_sha256 != hashlib.sha256(owner.selected_input.raw).hexdigest()
+            or self.diagnostics != self._result_diagnostics(result,
+                strict=owner.item.binding.criteria.owner_contract == "current")):
+            return (*self.diagnostics, "WI-LEDGER-OPERATION-RESULT: captured history/result association differs")
+        errors = []
+        received = result.receive(owner.item, errors)
+        if received is None:
+            return (*self.diagnostics, *errors, "WI-LEDGER-OPERATION-RESULT: captured receiving unavailable")
+        return received.operation_diagnostics(requested_positions=(), strict=True)
 
 
 @dataclass(frozen=True)
@@ -2278,6 +2326,10 @@ class RuntimeLedgerRowV1:
     ]
     authority: LedgerAuthorityV1
     projection_transformation: str = field(default="raw", compare=False)
+    raw_event_sha256: str | None = None
+    obligation_id: str | None = None
+    predecessor_operation_id: str | None = None
+    _current_inputs: object | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -2450,9 +2502,10 @@ class _CurrentEvidenceV1:
         self.borrowed_disposition = None
         self.receiving_refusal = ()
         self.relation_diagnostics = None
-        self.closure_diagnostics = None
+        self.qualification_observations = None
         self.received = False
         self.artifact_locators = {}
+        self.transfer_grants = {}
 
     def artifact(self, item, value, label, run_id, errors):
         if not isinstance(value, str):
@@ -2500,7 +2553,7 @@ class _CurrentEvidenceV1:
             self.predicates[key] = predicate
         return self.predicates[key]
 
-    def read_bytes(self, path):
+    def read_bytes(self, path, *, maximum_bytes=None):
         key = ("selected-bytes", path)
         if key not in self.predicates:
             if self.received:
@@ -2511,16 +2564,20 @@ class _CurrentEvidenceV1:
                 owner = load_lifecycle_owner()
                 try:
                     snapshot = owner._capture_file_snapshot(
-                        path, failure_id="WI-LEDGER-CUSTODY-STALE-TARGET")
+                        path, failure_id="WI-LEDGER-CUSTODY-STALE-TARGET",
+                        **({"maximum_bytes": maximum_bytes} if maximum_bytes is not None else {}))
                 except owner.LifecycleError as exc:
                     raise OSError(f"{exc.failure_id}: {exc}") from exc
                 raw = snapshot.data
             self.predicates[key] = _CurrentPredicateV1("bytes", path, True,
                 snapshot=snapshot, expected_bytes=raw)
-        return self.predicates[key].expected_bytes
+        raw = self.predicates[key].expected_bytes
+        if maximum_bytes is not None and len(raw) > maximum_bytes:
+            raise ValueError("WI-LEDGER-RESOURCE-INCOMPLETE: selected input exceeds admitted byte allowance")
+        return raw
 
-    def read_selection(self, path):
-        raw = self.read_bytes(path)
+    def read_selection(self, path, *, maximum_bytes=None):
+        raw = self.read_bytes(path, maximum_bytes=maximum_bytes)
         predicate = self.predicates[("selected-bytes", path)]
         if not any(entry is predicate for entry in self.selection_inputs):
             self.selection_inputs.append(predicate)
@@ -2658,7 +2715,9 @@ def _current_rows_image(rows):
         raise TypeError("current projection requires local row tuples")
     return [[_current_object(row.event), row.raw_line_ordinal, row.raw_line_sha256,
         row.raw_body_sha256, row.projected_event_sha256, row.epoch,
-        _current_authority_image(row.authority), row.projection_transformation] for row in rows]
+        _current_authority_image(row.authority), row.projection_transformation,
+        row.raw_event_sha256, row.obligation_id, row.predecessor_operation_id,
+        id(row._current_inputs) if row._current_inputs is not None else None] for row in rows]
 
 
 def _current_holds_image(holds):
@@ -2767,7 +2826,7 @@ def _current_target_key(item):
 class _CurrentReductionV1(tuple):
     """The existing four-tuple together with its exact final owner context."""
 
-    def __new__(cls, values, context, diagnostics, telemetry=None, *, admission_diagnostics=(), current_diagnostics=None, relation_diagnostics=(), closure_diagnostics=()):
+    def __new__(cls, values, context, diagnostics, telemetry=None, *, admission_diagnostics=(), current_diagnostics=None, relation_diagnostics=(), qualification_observations=()):
         detached = (tuple(values[0]), tuple(values[1]),
             [_current_object(event) for event in values[2]], [_current_object(event) for event in values[3]])
         result = super().__new__(cls, detached)
@@ -2775,7 +2834,7 @@ class _CurrentReductionV1(tuple):
         result.admission_diagnostics = tuple(admission_diagnostics)
         result.current_diagnostics = tuple(diagnostics if current_diagnostics is None else current_diagnostics)
         result.relation_diagnostics = tuple(relation_diagnostics)
-        result.closure_diagnostics = tuple(closure_diagnostics)
+        result.qualification_observations = tuple(qualification_observations)
         result.diagnostics = (*result.admission_diagnostics, *result.current_diagnostics,
                               *result.relation_diagnostics, *result.closure_diagnostics)
         result.telemetry = dict(getattr(values, "telemetry", {}) if telemetry is None else telemetry)
@@ -2786,12 +2845,29 @@ class _CurrentReductionV1(tuple):
         return _canonical_projection_bytes([_current_context_image(self.context).decode("utf-8"),
             list(self[0]), [[entry.current_schema_valid, _current_authority_image(entry.authority)] for entry in self[1]],
             [_current_object(event) for event in self[2]], [_current_object(event) for event in self[3]],
-            list(self.admission_diagnostics), list(self.current_diagnostics), list(self.relation_diagnostics), list(self.closure_diagnostics)])
+            list(self.diagnostics), list(self.admission_diagnostics), list(self.current_diagnostics), list(self.relation_diagnostics),
+            [[value.diagnostic, value.raw_line_ordinal, value.raw_line_sha256, value.historical_admission_run_id,
+              value.transferred_obligation_id]
+             for value in self.qualification_observations]])
+
+    @property
+    def closure_diagnostics(self):
+        return tuple(value.diagnostic for value in self.qualification_observations)
+
+    @property
+    def current_qualification_diagnostics(self):
+        return tuple(value.diagnostic for value in self.qualification_observations
+                     if value.historical_admission_run_id is None and value.transferred_obligation_id is None)
+
+    @property
+    def veto_diagnostics(self):
+        return (*self.admission_diagnostics, *self.current_diagnostics, *self.relation_diagnostics,
+                *self.current_qualification_diagnostics)
 
     def projection_is_bound(self):
         try:
             return self.semantic_image() == self._semantic_image
-        except (TypeError, ValueError, UnicodeError, RecursionError):
+        except (AttributeError, TypeError, ValueError, UnicodeError, RecursionError):
             return False
 
 
@@ -2807,7 +2883,11 @@ class _CurrentReductionV1(tuple):
         # retained result, never from the outward projection just received.
         return _context_evaluation(received.context).extend_admission(diagnostics)
 
-    def receive(self, item, errors, *, qualify=True):
+    def receive(self, item, errors, *, qualify=True, observed_diagnostics=None, strict=False, history=False):
+        if observed_diagnostics is not None and tuple(observed_diagnostics) != (
+            *self.diagnostics, *self.obligation_diagnostics(strict=strict, history=history)):
+            fail(errors, "WI-LEDGER-OPERATION-RESULT: diagnostic/result association differs")
+            return None
         owner = _context_evaluation(self.context)
         if owner is None:
             fail(errors, "WI-LEDGER-CUSTODY-STALE-TARGET: current result issuer unavailable")
@@ -2856,7 +2936,7 @@ class _CurrentReductionV1(tuple):
         if failures:
             return (*self.diagnostics, *failures, *obligations)
         return (*self.admission_diagnostics, *self.current_diagnostics, *self.relation_diagnostics,
-                *(self.closure_diagnostics if strict else ()), *obligations)
+                *(self.current_qualification_diagnostics if strict else ()), *obligations)
 
 
     def consume_status(self, item, errors, current_open_launch_ids):
@@ -3078,7 +3158,7 @@ class _CurrentLedgerEvaluationV1:
                 self.borrowed_context = None
             return _CurrentReductionV1(values, context, (*self.admission_diagnostics(), *diagnostics, *relations), telemetry,
                 admission_diagnostics=self.admission_diagnostics(), current_diagnostics=diagnostics,
-                relation_diagnostics=relations, closure_diagnostics=self.inputs.closure_diagnostics or ())
+                relation_diagnostics=relations, qualification_observations=self.inputs.qualification_observations or ())
         if not self.inputs.received:
             default_targets = {row.event.get("rawLineOrdinal") for row in self.base_rows
                                if row.event.get("custodyAction") == "admit"
@@ -3136,7 +3216,7 @@ class _CurrentLedgerEvaluationV1:
             self.borrowed_context = None
         return _CurrentReductionV1(values, context, (*self.admission_diagnostics(), *errors, *relations), telemetry,
             admission_diagnostics=self.admission_diagnostics(), current_diagnostics=errors,
-            relation_diagnostics=relations, closure_diagnostics=self.inputs.closure_diagnostics or ())
+            relation_diagnostics=relations, qualification_observations=self.inputs.qualification_observations or ())
 
     def complete(self):
         result = self.assemble(public_derive=True)
@@ -3153,7 +3233,7 @@ class _CurrentLedgerEvaluationV1:
         diagnostics = (*result.admission_diagnostics, *current_errors, *result.relation_diagnostics)
         qualified = _CurrentReductionV1(result, result.context, diagnostics, result.telemetry,
             admission_diagnostics=result.admission_diagnostics, current_diagnostics=current_errors,
-            relation_diagnostics=result.relation_diagnostics, closure_diagnostics=result.closure_diagnostics)
+            relation_diagnostics=result.relation_diagnostics, qualification_observations=result.qualification_observations)
         return self.issue_result(qualified)
 
     def issue_result(self, result):
@@ -3164,11 +3244,11 @@ class _CurrentLedgerEvaluationV1:
         self.selected_input = replace(self.selected_input, diagnostics=result.admission_diagnostics)
         self.result = _CurrentReductionV1(result, retained_context, result.diagnostics, result.telemetry,
             admission_diagnostics=result.admission_diagnostics, current_diagnostics=result.current_diagnostics,
-            relation_diagnostics=result.relation_diagnostics, closure_diagnostics=result.closure_diagnostics)
+            relation_diagnostics=result.relation_diagnostics, qualification_observations=result.qualification_observations)
         context = self.seal(_current_context_copy(retained_context, self))
         return _CurrentReductionV1(self.result, context, result.diagnostics, result.telemetry,
             admission_diagnostics=result.admission_diagnostics, current_diagnostics=result.current_diagnostics,
-            relation_diagnostics=result.relation_diagnostics, closure_diagnostics=result.closure_diagnostics)
+            relation_diagnostics=result.relation_diagnostics, qualification_observations=result.qualification_observations)
 
     def admission_preimage(self, original_bytes):
         """Evaluate original physical rows under this operation's authenticated admissions."""
@@ -3210,7 +3290,7 @@ class _CurrentLedgerEvaluationV1:
             raise ValueError("WI-LEDGER-HISTORY-BINDING: selected admission unavailable")
         current = copy.copy(self)
         current.inputs = copy.copy(self.inputs)
-        current.inputs.relation_diagnostics = current.inputs.closure_diagnostics = None
+        current.inputs.relation_diagnostics = current.inputs.qualification_observations = None
         current.inputs.borrowed_disposition = None
         current.raw, current.base_rows = original_bytes, tuple(original_rows)
         current.selected_input = current.result = current.context = current.borrowed_context = None
@@ -3244,7 +3324,7 @@ class _CurrentLedgerEvaluationV1:
         return self.issue_result(_CurrentReductionV1(retained, retained.context,
             (*admission, *retained.current_diagnostics, *retained.relation_diagnostics), retained.telemetry,
             admission_diagnostics=admission, current_diagnostics=retained.current_diagnostics,
-            relation_diagnostics=retained.relation_diagnostics, closure_diagnostics=retained.closure_diagnostics))
+            relation_diagnostics=retained.relation_diagnostics, qualification_observations=retained.qualification_observations))
 
     def receive_again(self, *, fresh=False, receiving_refusal=(), retain_relations=False):
         # Prepared immutable schema/history is retained. Receiving only qualifies
@@ -3253,7 +3333,7 @@ class _CurrentLedgerEvaluationV1:
         current.inputs = copy.copy(self.inputs)
         current.inputs.receiving_refusal = (*self.inputs.receiving_refusal, *receiving_refusal)
         current.inputs.relation_diagnostics = self.result.relation_diagnostics if retain_relations else None
-        current.inputs.closure_diagnostics = self.result.closure_diagnostics if retain_relations else None
+        current.inputs.qualification_observations = self.result.qualification_observations if retain_relations else None
         current.inputs.predicates = {}
         current.inputs.events = {}
         current.inputs.packets = dict(self.inputs.packets)
@@ -3394,6 +3474,10 @@ def _runtime_rows_from_projection(
                 False,
             ),
             projection_transformation=row.transformation,
+            raw_event_sha256=row.raw_event_sha256 if row.transformation == "transferred" else None,
+            obligation_id=row.obligation_id,
+            predecessor_operation_id=row.predecessor_operation_id,
+            _current_inputs=row._current_inputs,
         ))
     return tuple(result)
 
@@ -3446,7 +3530,8 @@ def _capture_obligation_state(
                 ).hexdigest()
                 source_kind = row.transformation
             else:
-                raw_event_sha256 = row.raw_body_sha256
+                raw_event_sha256 = (row.raw_event_sha256 if row.projection_transformation == "transferred"
+                                    else row.raw_body_sha256)
                 projected_event_sha256 = row.projected_event_sha256
                 source_kind = row.epoch
             result.append(WorkItemObligationRowV1(
@@ -4196,6 +4281,27 @@ def _current_admitted_orphan(row, current_ok, admission, known_run_ids):
         and launch_id.casefold() not in known_run_ids)
 
 
+def _qualified_transferred_review(row, item, inputs):
+    if type(inputs) is not _CurrentEvidenceV1 or row._current_inputs is None:
+        return False
+    grant = inputs.transfer_grants.get(row._current_inputs)
+    if grant is None:
+        return False
+    source, target_key, keys = grant
+    return bool(type(source) is LedgerProjectionRowV1
+        and target_key == _current_target_key(item)
+        and isinstance(row.obligation_id, str) and row.obligation_id
+        and isinstance(row.predecessor_operation_id, str) and row.predecessor_operation_id
+        and (row.event, row.raw_line_ordinal, row.raw_line_sha256, row.raw_body_sha256,
+             row.raw_event_sha256, row.projected_event_sha256, row.obligation_id, row.predecessor_operation_id)
+        == (source.event, source.raw_line_ordinal, source.raw_line_sha256, source.raw_line_sha256,
+            source.raw_event_sha256, hashlib.sha256(_canonical_projection_bytes(source.event)).hexdigest(),
+            source.obligation_id, source.predecessor_operation_id)
+        and source.event.get("gate") == "REVISE"
+        and keys and all(key in inputs.required_keys and key in inputs.predicates
+                         and inputs.predicates[key].accepted for key in keys))
+
+
 def _current_row_authority(row, current_ok, launch, terminal, revise, admitted_orphan, proof_failed):
     """One current owner derives independent and launch-dependent row permissions."""
     event = row.event
@@ -4215,6 +4321,7 @@ def _derive_authority_masks(
     _definition: Literal["current", "historical"],
     policy: Literal["current", "archive"] = "current",
     _diagnostics: list[str] | None = None,
+    _qualification_observations_out: list[_LedgerQualificationObservationV1] | None = None,
     _telemetry: dict[str, int] | None = None,
     _inputs: _CurrentEvidenceV1 | None = None,
     _history_custody: Sequence[HistoricalLedgerHoldV1] = (),
@@ -4258,6 +4365,7 @@ def _derive_authority_masks(
             and event.get("status") == "running"
             and "launchRunId" not in event
             and _launch_profile_is_exact(event)
+            and row.projection_transformation != "transferred"
         )
         if current_policy and row.epoch == "historical-custody":
             launch_eligible[pos] = row.authority.launch_eligible
@@ -4301,6 +4409,7 @@ def _derive_authority_masks(
             and launch_eligible[target_pos]
             and launch_id not in settled
             and binding_matches
+            and row.projection_transformation != "transferred"
         )
         terminal_eligible[pos] = eligible
         if historical_definition and current_policy and row.epoch == "historical-custody":
@@ -4310,6 +4419,20 @@ def _derive_authority_masks(
             and not admitted_orphans[pos] and event.get("eventKind") == "terminal" \
             and _diagnostics is not None:
             current_relation_diagnostic = True
+            def qualification(message):
+                fail(_diagnostics, message)
+                if _qualification_observations_out is not None:
+                    admission = admissions.get(row.raw_line_ordinal)
+                    # Only this emission evaluates the original subject. The
+                    # custody owner already bound its exact physical/native row;
+                    # proof, selected-input and relation failures keep their own
+                    # current diagnostic channels.
+                    historical = admission is not None and admission.event == row.event
+                    _qualification_observations_out.append(_LedgerQualificationObservationV1(
+                        message, row.raw_line_ordinal,
+                        admission.raw_line_sha256 if historical else row.raw_line_sha256,
+                        admission.admission_run_id if historical else None,
+                        row.obligation_id if _qualified_transferred_review(row, item, _inputs) else None))
             def bump(rule):
                 if _telemetry is not None:
                     _telemetry[rule] = _telemetry.get(rule, 0) + 1
@@ -4317,23 +4440,23 @@ def _derive_authority_masks(
                 bump("lifecycle-terminal-checked")
             if target_pos is None or target_pos >= pos:
                 if current_relation_diagnostic:
-                    fail(_diagnostics, f"{run_id}: launchRunId {launch_id} does not reference an earlier event")
+                    qualification(f"{run_id}: launchRunId {launch_id} does not reference an earlier event")
                     bump("lifecycle-dangling-launch")
             elif target.get("eventKind") != "launch":
                 if current_relation_diagnostic:
-                    fail(_diagnostics, f"{run_id}: launchRunId {launch_id} references a non-launch event")
+                    qualification(f"{run_id}: launchRunId {launch_id} references a non-launch event")
                     bump("lifecycle-nonlaunch-ref")
             elif not launch_eligible[target_pos]:
                 if current_relation_diagnostic:
-                    fail(_diagnostics, f"{run_id}: launchRunId {launch_id} references an invalid launch event")
+                    qualification(f"{run_id}: launchRunId {launch_id} references an invalid launch event")
                     bump("lifecycle-invalid-launch-ref")
             elif not binding_matches:
                 fields = ", ".join(mismatches)
-                fail(_diagnostics, f"WI-LEDGER-LAUNCH-BINDING: {run_id}: own launch {launch_id} differs in {fields}")
+                qualification(f"WI-LEDGER-LAUNCH-BINDING: {run_id}: own launch {launch_id} differs in {fields}")
                 bump("lifecycle-launch-flags-mismatch" if "launchFlags" in mismatches
                      else "lifecycle-launch-binding-mismatch")
             elif current_relation_diagnostic and launch_id in settled:
-                fail(_diagnostics, f"{run_id}: duplicate terminal for launch {launch_id} (first: {settled[launch_id]})")
+                qualification(f"{run_id}: duplicate terminal for launch {launch_id} (first: {settled[launch_id]})")
                 bump("lifecycle-duplicate-terminal")
         if eligible:
             settled[launch_id] = run_id
@@ -4343,6 +4466,10 @@ def _derive_authority_masks(
     for pos, row in enumerate(rows):
         event = row.event
         current_ok = pos < len(current_validity) and current_validity[pos]
+        if row.projection_transformation == "transferred":
+            masks.append(LedgerAuthorityV1(False, False,
+                _qualified_transferred_review(row, item, _inputs), False, False))
+            continue
         if historical_definition and current_policy and row.epoch == "historical-custody":
             proof_failed = row.raw_line_ordinal in failed_custody_ordinals
             masks.append(replace(row.authority, closer_eligible=False, artifact_evidence_eligible=False)
@@ -7342,8 +7469,11 @@ def _qualified_history_disposition_from_inputs(
         raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: resolution requirement coverage is incomplete")
     proof_rows = rows[:control_position]
     qualification_errors = []
+    qualification_observations = []
     proof_masks = _derive_authority_masks(proof_rows, proof_current[:control_position], item,
         _definition="current", _inputs=_inputs, _diagnostics=qualification_errors,
+        _qualification_observations_out=qualification_observations,
+        _history_custody=borrowed[5] if shares_owner else (),
         _selection_qualified=_inputs.authority_qualified())
     proof_validity = tuple(LedgerEventValidityV1(ok, mask)
                            for ok, mask in zip(proof_current[:control_position], proof_masks))
@@ -7360,7 +7490,8 @@ def _qualified_history_disposition_from_inputs(
             raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: controlled review obligations require current evidence coverage")
         required_targets = {run_id for closer in dependent for run_id in closer.event["closesRunIds"]}
         proof_validity = _withhold_pending_closers(proof_rows, proof_validity, pending_closing_effects)
-        relation_errors = qualification_errors
+        relation_errors = [value.diagnostic for value in qualification_observations
+                           if value.historical_admission_run_id is None]
         open_targets, _launches = _validate_closure_authority(proof_rows, relation_errors, validity=proof_validity)
         if relation_errors or required_targets & {row["runId"] for row in open_targets}:
             raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: exact dependent current obligations remain unresolved")
@@ -7487,7 +7618,8 @@ def _apply_history_custody(
             try:
                 bound_hold = replace(hold, _current_inputs=_inputs)
                 if _inputs is not None:
-                    _inputs.borrowed_disposition = (rows, item, control_position, event, bound_hold)
+                    _inputs.borrowed_disposition = (rows, item, control_position, event, bound_hold,
+                                                   tuple(admissions.values()))
                 _qualified_history_disposition(rows, item, control_position, event, bound_hold, candidate_blobs, set(admissions),
                     pending, tuple(LedgerEventValidityV1(ok, mask) for ok, mask in zip(current, masks)))
             except ValueError as exc:
@@ -8644,12 +8776,13 @@ def obligation_transfer_id(
     ).hexdigest()
 
 
-def _transfer_status_relation(item: Path, errors: list[str]) -> tuple[str, str] | None:
+def _transfer_status_relation(item: Path, errors: list[str], *, _inputs=None) -> tuple[str, str] | None:
     status = item if item.is_file() else item / "status.md"
     if not status.is_file():
         return None
     try:
-        text = status.read_text(encoding="utf-8", errors="strict")
+        text = (_inputs.read_selection(status).decode("utf-8", errors="strict") if _inputs is not None
+                else status.read_text(encoding="utf-8", errors="strict"))
     except (OSError, UnicodeError) as exc:
         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer status is unreadable: {exc}")
         return None
@@ -8738,8 +8871,13 @@ def _transfer_stat_key(metadata: os.stat_result) -> tuple[int, ...]:
 
 
 def _read_transfer_authority_bytes(
-    root: Path, path: Path, *, maximum_bytes: int | None = None
+    root: Path, path: Path, *, maximum_bytes: int | None = None, _inputs=None
 ) -> bytes:
+    if _inputs is not None:
+        metadata = _transfer_authority_metadata(root, path)
+        if maximum_bytes is not None and metadata.st_size > maximum_bytes:
+            raise ValueError(f"transfer authority exceeds maximum raw length {maximum_bytes} bytes")
+        return _inputs.read_selection(path, maximum_bytes=maximum_bytes)
     if isinstance(path, _CapturedHistoryPath):
         metadata = _transfer_authority_metadata(root, path)
         if maximum_bytes is not None and metadata.st_size > maximum_bytes:
@@ -8780,10 +8918,11 @@ def _read_transfer_authority_bytes(
 
 
 def _transfer_authority_sha256(
-    root: Path, path: Path, *, maximum_bytes: int
+    root: Path, path: Path, *, maximum_bytes: int, _inputs=None
 ) -> str:
-    if isinstance(path, _CapturedHistoryPath):
-        return hashlib.sha256(_read_transfer_authority_bytes(root, path, maximum_bytes=maximum_bytes)).hexdigest()
+    if isinstance(path, _CapturedHistoryPath) or _inputs is not None:
+        return hashlib.sha256(_read_transfer_authority_bytes(root, path, maximum_bytes=maximum_bytes,
+            _inputs=_inputs)).hexdigest()
     before = _transfer_authority_metadata(root, path)
     if before.st_size > maximum_bytes:
         raise ValueError(
@@ -8827,14 +8966,14 @@ def _transfer_authority_sha256(
 
 
 def _transfer_receipts(
-    root: Path, errors: list[str], *, ledger_resource_budget=None
+    root: Path, errors: list[str], *, ledger_resource_budget=None, _inputs=None
 ) -> dict[str, tuple[Path, dict, Path]]:
     receipts: dict[str, tuple[Path, dict, Path]] = {}
     for path in _transfer_receipt_candidates(root, errors):
         try:
             payload = decode_json_object(
                 _read_transfer_authority_bytes(
-                    root, path, maximum_bytes=MAX_TRANSFER_RECEIPT_BYTES
+                    root, path, maximum_bytes=MAX_TRANSFER_RECEIPT_BYTES, _inputs=_inputs
                 ),
                 source=str(path),
                 maximum_bytes=MAX_TRANSFER_RECEIPT_BYTES,
@@ -8880,7 +9019,8 @@ def _transfer_receipts(
         ledger = archive / "agent-runs.jsonl"
         try:
             physical_ledger_sha = _transfer_authority_sha256(
-                root, ledger, maximum_bytes=_ledger_resource_budget(ledger_resource_budget).max_ledger_bytes
+                root, ledger, maximum_bytes=_ledger_resource_budget(ledger_resource_budget).max_ledger_bytes,
+                _inputs=_inputs
             )
         except (OSError, ValueError) as exc:
             fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer ledger is unavailable: {exc}")
@@ -8891,33 +9031,46 @@ def _transfer_receipts(
         receipts[operation_id] = (path, payload, archive)
     return receipts
 
+def _receive_transfer_source_state(archive, errors, *, terminal=False, _inputs=None,
+                                   ledger_resource_budget=None, transition_resource_budget=None):
+    states, acquired = [], []
+    diagnostics = validate_work_item(archive, strict_revise=False, validate_status_file=False,
+        obligation_state_out=states, ledger_acquisition_complete_out=acquired,
+        ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+    if (acquired != [True] or len(states) != 1 or type(states[0]) is not WorkItemObligationStateV1
+        or type(states[0]._current_result) is not _CurrentReductionV1):
+        errors.extend(diagnostics)
+        fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: complete source obligation state is unavailable")
+        return None
+    receiving_errors = []
+    result = states[0]._current_result.receive(archive, receiving_errors, observed_diagnostics=diagnostics)
+    veto = ([*diagnostics, *receiving_errors] if result is None else
+            [*result.veto_diagnostics, *result.obligation_diagnostics(strict=terminal, history=True)])
+    if result is not None and result[3]:
+        fail(veto, "WI-OBLIGATION-TRANSFER-COVERAGE: settled transfer source has open launches")
+    if veto:
+        errors.extend(veto)
+        fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: source obligation state is invalid")
+        return None
+    if _inputs is not None:
+        owner = _context_evaluation(result.context)
+        _inputs.adopt_selection(tuple(owner.inputs.predicates.values()))
+    states.clear()
+    result.publish(states, None)
+    return states[0]
+
+
 def validate_transfer_receipt_obligation_coverage(
     root: Path,
     receipt: Mapping[str, object],
     archive: Path, ledger_resource_budget=None,
-*, transition_resource_budget=None) -> list[str]:
+*, transition_resource_budget=None, _inputs=None) -> list[str]:
     """Bind one settled transfer receipt to the archive's canonical open state."""
 
     errors: list[str] = []
-    states: list[WorkItemObligationStateV1] = []
-    source_errors = validate_work_item(
-        archive,
-        strict_revise=False,
-        validate_status_file=False,
-        obligation_state_out=states, ledger_resource_budget=ledger_resource_budget
-    , transition_resource_budget=transition_resource_budget)
-    if source_errors or len(states) != 1:
-        errors.extend(source_errors)
-        fail(
-            errors,
-            "WI-OBLIGATION-TRANSFER-OWNER: source obligation state is invalid",
-        )
-        return errors
-    if states[0].open_launches:
-        fail(
-            errors,
-            "WI-OBLIGATION-TRANSFER-COVERAGE: settled transfer source has open launches",
-        )
+    state = _receive_transfer_source_state(archive, errors, _inputs=_inputs,
+        ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+    if state is None:
         return errors
 
     obligations = receipt.get("obligations")
@@ -8972,7 +9125,7 @@ def validate_transfer_receipt_obligation_coverage(
         )
 
     expected: dict[tuple[str, int], tuple[object, ...]] = {}
-    for row in states[0].open_revise:
+    for row in state.open_revise:
         position = (row.run_id, row.raw_line_ordinal)
         obligation_id = row.obligation_id
         if obligation_id is None:
@@ -8991,7 +9144,7 @@ def validate_transfer_receipt_obligation_coverage(
             row.predecessor_operation_id,
         )
 
-    if set(declared) != set(expected) or len(expected) != len(states[0].open_revise):
+    if set(declared) != set(expected) or len(expected) != len(state.open_revise):
         fail(
             errors,
             "WI-OBLIGATION-TRANSFER-COVERAGE: settled transfer receipt does not exactly cover archived open REVISE rows",
@@ -9011,7 +9164,7 @@ def _resolve_transferred_obligation(
     obligation: dict,
     errors: list[str],
     visiting: frozenset[str], ledger_resource_budget=None,
-*, transition_resource_budget=None) -> LedgerProjectionRowV1 | None:
+*, transition_resource_budget=None, _inputs=None) -> LedgerProjectionRowV1 | None:
     if operation_id in visiting:
         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer cycle at {operation_id}")
         return None
@@ -9043,7 +9196,7 @@ def _resolve_transferred_obligation(
             return None
         inherited = _resolve_transferred_obligation(
             root, receipts, predecessor, matches[0], errors, visiting | {operation_id}, ledger_resource_budget=ledger_resource_budget
-        , transition_resource_budget=transition_resource_budget)
+        , transition_resource_budget=transition_resource_budget, _inputs=_inputs)
         if inherited is None:
             return None
         binding = (
@@ -9064,16 +9217,9 @@ def _resolve_transferred_obligation(
             inherited.raw_event_sha256, "transferred", obligation_id, predecessor,
         )
 
-    states: list[WorkItemObligationStateV1] = []
-    validation_errors = validate_work_item(
-        archive,
-        strict_revise=False,
-        validate_status_file=False,
-        obligation_state_out=states, ledger_resource_budget=ledger_resource_budget
-    , transition_resource_budget=transition_resource_budget)
-    if validation_errors or len(states) != 1:
-        errors.extend(validation_errors)
-        fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: source obligation state is invalid: {operation_id}")
+    state = _receive_transfer_source_state(archive, errors, _inputs=_inputs,
+        ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+    if state is None:
         return None
     declared_binding = (
         obligation.get("runId"), obligation.get("rawLineOrdinal"),
@@ -9081,7 +9227,7 @@ def _resolve_transferred_obligation(
         obligation.get("projectedEventSha256"),
     )
     matches = [
-        row for row in states[0].open_revise
+        row for row in state.open_revise
         if (
             row.run_id, row.raw_line_ordinal, row.raw_line_sha256,
             row.raw_event_sha256, row.projected_event_sha256,
@@ -9104,8 +9250,8 @@ def _resolve_transferred_obligation(
     )
 
 
-def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_budget=None, transition_resource_budget=None) -> tuple[LedgerProjectionRowV1, ...]:
-    relation = _transfer_status_relation(item, errors)
+def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_budget=None, transition_resource_budget=None, _inputs=None) -> tuple[LedgerProjectionRowV1, ...]:
+    relation = _transfer_status_relation(item, errors, _inputs=_inputs)
     if relation is None:
         return ()
     root = repo_root_for(item)
@@ -9113,7 +9259,7 @@ def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_b
         fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: successor has no repository root")
         return ()
     source_slug, operation_id = relation
-    receipts = _transfer_receipts(root, errors, ledger_resource_budget=ledger_resource_budget)
+    receipts = _transfer_receipts(root, errors, ledger_resource_budget=ledger_resource_budget, _inputs=_inputs)
     entry = receipts.get(operation_id)
     if entry is None:
         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: successor receipt is absent: {operation_id}")
@@ -9131,6 +9277,12 @@ def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_b
     if receipt.get("workItem") != source_slug or not item_matches_successor:
         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: successor relation differs: {operation_id}")
         return ()
+    coverage_errors = validate_transfer_receipt_obligation_coverage(root, receipt, entry[2],
+        ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget,
+        _inputs=_inputs)
+    if coverage_errors:
+        errors.extend(coverage_errors)
+        return ()
     result: list[LedgerProjectionRowV1] = []
     seen_ids: set[str] = set()
     seen_run_ids: set[str] = set()
@@ -9142,7 +9294,7 @@ def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_b
         run_id = obligation.get("runId")
         if (
             not isinstance(obligation_id, str)
-            or not isinstance(run_id, str)
+            or not obligation_id or not isinstance(run_id, str) or not run_id
             or obligation_id in seen_ids
             or run_id in seen_run_ids
         ):
@@ -9152,9 +9304,10 @@ def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_b
         seen_run_ids.add(run_id)
         resolved = _resolve_transferred_obligation(
             root, receipts, operation_id, obligation, errors, frozenset(), ledger_resource_budget=ledger_resource_budget
-        , transition_resource_budget=transition_resource_budget)
+        , transition_resource_budget=transition_resource_budget, _inputs=_inputs)
         if resolved is not None:
-            result.append(LedgerProjectionRowV1(
+            carrier = object()
+            granted = LedgerProjectionRowV1(
                 dict(resolved.event),
                 resolved.raw_line_ordinal,
                 resolved.raw_line_sha256,
@@ -9162,7 +9315,13 @@ def _inherited_transfer_rows(item: Path, errors: list[str], *, ledger_resource_b
                 "transferred",
                 resolved.obligation_id,
                 operation_id,
-            ))
+                _current_inputs=carrier,
+            )
+            if _inputs is not None:
+                selected = {id(predicate) for predicate in _inputs.selection_inputs}
+                keys = tuple(key for key, predicate in _inputs.predicates.items() if id(predicate) in selected)
+                _inputs.transfer_grants[carrier] = (granted, _current_target_key(item), keys)
+            result.append(granted)
     return tuple(result)
 
 
@@ -9257,15 +9416,11 @@ def validate_obligation_transfer_ownership(root: Path, *, ledger_resource_budget
                 if len(locations) != 1:
                     fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: current owner location is absent or duplicate: {obligation_id}")
                 elif locations[0].is_dir() and locations[0].parent.parent.name == "archive":
-                    state: list[WorkItemObligationStateV1] = []
-                    terminal_errors = validate_work_item(
-                        locations[0], strict_revise=False, validate_status_file=False,
-                        obligation_state_out=state, ledger_resource_budget=ledger_resource_budget
-                    , transition_resource_budget=transition_resource_budget)
-                    errors.extend(terminal_errors)
-                    if len(state) != 1 or any(
+                    state = _receive_transfer_source_state(locations[0], errors, terminal=True,
+                        ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+                    if state is None or any(
                         open_row.obligation_id == obligation_id
-                        for open_row in state[0].open_revise
+                        for open_row in state.open_revise
                     ):
                         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: unresolved obligation has a terminal owner: {obligation_id}")
                 elif _transfer_status_relation(locations[0], errors) != (
@@ -9868,9 +10023,11 @@ def _reduce_archived_current_state(item, effective_rows, runtime_rows, historica
         typed_closure_validity[pos] for pos in active_positions
     )
     qualification_errors = []
+    qualification_observations = []
     active_masks = _derive_authority_masks(
         active_rows, [closure_validity[pos] for pos in active_positions],
         item, policy="archive", _definition="current", _diagnostics=qualification_errors, _telemetry=telemetry,
+        _qualification_observations_out=qualification_observations,
     )
     # Preserve exact target-only proofs; every dependent grant uses the active view.
     active_validity = tuple(
@@ -9933,13 +10090,13 @@ def _reduce_archived_current_state(item, effective_rows, runtime_rows, historica
     by_position = dict(zip(active_positions, active_validity))
     validity = tuple(by_position.get(position, LedgerEventValidityV1(False, _NO_LEDGER_AUTHORITY))
                      for position in range(len(runtime_rows)))
-    if inputs.closure_diagnostics is None:
-        inputs.closure_diagnostics = tuple(qualification_errors)
+    if inputs.qualification_observations is None:
+        inputs.qualification_observations = tuple(qualification_observations)
     if inputs.relation_diagnostics is None:
         inputs.relation_diagnostics = (*relation_errors, *closure_errors)
     (errors if _relation_diagnostics_out is None else _relation_diagnostics_out).extend(inputs.relation_diagnostics)
     if _relation_diagnostics_out is None:
-        errors.extend(inputs.closure_diagnostics)
+        errors.extend(value.diagnostic for value in inputs.qualification_observations)
     return (tuple(active_positions), validity, open_revise, open_launches), tuple(errors)
 
 
@@ -9968,6 +10125,7 @@ def observe_captured_work_item_history(
     required_acquisition_failures = []
     required_ledger_acquisition_by_path = {}
     final_result = None
+    item = None
     owner = load_lifecycle_owner()
     try:
         item = _acquire_captured_history_item(binding)
@@ -10027,10 +10185,8 @@ def observe_captured_work_item_history(
             errors = [*errors, *inner_errors, *outer_errors, *composition_errors]
         else:
             final_result.publish(states, masks)
-            errors = [*final_result.diagnostics,
-                *final_result.obligation_diagnostics(strict=binding.criteria.owner_contract == "current", history=True)]
-            if final_result[2] or final_result[3] or final_result.context.unresolved_history:
-                fail(errors, "WI-LEGACY-COMPLETION-HISTORY: original history has unresolved obligations")
+            errors = list(CapturedWorkItemHistoryObservationV1._result_diagnostics(final_result,
+                strict=binding.criteria.owner_contract == "current"))
     else:
         errors = [*errors, *inner_errors, *outer_errors]
     return CapturedWorkItemHistoryObservationV1(
@@ -10038,6 +10194,7 @@ def observe_captured_work_item_history(
         and all(outcome == [True] for outcome in required_ledger_acquisition_by_path.values()), tuple(errors),
         states[-1] if states else None,
         MappingProxyType(masks[-1]) if masks else None,
+        item,
     )
 
 
@@ -10054,7 +10211,7 @@ def validate_status(
             return
         rows, context, qualified, received_result = received
         if received_result is not None:
-            errors.extend(received_result.diagnostics)
+            errors.extend(received_result.veto_diagnostics)
         if qualified is not None:
             if not context._current_owner.inputs.selection_qualified():
                 return
@@ -10565,6 +10722,9 @@ def _reduce_current_state_from_inputs(
 
     if not _sealed_context_is_bound(rows, context, errors, target=item):
         return (), (), [], []
+    for row in rows:
+        if row.projection_transformation == "transferred" and not _qualified_transferred_review(row, item, _inputs):
+            fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: transferred review lacks its bound selected source grant")
     validity = (derive_event_validity(rows, item, errors, context=context) if public_derive else
         _derive_event_validity_from_inputs(rows, item, errors, context=context, _inputs=_inputs,
                                           _admission_rows=_admission_rows))
@@ -10586,6 +10746,7 @@ def _reduce_current_state_from_inputs(
         validity[position].current_schema_valid for position in active_positions
     )
     qualification_errors = []
+    qualification_observations = []
     active_masks = _derive_authority_masks(
         active_rows, active_current_validity, item,
         context.historical_pass_custody if context is not None else None,
@@ -10593,6 +10754,7 @@ def _reduce_current_state_from_inputs(
         _history_custody=context.history_custody if context is not None else (),
         _selection_qualified=_inputs.authority_qualified(),
         _diagnostics=qualification_errors,
+        _qualification_observations_out=qualification_observations,
         _telemetry=telemetry,
         _admission_rows=(_admission_rows if _admission_rows is not None else
             _context_evaluation(context).base_rows if context is not None else rows),
@@ -10626,13 +10788,13 @@ def _reduce_current_state_from_inputs(
             telemetry["recovery-reopened-launch"] = (
                 telemetry.get("recovery-reopened-launch", 0) + reopened_launch
             )
-    if _inputs.closure_diagnostics is None:
-        _inputs.closure_diagnostics = tuple(qualification_errors)
+    if _inputs.qualification_observations is None:
+        _inputs.qualification_observations = tuple(qualification_observations)
     if _inputs.relation_diagnostics is None:
         _inputs.relation_diagnostics = (*relation_errors, *closure_errors)
     (errors if _relation_diagnostics_out is None else _relation_diagnostics_out).extend(_inputs.relation_diagnostics)
     if _relation_diagnostics_out is None:
-        errors.extend(_inputs.closure_diagnostics)
+        errors.extend(value.diagnostic for value in _inputs.qualification_observations)
     return active_positions, tuple(effective_validity), open_revise, open_launches
 
 
@@ -10914,7 +11076,8 @@ def validate_work_item(
     _, v3_errors = reduce_v3_events(events)
     errors.extend(v3_errors)
     validate_scratch_ownership(native_effective_events, item, errors)
-    inherited_rows = _inherited_transfer_rows(item, errors, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+    inherited_rows = _inherited_transfer_rows(item, errors, ledger_resource_budget=ledger_resource_budget,
+        transition_resource_budget=transition_resource_budget, _inputs=inputs)
     effective_rows = inherited_rows + native_effective_rows
     effective_events = _row_events(effective_rows)
     root_relative = (

@@ -554,6 +554,18 @@ Ordinary directory `close` is the positive operation and omits `--apply`. That
 flag belongs only to the separate `--legacy-evidence-file` close route, not an
 extra confirmation for ordinary close.
 
+When the active item has `agent-runs.jsonl`, ordinary `close` writes a schema
+version 3 `lifecycle-transition-receipt.json` in the archive as part of the
+same rollback-safe lifecycle transaction. The lifecycle owner binds the close
+inputs and captured source ledger to the archived ledger and archive location,
+and binds the README preimage (including captured absence) and historical final
+digest, then verifies the written proof. This lets
+existing history consumers recognize an ordinary ledger relocation; it does
+not transfer successor or review ownership. An archived replay must match the
+recorded closure and terminal instant, and a mismatch refuses. Existing
+archives are not backfilled. This proof does not replace ordinary close's
+current-result, bug-disposition, status, current-obligation, or README checks.
+
 Incoming-link upkeep changes only captured hrefs that still name the same
 target at its archive location. The lifecycle owner first admits the captured
 record format, physical-current membership and mutability; category-known
@@ -1082,7 +1094,7 @@ The optional mode emits one JSON object: `schemaVersion: 1`, `workItem`, `ledger
 
 The observation freezes selected presence as well as bytes. A captured present image, including empty bytes, is validated even if the path later disappears. Genuine captured absence stays absent if a file later appears and is ledger-free only under the existing live quick-fix contract; required, candidate and compatible-member absence refuse. The direct validator API distinguishes explicit `selected_ledger_absent=True` from omitted legacy acquisition and rejects combining absence with `selected_ledger_bytes`. A failed read stays incomplete and is never parsed as successful empty data. Default failure output retains its original cannot-read cause and nonzero exit; the manufactured `ledger has no events` diagnostic after that failed read is removed, so its error count can change.
 
-Available typed projection contains `openLaunches`, `openRevises`, `unresolvedHistory`. Current rows expose run/source digests and ordinals, source kind, obligation/predecessor IDs, and declared artifact/lane. History rows expose prefix digest/length, raw line identity, admission/disposition run and declared run ID. Arbitrary notes/prompts/raw evidence are excluded. Null is unavailable; errors plus empty arrays remain FAIL. Only successful strict live/approved ledger-free validation with available empty arrays establishes effective obligations clear at that revision.
+Available typed projection contains `openLaunches`, `openRevises`, `unresolvedHistory`. Current rows expose run/source digests and ordinals, source kind, obligation/predecessor IDs, and declared artifact/lane. History rows expose prefix digest/length, raw line identity, admission/disposition run and declared run ID. Arbitrary notes/prompts/raw evidence are excluded. Null is unavailable; errors plus empty arrays remain FAIL. The optional telemetry `result` remains a full-observation validation `PASS`/`FAIL`, so retained historical forensic findings can keep that audit at `FAIL`. Current close eligibility comes from the lifecycle owner's existing complete, target-bound current-result receiving and operation diagnostics, together with the close's existing current-obligation and lifecycle guards; empty arrays or the audit label alone do not establish it. Missing, incomplete or mismatched receiving and genuine unresolved duties still refuse. The original historical event and its audit interpretation remain unchanged.
 
 Root consumes the completed tool frame and verifies item/selection/strictness/digest/diagnostics, then checks current selected presence and digest before dependent action; changed presence or bytes require a fresh observation. Persist terminal identity, observed revision/selection, exact pending IDs/causes and action owner/resume in existing `Last result`/next-action text. Known strict obligation FAIL is useful state; tool/acquisition failure records unavailable/resume. Continue independent admitted ready work. No acknowledgment-only ledger event mutates the observed revision. Writer success/replay markers stay independent; observation is neither task completion nor publication authority. Independent QA inspects actual tool receipt and persisted Root acknowledgment.
 

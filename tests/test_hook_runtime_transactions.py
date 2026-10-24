@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from _filesystem_fixture_support import _make_directory_junction, _make_file_symlink
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRATCH = ROOT / ".scratch"
@@ -241,41 +243,6 @@ def _seed_unrelated_provider_state(project: Path, case: Case) -> tuple[Path, ...
     custom.parent.mkdir(parents=True, exist_ok=True)
     custom.write_text("preserve custom sibling\n", encoding="utf-8")
     return (*unrelated, custom)
-
-
-def _make_file_symlink(link: Path, target: Path) -> None:
-    link.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        link.symlink_to(target, target_is_directory=False)
-    except (OSError, NotImplementedError) as exc:
-        pytest.skip(f"file symlinks are unavailable: {exc}")
-    assert link.is_symlink()
-
-
-def _make_directory_junction(link: Path, target: Path) -> None:
-    if os.name != "nt":
-        pytest.skip("Windows junction coverage")
-    link.parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        [
-            "powershell",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "New-Item",
-            "-ItemType",
-            "Junction",
-            "-Path",
-            str(link),
-            "-Target",
-            str(target),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    if result.returncode != 0 or not os.path.isjunction(link):
-        pytest.skip(f"junction creation is unavailable: {result.stdout}{result.stderr}")
 
 
 ABORT_POLICY_PATHS = (

@@ -595,13 +595,21 @@ def test_exact_replay_is_a_byte_identical_noop_and_changed_request_is_refused(
     ["after-manifest", "after-registry", "after-ledger", "after-receipt"],
 )
 def test_each_participant_failure_restores_exact_preimage(
-    tmp_path: Path, boundary: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
 ) -> None:
     owner = load_owner()
     root = tmp_path / "repo"
     ledger, ledger_before, request = satisfied_fixture(
         root, operation_id=f"legacy-settlement-{boundary}"
     )
+    assert not (root / "work-items" / "legacy-ledger-projections.jsonl").exists()
+    observer = owner.LifecycleDiagnosticObserver()
+    transaction = owner._settle_legacy_ledger_transaction
+
+    def observed(*args, **kwargs):
+        return transaction(*args, diagnostic_observer=observer, **kwargs)
+
+    monkeypatch.setattr(owner, "_settle_legacy_ledger_transaction", observed)
 
     with pytest.raises(owner.LifecycleError) as raised:
         owner.settle_legacy_ledger(
@@ -618,6 +626,95 @@ def test_each_participant_failure_restores_exact_preimage(
     assert not (work_items / "legacy-ledger-projections.jsonl").exists()
     assert not (work_items / "legacy-ledger-projection-manifests").exists()
     assert not (work_items / "legacy-ledger-projection-receipts").exists()
+    assert observer.state == "delivered"
+    assert observer.snapshot.cleanupFailures == (), "\n".join(
+        row.diagnostic for row in observer.snapshot.cleanupFailures)
+
+
+@pytest.mark.parametrize("case", ["validation", "dual", "cancel-dual", "uncreated", "foreign", "retirement"])
+def test_settlement_candidate_retirement_preserves_independent_outcomes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    owner = load_owner()
+    root = tmp_path / "repo"
+    ledger, before, request = satisfied_fixture(root)
+    candidate = ledger.with_suffix(".jsonl.tmp")
+    primary = (KeyboardInterrupt("candidate validation cancelled") if case == "cancel-dual"
+               else owner.LifecycleError("WI-LEDGER-LEGACY-SETTLEMENT-INCOMPLETE", "candidate validation failed"))
+    retirement = owner.LifecycleError("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "candidate retirement failed")
+    original = owner._legacy_settlement_validate_after_image
+    observer = owner.LifecycleDiagnosticObserver()
+    reached = []
+    foreign_identity = []
+
+    def injected(root, result, plan, **kwargs):
+        ledger_owner = owner._load_agent_run_ledger()
+        load_validator = ledger_owner.load_validator
+        write = owner._atomic_write
+
+        def load_candidate_validator():
+            validator = load_validator()
+            validate = validator.validate_work_item
+
+            def validate_candidate(item, **selected):
+                if selected.get("ledger_path") == candidate and case not in {"uncreated", "retirement"}:
+                    reached.append("validation")
+                    if case == "foreign":
+                        replacement = candidate.with_name("foreign-replacement")
+                        replacement.write_bytes(b"foreign replacement must survive\n")
+                        replacement.replace(candidate)
+                        foreign_identity.append(owner._capture_file_snapshot(
+                            candidate, failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE").identity)
+                    raise primary
+                return validate(item, **selected)
+
+            monkeypatch.setattr(validator, "validate_work_item", validate_candidate)
+            return validator
+
+        def write_candidate(path, data, **selected):
+            if path == candidate and case == "uncreated":
+                reached.append("uncreated")
+                raise primary
+            return write(path, data, **selected)
+
+        def fail_retirement(path, **selected):
+            assert path == candidate
+            reached.append("retirement")
+            raise retirement
+
+        monkeypatch.setattr(ledger_owner, "load_validator", load_candidate_validator)
+        monkeypatch.setattr(owner, "_atomic_write", write_candidate)
+        if case in {"dual", "cancel-dual", "retirement"}:
+            monkeypatch.setattr(owner, "_remove_lifecycle_file", fail_retirement)
+        return original(root, result, plan, **kwargs)
+
+    monkeypatch.setattr(owner, "_legacy_settlement_validate_after_image", injected)
+    expected = retirement if case == "retirement" else primary
+    with pytest.raises(type(expected)) as raised:
+        owner._settle_legacy_ledger_transaction(root, request, diagnostic_observer=observer)
+
+    assert ("validation" in reached) is (case not in {"uncreated", "retirement"})
+    assert ("retirement" in reached) is (case in {"dual", "cancel-dual", "retirement"})
+    assert ("uncreated" in reached) is (case == "uncreated")
+    assert raised.value is expected
+    assert ledger.read_bytes() == before
+    assert not (root / "work-items" / "legacy-ledger-projection-receipts").exists()
+    assert observer.state == "delivered"
+    assert observer.snapshot.primaryFailureId == getattr(expected, "failure_id", None)
+    cleanup = [row for row in observer.snapshot.cleanupFailures if row.phase == "write-temp-cleanup"]
+    if case in {"dual", "cancel-dual", "foreign"}:
+        assert len(cleanup) == 1
+        assert cleanup[0].resource == candidate.relative_to(root).as_posix()
+        assert cleanup[0].failureId == ("WI-CATEGORY-MIGRATION-INVENTORY" if case == "foreign"
+                                        else "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE")
+        assert candidate.exists()
+    else:
+        assert cleanup == []
+        assert candidate.exists() is (case == "retirement")
+    if case == "foreign":
+        assert candidate.read_bytes() == b"foreign replacement must survive\n"
+        assert owner._capture_file_snapshot(
+            candidate, failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE").identity == foreign_identity[0]
 
 
 def test_archived_migration_neutral_settlement_keeps_review_debt_and_true_duplicates(tmp_path: Path) -> None:

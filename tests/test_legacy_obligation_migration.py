@@ -155,13 +155,13 @@ def settled_parent_migration_fixture(tmp_path: Path):
 def append_reviewer_pass(item: Path, expected: dict) -> None:
     work_item = json.loads((item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()[0])["workItem"]
     common = ["--role", "toolchain-engineer", "--execution-role", "internal",
-              "--scope", "implementation.md", "--work-item-name", work_item]
+              "--scope", "implementation.md", "--work-item-name", work_item, "--effort", "high"]
     for arguments in (
         ["--run-id", "migration-review-r1", "--status", "running", "--gate", "none",
          "--event-kind", "launch", "--started-at", "2026-08-18T00:01:00Z", "--updated-at", "2026-08-18T00:01:00Z"],
         ["--run-id", "migration-review-r1-terminal", "--status", "completed", "--gate", "PASS",
          "--event-kind", "terminal", "--launch-run-id", "migration-review-r1", "--closes", expected["targetRunId"],
-         "--artifact", "implementation.md", "--artifact-revision", "a" * 64, "--lane", "implementation", "--effort", "high",
+         "--artifact", "implementation.md", "--artifact-revision", "a" * 64, "--lane", "implementation",
          "--evidence", "artifact:implementation.md", "--started-at", "2026-08-18T00:02:00Z", "--updated-at", "2026-08-18T00:02:00Z"],
     ):
         written = subprocess.run([sys.executable, "-B", str(LEDGER), "--work-item", str(item), "append", *common, *arguments],
@@ -216,24 +216,8 @@ def transfer_fixture(tmp_path: Path):
         "schemaVersion": 1, "workItem": item.name, "closedAt": instant, "bugs": []
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     lifecycle.refresh_readme(tmp_path)
-    validator = load_validator()
-    metadata: list[dict[str, object]] = []
-    errors: list[str] = []
-    raw_events = validator.load_jsonl(ledger_path, errors, metadata, ledger_before)
-    assert errors == []
-    effective_events, _, projection_errors = validator.project_legacy_obligation_migrations(
-        raw_events, metadata, item
-    )
-    assert projection_errors == []
-    raw_position = next(
-        position for position, event in enumerate(raw_events)
-        if event.get("runId") == expected["targetRunId"]
-    )
-    raw_event = raw_events[raw_position]
-    projected_event = next(
-        event for event in effective_events
-        if event.get("runId") == expected["targetRunId"]
-    )
+    open_rows = lifecycle._inspect_transfer_obligations(tmp_path, item)
+    assert [row.run_id for row in open_rows] == [expected["targetRunId"]]
     successor_slug = f"{item.name}-successor"
     operation_id = "transition-transfer-op-001"
     transfer = {
@@ -242,16 +226,12 @@ def transfer_fixture(tmp_path: Path):
         "successorWorkItem": successor_slug,
         "expectedSourceLedgerSha256": sha256(ledger_before),
         "obligations": [{
-            "runId": expected["targetRunId"],
-            "rawLineOrdinal": metadata[raw_position]["line"],
-            "rawLineSha256": metadata[raw_position]["sha256"],
-            "rawEventSha256": sha256(json.dumps(
-                raw_event, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-            ).encode("utf-8")),
-            "projectedEventSha256": sha256(json.dumps(
-                projected_event, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-            ).encode("utf-8")),
-        }],
+            "runId": row.run_id,
+            "rawLineOrdinal": row.raw_line_ordinal,
+            "rawLineSha256": row.raw_line_sha256,
+            "rawEventSha256": row.raw_event_sha256,
+            "projectedEventSha256": row.projected_event_sha256,
+        } for row in open_rows],
     }
     closure = (
         f"Closed: {instant}\n"
@@ -626,7 +606,10 @@ def test_ledger_location_settlement_survives_normal_successor_and_readme_changes
     tmp_path: Path,
 ) -> None:
     fixture = transfer_fixture(tmp_path)
-    run_transfer(fixture)
+    receipt = run_transfer(fixture)
+    archive = tmp_path.joinpath(*receipt["archivePath"].split("/"))
+    protected = {path: path.read_bytes() for path in
+        (archive / "agent-runs.jsonl", archive / "lifecycle-transition-receipt.json")}
     logical_work_item = f"work-items/active/{fixture['slug']}"
     logical_ledger_path = f"{logical_work_item}/agent-runs.jsonl"
     before = fixture["lifecycle"].resolve_work_item_ledger_location(
@@ -647,6 +630,130 @@ def test_ledger_location_settlement_survives_normal_successor_and_readme_changes
     )
 
     assert after == before
+    active = tmp_path / "work-items/active" / fixture["successorSlug"]
+    assert (active / "agent-runs.jsonl").read_bytes() == fixture["lifecycle"]._staged_admission_ledger_bytes(
+        fixture["successorSlug"], successor_status(fixture["slug"], fixture["operationId"]))
+    assert all(path.read_bytes() == raw for path, raw in protected.items())
+    validator, states, acquired = load_validator(), [], []
+    errors = validator.validate_work_item(active, strict_revise=False, obligation_state_out=states,
+        ledger_acquisition_complete_out=acquired)
+    assert errors == [f"{receipt['obligations'][0]['runId']}: launchRunId toolchain-luna-profile-floor-20260812-r1 does not reference an earlier event"]
+    assert acquired == [True] and len(states) == 1
+    obligation = states[0].open_revise[0]
+    declared = receipt["obligations"][0]
+    assert (obligation.run_id, obligation.raw_line_ordinal, obligation.raw_line_sha256,
+        obligation.raw_event_sha256, obligation.projected_event_sha256, obligation.obligation_id,
+        obligation.predecessor_operation_id) == (declared["runId"], declared["rawLineOrdinal"],
+        declared["rawLineSha256"], declared["rawEventSha256"], declared["projectedEventSha256"],
+        declared["obligationId"], fixture["operationId"])
+    assert obligation.raw_event_sha256 != obligation.projected_event_sha256
+    result = states[0]._current_result
+    assert result.operation_diagnostics(requested_positions=(), strict=False, history=True) == ()
+    imported = next(pos for pos, row in enumerate(result.context.rows) if row.obligation_id)
+    assert result[1][imported].authority == validator.LedgerAuthorityV1(False, False, True, False, False)
+    refused = []
+    again = result.receive(active, refused)
+    assert again is not None and not refused and again.operation_diagnostics(requested_positions=(), strict=False) == ()
+    published = []
+    again.publish(published, None)
+    assert published[0].open_revise == states[0].open_revise
+    from dataclasses import replace
+    original_rows = result.context.rows
+    for name, value in (("obligation_id", None), ("predecessor_operation_id", None),
+                        ("raw_event_sha256", None), ("_current_inputs", object())):
+        rows = list(original_rows)
+        rows[imported] = replace(rows[imported], **{name: value})
+        object.__setattr__(result.context, "rows", tuple(rows))
+        refused = []
+        received = result.receive(active, refused)
+        assert received is None or received.operation_diagnostics(requested_positions=(), strict=False)
+        object.__setattr__(result.context, "rows", original_rows)
+    proof = archive / "lifecycle-transition-receipt.json"
+    proof.write_bytes(protected[proof] + b" ")
+    refused = []
+    stale = again.receive(active, refused)
+    assert stale is None or stale.operation_diagnostics(requested_positions=(), strict=False)
+    proof.write_bytes(protected[proof])
+
+
+def test_zero_obligation_transfer_retains_selected_source_inputs(tmp_path: Path) -> None:
+    fixture = native_transfer_fixture(tmp_path)
+    append_reviewer_pass(fixture["item"], {"targetRunId": fixture["transferObject"]["obligations"][0]["runId"]})
+    fixture["ledgerBefore"] = (fixture["item"] / "agent-runs.jsonl").read_bytes()
+    fixture["ledgerSha"] = sha256(fixture["ledgerBefore"])
+    fixture["transferObject"]["expectedSourceLedgerSha256"] = fixture["ledgerSha"]
+    fixture["transferObject"]["obligations"] = []
+    fixture["transfer"] = json.dumps(fixture["transferObject"], sort_keys=True).encode()
+    receipt = run_transfer(fixture)
+    assert receipt["obligations"] == []
+    active = fixture["lifecycle"].start_item(tmp_path, fixture["successorSlug"],
+        successor_status(fixture["slug"], fixture["operationId"]))
+    validator, states = load_validator(), []
+    assert validator.validate_work_item(active, strict_revise=False, obligation_state_out=states) == []
+    assert states[0].open_revise == states[0].open_launches == ()
+    result = states[0]._current_result
+    owner = validator._context_evaluation(result.context)
+    assert owner.inputs.required_keys and not owner.inputs.transfer_grants
+    proof = tmp_path.joinpath(*receipt["archivePath"].split("/")) / "lifecycle-transition-receipt.json"
+    raw = proof.read_bytes()
+    proof.write_bytes(raw + b" ")
+    refused = []
+    stale = result.receive(active, refused)
+    assert stale is None or stale.operation_diagnostics(requested_positions=(), strict=True)
+    proof.write_bytes(raw)
+
+
+def test_transfer_source_receiving_retains_genuine_current_qualification(tmp_path: Path) -> None:
+    fixture = native_transfer_fixture(tmp_path)
+    source = fixture["item"] / "agent-runs.jsonl"
+    source.write_bytes(fixture["ledgerBefore"].splitlines(keepends=True)[1])
+    before = source.read_bytes()
+    validator = load_validator()
+    errors = []
+    state = validator._receive_transfer_source_state(fixture["item"], errors)
+    assert state is None
+    assert any("does not reference an earlier event" in error for error in errors)
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["standalone", "terminal"])
+def test_transferred_review_is_target_only_with_native_origin_collision(tmp_path: Path, kind: str) -> None:
+    fixture = native_transfer_fixture(tmp_path)
+    if kind == "standalone":
+        event = json.loads(fixture["ledgerBefore"].splitlines()[1])
+        event["eventKind"] = "standalone"
+        event.pop("launchRunId")
+        writer = load_script(LEDGER, f"standalone_transfer_writer_{id(fixture)}")
+        # Actual producer wire order is deliberately distinct from the projected hash domain.
+        raw = (writer.serialize_event(dict(reversed(tuple(event.items())))) + "\n").encode()
+        (fixture["item"] / "agent-runs.jsonl").write_bytes(raw)
+        rows = fixture["lifecycle"]._inspect_transfer_obligations(tmp_path, fixture["item"])
+        assert len(rows) == 1 and rows[0].raw_event_sha256 != rows[0].projected_event_sha256
+        row = rows[0]
+        fixture["ledgerBefore"], fixture["ledgerSha"] = raw, sha256(raw)
+        fixture["transferObject"]["expectedSourceLedgerSha256"] = fixture["ledgerSha"]
+        fixture["transferObject"]["obligations"] = [{"runId": row.run_id,
+            "rawLineOrdinal": row.raw_line_ordinal, "rawLineSha256": row.raw_line_sha256,
+            "rawEventSha256": row.raw_event_sha256, "projectedEventSha256": row.projected_event_sha256}]
+        fixture["transfer"] = json.dumps(fixture["transferObject"], sort_keys=True).encode()
+    receipt = run_transfer(fixture)
+    active = fixture["lifecycle"].start_item(tmp_path, fixture["successorSlug"],
+        successor_status(fixture["slug"], fixture["operationId"]))
+    (active / "implementation.md").write_text("Current independently owned local artifact.\n", encoding="utf-8")
+    source_launch = "toolchain-luna-profile-floor-20260812-r1"
+    writer = load_script(LEDGER, f"collision_transfer_writer_{id(fixture)}")
+    assert writer.main(["--work-item", str(active), "append", "--run-id", source_launch,
+        "--role", "toolchain-engineer", "--execution-role", "internal", "--effort", "high",
+        "--event-kind", "launch", "--status", "running", "--gate", "none", "--scope", "implementation.md"]) == 0
+    validator, states = load_validator(), []
+    validator.validate_work_item(active, strict_revise=False, obligation_state_out=states)
+    result = states[0]._current_result
+    position = next(i for i, row in enumerate(result.context.rows) if row.obligation_id)
+    assert result[1][position].authority == validator.LedgerAuthorityV1(False, False, True, False, False)
+    assert [row.run_id for row in states[0].open_launches] == [source_launch]
+    assert states[0].open_revise[0].obligation_id == receipt["obligations"][0]["obligationId"]
+    assert any(row.raw_line_ordinal == result.context.rows[position].raw_line_ordinal
+        for row in result.context.rows if row.projection_transformation != "transferred")
 
 
 @pytest.mark.parametrize(
@@ -811,6 +918,7 @@ def append_successor_closer(item: Path, target_run_id: str) -> None:
         "gate": "none",
         "scope": ["implementation.md"],
         "eventKind": "launch",
+        "effort": "high",
         "startedAt": "2026-08-18T00:04:10Z",
         "updatedAt": "2026-08-18T00:04:10Z",
     }
@@ -1822,7 +1930,7 @@ def test_archive_with_successor_transfer_exactly_once_across_activation_close_an
     errors = load_validator().validate_work_item(
         active_successor, strict_revise=False, obligation_state_out=states
     )
-    assert errors == []
+    assert errors == [f"{receipt['obligations'][0]['runId']}: launchRunId toolchain-luna-profile-floor-20260812-r1 does not reference an earlier event"]
     assert len(states) == 1
     assert [row.run_id for row in states[0].open_revise] == [
         fixture["transferObject"]["obligations"][0]["runId"]

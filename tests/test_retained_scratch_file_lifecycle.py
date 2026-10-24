@@ -1,27 +1,19 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import sys
 from pathlib import Path
 
 import pytest
 
+from _module_loading_support import load_module
+
 
 ROOT = Path(__file__).resolve().parents[1]
 MUTATOR = ROOT / "scripts" / "mutate-work-item.py"
 CLASSIFIER = ROOT / "scripts" / "maintenance" / "cleanup.py"
 SCRATCH_FIXTURE = ROOT / "tests" / "test_scratch_evidence_lifecycle.py"
-
-
-def load_module(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def retained_file_fixture(root: Path, *, slug: str = "retained-file-owner"):
