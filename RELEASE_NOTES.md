@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-24
 
+- Publication workdir denials now retain closed, non-sensitive categories for the actual failing check, stage, selected source and value type through the existing result channel. Permission decisions, failure identifiers, workdir selection, approval rules and retry behavior remain unchanged; the diagnostic does not establish the cause or executing-code identity of a historical denial or authorize publication. PR preparation shares one root-agreement owner and no longer carries unused internal compatibility paths.
+
 - Historical work-item catalogues now show an acquired incomplete canonical schema pair as an explicit, nonauthorizing Archive metadata observation. Refresh reports the original schema diagnostic and actual historical member while a valid unrelated close can proceed; archive bytes, strict audit and selected Goal/history/replay consumers remain protected. Malformed declarations and invalid complete records still refuse.
 
 - Lead can use matching installed plugin methods, including Software Architect for architecture work and Ponytail for reuse and simplification, within the existing assigned role. Reuse guidance checks for already-satisfied behavior, follows a short ready-solution sequence, and preserves required fit; material architecture choices record determining quality priorities from accepted scenarios and constraints. Discovery follows the current host catalog; optional plugins add no installation requirement, mandatory stage, duplicate report or replacement for independent review, and conflicting or unrelated plugin requirements do not expand the task.
