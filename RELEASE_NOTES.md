@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-24
 
+- Restore UTF-8 punctuation and Russian examples in the Codex governance capsule and Lead operating model after a text-edit encoding conversion. Approved native-role configuration rules and all ASCII controls remain unchanged.
+
 - Installer rollback now settles nested owned children before their containers across scalar and create-only paths, preserving foreign files and each inverse's original ownership. Stock native-role compatibility comparisons also remove their temporary readonly clones through the standard-library lifecycle and retain operation and cleanup failures separately.
 
 - Native-role configuration now separates exact factory provenance from the owned profession instructions. All 18 factory native profiles default apps and plugins to false while main-session settings and compatible user tuning remain preserved. Supported user settings and formatting are preserved during selection and upgrades; configured model/effort candidates remain policy checked, and neither role-file declarations nor a resolver result establish native execution or parent permissions.
