@@ -269,8 +269,8 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      grant no authority. Original whole-token display forms remain accepted.
   8. Derive the latest exact PR grant/revoke/malformed state from the complete
      bounded readable transcript. A malformed reserved signal denies. An
-     active grant runs only the strict PR route: fresh GitHub/Git binding and
-     protection checks plus one fresh unused non-empty range receipt bound to
+     active grant runs only the strict PR route: fresh GitHub PR/Git identity
+     binding plus one fresh unused non-empty range receipt bound to
      remote, full destination, and local HEAD tip. Every active-route failure
      denies without generic fallback.
   9. If no active PR grant is present and the current turn (entries after the last genuine user message) shows
@@ -4400,15 +4400,23 @@ def _verify_pr_oracle(
         "PRG-PR-UNAVAILABLE",
         repository_workdir,
     )
-    _, head_repo_text = _run_text(
-        [gh_exe, "repo", "view", head_name, "--json", repo_fields],
-        deadline,
-        "PRG-PR-UNAVAILABLE",
-        repository_workdir,
-    )
     base_record = _strict_json(base_repo_text, dict, "PRG-PR-UNAVAILABLE")
-    head_record = _strict_json(head_repo_text, dict, "PRG-PR-UNAVAILABLE")
-    _, base_default = _repo_record(base_record, f"{owner}/{repo}", "PRG-BINDING-DRIFT")
+    base_repo_id, base_default = _repo_record(base_record, f"{owner}/{repo}", "PRG-BINDING-DRIFT")
+    if (
+        base_repo_id == head_repo_id
+        and head_name == base_record["nameWithOwner"]
+        and base_record["url"] == f"https://github.com/{head_name}"
+    ):
+        # One fresh, validated same-repository observation serves both roles.
+        head_record = base_record
+    else:
+        _, head_repo_text = _run_text(
+            [gh_exe, "repo", "view", head_name, "--json", repo_fields],
+            deadline,
+            "PRG-PR-UNAVAILABLE",
+            repository_workdir,
+        )
+        head_record = _strict_json(head_repo_text, dict, "PRG-PR-UNAVAILABLE")
     current_head_repo_id, head_default = _repo_record(head_record, head_name, "PRG-BINDING-DRIFT")
     if current_head_repo_id != head_repo_id:
         raise PrRouteDenied("PRG-BINDING-DRIFT")
@@ -4420,26 +4428,6 @@ def _verify_pr_oracle(
     if ref_check.strip() != head_ref:
         raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
     if target.destination == "refs/heads/main" or head_ref in (base_ref, base_default, head_default):
-        raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
-
-    encoded_ref = quote(head_ref, safe="")
-    _, branch_text = _run_text(
-        [gh_exe, "api", "--hostname", "github.com", f"repos/{head_name}/branches/{encoded_ref}"],
-        deadline,
-        "PRG-PR-UNAVAILABLE",
-        repository_workdir,
-    )
-    branch = _strict_json(branch_text, dict, "PRG-PR-UNAVAILABLE")
-    if branch.get("name") != head_ref or branch.get("protected") is not False:
-        raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
-    _, rules_text = _run_text(
-        [gh_exe, "api", "--hostname", "github.com", f"repos/{head_name}/rules/branches/{encoded_ref}"],
-        deadline,
-        "PRG-PR-UNAVAILABLE",
-        repository_workdir,
-    )
-    rules = _strict_json(rules_text, list, "PRG-PR-UNAVAILABLE")
-    if rules:
         raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
 
     _, expanded_urls = _run_text(
@@ -5243,7 +5231,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         "PRG-PR-UNAVAILABLE": "Restore authenticated GitHub state access, then retry so the pull request can be checked afresh.",
         "PRG-PR-STATE": "The pull request is not open; obtain a new grant only for an open pull request.",
         "PRG-BINDING-DRIFT": "Refresh the pull-request binding and retry with a current exact grant if needed.",
-        "PRG-DESTINATION-UNSAFE": "Choose the current unprotected non-default pull-request head branch.",
+        "PRG-DESTINATION-UNSAFE": "Choose the current approved non-default pull-request head branch.",
         "PRG-REMOTE-MISMATCH": "Use one direct GitHub remote for the current pull-request head repository.",
         "PRG-WORKDIR-INVALID": "Use one explicit absolute repository root for the current push tool call.",
         "PRG-BRANCH-DRIFT": "Refresh remote branch state, then retry the same push for a fresh gate-owned check.",

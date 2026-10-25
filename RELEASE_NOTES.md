@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-25
 
+- PR-scoped corrective publication no longer depends on branch-protection/rules enumeration or proving rules absent. The hook retains exact open-PR/head/ref binding, scoped human consent and a fresh complete leak scan; the ordinary push remains subject to the server's configured rules and exceptions.
+
 - Updated Claude transport uses its bound canonical Lead ledger helpers after a Codex-only install, so retained historical peer helpers no longer break recording or readback. Source pairing, installed scope and link checks remain enforced without copying or adopting old peer ledger files.
 
 - H1 relocation and scratch settlement now publish their native directory, file and link-entry effects through the held lifecycle owner. First calls and replay retain current custody; link targets remain untouched, and Windows ReadOnly retries preserve their exact restoration contract.
