@@ -5162,14 +5162,178 @@ def _bounded_cleanup_result(
     return CleanupResult(tuple(bounded), recovery_retained=recovery_retained)
 
 
+def _ledger_file_identity(path: Path) -> tuple:
+    validate_no_reparse_components(path)
+    metadata = path.lstat()
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ValueError("WI-LEDGER-RESOURCE-MISSING: ledger cohort member is not ordinary")
+    return (metadata.st_dev, metadata.st_ino, metadata.st_mode,
+            metadata.st_size, metadata.st_mtime_ns)
+
+
+def _ledger_selection_witness(path: Path) -> tuple:
+    """Retain a used OS association without declaring another trusted root."""
+    metadata = path.lstat()
+    resolved = path.resolve(strict=True)
+    target = resolved.stat()
+    native = (metadata.st_dev, metadata.st_ino, metadata.st_mode,
+        getattr(metadata, 'st_file_attributes', 0))
+    link = os.readlink(path) if stat.S_ISLNK(metadata.st_mode) or _metadata_is_reparse(metadata) else None
+    return (path, native, resolved,
+        (target.st_dev, target.st_ino, target.st_mode, getattr(target, 'st_file_attributes', 0)), link)
+
+
+@dataclass(frozen=True)
+class _LedgerHelperBinding:
+    """One consumer's selected scope and original code/root witnesses."""
+    helper: Path
+    script: Path
+    script_identity: tuple
+    roots: tuple
+    members: tuple
+    authorities: tuple = ()
+    selection: tuple = ()
+
+    def assert_current(self) -> None:
+        for witness in self.selection:
+            if _ledger_selection_witness(witness[0]) != witness:
+                raise ValueError("WI-LEDGER-RESOURCE-DRIFT: ledger selection association changed")
+        if _ledger_file_identity(self.script.resolve(strict=True)) != self.script_identity:
+            raise ValueError("WI-LEDGER-RESOURCE-DRIFT: executing wrapper changed")
+        for logical, identity, resolved in self.roots:
+            metadata = logical.lstat()
+            current = (metadata.st_dev, metadata.st_ino, metadata.st_mode,
+                       getattr(metadata, "st_file_attributes", 0))
+            if current != identity or logical.resolve(strict=True) != resolved:
+                raise ValueError("WI-LEDGER-RESOURCE-DRIFT: installed ledger root changed")
+        for authority in self.authorities:
+            authority.assert_current()
+        for path, identity in self.members:
+            if _ledger_file_identity(path) != identity:
+                raise ValueError("WI-LEDGER-RESOURCE-DRIFT: selected ledger cohort changed")
+
+
+def _ledger_helper_binding() -> _LedgerHelperBinding | None:
+    """Select only the executing module's Source or admitted installer scope."""
+    try:
+        script = Path(os.path.abspath(__file__))
+        # A module leaf itself is never a declared runtime-root link.
+        metadata = script.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or _metadata_is_reparse(metadata):
+            return None
+        script_identity = _ledger_file_identity(script.resolve(strict=True))
+        source = script.parent.parent
+        is_source = (script == source / "scripts/provider_prompt.py"
+            and (source / "AGENTS.md").is_file()
+            and (source / "shared/AGENTS.shared.md").is_file())
+        roots, authorities = [], []
+        selection = [_ledger_selection_witness(script)]
+        if is_source:
+            validate_no_reparse_components(script)
+            for marker in (source / 'AGENTS.md', source / 'shared/AGENTS.shared.md'):
+                _ledger_file_identity(marker)
+                selection.append(_ledger_selection_witness(marker))
+            owner = source
+        else:
+            parts = tuple(part.casefold() for part in script.parts)
+            canonical = parts[-5:] == ('.agents', 'skills', 'lead', 'scripts', 'provider_prompt.py')
+            claude = parts[-4:] == ('.claude', 'agents', 'scripts', 'provider_prompt.py')
+            home = Path(os.path.abspath(Path.home()))
+            # A declared global root can resolve to backing storage whose name
+            # also resembles a project layout. Actual module association wins;
+            # no unsuccessful project lookup can select global scope later.
+            matches = []
+            for is_claude, candidate in ((False, home / '.agents/skills/lead/scripts/provider_prompt.py'),
+                    (True, home / '.claude/agents/scripts/provider_prompt.py')):
+                try:
+                    if script.samefile(candidate) and script.resolve(strict=True) == candidate.resolve(strict=True):
+                        matches.append((is_claude, candidate))
+                except OSError:
+                    continue
+            if matches:
+                if len(matches) != 1:
+                    return None
+                claude, scope_script = matches[0]
+                base, global_scope = home, True
+            elif canonical or claude:
+                scope_script = script
+                base = scope_script.parents[4 if canonical else 3]
+                global_scope = os.path.normcase(str(base)) == os.path.normcase(str(home))
+            else:
+                return None
+            # Keep the actual installer/native association's path spelling.
+            # Casefolded suffixes classify a scope; they do not mint paths.
+            canonical_root = base / '.agents' if claude else scope_script.parents[3]
+            claude_root = scope_script.parents[2] if claude else None
+            logical_roots = (canonical_root, scope_script.parents[1], claude_root / 'skills') if claude else (canonical_root,)
+            for logical in logical_roots:
+                validate_no_reparse_components(logical.parent)
+                metadata = logical.lstat()
+                if not global_scope:
+                    validate_no_reparse_components(logical)
+                resolved = logical.resolve(strict=True)
+                if not resolved.is_dir():
+                    return None
+                roots.append((logical, (metadata.st_dev, metadata.st_ino, metadata.st_mode,
+                    getattr(metadata, 'st_file_attributes', 0)), resolved))
+            relative_owner = Path('skills/lead') if claude else scope_script.parents[1].relative_to(canonical_root)
+            owner = roots[0][2] / relative_owner
+            selection.append(_ledger_selection_witness(owner))
+            if claude:
+                peer_script = scope_script
+                if not script.samefile(peer_script):
+                    return None
+                projection = claude_root / 'skills/lead'
+                if not projection.samefile(owner):
+                    return None
+                selection.append(_ledger_selection_witness(projection))
+            elif not script.samefile(scope_script):
+                return None
+            if global_scope:
+                # The normal canonical package supplies L. Scope and OS module
+                # association above precede executing any bootstrap dependency.
+                dependency = owner / 'scripts/linked_runtime_subroots.py'
+                initial = _ledger_file_identity(dependency)
+                payload = dependency.read_bytes()
+                if _ledger_file_identity(dependency) != initial:
+                    return None
+                provisional = _LedgerHelperBinding(owner / 'scripts/agent-run-ledger.py', script,
+                    script_identity, tuple(roots), ((dependency, initial),), selection=tuple(selection))
+                provisional.assert_current()
+                module = types.ModuleType('_orchestrarium_ledger_linked_runtime')
+                module.__name__ += '_' + str(id(module))
+                module.__file__ = str(dependency)
+                sys.modules[module.__name__] = module
+                try:
+                    exec(compile(payload, str(dependency), 'exec'), module.__dict__)
+                finally:
+                    sys.modules.pop(module.__name__, None)
+                provisional.assert_current()
+                for logical, _identity, _resolved in roots:
+                    authority = module.LinkedRuntimeSubrootAuthority.bind(logical,
+                        scope='global', trusted_global_roots=(logical,))
+                    if authority is not None:
+                        authorities.append(authority)
+                for authority in authorities:
+                    authority.assert_current()
+                # L owns ordinary descendants of its declared canonical root.
+                if authorities and authorities[0].logical_root == canonical_root:
+                    authorities[0].ordinary_file(Path('skills/lead/scripts/agent-run-ledger.py'))
+        relatives = ('scripts/agent-run-ledger.py', 'scripts/validate-work-item-state.py',
+            'scripts/mutate-work-item.py', 'scripts/solution_attempt/reducer.py',
+            'shared/schemas/agent-runs.schema.json')
+        members = tuple((owner / name, _ledger_file_identity(owner / name)) for name in relatives)
+        binding = _LedgerHelperBinding(owner / relatives[0], script, script_identity,
+            tuple(roots), members, tuple(authorities), tuple(selection))
+        binding.assert_current()
+        return binding
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
 def ledger_helper() -> Path | None:
-    script_dir = Path(__file__).resolve().parent
-    candidates = (
-        script_dir / "agent-run-ledger.py",
-        Path("scripts/agent-run-ledger.py"),
-        script_dir.parents[2] / "scripts" / "agent-run-ledger.py",
-    )
-    return next((path for path in candidates if path.is_file()), None)
+    binding = _ledger_helper_binding()
+    return binding.helper if binding is not None else None
 
 
 def _runner_support_environment(source: dict[str, str]) -> dict[str, str]:
@@ -5187,6 +5351,7 @@ def run_support_command(
     cwd: Path,
     environment: dict[str, str],
     timeout_secs: float,
+    before_start=None,
 ) -> tuple[ProcessResultV1, bytes, bytes]:
     executable = Path(command[0]).resolve(strict=True)
     argv = (str(executable), *command[1:])
@@ -5208,20 +5373,25 @@ def run_support_command(
             "python-support", executable
         ),
     )
+    if before_start is not None:
+        before_start()
     result = runner.run(request)
     return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
 
 
 def _ledger_owner():
     """Use the existing paired writer/module-loader owner, never row policy."""
-    helper = ledger_helper()
-    if helper is None:
+    binding = _ledger_helper_binding()
+    if binding is None:
         raise ValueError("WI-LEDGER-RESOURCE-MISSING: paired ledger owner unavailable")
+    helper = binding.helper
     spec = importlib.util.spec_from_file_location("_provider_paired_ledger_owner", helper)
     if spec is None or spec.loader is None:
         raise ValueError("WI-LEDGER-RESOURCE-MISSING: paired ledger owner cannot load")
     module = importlib.util.module_from_spec(spec)
+    binding.assert_current()
     spec.loader.exec_module(module)
+    binding.assert_current()
     return module
 
 
@@ -5271,16 +5441,17 @@ def prepare_ledger_admission(control: Control, launch_args: list[str]):
 
 
 def run_ledger(runner: ProcessRunnerV1, args: list[str]) -> bool:
-    helper = ledger_helper()
-    if helper is None:
+    binding = _ledger_helper_binding()
+    if binding is None:
         return False
     try:
         result, stdout, stderr = run_support_command(
             runner,
-            [sys.executable, str(helper), *args],
+            [sys.executable, str(binding.helper), *args],
             cwd=Path.cwd().resolve(),
             environment=_runner_support_environment(dict(os.environ)),
             timeout_secs=30,
+            before_start=binding.assert_current,
         )
     except (OSError, ValueError):
         return False

@@ -48,7 +48,9 @@ A supported predecessor transport generation is admitted through its scoped
 receipt, complete authored canonical tree, ordered manifest codec and matching
 ordinary peer members. Its captured old digests drive the existing exact migration
 owner. Both provider entrypoints converge an already owned scoped Claude transport
-peer in the same transaction. An absent unselected peer is not created; an unknown,
+peer in the same transaction.
+
+Current installed Claude transport selects the ledger writer, validator, lifecycle owner and schema from its same-scope canonical Lead tree. Historical peer ledger files can remain present but cannot shadow that owner. Missing or changed canonical scope refuses the operation; working-directory helpers supply no fallback. An absent unselected peer is not created; an unknown,
 customized or unsupported unselected peer remains preserved and unclaimed, while
 explicit unknown overwrite still refuses. Historical example hashes are not the
 general ownership rule, and independently valid safe and frozen legacy routes keep
