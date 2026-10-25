@@ -237,10 +237,12 @@ def test_repository_target_in_same_archive_is_bound_and_never_deleted(tmp_path: 
         pytest.skip(f"symlink unavailable: {exc}")
     add_artifact(archived)
     target_before = target.read_bytes()
+    target_identity = target.stat().st_dev, target.stat().st_ino
 
     receipt = release(mutator, root, archived, event)
 
     assert not scratch.exists() and target.read_bytes() == target_before
+    assert (target.stat().st_dev, target.stat().st_ino) == target_identity
     link_row = next(row for row in json.loads(receipt.read_text(encoding="utf-8"))["inventory"] if row["kind"] == "symlink")
     assert link_row["targetClass"] == "repository"
     assert link_row["targetSha256"] == "54dab9eb6d3204a0b42800148196ed4785d258f980432579b62ef0d9db0207b8"
@@ -565,16 +567,17 @@ def test_readonly_retry_failure_restores_attribute_and_preserves_bytes(tmp_path:
     leaf = scratch / "payload.txt"
     leaf.chmod(stat.S_IREAD)
     before = leaf.stat(), leaf.read_bytes()
-    original_unlink = Path.unlink
+    original_delete = mutator.LifecycleWriteTarget._windows_delete
     attempts = []
 
-    def denied(path, *args, **kwargs):
+    def denied(owner, handle):
+        path = owner.path
         if path.name == "payload.txt":
             attempts.append(path.stat().st_file_attributes)
             raise PermissionError("denied retry")
-        return original_unlink(path, *args, **kwargs)
+        return original_delete(owner, handle)
 
-    monkeypatch.setattr(Path, "unlink", denied)
+    monkeypatch.setattr(mutator.LifecycleWriteTarget, "_windows_delete", denied)
     with pytest.raises(mutator.LifecycleError, match="denied retry"):
         release(mutator, root, archived, event)
     tombstone = next(scratch.parent.glob(".*.orchestrarium-delete-*"))
@@ -600,14 +603,15 @@ def test_permission_denial_does_not_clear_unowned_or_writable_attributes(tmp_pat
         os.link(leaf, alias)
         leaf.chmod(stat.S_IREAD)
     before = leaf.stat().st_file_attributes, leaf.read_bytes()
-    original_unlink = Path.unlink
+    original_delete = mutator.LifecycleWriteTarget._windows_delete
 
-    def denied(path, *args, **kwargs):
+    def denied(owner, handle):
+        path = owner.path
         if path.name == "payload.txt":
             raise PermissionError("unchanged access denial")
-        return original_unlink(path, *args, **kwargs)
+        return original_delete(owner, handle)
 
-    monkeypatch.setattr(Path, "unlink", denied)
+    monkeypatch.setattr(mutator.LifecycleWriteTarget, "_windows_delete", denied)
     with pytest.raises(mutator.LifecycleError, match="unchanged access denial"):
         release(mutator, root, archived, event)
     retained = next(scratch.parent.glob(".*.orchestrarium-delete-*")) / "payload.txt"
@@ -960,3 +964,62 @@ def test_reconciliation_preserves_unselected_missing_retention_and_open_launch(t
     with pytest.raises(mutator.LifecycleError, match="WI-LEDGER-UNSETTLED|launch"):
         mutator.close_item(root, item.name, helpers.closure("2026-08-09T01:00:00Z"), "2026-08-09T01:00:00Z")
     assert item.is_dir() and not scratch.exists()
+
+
+def test_release_empty_retained_directory_preserves_archive_and_replays(tmp_path: Path) -> None:
+    mutator, root, archived, scratch, event, closure, instant = archived_fixture(tmp_path)
+    (scratch / "payload.txt").unlink()
+    assert scratch.is_dir() and not list(scratch.iterdir())
+    add_artifact(archived)
+    before = {path.relative_to(archived): path.read_bytes()
+              for path in archived.rglob("*") if path.is_file()}
+    receipt = release(mutator, root, archived, event)
+    rows = json.loads(receipt.read_bytes())["inventory"]
+    assert len(rows) == 1 and rows[0]["kind"] == "directory" and rows[0]["path"] == "."
+    assert not scratch.exists()
+    assert mutator.close_item(root, archived.name, closure, instant) == archived
+    assert all((archived / path).read_bytes() == data for path, data in before.items())
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows relative entry handle substitution")
+@pytest.mark.parametrize("replacement", ["entry", "parent"])
+def test_link_retirement_refuses_native_substitution_without_target_effect(
+    tmp_path: Path, monkeypatch, replacement: str,
+) -> None:
+    mutator, root, archived, scratch, event, _closure, _instant = archived_fixture(tmp_path)
+    target = archived / "durable-target.txt"
+    target.write_bytes(b"durable")
+    try:
+        (scratch / "durable-link.txt").symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+    add_artifact(archived)
+    before = target.stat(), target.read_bytes()
+    original_child = mutator.LifecycleWriteTarget._windows_child
+    original_delete = mutator.LifecycleWriteTarget._windows_delete
+    interposed, deletions = [], []
+
+    def replace_before_acquisition(owner, parent, leaf, **kwargs):
+        if kwargs.get("_link_entry") is not None and not interposed:
+            interposed.append(owner.path)
+            if replacement == "entry":
+                owner.path.rename(root / "held-link.txt")
+                owner.path.symlink_to(target)
+            else:
+                owner.path.parent.rename(root / "held-parent")
+                owner.path.parent.mkdir()
+                owner.path.symlink_to(target)
+        return original_child(owner, parent, leaf, **kwargs)
+
+    def observe_delete(owner, handle):
+        if owner.path.name == "durable-link.txt":
+            deletions.append(owner.path)
+        return original_delete(owner, handle)
+
+    monkeypatch.setattr(mutator.LifecycleWriteTarget, "_windows_child", replace_before_acquisition)
+    monkeypatch.setattr(mutator.LifecycleWriteTarget, "_windows_delete", observe_delete)
+    with pytest.raises(mutator.LifecycleError):
+        release(mutator, root, archived, event)
+    assert len(interposed) == 1 and not deletions
+    after = target.stat()
+    assert (after.st_dev, after.st_ino, target.read_bytes()) == (before[0].st_dev, before[0].st_ino, before[1])

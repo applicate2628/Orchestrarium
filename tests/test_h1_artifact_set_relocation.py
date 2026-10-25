@@ -995,3 +995,25 @@ def test_h1_repository_role_survives_dynamic_reader_and_recovery(tmp_path: Path,
     assert writer._CURRENT_LIFECYCLE_TRANSACTION.get() is None
     assert not (tmp_path / ".scratch").exists()
     print("ROOT_ROLE_SERIALIZED_H1", json.dumps({"physical_base": location.physical_base, "receipt_path": location.receipt_path}, sort_keys=True))
+
+
+def test_h1_rollback_preserves_uncreated_foreign_empty_artifact_base(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "foreign-base"
+    _support, writer, _reader, request, _items, _paths = activated_relocation_fixture(root)
+    base = root / request.archive_owner / "ledger-h1-compatibility"
+    fsync = writer._transition_fsync_directory
+    foreign_identity = []
+
+    def foreign_base_after_intent(path):
+        result = fsync(path)
+        if path.name == "work-items-lifecycle-transitions" and not foreign_identity:
+            base.mkdir()
+            foreign_identity.append((base.stat().st_dev, base.stat().st_ino))
+        return result
+
+    monkeypatch.setattr(writer, "_transition_fsync_directory", foreign_base_after_intent)
+    with pytest.raises(writer.LifecycleError):
+        writer.relocate_ledger_h1_artifact_set(root, request, apply=True)
+    assert len(foreign_identity) == 1 and base.is_dir()
+    assert (base.stat().st_dev, base.stat().st_ino) == foreign_identity[0]
+    assert not list(base.iterdir())

@@ -1445,7 +1445,25 @@ class LifecycleTransaction:
                     expected_data=None if origin.directory else current.data, inverse=inverse)
         raise LifecycleError("WI-LIFECYCLE-EFFECT", "movement restoration lacks actual owned origin")
 
-    def prepare_owned_effect(self, owner, source, destination, *, data=None, directory=False, replace_existing=False, inverse=None):
+    def _verify_link_entry(self, entry):
+        if (type(entry) is not _CapturedLinkEntry or not self._locked
+                or _CURRENT_LIFECYCLE_TRANSACTION.get() is not self
+                or self._retained_observations.get(entry.path.parent) is not entry.parent
+                or entry.parent.path != entry.path.parent
+                or not entry.path.is_relative_to(self.repository_root)):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "link entry lacks its selected current parent")
+        _verify_owned_directory_snapshot(entry.parent, "WI-LIFECYCLE-EFFECT")
+        metadata = dict(entry.parent.members).get(entry.path.name)
+        current = entry.path.lstat()
+        if (metadata is None or not stat.S_ISLNK(current.st_mode)
+                or _lifecycle_file_snapshot_key(metadata) != _lifecycle_file_snapshot_key(entry.metadata)
+                or _lifecycle_file_snapshot_key(current) != _lifecycle_file_snapshot_key(entry.metadata)
+                or getattr(current, "st_file_attributes", 0) != getattr(entry.metadata, "st_file_attributes", 0)
+                or getattr(current, "st_reparse_tag", 0) != getattr(entry.metadata, "st_reparse_tag", 0)
+                or os.readlink(entry.path) != entry.text):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "selected link entry changed before retirement")
+
+    def prepare_owned_effect(self, owner, source, destination, *, data=None, directory=False, replace_existing=False, inverse=None, link_entry=None):
         """Prepare native observation changes, never domain admission."""
         if not self._locked:
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "native effect requires the held transaction")
@@ -1458,6 +1476,14 @@ class LifecycleTransaction:
             self.verify(creation_owner=capture_owner)
         source = None if source is None else _lifecycle_unresolved_absolute(source)
         destination = None if destination is None else _lifecycle_unresolved_absolute(destination)
+        if link_entry is not None:
+            if (type(link_entry) is not _CapturedLinkEntry or link_entry.path != source
+                    or destination is not None or data is not None or directory
+                    or replace_existing or inverse is not None
+                    or not isinstance(owner, LifecycleWriteTarget) or owner.path != source
+                    or owner._operation_owner is not self):
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "link retirement differs from its selected entry")
+            self._verify_link_entry(link_entry)
         paths = tuple(path for path in (source, destination) if path is not None)
         if not paths or any(not path.is_relative_to(self.repository_root) for path in paths):
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "effect escapes admitted repository")
@@ -1480,6 +1506,9 @@ class LifecycleTransaction:
             self._verify_owned_inverse(inverse, creation_owner=capture_owner)
         before = {}
         for path in paths:
+            if link_entry is not None:
+                before[path] = (link_entry.metadata, link_entry)
+                continue
             _lifecycle_reject_unreduced_reparse(path, failure_id="WI-LIFECYCLE-EFFECT", message="effect path is unsafe")
             try:
                 info = path.lstat()
@@ -3071,6 +3100,16 @@ class CapturedDirectorySnapshotV1:
     metadata: os.stat_result
     members: tuple[tuple[str, os.stat_result], ...]
     capture_binding: tuple = field(default=(), repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class _CapturedLinkEntry:
+    """One receipt-selected link entry under a current ordinary parent proof."""
+
+    path: Path
+    parent: CapturedDirectorySnapshotV1
+    metadata: os.stat_result
+    text: str
 
 
 def _directory_capture_binding(snapshot):
@@ -9178,6 +9217,38 @@ class LifecycleWriteTarget:
         self._publish_effect(removal, image["identity"]["value"])
         return True if outcome_composer is not None else None
 
+    def remove_link_entry(self, entry: _CapturedLinkEntry) -> None:
+        """Retire only a selected link object; never acquire or mutate its target."""
+        transaction = self._admit_mutation()
+        if (not isinstance(transaction, LifecycleTransaction) or self._operation_owner is not transaction
+                or type(entry) is not _CapturedLinkEntry or entry.path != self.path):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "link retirement lacks its current domain owner")
+        self._verify_owned()
+        removal = self._prepare_effect(self.path, None, link_entry=entry)
+        handle = None
+        primary = None
+        try:
+            if os.name == "nt":
+                handle = self._windows_child(self._parent, self.leaf, delete=True, _link_entry=entry)
+            self._verify_owned()
+            transaction._verify_link_entry(entry)
+            if os.name == "nt":
+                self._verify_effect_source(removal, handle)
+                self._windows_delete(handle)
+            else:
+                current = os.stat(self.leaf, dir_fd=self._parent, follow_symlinks=False)
+                if (_lifecycle_file_snapshot_key(current) != _lifecycle_file_snapshot_key(entry.metadata)
+                        or os.readlink(self.leaf, dir_fd=self._parent) != entry.text):
+                    raise LifecycleError("WI-LIFECYCLE-EFFECT", "parent-relative link entry changed")
+                os.unlink(self.leaf, dir_fd=self._parent)
+        except BaseException as exc:
+            primary = exc
+            raise
+        finally:
+            if handle is not None:
+                self._release_handle(handle, primary)
+        self._publish_effect(removal, _lifecycle_file_identity(entry.metadata))
+
     def promote_create(self, image: dict) -> None:
         """Promote an observed stage without replacing any destination."""
         self._admit_mutation()
@@ -9308,8 +9379,13 @@ class LifecycleWriteTarget:
         except BaseException as primary:
             self._release_handle(handle, primary); raise
 
-    def _windows_child(self, parent, leaf, *, directory=False, create=False, exclusive=False, delete=False, write=False, _creation=None):
+    def _windows_child(self, parent, leaf, *, directory=False, create=False, exclusive=False, delete=False, write=False, _creation=None, _link_entry=None):
         self._check_leaf(leaf)
+        if _link_entry is not None and (
+                type(_link_entry) is not _CapturedLinkEntry or self.path != _link_entry.path
+                or leaf != self.leaf or parent != self._parent or directory or create
+                or exclusive or write or not delete or _creation is not None):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "native link request differs from selected retirement")
         if (create or exclusive) and _creation is None:
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "native creator custody must precede acquisition")
         if _creation is not None and (type(_creation) is not _OwnedNativeCreation or _creation.seal is not _NATIVE_CREATION_OWNER
@@ -9326,6 +9402,8 @@ class LifecycleWriteTarget:
         access = (0x1000a0 | (0x10000 if delete else 0)) if directory else 0x100081 | (2 if write else 0) | (0x10000 if delete else 0)
         disposition = 2 if exclusive else 3 if create else 1
         options = 0x200020 | (1 if directory else 0x40)
+        if _link_entry is not None:
+            access, options = 0x110080, 0x200020  # DELETE/read attributes; OPEN_REPARSE_POINT.
         result = nt.NtCreateFile(c.byref(output), access, c.byref(attributes), c.byref(status), None, 0x80,
                                  3 if directory or create else 7, disposition, options, None, 0)
         try:
@@ -9338,7 +9416,19 @@ class LifecycleWriteTarget:
                 _creation.holder, _creation.phase = "inner", "acquired" if _creation.creator else "opened"
             if _creation is not None and not _creation.creator:
                 raise LifecycleError("WI-LIFECYCLE-EFFECT", "native request did not create the admitted object")
-            self._windows_check(output.value, directory=directory)
+            if _link_entry is None:
+                self._windows_check(output.value, directory=directory)
+            else:
+                value = _LifecycleTag()
+                _c, _w, kernel, _nt, _types = self._native
+                if not kernel.GetFileInformationByHandleEx(output.value, 9, c.byref(value), c.sizeof(value)):
+                    raise OSError(c.get_last_error(), "link entry attributes unavailable")
+                if (value.Tag != 0xA000000C or value.Tag != _link_entry.metadata.st_reparse_tag
+                        or value.Attributes != _link_entry.metadata.st_file_attributes
+                        or self._identity(output.value) != _lifecycle_file_identity(_link_entry.metadata)):
+                    raise LifecycleError("WI-LIFECYCLE-EFFECT", "native link entry identity or kind changed")
+                if not kernel.SetHandleInformation(output.value, 1, 0):
+                    raise OSError(c.get_last_error(), "cannot make native link handle non-inheritable")
             if _creation is not None:
                 _creation.holder = "outer"
             return output.value
@@ -12441,6 +12531,46 @@ def _scratch_disposition_plan(
     return tuple(plans)
 
 
+def _capture_scratch_retirement_inputs(path: Path) -> LifecycleTransaction:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if not isinstance(transaction, LifecycleTransaction) or not transaction._locked:
+        raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "scratch retirement requires its held owner")
+    transaction.verify()
+    info = path.lstat()
+    if stat.S_ISDIR(info.st_mode) and not _lifecycle_path_has_reparse(path):
+        snapshots = transaction._capture_effect_tree(path)
+    else:
+        snapshots = (_capture_file_snapshot(path, failure_id="WI-SCRATCH-DISPOSITION-PENDING",
+            maximum_bytes=_scratch_classifier_module().MAX_OWNED_TREE_BYTES),)
+    transaction.observe_retained_inputs(snapshots)
+    return transaction
+
+
+def _remove_scratch_link_entry(path: Path, row: dict) -> None:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if not isinstance(transaction, LifecycleTransaction):
+        raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "link retirement lacks its held owner")
+    parent = transaction._retained_observations.get(path.parent)
+    if not isinstance(parent, CapturedDirectorySnapshotV1):
+        raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "link retirement lacks its admitted parent")
+    text = os.readlink(path)
+    if row.get("kind") != "symlink" or _sha256_bytes(os.fsencode(text)) != row.get("rawTargetSha256"):
+        raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "link text differs from the authenticated receipt")
+    entry = _CapturedLinkEntry(path, parent, path.lstat(), text)
+    transaction._verify_link_entry(entry)
+    owner = LifecycleWriteTarget(path, failure_id="WI-SCRATCH-RELEASE-DRIFT", _operation_owner=transaction)
+    primary = None
+    try:
+        owner._acquire_existing_parents()
+        owner.remove_link_entry(entry)
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        owner.__exit__(type(primary) if primary is not None else None, primary,
+            primary.__traceback__ if primary is not None else None)
+
+
 def _unlink_owned_scratch_file(path: Path) -> None:
     """Unlink an owned leaf; retry only a proven Windows ReadOnly failure."""
     before = path.lstat()
@@ -12455,9 +12585,9 @@ def _unlink_owned_scratch_file(path: Path) -> None:
         maximum_bytes=_scratch_classifier_module().MAX_OWNED_TREE_BYTES,
     ) if eligible else None
     try:
-        path.unlink()
-    except PermissionError as denied:
-        if snapshot is None:
+        _remove_lifecycle_file(path, failure_id="WI-SCRATCH-DISPOSITION-PENDING")
+    except OSError as denied:
+        if snapshot is None or not (isinstance(denied, PermissionError) or denied.errno == 5):
             raise
         current = _capture_file_snapshot(
             path, failure_id="WI-SCRATCH-DISPOSITION-PENDING", require_single_link=True,
@@ -12465,6 +12595,8 @@ def _unlink_owned_scratch_file(path: Path) -> None:
         )
         if current != snapshot or _lifecycle_file_snapshot_key(path.lstat()) != _lifecycle_file_snapshot_key(before):
             raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly leaf changed before retry") from denied
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        attributes = transaction.prepare_owned_effect(transaction, path, path, data=snapshot.data)
         path.chmod(before.st_mode | stat.S_IWRITE, follow_symlinks=False)
         try:
             current = _capture_file_snapshot(
@@ -12477,7 +12609,8 @@ def _unlink_owned_scratch_file(path: Path) -> None:
                 or after.st_file_attributes != (before.st_file_attributes & ~readonly)
             ):
                 raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly leaf changed after attribute update")
-            path.unlink()
+            transaction.publish_owned_effect(attributes, native_identity=snapshot.identity)
+            _remove_lifecycle_file(path, failure_id="WI-SCRATCH-DISPOSITION-PENDING")
         except (OSError, LifecycleError) as retry_failure:
             try:
                 current = _capture_file_snapshot(
@@ -12490,10 +12623,12 @@ def _unlink_owned_scratch_file(path: Path) -> None:
                     or (restoring.st_file_attributes & ~readonly) != (before.st_file_attributes & ~readonly)
                 ):
                     raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly leaf changed before restoration")
+                restoration = transaction.prepare_owned_effect(transaction, path, path, data=snapshot.data)
                 path.chmod(before.st_mode, follow_symlinks=False)
                 _verify_captured_file(snapshot, "WI-SCRATCH-DISPOSITION-PENDING")
                 if path.lstat().st_file_attributes != before.st_file_attributes:
                     raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly attribute restoration differs")
+                transaction.publish_owned_effect(restoration, native_identity=snapshot.identity)
             except (OSError, LifecycleError) as restore_failure:
                 raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", f"ReadOnly restoration refused: {restore_failure}") from retry_failure
             raise retry_failure from denied
@@ -12502,6 +12637,7 @@ def _unlink_owned_scratch_file(path: Path) -> None:
 def _remove_scratch_tree(tree_root: Path) -> None:
     """Remove one already-proven tree without following links or reparses."""
 
+    transaction = _capture_scratch_retirement_inputs(tree_root)
     classifier = _scratch_classifier_module()
     directories: list[Path] = []
     stack = [tree_root]
@@ -12524,7 +12660,9 @@ def _remove_scratch_tree(tree_root: Path) -> None:
             else:
                 raise OSError(f"unsafe non-regular entry during removal: {entry.name}")
     for directory in reversed(directories):
-        directory.rmdir()
+        snapshot = transaction._retained_observations.get(directory)
+        LifecycleWriteTarget._remove_empty_directory_snapshot(snapshot, transaction,
+            failure_id="WI-SCRATCH-DISPOSITION-PENDING")
 
 
 def _settle_released_scratch(
@@ -12561,6 +12699,7 @@ def _settle_released_scratch(
     actual = _release_inventory(root, plan.tombstone, plan.original, verify_link_targets=False)
     if not _release_rows_match(actual, expected, subset=True):
         raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release tombstone differs after rename")
+    transaction = _capture_scratch_retirement_inputs(plan.tombstone)
     remaining = {row["path"] for row in actual}
     file_unlinked = False
     link_unlinked = False
@@ -12591,7 +12730,7 @@ def _settle_released_scratch(
                     root, item, plan.original, (row,), receipt["artifactSha256"],
                     surviving_root=plan.tombstone,
                 )
-            target.unlink()
+            _remove_scratch_link_entry(target, row)
         else:
             _unlink_owned_scratch_file(target)
         if row["kind"] == "symlink" and not link_unlinked:
@@ -12609,7 +12748,9 @@ def _settle_released_scratch(
         inspection = classifier.inspect_root_no_follow(target)
         if not inspection.exists or inspection.is_link_or_reparse or not inspection.is_directory:
             raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release directory changed before removal")
-        target.rmdir()
+        snapshot = transaction._retained_observations.get(target)
+        LifecycleWriteTarget._remove_empty_directory_snapshot(snapshot, transaction,
+            failure_id="WI-SCRATCH-RELEASE-DRIFT")
     if inject_failure_at == "after-final-removal":
         raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "injected after-final-removal")
 
@@ -29341,7 +29482,7 @@ def _ledger_h1_apply_contract_after(
 def _ledger_h1_restore_before_receipt(
     root: Path,
     intent_path: Path,
-    intent: Mapping[str, object], ledger_resource_budget=None,
+    intent: Mapping[str, object], ledger_resource_budget=None, _created_directories=None,
 ) -> None:
     receipt_path = _intent_path(root, str(intent["receiptPath"]), ledger_resource_budget=ledger_resource_budget)
     if _ledger_h1_lexically_exists(receipt_path):
@@ -29356,7 +29497,7 @@ def _ledger_h1_restore_before_receipt(
     artifact_base = _intent_path(root, str(intent["artifactBase"]), ledger_resource_budget=ledger_resource_budget)
     for member, source, target, side in reversed(distribution):
         if side == "target":
-            source.parent.mkdir(parents=True, exist_ok=True)
+            LifecycleWriteTarget.make_directories(source.parent, _CURRENT_LIFECYCLE_TRANSACTION.get())
             (_replace_lifecycle_directory(target, source) if member["kind"] == "directory" else _replace_lifecycle_directory(target, source, directory=False))
             _ledger_h1_exact_member_at(
                 source,
@@ -29379,15 +29520,18 @@ def _ledger_h1_restore_before_receipt(
                 "H1 rollback root contract cannot be proven",
             )
         _atomic_write(contract_path, root_before)
-    try:
-        artifact_base.rmdir()
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        raise LifecycleError(
-            "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
-            "H1 rollback target base is not empty",
-        ) from exc
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if _created_directories is not None:
+        for record in reversed(_created_directories):
+            if os.path.lexists(record.locator):
+                LifecycleWriteTarget.remove_created_directory(record, transaction,
+                    failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE")
+    elif os.path.lexists(artifact_base):
+        snapshot = _capture_owned_directory_snapshot(artifact_base, failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE")
+        transaction.observe_retained_inputs((snapshot,))
+        LifecycleWriteTarget._remove_empty_directory_snapshot(
+            transaction._retained_observations[artifact_base], transaction,
+            failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE")
     _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
     _transition_fsync_directory(intent_path.parent)
 
@@ -29466,13 +29610,12 @@ def _recover_ledger_h1_artifact_set_relocation(
                 "root-only H1 recovery unexpectedly has a receipt",
             )
         if _ledger_h1_lexically_exists(artifact_base):
-            try:
-                artifact_base.rmdir()
-            except OSError as exc:
-                raise LifecycleError(
-                    "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
-                    "root-only H1 recovery target is not empty",
-                ) from exc
+            transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+            snapshot = _capture_owned_directory_snapshot(artifact_base, failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE")
+            transaction.observe_retained_inputs((snapshot,))
+            LifecycleWriteTarget._remove_empty_directory_snapshot(
+                transaction._retained_observations[artifact_base], transaction,
+                failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE")
         retired = _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
             outcome_composer=_CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get())
         _require_intent_retirement_result(retired)
@@ -29485,7 +29628,7 @@ def _recover_ledger_h1_artifact_set_relocation(
             "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
             "split H1 recovery unexpectedly has a receipt",
         )
-    artifact_base.mkdir(exist_ok=True)
+    LifecycleWriteTarget.make_directories(artifact_base, _CURRENT_LIFECYCLE_TRANSACTION.get())
     for member, source, target, side in distribution:
         if side == "source":
             (_replace_lifecycle_directory(source, target) if member["kind"] == "directory" else _replace_lifecycle_directory(source, target, directory=False))
@@ -29614,18 +29757,23 @@ def _relocate_ledger_h1_artifact_set_locked(
             "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
             "H1 relocation intent still exists after recovery",
         )
-    intent_path.parent.mkdir(parents=True, exist_ok=True)
     _transition_reserve_fixed_output(intent_path, _migration_receipt_bytes(intent))
     _atomic_write(intent_path, _migration_receipt_bytes(intent))
     _transition_fsync_directory(intent_path.parent)
     receipt_committed = False
+    created_directories = []
     try:
         if inject_failure == "after-intent":
             raise LifecycleError(
                 "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
                 "injected failure after H1 relocation intent",
             )
-        plan.artifact_base.mkdir()
+        if os.path.lexists(plan.artifact_base):
+            _ledger_h1_relocation_fail("H1 artifact base appeared before exclusive creation")
+        LifecycleWriteTarget.make_directories(plan.artifact_base, _CURRENT_LIFECYCLE_TRANSACTION.get(),
+            created=created_directories)
+        if not any(record.locator == plan.artifact_base for record in created_directories):
+            _ledger_h1_relocation_fail("H1 artifact base lacks its actual creator")
         _transition_fsync_directory(plan.archive_owner)
         for index, member in enumerate(plan.members, start=1):
             source = plan.repository.joinpath(
@@ -29691,7 +29839,8 @@ def _relocate_ledger_h1_artifact_set_locked(
         )
     except BaseException:
         if not receipt_committed:
-            _ledger_h1_restore_before_receipt(root, intent_path, intent, ledger_resource_budget=ledger_resource_budget)
+            _ledger_h1_restore_before_receipt(root, intent_path, intent, ledger_resource_budget=ledger_resource_budget,
+                _created_directories=created_directories)
         raise
 
 
