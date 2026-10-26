@@ -238,9 +238,11 @@ checkable disagreement; majority agreement does not establish truth.
 ### 5. Hybrid SDK coordination, native operations and portability
 
 **Disposition:** extracted into the
-[independent distribution/runtime project](https://github.com/applicate2628/Orchestrarium/pull/17), together with
-outcome 1. Its admitted design target, current-runtime limits, provider-neutral
-boundary, ownership and parity/qualification requirements live there. Lead and
+[SDK design/status PR18](https://github.com/applicate2628/Orchestrarium/pull/18),
+[SDK implementation PR19](https://github.com/applicate2628/Orchestrarium/pull/19) and
+[independent npm and Rust task documents in PR17](https://github.com/applicate2628/Orchestrarium/pull/17),
+together with outcome 1. Each owning document retains its own boundaries and
+qualification; the two PR17 tasks are independent. Lead and
 existing operation owners retain their responsibilities. Qualified slices may ship
 in current versions; no runtime migration or provider activation follows from this
 2.0 plan, and no duplicate implementation is retained here.
@@ -406,5 +408,5 @@ Later implementation needs the probes under its own outcome and current gates.
 - PR: pull request; a proposal is not evidence that its changes have landed.
 - Admission: existing permission and policy eligibility, distinct from ranking.
 - Empirical arbitration: settling checkable disagreement with observed evidence.
-- SDK: software development kit; the extracted hybrid-runtime project owns the
-  Python Agents SDK design, not this remaining 2.0 roadmap.
+- SDK: software development kit; [PR18](https://github.com/applicate2628/Orchestrarium/pull/18) owns design/status and
+  [PR19](https://github.com/applicate2628/Orchestrarium/pull/19) owns the implementation, not this remaining 2.0 roadmap.

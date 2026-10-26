@@ -835,6 +835,104 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertEqual(self.target.stat().st_mtime_ns, self.before.st_mtime_ns)
         self.assert_clean()
 
+    @unittest.skipUnless(os.name == "nt", "Windows borrowed-descriptor mode contract")
+    def test_windows_descriptor_mode_borrows_custody_and_preserves_other_metadata(self):
+        def dacl_digest(bound):
+            ctypes_api, wintypes, *_rest = bound._api()
+            query = ctypes_api.WinDLL("advapi32", use_last_error=True).GetKernelObjectSecurity
+            query.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes_api.c_void_p,
+                              wintypes.DWORD, ctypes_api.POINTER(wintypes.DWORD)]
+            query.restype = wintypes.BOOL
+            size = wintypes.DWORD()
+            query(bound.live_handle, 4, None, 0, ctypes_api.byref(size))  # DACL_SECURITY_INFORMATION.
+            if not size.value:
+                raise ctypes_api.WinError(ctypes_api.get_last_error())
+            buffer = ctypes_api.create_string_buffer(size.value)
+            if not query(bound.live_handle, 4, buffer, size.value, ctypes_api.byref(size)):
+                raise ctypes_api.WinError(ctypes_api.get_last_error())
+            return hashlib.sha256(buffer.raw[:size.value]).hexdigest()
+
+        self.addCleanup(self.target.chmod, stat.S_IREAD | stat.S_IWRITE)
+        with PI._WindowsBoundNode(self.target, purpose="parent") as bound:
+            bound.python_metadata(writable=True)
+            descriptor = bound.descriptor
+            proof = bound.proof
+            basic = bound.basic()
+            stable = basic.creation, basic.access, basic.write, basic.attributes & ~stat.FILE_ATTRIBUTE_READONLY
+            dacl_before = dacl_digest(bound)
+            before = PI._CreateOnlyMutablePath._identity(self.target)
+            for requested in (stat.S_IREAD | stat.S_IEXEC, stat.S_IREAD | stat.S_IWRITE):
+                result = PI._InstallTransaction._chmod_owned(self.target, before, requested,
+                    descriptor=descriptor, native_proof=proof)
+                self.assertEqual(PI._InstallTransaction._chmod_identity(before, requested), result)
+                self.assertEqual(proof, bound.proof)
+                current = bound.basic()
+                self.assertEqual(stable, (current.creation, current.access, current.write,
+                    current.attributes & ~stat.FILE_ATTRIBUTE_READONLY))
+                self.assertEqual(descriptor, bound.descriptor)
+                self.assertEqual(dacl_before, dacl_digest(bound))
+                os.fstat(descriptor)
+                before = result
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            self.assertEqual(b"same", os.read(descriptor, 4))
+        with self.assertRaises(OSError):
+            os.fstat(descriptor)
+
+    @unittest.skipUnless(os.name == "nt", "Windows descriptor origin and denial contract")
+    def test_windows_descriptor_mode_requires_original_proof_and_propagates_denial(self):
+        self.addCleanup(self.target.chmod, stat.S_IREAD | stat.S_IWRITE)
+        with PI._WindowsBoundNode(self.target, purpose="parent") as bound:
+            bound.python_metadata(writable=True)
+            before = PI._CreateOnlyMutablePath._identity(self.target)
+            for proof in (None, replace(bound.proof, file_id=b"not-the-original")):
+                with self.subTest(proof=proof):
+                    with self.assertRaisesRegex(ValueError, "permission native"):
+                        PI._InstallTransaction._chmod_owned(self.target, before, stat.S_IREAD,
+                            descriptor=bound.descriptor, native_proof=proof)
+                    self.assertEqual(before, PI._CreateOnlyMutablePath._identity(self.target))
+            primary = OSError("synthetic native attribute denial")
+            with patch.object(PI._WindowsBoundNode, "set_readonly", side_effect=primary):
+                with self.assertRaises(OSError) as caught:
+                    PI._InstallTransaction._chmod_owned(self.target, before, stat.S_IREAD,
+                        descriptor=bound.descriptor, native_proof=bound.proof)
+                self.assertIs(primary, caught.exception)
+            self.assertEqual(before, PI._CreateOnlyMutablePath._identity(self.target))
+            os.fstat(bound.descriptor)
+        with PI._WindowsBoundNode(self.target, purpose="observe") as observer:
+            observer.python_metadata()
+            with self.assertRaises(OSError):
+                PI._InstallTransaction._chmod_owned(self.target, before, stat.S_IREAD,
+                    descriptor=observer.descriptor, native_proof=observer.proof)
+            self.assertEqual(before, PI._CreateOnlyMutablePath._identity(self.target))
+            os.fstat(observer.descriptor)
+
+    @unittest.skipUnless(os.name == "nt", "Windows held-object origin contract")
+    def test_windows_descriptor_mode_refuses_other_descriptor_and_replaced_path(self):
+        with PI._WindowsBoundNode(self.target, purpose="parent") as target_bound:
+            target_bound.python_metadata(writable=True)
+            before = PI._CreateOnlyMutablePath._identity(self.target)
+            with PI._WindowsBoundNode(self.source, purpose="parent") as other_bound:
+                other_bound.python_metadata(writable=True)
+                other_before = PI._CreateOnlyMutablePath._identity(self.source)
+                with self.assertRaisesRegex(ValueError, "permission native identity"):
+                    PI._InstallTransaction._chmod_owned(self.target, before, stat.S_IREAD,
+                        descriptor=other_bound.descriptor, native_proof=target_bound.proof)
+                self.assertEqual(before, PI._CreateOnlyMutablePath._identity(self.target))
+                self.assertEqual(other_before, PI._CreateOnlyMutablePath._identity(self.source))
+            held = self.root / "held-target"
+            self.assertTrue(held.resolve().is_relative_to(self.root.resolve()))
+            self.assertFalse(held.exists())
+            self.target.rename(held)
+            self.target.write_bytes(b"replacement")
+            replacement = PI._CreateOnlyMutablePath._identity(self.target)
+            with self.assertRaisesRegex(ValueError, "permission beforeimage"):
+                PI._InstallTransaction._chmod_owned(self.target, before, stat.S_IREAD,
+                    descriptor=target_bound.descriptor, native_proof=target_bound.proof)
+            self.assertEqual(replacement, PI._CreateOnlyMutablePath._identity(self.target))
+            self.assertEqual(before, PI._CreateOnlyMutablePath._identity(held))
+            self.assertEqual(b"replacement", self.target.read_bytes())
+            os.fstat(target_bound.descriptor)
+
     def test_bound_source_refuses_foreign_origin_before_read(self):
         transaction = self.transaction()
         expected = transaction._capture_node(self.source)
@@ -904,8 +1002,8 @@ class CopyMetadataTests(unittest.TestCase):
             return actual
         transaction = self.transaction()
         with self.assertRaises(OSError) as caught:
-            with patch.object(PI._InstallTransaction, "_chmod_owned", staticmethod(fault)):
-                with transaction:
+            with transaction:
+                with patch.object(PI._InstallTransaction, "_chmod_owned", staticmethod(fault)):
                     self.owner(transaction).copy_file(Path("target"), self.source)
         self.assertIs(caught.exception, primary)
         self.assertTrue(self.target.stat().st_mode & stat.S_IWRITE)

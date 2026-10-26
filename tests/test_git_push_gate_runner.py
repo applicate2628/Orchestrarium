@@ -479,9 +479,9 @@ def test_r4_public_interface_is_explicit_minimal_and_used() -> None:
     assert len(imports) == 1
     imported = tuple(alias.name for alias in imports[0].names)
     expected = (
-        "PreflightResult", "TranscriptDiagnostic",
-        "validate_preflight_result", "validate_transcript_diagnostic",
-            "build_preflight_from_stdin", "ShellParseResult", "PrRouteDenied",
+        "PreflightResult", "TranscriptDiagnostic", "WorkdirDiagnostic",
+        "validate_preflight_result", "validate_transcript_diagnostic", "validate_workdir_diagnostic",
+            "build_preflight_from_stdin", "ShellParseResult", "absolute_literal_root_context", "PrRouteDenied",
             "resolve_command_dialect", "parse_transcript_command",
             "project_scan_range_binding", "extract_publication_user_reply",
             "is_simple_pr_approval", "normalize_publication_approval_text",
@@ -742,19 +742,19 @@ def test_publication_layout_acquisition_and_compatibility():
             plain = {"type": "user", "message": {"role": "user", "content": text}}
             assert common.extract_user_typed_text(plain) == text.strip()
             assert common.extract_user_typed_text(plain, preserve_outer_whitespace=True) == text
-            for entry, kind, compatibility in ((plain, "plain", text.strip()),
-                    (_batch_user((("Metadata", text),)), "structured-answer", text)):
+            for entry, kind in ((plain, "plain"),
+                    (_batch_user((("Metadata", text),)), "structured-answer")):
                 raw = json.dumps(entry).encode()
                 reply = preflight.extract_publication_user_reply(entry)
-                assert (reply.kind, reply.answers, reply.text) == (kind, (text,), compatibility)
+                assert (reply.kind, reply.answers) == (kind, (text,))
                 assert reply.publication_action() == ("neutral", "")
                 assert json.dumps(entry).encode() == raw
         for blank in ("", " \t\n "):
             plain = {"type": "user", "message": {"role": "user", "content": blank}}
             reply = preflight.extract_publication_user_reply(plain)
-            assert (reply.kind, reply.answers, reply.text) == ("plain", ("",), "")
+            assert (reply.kind, reply.answers) == ("plain", ("",))
             structured = preflight.extract_publication_user_reply(_batch_user((("Metadata", blank),)))
-            assert (structured.kind, structured.answers, structured.text) == ("structured-answer", (blank,), blank)
+            assert (structured.kind, structured.answers) == ("structured-answer", (blank,))
             reducer = policy._PrGrantReducer(str(ROOT))
             reducer.consume(plain)
             assert reducer.last_genuine_user_position == -1
@@ -763,7 +763,7 @@ def test_publication_layout_acquisition_and_compatibility():
         padded = _batch_user((("Metadata", "\tanswer \n"),))
         padded["message"]["content"][0]["text"] = " \n" + padded["message"]["content"][0]["text"] + "\t "
         reply = preflight.extract_publication_user_reply(padded)
-        assert (reply.kind, reply.answers, reply.text) == ("structured-answer", ("\tanswer \n",), "\tanswer \n")
+        assert (reply.kind, reply.answers) == ("structured-answer", ("\tanswer \n",))
         malformed = {"content": " \n<send_user_message_question_reply>\n[]\n</send_user_message_question_reply>\t"}
         assert preflight.extract_publication_user_reply(malformed).kind == "recognized-malformed"
         for text in (" \t[approve-publication] \n", " \n`[approve-publication]`\t", "  **[approve-publication]**  "):
@@ -886,7 +886,6 @@ def test_batch_disposition_preserves_atomic_answer_boundaries(tmp_path):
             entry = _batch_user(tuple(("Question quotes " + generic, value) for value in order))
             reply = preflight.extract_publication_user_reply(entry)
             assert reply.publication_action()[0] == expected
-            assert reply.text == ""
             reducer = policy._PrGrantReducer(str(tmp_path))
             reducer.consume(entry, json.dumps(entry).encode("utf-8") + b"\n")
             assert reducer.record_position == 1
@@ -910,19 +909,27 @@ def test_batch_reducer_retains_original_record_and_standing_chronology(tmp_path)
     _common, preflight, policy, _runner = _load_gate_target(TARGETS[0], "batch_chronology")
     batch = _batch_user((("Unrelated", "Neutral"), ("Approve?", "[approve-pr-publication]")))
     raw = json.dumps(batch).encode("utf-8") + b"\n"
-    reducer = policy._PrGrantReducer(str(tmp_path))
+    transcript = tmp_path / "history.jsonl"
+    transcript.write_bytes(raw)
+    envelope = {"tool_name": "Bash", "transcript_path": str(transcript), "tool_input": {
+        "command": "git push origin HEAD:refs/heads/topic", "workdir": str(tmp_path),
+    }}
+    context = preflight.build_preflight(envelope)
+    assert context.transcript_path == str(transcript)
+    reducer = policy._PrGrantReducer(context)
     reducer.consume(batch, raw)
     state, intent = reducer.finish()
     assert state == "simple" and intent.record == 1
     assert intent.sha256 == hashlib.sha256(raw).hexdigest() and reducer.record_position == 1
     revoke = _batch_user((("Revoke?", "[revoke-pr-publication:v1]"), ("Unrelated", "Neutral")))
-    transcript = tmp_path / "history.jsonl"
     malformed = _batch_user((("Approve?", "[approve-pr-publication:v1 invalid]"),))
     for later, expected in ((revoke, "revoked"), (malformed, "malformed")):
         transcript.write_bytes(raw + json.dumps(later).encode("utf-8") + b"\n")
-        assert derive_pr_grant(policy,[batch, later], str(tmp_path)) == (expected, None)
-        assert policy._stream_stable_pr_grant(str(transcript), str(tmp_path)) == (expected, None, "found")
-    pending = policy._PrGrantReducer(str(tmp_path))
+        context = preflight.build_preflight(envelope)
+        assert context.transcript_path == str(transcript)
+        assert derive_pr_grant(policy, [batch, later], context) == (expected, None)
+        assert policy._stream_stable_pr_grant(context) == (expected, None, "found")
+    pending = policy._PrGrantReducer(context)
     pending.consume(_batch_user((("Approve?", "[approve-pr-publication:v1 pr=7]"),)))
     assert pending.pending_numeric is not None
     pending.consume(_batch_user((("One", "Neutral"), ("Two", "Also neutral"))))
@@ -1174,17 +1181,16 @@ def test_materialized_root_alias_public_handlers_use_real_owned_range_scan(
     """Installer-equivalent complete payload; actual direct and fixed loaders."""
     physical = tmp_path / "ordinary-component"
     script_dir = physical / "scripts"
-    for filename in (POLICY_NAME, RUNNER_NAME, "git_push_gate_preflight.py", "hook_common.py", "check-publication-safety.py"):
-        destination = script_dir / filename
+    _common, _preflight, policy, _runner = _load_gate_target(TARGETS[0], "materialized_payload")
+    source_paths = dict(next(layout for layout in policy.SOURCE_LAYOUTS if layout.name == "universal").role_paths)
+    component_paths = dict(next(layout for layout in policy.SOURCE_LAYOUTS if layout.name == "component").role_paths)
+    assert tuple(source_paths) == tuple(component_paths) == policy.SOURCE_ROLE_ORDER
+    for role in policy.SOURCE_ROLE_ORDER:
+        destination = physical / component_paths[role]
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes((CANON_DIR / filename).read_bytes())
-    for filename in ("posix_process_group.py", "windows_job.py"):
-        destination = script_dir / "process_supervision" / filename
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes((ROOT / "scripts/process_supervision" / filename).read_bytes())
-    classifier = physical / "hooks/check-machine-local-path.py"
-    classifier.parent.mkdir(parents=True)
-    classifier.write_bytes((CANON_DIR.parent / "hooks/check-machine-local-path.py").read_bytes())
+        destination.write_bytes((ROOT / "scripts" / source_paths[role]).read_bytes())
+    for filename in (RUNNER_NAME, "git_push_gate_preflight.py"):
+        (script_dir / filename).write_bytes((CANON_DIR / filename).read_bytes())
     alias = tmp_path / "logical-component"
     if os.name == "nt":
         import _winapi
@@ -1557,6 +1563,7 @@ def test_a3_preflight_contract_and_old_owner_are_red_until_relocated() -> None:
         "repository_workdir_source",
         "transcript_diagnostic",
         "simple_pr_approval",
+        "workdir_diagnostic",
     )
     for target in TARGETS:
         assert target.preflight_path.is_file(), f"A3-PREFLIGHT-MISSING:{target.label}"
@@ -1620,6 +1627,105 @@ def _copy_runner(target_dir: Path) -> GateTarget:
         encoding="utf-8",
     )
     return target
+
+
+@pytest.mark.parametrize(
+    "selected,cwd_present,cwd,check,source,kind",
+    (
+        ({"workdir": {"PRIVATE-WORKDIR-CANARY": "secret"}}, True, None, "non-string", "tool", "object"),
+        ({}, True, "PRIVATE-WORKDIR-CANARY", "relative", "envelope", "string"),
+        ({}, False, None, "missing", "absent", "missing"),
+        ({"workdir": ""}, False, None, "empty", "tool", "string"),
+        ({"workdir": "PRIVATE-WORKDIR-CANARY\x00"}, False, None, "nul", "tool", "string"),
+        ({"workdir": None}, True, None, "non-string", "tool", "null"),
+    ),
+)
+def test_workdir_diagnostic_public_entry_preserves_denial_and_privacy(
+    tmp_path: Path, selected, cwd_present, cwd, check, source, kind,
+) -> None:
+    transcript = tmp_path / "synthetic-transcript.jsonl"
+    transcript.write_text(json.dumps({"type": "user", "message": {
+        "role": "user", "content": "[approve-publication]",
+    }}) + "\n", encoding="utf-8")
+    envelope = {"tool_name": "Bash", "transcript_path": str(transcript),
+                "tool_input": {"command": "git push origin HEAD:refs/heads/topic", **selected}}
+    if cwd_present:
+        envelope["cwd"] = str(tmp_path) if cwd is None else cwd
+    expected = (f"Workdir diagnostics: stage=input-selection; check={check}; "
+                f"subject=invocation; source={source}; value-kind={kind}.")
+    for target in TARGETS:
+        results = [_run(target, envelope, surface=surface) for surface in ("runner", "policy")]
+        assert (results[0].returncode, results[0].stdout, results[0].stderr) == (
+            results[1].returncode, results[1].stdout, results[1].stderr,
+        )
+        result = results[0]
+        assert result.returncode == 0 and result.stderr == ""
+        body = json.loads(result.stdout)
+        assert set(body) == {"hookSpecificOutput"}
+        output = body["hookSpecificOutput"]
+        assert set(output) == {"hookEventName", "permissionDecision", "permissionDecisionReason"}
+        assert output["hookEventName"] == "PreToolUse" and output["permissionDecision"] == "deny"
+        assert output["permissionDecisionReason"].startswith(
+            "PRG-WORKDIR-INVALID: PR-scoped publication denied. "
+            "Use one explicit absolute repository root for the current push tool call."
+        )
+        assert output["permissionDecisionReason"].endswith(expected)
+        assert "PRIVATE-WORKDIR-CANARY" not in result.stdout
+        assert str(tmp_path) not in result.stdout and str(transcript) not in result.stdout
+
+
+def test_workdir_diagnostic_contract_is_optional_closed_and_nonauthorizing() -> None:
+    module = _load(TARGETS[0].preflight_path, "workdir_diagnostic_contract")
+    legacy = module.PrRouteDenied("PRG-WORKDIR-INVALID")
+    assert legacy.workdir_diagnostic is None
+    result = module.PreflightResult(
+        "DEFER", "PFP-DENY-KNOWN", "RENDER_DENY", None, None, "",
+        None, None, None, False, "PRG-WORKDIR-INVALID",
+    )
+    assert result.workdir_diagnostic is None
+    assert module.validate_preflight_result(result) is result
+    diagnostic = module.WorkdirDiagnostic("input-selection", "non-string", "invocation", "tool", "object")
+    assert module.validate_preflight_result(result._replace(workdir_diagnostic=diagnostic))
+    for field in diagnostic._fields:
+        with pytest.raises((TypeError, ValueError)):
+            module.validate_preflight_result(result._replace(
+                workdir_diagnostic=diagnostic._replace(**{field: "PRIVATE-WORKDIR-CANARY"}),
+            ))
+    with pytest.raises((TypeError, ValueError)):
+        module.validate_preflight_result(result._replace(workdir_diagnostic=tuple(diagnostic)))
+    allow = module.build_preflight({"agent_id": "synthetic-leaf"})
+    with pytest.raises((TypeError, ValueError)):
+        module.validate_preflight_result(allow._replace(workdir_diagnostic=diagnostic))
+    for value, kind in ((None, "null"), (False, "boolean"), (0, "number"),
+                        (0.0, "number"), ("", "string"), ([], "array"),
+                        ({}, "object"), (object(), "other")):
+        assert module.WorkdirDiagnostic.from_value(
+            "input-selection", "non-string", "invocation", "tool", value,
+        ).value_kind == kind
+
+
+def test_workdir_diagnostic_public_normalization_preserves_selected_source(tmp_path: Path) -> None:
+    (tmp_path / "child").mkdir()
+    transcript = tmp_path / "synthetic-transcript.jsonl"
+    transcript.write_text(json.dumps({"type": "user", "message": {
+        "role": "user", "content": "[approve-publication]",
+    }}) + "\n", encoding="utf-8")
+    envelope = {"tool_name": "Bash", "transcript_path": str(transcript),
+                "cwd": str(tmp_path), "tool_input": {
+                    "command": "git push origin HEAD:refs/heads/topic",
+                    "workdir": str(tmp_path / "child") + os.sep + "..",
+                }}
+    for target in TARGETS:
+        direct, runner = (_run(target, envelope, surface=s) for s in ("policy", "runner"))
+        assert (direct.returncode, direct.stdout, direct.stderr) == (runner.returncode, runner.stdout, runner.stderr)
+        assert runner.returncode == 0 and runner.stderr == ""
+        output = json.loads(runner.stdout)["hookSpecificOutput"]
+        assert output["permissionDecision"] == "deny"
+        assert output["permissionDecisionReason"].endswith(
+            "Workdir diagnostics: stage=invocation-qualification; check=canonical-mismatch; "
+            "subject=invocation; source=tool; value-kind=string."
+        )
+        assert str(tmp_path) not in runner.stdout
 
 
 def _assert_runner_deny(completed: subprocess.CompletedProcess[str]) -> None:

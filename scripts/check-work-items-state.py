@@ -1303,7 +1303,8 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     lifecycle = load_lifecycle_owner()
     try:
-        ledger_resource_budget = load_validator().resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes)
+        ledger_resource_budget = (None if args.ledger_max_events is None and args.ledger_max_bytes is None
+            else load_validator().resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes))
         transition_resource_budget = lifecycle._transition_cli_budget(args)
         transition_output_ceiling = lifecycle._transition_cli_budget(args, output=True)
     except (ValueError, lifecycle.LifecycleError) as exc:

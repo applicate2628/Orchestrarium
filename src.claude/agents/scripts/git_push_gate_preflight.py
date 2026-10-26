@@ -50,13 +50,6 @@ class PublicationUserReply(NamedTuple):
     kind: str
     answers: tuple[str, ...]
 
-    @property
-    def text(self) -> str:
-        """Compatibility view; a batch never becomes flattened authority."""
-        if self.kind == "recognized-malformed" or len(self.answers) != 1:
-            return ""
-        return self.answers[0].strip() if self.kind == "plain" else self.answers[0]
-
     def publication_action(self) -> tuple[str, str]:
         """One atomic event disposition, using existing per-answer grammars."""
         choices: set[tuple[str, str]] = set()
@@ -555,11 +548,50 @@ class TranscriptDiagnostic(NamedTuple):
     history: str
     recovery: str
 
+class WorkdirDiagnostic(NamedTuple):
+    stage: str
+    check: str
+    subject: str
+    source: str
+    value_kind: str
+
+    @classmethod
+    def from_value(cls, stage: str, check: str, subject: str, source: str, value: object):
+        kind = {
+            type(None): "null", str: "string", bool: "boolean", int: "number",
+            float: "number", list: "array", dict: "object",
+        }.get(type(value), "other")
+        return cls(stage, check, subject, source, kind)
+
+
+def validate_workdir_diagnostic(diagnostic: object) -> WorkdirDiagnostic:
+    if type(diagnostic) is not WorkdirDiagnostic:
+        raise TypeError("foreign workdir diagnostic")
+    categories = (
+        {"input-selection", "authorization-normalization", "invocation-qualification",
+         "literal-normalization", "literal-agreement", "repository-root-proof",
+         "repository-identity", "executable-resolution"},
+        {"missing", "non-string", "empty", "nul", "relative", "resolve-failed",
+         "not-directory", "canonical-mismatch", "ordinary-directory", "selected-types",
+         "literal-context", "selection-source", "root-mismatch", "stat-failed",
+         "deadline", "process-result", "decode", "root-output", "executable-missing"},
+        {"invocation", "authorization", "literal", "repository", "executable"},
+        {"tool", "envelope", "authorization-context", "literal", "derived-repository",
+         "absent", "unacquired"},
+        {"missing", "null", "string", "boolean", "number", "array", "object", "other"},
+    )
+    if any(type(value) is not str or value not in allowed
+           for value, allowed in zip(diagnostic, categories)):
+        raise ValueError("invalid workdir diagnostic")
+    return diagnostic
+
+
 class PrRouteDenied(Exception):
     def __init__(
         self,
         failure_id: str,
         transcript_diagnostic: TranscriptDiagnostic | None = None,
+        workdir_diagnostic: WorkdirDiagnostic | None = None,
     ):
         super().__init__(failure_id)
         self.failure_id = failure_id
@@ -567,6 +599,10 @@ class PrRouteDenied(Exception):
             validate_transcript_diagnostic(transcript_diagnostic)
             if transcript_diagnostic is not None
             else None
+        )
+        self.workdir_diagnostic = (
+            validate_workdir_diagnostic(workdir_diagnostic)
+            if workdir_diagnostic is not None else None
         )
 
 def _wrapper_option(
@@ -2849,6 +2885,7 @@ class PreflightResult(NamedTuple):
     repository_workdir_source: str = ""
     transcript_diagnostic: TranscriptDiagnostic | None = None
     simple_pr_approval: bool = False
+    workdir_diagnostic: WorkdirDiagnostic | None = None
 
 
 _OUTCOMES = frozenset(("ALLOW_FINAL", "ABSTAIN", "DEFER"))
@@ -2982,12 +3019,21 @@ def _repository_workdir(
     elif allow_absent:
         return "", ""
     else:
-        raise PrRouteDenied("PRG-WORKDIR-INVALID")
-    if type(raw) is not str or not raw or "\x00" in raw:
-        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=WorkdirDiagnostic(
+            "input-selection", "missing", "invocation", "absent", "missing",
+        ))
+    diagnostic = WorkdirDiagnostic.from_value(
+        "input-selection", "non-string", "invocation", source, raw,
+    )
+    if type(raw) is not str:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic)
+    if not raw:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic._replace(check="empty"))
+    if "\x00" in raw:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic._replace(check="nul"))
     candidate = Path(raw)
     if not candidate.is_absolute():
-        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic._replace(check="relative"))
     return raw, source
 
 
@@ -3102,6 +3148,10 @@ def validate_preflight_result(result: object) -> PreflightResult:
         validate_transcript_diagnostic(result.transcript_diagnostic)
         if result.outcome == "ABSTAIN":
             raise ValueError("unexpected branch field: transcript_diagnostic")
+    if result.workdir_diagnostic is not None:
+        validate_workdir_diagnostic(result.workdir_diagnostic)
+        if result.failure_id != "PRG-WORKDIR-INVALID":
+            raise ValueError("unexpected branch field: workdir_diagnostic")
     branch = _PREFLIGHT_BRANCHES[result.reason_id]
     expected_outcome, expected_continuation, present_fields, expected_failure = branch
     if (result.outcome, result.continuation) != (
@@ -3170,6 +3220,7 @@ def _result(
     repository_workdir_source: str = "",
     transcript_diagnostic: TranscriptDiagnostic | None = None,
     simple_pr_approval: bool = False,
+    workdir_diagnostic: WorkdirDiagnostic | None = None,
 ) -> PreflightResult:
     return validate_preflight_result(PreflightResult(
         outcome, reason_id, continuation, command, dialect, transcript_path,
@@ -3178,6 +3229,7 @@ def _result(
         repository_workdir_source,
         transcript_diagnostic,
         simple_pr_approval,
+        workdir_diagnostic,
     ))
 
 
@@ -3302,6 +3354,7 @@ def build_preflight(envelope: dict) -> PreflightResult:
         return _result(
             "DEFER", "PFP-DENY-KNOWN", "RENDER_DENY",
             failure_id=exc.failure_id,
+            workdir_diagnostic=exc.workdir_diagnostic,
         )
     except Exception:
         return _result("DEFER", "PFP-DENY-INTERNAL", "RENDER_DENY")

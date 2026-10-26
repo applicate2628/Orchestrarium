@@ -138,9 +138,12 @@ def test_managed_missing_insufficient_growth_and_byte_guard(tmp_path):
     item, before = fixture(tmp_path, 3)
     cap = v.LedgerResourceBudgetV1(10, len(before) + 300000)
     demand = v.inspect_ledger_resource_demand(item / 'agent-runs.jsonl', cap, unknown_terminal_rows=2)
-    for kwargs in ({}, {'max_events': 4, 'max_ledger_bytes': cap.max_ledger_bytes}):
-        with pytest.raises(ValueError, match='WI-LEDGER-RESOURCE'):
-            v.resolve_ledger_resource_budget(**kwargs, managed=True, demand=demand)
+    with pytest.raises(ValueError, match='WI-LEDGER-RESOURCE-MISSING'):
+        v.resolve_ledger_resource_budget(managed=True)
+    derived = v.resolve_ledger_resource_budget(managed=True, demand=demand)
+    assert (derived.max_events, derived.max_ledger_bytes) == (demand.required_events, demand.required_bytes)
+    with pytest.raises(ValueError, match='WI-LEDGER-RESOURCE-INCOMPLETE'):
+        v.resolve_ledger_resource_budget(4, cap.max_ledger_bytes, managed=True, demand=demand)
     errors, complete = [], []
     assert v.load_jsonl(item / 'agent-runs.jsonl', errors, source_bytes=before,
                        ledger_resource_budget=v.LedgerResourceBudgetV1(10, 5),
@@ -155,6 +158,7 @@ def test_h1_physical_count_is_distinct_and_diagnostic_default_is_incomplete(tmp_
     item, before = fixture(tmp_path)
     errors, complete = [], []
     assert v.load_jsonl(item / 'agent-runs.jsonl', errors, source_bytes=before,
+                       ledger_resource_budget=v.resolve_ledger_resource_budget(),
                        ledger_acquisition_complete_out=complete) == []
     assert complete == [False] and 'WI-LEDGER-RESOURCE-INCOMPLETE' in errors[-1]
     errors, complete = [], []
@@ -219,12 +223,15 @@ def test_wrapper_admission_carries_context_and_complete_terminal_readback(tmp_pa
     assert p.read_back_external_terminal(control, 'codex', 'synthetic-wrapper-launch-v4') is None
     result = cli(item, *options(cap), 'rollup', '--json')
     assert json.loads(result.stdout)['malformedLines'] == 1
-    # Missing managed admission refuses before the first writer/host call.
-    with pytest.raises(ValueError, match='WI-LEDGER-RESOURCE-MISSING'):
-        p.prepare_ledger_admission(p.Control(ledger=str(item)), args)
+    # Omission remains omission through the wrapper; the locked writer admits
+    # its current image. An explicit partial pair still refuses at transport.
+    automatic = p.Control(ledger=str(item))
+    assert p.prepare_ledger_admission(automatic, args) is None
+    assert p.ledger_resource_options(automatic) == []
+    with pytest.raises(ValueError, match='WI-LEDGER-RESOURCE-INVALID'):
+        p.ledger_resource_options(p.Control(ledger=str(item), ledger_max_events=4200))
     with p.ProcessRunnerV1() as runner:
-        assert not p.run_ledger(runner, ['--work-item', str(item), 'rollup'])
-    assert 'WI-LEDGER-RESOURCE-INCOMPLETE' in capsys.readouterr().err
+        assert p.run_ledger(runner, ['--work-item', str(item), 'rollup'])
 
 
 def test_release_binding_direct_and_capture_paths_share_budget(tmp_path):
@@ -239,7 +246,8 @@ def test_release_binding_direct_and_capture_paths_share_budget(tmp_path):
             m._release_event_binding(item, 'synthetic-no-terminal', 'synthetic-entry',
                                      event_out=event_out, ledger_resource_budget=budget)
         with pytest.raises(m.LifecycleError, match='WI-LEDGER-RESOURCE-INCOMPLETE'):
-            m._release_event_binding(item, 'synthetic-no-terminal', 'synthetic-entry', event_out=event_out)
+            m._release_event_binding(item, 'synthetic-no-terminal', 'synthetic-entry', event_out=event_out,
+                                     ledger_resource_budget=v.resolve_ledger_resource_budget())
 
 
 def test_complete_h1_group_charges_all_participants_before_receiving(tmp_path):

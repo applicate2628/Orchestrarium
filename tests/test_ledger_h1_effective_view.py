@@ -2755,3 +2755,150 @@ def test_native_sealed_mismatch_custody_preserves_real_obligations(tmp_path, mon
     assert axes(neutral.context.history_custody[0].authority_before) == axes(target.authority)
     assert neutral.context.history_custody[0].disposition_run_id is None
     assert path.read_bytes().startswith(raw)
+
+
+def _capture_current_history(module, root, item, *, ledger_required=True, prepare=True):
+    lifecycle = module.load_lifecycle_owner()
+    inputs = {"criteria.md": f"Ledger required: {ledger_required}.\n".encode(),
+              "acquisition.md": b"Synthetic original history selection.\n"}
+    for name, data in inputs.items():
+        if prepare:
+            (item / name).write_bytes(data)
+        else:
+            assert (item / name).read_bytes() == data
+    directories = [root, *sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: path.as_posix())]
+    proofs = tuple(lifecycle._capture_directory_snapshot(path, failure_id="WI-TEST-DIRECTORY") for path in directories)
+    snapshots = tuple(lifecycle._capture_file_snapshot(path, failure_id="WI-TEST-CAPTURE")
+                      for path in sorted(root.rglob("*"), key=lambda path: path.as_posix()) if path.is_file())
+    acquired_input = lifecycle.AcquiredWorkItemInputV1(root,
+        tuple(lifecycle.CapturedInputAssociationV1(value, value) for value in snapshots),
+        tuple(lifecycle.CapturedInputAssociationV1(value, value) for value in proofs))
+    base = item.relative_to(root).as_posix()
+    selected = base + "/agent-runs.jsonl"
+    binding = module.CapturedWorkItemHistoryBindingV1(root, item.name, base + "/status.md", base, selected,
+        module.HistoricalLedgerCriteriaV1(base + "/criteria.md", base + "/acquisition.md", ledger_required, "current"),
+        tuple(module.CapturedHistoryFileV1(value.path.relative_to(root).as_posix(), value, value.length, digest(value.data))
+              for value in snapshots), () if (item / "agent-runs.jsonl").exists() else (selected,),
+        {proof.path.relative_to(root).as_posix(): tuple(name for name, _ in proof.members) for proof in proofs}, acquired_input)
+    return module.observe_captured_work_item_history(binding)
+
+
+@pytest.mark.parametrize("ledger_required", [False, True])
+def test_captured_absence_preserves_acquired_selection_and_required_input(tmp_path, ledger_required):
+    module = load_validator()
+    item = tmp_path / "work-items/active/captured-absence"
+    item.mkdir(parents=True)
+    (item / "status.md").write_text(closed_status(), encoding="utf-8")
+    captured = _capture_current_history(module, tmp_path, item, ledger_required=ledger_required)
+    assert captured.selection == "absent" and captured.acquisition_complete
+    assert bool(captured.operation_diagnostics()) is ledger_required
+    if ledger_required:
+        assert replace(captured, diagnostics=()).operation_diagnostics()
+    assert replace(captured, _current_item=None).operation_diagnostics()
+    (item / "agent-runs.jsonl").write_bytes(b"unexpected current input\n")
+    assert captured.operation_diagnostics()
+
+
+def test_accounted_known_pair_retains_audit_and_allows_current_close(tmp_path, monkeypatch):
+    """The original failed commission is evidence, never current authority."""
+    from tests.test_mixed_current_ledger_recovery import (
+        _history_disposition_request, _history_cli, load_writer, minimal_staged_status,
+    )
+    test_native_sealed_mismatch_custody_preserves_real_obligations(
+        tmp_path, monkeypatch, "completed", "settle-launch")
+    item = tmp_path / "work-items/active/reader-a"
+    ledger = item / "agent-runs.jsonl"
+    original = b"".join(ledger.read_bytes().splitlines(keepends=True)[:4])
+    old = json.loads(original.splitlines()[3])
+    module = load_validator()
+    lifecycle = module.load_lifecycle_owner()
+    observation = "WI-LEDGER-LAUNCH-BINDING: revise-a-0001: own launch launch-c-0001 differs in scope"
+    with pytest.raises(lifecycle.LifecycleError, match="WI-LEDGER-LAUNCH-BINDING|WI-LEDGER-HISTORY-UNRESOLVED|open REVISE"):
+        lifecycle._validate_item_before_close(item)
+    (item / "current-independent-review.md").write_text("Synthetic distinct current analyst review.\n", encoding="utf-8")
+    assert load_writer().main(["--work-item", str(item), "append", "--run-id", "independent-current-review-closer",
+        "--role", old["role"], "--execution-role", "internal", "--status", "completed", "--gate", "PASS",
+        "--event-kind", "standalone", "--artifact", old["artifact"], "--evidence", "review:current-independent-review.md",
+        "--closes", old["runId"], "--scope", *old["scope"],
+        "--started-at", "2026-10-04T12:01:00Z", "--updated-at", "2026-10-04T12:01:01Z"]) == 0
+    with pytest.raises(lifecycle.LifecycleError, match="WI-LEDGER-LAUNCH-BINDING|WI-LEDGER-HISTORY-UNRESOLVED"):
+        lifecycle._validate_item_before_close(item)
+    admission = {"schemaVersion": 2, "workItem": "work-items/active/reader-a",
+        "operationId": "claim4-sealed-noncloser", "recordedAt": "2026-10-04T12:00:00Z",
+        "expectedLedgerSha256": digest(original), "targets": [{"action": "custody-invalid-history",
+            "rawLineOrdinal": 4, "sourcePrefixSha256": digest(original), "sourcePrefixBytes": len(original),
+            "physicalLineSha256": digest(original.splitlines(keepends=True)[3])}]}
+    request = _history_disposition_request(item, admission, kind="current-evidence-covered", identity_prefix="known-pair-")
+    preview = _history_cli(item, request, apply=False)
+    assert preview.returncode == 0, preview.stdout + preview.stderr
+    applied = _history_cli(item, request)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    states, acquired = [], []
+    errors = module.validate_work_item(item, obligation_state_out=states,
+        ledger_acquisition_complete_out=acquired)
+    assert errors == [observation] and acquired == [True] and len(states) == 1
+    result = states[0]._current_result
+    assert not result[2] and not result[3] and not result.context.unresolved_history
+    target = next(entry for row, entry in zip(result.context.rows, result[1]) if row.event["runId"] == old["runId"])
+    assert target.current_schema_valid
+    assert target.authority == module.LedgerAuthorityV1(False, False, True, False, False)
+    assert ledger.read_bytes().startswith(original)
+    assert result.operation_diagnostics(requested_positions=(), strict=True) == ()
+    old_position = next(pos for pos, row in enumerate(result.context.rows) if row.event["runId"] == old["runId"])
+    assert any("WI-LEDGER-OPERATION-EFFECT" in value for value in
+               result.operation_diagnostics(requested_positions=(old_position,), strict=False))
+    refused = []
+    assert result.receive(item, refused, observed_diagnostics=(), strict=True) is None and refused
+    for attribute in ("qualification_observations", "diagnostics"):
+        original_projection = getattr(result, attribute)
+        setattr(result, attribute, ())
+        refused = []
+        received = result.receive(item, refused)
+        assert received is None or received.operation_diagnostics(requested_positions=(), strict=True)
+        setattr(result, attribute, original_projection)
+    assert load_writer().main(["--work-item", str(item), "rollup"]) == 1
+    assert lifecycle._inspect_transfer_obligations(tmp_path, item) == ()
+    status_bytes = (item / "status.md").read_bytes()
+    (item / "status.md").write_text(closed_status(), encoding="utf-8")
+    status_states = []
+    assert module.validate_work_item(item, obligation_state_out=status_states) == [observation]
+    assert status_states[0]._current_result.operation_diagnostics(requested_positions=(), strict=True) == ()
+    (item / "status.md").write_bytes(status_bytes)
+    captured = _capture_current_history(module, tmp_path, item)
+    assert captured.diagnostics == (observation,) and captured.operation_diagnostics() == ()
+    assert replace(captured, diagnostics=()).operation_diagnostics()
+    assert replace(captured, obligations=None).operation_diagnostics()
+    assert replace(captured, selection="absent", ledger_sha256=None, diagnostics=(), obligations=None,
+                   authority_by_raw_line=None).operation_diagnostics()
+    lifecycle._validate_item_before_close(item)
+    instant = "2026-10-24T00:00:00Z"
+    (item / "bug-dispositions.json").write_bytes(canonical({"schemaVersion": 1, "workItem": item.name,
+        "closedAt": instant, "bugs": []}))
+    other = tmp_path / "work-items/active/reader-b"
+    (other / "status.md").write_text(minimal_staged_status(), encoding="utf-8")
+    lifecycle.refresh_readme(tmp_path)
+    closure = (f"Closed: {instant}\nOutcome: Synthetic known-pair current completion oracle.\n"
+               "Evidence: actual public review and qualified disposition\nResidual risk: fixture only\n").encode()
+    archive = lifecycle.close_item(tmp_path, item.name, closure, instant)
+    assert archive.is_dir() and not item.exists()
+    assert (archive / "agent-runs.jsonl").read_bytes().startswith(original)
+    assert (archive / "bug-dispositions-receipt.json").is_file()
+    assert f"archive/{archive.parent.name}/{archive.name}/closure.md" in (tmp_path / "work-items/README.md").read_text()
+    archive_states, archive_acquired = [], []
+    archive_errors, revises, launches = module.validate_archived_ledger_obligations(archive,
+        obligation_state_out=archive_states, ledger_acquisition_complete_out=archive_acquired)
+    assert archive_errors == [observation] and revises == launches == []
+    assert archive_acquired == [True] and len(archive_states) == 1
+    received = archive_states[0]._current_result
+    assert received.context.view == result.context.view
+    assert received.operation_diagnostics(requested_positions=(), strict=True) == ()
+    archived_old = next(entry for row, entry in zip(received.context.rows, received[1]) if row.event["runId"] == old["runId"])
+    assert archived_old.authority == target.authority
+    proof = json.loads((archive / "lifecycle-transition-receipt.json").read_bytes())
+    assert len(proof) == 17 and proof["schemaVersion"] == 3
+    assert proof["owner"] == lifecycle.ORDINARY_CLOSE_TRANSITION_OWNER
+    assert proof["operationId"] == lifecycle._ordinary_close_operation_id(proof)
+    remaining = module.load_effective_ledger_view(tmp_path, other, "work-items/active/reader-b/agent-runs.jsonl")
+    assert remaining.view is not None and remaining.observation.activation_state == "active"
+    remaining_errors = module.validate_work_item(other, strict_revise=False)
+    assert not any("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in value for value in remaining_errors)

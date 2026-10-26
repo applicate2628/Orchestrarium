@@ -269,8 +269,8 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      grant no authority. Original whole-token display forms remain accepted.
   8. Derive the latest exact PR grant/revoke/malformed state from the complete
      bounded readable transcript. A malformed reserved signal denies. An
-     active grant runs only the strict PR route: fresh GitHub/Git binding and
-     protection checks plus one fresh unused non-empty range receipt bound to
+     active grant runs only the strict PR route: fresh GitHub PR/Git identity
+     binding plus one fresh unused non-empty range receipt bound to
      remote, full destination, and local HEAD tip. Every active-route failure
      denies without generic fallback.
   9. If no active PR grant is present and the current turn (entries after the last genuine user message) shows
@@ -386,8 +386,10 @@ from hook_common import (
 from git_push_gate_preflight import (
     PreflightResult,
     TranscriptDiagnostic,
+    WorkdirDiagnostic,
     validate_preflight_result,
     validate_transcript_diagnostic,
+    validate_workdir_diagnostic,
     build_preflight_from_stdin,
     ShellParseResult,
     absolute_literal_root_context,
@@ -1598,7 +1600,9 @@ def _parse_pr_grant(text: str) -> ActivePrGrant | None:
 def _canonicalize_numeric_pr_grant(
     number: int, authorization_workdir: str, *, preflight: PreflightResult
 ) -> ActivePrGrant:
-    repository_workdir = _normalize_repository_workdir(authorization_workdir)
+    repository_workdir = _normalize_repository_workdir(
+        authorization_workdir, subject="authorization", source="authorization-context",
+    )
     _prepare_selected_repository_workdir(
         absolute_literal_root_context(preflight.parsed)
         if preflight.parsed is not None else None,
@@ -1609,7 +1613,9 @@ def _canonicalize_numeric_pr_grant(
     gh_exe = _resolve_executable("gh", repository_workdir)
     if git_exe is None or gh_exe is None:
         raise PrRouteDenied("PRG-PR-UNAVAILABLE")
-    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    repository_workdir = _prove_repository_root(
+        repository_workdir, git_exe, subject="authorization", source="authorization-context",
+    )
     deadline = time.monotonic() + ORACLE_TIMEOUT_SECONDS
     _, repo_text = _run_text(
         [gh_exe, "repo", "view", "--json", "nameWithOwner,url"],
@@ -1635,7 +1641,9 @@ def _canonicalize_numeric_pr_grant(
         or match.group("owner") != owner or match.group("repo") != repo
     ):
         raise PrRouteDenied("PRG-BINDING-DRIFT")
-    if _prove_repository_root(repository_workdir, git_exe) != repository_workdir:
+    if _prove_repository_root(
+        repository_workdir, git_exe, subject="authorization", source="authorization-context",
+    ) != repository_workdir:
         raise PrRouteDenied("PRG-BINDING-DRIFT")
     return ActivePrGrant(match.group("url"), owner, repo, number)
 
@@ -1788,7 +1796,9 @@ def _repository_identity(repository_workdir: str) -> tuple[int, int]:
     try:
         observed = os.stat(repository_workdir, follow_symlinks=False)
     except OSError:
-        raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=WorkdirDiagnostic(
+            "repository-identity", "stat-failed", "repository", "derived-repository", "string",
+        )) from None
     return observed.st_dev, observed.st_ino
 
 
@@ -4109,38 +4119,54 @@ def _run_text(
     repository_workdir: str,
     *,
     accepted_codes: tuple[int, ...] = (0,),
+    workdir_diagnostic: WorkdirDiagnostic | None = None,
 ) -> tuple[int, str]:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        raise PrRouteDenied(failure_id)
+        raise PrRouteDenied(failure_id, workdir_diagnostic=(
+            workdir_diagnostic._replace(check="deadline") if workdir_diagnostic else None
+        ))
     result = _run_process(argv, remaining, repository_workdir)
     if result is None or result.returncode not in accepted_codes:
-        raise PrRouteDenied(failure_id)
+        raise PrRouteDenied(failure_id, workdir_diagnostic=(
+            workdir_diagnostic._replace(check="process-result") if workdir_diagnostic else None
+        ))
     try:
         return result.returncode, result.stdout.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
-        raise PrRouteDenied(failure_id) from None
+        raise PrRouteDenied(failure_id, workdir_diagnostic=(
+            workdir_diagnostic._replace(check="decode") if workdir_diagnostic else None
+        )) from None
 
 
-def _normalize_repository_workdir(repository_workdir: str) -> str:
+def _normalize_repository_workdir(
+    repository_workdir: str, *, subject: str = "invocation", source: str = "unacquired",
+) -> str:
+    stage = {
+        "authorization": "authorization-normalization", "literal": "literal-normalization",
+    }.get(subject, "invocation-qualification")
+    diagnostic = WorkdirDiagnostic.from_value(stage, "non-string", subject, source, repository_workdir)
     if type(repository_workdir) is not str or not repository_workdir:
-        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic._replace(
+            check="non-string" if type(repository_workdir) is not str else "empty",
+        ))
+    check = "resolve-failed"
     try:
         candidate = Path(repository_workdir)
         if not candidate.is_absolute():
-            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+            raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic._replace(check="relative"))
         selected = candidate.resolve(strict=True)
-        if (
-            not selected.is_dir()
-            or os.path.normcase(str(selected)) != os.path.normcase(repository_workdir)
-        ):
-            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        if not selected.is_dir():
+            raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic._replace(check="not-directory"))
+        if os.path.normcase(str(selected)) != os.path.normcase(repository_workdir):
+            raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic._replace(check="canonical-mismatch"))
         # Case folding may make a reparse alias look like the selected root.
         # Require every lexical component to remain an ordinary directory.
+        check = "ordinary-directory"
         for count in range(1, len(candidate.parts) + 1):
             _directory_generation(Path(*candidate.parts[:count]))
     except (OSError, RuntimeError, ValueError):
-        raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic._replace(check=check)) from None
     return str(selected)
 
 
@@ -4150,11 +4176,17 @@ def _prepare_selected_repository_workdir(
     repository_workdir_source: str,
 ) -> str | None:
     """Qualify the selected E and preserve only P-proved literal absence."""
+    source = repository_workdir_source if (
+        type(repository_workdir_source) is str and repository_workdir_source in {"tool", "envelope"}
+    ) else "unacquired"
+    diagnostic = WorkdirDiagnostic.from_value(
+        "invocation-qualification", "selected-types", "invocation", source, repository_workdir,
+    )
     if (
         type(repository_workdir) is not str
         or type(repository_workdir_source) is not str
     ):
-        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic)
     if literal_context is not None and (
         type(literal_context) is not tuple
         or len(literal_context) != 2
@@ -4163,42 +4195,44 @@ def _prepare_selected_repository_workdir(
         or not Path(literal_context[0]).is_absolute()
         or not Path(literal_context[1]).is_absolute()
     ):
-        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=WorkdirDiagnostic.from_value(
+            "invocation-qualification", "literal-context", "literal", "literal", literal_context,
+        ))
     if repository_workdir_source in {"tool", "envelope"}:
-        return _normalize_repository_workdir(repository_workdir)
+        return _normalize_repository_workdir(repository_workdir, source=repository_workdir_source)
     if (
         repository_workdir_source == ""
         and repository_workdir == ""
         and literal_context is not None
     ):
         return None
-    raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic._replace(check="selection-source"))
 
 
-def _prove_repository_root(repository_workdir: str, git_exe: str) -> str:
+def _prove_repository_root(
+    repository_workdir: str, git_exe: str, *, subject: str = "repository", source: str = "derived-repository",
+) -> str:
     selected = Path(repository_workdir)
+    diagnostic = WorkdirDiagnostic(
+        "repository-root-proof", "root-output", subject, source, "string",
+    )
     _, top_text = _run_text(
         [git_exe, "rev-parse", "--show-toplevel"],
         time.monotonic() + PROCESS_TIMEOUT_SECONDS,
         "PRG-WORKDIR-INVALID",
         repository_workdir,
+        workdir_diagnostic=diagnostic,
     )
     rows = top_text.splitlines()
     if len(rows) != 1:
-        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic)
     try:
         top = Path(rows[0]).resolve(strict=True)
     except (OSError, RuntimeError):
-        raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic._replace(check="resolve-failed")) from None
     if top != selected:
-        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic._replace(check="root-mismatch"))
     return repository_workdir
-
-
-def _validate_repository_workdir(repository_workdir: str, git_exe: str) -> str:
-    return _prove_repository_root(
-        _normalize_repository_workdir(repository_workdir), git_exe
-    )
 
 
 def _strict_json(text: str, expected_type: type, failure_id: str):
@@ -4366,15 +4400,23 @@ def _verify_pr_oracle(
         "PRG-PR-UNAVAILABLE",
         repository_workdir,
     )
-    _, head_repo_text = _run_text(
-        [gh_exe, "repo", "view", head_name, "--json", repo_fields],
-        deadline,
-        "PRG-PR-UNAVAILABLE",
-        repository_workdir,
-    )
     base_record = _strict_json(base_repo_text, dict, "PRG-PR-UNAVAILABLE")
-    head_record = _strict_json(head_repo_text, dict, "PRG-PR-UNAVAILABLE")
-    _, base_default = _repo_record(base_record, f"{owner}/{repo}", "PRG-BINDING-DRIFT")
+    base_repo_id, base_default = _repo_record(base_record, f"{owner}/{repo}", "PRG-BINDING-DRIFT")
+    if (
+        base_repo_id == head_repo_id
+        and head_name == base_record["nameWithOwner"]
+        and base_record["url"] == f"https://github.com/{head_name}"
+    ):
+        # One fresh, validated same-repository observation serves both roles.
+        head_record = base_record
+    else:
+        _, head_repo_text = _run_text(
+            [gh_exe, "repo", "view", head_name, "--json", repo_fields],
+            deadline,
+            "PRG-PR-UNAVAILABLE",
+            repository_workdir,
+        )
+        head_record = _strict_json(head_repo_text, dict, "PRG-PR-UNAVAILABLE")
     current_head_repo_id, head_default = _repo_record(head_record, head_name, "PRG-BINDING-DRIFT")
     if current_head_repo_id != head_repo_id:
         raise PrRouteDenied("PRG-BINDING-DRIFT")
@@ -4386,26 +4428,6 @@ def _verify_pr_oracle(
     if ref_check.strip() != head_ref:
         raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
     if target.destination == "refs/heads/main" or head_ref in (base_ref, base_default, head_default):
-        raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
-
-    encoded_ref = quote(head_ref, safe="")
-    _, branch_text = _run_text(
-        [gh_exe, "api", "--hostname", "github.com", f"repos/{head_name}/branches/{encoded_ref}"],
-        deadline,
-        "PRG-PR-UNAVAILABLE",
-        repository_workdir,
-    )
-    branch = _strict_json(branch_text, dict, "PRG-PR-UNAVAILABLE")
-    if branch.get("name") != head_ref or branch.get("protected") is not False:
-        raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
-    _, rules_text = _run_text(
-        [gh_exe, "api", "--hostname", "github.com", f"repos/{head_name}/rules/branches/{encoded_ref}"],
-        deadline,
-        "PRG-PR-UNAVAILABLE",
-        repository_workdir,
-    )
-    rules = _strict_json(rules_text, list, "PRG-PR-UNAVAILABLE")
-    if rules:
         raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
 
     _, expanded_urls = _run_text(
@@ -4611,7 +4633,6 @@ def _resolve_generic_scan_binding(
 
 def _evaluate_active_pr_route(
     grant: ActivePrGrant,
-    command: str,
     dialect: str,
     parsed: ShellParseResult,
     repository_workdir: str,
@@ -4620,7 +4641,7 @@ def _evaluate_active_pr_route(
     try:
         try:
             prepared = _prepare_pr_push(
-                command, dialect, parsed, repository_workdir,
+                dialect, parsed, repository_workdir,
                 repository_workdir_source,
             )
         except PrRouteDenied as exc:
@@ -4650,7 +4671,6 @@ def _evaluate_active_pr_route(
 
 
 def _prepare_pr_push(
-    command: str,
     dialect: str,
     parsed: ShellParseResult,
     repository_workdir: str,
@@ -4669,25 +4689,42 @@ def _prepare_pr_push(
     selected_workdir = _prepare_selected_repository_workdir(
         literal_context, repository_workdir, repository_workdir_source
     )
-    if literal.repository_root is None:
-        if selected_workdir is None:
-            raise PrRouteDenied("PRG-WORKDIR-INVALID")
-        repository_workdir = selected_workdir
-    else:
-        command_root = _normalize_repository_workdir(literal.repository_root)
-        if literal_context is None:
-            if repository_workdir_source == "tool":
-                if selected_workdir != command_root:
-                    raise PrRouteDenied("PRG-WORKDIR-INVALID")
-            elif repository_workdir_source != "envelope":
-                raise PrRouteDenied("PRG-WORKDIR-INVALID")
-        repository_workdir = command_root
+    repository_workdir = _select_pr_repository_workdir(
+        literal.repository_root, literal_context, selected_workdir, repository_workdir_source,
+    )
     git_exe = _resolve_executable("git", repository_workdir)
     if git_exe is None:
         raise PrRouteDenied("PRG-REMOTE-MISMATCH")
     literal = _bind_pr_literal_executable(literal, git_exe)
     repository_workdir = _prove_repository_root(repository_workdir, git_exe)
     return PreparedPrPush(literal, repository_workdir, git_exe)
+
+
+def _select_pr_repository_workdir(
+    literal_root: str | None,
+    literal_context: tuple[str, str] | None,
+    selected_workdir: str | None,
+    repository_workdir_source: str,
+) -> str:
+    """Resolve the PR routes' root agreement after their own grammar checks."""
+    if literal_root is None:
+        if selected_workdir is None:
+            raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=WorkdirDiagnostic(
+                "invocation-qualification", "missing", "invocation", "absent", "missing",
+            ))
+        return selected_workdir
+    command_root = _normalize_repository_workdir(literal_root, subject="literal", source="literal")
+    if literal_context is None:
+        if repository_workdir_source == "tool":
+            if selected_workdir != command_root:
+                raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=WorkdirDiagnostic(
+                    "literal-agreement", "root-mismatch", "invocation", "tool", "string",
+                ))
+        elif repository_workdir_source != "envelope":
+            raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=WorkdirDiagnostic(
+                "literal-agreement", "selection-source", "invocation", "unacquired", "string",
+            ))
+    return command_root
 
 
 def _raise_command_shape(
@@ -4774,20 +4811,14 @@ def _prepare_simple_pr_push(
     if global_options:
         if len(global_options) != 2 or global_options[0] != "-C":
             _raise_command_shape("simple", dialect, parsed, "git-global")
-        command_root = _normalize_repository_workdir(global_options[1])
-        if literal_context is None:
-            if repository_workdir_source == "tool":
-                if selected_workdir != command_root:
-                    raise PrRouteDenied("PRG-WORKDIR-INVALID")
-            elif repository_workdir_source != "envelope":
-                raise PrRouteDenied("PRG-WORKDIR-INVALID")
-        repository_workdir = command_root
+        literal_root = global_options[1]
     else:
         if push.repository_context != "ambient":
             _raise_command_shape("simple", dialect, parsed, "command-context")
-        if selected_workdir is None:
-            raise PrRouteDenied("PRG-WORKDIR-INVALID")
-        repository_workdir = selected_workdir
+        literal_root = None
+    repository_workdir = _select_pr_repository_workdir(
+        literal_root, literal_context, selected_workdir, repository_workdir_source,
+    )
     remote, refspec = push.positionals
     if not REMOTE_NAME_REGEX.fullmatch(remote):
         _raise_command_shape("simple", dialect, parsed, "target")
@@ -5026,20 +5057,26 @@ def _complete_generic_publication(preflight: PreflightResult) -> bool:
         literal_context, selected_workdir, selected_source
     )
     if selected_workdir is None and not generic_push_path:
-        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=WorkdirDiagnostic(
+            "invocation-qualification", "missing", "invocation", "absent", "missing",
+        ))
 
     literal_executable = None
     if literal_context is not None:
         literal_executable, raw_repository_root = literal_context
-        repository_workdir = _normalize_repository_workdir(raw_repository_root)
+        repository_workdir = _normalize_repository_workdir(raw_repository_root, subject="literal", source="literal")
     else:
         if selected_workdir is None:
-            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+            raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=WorkdirDiagnostic(
+                "invocation-qualification", "missing", "invocation", "absent", "missing",
+            ))
         repository_workdir = selected_workdir
 
     git_exe = _resolve_executable("git", repository_workdir)
     if git_exe is None:
-        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        raise PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=WorkdirDiagnostic(
+            "executable-resolution", "executable-missing", "executable", "derived-repository", "null",
+        ))
     if literal_executable is not None:
         _bind_literal_executable_identity(
             literal_executable, git_exe, "PGG-EXECUTABLE-MISMATCH"
@@ -5072,7 +5109,7 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         return False
     if pr_state == "active" and pr_grant is not None:
         return _evaluate_active_pr_route(
-            pr_grant, preflight.command, preflight.dialect, preflight.parsed,
+            pr_grant, preflight.dialect, preflight.parsed,
             preflight.repository_workdir, preflight.repository_workdir_source,
         )
     if pr_state == "simple" and isinstance(pr_grant, SimplePrIntent):
@@ -5167,6 +5204,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
 
     failure_id: str | None = result.failure_id
     transcript_diagnostic = result.transcript_diagnostic
+    workdir_diagnostic = result.workdir_diagnostic
     command_shape_diagnostic = None
     if result.continuation == "EVALUATE_HEAVY":
         try:
@@ -5175,6 +5213,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         except PrRouteDenied as exc:
             failure_id = exc.failure_id
             transcript_diagnostic = exc.transcript_diagnostic
+            workdir_diagnostic = exc.workdir_diagnostic
             command_shape_diagnostic = getattr(
                 exc, "command_shape_diagnostic", None
             )
@@ -5192,7 +5231,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         "PRG-PR-UNAVAILABLE": "Restore authenticated GitHub state access, then retry so the pull request can be checked afresh.",
         "PRG-PR-STATE": "The pull request is not open; obtain a new grant only for an open pull request.",
         "PRG-BINDING-DRIFT": "Refresh the pull-request binding and retry with a current exact grant if needed.",
-        "PRG-DESTINATION-UNSAFE": "Choose the current unprotected non-default pull-request head branch.",
+        "PRG-DESTINATION-UNSAFE": "Choose the current approved non-default pull-request head branch.",
         "PRG-REMOTE-MISMATCH": "Use one direct GitHub remote for the current pull-request head repository.",
         "PRG-WORKDIR-INVALID": "Use one explicit absolute repository root for the current push tool call.",
         "PRG-BRANCH-DRIFT": "Refresh remote branch state, then retry the same push for a fresh gate-owned check.",
@@ -5226,6 +5265,17 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             remediation = pr_reasons.get(failure_id, pr_reasons["PRG-INTERNAL"])
             scope = _denial_scope(failure_id)
             reason = f"{failure_id}: {scope}. {remediation}"
+            if failure_id == "PRG-WORKDIR-INVALID" and workdir_diagnostic is not None:
+                try:
+                    diagnostic = validate_workdir_diagnostic(workdir_diagnostic)
+                except (TypeError, ValueError):
+                    diagnostic = None
+                if diagnostic is not None:
+                    reason += (
+                        f" Workdir diagnostics: stage={diagnostic.stage}; check={diagnostic.check}; "
+                        f"subject={diagnostic.subject}; source={diagnostic.source}; "
+                        f"value-kind={diagnostic.value_kind}."
+                    )
             if (
                 failure_id in _TRANSCRIPT_FAILURE_IDS
                 and transcript_diagnostic is not None
