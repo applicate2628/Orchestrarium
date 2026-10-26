@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-26
 
+- Clarified scratch retention at the ledger recording step: callers choose the existing typed owner namespace before acquisition and distinguish completed PASS-terminal retention from preserving partial or failed results and later Version 3 close-time retention. Existing verdict, ownership and lifecycle requirements remain unchanged.
+
 - Historical README catalogues preserve the existing input role when receiving never-admitted retirement records. They retain stored incoming/source inventory and exact archived payload/digest checks without starting an unrelated current-consumer sweep; strict retirement and integrity audits still detect later stale citations.
 
 ## 2026-10-25

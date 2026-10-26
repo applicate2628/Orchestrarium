@@ -81,6 +81,10 @@ The init command creates missing legacy status sections and `agent-runs.jsonl` w
 
 An admitted execution uses one matching launch/terminal pair through its selected recording owner: Root for native and already-admitted direct external owner-equivalent execution, or actual supported tracked wrapper on Root's behalf when it runs. A direct external equivalent follows external-dispatch and uses real manual evidence plus Root's exact canonical pair/readback, never wrapper identity. Append a standalone event only for a genuine separate accepted result or substantive main-session gate action outside the pair. Ordinary calls preserve omission and let the selected owner admit the current transaction; explicit positive ceilings remain unchanged. Polling, progress, readback, or status acknowledgment alone adds no event.
 
+Before acquiring scratch that will be declared through `--scratch-evidence-json`, choose its owner path using the [existing Lead scratch contract](../src.codex/skills/lead/SKILL.md#task-memory-rule): `.scratch/work-items/<work-item-slug>/<terminal-run-id>/<entry-id>`. Typed terminal retention requires the actual completed `PASS` terminal and a `canonicalPointer` to an accepted file inside that same work item; `retain` carries no deletion proof.
+
+A failed, partial, or advisory result keeps its actual verdict and valuable evidence under its current owner; promote required results into canonical recovery without fabricating a Source `PASS` or an execution. The existing Version 3 `evidenceRetention` in the [ordinary-close contract](#close-with-current-bug-dispositions) is a separate close-time route for unmatched canonical scratch roots, with exact tree and same-item pointer hashes. It does not change a terminal verdict, overlap a declared `scratchEvidence` root, or permit closing unfinished work merely to retain evidence.
+
 ```bash
 python scripts/agent-run-ledger.py --work-item work-items/active/<slug> append \
   --role lead \
