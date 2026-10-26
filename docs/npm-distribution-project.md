@@ -103,7 +103,7 @@ The minimal shared payload contract belongs to the [existing installer](../scrip
 admitted resolved root, immutable retained executable/resources, explicit apply,
 recovery and persisted readback. Unknown references preserve a retained version;
 no new garbage collector, reference-count service or payload manager.
-The [Rust task](native-operations-rust-project.md) may supply qualified targets
+The [Rust task](https://github.com/applicate2628/Orchestrarium/pull/21) may supply qualified targets
 independently. Python/SDK environment provisioning remains outside npm.
 
 ## Architecture decisions and risks

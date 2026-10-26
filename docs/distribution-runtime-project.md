@@ -4,7 +4,7 @@ This former combined project now indexes two independent documentation tasks:
 
 - [npm distribution](npm-distribution-project.md): thin dispatcher, complete
   versioned payload and explicit apply through the existing installer.
-- [Native operations in Rust](native-operations-rust-project.md): one common
+- [Native operations in Rust](https://github.com/applicate2628/Orchestrarium/pull/21): one common
   operation CLI, first mcp-usage-reminder slice and separately qualified cutovers.
 
 Each linked document owns its requirements and acceptance; they are not two

@@ -4,7 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-26
 
-- Split npm distribution and native Rust operations into independent owning plans. npm can explicitly use the existing Python installer; the first Rust slice details one shared reminder hook, invocation descriptor, retained payload, parity and coordinated consumer cutover, without duplicate state owners or runtime activation.
+- Separate npm distribution review from native Rust operations. This branch owns the npm plan and links to the independently based Rust proposal rather than carrying its plan or requiring it to merge. npm can explicitly use the existing Python installer; no package is published and no runtime is activated.
 
 ## 2026-10-25
 
@@ -43,7 +43,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-23
 
-- Defined a standalone npm distribution and native Rust project with explicit application, retained executable/resource versions and common-hook replacement across supported consumers. SDK integration is now owned by separate PR18 rather than duplicated here; it can start without a Rust/npm dependency. Native hook identity, shared linked roots and recovery stay with existing owners. Manual-trust guidance is count-neutral, follows native consent and has corrected negative documentation tests. This is design and documentation-test work, not an implemented native runtime.
+- Defined npm distribution with explicit application and installer-owned retained executable/resource versions. Native Rust operation design is maintained in a separate proposal; SDK design belongs to PR18 and implementation to PR19. Preserve the earlier count-neutral manual-trust documentation and its corrected negative tests in their original owner scope. No native runtime or package publication is delivered here.
 
 - Claude document reinstallation now uses a bundled Markdown parser to distinguish real installer ownership from quoted user examples, including list and quote continuations. Custom instructions and imports remain in position, failed classification stays write-free, and existing Python installation commands require no additional package setup. Missing private packages refuse before ambient code can run, and Windows file metadata changes retain the held object on Python 3.11 and newer.
 - A current-line Claude instruction research and development handoff distinguishes newly documented native AGENTS.md discovery from the existing shared-policy import bridge. It establishes shared default policy and separate provider-specific sources as the target, explains why generated runtime projections remain safer than forcing a neutral root through higher-priority configuration, and identifies preservation and qualification prerequisites; this documentation change does not alter installed behavior or join the 2.0 redesign.
