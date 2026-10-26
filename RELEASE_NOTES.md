@@ -4,11 +4,26 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-26
 
+- Reconcile the opt-in SDK branch with current review-closure receiving changes: preserve SDK execution metadata and artifact constraints alongside source-bound review closure proofs and the current ledger reader limits. No SDK route is enabled and no live qualification is implied by this integration.
+
 - Add the recovered Windows Codex coordination caller as an explicit, parameterized qualification example. Only its source-checkout locator changes, with byte-equivalence and no-provider entry-point tests; operators can inspect the complete outer-to-inner composition without activating a provider. Existing admission, separate reservations, Windows restriction and cleanup remain intact. This is not a new live qualification or a transfer of the original host-local test suite.
 
 - Reconcile the Codex coordinator documentation with its recorded bounded live qualification while keeping missing portable caller, multi-step and recovery coverage explicit. Restore the previous tracing provider after Runner tests, including setup and cleanup failures, so test-local state does not leak into later tests. No provider is activated or live qualification repeated.
 
 - Prepared a distinct typed Codex coordination-inference worker seam and optional public Agents Model adapter. It translates only validated observed intent after outer settlement; native execution requires its separate typed coordinator launch/receiving bindings and qualified runtime admission. Existing Host-led review remains available; no model or dependency activation follows. Explicit storage selections are rejected until native semantics are supported. Public generic RunHooks remain capability-compatible, and only bound nonauthorizing SDK v3 coordination may retain main/lead terminal provenance; ordinary external terminal restrictions remain intact.
+- Publication hooks recover one proved literal PowerShell Git invocation when a supported host label incorrectly selects Bash parsing. Mixed quoting retains the original command and all publication checks; compound refusals now show only safe parser facts and compiled revision labels for diagnosis.
+
+- Optional review-closure V2 now separates actual source-bound Root semantic receiving from independently acquired machine promises. Unknown JSON/prose gains no schema from its keys or layout; an explicitly commissioned six-field review-loop result is checked by its existing value/state owner, retained source binding and known-aware reader marker. Genuine findings, native currentness, cold replay and minimal durable transfer remain required.
+
+- Publication-query failure normalization now preserves the actual primary exception, cause and owned resources when a timeout or output-limit trigger occurs first. Diagnostic labels no longer decide whether a primary failure may become an ordinary incomplete observation.
+
+- PowerShell literal call-operator invocations now qualify as one direct Git push, including mixed quoting and an explicit tool workdir. Actual executable identity, exact approved source, fresh full-graph scans and current repository binding remain required; genuine compound commands still refuse. Failed metadata queries expose only safe process categories and status codes, preserving denial and cleanup without printing command output or private paths.
+
+- Publication approval stays bound to its exact reviewed pending operation across neutral steering. Original user/scope and later state are requalified; explicit reviewed user scope needs no separate packet/question. Each attempt still requires a new complete graph scan, and derived indexes cannot revive revoked, fulfilled or unresolved authority.
+
+- Clarified scratch retention at the ledger recording step: callers choose the existing typed owner namespace before acquisition and distinguish completed PASS-terminal retention from preserving partial or failed results and later Version 3 close-time retention. Existing verdict, ownership and lifecycle requirements remain unchanged.
+
+- Historical README catalogues preserve the existing input role when receiving never-admitted retirement records. They retain stored incoming/source inventory and exact archived payload/digest checks without starting an unrelated current-consumer sweep; strict retirement and integrity audits still detect later stale citations.
 
 ## 2026-10-25
 

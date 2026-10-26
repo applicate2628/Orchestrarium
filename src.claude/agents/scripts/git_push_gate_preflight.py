@@ -46,9 +46,16 @@ _QUESTION_REPLY_OPEN = "<send_user_message_question_reply>\n"
 _QUESTION_REPLY_CLOSE = "\n</send_user_message_question_reply>"
 
 
+class PublicationQuestionAnswer(NamedTuple):
+    question_item_id: str
+    question: str
+    answer: str
+
+
 class PublicationUserReply(NamedTuple):
     kind: str
     answers: tuple[str, ...]
+    structured_items: tuple[PublicationQuestionAnswer, ...] = ()
 
     def publication_action(self) -> tuple[str, str]:
         """One atomic event disposition, using existing per-answer grammars."""
@@ -86,6 +93,14 @@ class PublicationPrGrant(NamedTuple):
     number: int
 
 
+def publication_reply_has_push_instruction(reply: PublicationUserReply) -> bool:
+    action, _ = reply.publication_action()
+    return action not in {"malformed", "revoked"} and any(
+        _has_publication_signal(answer, PUSH_INSTRUCTION_REGEX)
+        for answer in reply.answers
+    )
+
+
 def normalize_publication_approval_text(text: str) -> str:
     """Remove at most one accepted display wrapper from a whole approval."""
     normalized = text.strip()
@@ -115,6 +130,7 @@ def extract_publication_user_reply(entry: object) -> PublicationUserReply:
     if type(payload) is not list or not payload:
         return PublicationUserReply("recognized-malformed", ())
     answers: list[str] = []
+    structured_items: list[PublicationQuestionAnswer] = []
     malformed = False
     for member in payload:
         if (
@@ -125,10 +141,14 @@ def extract_publication_user_reply(entry: object) -> PublicationUserReply:
             malformed = True
         else:
             answers.append(member["answer"])
+            structured_items.append(PublicationQuestionAnswer(
+                member["questionItemId"], member["question"], member["answer"],
+            ))
     # Retained valid answers in a malformed carrier may only preserve an
     # explicit revocation; publication_action forbids every positive effect.
     return PublicationUserReply(
-        "recognized-malformed" if malformed else "structured-answer", tuple(answers)
+        "recognized-malformed" if malformed else "structured-answer", tuple(answers),
+        tuple(structured_items),
     )
 
 
@@ -2509,67 +2529,49 @@ def _has_static_posix_continuation_proof(parsed: ShellParseResult) -> bool:
         return False
 
 
-def absolute_literal_root_context(parsed: ShellParseResult) -> tuple[str, str] | None:
-    """Project literal A/R selection independently of route acceptance."""
+def literal_direct_command(parsed: ShellParseResult) -> ExecutableCommand | None:
+    """Reuse one parser-owned literal direct dispatch, including PowerShell &.
+
+    This is syntax/provenance only. Callers still qualify the actual executable,
+    repository, operation, consent and currentness under their existing owner.
+    """
     if type(parsed) is not ShellParseResult:
         return None
-    identity = parsed.identity
-    effective = parsed.effective_publications
     if (
         parsed.dialect not in {"posix", "powershell"}
-        or identity.dialect != parsed.dialect or identity.input_kind != "SHELL_TEXT"
-        or identity.depth != 0 or identity.parent is not None
-        or identity.wrapper_id is not None
-        or parsed.candidates or parsed.children or parsed.wrapper_projections
+        or parsed.identity.dialect != parsed.dialect
+        or parsed.identity.input_kind != "SHELL_TEXT"
+        or parsed.status != "SCG-PARSED" or parsed.candidates
+        or parsed.children or parsed.wrapper_projections
         or parsed.normalizations or parsed.lexical.operations or parsed.lexical.removed_spans
-        or len(parsed.commands) != 1 or len(parsed.pushes) != 1
-        or parsed.status != "SCG-PARSED" or not effective.exact_complete
-        or len(effective.records) != 1
-        or effective.eligible_direct_generic != effective.records
+        or len(parsed.commands) != 1 or not parsed.effective_publications.exact_complete
     ):
         return None
-    record = effective.records[0]
     command = parsed.commands[0]
-    push = record.push
-    argv = command.tokens
+    call_operator = (
+        parsed.dialect == "powershell" and command.nesting_context == "call-operator"
+        and command.boundary_before == "&"
+    )
     if (
-        record.kind != "DIRECT" or record.certainty != "exact"
-        or record.identity != identity or push != parsed.pushes[0]
-        or push.command != command
+        command.confidence != "exact" or command.normalization_state != "literal"
         or command.environment_assignments or command.control_keywords
-        or command.normalization_state != "literal"
-        or len(argv) < 4 or argv[1] != "-C" or argv[3] != "push"
-        or tuple(token.value for token in command.token_records) != argv
+        or (not call_operator and (command.nesting_context != "top-level" or command.boundary_before != "start"))
+        or (command.boundary_after != "end" and not command.trailing_linebreak_only)
+        or tuple(token.value for token in command.token_records) != command.tokens
     ):
         return None
-    executable, root = argv[0], argv[2]
-    if any(not value or "\x00" in value or not Path(value).is_absolute()
-           for value in (executable, root)):
+    # The segment's last boundary alone cannot prove solitary dispatch: empty
+    # prefixes/redirections can otherwise disappear during token projection.
+    operators = [atom for atom in parsed.lexical.atoms if atom.operator_capable
+                 and not (atom.value in "\r\n" and atom.source_span[0] >= command.source_span[1])]
+    if call_operator:
+        if len(operators) != 1 or operators[0].value != "&" or operators[0].source_span[1] > command.source_span[0]:
+            return None
+    elif operators:
         return None
-    if (
-        command.boundary_before != "start" and not (
-            parsed.dialect == "powershell" and command.boundary_before == "&"
-            and push.shell_context == "call-operator"
-        )
-    ) or (
-        command.boundary_after != "end" and not command.trailing_linebreak_only
-    ) or (
-        push.shell_context not in {"top-level", "call-operator"}
-        or push.environment_assignments
-        or push.executable != executable or command.arguments != argv[1:]
-        or push.git_global_options != ("-C", root)
-        or push.git_global_occurrences != (OptionOccurrence("-C", "required-value", "neutral", 1),)
-        or push.post_subcommand_tokens != argv[4:]
-        or push.repository_context != "redirected"
-    ):
+    if parsed.dialect == "powershell" and not call_operator and command.token_records[0].states != ("ordinary",):
         return None
-    if (
-        parsed.dialect == "powershell" and command.boundary_before == "start"
-        and command.token_records[0].states != ("ordinary",)
-    ):
-        return None
-    # Inspect the existing atoms, never reinterpret raw shell syntax. Quoting
-    # alone does not make an expansion-bearing token a literal selection.
+    # This is the existing literal A/R atom proof, shared rather than reparsed.
     for atom in parsed.lexical.atoms:
         if atom.token_membership < 0:
             continue
@@ -2581,13 +2583,48 @@ def absolute_literal_root_context(parsed: ShellParseResult) -> tuple[str, str] |
             return None
         if atom.state == "ordinary" and (
             any(character in "*?[{" for character in atom.value)
-            or (
-                atom.source_span == command.token_records[atom.token_membership].source_spans[0]
-                and atom.value == ("~" if parsed.dialect == "posix" else "@")
-            )
+            or (atom.source_span == command.token_records[atom.token_membership].source_spans[0]
+                and atom.value == ("~" if parsed.dialect == "posix" else "@"))
         ):
             return None
+    return command
+
+
+def absolute_literal_root_context(parsed: ShellParseResult) -> tuple[str, str] | None:
+    """Project literal A/R selection independently of route acceptance."""
+    command = literal_direct_command(parsed)
+    if command is None:
+        return None
+    identity = parsed.identity
+    effective = parsed.effective_publications
+    if (
+        identity.depth != 0 or identity.parent is not None or identity.wrapper_id is not None
+        or len(parsed.pushes) != 1 or len(effective.records) != 1
+        or effective.eligible_direct_generic != effective.records
+    ):
+        return None
+    record = effective.records[0]
+    push = record.push
+    argv = command.tokens
+    if (
+        record.kind != "DIRECT" or record.certainty != "exact" or record.identity != identity
+        or push != parsed.pushes[0] or push.command is not command
+        or len(argv) < 4 or argv[1] != "-C" or argv[3] != "push"
+    ):
+        return None
+    executable, root = argv[0], argv[2]
+    if any(not value or "\x00" in value or not Path(value).is_absolute() for value in (executable, root)):
+        return None
+    if (
+        push.shell_context not in {"top-level", "call-operator"} or push.environment_assignments
+        or push.executable != executable or command.arguments != argv[1:]
+        or push.git_global_options != ("-C", root)
+        or push.git_global_occurrences != (OptionOccurrence("-C", "required-value", "neutral", 1),)
+        or push.post_subcommand_tokens != argv[4:] or push.repository_context != "redirected"
+    ):
+        return None
     return executable, root
+
 
 def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     projection = parsed.effective_publications
@@ -2608,14 +2645,18 @@ def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     if not isinstance(push.command, ExecutableCommand):
         return GenericPushDecision("PGG-PARSE-UNCERTAIN", None)
     literal_context = absolute_literal_root_context(parsed)
-    canonical_literal_root = (
-        literal_context is not None
-        and _is_exact_direct_literal(parsed.raw_command, parsed)
-        and len(parsed.strict_projection.argv) == 6
-        and push.positionals == parsed.strict_projection.argv[4:]
+    literal_command = literal_direct_command(parsed)
+    literal_root = (
+        literal_context is not None and literal_command is push.command
+        and (parsed.dialect == "powershell" or _is_exact_direct_literal(parsed.raw_command, parsed))
+        and len(literal_command.tokens) == 6 and push.positionals == literal_command.tokens[4:]
         and not push.push_options and not push.push_option_occurrences
     )
-    if push.command.control_keywords or (not canonical_literal_root and (
+    literal_call = (
+        literal_command is push.command and parsed.dialect == "powershell"
+        and push.shell_context == "call-operator"
+    )
+    if push.command.control_keywords or (not literal_root and not literal_call and (
         push.shell_context != "top-level"
         or push.command.boundary_before != "start"
         or (
@@ -2624,11 +2665,11 @@ def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
         )
     )):
         return GenericPushDecision("PGG-COMPOUND-CONTEXT", None)
-    if push.repository_context != "ambient" and not canonical_literal_root:
+    if push.repository_context != "ambient" and not literal_root:
         return GenericPushDecision("PGG-REPOSITORY-REDIRECT", None)
     if push.environment_assignments:
         return GenericPushDecision("PGG-ENV-PREFIX", None)
-    if push.git_global_options and not canonical_literal_root:
+    if push.git_global_options and not literal_root:
         return GenericPushDecision("PGG-GIT-GLOBAL-OPTION", None)
     if push.option_status in ("GPO-MISSING-VALUE", "GPO-AMBIGUOUS"):
         return GenericPushDecision("PGG-OPTION-ARITY", None)
@@ -2754,6 +2795,25 @@ def resolve_command_dialect(tool_name: object) -> CommandDialectResolution:
     return CommandDialectResolution("unsupported", False)
 
 
+
+def parse_native_argument_vector(
+    argv: tuple[str, ...], root_occurrence: str, ordinal: int,
+) -> ShellParseResult:
+    """Use the existing DIRECT_ARGV grammar without shell reserialization.
+
+    Root token spans are argv indices, not invented shell-text offsets.
+    Existing wrapper projections alone may expose a literal shell child.
+    """
+    if type(argv) is not tuple or not argv or any(type(word) is not str or "\0" in word for word in argv) or not argv[0]:
+        raise TypeError("invalid native argument vector")
+    if type(root_occurrence) is not str or type(ordinal) is not int or ordinal < 0:
+        raise TypeError("invalid native argument vector identity")
+    dialect = _host_command_dialect()
+    records = tuple(LexicalToken(word, ((index, index + 1),), ("ARGV",), True) for index, word in enumerate(argv))
+    identity = CommandIdentity(dialect, 0, None, None, ordinal, "DIRECT_ARGV", None, None, (), root_occurrence)
+    return _parse_command_input(CommandInput("DIRECT_ARGV", dialect, None, records, None, records), identity)
+
+
 def parse_transcript_command(
     command_text: str,
     tool_name: object,
@@ -2799,6 +2859,8 @@ def _is_exact_direct_literal(command: str, parsed: ShellParseResult) -> bool:
     return serialized == command
 
 
+PUBLICATION_PREFLIGHT_REVISION = "PF-native-dialect-recovery-20261026"
+
 def _recover_mislabeled_command_dialect(
     command: str,
     resolution: CommandDialectResolution,
@@ -2822,7 +2884,14 @@ def _recover_mislabeled_command_dialect(
     candidates: list[tuple[str, ShellParseResult]] = []
     for dialect in ("posix", "powershell"):
         candidate = parsed if dialect == resolution.dialect else parse_shell_command(command, dialect)
-        if _is_exact_direct_literal(command, candidate):
+        literal = literal_direct_command(candidate)
+        publications = candidate.effective_publications.records
+        if (
+            literal is not None and len(publications) == 1
+            and publications[0].kind == "DIRECT"
+            and publications[0].certainty == "exact"
+            and publications[0].push.command is literal
+        ):
             candidates.append((dialect, candidate))
     if len(candidates) != 1 or candidates[0][0] != host_dialect:
         return resolution, parsed
@@ -2886,6 +2955,8 @@ class PreflightResult(NamedTuple):
     transcript_diagnostic: TranscriptDiagnostic | None = None
     simple_pr_approval: bool = False
     workdir_diagnostic: WorkdirDiagnostic | None = None
+    tool_use_id: str = ""
+    native_session_id: str = ""
 
 
 _OUTCOMES = frozenset(("ALLOW_FINAL", "ABSTAIN", "DEFER"))
@@ -3233,7 +3304,7 @@ def _result(
     ))
 
 
-def build_preflight(envelope: dict) -> PreflightResult:
+def _build_preflight(envelope: dict) -> PreflightResult:
     try:
         if envelope.get("agent_id"):
             return _result("ALLOW_FINAL", "PFP-ALLOW-SUBAGENT", "NONE")
@@ -3309,9 +3380,7 @@ def build_preflight(envelope: dict) -> PreflightResult:
             else PublicationUserReply("plain", ())
         )
         action, _ = reply.publication_action()
-        instruction = action not in {"malformed", "revoked"} and any(
-            _has_publication_signal(answer, PUSH_INSTRUCTION_REGEX) for answer in reply.answers
-        )
+        instruction = publication_reply_has_push_instruction(reply)
         grammar = classify_generic_push(parsed)
         transcript_diagnostic = TranscriptDiagnostic(
             envelope_status,
@@ -3358,6 +3427,21 @@ def build_preflight(envelope: dict) -> PreflightResult:
         )
     except Exception:
         return _result("DEFER", "PFP-DENY-INTERNAL", "RENDER_DENY")
+
+
+def build_preflight(envelope: dict) -> PreflightResult:
+    result = _build_preflight(envelope)
+    if not isinstance(envelope, dict) or result.continuation != "EVALUATE_HEAVY":
+        return result
+    values = []
+    for key in ("tool_use_id", "session_id"):
+        value = envelope.get(key)
+        if value is not None and type(value) is not str:
+            raise ValueError("invalid native invocation correlation")
+        values.append(value or "")
+    return validate_preflight_result(result._replace(
+        tool_use_id=values[0], native_session_id=values[1],
+    ))
 
 
 def build_preflight_from_stdin() -> PreflightResult:

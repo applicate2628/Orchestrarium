@@ -7,6 +7,7 @@ import io
 import importlib.util
 import itertools
 import json
+import math
 import os
 import re
 import stat as stat_module
@@ -61,6 +62,7 @@ V2_ONLY_FIELDS = {
     "rawLineOrdinal", "physicalLineSha256", "historyDisposition",
     "reviewedRole",
     "reviewArtifactCustody",
+    "reviewClosureProofs",
     "eventKind",
     "launchRunId",
     "closesRunIds",
@@ -133,6 +135,7 @@ ALLOWED_FIELDS = {
     "assignedRole",
     "reviewedRole",
     "reviewArtifactCustody",
+    "reviewClosureProofs",
     "provider",
     "model",
     "status",
@@ -221,6 +224,9 @@ MAX_SCRATCH_REPRODUCE_LENGTH = _ACCEPTED_ARTIFACT_SCHEMA["properties"]["reproduc
 MAX_LEDGER_LINE_CHARS = _JSONL_SCHEMA["maxLineChars"]
 MAX_LEDGER_LINE_BYTES = _JSONL_SCHEMA["maxLineBytes"]
 MAX_LEDGER_EVENTS = _JSONL_SCHEMA["maxEvents"]
+# The event -> proofs[] -> findingEvidence -> dispositions[] -> anchor ->
+# selector -> path[] -> literal wire requires depth 9 (including scalar leaves).
+# The canonical schema owns this finite structural parser bound.
 MAX_JSON_NESTING_DEPTH = _JSONL_SCHEMA["maxNestingDepth"]
 MAX_TRANSFER_RECEIPT_BYTES = 4 * 1024 * 1024
 MAX_TRANSFER_LEDGER_BYTES = MAX_LEDGER_EVENTS * (MAX_LEDGER_LINE_BYTES + 2)
@@ -493,6 +499,19 @@ def load_solution_attempt_owner():
     spec.loader.exec_module(module)
     _SOLUTION_ATTEMPT_OWNER = module
     return module
+
+
+def load_review_loop_owner():
+    name = "review_loop_owner_for_validation"
+    if name not in sys.modules:
+        owner_path = Path(__file__).with_name("review_loop_state.py")
+        spec = importlib.util.spec_from_file_location(name, owner_path)
+        if spec is None or spec.loader is None:
+            raise ValueError("C3-source-contract: actual L normalization owner unavailable")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
 
 
 def staged_status_fields(text: str) -> dict[str, str] | None:
@@ -2647,6 +2666,7 @@ class _CurrentEvidenceV1:
         self.received = False
         self.artifact_locators = {}
         self.transfer_grants = {}
+        self.review_source_errors = {}
 
     def artifact(self, item, value, label, run_id, errors):
         if not isinstance(value, str):
@@ -2827,6 +2847,859 @@ class _CurrentEvidenceV1:
             predicate.accepted = accepted
         self.received = True
         return changed
+
+
+@dataclass(frozen=True)
+class ResolvedReviewSourceV1:
+    """One exact source value received by the current captured-input owner."""
+
+    source_ref: str
+    source_sha256: str
+    selector_kind: str
+    value: object
+
+
+def _review_json_finite_float(value):
+    decoded = float(value)
+    if not math.isfinite(decoded):
+        raise ValueError("C3-proof-anchor: nonfinite JSON numeric value")
+    return decoded
+
+
+def parse_review_source_anchor_v1(anchor):
+    """Validate the new SourceAnchorV1 wire without selecting another read root."""
+    if type(anchor) is not dict or set(anchor) != {"source", "sourceSha256", "selector"}:
+        raise ValueError("C3-proof-anchor: expected source, sourceSha256 and selector")
+    source, selector = anchor["source"], anchor["selector"]
+    if (type(source) is not dict or set(source) != {"kind", "ref"}
+            or type(source["kind"]) is not str or source["kind"] not in {"review", "artifact"}
+            or type(source["ref"]) is not str or not source["ref"].strip()):
+        raise ValueError("C3-proof-anchor: invalid confined source reference")
+    if type(anchor["sourceSha256"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", anchor["sourceSha256"]):
+        raise ValueError("C3-proof-anchor: sourceSha256 must bind the whole source")
+    if type(selector) is not dict:
+        raise ValueError("C3-proof-anchor: selector must be an object")
+    if selector.get("kind") == "json-value":
+        if (set(selector) != {"kind", "path"} or type(selector["path"]) is not list
+                or any(not (type(part) is str or type(part) is int and part >= 0)
+                       for part in selector["path"])):
+            raise ValueError("C3-proof-anchor: json-value requires a literal string/index path")
+    elif selector.get("kind") == "utf8-range":
+        if (set(selector) != {"kind", "start", "end"}
+                or type(selector["start"]) is not int or type(selector["end"]) is not int
+                or not 0 <= selector["start"] < selector["end"]):
+            raise ValueError("C3-proof-anchor: invalid exclusive UTF-8 byte range")
+    else:
+        raise ValueError("C3-proof-anchor: unsupported selector kind")
+    return _current_json_value(anchor)
+
+
+def _capture_review_anchor_source(anchor, admitted_sources, inputs):
+    anchor = parse_review_source_anchor_v1(anchor)
+    if not isinstance(inputs, _CurrentEvidenceV1):
+        raise ValueError("C3-proof-anchor: a captured current-evidence owner is required")
+    locator = admitted_sources.get(anchor["source"]["ref"])
+    if type(locator) is not _ArtifactLocatorV1:
+        raise ValueError("C3-proof-anchor: source is outside the actual selected review/evidence domain")
+    namespace = inputs.path(locator.selected, file=True, _locator=locator)
+    if not any(predicate is namespace for predicate in inputs.selection_inputs):
+        inputs.selection_inputs.append(namespace)
+    raw = inputs.read_selection(locator.selected)
+    if hashlib.sha256(raw).hexdigest() != anchor["sourceSha256"]:
+        raise ValueError("C3-proof-anchor: whole-source digest mismatch")
+    return anchor, raw
+
+
+def resolve_review_source_anchor_v1(anchor, *, admitted_sources, inputs):
+    """Receive exact captured bytes through existing locator/currentness custody.
+
+    This selects durable claim support or an explicitly selected call-time
+    witness. It never interprets a historical subject identifier as a locator.
+    """
+    anchor, raw = _capture_review_anchor_source(anchor, admitted_sources, inputs)
+    text = raw.decode("utf-8", errors="strict")
+    selector = anchor["selector"]
+    if selector["kind"] == "json-value":
+        def reject_constant(value):
+            raise ValueError(f"C3-proof-anchor: non-JSON constant {value}")
+        try:
+            value = json.loads(text, object_pairs_hook=_reject_duplicate_keys,
+                               parse_constant=reject_constant, parse_float=_review_json_finite_float)
+        except RecursionError as exc:
+            raise ValueError("C3-proof-anchor: source JSON exceeds runtime decoder capacity") from exc
+        for part in selector["path"]:
+            if type(part) is str and type(value) is dict and part in value:
+                value = value[part]
+            elif type(part) is int and type(value) is list and part < len(value):
+                value = value[part]
+            else:
+                raise ValueError("C3-proof-anchor: literal JSON selection is absent or has wrong type")
+    else:
+        start, end = selector["start"], selector["end"]
+        if end > len(raw):
+            raise ValueError("C3-proof-anchor: UTF-8 range exceeds captured source")
+        raw[:start].decode("utf-8", errors="strict")
+        raw[:end].decode("utf-8", errors="strict")
+        value = raw[start:end].decode("utf-8", errors="strict")
+    return ResolvedReviewSourceV1(anchor["source"]["ref"], anchor["sourceSha256"],
+                                       selector["kind"], value)
+
+
+def _review_exact_object(value, keys, label):
+    if type(value) is not dict or set(value) != set(keys):
+        raise ValueError(f"C3-review-proof: {label} has invalid fields")
+
+
+def _review_nonempty(value, label):
+    if type(value) is not str or not value.strip():
+        raise ValueError(f"C3-review-proof: {label} must be nonempty")
+
+
+def _review_anchor_list(value, label, *, empty=False):
+    if type(value) is not list or not empty and not value:
+        raise ValueError(f"C3-review-proof: {label} requires actual source anchors")
+    for anchor in value:
+        parse_review_source_anchor_v1(anchor)
+
+
+def _parse_review_proof_bindings(proof):
+    for key in ("target", "reviewerPass"):
+        value = proof[key]
+        _review_exact_object(value, {"runId", "rawLineSha256"}, key)
+        _review_nonempty(value["runId"], key + ".runId")
+        if type(value["rawLineSha256"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", value["rawLineSha256"]):
+            raise ValueError("C3-review-proof: invalid raw-row digest")
+    _review_exact_object(proof["reports"], {"targetSha256", "passSha256"}, "reports")
+    for value in proof["reports"].values():
+        if type(value) is not str or not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ValueError("C3-review-proof: invalid whole-report digest")
+    _review_exact_object(proof["subject"], {"before", "after"}, "subject")
+    for name in ("before", "after"):
+        subject = proof["subject"][name]
+        _review_exact_object(subject, {"artifactKey", "revision"}, "subject." + name)
+        for value in subject.values():
+            _review_nonempty(value, "historical subject identifier")
+    binding = proof["bindingEvidence"]
+    _review_exact_object(binding, {"scope", "angle", "lineage", "nativeReceiving"}, "bindingEvidence")
+    _review_exact_object(binding["scope"], {"relation", "sources"}, "scope")
+    if binding["scope"]["relation"] not in ("same", "narrower-with-full-target-coverage"):
+        raise ValueError("C3-review-proof: unsupported semantic scope relation")
+    _review_exact_object(binding["angle"], {"value", "sources"}, "angle")
+    _review_nonempty(binding["angle"]["value"], "angle.value")
+    _review_exact_object(binding["lineage"], {"sources"}, "lineage")
+    for name in ("scope", "angle", "lineage"):
+        _review_anchor_list(binding[name]["sources"], name)
+    native = binding["nativeReceiving"]
+    _review_exact_object(native, {"facts", "sources"}, "nativeReceiving")
+    _review_anchor_list(native["sources"], "nativeReceiving.sources", empty=True)
+    if type(native["facts"]) is not list or not native["facts"]:
+        raise ValueError("C3-review-proof: actual native receiving facts required")
+    for fact in native["facts"]:
+        if (type(fact) is not dict or not {"kind", "ref"} <= set(fact)
+                or not set(fact) <= EVIDENCE_ALLOWED_FIELDS or type(fact["kind"]) is not str
+                or fact["kind"] not in EVIDENCE_KINDS):
+            raise ValueError("C3-review-proof: invalid native fact evidence")
+        _review_nonempty(fact["ref"], "native fact reference")
+        if "result" in fact and type(fact["result"]) is not str:
+            raise ValueError("C3-review-proof: native fact result must be a string")
+
+
+def parse_review_closure_proof_v1(proof):
+    _review_exact_object(proof, {"version", "target", "reviewerPass", "reports", "subject",
+                                "bindingEvidence", "findingEvidence", "receivingMode"}, "proof")
+    if type(proof["version"]) is not int or proof["version"] != 1:
+        raise ValueError("C3-review-proof: version must be 1")
+    if proof["receivingMode"] not in ("structured", "owner-equivalent"):
+        raise ValueError("C3-review-proof: unsupported receivingMode")
+    _parse_review_proof_bindings(proof)
+    finding = proof["findingEvidence"]
+    _review_exact_object(finding, {"completeTargetFindings", "dispositions"}, "findingEvidence")
+    parse_review_source_anchor_v1(finding["completeTargetFindings"])
+    if type(finding["dispositions"]) is not list or not finding["dispositions"]:
+        raise ValueError("C3-review-proof: explicit finding dispositions required")
+    seen = set()
+    for disposition in finding["dispositions"]:
+        _review_exact_object(disposition, {"findingId", "targetFinding", "reviewerDisposition"}, "disposition")
+        _review_nonempty(disposition["findingId"], "findingId")
+        if disposition["findingId"] in seen:
+            raise ValueError("C3-review-proof: duplicate finding disposition")
+        seen.add(disposition["findingId"])
+        parse_review_source_anchor_v1(disposition["targetFinding"])
+        parse_review_source_anchor_v1(disposition["reviewerDisposition"])
+    return _current_json_value(proof)
+
+
+@dataclass(frozen=True)
+class ResolvedReviewSourceUnitV2:
+    source_ref: str
+    source_sha256: str
+    selector_kind: str
+    coordinate: tuple
+    document: object
+    value: object
+    ancestry: tuple
+
+
+def resolve_review_source_unit_v2(anchor, *, admitted_sources, inputs):
+    """One actual tree unit or whole prose, never a guessed byte/JSON join."""
+    anchor, raw = _capture_review_anchor_source(anchor, admitted_sources, inputs)
+    text = raw.decode("utf-8", errors="strict")
+    try:
+        document = _review_strict_json(raw)
+    except json.JSONDecodeError:
+        selector = anchor["selector"]
+        if selector["kind"] != "utf8-range" or selector["start"] != 0 or selector["end"] != len(raw):
+            raise ValueError("C3-proof-unit: prose authority requires the whole captured UTF-8 report")
+        return ResolvedReviewSourceUnitV2(anchor["source"]["ref"], anchor["sourceSha256"],
+            "utf8-range", (0, len(raw)), text, text, ())
+    except RecursionError as exc:
+        raise ValueError("C3-proof-unit: JSON exceeds runtime decoder capacity") from exc
+    selector = anchor["selector"]
+    if selector["kind"] != "json-value":
+        raise ValueError("C3-proof-unit: actual JSON authority requires its literal JSON path")
+    value = document
+    path = ()
+    ancestry = [(path, value)]
+    for part in selector["path"]:
+        if type(part) is str and type(value) is dict and part in value:
+            value = value[part]
+        elif type(part) is int and type(value) is list and part < len(value):
+            value = value[part]
+        else:
+            raise ValueError("C3-proof-unit: literal JSON selection absent or wrong type")
+        path = (*path, part)
+        ancestry.append((path, value))
+    return ResolvedReviewSourceUnitV2(anchor["source"]["ref"], anchor["sourceSha256"],
+        "json-value", tuple(selector["path"]), document, value, tuple(ancestry))
+
+
+def parse_review_closure_proof_v2(proof):
+    _review_exact_object(proof, {"version", "target", "reviewerPass", "reports", "subject",
+        "bindingEvidence", "findingEvidence", "rootSemanticReceiving"}, "proofV2")
+    if type(proof["version"]) is not int or proof["version"] != 2:
+        raise ValueError("C3-review-proof: version must be 2")
+    _parse_review_proof_bindings(proof)
+    _review_exact_object(proof["findingEvidence"], {"completeTargetFindings"}, "findingEvidenceV2")
+    parse_review_source_anchor_v1(proof["findingEvidence"]["completeTargetFindings"])
+    received = proof["rootSemanticReceiving"]
+    _review_exact_object(received, {"version", "action", "findings"}, "rootSemanticReceiving")
+    if type(received["version"]) is not int or received["version"] not in (1, 2) or received["action"] != "receive-independent-review-claims":
+        raise ValueError("C3-review-proof: actual Root semantic receiving action required")
+    if type(received["findings"]) is not list or not received["findings"]:
+        raise ValueError("C3-review-proof: actual per-finding Root results required")
+    seen = set()
+    for result in received["findings"]:
+        _review_exact_object(result, {"findingId", "targetFinding", "reviewerClaimUnit", "reviewedRevision", "meaning"}, "Root finding result")
+        _review_nonempty(result["findingId"], "findingId")
+        if result["findingId"] in seen:
+            raise ValueError("C3-review-proof: duplicate Root finding result")
+        seen.add(result["findingId"])
+        parse_review_source_anchor_v1(result["targetFinding"])
+        parse_review_source_anchor_v1(result["reviewerClaimUnit"])
+        if result["reviewedRevision"] != proof["subject"]["after"]["revision"] or result["meaning"] != "reviewer-explicitly-reverified-corrected-finding":
+            raise ValueError("C3-review-proof: per-finding revision/actual positive meaning differs")
+    return _current_json_value(proof)
+
+
+def parse_review_closure_proof(proof):
+    if type(proof) is not dict or type(proof.get("version")) is not int:
+        raise ValueError("C3-review-proof: actual nested proof version required")
+    if proof["version"] == 1:
+        return parse_review_closure_proof_v1(proof)
+    if proof["version"] == 2:
+        return parse_review_closure_proof_v2(proof)
+    raise ValueError("C3-review-proof: unsupported nested proof version")
+
+
+def _review_proof_event_shape(event):
+    proofs = event.get("reviewClosureProofs")
+    if type(proofs) is not list or not proofs:
+        raise ValueError("C3-review-proof: reviewClosureProofs must be nonempty")
+    fixed = {"schemaVersion": 2, "role": "lead", "executionRole": "main",
+             "eventKind": "standalone", "status": "completed", "gate": "PASS"}
+    if event.get("assignedRole") not in (None, "lead"):
+        raise ValueError("C3-review-proof: Root receiving cannot claim an assigned reviewer profession")
+    if any(event.get(key) != value for key, value in fixed.items()) or any(
+            key in event for key in ("launchRunId", "terminalClass", "externalEvidenceRunId",
+                                     "reviewArtifactCustody", "externalDispatchId", "authorizing",
+                                     "actualExecutionPath", "targetTuple", "closerRunId", "reviewedRole")):
+        raise ValueError("C3-review-proof: only truthful standalone Lead/main receiving may carry proofs")
+    targets = []
+    for proof in proofs:
+        parse_review_closure_proof(proof)
+        targets.append(proof["target"]["runId"])
+    for entry, recognition in _review_contract_references(event):
+        for proof in proofs:
+            if _review_contract_selects_proof(recognition, proof):
+                parse_review_source_contract_evidence(entry)
+                if proof["version"] != 2 or proof["rootSemanticReceiving"]["version"] != 2:
+                    raise ValueError("C3-source-contract: selected typed obligation cannot be manually downgraded")
+    closes = event.get("closesRunIds")
+    if (type(closes) is not list or len(set(targets)) != len(targets)
+            or len(set(closes)) != len(closes) or set(targets) != set(closes)):
+        raise ValueError("C3-review-proof: proof targets must exactly equal unique closesRunIds")
+
+
+_REVIEW_ASSOCIATION_SEAL = object()
+
+
+@dataclass(frozen=True)
+class QualifiedReviewAssociationV1:
+    """Ephemeral current evaluation, never a serialized reviewer verdict/token."""
+
+    receiving_run_id: str
+    target_run_id: str
+    reviewer_run_id: str
+    target_raw_sha256: str
+    reviewer_raw_sha256: str
+    _seal: object = field(repr=False, compare=False)
+
+
+def _review_selected_sources(item, events, inputs):
+    admitted = {}
+    for event in events:
+        references = [event.get("artifact")]
+        references.extend(entry.get("ref") for entry in event.get("evidence", ())
+                          if isinstance(entry, Mapping) and entry.get("kind") in {"artifact", "review"})
+        for ref in references:
+            if not isinstance(ref, str) or ref in admitted:
+                continue
+            errors = []
+            locator = inputs.artifact(item, ref, "review selected source", event.get("runId"), errors)
+            if locator is not None:
+                admitted[ref] = locator
+    return admitted
+
+
+def _review_resolve(anchor, admitted, inputs, *, required_ref=None):
+    if required_ref is not None and anchor["source"]["ref"] != required_ref:
+        raise ValueError("C3-review-proof: finding claim is not from the actual selected reviewer/target report")
+    return resolve_review_source_anchor_v1(anchor, admitted_sources=admitted, inputs=inputs).value
+
+
+def _review_strict_json(raw):
+    def nonfinite(value):
+        raise ValueError("C3-review-proof: nonfinite JSON constant")
+    return json.loads(raw.decode("utf-8", errors="strict"),
+                      object_pairs_hook=_reject_duplicate_keys, parse_constant=nonfinite,
+                      parse_float=_review_json_finite_float)
+
+
+def _review_literal_values(value):
+    pending = [value]
+    while pending:
+        selected = pending.pop()
+        if type(selected) is dict:
+            pending.extend(selected.values())
+        elif type(selected) is list:
+            pending.extend(selected)
+        else:
+            yield selected
+
+
+REVIEW_SOURCE_CONTRACT_KIND = "review-source-contract-binding"
+REVIEW_SOURCE_CONTRACT_PROFILE = "review-loop-explicit-six-field-result-v2"
+
+
+def _review_contract_references(event):
+    for entry in event.get("evidence", ()):
+        if not isinstance(entry, Mapping) or type(entry.get("result")) is not str:
+            continue
+        try:
+            value = json.loads(entry["result"])
+        except (ValueError, TypeError):
+            continue  # Ordinary unstructured result prose stays ordinary.
+        if type(value) is dict and value.get("kind") == REVIEW_SOURCE_CONTRACT_KIND:
+            yield entry, value
+
+
+def parse_review_source_contract_evidence(entry):
+    """Exact existing outer evidence codec; the typed payload is JSON STRING."""
+    _review_exact_object(entry, {"kind", "ref", "result"}, "source-contract evidence")
+    if entry["kind"] not in {"artifact", "review"} or type(entry["result"]) is not str:
+        raise ValueError("C3-source-contract: admitted artifact/review and string result required")
+    value = decode_json_object(entry["result"], source="review source contract result")
+    if _canonical_projection_bytes(value).decode("utf8") != entry["result"]:
+        raise ValueError("C3-source-contract: canonical JSON result string required")
+    _review_exact_object(value, {"schemaVersion", "kind", "protocol", "producer", "commission", "delivery", "loop"}, "source-contract binding")
+    if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1 or value["kind"] != REVIEW_SOURCE_CONTRACT_KIND:
+        raise ValueError("C3-source-contract: unsupported binding version/kind")
+    _review_nonempty(value["protocol"], "actually acquired protocol")
+    producer = value["producer"]
+    _review_exact_object(producer, {"runId", "rawLineSha256"}, "source-contract producer")
+    _review_nonempty(producer["runId"], "source-contract runId")
+    if type(producer["rawLineSha256"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", producer["rawLineSha256"]):
+        raise ValueError("C3-source-contract: actual producer raw-row hash required")
+    for anchor in (value["commission"], value["delivery"]):
+        parse_review_source_anchor_v1(anchor)
+    if entry["ref"] != value["commission"]["source"]["ref"]:
+        raise ValueError("C3-source-contract: evidence ref must name its actual commission source")
+    loop = value["loop"]
+    _review_exact_object(loop, {"state", "round", "lane", "attemptId", "artifactRevision"}, "source-contract loop")
+    parse_review_source_anchor_v1(loop["state"])
+    if type(loop["round"]) is not int or loop["round"] < 1:
+        raise ValueError("C3-source-contract: actual positive round required")
+    for key in ("lane", "attemptId", "artifactRevision"):
+        _review_nonempty(loop[key], "source-contract " + key)
+    return value
+
+
+def _review_contract_selects_proof(binding, proof):
+    """Identify possible selected association, never positive promise credit.
+
+    A wrong producer label cannot hide an actual selected raw-row or delivery
+    reference. Full genuine producer/commission/delivery qualification follows.
+    Unrelated actual promises remain outside this proof's receiving domain.
+    """
+    producer = binding.get("producer")
+    producer = producer if type(producer) is dict else {}
+    delivery = binding.get("delivery")
+    source = delivery.get("source") if type(delivery) is dict else None
+    delivery_ref = source.get("ref") if type(source) is dict else None
+    selected = (proof["target"], proof["reviewerPass"])
+    reports = {proof["findingEvidence"]["completeTargetFindings"]["source"]["ref"]}
+    if proof["version"] == 2:
+        reports.update(result["reviewerClaimUnit"]["source"]["ref"] for result in proof["rootSemanticReceiving"]["findings"])
+    else:
+        reports.update(result["reviewerDisposition"]["source"]["ref"] for result in proof["findingEvidence"]["dispositions"])
+    return (any(producer.get("runId") == reference["runId"] for reference in selected)
+            or any(producer.get("rawLineSha256") == reference["rawLineSha256"] for reference in selected)
+            or any(delivery_ref == report for report in reports))
+
+
+def prepare_review_source_contract_evidence(event):
+    """Forward actual acquired references; never invent a Root semantic act."""
+    known = [(entry, parse_review_source_contract_evidence(entry)) for entry, _value in _review_contract_references(event)]
+    if not known:
+        return
+    evidence = event.setdefault("evidence", [])
+    for entry, binding in known:
+        for anchor in (binding["commission"], binding["delivery"], binding["loop"]["state"]):
+            reference = {"kind": anchor["source"]["kind"], "ref": anchor["source"]["ref"]}
+            if not any(old.get("kind") in {"artifact", "review"} and old.get("ref") == reference["ref"] for old in evidence):
+                evidence.append(reference)
+        proofs = event.get("reviewClosureProofs", ())
+        relevant = [proof for proof in proofs if _review_contract_selects_proof(binding, proof)]
+        for proof in relevant:
+            if proof["version"] != 2 or proof["rootSemanticReceiving"]["version"] != 2:
+                raise ValueError("C3-source-contract: known-aware receiving version 2 required; no manual downgrade")
+            facts = proof["bindingEvidence"]["nativeReceiving"]["facts"]
+            if entry not in facts:
+                facts.append(_current_json_value(entry))
+
+
+@dataclass(frozen=True)
+class QualifiedReviewSourceContractV1:
+    protocol: str
+    producer_run_id: str
+    producer_raw_sha256: str
+    loop_id: str
+    round_number: int
+    lane: str
+    attempt_id: str
+    artifact_revision: str
+    verdict: str
+
+
+def _selected_review_contract_inputs(proof, rows, validity, receiver_pos):
+    required = []
+    for position, row in enumerate(rows[:receiver_pos + 1]):
+        event = row.event
+        if (event.get("role") != "lead" or event.get("executionRole") != "main"
+                or event.get("eventKind") != "standalone" or event.get("gate") != "PASS"
+                or event.get("status") != "completed"
+                or not validity[position].current_schema_valid
+                or not (validity[position].authority.closer_eligible if position == receiver_pos
+                        else validity[position].authority.artifact_evidence_eligible)):
+            continue
+        for entry, recognition in _review_contract_references(event):
+            if _review_contract_selects_proof(recognition, proof):
+                binding = parse_review_source_contract_evidence(entry)
+                if (entry, binding) not in required:
+                    required.append((entry, binding))
+    receiver = rows[receiver_pos].event
+    for entry, _binding in required:
+        if entry not in receiver.get("evidence", ()) or entry not in proof["bindingEvidence"]["nativeReceiving"]["facts"]:
+            raise ValueError("C3-source-contract: actually acquired selected obligation was not forwarded")
+    if required and (proof["version"] != 2 or proof["rootSemanticReceiving"]["version"] != 2):
+        raise ValueError("C3-source-contract: known-aware receiving version 2 required; no manual downgrade")
+    if proof["version"] == 2 and proof["rootSemanticReceiving"]["version"] == 2 and not required:
+        raise ValueError("C3-source-contract: known marker without actual acquired binding supplies no credit")
+    return required
+
+
+def _qualify_review_source_contract(binding, entry, proof, rows, admitted, inputs):
+    if binding["protocol"] != REVIEW_SOURCE_CONTRACT_PROFILE:
+        raise ValueError("C3-source-contract: actual promised protocol unsupported: " + binding["protocol"])
+    producer = binding["producer"]
+    role = "target" if producer["runId"] == proof["target"]["runId"] else "reviewerPass"
+    if producer != proof[role]:
+        raise ValueError("C3-source-contract: producer/run/raw-row association differs")
+    candidates = [row for row in rows if row.event.get("runId") == producer["runId"]]
+    if len(candidates) != 1 or candidates[0].raw_line_sha256 != producer["rawLineSha256"]:
+        raise ValueError("C3-source-contract: actual producer is unavailable")
+    row = candidates[0].event
+    delivery = binding["delivery"]
+    expected_hash = proof["reports"]["targetSha256" if role == "target" else "passSha256"]
+    if delivery["source"]["ref"] != row.get("artifact") or delivery["sourceSha256"] != expected_hash:
+        raise ValueError("C3-source-contract: delivery is not the actual selected producer report")
+    commission = resolve_review_source_unit_v2(binding["commission"], admitted_sources=admitted, inputs=inputs)
+    delivered = resolve_review_source_unit_v2(delivery, admitted_sources=admitted, inputs=inputs)
+    state = resolve_review_source_unit_v2(binding["loop"]["state"], admitted_sources=admitted, inputs=inputs)
+    if delivered.selector_kind != "json-value" or state.selector_kind != "json-value":
+        raise ValueError("C3-source-contract: actual L state/result JSON unit required")
+    expected_revision = proof["subject"]["before" if role == "target" else "after"]["revision"]
+    loop = binding["loop"]
+    if loop["artifactRevision"] != expected_revision:
+        raise ValueError("C3-source-contract: role-appropriate reviewed revision differs")
+    owner = load_review_loop_owner()
+    try:
+        result = owner.qualify_completed_verdict_result_v2(
+            state.value, delivered.value, round_number=loop["round"], lane=loop["lane"],
+            attempt_id=loop["attemptId"], artifact_revision=loop["artifactRevision"], require_all_fields=True,
+        )
+    except (owner.StateError, ValueError, TypeError, KeyError) as exc:
+        raise ValueError("C3-source-contract: actual L state/result qualification failed: " + str(exc)) from exc
+    expected_verdict = "REVISE" if role == "target" else "PASS"
+    if result["verdict"] != expected_verdict or row.get("gate") != expected_verdict:
+        raise ValueError("C3-source-contract: actual overall verdict cannot be promoted across producer role")
+    return QualifiedReviewSourceContractV1(binding["protocol"], producer["runId"], producer["rawLineSha256"],
+        state.value["loop_id"], loop["round"], loop["lane"], loop["attemptId"], loop["artifactRevision"], result["verdict"])
+
+
+def _qualify_review_semantic_results_v2(proof, admitted, inputs, target_ref, pass_ref, binding_values):
+    """4712 actual Root receiving: bind units, do not infer unpromised meaning.
+
+    The literal normalized Root result is a truthful semantic duty over actual
+    independent source, not a JSON-only proof that arbitrary prose is positive.
+    Known machine constraints are qualified separately through their real owner.
+    """
+    for anchor, required in [(proof["findingEvidence"]["completeTargetFindings"], target_ref), *(
+            pair for result in proof["rootSemanticReceiving"]["findings"]
+            for pair in ((result["targetFinding"], target_ref), (result["reviewerClaimUnit"], pass_ref)))]:
+        if anchor["source"]["ref"] != required:
+            raise ValueError("C3-proof-unit: actual selected target/reviewer source mismatch")
+        resolve_review_source_unit_v2(anchor, admitted_sources=admitted, inputs=inputs)
+
+
+def receive_review_association_v1(proof, *, resolved_sources, rows, validity, root_receiving):
+    """Qualify a genuine reviewer result plus Root's anchored semantic receiving.
+
+    Arbitrary prose is interpreted by the actual receiving owner, not an NLP
+    parser. Mechanical receiving binds its exact sources/complete association;
+    only the fitting structured adapter mechanically decides claim semantics.
+    """
+    receiver_pos, inputs = root_receiving
+    receiver = rows[receiver_pos].event
+    _review_proof_event_shape(receiver)
+    index = {}
+    for position, row in enumerate(rows):
+        index.setdefault(row.event.get("runId"), []).append(position)
+    positions = []
+    for key in ("target", "reviewerPass"):
+        selected = index.get(proof[key]["runId"], ())
+        if len(selected) != 1:
+            raise ValueError("C3-review-proof: selected row identity is not unique")
+        position = selected[0]
+        if rows[position].raw_line_sha256 != proof[key]["rawLineSha256"]:
+            raise ValueError("C3-review-proof: selected raw-row digest mismatch")
+        positions.append(position)
+    target_pos, reviewer_pos = positions
+    if not target_pos < reviewer_pos < receiver_pos:
+        raise ValueError("C3-review-proof: require target < actual reviewer PASS < receiving")
+    target, reviewer = rows[target_pos].event, rows[reviewer_pos].event
+    if (target.get("gate") != "REVISE" or not validity[target_pos].authority.revise_target_eligible
+            or reviewer.get("gate") != "PASS" or reviewer.get("status") != "completed"
+            or not validity[reviewer_pos].authority.artifact_evidence_eligible
+            or not validity[reviewer_pos].current_schema_valid
+            or reviewer.get("executionRole") != "internal" or "terminalClass" in reviewer
+            or reviewer.get("role") in {"lead", "consultant", "external-worker", "external-reviewer", "external-brigade"}
+            or target.get("workItem") != reviewer.get("workItem")
+            or target.get("workItem") != receiver.get("workItem")):
+        raise ValueError("C3-review-proof: evidence is not an eligible actual native reviewer PASS")
+    target_role = target.get("assignedRole") or target.get("role")
+    if target_role == "lead" and target.get("executionRole") == "main":
+        profession_ok = (reviewer.get("role") == "qa-engineer" and reviewer.get("reviewedRole") == "lead"
+                         and reviewer.get("assignedRole") != "lead"
+                         and reviewer.get("closesRunIds") == [target["runId"]])
+    else:
+        # Native profession is the actual role. An assignedRole label cannot
+        # turn an author/another profession into the required reviewer.
+        profession_ok = (bool(target_role) and reviewer.get("role") == target_role
+                         and reviewer.get("assignedRole") in (None, target_role))
+    if not profession_ok:
+        raise ValueError("C3-review-proof: actual reviewer profession does not match target authority")
+    native_facts = proof["bindingEvidence"]["nativeReceiving"]["facts"]
+    if any(fact not in receiver.get("evidence", ()) for fact in native_facts):
+        raise ValueError("C3-review-proof: native facts are not actual Root receiving evidence")
+    target_ref, pass_ref = target.get("artifact"), reviewer.get("artifact")
+    if target_ref not in resolved_sources or pass_ref not in resolved_sources:
+        raise ValueError("C3-review-proof: actual reviewer reports unavailable")
+    for report_event, digest in ((target, proof["reports"]["targetSha256"]),
+                                 (reviewer, proof["reports"]["passSha256"])):
+        recorded = report_event.get("artifactRevision")
+        if (isinstance(recorded, str) and re.fullmatch(r"[0-9a-fA-F]{64}", recorded)
+                and recorded.lower() != digest):
+            raise ValueError("C3-review-proof: selected row's recorded report revision differs")
+    report_bytes = []
+    for ref, digest in ((target_ref, proof["reports"]["targetSha256"]),
+                        (pass_ref, proof["reports"]["passSha256"])):
+        raw = inputs.read_selection(resolved_sources[ref].selected)
+        if hashlib.sha256(raw).hexdigest() != digest:
+            raise ValueError("C3-review-proof: actual report digest mismatch")
+        report_bytes.append(raw)
+    contracts = _selected_review_contract_inputs(proof, rows, validity, receiver_pos)
+    for entry, binding in contracts:
+        _qualify_review_source_contract(binding, entry, proof, rows, resolved_sources, inputs)
+    binding_values = {}
+    for name in ("scope", "angle", "lineage", "nativeReceiving"):
+        anchors = proof["bindingEvidence"][name]["sources"]
+        if proof["version"] == 2:
+            binding_values[name] = [resolve_review_source_unit_v2(anchor, admitted_sources=resolved_sources, inputs=inputs).value for anchor in anchors]
+        else:
+            binding_values[name] = [_review_resolve(anchor, resolved_sources, inputs) for anchor in anchors]
+        if proof["version"] == 1 and any(value in (None, "", [], {}) for value in binding_values[name]):
+            raise ValueError("C3-review-proof: empty actual binding claim")
+    for value in binding_values["nativeReceiving"]:
+        # Check actually exposed separate-assignment facts where this existing
+        # JSON shape supplies them. Missing host IDs add no new attestation gate.
+        if proof["version"] == 1 and type(value) is dict and {"authorRunId", "reviewerRunId"} <= set(value):
+            if (value["authorRunId"] == value["reviewerRunId"]
+                    or value["reviewerRunId"] != reviewer["runId"]):
+                raise ValueError("C3-review-proof: exposed native author/reviewer assignment conflicts")
+    if proof["version"] == 2:
+        _qualify_review_semantic_results_v2(proof, resolved_sources, inputs, target_ref, pass_ref, binding_values)
+        return QualifiedReviewAssociationV1(receiver["runId"], target["runId"], reviewer["runId"],
+            rows[target_pos].raw_line_sha256, rows[reviewer_pos].raw_line_sha256, _REVIEW_ASSOCIATION_SEAL)
+    if proof["receivingMode"] != "structured":
+        raise ValueError("C3-review-proof: unproved opaque V1 semantic prototype requires actual V2 Root receiving; no automatic upgrade")
+    finding = proof["findingEvidence"]
+    complete = _review_resolve(finding["completeTargetFindings"], resolved_sources, inputs,
+                               required_ref=target_ref)
+    selected = []
+    for disposition in finding["dispositions"]:
+        selected.append((disposition["findingId"],
+            _review_resolve(disposition["targetFinding"], resolved_sources, inputs, required_ref=target_ref),
+            _review_resolve(disposition["reviewerDisposition"], resolved_sources, inputs, required_ref=pass_ref)))
+    # Complete structured identifier collections remain mechanically complete
+    # even when the reviewer claim itself needs owner-equivalent text receiving.
+    actual_ids = None
+    if type(complete) is list and complete:
+        if all(type(entry) is dict and type(entry.get("id")) is str for entry in complete):
+            actual_ids = [entry["id"] for entry in complete]
+        elif all(type(entry) is str for entry in complete):
+            actual_ids = complete
+    if actual_ids is not None:
+        if (any(not value.strip() for value in actual_ids)
+                or len(set(actual_ids)) != len(actual_ids)
+                or set(actual_ids) != {entry[0] for entry in selected}):
+            raise ValueError("C3-review-proof: complete actual finding collection is not fully associated")
+        for identifier, target_claim, _pass_claim in selected:
+            if target_claim not in complete or (type(target_claim) is dict
+                    and target_claim.get("id") != identifier) or (type(target_claim) is str
+                    and target_claim != identifier):
+                raise ValueError("C3-review-proof: actual target finding/source identifier mismatch")
+    # Mode chooses a fitting representation, never permission to contradict
+    # an actually exposed typed claim or omit an actual typed target finding.
+    reports = []
+    for raw in report_bytes:
+        try:
+            reports.append(_review_strict_json(raw))
+        except (ValueError, UnicodeError):
+            if proof["receivingMode"] == "structured":
+                raise
+            reports.append(None)  # Actual prose remains owner-equivalent input.
+    target_report, pass_report = reports
+    identifiers = [entry[0] for entry in selected]
+    if type(target_report) is dict and "blockerDetails" in target_report:
+        exposed = target_report["blockerDetails"]
+        if (type(exposed) is not list or not exposed
+                or any(type(entry) is not dict or type(entry.get("id")) is not str
+                       or not entry["id"].strip() for entry in exposed)):
+            raise ValueError("C3-review-proof: ambiguous actual typed target findings")
+        exposed_ids = [entry["id"] for entry in exposed]
+        if len(set(exposed_ids)) != len(exposed_ids) or set(exposed_ids) != set(identifiers):
+            raise ValueError("C3-review-proof: actual typed target findings are not fully associated")
+    relevant = None
+    if type(pass_report) is dict and "priorFindingDispositions" in pass_report:
+        actual_dispositions = pass_report["priorFindingDispositions"]
+        if type(actual_dispositions) is not list:
+            raise ValueError("C3-review-proof: actual reviewer finding dispositions unavailable")
+        relevant = [entry for entry in actual_dispositions
+                    if type(entry) is dict and entry.get("id") in identifiers]
+        if (len(relevant) != len(identifiers) or {entry.get("id") for entry in relevant} != set(identifiers)
+                or any(entry.get("verdict") != "verified" for entry in relevant)):
+            raise ValueError("C3-review-proof: reviewer did not explicitly verify every target finding")
+    if any(type(claim) is dict and claim.get("id") == identifier
+           and "verdict" in claim and claim["verdict"] != "verified"
+           for identifier, _target, claim in selected):
+        raise ValueError("C3-review-proof: selected actual typed reviewer disposition is not verified")
+    if proof["receivingMode"] == "structured":
+        if (type(target_report) is not dict or type(pass_report) is not dict
+                or complete != target_report.get("blockerDetails") or type(complete) is not list or not complete):
+            raise ValueError("C3-review-proof: actual complete structured target findings required")
+        identifiers = [entry.get("id") if type(entry) is dict else None for entry in complete]
+        if any(type(value) is not str or not value.strip() for value in identifiers) or len(set(identifiers)) != len(identifiers):
+            raise ValueError("C3-review-proof: ambiguous complete target finding collection")
+        if relevant is None:
+            raise ValueError("C3-review-proof: actual reviewer finding dispositions unavailable")
+        if set(identifiers) != {entry[0] for entry in selected}:
+            raise ValueError("C3-review-proof: supplied association omits actual target findings")
+        for finding_id, target_claim, pass_claim in selected:
+            if (target_claim not in complete or type(target_claim) is not dict
+                    or target_claim.get("id") != finding_id or pass_claim not in relevant
+                    or pass_claim.get("id") != finding_id or pass_claim.get("verdict") != "verified"):
+                raise ValueError("C3-review-proof: anchored finding/disposition mismatch")
+        lineage_values = list(_review_literal_values(binding_values["lineage"]))
+        before_revision = proof["subject"]["before"]["revision"]
+        after_revision = proof["subject"]["after"]["revision"]
+        pass_inputs = list(_review_literal_values(pass_report.get("inputPins")))
+        if (before_revision not in lineage_values or after_revision not in lineage_values
+                or not (before_revision in pass_inputs or proof["reports"]["targetSha256"] in pass_inputs)):
+            raise ValueError("C3-review-proof: actual correction lineage/source correspondence is absent")
+        for name, report in (("before", target_report), ("after", pass_report)):
+            if report.get("artifact_revision") != proof["subject"][name]["revision"]:
+                raise ValueError("C3-review-proof: actual reviewed subject revision mismatch")
+        angle = proof["bindingEvidence"]["angle"]["value"]
+        if not binding_values["angle"] or any(value != angle for value in binding_values["angle"]):
+            raise ValueError("C3-review-proof: actual structured review angle mismatch")
+        scopes = binding_values["scope"]
+        if len(scopes) < 2 or any(type(value) is not list for value in scopes):
+            raise ValueError("C3-review-proof: actual target/reviewer semantic scope selections required")
+        if proof["bindingEvidence"]["scope"]["relation"] == "same":
+            scope_ok = all(value == scopes[0] for value in scopes[1:])
+        else:
+            scope_ok = all(all(entry in scopes[0] for entry in value) for value in scopes[1:])
+        if not scope_ok:
+            raise ValueError("C3-review-proof: actual semantic review scope mismatch")
+    else:
+        # The actual Root semantic action owns interpretation of differently
+        # represented claims. This verifies anchored support, not its prose.
+        if complete in (None, "", [], {}) or any(
+                target_claim in (None, "", [], {}) or pass_claim in (None, "", [], {})
+                or type(pass_claim) is str and pass_claim.strip() == "PASS"
+                for _identifier, target_claim, pass_claim in selected):
+            raise ValueError("C3-review-proof: bare PASS/empty text is not an explicit actual finding claim")
+    return QualifiedReviewAssociationV1(receiver["runId"], target["runId"], reviewer["runId"],
+        rows[target_pos].raw_line_sha256, rows[reviewer_pos].raw_line_sha256, _REVIEW_ASSOCIATION_SEAL)
+
+
+def _review_proof_source_anchors(proof):
+    for part in proof["bindingEvidence"].values():
+        yield from part["sources"]
+    finding = proof["findingEvidence"]
+    yield finding["completeTargetFindings"]
+    if proof["version"] == 2:
+        for result in proof["rootSemanticReceiving"]["findings"]:
+            yield result["targetFinding"]
+            yield result["reviewerClaimUnit"]
+    else:
+        for disposition in finding["dispositions"]:
+            yield disposition["targetFinding"]
+            yield disposition["reviewerDisposition"]
+
+
+def _prepare_review_proof_inputs(rows, item, inputs):
+    """Acquire durable proof dependencies before the existing owner freezes selection.
+
+    Qualification happens later with actual masks; this phase only prepares the
+    exact sources selected by those actual row/event references. Failures stay
+    with this invocation; no later recapture can invent a new preimage.
+    """
+    index = {}
+    for row in rows:
+        index.setdefault(row.event.get("runId"), []).append(row.event)
+    for row in rows:
+        event = row.event
+        if "reviewClosureProofs" not in event:
+            continue
+        key = (item, _canonical_projection_bytes(dict(event)))
+        if key in inputs.review_source_errors:
+            continue
+        inputs.review_source_errors[key] = None
+        try:
+            _review_proof_event_shape(event)
+            for proof in event["reviewClosureProofs"]:
+                targets = index.get(proof["target"]["runId"], ())
+                reviewers = index.get(proof["reviewerPass"]["runId"], ())
+                if len(targets) != 1 or len(reviewers) != 1:
+                    raise ValueError("C3-review-proof: selected source rows are not unique")
+                admitted = _review_selected_sources(item, (*targets, *reviewers, event), inputs)
+                for ref in (targets[0].get("artifact"), reviewers[0].get("artifact")):
+                    if ref not in admitted:
+                        raise ValueError("C3-review-proof: selected report source unavailable")
+                    inputs.read_selection(admitted[ref].selected)
+                anchors = list(_review_proof_source_anchors(proof))
+                for entry, recognition in _review_contract_references(event):
+                    if _review_contract_selects_proof(recognition, proof):
+                        contract = parse_review_source_contract_evidence(entry)
+                        anchors.extend((contract["commission"], contract["delivery"], contract["loop"]["state"]))
+                for anchor in anchors:
+                    resolver = resolve_review_source_unit_v2 if proof["version"] == 2 else resolve_review_source_anchor_v1
+                    resolver(anchor, admitted_sources=admitted, inputs=inputs)
+        except (ValueError, TypeError, KeyError, OSError, UnicodeError, RecursionError) as exc:
+            inputs.review_source_errors[key] = str(exc)
+
+
+def _receive_review_associations(rows, validity, item, inputs, errors):
+    qualified = {}
+    if not any("reviewClosureProofs" in (row.event if isinstance(row, RuntimeLedgerRowV1) else row) for row in rows):
+        return qualified
+    if item is None or inputs is None:
+        fail(errors, "C3-review-proof: owner-qualified source receiving is required")
+        return qualified
+    for position, row in enumerate(rows):
+        event = row.event
+        if "reviewClosureProofs" not in event:
+            continue
+        try:
+            _review_proof_event_shape(event)
+            prepared_error = inputs.review_source_errors.get((item, _canonical_projection_bytes(dict(event))))
+            if prepared_error:
+                raise ValueError(prepared_error)
+            if not validity[position].authority.closer_eligible:
+                raise ValueError("C3-review-proof: Root receiving event is invalidated/unqualified")
+            index = {candidate.event.get("runId"): candidate.event for candidate in rows}
+            pending = {}
+            for proof in event["reviewClosureProofs"]:
+                target = index.get(proof["target"]["runId"], {})
+                reviewer = index.get(proof["reviewerPass"]["runId"], {})
+                admitted = _review_selected_sources(item, (target, reviewer, event), inputs)
+                association = receive_review_association_v1(proof, resolved_sources=admitted,
+                    rows=rows, validity=validity, root_receiving=(position, inputs))
+                pending[(event["runId"], association.target_run_id)] = association
+            qualified.update(pending)
+        except (ValueError, TypeError, KeyError, OSError, UnicodeError) as exc:
+            fail(errors, f"{event.get('runId')}: {exc}")
+    return qualified
+
+
+def capture_review_settlement_witnesses(item, event):
+    """Call-time only first-placement witnesses; never later durable selectors."""
+    if "reviewClosureProofs" not in event:
+        return ()
+    _review_proof_event_shape(event)
+    inputs = _CurrentEvidenceV1()
+    for proof in event["reviewClosureProofs"]:
+        for subject in proof["subject"].values():
+            errors = []
+            locator = inputs.artifact(item, subject["artifactKey"], "settlement witness", event["runId"], errors)
+            if locator is None:
+                raise ValueError("; ".join(errors))
+            predicate = inputs.path(locator.selected, file=True, _locator=locator)
+            inputs.selection_inputs.append(predicate)
+            try:
+                raw = inputs.read_selection(locator.selected)
+            except OSError as exc:
+                raise ValueError(f"C3-review-proof: first-settlement witness unavailable: {exc}") from exc
+            revision = subject["revision"]
+            content_digest = re.fullmatch(r"(?:sha256:)?([0-9a-f]{64})", revision)
+            if content_digest and hashlib.sha256(raw).hexdigest() != content_digest.group(1):
+                raise ValueError("C3-review-proof: first-settlement subject witness digest mismatch")
+    inputs.receive()
+    if any(not predicate.accepted for predicate in inputs.selection_inputs):
+        raise ValueError("C3-review-proof: first-settlement witness currentness failed")
+    return tuple(inputs.selection_inputs)
 
 
 def _current_json_value(value):
@@ -3308,6 +4181,8 @@ class _CurrentLedgerEvaluationV1:
     def assemble(self, *, public_derive):
         telemetry = {}
         if self.archive_rows is not None:
+            if not self.inputs.received:
+                _prepare_review_proof_inputs(self.base_rows, self.item, self.inputs)
             context = self.issue(self.base_rows, (), self.admission_diagnostics())
             self.borrowed_context = context
             try:
@@ -3365,6 +4240,8 @@ class _CurrentLedgerEvaluationV1:
                     self.custody, self.candidate_blobs, context=predecessor, _inputs=self.inputs)
             finally:
                 self.borrowed_context = None
+        if not self.inputs.received:
+            _prepare_review_proof_inputs(rows, self.item, self.inputs)
         context = self.issue(rows, holds, (*self.admission_diagnostics(), *suffix_errors, *history_errors), notices)
         errors = [*suffix_errors, *history_errors]
         relations = []
@@ -3787,6 +4664,11 @@ def _validate_event_fields(
     if event.get("schemaVersion") == 3:
         return validate_v3_event(event, seen, errors)
     error_count_on_entry = len(errors)
+    if "reviewClosureProofs" in event:
+        try:
+            _review_proof_event_shape(event)
+        except (ValueError, TypeError, KeyError) as exc:
+            fail(errors, f"{event.get('runId')}: {exc}")
     required = ["schemaVersion", "runId", "workItem", "role", "executionRole", "status", "gate", "scope", "startedAt", "updatedAt"]
     for key in required:
         if key not in event:
@@ -4968,6 +5850,7 @@ def _reduce_closure_relations(
     _archived_preclose_v2_rows: frozenset[int] = frozenset(),
     _format1_effort: bool = False,
     _definition: Literal["current", "historical"],
+    _review_associations=None,
 ) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]]]:
     """Ledger-level REVISE-closure validation (decision 2026-07-16-review-verdict-closure,
     minimal slice). Returns (open_v2_revise_events, open_launch_events) — obligations never discharged/settled events (never discharged by a valid
@@ -5202,6 +6085,17 @@ def _reduce_closure_relations(
                 continue
             # C3 (PASS closers): identity + authority + strength against the target.
             if gate == "PASS":
+                if "reviewClosureProofs" in event:
+                    association = (_review_associations or {}).get((rid, target_id))
+                    if (type(association) is not QualifiedReviewAssociationV1
+                            or association._seal is not _REVIEW_ASSOCIATION_SEAL
+                            or association.target_raw_sha256 != rows[entry[0]].raw_line_sha256):
+                        fail(errors, f"{rid}: actual reviewer association is unavailable for {target_id} (C3-review-proof)")
+                        bump("C3-review-proof-fail")
+                        continue
+                    discharged[target_id] = rid
+                    bump("closure-accepted")
+                    continue
                 custody = event.get("reviewArtifactCustody")
                 if custody is not None and (
                     event.get("terminalClass") is not None
@@ -5439,12 +6333,15 @@ def _reduce_closure_relations(
 
 def _validate_closure_authority(
     rows, errors, telemetry=None, *, validity=None, event_validity=None,
-    _archived_preclose_v2_rows=frozenset(),
+    _archived_preclose_v2_rows=frozenset(), _review_item=None, _review_inputs=None,
 ):
-    """Current authority; descriptive cross-run effort grants no mandate."""
+    """Current authority, including the same captured owner for new review proofs."""
+    associations = _receive_review_associations(rows, validity if validity is not None else event_validity,
+                                               _review_item, _review_inputs, errors)
     return _reduce_closure_relations(
         rows, errors, telemetry, validity=validity, event_validity=event_validity,
         _archived_preclose_v2_rows=_archived_preclose_v2_rows, _definition="current",
+        _review_associations=associations,
     )
 
 
@@ -5480,7 +6377,8 @@ def _validate_closure_from_inputs(
         active_validity = _qualified_validity(active_rows, active_validity,
             tuple(LedgerEventValidityV1(entry.current_schema_valid, mask)
                   for entry, mask in zip(active_validity, masks)), errors)
-    return _validate_closure_authority(active_rows, errors, telemetry, validity=active_validity)
+    return _validate_closure_authority(active_rows, errors, telemetry, validity=active_validity,
+        _review_item=_item, _review_inputs=_inputs)
 
 def validate_closure(
     rows: Sequence[RuntimeLedgerRowV1], errors: list[str], telemetry: dict[str, int] | None = None, *,
@@ -7711,7 +8609,8 @@ def _qualified_history_disposition_from_inputs(
         proof_validity = _withhold_pending_closers(proof_rows, proof_validity, pending_closing_effects)
         relation_errors = [value.diagnostic for value in qualification_observations
                            if value.historical_admission_run_id is None]
-        open_targets, _launches = _validate_closure_authority(proof_rows, relation_errors, validity=proof_validity)
+        open_targets, _launches = _validate_closure_authority(proof_rows, relation_errors, validity=proof_validity,
+            _review_item=item, _review_inputs=_inputs)
         if relation_errors or required_targets & {row["runId"] for row in open_targets}:
             raise ValueError("WI-LEDGER-HISTORY-DISPOSITION: exact dependent current obligations remain unresolved")
     if proof["kind"] != "current-evidence-covered" and (
@@ -10645,6 +11544,7 @@ def _reduce_archived_current_state(item, effective_rows, runtime_rows, historica
     open_revise, open_launches = _validate_closure_authority(
         active_rows, closure_errors, telemetry, validity=active_validity,
         _archived_preclose_v2_rows=frozenset(preclose_v2_rows),
+        _review_item=item, _review_inputs=inputs,
     )
     by_position = dict(zip(active_positions, active_validity))
     validity = tuple(by_position.get(position, LedgerEventValidityV1(False, _NO_LEDGER_AUTHORITY))
@@ -11191,7 +12091,8 @@ def _resolve_closure_invalidations_from_inputs(
                 view_validity = tuple(LedgerEventValidityV1(validity[i].current_schema_valid, mask)
                                       for i, mask in zip(positions, masks))
                 view_validity = _withhold_pending_closers(view_rows, view_validity, pending)
-            _validate_closure_authority(view_rows, observations, validity=view_validity)
+            _validate_closure_authority(view_rows, observations, validity=view_validity,
+                _review_item=_item, _review_inputs=_inputs)
         introduced = with_errors[len(before_errors):] if with_errors[:len(before_errors)] == before_errors else with_errors
         if preserved or not introduced:
             if _bind_ordinary_invalidation(rows, validity, pos, inactive, errors, require_obligations=True) is None:
@@ -11289,7 +12190,7 @@ def _reduce_current_state_from_inputs(
                                           _admission_rows=_admission_rows))
     baseline_errors: list[str] = []
     baseline_revise, baseline_launches = _validate_closure_authority(
-        rows, baseline_errors, validity=validity
+        rows, baseline_errors, validity=validity, _review_item=item, _review_inputs=_inputs
     )
     relation_errors = []
     pending: list = []
@@ -11334,7 +12235,8 @@ def _reduce_current_state_from_inputs(
         effective_validity[position] = row_validity
     closure_errors = []
     open_revise, open_launches = _validate_closure_authority(
-        active_rows, closure_errors, telemetry, validity=active_validity
+        active_rows, closure_errors, telemetry, validity=active_validity,
+        _review_item=item, _review_inputs=_inputs
     )
     if telemetry is not None:
         reopened_revise = max(0, len(open_revise) - len(baseline_revise))

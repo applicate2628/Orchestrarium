@@ -459,6 +459,67 @@ def effective_scout_reconciliation(data: dict[str, Any], round_index: int, *, he
     ]}
 
 
+def verdict_result_errors_v2(result: Any, *, label: str = "result", require_all_fields: bool = False) -> list[str]:
+    """One pure owner for the existing verdict DTO; no value coercion.
+
+    The default minimum is unchanged. Exact six-field presence is requested
+    only by an actually commissioned explicit-six-field receiving profile.
+    """
+    errors: list[str] = []
+    if not isinstance(result, dict):
+        return [f"{label}: expected object"]
+    _fields(result, VERDICT_RESULT_FIELDS, label, errors)
+    if require_all_fields and set(result) != VERDICT_RESULT_FIELDS:
+        errors.append(f"{label}: explicit six-field commission requires exactly its six fields")
+    verdict = result.get("verdict")
+    if not isinstance(verdict, str) or verdict not in {"PASS", "REVISE"}:
+        errors.append(f"{label}.verdict: required")
+    if not (isinstance(result.get("blockers"), list) and result["blockers"]) and not _nonempty(result.get("rationale")):
+        errors.append(f"{label}: bare verdict")
+    for key in ("root_proven", "scope_unchanged", "verification_adequate"):
+        if not _nonempty(result.get(key)):
+            errors.append(f"{label}.{key}: required")
+    return errors
+
+
+def qualify_completed_verdict_result_v2(
+    data: Any, result: Any, *, round_number: int, lane: str, attempt_id: str,
+    artifact_revision: str, require_all_fields: bool = False,
+) -> dict[str, Any]:
+    """Pure receiving of an actual completed admitted L delivery association.
+
+    This qualifies state/result consistency; it does not attest execution or
+    create a result/receipt, and never reopens a controller path.
+    """
+    errors = validate_v2(data)
+    errors.extend(verdict_result_errors_v2(result, require_all_fields=require_all_fields))
+    if errors:
+        raise StateError("RLSTATE_INVALID", errors[0])
+    if type(round_number) is not int or lane not in VERDICT_LANES:
+        raise StateError("RLSTATE_INVALID", "actual verdict round/lane required")
+    rnd = _round(data, round_number)
+    if artifact_revision != rnd["artifact"]["revision"]:
+        raise StateError("RLSTATE_REVISION_MISMATCH", "delivered result revision differs")
+    block = _attempt(rnd, lane, attempt_id)
+    if block.get("state") != "complete" or any(
+            item.get("lane") == lane and item.get("attempt_id") == attempt_id
+            for item in rnd["lane_failures"] if isinstance(item, dict)):
+        raise StateError("RLSTATE_INVALID", "actual admitted completed nonfailed attempt required")
+    recorded = {key: block[key] for key in VERDICT_RESULT_FIELDS if key in block}
+    if recorded != result:
+        raise StateError("RLSTATE_INVALID", "actual delivered result differs from completed attempt")
+    if not any(isinstance(operation, dict) and isinstance(operation.get("receipt"), dict)
+               and operation["receipt"].get("command") == "record-result"
+               and operation["receipt"].get("loop_id") == data["loop_id"]
+               and operation["receipt"].get("round") == round_number
+               and operation["receipt"].get("lane") == lane
+               and operation["receipt"].get("attempt_id") == attempt_id
+               and operation["receipt"].get("artifact_revision") == artifact_revision
+               for operation in data["operations"]):
+        raise StateError("RLSTATE_INVALID", "actual result receiving operation is unavailable")
+    return dict(result)
+
+
 def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: bool = False) -> list[str]:
     errors: list[str] = []
     if not isinstance(data, dict):
@@ -628,14 +689,8 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
                 errors.append(f"{lane_label}.state: invalid value")
             if state == "complete":
                 if lane in VERDICT_LANES:
-                    verdict = block.get("verdict")
-                    if verdict not in {"PASS", "REVISE"}:
-                        errors.append(f"{lane_label}.verdict: required")
-                    if not (isinstance(block.get("blockers"), list) and block["blockers"]) and not _nonempty(block.get("rationale")):
-                        errors.append(f"{lane_label}: bare verdict")
-                    for key in ("root_proven", "scope_unchanged", "verification_adequate"):
-                        if not _nonempty(block.get(key)):
-                            errors.append(f"{lane_label}.{key}: required")
+                    result = {key: block[key] for key in VERDICT_RESULT_FIELDS if key in block}
+                    errors.extend(verdict_result_errors_v2(result, label=lane_label))
                 else:
                     if not isinstance(block.get("findings"), list) or not isinstance(block.get("reconciliation"), list):
                         errors.append(f"{lane_label}: findings and reconciliation lists required")

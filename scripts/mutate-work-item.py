@@ -10036,8 +10036,10 @@ def _status_entry(root: Path, item: Path, *, diagnostic_status: bool = False, pr
 
 def _legacy_retirement_entry(item: Path, metadata: Path,
     *,
-    acquired_input=None, ledger_resource_budget=None,
+    acquired_input=None, ledger_resource_budget=None, input_role: str = "strict",
 ) -> ReadmeEntry:
+    if input_role not in ("strict", "historical-catalogue"):
+        raise ValueError("unsupported archived work-item input role")
     try:
         payload = json.loads(_input_text(metadata, acquired_input, encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -10138,33 +10140,34 @@ def _legacy_retirement_entry(item: Path, metadata: Path,
             "WI-LEGACY-RETIREMENT-INVALID",
             f"source inventory does not cover the retirement payload: {item}",
         )
-    # Retirement is immutable, but its former backlog paths must not remain in
-    # mutable records.  The stored inventory is evidence from the transition;
-    # this fresh owner-level scan catches a later plain-text citation that the
-    # original Markdown/link scanner could not see.  Archived consumers are
-    # historical evidence and intentionally do not participate.
-    work_items = item.parents[2]
-    current_incoming = _incoming_link_result(
-        work_items.parent,
-        sources,
-        f"work-item:{item.name}",
-        literal_path_references=(
-            f"{work_items.name}/backlog/{item.name}/{relative}"
-            for relative in seen
-        ),
-        mutable_consumers_only=True,
-        scan_markdown_links=False,
-        acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget
-    )
-    try:
-        _validate_incoming_link_snapshot(
-            f"work-item:{item.name}", current_incoming, label="current"
+    if input_role == "strict":
+        # Retirement is immutable, but its former backlog paths must not remain in
+        # mutable records.  The stored inventory is evidence from the transition;
+        # this fresh owner-level scan catches a later plain-text citation that the
+        # original Markdown/link scanner could not see.  Archived consumers are
+        # historical evidence and intentionally do not participate.
+        work_items = item.parents[2]
+        current_incoming = _incoming_link_result(
+            work_items.parent,
+            sources,
+            f"work-item:{item.name}",
+            literal_path_references=(
+                f"{work_items.name}/backlog/{item.name}/{relative}"
+                for relative in seen
+            ),
+            mutable_consumers_only=True,
+            scan_markdown_links=False,
+            acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget
         )
-    except LifecycleError as exc:
-        raise LifecycleError(
-            "WI-LEGACY-RETIREMENT-INVALID",
-            f"mutable record retains a retired backlog path: {item}",
-        ) from exc
+        try:
+            _validate_incoming_link_snapshot(
+                f"work-item:{item.name}", current_incoming, label="current"
+            )
+        except LifecycleError as exc:
+            raise LifecycleError(
+                "WI-LEGACY-RETIREMENT-INVALID",
+                f"mutable record retains a retired backlog path: {item}",
+            ) from exc
     return ReadmeEntry(
         "Recently completed",
         f"work-item:{item.name}",
@@ -10201,7 +10204,7 @@ def _archived_work_item_entry(item: Path,
                 "WI-LEGACY-RETIREMENT-INVALID",
                 f"direct legacy retirement must not carry active/closure history: {item}",
             )
-        return _legacy_retirement_entry(item, retirement, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
+        return _legacy_retirement_entry(item, retirement, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget, input_role=input_role)
     closure = item / "closure.md"
     if not _readme_input_is_file(closure, prepared_terminal, acquired_input):
         raise LifecycleError(
