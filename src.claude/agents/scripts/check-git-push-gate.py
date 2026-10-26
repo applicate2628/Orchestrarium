@@ -192,10 +192,12 @@ option, repository redirect, compound sibling, pipeline, unknown push option,
 or extra refspec. Range mode additionally requires its declared `remote` and
 `dst` to equal the admitted command binding.
 
-The generic grammar deliberately stops short of the strict PR route's
-source/tip, repository identity, remote freshness, and provider-oracle
-bindings. Those remain explicit residuals of generic receipts, not permission
-for command-visible redirects or payload-expanding options.
+Generic publication also receives the genuine original approval and its exact
+reviewed source/root/endpoint/destination. Neutral steering cannot expire or
+widen that pending operation. Its derived selector index is not authority:
+original user/subject records and subsequent actual controls are requalified.
+The PR provider oracle remains separate. Command-visible redirects and
+payload-expanding options remain prohibited.
 
 HONESTY RULE — THIS IS A BACKSTOP, NOT A GUARANTEE. The generic route under-detects by design.
 It cannot see inside an opaque wrapper file such as `bash sync.sh`, nor can it
@@ -258,37 +260,25 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      forward order, binding both bounded-read passes to its opened descriptor's
      initial byte size. Complete history alone supplies no publication authority;
      active grants still enter the unchanged strict route.
-  7. Qualified current-turn consent from `[approve-publication]` in one genuine
-     answer enters the common strict command, repository/range binding and
-     fresh authoritative-scan completion BEFORE unrelated standing history.
-     Consent never returns an unconditional real-push allowance. Validate the
-     entire answer batch atomically and honor revocation/conflicts. P qualifies
-     original occurrences for both consent and push instructions, excluding
-     formal quote/code/tagged-JSON data without a whole-answer length limit.
-     Questions, identifiers, assistant/tool/file content and joined fragments
-     grant no authority. Original whole-token display forms remain accepted.
+  7. Current and recovered generic input enter the same original-control
+     receiving owner. Genuine user approval must identify the actually reviewed
+     immutable operation. Structured input retains its actual Q/A correlation;
+     explicit plain user scope needs neither a question nor an independent
+     packet. Neutral steering preserves pending O; changed scope, actual
+     revocation/fulfillment or unresolved effects cannot inherit it. Original
+     occurrence and whole-answer validation remain P's owner. Reports, index
+     labels, questions and assistant/tool/file text cannot supply approval.
   8. Derive the latest exact PR grant/revoke/malformed state from the complete
      bounded readable transcript. A malformed reserved signal denies. An
      active grant runs only the strict PR route: fresh GitHub PR/Git identity
      binding plus one fresh unused non-empty range receipt bound to
      remote, full destination, and local HEAD tip. Every active-route failure
      denies without generic fallback.
-  9. If no active PR grant is present and the current turn (entries after the last genuine user message) shows
-     a publication-safety scan invocation among the model's own tool CALLS,
-     under an id UNIQUE among this turn's calls (see COLLISION REJECTION note
-     below), WHOSE OWN correlated tool OUTPUT (same call id — see the
-     CORRELATION note above), itself under an id unique among this turn's
-     outputs and recorded STRICTLY AFTER the call it answers, reports EITHER
-     (i) a clean, non-empty, `tracked`-mode result ON A WHOLE LINE BY ITSELF
-     (see the RESULT MATCH IS WHOLE-LINE note above and `SCAN_CLEAN_TRACKED_
-     REGEX`'s own comment), OR (ii) a clean, non-empty, `range`-mode result
-     ON A WHOLE LINE BY ITSELF whose declared `remote` and `dst` equal the
-     admitted push binding — AND the command is one solitary direct push in
-     the closed generic grammar, AND in EITHER case does NOT also carry the
-     scanner's own self-reported failure line
-     (`SCAN_FAILURE_MARKER_REGEX`), AND the last genuine user message
-     contains an explicit push-instruction signal (`push`, `запушь`,
-     `залей`, ...) → exit 0.
+  9. Exact pending generic consent must additionally pass the unchanged closed
+     command/root/executable binding and one NEW gate-owned nonempty complete
+     version-3 graph scan. Currentness is checked again before allowing the
+     pending tool. Diagnostic transcript scans cannot authorize. Consuming the
+     scan does not mean Git executed or fulfilled the human's operation.
   10. Otherwise — including when the decision path raises an uncaught exception (see
      the "A CRASH WHILE DECIDING" note above and `evaluate_push`'s own
      docstring; 2026-07-26 hardening) — emit a structured `permissionDecision:
@@ -375,6 +365,14 @@ from hook_common import (
     extract_model_shell_command_occurrences,
     extract_model_tool_calls_with_ids,
     extract_tool_outputs_with_ids,
+    extract_native_control_calls,
+    extract_native_control_results,
+    extract_native_command_observation,
+    hold_native_history_source,
+    NativeHistoryIdentity,
+    NativeHistorySourceError,
+    extract_text,
+    is_assistant_message,
     is_user_message,
     parse_envelope,
     read_transcript_history,
@@ -396,16 +394,20 @@ from git_push_gate_preflight import (
     PrRouteDenied,
     resolve_command_dialect,
     parse_transcript_command,
+    parse_native_argument_vector,
     project_scan_range_binding,
     extract_publication_user_reply,
     is_simple_pr_approval,
     normalize_publication_approval_text,
     parse_publication_pr_grant,
+    publication_reply_has_push_instruction,
+    classify_generic_push,
+    PublicationUserReply,
 )
 
 
-# Per-turn consent marker — honored ONLY from the last genuine user message;
-# it never replaces mandatory command, binding and authoritative-scan checks.
+# Genuine-user signals never replace original-scope/lifetime receiving or the
+# mandatory command, binding and fresh authoritative-scan checks.
 # User-side only by design: assistant prose can be steered by injected content
 # (see the consultant continuation-prompt untrusted-data rule). Neither this
 # marker nor [skip-bugfix-discipline] gains authority from the model's own reply.
@@ -543,6 +545,1401 @@ class PushScanBinding(NamedTuple):
     destination: str
     source_oid: str
     head_oid: str
+
+
+@dataclass(frozen=True)
+class GenericPublicationSubject:
+    """Reviewed scope, distinct from the invocation's technical HEAD."""
+
+    root: str
+    root_identity: tuple[int, int]
+    repository_identity: tuple[int, int]
+    worktree_identity: tuple[int, int]
+    remote: str
+    remote_identity: str
+    destination: str
+    object_format: str
+    source_oid: str
+
+
+@dataclass(frozen=True)
+class GenericApprovalSelection:
+    """Locators for semantic receiving; no field authenticates itself."""
+
+    review_call_id: str | None
+    review_record: int | None
+    user_record: int
+    question_call_id: str | None = None
+    question_index: int | None = None
+
+
+@dataclass(frozen=True)
+class OriginalGenericApproval:
+    subject: GenericPublicationSubject
+    selection: GenericApprovalSelection
+    user_sha256: str
+    packet_sha256: str | None
+    producer_kind: str
+    history_sha256: str
+    source_identity: NativeHistoryIdentity | None = None
+
+
+@dataclass(frozen=True)
+class GenericRecordEvidence:
+    """Restrictive locators into actual native records, never approval flags."""
+
+    role: str
+    record: int
+    record_sha256: str
+    component: str
+    call_id: str | None = None
+    index: int | None = None
+    span: tuple[int, int] | None = None
+
+
+@dataclass(frozen=True)
+class GenericSourceField:
+    """One logical coordinate located in an actual evidence component."""
+
+    field: str
+    evidence_index: int
+    span: tuple[int, int] | None = None
+
+
+@dataclass(frozen=True)
+class _OriginalLogicalScope:
+    root: str
+    repository: str
+    remote: str
+    remote_identity: str
+    destination: str
+    source_oid: str
+    review_statement: str
+
+
+@dataclass(frozen=True)
+class _ReceivedGenericSource:
+    """Source facts before current invocation or cache scope is compared."""
+
+    scope: _OriginalLogicalScope
+    selection: GenericApprovalSelection
+    user_sha256: str
+    packet_sha256: str | None
+    producer_kind: str
+    history_sha256: str
+
+
+class _OriginalScopeInputError(PrRouteDenied):
+    def __init__(self, coordinate: str):
+        super().__init__("PGG-CONSENT-ASSOCIATION")
+        self.coordinate = coordinate
+
+
+@dataclass(frozen=True)
+class GenericUserScopeSelection:
+    """Root's semantic locators into an actual explicit plain user record.
+
+    Spans use Python Unicode-string offsets. They identify original user data,
+    not new SDK fields, an authored user frame, or a serialized permission.
+    Root owns the meaning of the actual completed-review statement. Receiving
+    below independently reads the genuine record and every selected value.
+    """
+
+    user_record: int
+    root: str
+    repository: str
+    remote: str
+    remote_identity: str
+    destination: str
+    source_oid: str
+    review_statement: str
+    spans: tuple[tuple[str, int, int], ...] = ()
+    question_call_id: str | None = None
+    question_index: int | None = None
+    evidence: tuple[GenericRecordEvidence, ...] = ()
+    source_fields: tuple[GenericSourceField, ...] = ()
+
+
+@dataclass(frozen=True)
+class GenericConsentResult:
+    """Derived receiving outcome. Even pending is not publication permission."""
+
+    state: str
+    approval: OriginalGenericApproval | None
+    detail: str
+    direct_selection: GenericUserScopeSelection | None = None
+
+
+@dataclass(frozen=True)
+class _GenericControlCut:
+    selection: GenericApprovalSelection | None
+    intent_record: int
+    intent_state: str
+    pr_record: int
+    commands: tuple[tuple[int, object], ...]
+    opaque_calls: tuple[tuple[int, str], ...]
+    model_publications: tuple[tuple[int, str, str | None], ...]
+    invalid_command_records: tuple[tuple[int, object], ...]
+    history_sha256: str
+    history_status: str
+    max_approval_record_bytes: int
+    record_count: int
+    execution_record: int = 0
+    pr_state: str = "absent"
+    pr_grant: object = None
+    pr_reducer: object = None
+
+
+@dataclass(frozen=True)
+class GenericConsentIndex:
+    """Restrictive materialization; its labels and digest are not authority."""
+
+    user_record: int
+    user_sha256: str
+    source_identity: tuple[int, int]
+    subject: GenericPublicationSubject
+    spans: tuple[tuple[str, int, int], ...]
+    question_call_id: str | None
+    question_index: int | None
+    history_sha256: str
+    history_records: int
+    evidence: tuple[GenericRecordEvidence, ...] = ()
+    repository: str = ""
+    review_statement: str = ""
+    source_fields: tuple[GenericSourceField, ...] = ()
+
+
+@dataclass(frozen=True)
+class PreparedGenericPublication:
+    repository_workdir: str
+    git_exe: str
+    binding: PushScanBinding
+    subject: GenericPublicationSubject
+    source_operand: str
+
+    def requalify_binding(self) -> PushScanBinding:
+        """Re-resolve this original invocation before discarding technical pins."""
+        if type(self.source_operand) is not str or not self.source_operand:
+            raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+        current = _resolve_generic_scan_binding(
+            self.binding.remote, self.binding.destination, self.source_operand,
+            self.repository_workdir, self.git_exe,
+        )
+        if current != self.binding:
+            raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+        return current
+
+
+def publication_review_packet(subject: GenericPublicationSubject) -> str:
+    """Scope context for the existing review packet, never a consent record."""
+    value = {
+        "kind": "publication-review-v1",
+        "subject": {
+            "root": subject.root,
+            "rootIdentity": list(subject.root_identity),
+            "repositoryIdentity": list(subject.repository_identity),
+            "worktreeIdentity": list(subject.worktree_identity),
+            "remote": subject.remote,
+            "remoteIdentity": subject.remote_identity,
+            "destination": subject.destination,
+            "objectFormat": subject.object_format,
+            "sourceOid": subject.source_oid,
+        },
+    }
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    _review_packet_subject(encoded)
+    return encoded
+
+
+def publication_review_reference(packet: str) -> str:
+    return "[publication-review:" + hashlib.sha256(packet.encode("utf-8")).hexdigest() + "]"
+
+
+def _review_packet_subject(packet: str) -> GenericPublicationSubject:
+    value = _strict_json(packet, dict, "PGG-CONSENT-ASSOCIATION")
+    if set(value) != {"kind", "subject"} or value["kind"] != "publication-review-v1":
+        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    subject = value["subject"]
+    fields = {
+        "root", "rootIdentity", "repositoryIdentity", "worktreeIdentity", "remote",
+        "remoteIdentity", "destination", "objectFormat", "sourceOid",
+    }
+    if not isinstance(subject, dict) or set(subject) != fields:
+        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    for key in ("rootIdentity", "repositoryIdentity", "worktreeIdentity"):
+        identity = subject[key]
+        if not isinstance(identity, list) or len(identity) != 2 or any(type(n) is not int or n < 0 for n in identity):
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    if any(type(subject[key]) is not str or not subject[key] for key in fields - {"rootIdentity", "repositoryIdentity", "worktreeIdentity"}):
+        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    width = {"sha1": 40, "sha256": 64}.get(subject["objectFormat"])
+    endpoint = urlsplit(subject["remoteIdentity"])
+    if (
+        width is None or re.fullmatch(r"[0-9a-f]{" + str(width) + r"}", subject["sourceOid"]) is None
+        or not Path(subject["root"]).is_absolute()
+        or not subject["destination"].startswith("refs/heads/")
+        or not REMOTE_NAME_REGEX.fullmatch(subject["remote"])
+        or endpoint.username is not None or endpoint.password is not None
+    ):
+        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    return GenericPublicationSubject(
+        subject["root"], tuple(subject["rootIdentity"]), tuple(subject["repositoryIdentity"]), tuple(subject["worktreeIdentity"]),
+        subject["remote"], subject["remoteIdentity"], subject["destination"],
+        subject["objectFormat"], subject["sourceOid"],
+    )
+
+
+def _receive_generic_original_association(
+    transcript_path: str,
+    selection: GenericApprovalSelection,
+) -> OriginalGenericApproval:
+    """Receive original records from HC; caller locators never grant consent."""
+    calls: dict[str, tuple[int, object]] = {}
+    review: tuple[int, tuple[str, ...]] | None = None
+    approval: tuple[object, bytes] | None = None
+    visible_review: list[tuple[int, str]] = []
+    position = 0
+    record_digests: dict[int, str] = {}
+    digest = hashlib.sha256()
+
+    def consume(entry: dict, raw: bytes) -> None:
+        nonlocal position, review, approval
+        position += 1
+        digest.update(raw)
+        if position in {selection.review_record, selection.user_record}:
+            record_digests[position] = hashlib.sha256(raw).hexdigest()
+        for call in extract_native_control_calls(entry):
+            if call.call_id in {selection.review_call_id, selection.question_call_id}:
+                if call.call_id in calls:
+                    raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+                calls[call.call_id] = position, call
+                record_digests[position] = hashlib.sha256(raw).hexdigest()
+        for result in extract_native_control_results(entry):
+            if result.call_id == selection.review_call_id:
+                if review is not None or position != selection.review_record:
+                    raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+                review = position, result.text_blocks
+        if position == selection.user_record:
+            if not is_user_message(entry):
+                raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+            approval = extract_publication_user_reply(entry), raw
+        if selection.review_record < position < selection.user_record and is_assistant_message(entry):
+            visible_review.append((position, extract_text(entry)))
+
+    _entries, status = read_transcript_history(
+        transcript_path, byte_cap=None, record_cap=None, line_byte_cap=None,
+        on_record=consume,
+    )
+    if status == HISTORY_STATUS_IDENTITY_DRIFT:
+        raise PrRouteDenied("PGG-CONSENT-IDENTITY-DRIFT")
+    if status != HISTORY_STATUS_FOUND:
+        raise PrRouteDenied("PGG-CONSENT-HISTORY")
+    if review is None or approval is None or selection.review_call_id not in calls:
+        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    review_position, blocks = review
+    if not calls[selection.review_call_id][0] < review_position < selection.user_record:
+        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    packets: list[tuple[str, GenericPublicationSubject]] = []
+    for block in blocks:
+        try:
+            subject = _review_packet_subject(block)
+        except PrRouteDenied:
+            continue
+        packets.append((block, subject))
+    if len(packets) != 1:
+        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    packet, subject = packets[0]
+    reference = publication_review_reference(packet)
+    reply, raw_user = approval
+    action, _ = reply.publication_action()
+    if action != "generic" and not publication_reply_has_push_instruction(reply):
+        raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+    if reply.kind == "structured-answer":
+        if selection.question_call_id not in calls or type(selection.question_index) is not int:
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        question_position, question = calls[selection.question_call_id]
+        if not review_position < question_position < selection.user_record or question.input_kind != "json":
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        if question.tool_name not in {"request_user_input_async", "functions.request_user_input_async"}:
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        arguments = _strict_json(question.input_text, dict, "PGG-CONSENT-ASSOCIATION")
+        questions = arguments.get("questions")
+        index = selection.question_index
+        if not isinstance(questions, list) or not 0 <= index < len(questions):
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        original = questions[index]
+        if not isinstance(original, dict) or not isinstance(original.get("title"), str):
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        matched = []
+        for item in reply.structured_items:
+            locator = _strict_json(item.question_item_id, list, "PGG-CONSENT-ASSOCIATION")
+            if locator == [question.tool_name, question.call_id, index]:
+                matched.append(item)
+        if len(matched) != 1 or matched[0].question != original["title"] or reference not in original["title"]:
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        selected_answer = PublicationUserReply("plain", (matched[0].answer,))
+        if selected_answer.publication_action()[0] != "generic" and not publication_reply_has_push_instruction(selected_answer):
+            raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+    elif reply.kind == "plain":
+        if selection.question_call_id is not None or selection.question_index is not None:
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        if not any(review_position < pos < selection.user_record and reference in text for pos, text in visible_review):
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    else:
+        raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+    review_evidence = GenericRecordEvidence("scope", review_position, record_digests[review_position], "result-text", selection.review_call_id, blocks.index(packet))
+    selected = GenericUserScopeSelection(
+        selection.user_record, subject.root, subject.remote_identity, subject.remote,
+        subject.remote_identity, subject.destination, subject.source_oid, packet,
+        question_call_id=selection.question_call_id, question_index=selection.question_index,
+        evidence=(
+            GenericRecordEvidence("approval", selection.user_record, hashlib.sha256(raw_user).hexdigest(), "answer" if reply.kind == "structured-answer" else "user-text", selection.question_call_id, selection.question_index),
+            review_evidence,
+            replace(review_evidence, role="completed-review"),
+            GenericRecordEvidence("association", question_position, record_digests[question_position], "question", selection.question_call_id, selection.question_index)
+            if reply.kind == "structured-answer" else replace(review_evidence, role="association"),
+        ),
+    )
+    received = _receive_selected_generic_association(transcript_path, selected, subject)
+    if received.history_sha256 != digest.hexdigest():
+        raise PrRouteDenied("PGG-CONSENT-IDENTITY-DRIFT")
+    return replace(received, packet_sha256=hashlib.sha256(packet.encode("utf-8")).hexdigest())
+
+
+def _generic_control_cut(
+    transcript_path: str, *, collect_lifecycle: bool = True,
+    preflight: PreflightResult | None = None,
+) -> _GenericControlCut:
+    """Reduce the same selected finite source; there is no durable grant store."""
+    calls: dict[str, int] = {}
+    reviews: dict[str, tuple[str, int]] = {}
+    questions: dict[str, tuple[int, object]] = {}
+    visible: set[str] = set()
+    commands: list[tuple[int, object]] = []
+    opaque: list[tuple[int, str]] = []
+    model_publications: list[tuple[int, str, str | None]] = []
+    invalid_commands: list[tuple[int, object]] = []
+    transcript_cwd: str | None = None
+    selection: GenericApprovalSelection | None = None
+    intent_record = pr_record = execution_record = position = 0
+    pr_reducer = _PrGrantReducer(preflight) if preflight is not None else None
+    intent_state = "no-intent"
+    max_approval_record_bytes = 0
+    digest = hashlib.sha256()
+    reference_pattern = re.compile(r"\[publication-review:([0-9a-f]{64})\]")
+
+    def consume(entry: dict, raw: bytes) -> None:
+        nonlocal position, selection, intent_record, intent_state, pr_record, execution_record, transcript_cwd, max_approval_record_bytes
+        if pr_reducer is not None:
+            pr_reducer.consume(entry, raw)
+        position += 1
+        digest.update(raw)
+        payload = entry.get("payload")
+        if entry.get("type") in {"session_meta", "turn_context"} and isinstance(payload, dict):
+            value = payload.get("cwd")
+            transcript_cwd = value if isinstance(value, str) else None
+        current_calls = {call.call_id: call for call in extract_native_control_calls(entry)}
+        for call in current_calls.values():
+            calls[call.call_id] = position
+            if call.tool_name in {"request_user_input_async", "functions.request_user_input_async"}:
+                questions[call.call_id] = position, call
+            elif collect_lifecycle and call.input_kind == "raw" and call.tool_name.rsplit(".", 1)[-1] == "exec":
+                opaque.append((position, call.call_id))
+        for result in extract_native_control_results(entry):
+            if result.call_id not in calls or calls[result.call_id] >= position:
+                continue
+            for block in result.text_blocks:
+                # Do not interpret unrelated tool bodies as review packets.
+                if not block.startswith('{"kind":"publication-review-v1",'):
+                    continue
+                try:
+                    _review_packet_subject(block)
+                except PrRouteDenied:
+                    continue
+                packet_digest = hashlib.sha256(block.encode("utf-8")).hexdigest()
+                if packet_digest in reviews and reviews[packet_digest] != (result.call_id, position):
+                    raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+                reviews[packet_digest] = result.call_id, position
+        command = extract_native_command_observation(entry) if collect_lifecycle else None
+        if command is not None:
+            commands.append((position, command))
+        elif collect_lifecycle:
+            params = entry.get("params") if entry.get("method") in {"item/started", "item/completed"} else None
+            item = params.get("item") if isinstance(params, dict) else None
+            payload = entry.get("payload") if entry.get("type") == "event_msg" else None
+            core_item = payload.get("item") if isinstance(payload, dict) and payload.get("type") in {"item_started", "item_completed"} else None
+            if (isinstance(item, dict) and item.get("type") == "commandExecution") or (isinstance(core_item, dict) and core_item.get("type") == "CommandExecution"):
+                native_item = core_item if isinstance(core_item, dict) else item
+                raw_command = native_item.get("command")
+                raw_cwd = native_item.get("cwd")
+                invalid_commands.append((position, {
+                    "item_id": native_item.get("id"), "command": raw_command,
+                    "cwd": raw_cwd, "core": isinstance(core_item, dict),
+                }))
+        for occurrence in extract_model_shell_command_occurrences(entry) if collect_lifecycle else ():
+            parsed = parse_transcript_command(
+                occurrence.command_text, occurrence.tool_name, occurrence.call_id, 0,
+            )
+            if not parsed.effective_publications.records:
+                continue
+            context = absolute_literal_root_context(parsed)
+            selected_root = context[1] if context is not None else transcript_cwd
+            call = current_calls.get(occurrence.call_id)
+            if context is None and call is not None and call.input_kind == "json":
+                try:
+                    arguments = _strict_json(call.input_text, dict, "PGG-CONSENT-ASSOCIATION")
+                except PrRouteDenied:
+                    arguments = {}
+                if isinstance(arguments.get("workdir"), str):
+                    selected_root = arguments["workdir"]
+            model_publications.append((position, occurrence.call_id, selected_root))
+        if is_assistant_message(entry):
+            visible.update(reference_pattern.findall(extract_text(entry)))
+        if not is_user_message(entry):
+            return
+        reply = extract_publication_user_reply(entry)
+        if reply.kind == "plain" and not any(reply.answers):
+            return
+        action, _ = reply.publication_action()
+        if publication_reply_has_push_instruction(reply):
+            execution_record = position
+        if action == "generic" or publication_reply_has_push_instruction(reply):
+            max_approval_record_bytes = max(max_approval_record_bytes, len(raw))
+        if action in {"simple", "targeted", "malformed", "revoked"}:
+            pr_record = position
+        if action in {"malformed", "revoked"}:
+            intent_state = "revoked" if action == "revoked" else "corrupt"
+            intent_record, selection = position, None
+        elif action == "generic" or publication_reply_has_push_instruction(reply):
+            chosen: list[GenericApprovalSelection] = []
+            if reply.kind == "structured-answer":
+                for item in reply.structured_items:
+                    selected_answer = PublicationUserReply("plain", (item.answer,))
+                    if selected_answer.publication_action()[0] != "generic" and not publication_reply_has_push_instruction(selected_answer):
+                        continue
+                    try:
+                        locator = _strict_json(item.question_item_id, list, "PGG-CONSENT-ASSOCIATION")
+                    except PrRouteDenied:
+                        continue
+                    if len(locator) != 3 or type(locator[2]) is not int or not isinstance(locator[1], str):
+                        continue
+                    found = questions.get(locator[1])
+                    if found is None:
+                        continue
+                    question_position, question = found
+                    if locator[0] != question.tool_name or question.input_kind != "json":
+                        continue
+                    try:
+                        arguments = _strict_json(question.input_text, dict, "PGG-CONSENT-ASSOCIATION")
+                    except PrRouteDenied:
+                        continue
+                    originals = arguments.get("questions")
+                    index = locator[2]
+                    if not isinstance(originals, list) or not 0 <= index < len(originals):
+                        continue
+                    original = originals[index]
+                    if not isinstance(original, dict) or original.get("title") != item.question:
+                        continue
+                    for reference in reference_pattern.findall(item.question):
+                        review = reviews.get(reference)
+                        if review is not None and review[1] < question_position < position:
+                            chosen.append(GenericApprovalSelection(review[0], review[1], position, question.call_id, index))
+            elif reply.kind == "plain":
+                for reference in visible:
+                    review = reviews.get(reference)
+                    if review is not None and review[1] < position:
+                        chosen.append(GenericApprovalSelection(review[0], review[1], position))
+            if len(chosen) == 1:
+                selection, intent_record, intent_state = chosen[0], position, "candidate"
+            elif action == "generic":
+                selection, intent_record, intent_state = None, position, "insufficient"
+            # A bare request to execute does not change the authority domain.
+            # A genuinely new generic approval above still supersedes old PR
+            # authority even when its original association is insufficient.
+        visible.clear()
+
+    _entries, status = read_transcript_history(
+        transcript_path, byte_cap=None, record_cap=None, line_byte_cap=None,
+        on_record=consume,
+    )
+    pr_state, pr_grant = (pr_reducer.state, pr_reducer.grant) if pr_reducer is not None and status == HISTORY_STATUS_FOUND else ("absent", None)
+    return _GenericControlCut(
+        selection, intent_record, intent_state, pr_record, tuple(commands),
+        tuple(opaque), tuple(model_publications), tuple(invalid_commands), digest.hexdigest(), status,
+        max_approval_record_bytes, position, execution_record, pr_state, pr_grant, pr_reducer,
+    )
+
+
+def _parse_native_command(command: object) -> ShellParseResult:
+    if command.argv:
+        return parse_native_argument_vector(command.argv, "native-command:" + command.item_id, 0)
+    return parse_transcript_command(command.command, "exec_command", "native-command:" + command.item_id, 0)
+
+
+def _native_literal_leaf(parsed: ShellParseResult, subject: GenericPublicationSubject) -> ShellParseResult | None:
+    """Only the grammar owner's exact child of an actually qualified wrapper."""
+    while parsed.children:
+        if parsed.status != "SCG-PARSED" or parsed.candidates or len(parsed.commands) != 1 or len(parsed.children) != 1 or len(parsed.wrapper_projections) != 1:
+            return None
+        projection = parsed.wrapper_projections[0]
+        if projection.terminal_state != "EXACT_CHILD" or projection.child_input is None:
+            return None
+        wrapper = parsed.commands[0].executable
+        if not Path(wrapper).is_absolute():
+            return None
+        resolved = _resolve_executable(Path(wrapper).name, subject.root)
+        if resolved is None:
+            return None
+        try:
+            _bind_literal_executable_identity(wrapper, resolved, "PGG-CONSENT-EXECUTABLE")
+        except PrRouteDenied:
+            return None
+        parsed = parsed.children[0]
+    return parsed
+
+
+def _native_git_arguments(
+    command: object, subject: GenericPublicationSubject, parsed: ShellParseResult | None,
+) -> tuple[str, ...] | None:
+    if parsed is None:
+        return None
+    publication = parsed.strict_projection.status == "canonical"
+    if publication:
+        argv = parsed.strict_projection.argv
+    else:
+        # Native argv and read-only queries reuse the exact literal record;
+        # neither is reserialized into a shell or made a live push grammar.
+        if (
+            parsed.status != "SCG-PARSED" or len(parsed.commands) != 1
+            or parsed.candidates or parsed.children or parsed.wrapper_projections
+            or parsed.normalizations or parsed.lexical.operations
+            or parsed.lexical.removed_spans
+        ):
+            return None
+        record = parsed.commands[0]
+        if (
+            record.confidence != "exact" or record.normalization_state != "literal"
+            or record.environment_assignments or record.control_keywords
+            or any(not token.literalized for token in record.token_records)
+        ):
+            return None
+        argv = record.tokens
+    if not argv or not Path(argv[0]).is_absolute():
+        return None
+    git = _resolve_executable("git", subject.root)
+    if git is None:
+        return None
+    try:
+        _bind_literal_executable_identity(argv[0], git, "PGG-CONSENT-EXECUTABLE")
+    except PrRouteDenied:
+        return None
+    selected_root = argv[2] if len(argv) > 2 and argv[1] == "-C" else command.cwd
+    if _same_publication_root(selected_root, subject) is not True:
+        return None
+    result = tuple(argv[3:]) if len(argv) > 2 and argv[1] == "-C" else tuple(argv[1:])
+    queries = {
+        ("remote", "get-url", "--push", "--all", subject.remote),
+        ("ls-remote", "--heads", subject.remote, subject.destination),
+    }
+    native_push = parsed.identity.input_kind == "DIRECT_ARGV" and result[:1] == ("push",)
+    return result if publication or native_push or result in queries or _native_remote_mutation(result, subject) else None
+
+
+def _same_publication_root(value: object, subject: GenericPublicationSubject) -> bool | None:
+    if type(value) is not str or not value or not Path(value).is_absolute():
+        return None
+    try:
+        observed = Path(value).stat()
+    except OSError:
+        return None
+    return (observed.st_dev, observed.st_ino) == subject.root_identity
+
+
+def _native_remote_mutation(args: tuple[str, ...], subject: GenericPublicationSubject) -> bool:
+    if len(args) >= 3 and args[0] == "remote" and args[1] in {"set-url", "add", "remove", "rm", "rename"} and args[2] == subject.remote:
+        return True
+    if args[:1] != ("config",):
+        return False
+    key = "remote." + subject.remote + "."
+    selected_keys = [index for index, word in enumerate(args) if word.startswith(key)]
+    return any(index < len(args) - 1 or any(word in {"--unset", "--unset-all", "--add", "--replace-all"} for word in args[1:index]) for index in selected_keys)
+
+
+def _native_operation_relevance(command: object, subject: GenericPublicationSubject) -> str:
+    """Qualify relation to O before applying thread/outcome predicates."""
+    parsed = _parse_native_command(command)
+    publications = parsed.effective_publications.records
+    if publications:
+        possible = False
+        for record in publications:
+            push = record.push
+            literal = push.command
+            root = command.cwd
+            options = push.git_global_options
+            if len(options) == 2 and options[0] == "-C":
+                root = options[1]
+            elif options:
+                possible = True
+                continue
+            relation = _same_publication_root(root, subject)
+            if relation is False:
+                continue
+            if relation is None or len(push.positionals) != 2:
+                possible = True
+                continue
+            remote, refspec = push.positionals
+            destination = refspec.split(":", 1)[-1]
+            destination = destination if destination.startswith("refs/") else "refs/heads/" + destination
+            if remote != subject.remote or destination != subject.destination:
+                continue
+            return "selected"
+        return "possible" if possible else "unrelated"
+    # Only exact native query/mutation operands can affect a selected remote
+    # preimage. Unrelated reads and opaque carrier names are not global vetoes.
+    leaf = _native_literal_leaf(parsed, subject)
+    if leaf is None or leaf.status != "SCG-PARSED" or leaf.candidates or len(leaf.commands) != 1:
+        return "unrelated"
+    tokens = leaf.commands[0].tokens
+    if not tokens or Path(tokens[0]).name.casefold() not in {"git", "git.exe"}:
+        return "unrelated"
+    root = tokens[2] if len(tokens) > 2 and tokens[1] == "-C" else command.cwd
+    args = tuple(tokens[3:]) if len(tokens) > 2 and tokens[1] == "-C" else tuple(tokens[1:])
+    relation = _same_publication_root(root, subject)
+    if relation is False:
+        return "unrelated"
+    queries = {("remote", "get-url", "--push", "--all", subject.remote),
+               ("ls-remote", "--heads", subject.remote, subject.destination)}
+    mutation = _native_remote_mutation(args, subject)
+    if args in queries or mutation:
+        return "mutation" if mutation else "observation" if relation is True else "possible"
+    return "unrelated"
+
+
+def _generic_operation_state(
+    approval: OriginalGenericApproval,
+    cut: _GenericControlCut,
+    preflight: PreflightResult,
+) -> tuple[str, str]:
+    """Actual typed native lifecycle, independently of scan consumption."""
+    subject = approval.subject
+    selected = []
+    for position, command in cut.commands:
+        if position <= approval.selection.user_record:
+            continue
+        relevance = _native_operation_relevance(command, subject)
+        if relevance != "unrelated":
+            selected.append((position, command, relevance))
+    for position, partial in cut.invalid_command_records:
+        if position <= approval.selection.user_record:
+            continue
+        raw = partial.get("command")
+        if partial.get("core") and isinstance(raw, list) and raw and all(type(word) is str for word in raw):
+            parsed = parse_native_argument_vector(tuple(raw), "partial-native:" + str(position), 0)
+        elif not partial.get("core") and type(raw) is str:
+            parsed = parse_transcript_command(raw, "exec_command", "partial-native:" + str(position), 0)
+        else:
+            parsed = None
+        matching_model = any(approval.selection.user_record < pos and call_id == partial.get("item_id") and (_same_publication_root(root, subject) is not False) for pos, call_id, root in cut.model_publications)
+        if matching_model or (parsed is not None and parsed.effective_publications.records and _same_publication_root(partial.get("cwd"), subject) is not False):
+            return "unresolved", "native-selected-command-shape"
+    if selected and not preflight.native_session_id:
+        return "unresolved", "native-command-thread-correlation"
+    latest: dict[str, tuple[int, object, str]] = {}
+    for position, command, relevance in selected:
+        if command.thread_id != preflight.native_session_id:
+            return "unresolved", "native-command-thread-correlation"
+        if command.source == "unifiedExecInteraction":
+            return "unresolved", "native-selected-continuation-parent-unavailable"
+        previous = latest.get(command.item_id)
+        if previous is not None:
+            old = previous[1]
+            if (old.command, old.argv, old.cwd, old.thread_id, old.turn_id, old.source) != (
+                command.command, command.argv, command.cwd, command.thread_id, command.turn_id, command.source,
+            ) or old.completed:
+                return "corrupt", "native-command-correlation"
+        latest[command.item_id] = position, command, relevance
+    endpoint: tuple[int, str] | None = None
+    targets: list[tuple[int, object]] = []
+    for position, command, relevance in sorted(latest.values(), key=lambda row: row[0]):
+        if relevance == "possible":
+            return "unresolved", "native-selected-operation"
+        if relevance == "mutation":
+            mutation_args = _native_git_arguments(command, subject, _native_literal_leaf(_parse_native_command(command), subject))
+            if mutation_args is None or not command.completed or command.status != "completed" or command.exit_code != 0:
+                return "unresolved", "native-selected-remote-mutation"
+            endpoint = None
+            continue
+        if position <= approval.selection.user_record:
+            continue
+        original_parse = _parse_native_command(command)
+        parsed = _native_literal_leaf(original_parse, subject)
+        argv = _native_git_arguments(command, subject, parsed)
+        if argv is None:
+            return "unresolved", "actual-target-command-shape"
+        if argv == ("remote", "get-url", "--push", "--all", subject.remote):
+            if command.completed and command.status == "completed" and command.exit_code == 0 and command.output is not None:
+                values = command.output.splitlines()
+                endpoint = (position, values[0]) if len(values) == 1 else None
+            continue
+        if command.argv:
+            # The actual -C root was qualified above. Classify the remaining
+            # native argument vector with the same grammar, without shell text.
+            parsed = parse_native_argument_vector((parsed.commands[0].executable, *argv), "native-command:" + command.item_id, 0)
+        decision = classify_generic_push(parsed)
+        if decision.status == "PGG-ADMISSIBLE" and decision.binding is not None:
+            remote, destination, source = decision.binding
+            if (remote, destination) != (subject.remote, subject.destination):
+                continue
+            if command.item_id == preflight.tool_use_id and not command.completed:
+                continue
+            if not command.completed or command.status != "completed" or command.exit_code != 0:
+                return "unresolved", "actual-target-outcome"
+            if source != subject.source_oid:
+                return "unresolved", "actual-target-immutable-source"
+            if endpoint is None or endpoint[1] != subject.remote_identity:
+                return "unresolved", "actual-target-remote-identity"
+            targets.append((position, command))
+            continue
+        if argv == ("ls-remote", "--heads", subject.remote, subject.destination) and targets:
+            if command.completed and command.status == "completed" and command.exit_code == 0 and command.output is not None:
+                expected = subject.source_oid + "\t" + subject.destination
+                if endpoint is not None and endpoint[1] == subject.remote_identity and command.output.splitlines() == [expected] and position > targets[-1][0]:
+                    return "fulfilled", "actual-target-and-destination-readback"
+        elif parsed.effective_publications.records:
+            return "unresolved", "actual-target-command-shape"
+    if targets:
+        return "unresolved", "actual-destination-readback"
+    for position, call_id, root in cut.model_publications:
+        if position <= approval.selection.user_record:
+            continue
+        if _same_publication_root(root, subject) is False:
+            continue
+        if call_id == preflight.tool_use_id and call_id not in latest:
+            continue
+        if call_id not in latest:
+            return "unresolved", "actual-target-result-unavailable"
+    # Opaque names alone establish neither a publication attempt nor no effect.
+    # Actual possibly matching model/native publications above remain held.
+    return "pending", "exact-original-operation"
+
+
+def _normalize_original_logical_scope(values: dict[str, str]) -> _OriginalLogicalScope:
+    """Normalize only actual supplied source values; never fill from HEAD/cache."""
+    if set(values) != _GENERIC_SCOPE_FIELDS:
+        missing = sorted(_GENERIC_SCOPE_FIELDS - set(values))
+        raise _OriginalScopeInputError(missing[0] if missing else "scope-fields")
+    if any(type(value) is not str or not value for value in values.values()):
+        raise _OriginalScopeInputError("scope-value")
+    root = _normalize_repository_workdir(values["root"], subject="authorization", source="authorization-context")
+    endpoint = values["remote_identity"]
+    repository = _repo_identity_from_url(endpoint)
+    if values["repository"] not in {endpoint, repository}:
+        raise _OriginalScopeInputError("repository")
+    repository = repository or endpoint
+    destination = values["destination"]
+    if not destination.startswith("refs/"):
+        destination = "refs/heads/" + destination
+    oid = values["source_oid"]
+    parsed_endpoint = urlsplit(endpoint)
+    if not REMOTE_NAME_REGEX.fullmatch(values["remote"]):
+        raise _OriginalScopeInputError("remote")
+    if parsed_endpoint.username is not None or parsed_endpoint.password is not None:
+        raise _OriginalScopeInputError("remote_identity")
+    if not destination.startswith("refs/heads/"):
+        raise _OriginalScopeInputError("destination")
+    if re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", oid) is None:
+        raise _OriginalScopeInputError("source_oid")
+    if not values["review_statement"].strip():
+        raise _OriginalScopeInputError("review_statement")
+    return _OriginalLogicalScope(root, repository, values["remote"], endpoint,
+        destination, oid.lower(), values["review_statement"])
+
+
+def _original_scope_source_values(selected, components) -> dict[str, str]:
+    fields = selected.source_fields
+    if fields:
+        if any(not isinstance(value, GenericSourceField) for value in fields) or len(fields) != len(_GENERIC_SCOPE_FIELDS) or {value.field for value in fields} != _GENERIC_SCOPE_FIELDS:
+            raise _OriginalScopeInputError("scope-fields")
+        values = {}
+        for value in fields:
+            if type(value.evidence_index) is not int or not 0 <= value.evidence_index < len(components):
+                raise _OriginalScopeInputError(value.field)
+            evidence, text = components[value.evidence_index]
+            needed_role = "completed-review" if value.field == "review_statement" else "scope"
+            if evidence.role != needed_role:
+                raise _OriginalScopeInputError(value.field)
+            if value.span is not None:
+                if type(value.span) is not tuple or len(value.span) != 2 or any(type(n) is not int for n in value.span) or not 0 <= value.span[0] < value.span[1] <= len(text):
+                    raise _OriginalScopeInputError(value.field)
+                text = text[value.span[0]:value.span[1]]
+            values[value.field] = text
+        return values
+    # An actual complete packet is one fitting source adapter. It is decoded
+    # before expected fields are consulted; general/narrative input uses the
+    # finite source field/component selectors above, not another user protocol.
+    packets = []
+    for evidence, text in components:
+        if evidence.role != "scope":
+            continue
+        try:
+            packet = _review_packet_subject(text)
+        except PrRouteDenied:
+            continue
+        packets.append((packet, text))
+    if not packets or len({value[0] for value in packets}) != 1:
+        raise _OriginalScopeInputError("scope-fields")
+    packet, raw = packets[0]
+    if not any(evidence.role == "completed-review" and text == raw for evidence, text in components):
+        raise _OriginalScopeInputError("review_statement")
+    return {"root": packet.root, "repository": packet.remote_identity,
+            "remote": packet.remote, "remote_identity": packet.remote_identity,
+            "destination": packet.destination, "source_oid": packet.source_oid,
+            "review_statement": raw}
+
+
+def _qualify_original_source_scope(source: _ReceivedGenericSource, current_subject: GenericPublicationSubject) -> OriginalGenericApproval:
+    scope = source.scope
+    # Only the source-derived root can use this operation's existing qualified
+    # native context. Current invocation/HEAD is never a missing scope filler.
+    if _same_publication_root(scope.root, current_subject) is not True:
+        raise _OriginalScopeInputError("root-native-context")
+    subject = GenericPublicationSubject(scope.root, current_subject.root_identity,
+        current_subject.repository_identity, current_subject.worktree_identity,
+        scope.remote, scope.remote_identity, scope.destination,
+        {40: "sha1", 64: "sha256"}[len(scope.source_oid)], scope.source_oid)
+    publication_review_packet(subject)
+    return OriginalGenericApproval(subject, source.selection, source.user_sha256,
+        source.packet_sha256, source.producer_kind, source.history_sha256)
+
+
+def _receive_selected_generic_source(
+    transcript_path: str,
+    selected: GenericUserScopeSelection,
+) -> _ReceivedGenericSource:
+    """Receive Root's semantic selection over actual applicable components.
+
+    Neither locators nor normalized values authenticate themselves. Original
+    raw records, genuine user disposition, selected Q/A correlation and actual
+    review/scope ordering are independently acquired every time. Root owns the
+    interpretation linking those components; no packet or answer-only text
+    format is imposed on that interpretation.
+    """
+    if type(selected.user_record) is not int or selected.user_record <= 0:
+        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    evidence = selected.evidence
+    if any(not isinstance(value, GenericRecordEvidence) for value in evidence) or len(set(evidence)) != len(evidence):
+        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    wanted = {value.record for value in evidence} | {selected.user_record}
+    call_ids = {value.call_id for value in evidence if value.call_id is not None}
+    if selected.question_call_id is not None:
+        call_ids.add(selected.question_call_id)
+    records: dict[int, tuple[dict, bytes]] = {}
+    calls: dict[str, tuple[int, object]] = {}
+    digest = hashlib.sha256()
+    position = 0
+
+    def consume(entry: dict, raw: bytes) -> None:
+        nonlocal position
+        position += 1
+        digest.update(raw)
+        if position in wanted:
+            records[position] = entry, raw
+        for call in extract_native_control_calls(entry):
+            if call.call_id in call_ids:
+                if call.call_id in calls:
+                    raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+                calls[call.call_id] = position, call
+
+    _entries, status = read_transcript_history(
+        transcript_path, byte_cap=None, record_cap=None, line_byte_cap=None, on_record=consume,
+    )
+    if status == HISTORY_STATUS_IDENTITY_DRIFT:
+        raise PrRouteDenied("PGG-CONSENT-IDENTITY-DRIFT")
+    if status != HISTORY_STATUS_FOUND or selected.user_record not in records:
+        raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+    user_entry, raw_user = records[selected.user_record]
+    if not is_user_message(user_entry):
+        raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+    reply = extract_publication_user_reply(user_entry)
+    action, _ = reply.publication_action()
+    if action in {"revoked", "malformed"} or (action != "generic" and not publication_reply_has_push_instruction(reply)):
+        raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+    answer = None
+    question_position = None
+    question_text = None
+    if reply.kind == "plain":
+        if len(reply.answers) != 1 or (selected.question_call_id, selected.question_index) != (None, None):
+            raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+        approval_text = reply.answers[0]
+    elif reply.kind == "structured-answer":
+        if selected.question_call_id not in calls or type(selected.question_index) is not int:
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        question_position, question = calls[selected.question_call_id]
+        if question_position >= selected.user_record or question.input_kind != "json" or question.tool_name not in {"request_user_input_async", "functions.request_user_input_async"}:
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        questions = _strict_json(question.input_text, dict, "PGG-CONSENT-ASSOCIATION").get("questions")
+        index = selected.question_index
+        if not isinstance(questions, list) or not 0 <= index < len(questions):
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        matched = [item for item in reply.structured_items if _strict_json(item.question_item_id, list, "PGG-CONSENT-ASSOCIATION") == [question.tool_name, question.call_id, index]]
+        if len(matched) != 1:
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        answer = matched[0]
+        original = questions[index]
+        # Match the actual indexed producer component to the received native
+        # question. Do not guess a universal historical title/key spelling.
+        originals = [original] if type(original) is str else list(original.values()) if isinstance(original, dict) else []
+        if sum(type(value) is str and value == answer.question for value in originals) != 1:
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        selected_answer = PublicationUserReply("plain", (answer.answer,))
+        if selected_answer.publication_action()[0] != "generic" and not publication_reply_has_push_instruction(selected_answer):
+            raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+        approval_text, question_text = answer.answer, answer.question
+    else:
+        raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+
+    fields = {"root": selected.root, "repository": selected.repository, "remote": selected.remote,
+              "remote_identity": selected.remote_identity, "destination": selected.destination,
+              "source_oid": selected.source_oid, "review_statement": selected.review_statement}
+    if any(type(value) is not str or not value for value in fields.values()):
+        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+    source_values = {}
+    if not evidence:
+        # Existing one-user-record adapter extracts actual values first.
+        if len(selected.spans) != len(fields) or {row[0] for row in selected.spans} != set(fields):
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        for key, start, end in selected.spans:
+            if type(start) is not int or type(end) is not int or not 0 <= start < end <= len(approval_text):
+                raise _OriginalScopeInputError(key)
+            source_values[key] = approval_text[start:end]
+    else:
+        roles: dict[str, list[tuple[GenericRecordEvidence, str]]] = {}
+        components = []
+        for value in evidence:
+            if value.role not in {"approval", "scope", "completed-review", "association"} or type(value.record) is not int or value.record <= 0 or value.record > selected.user_record or value.record not in records:
+                raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+            entry, raw = records[value.record]
+            if type(value.record_sha256) is not str or hashlib.sha256(raw).hexdigest() != value.record_sha256:
+                raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+            if value.component == "user-text":
+                if not is_user_message(entry) or extract_publication_user_reply(entry).kind != "plain" or value.call_id is not None or value.index is not None:
+                    raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+                component = extract_publication_user_reply(entry).answers[0]
+            elif value.component == "answer":
+                if value.record != selected.user_record or answer is None or (value.call_id, value.index) != (selected.question_call_id, selected.question_index):
+                    raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+                component = answer.answer
+            elif value.component in {"question", "call-input"}:
+                if value.call_id not in calls or calls[value.call_id][0] != value.record:
+                    raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+                if value.component == "question":
+                    if question_text is None or value.record != question_position or (value.call_id, value.index) != (selected.question_call_id, selected.question_index):
+                        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+                    component = question_text
+                else:
+                    if value.index is not None:
+                        raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+                    component = calls[value.call_id][1].input_text
+            elif value.component == "result-text":
+                matches = [result for result in extract_native_control_results(entry) if result.call_id == value.call_id]
+                if value.call_id not in calls or calls[value.call_id][0] >= value.record or len(matches) != 1 or type(value.index) is not int or not 0 <= value.index < len(matches[0].text_blocks):
+                    raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+                component = matches[0].text_blocks[value.index]
+            else:
+                raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+            if value.span is not None:
+                if type(value.span) is not tuple or len(value.span) != 2 or any(type(n) is not int for n in value.span) or not 0 <= value.span[0] < value.span[1] <= len(component):
+                    raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+                component = component[value.span[0]:value.span[1]]
+            if not component:
+                raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+            roles.setdefault(value.role, []).append((value, component))
+            components.append((value, component))
+        if set(roles) != {"approval", "scope", "completed-review", "association"}:
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        if any(value.record != selected.user_record or value.component not in {"answer", "user-text"} for value, _ in roles["approval"]):
+            raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+        if question_position is not None and not any(value.record == question_position and value.component == "question" for value, _ in roles["association"]):
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        # Applicable user/answer components may supply scope and a statement
+        # that review was completed. Only genuinely future source records are
+        # excluded above; Q-before-answer correlation remains mandatory.
+        source_values = _original_scope_source_values(selected, components)
+    actual_scope = _normalize_original_logical_scope(source_values)
+    expected_scope = _normalize_original_logical_scope(fields)
+    if actual_scope != expected_scope:
+        coordinate = next(name for name in sorted(_GENERIC_SCOPE_FIELDS) if getattr(actual_scope, name) != getattr(expected_scope, name))
+        raise _OriginalScopeInputError(coordinate)
+    review = min((value for value in evidence if value.role == "completed-review"), key=lambda value: value.record, default=None)
+    return _ReceivedGenericSource(actual_scope, GenericApprovalSelection(
+        review.call_id if review is not None else None,
+        review.record if review is not None and review.record != selected.user_record else None,
+        selected.user_record, selected.question_call_id, selected.question_index,
+    ), hashlib.sha256(raw_user).hexdigest(), None, reply.kind, digest.hexdigest())
+
+
+def _receive_selected_generic_association(
+    transcript_path: str, selected: GenericUserScopeSelection, current_subject: GenericPublicationSubject,
+) -> OriginalGenericApproval:
+    return _qualify_original_source_scope(_receive_selected_generic_source(transcript_path, selected), current_subject)
+
+
+def _receive_direct_user_scope(
+    transcript_path: str, selected: GenericUserScopeSelection, current_subject: GenericPublicationSubject,
+) -> OriginalGenericApproval:
+    return _receive_selected_generic_association(transcript_path, selected, current_subject)
+
+
+_GENERIC_INDEX_SUFFIX = ".generic-publication-index-v1.json"
+_GENERIC_SCOPE_FIELDS = frozenset({
+    "root", "repository", "remote", "remote_identity", "destination",
+    "source_oid", "review_statement",
+})
+
+
+def _generic_index_path(transcript_path: str) -> Path:
+    # Same selected native-source/binding owner; the PR v1 leaf is untouched.
+    original = _binding_sidecar_path(transcript_path)
+    return original.with_name(original.name[:-len(PR_BINDING_SIDECAR_SUFFIX)] + _GENERIC_INDEX_SUFFIX)
+
+
+def _generic_evidence_payload(value: GenericRecordEvidence) -> dict:
+    return {"role": value.role, "record": value.record, "sha256": value.record_sha256,
+            "component": value.component, "callId": value.call_id, "index": value.index,
+            "span": list(value.span) if value.span is not None else None}
+
+
+def _decode_generic_evidence(value: object) -> GenericRecordEvidence:
+    if not isinstance(value, dict) or set(value) != {"role", "record", "sha256", "component", "callId", "index", "span"}:
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    if value["role"] not in {"approval", "scope", "completed-review", "association"} or type(value["record"]) is not int or value["record"] <= 0 or type(value["sha256"]) is not str or re.fullmatch(r"[0-9a-f]{64}", value["sha256"]) is None:
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    if value["component"] not in {"user-text", "answer", "question", "call-input", "result-text"}:
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    if value["callId"] is not None and (type(value["callId"]) is not str or not value["callId"]):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    if value["index"] is not None and (type(value["index"]) is not int or value["index"] < 0):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    span = value["span"]
+    if span is not None and (not isinstance(span, list) or len(span) != 2 or any(type(n) is not int for n in span) or not 0 <= span[0] < span[1]):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    return GenericRecordEvidence(value["role"], value["record"], value["sha256"], value["component"], value["callId"], value["index"], tuple(span) if span is not None else None)
+
+
+def _generic_source_field_payload(value: GenericSourceField) -> dict:
+    return {"field": value.field, "evidenceIndex": value.evidence_index,
+            "span": list(value.span) if value.span is not None else None}
+
+
+def _decode_generic_source_field(value: object) -> GenericSourceField:
+    if not isinstance(value, dict) or set(value) != {"field", "evidenceIndex", "span"} or value["field"] not in _GENERIC_SCOPE_FIELDS or type(value["evidenceIndex"]) is not int or value["evidenceIndex"] < 0:
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    span = value["span"]
+    if span is not None and (not isinstance(span, list) or len(span) != 2 or any(type(n) is not int for n in span) or not 0 <= span[0] < span[1]):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    return GenericSourceField(value["field"], value["evidenceIndex"], tuple(span) if span is not None else None)
+
+
+def _generic_index_payload(value: GenericConsentIndex) -> dict:
+    return {
+        "v": 1, "kind": "generic-derived-selection",
+        "anchor": {"record": value.user_record, "sha256": value.user_sha256},
+        "sourceIdentity": list(value.source_identity),
+        "subject": json.loads(publication_review_packet(value.subject))["subject"],
+        "spans": [list(row) for row in value.spans],
+        "questionCallId": value.question_call_id, "questionIndex": value.question_index,
+        "history": {"records": value.history_records, "sha256": value.history_sha256},
+        "evidence": [_generic_evidence_payload(item) for item in value.evidence],
+        "association": {"repository": value.repository, "reviewStatement": value.review_statement},
+        "sourceFields": [_generic_source_field_payload(item) for item in value.source_fields],
+    }
+
+
+def _decode_generic_index(raw: bytes) -> GenericConsentIndex:
+    value = _strict_json(raw.decode("utf-8", errors="strict"), dict, "PGG-CONSENT-CORRUPT")
+    allowed = {"v", "kind", "anchor", "sourceIdentity", "subject", "spans", "questionCallId", "questionIndex", "history", "evidence", "association"}
+    if set(value) not in (allowed, allowed | {"sourceFields"}) or type(value["v"]) is not int or value["v"] != 1 or value["kind"] != "generic-derived-selection":
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    anchor, history = value["anchor"], value["history"]
+    if not isinstance(anchor, dict) or set(anchor) != {"record", "sha256"} or not isinstance(history, dict) or set(history) != {"records", "sha256"}:
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    if type(anchor["record"]) is not int or anchor["record"] <= 0 or type(history["records"]) is not int or history["records"] < anchor["record"]:
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    if any(type(item) is not str or re.fullmatch(r"[0-9a-f]{64}", item) is None for item in (anchor["sha256"], history["sha256"])):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    identity = value["sourceIdentity"]
+    if not isinstance(identity, list) or len(identity) != 2 or any(type(n) is not int or n < 0 for n in identity):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    evidence_rows, association = value["evidence"], value["association"]
+    if not isinstance(evidence_rows, list) or not isinstance(association, dict) or set(association) != {"repository", "reviewStatement"} or any(type(n) is not str for n in association.values()):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    evidence = tuple(_decode_generic_evidence(row) for row in evidence_rows)
+    source_rows = value.get("sourceFields", [])
+    if not isinstance(source_rows, list):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    source_fields = tuple(_decode_generic_source_field(row) for row in source_rows)
+    if source_fields and (len(source_fields) != len(_GENERIC_SCOPE_FIELDS) or {row.field for row in source_fields} != _GENERIC_SCOPE_FIELDS):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    if len(set(evidence)) != len(evidence):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    spans = value["spans"]
+    if not isinstance(spans, list) or (not evidence and len(spans) != len(_GENERIC_SCOPE_FIELDS)):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    for row in spans:
+        if not isinstance(row, list) or len(row) != 3 or row[0] not in _GENERIC_SCOPE_FIELDS or any(type(n) is not int for n in row[1:]) or not 0 <= row[1] < row[2]:
+            raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    if not evidence and {row[0] for row in spans} != _GENERIC_SCOPE_FIELDS:
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    call_id, index = value["questionCallId"], value["questionIndex"]
+    if (call_id, index) != (None, None) and (type(call_id) is not str or not call_id or type(index) is not int or index < 0):
+        raise PrRouteDenied("PGG-CONSENT-CORRUPT")
+    subject = _review_packet_subject(json.dumps({"kind": "publication-review-v1", "subject": value["subject"]}))
+    return GenericConsentIndex(
+        anchor["record"], anchor["sha256"], tuple(identity), subject,
+        tuple(tuple(row) for row in spans), call_id, index,
+        history["sha256"], history["records"], evidence,
+        association["repository"], association["reviewStatement"], source_fields,
+    )
+
+
+def _generic_index_capacity(
+    cut: _GenericControlCut, subject: GenericPublicationSubject,
+    source_metadata: os.stat_result,
+) -> int:
+    """Worst valid encoding from acquired inputs, not a new input-size limit.
+
+    Six variable string slots can each refer to source user data, with at most
+    six ASCII escape bytes per Unicode character. Seventeen locator integers
+    are bounded by actual acquired record/text lengths. Native identity/schema
+    bytes are included exactly. The PR v1 resource bound remains unchanged.
+    """
+    skeleton = GenericConsentIndex(
+        1, "0" * 64, (source_metadata.st_dev, source_metadata.st_ino), subject,
+        tuple((key, 0, 1) for key in sorted(_GENERIC_SCOPE_FIELDS)),
+        None, None, "0" * 64, max(cut.record_count, 1),
+    )
+    fixed = len(json.dumps(_generic_index_payload(skeleton), ensure_ascii=True, separators=(",", ":")).encode("utf-8"))
+    digits = len(str(max(source_metadata.st_size, cut.record_count, cut.max_approval_record_bytes, 1)))
+    # A distinct locator is one of four roles over an actual component and
+    # an optional Unicode span. At most B components and (B+1)^2 spans exist
+    # in B acquired bytes. Exact duplicates are redundant, not another input.
+    # The ceiling is input-derived; reads allocate only observed-size+1.
+    size = max(source_metadata.st_size, 1)
+    locator_fixed = len(json.dumps(_generic_evidence_payload(GenericRecordEvidence("completed-review", 1, "0" * 64, "result-text", "", 0, (0, 1))), separators=(",", ":")))
+    locator_bound = locator_fixed + 6 * size + 4 * digits
+    field_fixed = len(json.dumps(_generic_source_field_payload(GenericSourceField("review_statement", 0, (0, 1))), separators=(",", ":")))
+    # Seven logical coordinates, each with one component index (bounded by
+    # actual distinct evidence count) and two source-character offsets.
+    field_bound = len(_GENERIC_SCOPE_FIELDS) * (field_fixed + 5 * digits)
+    return fixed + 6 * 6 * cut.max_approval_record_bytes + 17 * digits + 4 * size * (size + 1) ** 2 * locator_bound + 12 * size + field_bound
+
+
+def _read_generic_index(
+    transcript_path: str, cut: _GenericControlCut, subject: GenericPublicationSubject,
+) -> GenericConsentIndex | None:
+    return _read_native_binding_state(
+        _generic_index_path(transcript_path),
+        byte_cap=_generic_index_capacity(cut, subject, Path(transcript_path).stat()),
+        decode_document=_decode_generic_index,
+    )
+
+
+def _selection_from_generic_index(
+    transcript_path: str, value: GenericConsentIndex,
+) -> tuple[GenericUserScopeSelection, str]:
+    source = Path(transcript_path)
+    metadata = source.stat()
+    # The persisted inode is an acquisition observation, not perpetual
+    # authority. The current operation holds and requalifies its actual source.
+    observed_identity = (metadata.st_dev, metadata.st_ino)
+    position = 0
+    user: tuple[PublicationUserReply, bytes] | None = None
+    prefix = hashlib.sha256()
+    complete = hashlib.sha256()
+
+    def consume(entry: dict, raw: bytes) -> None:
+        nonlocal position, user
+        position += 1
+        complete.update(raw)
+        if position <= value.history_records:
+            prefix.update(raw)
+        if position == value.user_record and is_user_message(entry):
+            user = extract_publication_user_reply(entry), raw
+
+    _entries, status = read_transcript_history(
+        transcript_path, byte_cap=None, record_cap=None, line_byte_cap=None,
+        on_record=consume,
+    )
+    if status == HISTORY_STATUS_IDENTITY_DRIFT:
+        raise PrRouteDenied("PGG-CONSENT-IDENTITY-DRIFT")
+    metadata = source.stat()
+    if status != HISTORY_STATUS_FOUND or user is None or position < value.history_records or prefix.hexdigest() != value.history_sha256 or (metadata.st_dev, metadata.st_ino) != observed_identity:
+        raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+    reply, raw = user
+    if hashlib.sha256(raw).hexdigest() != value.user_sha256:
+        raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+    if value.question_call_id is None:
+        if reply.kind != "plain" or len(reply.answers) != 1:
+            raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+        text = reply.answers[0]
+    else:
+        if reply.kind != "structured-answer":
+            raise PrRouteDenied("PGG-CONSENT-PROVENANCE")
+        matches = []
+        for item in reply.structured_items:
+            locator = _strict_json(item.question_item_id, list, "PGG-CONSENT-ASSOCIATION")
+            if len(locator) == 3 and locator[1:] == [value.question_call_id, value.question_index]:
+                matches.append(item)
+        if len(matches) != 1:
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        text = matches[0].answer
+    if value.evidence:
+        return GenericUserScopeSelection(
+            value.user_record, value.subject.root, value.repository,
+            value.subject.remote, value.subject.remote_identity,
+            value.subject.destination, value.subject.source_oid, value.review_statement,
+            question_call_id=value.question_call_id, question_index=value.question_index,
+            evidence=value.evidence, source_fields=value.source_fields,
+        ), complete.hexdigest()
+    values = {}
+    for key, start, end in value.spans:
+        if not 0 <= start < end <= len(text):
+            raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+        values[key] = text[start:end]
+    return GenericUserScopeSelection(
+        value.user_record, spans=value.spans, question_call_id=value.question_call_id,
+        question_index=value.question_index, **values,
+    ), complete.hexdigest()
+
+
+def _receive_generic_publication_consent_once(
+    preflight: PreflightResult,
+    current_subject: GenericPublicationSubject,
+    *,
+    direct_selection: GenericUserScopeSelection | None = None,
+) -> GenericConsentResult:
+    """One common exact-scope receiving path; no cached label can authorize."""
+    cut = _generic_control_cut(preflight.transcript_path)
+    if cut.history_status != HISTORY_STATUS_FOUND:
+        detail = "selected-history-drift" if cut.history_status == HISTORY_STATUS_IDENTITY_DRIFT else "selected-history-unavailable"
+        return GenericConsentResult("corrupt", None, detail)
+    materialized: GenericConsentIndex | None = None
+    if cut.intent_state in {"revoked", "corrupt"}:
+        return GenericConsentResult(cut.intent_state, None, "later-genuine-publication-control")
+    if direct_selection is None and cut.intent_state != "candidate":
+        try:
+            materialized = _read_generic_index(preflight.transcript_path, cut, current_subject)
+            if direct_selection is None and materialized is not None:
+                direct_selection, observed_digest = _selection_from_generic_index(
+                    preflight.transcript_path, materialized,
+                )
+                if observed_digest != cut.history_sha256:
+                    return GenericConsentResult("corrupt", None, "selected-history-drift")
+        except PrRouteDenied as exc:
+            return GenericConsentResult("corrupt", None, exc.failure_id)
+        except OSError:
+            return GenericConsentResult("corrupt", None, "selected-source-unavailable")
+    if direct_selection is None and (cut.intent_state != "candidate" or cut.selection is None):
+        return GenericConsentResult(cut.intent_state, None, "original-reviewed-association")
+    if direct_selection is not None and (
+        cut.intent_state in {"revoked", "corrupt"}
+        or cut.intent_record > direct_selection.user_record
+    ):
+        return GenericConsentResult(cut.intent_state, None, "later-genuine-publication-control")
+    authority_record = direct_selection.user_record if direct_selection is not None else cut.intent_record
+    if cut.pr_record > authority_record:
+        return GenericConsentResult("superseded", None, "later-publication-intent")
+    try:
+        original = (
+            _receive_direct_user_scope(preflight.transcript_path, direct_selection, current_subject)
+            if direct_selection is not None
+            else _receive_generic_original_association(preflight.transcript_path, cut.selection)
+        )
+    except PrRouteDenied as exc:
+        detail = "original-source-coordinate:" + exc.coordinate if isinstance(exc, _OriginalScopeInputError) else exc.failure_id
+        return GenericConsentResult("insufficient", None, detail)
+    if original.history_sha256 != cut.history_sha256:
+        return GenericConsentResult("corrupt", None, "selected-history-drift")
+    if materialized is not None and materialized.user_record == original.selection.user_record:
+        if materialized.user_sha256 != original.user_sha256:
+            return GenericConsentResult("corrupt", None, "materialized-anchor-differs")
+        if materialized.subject != original.subject:
+            return GenericConsentResult("insufficient", original, "materialized-native-scope-differs")
+    if original.subject != current_subject:
+        return GenericConsentResult("insufficient", original, "selected-operation-differs")
+    state, detail = _generic_operation_state(original, cut, preflight)
+    return GenericConsentResult(state, original, detail, direct_selection)
+
+
+def receive_generic_publication_consent(
+    preflight: PreflightResult,
+    current_subject: GenericPublicationSubject,
+    *,
+    direct_selection: GenericUserScopeSelection | None = None,
+) -> GenericConsentResult:
+    try:
+        with hold_native_history_source(preflight.transcript_path) as source:
+            # A frontier/content drift may be reread once within this same
+            # source association; replacement never rebaselines the operation.
+            result = _receive_generic_publication_consent_once(
+                preflight, current_subject, direct_selection=direct_selection,
+            )
+            source.assert_current()
+            if result.detail in {"selected-history-drift", "PGG-CONSENT-IDENTITY-DRIFT"}:
+                result = _receive_generic_publication_consent_once(
+                    preflight, current_subject, direct_selection=direct_selection,
+                )
+            source.assert_current()
+            if result.approval is not None:
+                result = replace(result, approval=replace(result.approval, source_identity=source.identity))
+            return result
+    except NativeHistorySourceError:
+        return GenericConsentResult("corrupt", None, "selected-source-association")
+
+
+def materialize_generic_publication_consent(
+    preflight: PreflightResult,
+    selection: GenericUserScopeSelection,
+) -> GenericConsentResult:
+    """Finite Root receiving, not a grant-file writer or a publication action."""
+    try:
+        with hold_native_history_source(preflight.transcript_path) as held_source:
+            prepared = _prepare_generic_publication(preflight)
+            result = receive_generic_publication_consent(
+                preflight, prepared.subject, direct_selection=selection,
+            )
+            if result.state != "pending" or result.approval is None:
+                return result
+            if result.approval.source_identity != held_source.identity:
+                return GenericConsentResult("corrupt", None, "selected-source-association")
+            cut = _generic_control_cut(preflight.transcript_path, collect_lifecycle=False)
+            if cut.history_status != HISTORY_STATUS_FOUND or cut.history_sha256 != result.approval.history_sha256:
+                return GenericConsentResult("corrupt", None, "selected-history-drift")
+            source = Path(preflight.transcript_path).stat()
+            value = GenericConsentIndex(
+                selection.user_record, result.approval.user_sha256, (source.st_dev, source.st_ino),
+                result.approval.subject, selection.spans, selection.question_call_id,
+                selection.question_index, cut.history_sha256, cut.record_count,
+                selection.evidence, selection.repository if selection.evidence else "",
+                selection.review_statement if selection.evidence else "", selection.source_fields,
+            )
+            capacity = _generic_index_capacity(cut, prepared.subject, source)
+            path = _generic_index_path(preflight.transcript_path)
+
+            def read_state(selected_path: Path) -> GenericConsentIndex | None:
+                return _read_native_binding_state(
+                    selected_path, byte_cap=capacity, decode_document=_decode_generic_index,
+                )
+
+            expected = read_state(path)
+            _write_native_binding_state(
+                path, value, expected=expected, read_state=read_state,
+                encode_state=_generic_index_payload, byte_cap=capacity,
+            )
+            return receive_generic_publication_consent(preflight, prepared.subject, direct_selection=selection)
+
+    except NativeHistorySourceError:
+        return GenericConsentResult("corrupt", None, "selected-source-association")
 
 
 class TrustedSourceIdentity(NamedTuple):
@@ -860,7 +2257,7 @@ class PendingScanInvocation:
                 if (
                     receipt.source != self.binding.source_oid
                     or receipt.tip != self.binding.source_oid
-                    or self.binding.source_oid != self.binding.head_oid
+                    or (self.binding.route != "generic" and self.binding.source_oid != self.binding.head_oid)
                 ):
                     mismatch = "PGG-RANGE-TIP-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
                     raise PrRouteDenied(mismatch)
@@ -1872,7 +3269,9 @@ def _validate_binding_payload(value: object) -> PrBindingState:
     )
 
 
-def _read_binding_state(path: Path) -> PrBindingState | None:
+def _read_native_binding_state(
+    path: Path, *, byte_cap: int, decode_document: Callable[[bytes], object],
+) -> object | None:
     try:
         observed = path.lstat()
     except FileNotFoundError:
@@ -1883,7 +3282,7 @@ def _read_binding_state(path: Path) -> PrBindingState | None:
         not stat.S_ISREG(observed.st_mode)
         or stat.S_ISLNK(observed.st_mode)
         or observed.st_nlink != 1
-        or observed.st_size > PR_BINDING_SIDECAR_BYTE_CAP
+        or observed.st_size > byte_cap
         or bool(
             getattr(observed, "st_file_attributes", 0)
             & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
@@ -1898,12 +3297,13 @@ def _read_binding_state(path: Path) -> PrBindingState | None:
                 getattr(observed, name) for name in identity_fields
             ):
                 raise PrRouteDenied("PRG-AUTH-MALFORMED")
-            raw = stream.read(PR_BINDING_SIDECAR_BYTE_CAP + 1)
+            read_size = min(byte_cap + 1, observed.st_size + 1)
+            raw = stream.read(read_size)
             after_read = os.fstat(stream.fileno())
             stream.seek(0)
-            verified = stream.read(PR_BINDING_SIDECAR_BYTE_CAP + 1)
+            verified = stream.read(read_size)
             after_verify = os.fstat(stream.fileno())
-        if len(raw) > PR_BINDING_SIDECAR_BYTE_CAP:
+        if len(raw) > byte_cap:
             raise PrRouteDenied("PRG-AUTH-MALFORMED")
         current = path.lstat()
         stable_fields = (
@@ -1922,12 +3322,23 @@ def _read_binding_state(path: Path) -> PrBindingState | None:
             or len(raw) != opened.st_size
         ):
             raise PrRouteDenied("PRG-AUTH-MALFORMED")
-        value = json.loads(raw.decode("utf-8", errors="strict"))
+        value = decode_document(raw)
     except PrRouteDenied:
         raise
     except Exception:
         raise PrRouteDenied("PRG-AUTH-MALFORMED") from None
-    return _validate_binding_payload(value)
+    return value
+
+
+def _decode_pr_binding_document(raw: bytes) -> PrBindingState:
+    return _validate_binding_payload(json.loads(raw.decode("utf-8", errors="strict")))
+
+
+def _read_binding_state(path: Path) -> PrBindingState | None:
+    return _read_native_binding_state(
+        path, byte_cap=PR_BINDING_SIDECAR_BYTE_CAP,
+        decode_document=_decode_pr_binding_document,
+    )
 
 
 def _binding_lock_path(path: Path) -> Path:
@@ -2020,13 +3431,15 @@ def _release_binding_write_lock(
         raise PrRouteDenied(failure_id)
 
 
-def _write_binding_state(
-    path: Path, state: PrBindingState, *, expected: PrBindingState | None
+def _write_native_binding_state(
+    path: Path, state: object, *, expected: object | None,
+    read_state: Callable[[Path], object | None],
+    encode_state: Callable[[object], dict], byte_cap: int,
 ) -> None:
     payload = json.dumps(
-        _binding_payload(state), ensure_ascii=True, separators=(",", ":")
+        encode_state(state), ensure_ascii=True, separators=(",", ":")
     ).encode("utf-8")
-    if len(payload) > PR_BINDING_SIDECAR_BYTE_CAP:
+    if len(payload) > byte_cap:
         raise PrRouteDenied("PRG-INTERNAL")
     lock_fd, lock_path, lock_identity = _acquire_binding_write_lock(path)
     target = path if expected is None else path.with_name(
@@ -2037,7 +3450,7 @@ def _write_binding_state(
     committed = False
     primary = True
     try:
-        if _read_binding_state(path) != expected:
+        if read_state(path) != expected:
             raise PrRouteDenied("PRG-BINDING-DRIFT")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         if hasattr(os, "O_BINARY"):
@@ -2067,11 +3480,11 @@ def _write_binding_state(
             os.close(write_fd)
             write_fd = None
             if expected is not None:
-                if _read_binding_state(path) != expected:
+                if read_state(path) != expected:
                     raise PrRouteDenied("PRG-BINDING-DRIFT")
                 os.replace(target, path)
                 committed = True
-            if _read_binding_state(path) != state:
+            if read_state(path) != state:
                 raise PrRouteDenied("PRG-BINDING-DRIFT")
             committed = True
         except FileExistsError:
@@ -2092,6 +3505,15 @@ def _write_binding_state(
         _release_binding_write_lock(
             lock_fd, lock_path, lock_identity, preserve_primary=primary
         )
+
+
+def _write_binding_state(
+    path: Path, state: PrBindingState, *, expected: PrBindingState | None,
+) -> None:
+    _write_native_binding_state(
+        path, state, expected=expected, read_state=_read_binding_state,
+        encode_state=_binding_payload, byte_cap=PR_BINDING_SIDECAR_BYTE_CAP,
+    )
 
 
 def _same_binding_anchor(state: PrBindingState, intent: SimplePrIntent) -> bool:
@@ -5034,8 +6456,65 @@ def _revoke_simple_binding(transcript_path: str) -> None:
 
 
 
-def _complete_generic_publication(preflight: PreflightResult) -> bool:
-    """One owner for mandatory generic command, binding and scan completion."""
+def _capture_generic_publication_subject(
+    binding: PushScanBinding, repository_workdir: str, git_exe: str,
+) -> GenericPublicationSubject:
+    """Capture existing native repository observations and the effective endpoint."""
+    fds: tuple[int, ...] = ()
+    modules: CapturedReviewModules | None = None
+    primary: BaseException | None = None
+    try:
+        fds, closure = _capture_source_closure()
+        modules = _load_captured_review_modules(closure)
+        observed = _capture_repository_observation(
+            modules.policy_module, Path(repository_workdir), git_exe,
+        )
+        if observed["status"] != "captured":
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+        repository = observed["repository"]
+        _, endpoints = _run_text(
+            [git_exe, "remote", "get-url", "--push", "--all", binding.remote],
+            time.monotonic() + ORACLE_TIMEOUT_SECONDS,
+            "PGG-CONSENT-ASSOCIATION", repository_workdir,
+        )
+        rows = endpoints.splitlines()
+        if len(rows) != 1 or not rows[0]:
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+
+        def identity(key: str) -> tuple[int, int]:
+            value = repository[key]
+            return int(value["device"]), int(value["inode"])
+
+        result = GenericPublicationSubject(
+            repository_workdir, identity("worktreeRoot"), identity("commonGit"),
+            identity("worktreeGit"), binding.remote, rows[0], binding.destination,
+            repository["objectFormat"], binding.source_oid,
+        )
+        publication_review_packet(result)  # Validate before exposing scope data.
+        return result
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        failures: list[BaseException] = []
+        if modules is not None:
+            try:
+                _release_captured_review_modules(modules)
+            except BaseException as exc:
+                failures.append(exc)
+        for fd in fds:
+            try:
+                os.close(fd)
+            except BaseException as exc:
+                failures.append(exc)
+        if failures:
+            if primary is not None:
+                raise primary from failures[0]
+            raise PrRouteDenied("PGG-CONSENT-ASSOCIATION") from failures[0]
+
+
+def _prepare_generic_publication(preflight: PreflightResult) -> PreparedGenericPublication:
+    """Preserve the existing command/root/executable/current-source qualification."""
     grammar = preflight.generic_decision
     if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
         raise PrRouteDenied(grammar.status)
@@ -5085,23 +6564,105 @@ def _complete_generic_publication(preflight: PreflightResult) -> bool:
     binding = _resolve_generic_scan_binding(
         remote, destination, source, repository_workdir, git_exe
     )
-    _run_authoritative_scan(binding, repository_workdir, git_exe)
-    return True
+    subject = _capture_generic_publication_subject(binding, repository_workdir, git_exe)
+    return PreparedGenericPublication(repository_workdir, git_exe, binding, subject, source)
 
 
-def evaluate_heavy(preflight: PreflightResult) -> bool:
+def _complete_generic_publication(
+    preflight: PreflightResult,
+    consent: GenericConsentResult | None = None,
+    prepared: PreparedGenericPublication | None = None,
+) -> bool:
+    """Every generic allow requires actual original receiving plus a NEW scan."""
+    try:
+        with hold_native_history_source(preflight.transcript_path) as held_source:
+            if not isinstance(consent, GenericConsentResult) or consent.state != "pending" or consent.approval is None:
+                raise PrRouteDenied("PGG-CONSENT-ASSOCIATION")
+            if consent.approval.source_identity != held_source.identity:
+                raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+            prepared = prepared or _prepare_generic_publication(preflight)
+            before = _capture_generic_publication_subject(
+                prepared.requalify_binding(), prepared.repository_workdir, prepared.git_exe,
+            )
+            if before != prepared.subject:
+                raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+            current = receive_generic_publication_consent(
+                preflight, before, direct_selection=consent.direct_selection,
+            )
+            if current != consent or current.state != "pending":
+                raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+            _run_authoritative_scan(prepared.binding, prepared.repository_workdir, prepared.git_exe)
+            held_source.assert_current()
+            after = _capture_generic_publication_subject(
+                prepared.requalify_binding(),
+                prepared.repository_workdir, prepared.git_exe,
+            )
+            if after != prepared.subject:
+                raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+            received_after = receive_generic_publication_consent(
+                preflight, after, direct_selection=consent.direct_selection,
+            )
+            if (
+                received_after.state != "pending" or received_after.approval is None
+                or received_after.approval.subject != consent.approval.subject
+                or received_after.approval.selection != consent.approval.selection
+                or received_after.approval.user_sha256 != consent.approval.user_sha256
+                or received_after.approval.source_identity != held_source.identity
+            ):
+                raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+            return True
+
+    except NativeHistorySourceError:
+        raise PrRouteDenied("PGG-CONSENT-CURRENTNESS") from None
+
+
+def _select_publication_intent(cut: _GenericControlCut, actual_source: _ReceivedGenericSource | None = None) -> str:
+    generic_record = cut.intent_record
+    if actual_source is not None:
+        generic_record = max(generic_record, actual_source.selection.user_record)
+    if generic_record > cut.pr_record and (cut.intent_state != "no-intent" or actual_source is not None):
+        return "generic"
+    if cut.pr_state in {"active", "simple", "revoked", "malformed"}:
+        return "pr"
+    if cut.intent_record or cut.execution_record:
+        return "generic"
+    return "none"
+
+
+def _evaluate_held_publication(preflight: PreflightResult, direct_selection: GenericUserScopeSelection | None, held_source) -> bool:
     """Evaluate only transcript history, PR, scan, receipt and deny policy."""
     validate_preflight_result(preflight)
-    if preflight.reason_id == "PFP-CONSENT-GENERIC":
-        return _complete_generic_publication(preflight)
-    pr_state, pr_grant, history_status = _recover_stable_pr_grant(preflight)
-    transcript_diagnostic = _with_transcript_read_status(
-        preflight.transcript_diagnostic, history_status, "not-run"
-    )
-    if history_status != HISTORY_STATUS_FOUND:
-        raise PrRouteDenied(
-            "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
+    generic_cut = _generic_control_cut(preflight.transcript_path, collect_lifecycle=False, preflight=preflight)
+    if generic_cut.history_status == HISTORY_STATUS_IDENTITY_DRIFT:
+        generic_cut = _generic_control_cut(preflight.transcript_path, collect_lifecycle=False, preflight=preflight)
+    if generic_cut.history_status != HISTORY_STATUS_FOUND:
+        diagnostic = _with_transcript_read_status(
+            preflight.transcript_diagnostic, generic_cut.history_status, "not-run",
         )
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE", diagnostic)
+    actual_source = None
+    if direct_selection is not None:
+        actual_source = _receive_selected_generic_source(preflight.transcript_path, direct_selection)
+        held_source.assert_current()
+        if actual_source.history_sha256 != generic_cut.history_sha256:
+            # Requalify one current cut in this SAME held source, not a new
+            # namespace. Actual later controls still participate in the choice.
+            generic_cut = _generic_control_cut(preflight.transcript_path, collect_lifecycle=False, preflight=preflight)
+            actual_source = _receive_selected_generic_source(preflight.transcript_path, direct_selection)
+            held_source.assert_current()
+            if generic_cut.history_status != HISTORY_STATUS_FOUND or actual_source.history_sha256 != generic_cut.history_sha256:
+                raise PrRouteDenied("PGG-CONSENT-CURRENTNESS")
+    domain = _select_publication_intent(generic_cut, actual_source)
+    if domain == "generic":
+        prepared = _prepare_generic_publication(preflight)
+        selected = direct_selection if actual_source is not None and actual_source.selection.user_record >= max(generic_cut.intent_record, generic_cut.pr_record) else None
+        consent = receive_generic_publication_consent(preflight, prepared.subject, direct_selection=selected)
+        if consent.state != "pending":
+            raise PrRouteDenied("PGG-CONSENT-" + consent.state.upper())
+        return _complete_generic_publication(preflight, consent, prepared)
+    if domain != "pr":
+        return False
+    pr_state, pr_grant = generic_cut.pr_reducer.finish() if generic_cut.pr_reducer is not None else (generic_cut.pr_state, generic_cut.pr_grant)
     if pr_state == "malformed":
         raise PrRouteDenied("PRG-AUTH-MALFORMED")
     if pr_state == "revoked":
@@ -5116,9 +6677,24 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         return _evaluate_simple_pr_route(
             pr_grant, preflight.simple_pr_approval, preflight
         )
-    if preflight.push_instruction:
-        return _complete_generic_publication(preflight)
     return False
+
+def evaluate_heavy(preflight: PreflightResult, *, direct_selection: GenericUserScopeSelection | None = None) -> bool:
+    """One held source/domain/state owner; optional actual Root source locators.
+
+    Native entry supplies None. Call-local A is source input, never a success
+    flag or cached authority; it is rereceived through the common owner. A
+    native source-neutral no-marker generic-after-PR case lacks this port and
+    is not inferred from cache/prose or relabelled as native Functional PASS.
+    """
+    validate_preflight_result(preflight)
+    try:
+        with hold_native_history_source(preflight.transcript_path) as held_source:
+            return _evaluate_held_publication(preflight, direct_selection, held_source)
+    except NativeHistorySourceError:
+        diagnostic = _with_transcript_read_status(preflight.transcript_diagnostic, HISTORY_STATUS_UNREADABLE, "not-run")
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE", diagnostic) from None
+
 
 _TRANSCRIPT_FAILURE_IDS = frozenset((
     "PRG-TRANSCRIPT-UNAVAILABLE",
@@ -5138,6 +6714,8 @@ def _with_transcript_read_status(
 
 
 def _denial_scope(failure_id: str) -> str:
+    if failure_id.startswith("PGG-CONSENT-"):
+        return "Generic publication consent unavailable"
     if failure_id == "PGG-PARSE-UNCERTAIN":
         return "Command parsing incomplete"
     if failure_id in _TRANSCRIPT_FAILURE_IDS:
@@ -5252,7 +6830,17 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         "PGG-REFSPEC-CARDINALITY": "Name exactly one remote and one refspec.",
         "PGG-DESTINATION-SHAPE": "Use a refspec with a non-empty destination.",
         "PGG-RANGE-BINDING": "Correct the remote and destination binding, then retry the same push.",
-        "PGG-RANGE-TIP-BINDING": "Push the current HEAD commit directly and retry for a fresh gate-owned check.",
+        "PGG-RANGE-TIP-BINDING": "Keep the approved immutable source distinct from technical HEAD; satisfy the existing scan binding without changing human scope.",
+        "PGG-CONSENT-ASSOCIATION": "Receive the actual original user and applicable reviewed-subject association; do not substitute a report, current HEAD or another approval marker.",
+        "PGG-CONSENT-PROVENANCE": "Receive the applicable genuine user record and original structured Q/A when required; non-user data cannot authorize.",
+        "PGG-CONSENT-HISTORY": "Resolve the selected original-control source and complete relevant later cut through its existing owner.",
+        "PGG-CONSENT-CURRENTNESS": "Reconcile the changed original-control/binding inputs; retain genuinely pending authority without reusing a scan.",
+        "PGG-CONSENT-CORRUPT": "Resolve the corrupt or contradictory selected control/index through its existing owner; a new marker cannot repair it.",
+        "PGG-CONSENT-INSUFFICIENT": "Receive the specific missing original association or lifecycle evidence for the already approved operation; do not request its approval again.",
+        "PGG-CONSENT-REVOKED": "Obey the genuine revocation; this original anchor cannot authorize another publication.",
+        "PGG-CONSENT-FULFILLED": "The exact intent is fulfilled; an old index or destination reset cannot revive it.",
+        "PGG-CONSENT-UNRESOLVED": "Settle the actual correlated target/effect at the existing execution owner; scan completion, Declined or missing output cannot rearm authority.",
+        "PGG-CONSENT-SUPERSEDED": "Receive the actually selected later publication intent without downgrading an older scoped approval.",
         "PGG-RANGE-RECEIPT-VERSION": "Retry the push so the gate emits one complete-history version-3 receipt.",
         "PGG-RECEIPT-USED": "The prior receipt is consumed; retry the push for a fresh gate-owned check.",
     }
@@ -5292,20 +6880,17 @@ def compose_gate_result(preflight: PreflightResult) -> int:
     else:
         reason = (
         "Git-push publication gate: this Bash command runs `git push` (an "
-        "irreversible publication), but this turn shows neither the per-turn "
-        "user approval marker nor a successful gate-owned canonical range "
-        "scan for this pending push.\n\n"
+        "irreversible publication), but applicable exact pending user consent "
+        "and a new gate-owned canonical range scan have not been received.\n\n"
         "Publication requires human review PLUS a leak-check of the content "
-        "being published (Publication safety governance). Pick one before "
-        "retrying:\n\n"
-        "  (a) Human exception: if the user has NOT explicitly approved this "
+        "being published (Publication safety governance).\n\n"
+        "  (a) If the user has NOT actually reviewed and approved this exact "
         "push, STOP, report readiness to push, and ask the user to approve. "
-        "The user approves by including `[approve-publication]` in their next "
-        "message; then retry. The marker is honored only from the user's own "
-        "message and only for that turn. It is an exception, not the ordinary "
-        "recovery route for an already-committed change.\n\n"
-        "  (b) If the user already instructed you to push in their last "
-        "message, retry one admissible solitary push. The gate itself runs one "
+        "A genuine `[approve-publication]` input is not an unconditional bypass.\n\n"
+        "  (b) If this exact unchanged operation is already approved, receive "
+        "its original genuine control, reviewed scope and later state through "
+        "the existing owner; do not request the same permission again. Neutral "
+        "steering does not expire approval. Every attempt still requires one "
         "fresh non-empty version-3 complete-history range scan from the canonical sibling "
         "scanner, using an immutable in-memory source snapshot and its current "
         "trusted interpreter. Manual or transcript-visible scanner calls are "

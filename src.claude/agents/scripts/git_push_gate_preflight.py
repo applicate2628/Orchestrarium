@@ -46,9 +46,16 @@ _QUESTION_REPLY_OPEN = "<send_user_message_question_reply>\n"
 _QUESTION_REPLY_CLOSE = "\n</send_user_message_question_reply>"
 
 
+class PublicationQuestionAnswer(NamedTuple):
+    question_item_id: str
+    question: str
+    answer: str
+
+
 class PublicationUserReply(NamedTuple):
     kind: str
     answers: tuple[str, ...]
+    structured_items: tuple[PublicationQuestionAnswer, ...] = ()
 
     def publication_action(self) -> tuple[str, str]:
         """One atomic event disposition, using existing per-answer grammars."""
@@ -86,6 +93,14 @@ class PublicationPrGrant(NamedTuple):
     number: int
 
 
+def publication_reply_has_push_instruction(reply: PublicationUserReply) -> bool:
+    action, _ = reply.publication_action()
+    return action not in {"malformed", "revoked"} and any(
+        _has_publication_signal(answer, PUSH_INSTRUCTION_REGEX)
+        for answer in reply.answers
+    )
+
+
 def normalize_publication_approval_text(text: str) -> str:
     """Remove at most one accepted display wrapper from a whole approval."""
     normalized = text.strip()
@@ -115,6 +130,7 @@ def extract_publication_user_reply(entry: object) -> PublicationUserReply:
     if type(payload) is not list or not payload:
         return PublicationUserReply("recognized-malformed", ())
     answers: list[str] = []
+    structured_items: list[PublicationQuestionAnswer] = []
     malformed = False
     for member in payload:
         if (
@@ -125,10 +141,14 @@ def extract_publication_user_reply(entry: object) -> PublicationUserReply:
             malformed = True
         else:
             answers.append(member["answer"])
+            structured_items.append(PublicationQuestionAnswer(
+                member["questionItemId"], member["question"], member["answer"],
+            ))
     # Retained valid answers in a malformed carrier may only preserve an
     # explicit revocation; publication_action forbids every positive effect.
     return PublicationUserReply(
-        "recognized-malformed" if malformed else "structured-answer", tuple(answers)
+        "recognized-malformed" if malformed else "structured-answer", tuple(answers),
+        tuple(structured_items),
     )
 
 
@@ -2754,6 +2774,25 @@ def resolve_command_dialect(tool_name: object) -> CommandDialectResolution:
     return CommandDialectResolution("unsupported", False)
 
 
+
+def parse_native_argument_vector(
+    argv: tuple[str, ...], root_occurrence: str, ordinal: int,
+) -> ShellParseResult:
+    """Use the existing DIRECT_ARGV grammar without shell reserialization.
+
+    Root token spans are argv indices, not invented shell-text offsets.
+    Existing wrapper projections alone may expose a literal shell child.
+    """
+    if type(argv) is not tuple or not argv or any(type(word) is not str or "\0" in word for word in argv) or not argv[0]:
+        raise TypeError("invalid native argument vector")
+    if type(root_occurrence) is not str or type(ordinal) is not int or ordinal < 0:
+        raise TypeError("invalid native argument vector identity")
+    dialect = _host_command_dialect()
+    records = tuple(LexicalToken(word, ((index, index + 1),), ("ARGV",), True) for index, word in enumerate(argv))
+    identity = CommandIdentity(dialect, 0, None, None, ordinal, "DIRECT_ARGV", None, None, (), root_occurrence)
+    return _parse_command_input(CommandInput("DIRECT_ARGV", dialect, None, records, None, records), identity)
+
+
 def parse_transcript_command(
     command_text: str,
     tool_name: object,
@@ -2886,6 +2925,8 @@ class PreflightResult(NamedTuple):
     transcript_diagnostic: TranscriptDiagnostic | None = None
     simple_pr_approval: bool = False
     workdir_diagnostic: WorkdirDiagnostic | None = None
+    tool_use_id: str = ""
+    native_session_id: str = ""
 
 
 _OUTCOMES = frozenset(("ALLOW_FINAL", "ABSTAIN", "DEFER"))
@@ -3233,7 +3274,7 @@ def _result(
     ))
 
 
-def build_preflight(envelope: dict) -> PreflightResult:
+def _build_preflight(envelope: dict) -> PreflightResult:
     try:
         if envelope.get("agent_id"):
             return _result("ALLOW_FINAL", "PFP-ALLOW-SUBAGENT", "NONE")
@@ -3309,9 +3350,7 @@ def build_preflight(envelope: dict) -> PreflightResult:
             else PublicationUserReply("plain", ())
         )
         action, _ = reply.publication_action()
-        instruction = action not in {"malformed", "revoked"} and any(
-            _has_publication_signal(answer, PUSH_INSTRUCTION_REGEX) for answer in reply.answers
-        )
+        instruction = publication_reply_has_push_instruction(reply)
         grammar = classify_generic_push(parsed)
         transcript_diagnostic = TranscriptDiagnostic(
             envelope_status,
@@ -3358,6 +3397,21 @@ def build_preflight(envelope: dict) -> PreflightResult:
         )
     except Exception:
         return _result("DEFER", "PFP-DENY-INTERNAL", "RENDER_DENY")
+
+
+def build_preflight(envelope: dict) -> PreflightResult:
+    result = _build_preflight(envelope)
+    if not isinstance(envelope, dict) or result.continuation != "EVALUATE_HEAVY":
+        return result
+    values = []
+    for key in ("tool_use_id", "session_id"):
+        value = envelope.get(key)
+        if value is not None and type(value) is not str:
+            raise ValueError("invalid native invocation correlation")
+        values.append(value or "")
+    return validate_preflight_result(result._replace(
+        tool_use_id=values[0], native_session_id=values[1],
+    ))
 
 
 def build_preflight_from_stdin() -> PreflightResult:

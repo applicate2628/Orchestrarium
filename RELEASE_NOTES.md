@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-26
 
+- Publication approval stays bound to its exact reviewed pending operation across neutral steering. Original user/scope and later state are requalified; explicit reviewed user scope needs no separate packet/question. Each attempt still requires a new complete graph scan, and derived indexes cannot revive revoked, fulfilled or unresolved authority.
+
 - Clarified scratch retention at the ledger recording step: callers choose the existing typed owner namespace before acquisition and distinguish completed PASS-terminal retention from preserving partial or failed results and later Version 3 close-time retention. Existing verdict, ownership and lifecycle requirements remain unchanged.
 
 - Historical README catalogues preserve the existing input role when receiving never-admitted retirement records. They retain stored incoming/source inventory and exact archived payload/digest checks without starting an unrelated current-consumer sweep; strict retirement and integrity audits still detect later stale citations.

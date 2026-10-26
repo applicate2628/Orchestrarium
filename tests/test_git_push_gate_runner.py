@@ -482,10 +482,12 @@ def test_r4_public_interface_is_explicit_minimal_and_used() -> None:
         "PreflightResult", "TranscriptDiagnostic", "WorkdirDiagnostic",
         "validate_preflight_result", "validate_transcript_diagnostic", "validate_workdir_diagnostic",
             "build_preflight_from_stdin", "ShellParseResult", "absolute_literal_root_context", "PrRouteDenied",
-            "resolve_command_dialect", "parse_transcript_command",
+            "resolve_command_dialect", "parse_transcript_command", "parse_native_argument_vector",
             "project_scan_range_binding", "extract_publication_user_reply",
             "is_simple_pr_approval", "normalize_publication_approval_text",
             "parse_publication_pr_grant",
+            "publication_reply_has_push_instruction", "classify_generic_push",
+            "PublicationUserReply",
     )
     assert imported == expected
     assert "*" not in imported
@@ -937,6 +939,35 @@ def test_batch_reducer_retains_original_record_and_standing_chronology(tmp_path)
     assert pending.record_position == 2 and pending.last_genuine_user_position == 1
 
 
+def _scoped_generic_entries(policy, subject, answers):
+    """Synthetic native producer records supplying the fixture's reviewed O.
+
+    This replaces an omitted scope precondition, not a native consent receipt.
+    Unit owners may model subject metadata; real-range fixtures capture it
+    through the actual preparation owner before invoking either public path.
+    """
+    packet = policy.publication_review_packet(subject)
+    reference = policy.publication_review_reference(packet)
+    questions = [{"title": question + " " + reference} for question, _answer in answers]
+    payload = [{"questionItemId": json.dumps(["request_user_input_async", "fixture-approval", index]),
+                "question": questions[index]["title"], "answer": answer}
+               for index, (_question, answer) in enumerate(answers)]
+    return [
+        {"type": "response_item", "payload": {"type": "custom_tool_call", "name": "exec", "call_id": "fixture-review", "input": "synthetic review producer; never execute"}},
+        {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "fixture-review", "output": [{"type": "text", "text": packet}]}},
+        {"type": "response_item", "payload": {"type": "function_call", "name": "request_user_input_async", "call_id": "fixture-approval", "arguments": json.dumps({"questions": questions})}},
+        {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "<send_user_message_question_reply>\n" + json.dumps(payload) + "\n</send_user_message_question_reply>"}]}},
+    ]
+
+
+def _unit_generic_subject(policy, binding):
+    # Explicit in-process model only; never a native repository attestation.
+    metadata = ROOT.stat()
+    identity = metadata.st_dev, metadata.st_ino
+    return policy.GenericPublicationSubject(str(ROOT), identity, identity, identity,
+        binding.remote, "https://example.test/repository.git", binding.destination, "sha1", binding.source_oid)
+
+
 def test_fresh_generic_consent_public_handlers_reach_refusing_scanner(tmp_path):
     target = TARGETS[0]
     for surface in ("runner", "direct"):
@@ -948,6 +979,8 @@ def test_fresh_generic_consent_public_handlers_reach_refusing_scanner(tmp_path):
         envelope = {"tool_name": "Bash", "cwd": str(ROOT), "tool_input": {
             "command": "git push origin HEAD:refs/heads/topic"}, "transcript_path": str(transcript)}
         binding = policy.PushScanBinding("generic", "origin", "refs/heads/topic", "a" * 40, "a" * 40)
+        subject = _unit_generic_subject(policy, binding)
+        transcript.write_text("".join(json.dumps(row) + "\n" for row in _scoped_generic_entries(policy, subject, (("Approve?", "context " * 100 + "[approve-publication]"),))), encoding="utf-8")
         observed = []
         def refused(actual_binding, *_args):
             observed.append(actual_binding)
@@ -958,6 +991,7 @@ def test_fresh_generic_consent_public_handlers_reach_refusing_scanner(tmp_path):
              mock.patch.object(policy, "_resolve_executable", return_value="synthetic-git"), \
              mock.patch.object(policy, "_prove_repository_root", side_effect=lambda path, _git: path), \
              mock.patch.object(policy, "_resolve_generic_scan_binding", return_value=binding), \
+             mock.patch.object(policy, "_capture_generic_publication_subject", return_value=subject), \
              mock.patch.object(policy, "_run_authoritative_scan", side_effect=refused), \
              mock.patch.object(runner, "_load_preflight", return_value=(target.runner_path, preflight)), \
              mock.patch.object(runner, "_load_policy", return_value=policy), \
@@ -1074,6 +1108,8 @@ def test_fresh_generic_consent_public_handlers_use_real_owned_range_scan(
             transcript.write_text(json.dumps(_batch_user((("Unrelated", "Neutral"), ("Approve?", "context " * 100 + "[approve-publication]")))) + "\n", encoding="utf-8")
             envelope = {"tool_name": "Bash", "cwd": str(repo), "tool_input": {
                 "command": command}, "transcript_path": str(transcript)}
+            prepared = policy._prepare_generic_publication(preflight.build_preflight(envelope))
+            transcript.write_text("".join(json.dumps(row) + "\n" for row in _scoped_generic_entries(policy, prepared.subject, (("Unrelated", "Neutral"), ("Approve?", "context " * 100 + "[approve-publication]")))), encoding="utf-8")
             actual_scan = policy._run_authoritative_scan
             observed = []
             loaded_policy = [policy]
@@ -1231,7 +1267,7 @@ def _former_envelope(row_id: str, tmp_path: Path):
     if row_id == "approval-allow":
         text, command = "[approve-publication]", "git push origin HEAD:refs/heads/main"
     elif row_id == "active-pr-result":
-        text, command = "continue", "git push origin main"
+        text, command = "[approve-pr-publication:v1 pr=https://github.com/acme/project/pull/7]", "git push origin main"
     elif row_id == "generic-scan-allow":
         text, command = "push now", "git push origin main"
     elif row_id == "no-allow-deny":
@@ -1239,7 +1275,7 @@ def _former_envelope(row_id: str, tmp_path: Path):
     elif row_id == "history-unavailable":
         text, command = "continue", "git push origin main"
     elif row_id == "malformed-pr-authorization":
-        text, command = "continue", "git push origin main"
+        text, command = "[approve-pr-publication:v1 invalid]", "git push origin main"
     elif row_id == "inadmissible-generic-grammar":
         text, command = "push now", "git push --unknown origin main"
     else:
@@ -1252,6 +1288,8 @@ def _former_envelope(row_id: str, tmp_path: Path):
         }) + "\n",
         encoding="utf-8",
     )
+    if row_id == "history-unavailable":
+        transcript.unlink()
     return {
         "tool_name": "Bash",
         "cwd": str(ROOT),
@@ -1296,15 +1334,17 @@ def _exercise_former_row(target: GateTarget, row, tmp_path: Path, root: str):
         mock.patch.object(policy, "evaluate_heavy", side_effect=counted_heavy),
     ]
     if scenario == "active-pr":
-        grant = object()
         patches.extend((
-            mock.patch.object(policy, "_recover_stable_pr_grant", return_value=("active", grant, "found")),
             mock.patch.object(policy, "_evaluate_active_pr_route", side_effect=lambda *_args: counters.update({"owner": 1}) or True),
         ))
     elif scenario in {"generic-scan", "approved"}:
+        binding = policy.PushScanBinding("generic", "origin", "refs/heads/main", "a" * 40, "a" * 40)
+        subject = _unit_generic_subject(policy, binding)
+        Path(envelope["transcript_path"]).write_text("".join(json.dumps(value) + "\n" for value in _scoped_generic_entries(policy, subject, (("Approve?", "[approve-publication]"),))), encoding="utf-8")
         patches.extend((
-            mock.patch.object(policy, "_recover_stable_pr_grant", return_value=("absent", None, "found")),
-            mock.patch.object(policy, "_resolve_generic_scan_binding", return_value=object()),
+            mock.patch.object(policy, "_resolve_generic_scan_binding", return_value=binding),
+            mock.patch.object(policy, "_capture_generic_publication_subject", return_value=subject),
+            mock.patch.object(policy, "_refresh_scan_binding", return_value=binding),
             mock.patch.object(policy, "_run_authoritative_scan", side_effect=lambda *_args: counters.update({"owner": 1})),
         ))
     elif scenario == "plain-deny":
@@ -1564,6 +1604,8 @@ def test_a3_preflight_contract_and_old_owner_are_red_until_relocated() -> None:
         "transcript_diagnostic",
         "simple_pr_approval",
         "workdir_diagnostic",
+        "tool_use_id",
+        "native_session_id",
     )
     for target in TARGETS:
         assert target.preflight_path.is_file(), f"A3-PREFLIGHT-MISSING:{target.label}"
