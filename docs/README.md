@@ -2,6 +2,8 @@
 
 This directory is the branch-level docs surface for the Orchestrarium monorepo common layer.
 
+Optional SDK implementation and qualification limits: [sdk-execution.md](sdk-execution.md).
+
 Use it together with:
 
 - [../README.md](../README.md) for the repository overview

@@ -6,6 +6,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - PR-scoped corrective publication no longer depends on branch-protection/rules enumeration or proving rules absent. The hook retains exact open-PR/head/ref binding, scoped human consent and a fresh complete leak scan; the ordinary push remains subject to the server's configured rules and exceptions.
 
+- The optional software development kit (SDK) review path now preserves input-derived ledger admission when numerical caps are omitted, while explicit caps remain enforced. Current-launch checks also requalify captured ledger identity and selected participants so a concurrent settlement or replacement cannot be accepted as a still-open launch. The existing installed-scope ledger binding is retained; offline source and installer-composed fixtures do not establish native Windows or live-provider qualification.
+
 - Updated Claude transport uses its bound canonical Lead ledger helpers after a Codex-only install, so retained historical peer helpers no longer break recording or readback. Source pairing, installed scope and link checks remain enforced without copying or adopting old peer ledger files.
 
 - H1 relocation and scratch settlement now publish their native directory, file and link-entry effects through the held lifecycle owner. First calls and replay retain current custody; link targets remain untouched, and Windows ReadOnly retries preserve their exact restoration contract.
@@ -13,6 +15,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - Ordinary ledger and lifecycle commands derive finite admission from their selected history and planned writes when both numerical controls are omitted. Valid history can grow beyond the old diagnostic event threshold without manual sizing; explicit event/byte ceilings, complete acquisition, corruption checks and byte-preserving replay remain enforced. Automatic terminal recording acquires its current transaction after independent work.
 
 ## 2026-10-24
+
+- Added an explicit `--sdk-review-binding` Codex review bridge under the existing Host (invoking orchestration session) and receiving owners, with installer-managed software development kit (SDK) helpers rather than a new coordinator or automatic route switch. Its bounded nonauthorizing binding selects an empty Model Context Protocol (MCP) scope; selected-only preworker failures remain distinct from uncertain post-worker effects. Ordinary routes and other roles remain unchanged. The opted-in route also requests memories off and empty legacy notification commands to avoid unrelated inference/notification effects, and rejects incompatible raw startup readback; selected endpoints and enforced requirements still need existing Host admission before startup. Diagnostic recovery is implemented; its native qualification, dependency provisioning and current installed-bridge qualification remain separate requirements; this entry does not claim production readiness.
 
 - Restore UTF-8 punctuation and Russian examples in the Codex governance capsule and Lead operating model after a text-edit encoding conversion. Approved native-role configuration rules and all ASCII controls remain unchanged.
 
@@ -37,7 +41,31 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - Test-only filesystem fixtures and fresh-module loading now have shared concrete owners. Existing test scenarios, native identity and link checks, caller-supplied module names, and fresh import semantics are preserved while duplicate helper bodies are removed.
 
 
+
+
+- Added owner-local dialogue read shutdown and a borrowed ACP byte-stream boundary so official SDK connection closure can release a pending read before event-loop teardown. Pipe closure, capture and process settlement stay with the existing owner; no provider route is enabled by this lifecycle capability.
+
+- Added a dormant MiMoCode request identity and ACP integration boundary using the official public Python connection/router APIs. Exact model/variant checks and notification-drain accounting avoid adding a JavaScript worker merely for model selection. Live admission remains closed pending effective-tool, subscription, process and receiving qualification; installed routing is unchanged.
+
+- Added the optional MiniMax Code ACP integration surface and explicit request identity, using the official ACP client API without another process supervisor. Acquisition remains held until native launch, inherited-tool isolation, subscription account and receiving evidence are qualified; normal provider routing and user profiles are unchanged.
+
+- Codex SDK receiving now rejects a purported full terminal item list that omits already captured completed items. Historical reconciliation errors no longer implicitly interrupt the prior turn; explicit caller cancellation and current-client cleanup remain intact. These fixes prevent contradictory completion evidence and unintended cancellation during readback.
+
+- Added a dormant Grok ACP protocol slice and narrow integration with the existing process owner, with offline tests for configuration, cancellation, closure and retained evidence. Live admission remains held before launch: account/tool policy, durable receiving and installed-runtime qualification are not established, so no provider route or user profile is activated.
+
+- Codex SDK review now rejects command observations that arrive in a completed-event envelope while still reporting a nonterminal or missing command status. The same validation applies to history reconciliation, preserving actual failed/nonzero outcomes without fabricating successful command execution or adding host-hook gates.
+
+- Optional Agents coordination can now use an explicitly supplied SDK Session for run and RunState resume without creating a second history store. Capability and session-identity checks preserve the no-session route and existing current-authority/replay ownership; actual persisted restart still needs runtime qualification. Added SDK regression coverage keeps launch-only feature controls out of installed role files and preserves owned profession-instruction checks while allowing compatible native-role configuration.
+
+
+- Optional SDK execution now selects compatibility by required public APIs and observed operation contracts rather than fixed Codex, Claude or Agents SDK release numbers. Per-run version evidence and executable integrity remain distinct from product compatibility, so a compatible update is not rejected solely because its version changed.
+
+- Kimi SDK-interface cancellation now retains the existing owner result through repeated caller cancellation. SDK hook-trust preparation also inherits the operation deadline and cancellation probe while legacy support callers keep their existing defaults; process and trust checks remain authoritative.
+- SDK worker frames reuse the existing strict JSON parser, retaining framing and message validation while eliminating duplicate parser hooks; required provider, authority, and process-containment boundaries remain unchanged.
+
 ## 2026-10-23
+
+- Optional source-mode SDK reviews distinguish actual SDK configuration from CLI arguments and retain the existing permission, process-tree, artifact and atomic run-ledger owners. Structured results and independent persisted readback make mismatched, incomplete or unsettled execution explicit rather than treating a provider answer as accepted review. Existing host routes and hooks remain supported; ordinary installation does not provision or activate SDK dependencies, and native-platform/live qualification remains separate.
 
 - Claude document reinstallation now uses a bundled Markdown parser to distinguish real installer ownership from quoted user examples, including list and quote continuations. Custom instructions and imports remain in position, failed classification stays write-free, and existing Python installation commands require no additional package setup. Missing private packages refuse before ambient code can run, and Windows file metadata changes retain the held object on Python 3.11 and newer.
 - A current-line Claude instruction research and development handoff distinguishes newly documented native AGENTS.md discovery from the existing shared-policy import bridge. It establishes shared default policy and separate provider-specific sources as the target, explains why generated runtime projections remain safer than forcing a neutral root through higher-priority configuration, and identifies preservation and qualification prerequisites; this documentation change does not alter installed behavior or join the 2.0 redesign.
@@ -1513,6 +1541,9 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 - Added a dedicated provider runtime-layout reference at `docs/provider-runtime-layouts.md` that splits `global` and `local` installed surfaces for Codex, Claude Code, and Gemini. This closes a recurrent source of confusion between monorepo source trees such as `src.codex/` and the paths the actual provider runtimes read after installation, and it also records one important Gemini boundary early: Gemini CLI is native around `GEMINI.md`, `.gemini/commands/`, and extensions rather than the `skills/` or `agents/` trees used by the current Codex and Claude packs.
 
 ## Terms and Abbreviations
+
+- `SDK`: Software Development Kit; optional provider integration helpers, not launch authority.
+- `Host`: existing invoking orchestration session that retains authorization.
 
 - `AGENTS.md`: the Codex-readable governance and instruction file installed into a repository or provider home.
 - `agent-run-ledger.*`: helper script family that initializes legacy work-item ledger files and appends validated `agent-runs.jsonl` events.

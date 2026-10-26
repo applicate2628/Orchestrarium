@@ -434,6 +434,46 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertEqual(b"old", target.read_bytes())
         self.assert_clean()
 
+    def test_sdk_runtime_delivery_is_complete_and_rollback_preserves_unmanaged_files(self):
+        """Use the real delivery inventory and copy owner, without invoking providers."""
+        expected = {f"sdk_execution/{path.name}" for path in
+                    (ROOT / "scripts/sdk_execution").glob("*.py")}
+        expected.add("process_supervision/sdk_worker.py")
+        self.assertTrue(expected)
+        for host, relative in (("codex", "skills/lead/scripts"),
+                               ("claude", "agents/scripts")):
+            with self.subTest(host=host):
+                target = self.target / host / relative
+                destinations = PI._runtime_file_destinations(
+                    ROOT, target, include_codex_helpers=host == "codex")
+                selected = tuple((source, dest) for source, dest in destinations
+                                 if source.is_relative_to(ROOT / "scripts")
+                                 if source.relative_to(ROOT / "scripts").as_posix() in expected)
+                self.assertEqual(expected, {dest.relative_to(target).as_posix()
+                                            for _, dest in selected})
+                sentinel = target / "sdk_execution/operator-local.txt"
+                sentinel.parent.mkdir(parents=True)
+                sentinel.write_bytes(b"preserve operator file")
+                existing = target / "sdk_execution/contracts.py"
+                existing.write_bytes(b"prior installed contracts")
+                os.utime(existing, ns=(1_600_000_000_100_000_000, 1_600_000_000_200_000_000))
+                prior_mtime = existing.stat().st_mtime_ns
+                transaction = self.transaction([dest for _, dest in selected],
+                                               [dest for _, dest in selected])
+                with self.assertRaisesRegex(RuntimeError, "later producer failure"):
+                    with transaction:
+                        PI._install_runtime_files(ROOT, target, False,
+                            destinations=selected, mutable_owner=self.owner(transaction))
+                        for source, dest in selected:
+                            self.assertEqual(source.read_bytes(), dest.read_bytes())
+                        self.assertEqual(b"preserve operator file", sentinel.read_bytes())
+                        raise RuntimeError("later producer failure")
+                self.assertTrue(all(not dest.exists() for _, dest in selected if dest != existing))
+                self.assertEqual(b"prior installed contracts", existing.read_bytes())
+                self.assertEqual(prior_mtime, existing.stat().st_mtime_ns)
+                self.assertEqual(b"preserve operator file", sentinel.read_bytes())
+        self.assert_clean()
+
     def test_runtime_and_sync_wrappers_propagate_owner_and_skip_excluded(self):
         source = self.source / "runtime.py"
         source.write_bytes(b"runtime")

@@ -494,6 +494,8 @@ def test_kimi_unsupported_effort_is_durable_and_validator_accepted(tmp_path: Pat
         "--run-id", "dispatch-kimi-unsupported",
         "--event-kind", "launch",
         *common,
+        "--status", "running",
+        "--gate", "none",
     )
     assert launch.returncode == 0, launch.stderr
     terminal = run_ledger(
@@ -548,6 +550,8 @@ def test_kimi_configured_max_with_empty_flags_is_durable_and_validator_accepted(
         "--run-id", "dispatch-kimi-configured-max",
         "--event-kind", "launch",
         *common,
+        "--status", "running",
+        "--gate", "none",
     )
     assert launch.returncode == 0, launch.stderr
     terminal = run_ledger(

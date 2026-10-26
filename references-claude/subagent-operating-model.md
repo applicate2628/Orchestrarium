@@ -8,6 +8,23 @@ Visual companion: [operating-model-diagram.md](operating-model-diagram.md)
 
 This file keeps only Claude-specific runtime and repository concretization for the shared subagent operating model. Use the shared core for canonical blueprint, routing, role, and governance-model text.
 
+### Optional source-mode Claude SDK integration
+
+The separate direct Claude SDK adapter retains the native Claude preset and adds
+current common/provider instructions through the existing owned-file mechanism.
+Tool-restricted review is not an operating-system sandbox. Selected model aliases
+are not silently guessed into canonical IDs; source qualification limits and
+non-authorizing receiving remain explicit in [SDK execution](../docs/sdk-execution.md).
+Existing Claude provider execution and installed agent entrypoints remain unchanged.
+Both host packs receive installer-managed SDK helpers; that does not activate the
+Claude adapter. A Claude-hosted, policy-admitted Codex external-reviewer invocation
+may explicitly select `--sdk-review-binding` under the same Host authority, without
+starting an Agents coordinator or changing billing. This repository-local opt-in
+is Windows-only with empty MCP scope; other roles/providers remain on legacy
+routes. Diagnostic recovery is implemented but not yet native-qualified;
+installed-bridge qualification remains pending, and older native observations
+do not qualify this candidate.
+
 ## Claude-specific runtime notes
 
 - Claude runtime uses the Agent tool and the current Claude operator reference surfaces. Treat this file as a local runtime addendum to the shared blueprint, not as the canonical full methodology copy.
@@ -31,3 +48,10 @@ This file keeps only Claude-specific runtime and repository concretization for t
 - Main rule, core management rules, delivery loops, routing patterns, role map, prompts, gates, and team composition
 - Shared review/gate semantics, periodic-controls model, rolling lane-ready admission, parallel-work guidance, and generic task-memory expectations
 - The generic lead memo and final wording
+
+## Terms and Abbreviations
+
+- SDK: Software Development Kit.
+- MCP: Model Context Protocol.
+- Host: the existing invoking orchestration session, not a new coordinator.
+- API: Application Programming Interface.

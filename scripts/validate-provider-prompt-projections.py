@@ -19,7 +19,7 @@ from typing import Any, Sequence
 
 STABLE_ID = "E_TRANSPORT_PROJECTION_PARITY"
 SCHEMA_VERSION = 1
-TRANSPORT_FILES = (
+PRE_SDK_TRANSPORT_FILES = (
     "provider_prompt.py",
     "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
@@ -28,6 +28,25 @@ TRANSPORT_FILES = (
     "invoke-grok-prompt.py",
     "external-prompt-governance.md",
     "external-role-taxonomy.v1.json",
+)
+TRANSPORT_FILES = PRE_SDK_TRANSPORT_FILES + (
+    "process_supervision/sdk_worker.py",
+    "sdk_execution/__init__.py",
+    "sdk_execution/_async.py",
+    "sdk_execution/acp_streams.py",
+    "sdk_execution/claude.py",
+    "sdk_execution/codex.py",
+    "sdk_execution/codex_tools.py",
+    "sdk_execution/dispatch.py",
+    "sdk_execution/contracts.py",
+    "sdk_execution/coordinator.py",
+    "sdk_execution/grok.py",
+    "sdk_execution/kimi.py",
+    "sdk_execution/mimo.py",
+    "sdk_execution/minimax.py",
+    "sdk_execution/receiving.py",
+    "sdk_execution/runtime.py",
+    "sdk_execution/worker.py",
 )
 EXTERNAL_GOVERNANCE_BEGIN = "<!-- BEGIN ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->"
 EXTERNAL_GOVERNANCE_END = "<!-- END ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->"
@@ -146,7 +165,7 @@ def _open_ordinary_file(path: Path, label: str) -> _BoundOrdinaryFile:
     return _open_ordinary_leaf(path, label)
 
 
-def _load_manifest(path: Path) -> dict[str, Any]:
+def _load_manifest(path: Path, *, predecessor_only: bool = False) -> dict[str, Any]:
     bound = _open_ordinary_file(path, "manifest")
     try:
         raw = bound.read_bytes()
@@ -166,7 +185,8 @@ def _load_manifest(path: Path) -> dict[str, Any]:
     if not isinstance(revision, str) or not revision.strip():
         raise _fail("manifest pack revision")
     files = manifest.get("files")
-    if not isinstance(files, dict) or tuple(files) != TRANSPORT_FILES:
+    admitted_sets = (TRANSPORT_FILES, PRE_SDK_TRANSPORT_FILES) if predecessor_only else (TRANSPORT_FILES,)
+    if not isinstance(files, dict) or tuple(files) not in admitted_sets:
         raise _fail("manifest must bind the complete ordered transport set")
     return manifest
 

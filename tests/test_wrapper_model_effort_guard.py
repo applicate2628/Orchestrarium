@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from contextlib import redirect_stdout
 
 import pytest
 from tests.fixtures.codex_hook_fixture import (
@@ -179,6 +181,71 @@ def _run_transport(
         timeout=30,
     )
     return result, capture, item
+
+
+def _run_observed_profile_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    extra: list[str],
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    """Exercise profile/ledger composition with a synthetic settled process observation.
+
+    Native process ownership has separate platform-qualified tests. This fixture
+    retains actual prompt assembly, ledger writes/readback and receipt finalization.
+    """
+    from tests.test_agent_run_ledger import prepare_valid_work_item
+    from tests.test_kimi_transport import _kimi_process_result
+    from tests.test_prompt_wrapper_oracle import _BinaryOutput, _codex_agent, _codex_turn
+
+    item = prepare_valid_work_item(tmp_path)
+    prompt = tmp_path / f"{provider}.md"
+    prompt.write_bytes(b"fixture prompt\n")
+    capture = tmp_path / f"{provider}-argv.json"
+    stdout = _BinaryOutput()
+    stderr = io.StringIO()
+    raw = _codex_turn(_codex_agent()) if provider == "codex" else b"GATE: PASS\n"
+    observation = _kimi_process_result(raw, b"", target_exit_code=0, dialogue_complete=True)
+    observation.cancelled = observation.timed_out = False
+    auth = provider_prompt.resolve_provider_auth_configuration(
+        provider,
+        {"OPENAI_API_KEY" if provider == "codex" else "ANTHROPIC_API_KEY": "fixture-key"},
+    )
+    observed_calls: list[str] = []
+
+    def observed_process(_runner, _command, flags, _env, _cwd, body, _control, selected, **_kwargs):
+        assert selected == provider
+        assert body.startswith(provider_prompt.EXTERNAL_GOVERNANCE_BEGIN)
+        assert body.endswith(prompt.read_bytes())
+        capture.write_text(json.dumps(flags), encoding="utf-8")
+        observed_calls.append(selected)
+        return observation, raw, b""
+
+    def actual_local_writer(_runner, args):
+        with redirect_stdout(io.StringIO()):
+            return provider_prompt._ledger_owner().main(args) == 0
+
+    with monkeypatch.context() as patch:
+        patch.setenv(OUTPUT_ENV[provider], str(tmp_path / f"{provider}-outputs"))
+        patch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+        patch.setattr(provider_prompt.sys, "stdout", stdout)
+        patch.setattr(provider_prompt.sys, "stderr", stderr)
+        patch.setattr(provider_prompt, "_resolve_launch_provider_command", lambda *_args: ([sys.executable, "synthetic-observation"], None))
+        patch.setattr(provider_prompt, "resolve_provider_auth_configuration", lambda _provider: auth)
+        patch.setattr(provider_prompt, "require_codex_hook_trust", lambda *_args: 0)
+        patch.setattr(provider_prompt, "run_provider_process", observed_process)
+        patch.setattr(provider_prompt, "run_ledger", actual_local_writer)
+        code = provider_prompt.launch(provider, [
+            "model-effort-fixture", "--prompt-file", str(prompt),
+            "--terminal-receipt", str((tmp_path / f"{provider}.receipt").resolve()),
+            "--ledger", str(item), "--ledger-role", "architecture-reviewer",
+            "--ledger-lane", "model-effort-fixture", "--ledger-artifact", "reviews/qa.md",
+            "--ledger-max-events", "100", "--ledger-max-bytes", "1048576",
+            *extra,
+        ])
+    assert observed_calls == [provider], stderr.getvalue()
+    assert (tmp_path / f"{provider}.receipt").read_text(encoding="utf-8") == stdout.getvalue()
+    return subprocess.CompletedProcess([], code, stdout.getvalue(), stderr.getvalue()), capture, item
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))
@@ -470,7 +537,7 @@ def test_partial_override_fails_before_fake_provider_launch(
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))
 def test_launch_and_terminal_ledger_events_record_resolved_profile(
-    tmp_path: Path, provider: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str
 ) -> None:
     override = (
         ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max"]
@@ -485,8 +552,8 @@ def test_launch_and_terminal_ledger_events_record_resolved_profile(
             "high",
         ]
     )
-    result, _, item = _run_transport(
-        tmp_path, provider, ["--", *override], ledger=True
+    result, _, item = _run_observed_profile_transport(
+        tmp_path, monkeypatch, provider, ["--", *override]
     )
     assert result.returncode == 0, result.stderr
     assert item is not None
@@ -525,7 +592,7 @@ def test_launch_and_terminal_ledger_events_record_resolved_profile(
 
 
 def test_equal_model_effort_with_different_sandbox_flags_remain_distinguishable(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     common = [
         "--model",
@@ -538,11 +605,11 @@ def test_equal_model_effort_with_different_sandbox_flags_remain_distinguishable(
     for label, sandbox in (("readonly", "read-only"), ("workspace", "workspace-write")):
         case_root = tmp_path / label
         case_root.mkdir()
-        result, _, item = _run_transport(
+        result, _, item = _run_observed_profile_transport(
             case_root,
+            monkeypatch,
             "codex",
             ["--", *common, sandbox],
-            ledger=True,
         )
         assert result.returncode == 0, result.stderr
         assert item is not None

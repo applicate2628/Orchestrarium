@@ -6,6 +6,32 @@ External selection stays binding. A manual equivalent establishes the admitted d
 
 This contract defines the shared Claude-line routing semantics for the consultant toggle file and the external adapters.
 
+## Explicit Codex SDK review opt-in
+
+The repository-local `--sdk-review-binding <path>` option selects the direct Codex
+software development kit (SDK) path only for a policy-admitted `external-reviewer`
+invocation. Omission preserves the legacy command-line interface (CLI) route;
+workers, consultants and other providers are not migrated. The same invoking Host
+(the existing orchestration session) retains authority. The bounded binding file
+supplies selected account/scope/artifact and resource constraints, never permission,
+a new coordinator, automatic fallback or separate API billing. Current containment
+is Windows-only; this bridge selects an empty Model Context Protocol (MCP) scope.
+
+The installer-managed helpers do not provision dependencies or establish native
+qualification. Diagnostic recovery is implemented; its native qualification and
+current installed-bridge qualification remain pending. Older native observations
+are not evidence for this candidate.
+Source details, the strict binding schema and separate ledger/event/capture/memory
+bounds are in the repository's `docs/sdk-execution.md`. No provider execution or
+installation is authorized by this contract.
+
+This opt-in uses `direct-external-sdk`, selected configuration and a Version 3 (V3)
+result, not fabricated CLI launch flags or the legacy V2 finalizer below. Existing
+artifact, ledger, receiving, process and terminal-receipt owners remain responsible;
+SDK evidence remains nonauthorizing. A runtime-confirmed preworker failure exports
+selected-only blocked evidence. An uncertain post-worker failure must not become
+that no-worker result or trigger automatic replay; receiving failure remains open.
+
 ## Shared config file
 
 - Canonical path: `.claude/.agents-mode.yaml`
@@ -196,6 +222,10 @@ Rules:
 
 ## Provenance header
 
+For the explicit Codex SDK review exception, record `direct-external-sdk` and
+selected/observed SDK configuration separately; do not manufacture `Launch flags`.
+The CLI examples below continue to apply to legacy routes.
+
 Every external or consultant artifact should include one explicit execution record with these separate fields:
 
 - `Execution role: <consultant | external-worker | external-reviewer>`
@@ -220,6 +250,11 @@ Rules:
 - The adapter may replace an internal role for provenance, but the artifact must still show which role actually ran and which role was replaced.
 
 ## Terms and Abbreviations
+
+- `SDK`: Software Development Kit; the explicit Codex review transport, not a new policy owner.
+- `Host`: existing invoking orchestration session that retains authorization.
+- `V3` / `V2`: version-three SDK / version-two legacy CLI provider-result envelopes.
+- `API`: Application Programming Interface; no new billing route is selected by the SDK opt-in.
 
 - `agents-mode`: Orchestrarium operator configuration overlay for delegation, external provider routing, MCP use, and parallelism.
 - `reserve`: symbolic supplemental read-only candidate for advisory/review lanes only; it is separate from primary providers and not valid for worker or mutating routes.

@@ -41,6 +41,8 @@ FINDING_CLASSES = {"publication-safety", "security", "correctness", "performance
 PROTECTED_CLASSES = {"publication-safety", "security", "legacy-unclassified"}  # non-user-waivable (spine: $security-reviewer only)
 LEGACY_MIGRATION_KIND = "legacy-obligation-migration"
 LEGACY_MIGRATION_SCOPE = ["ledger-migration:invalid-finding-class"]
+
+
 LEGACY_MIGRATION_NORMALIZATIONS = {
     "invalid-finding-class": {
         "scope": ["ledger-migration:invalid-finding-class"],
@@ -63,6 +65,7 @@ V2_ONLY_FIELDS = {
     "launchRunId",
     "closesRunIds",
     "artifactRevision",
+    "artifactSizeBytes",
     "lane",
     "effort",
     "findingClass",
@@ -86,6 +89,7 @@ V2_ONLY_FIELDS = {
     "externalEvidenceRunId",
     "effortMappingLoss",
     "launchFlags",
+    "sdkExecution",
     "closerRunId",
     "targetTuple",
 }
@@ -145,6 +149,7 @@ ALLOWED_FIELDS = {
     "launchRunId",
     "closesRunIds",
     "artifactRevision",
+    "artifactSizeBytes",
     "lane",
     "effort",
     "findingClass",
@@ -168,6 +173,7 @@ ALLOWED_FIELDS = {
     "externalEvidenceRunId",
     "effortMappingLoss",
     "launchFlags",
+    "sdkExecution",
     "closerRunId",
     "targetTuple",
 }
@@ -341,6 +347,98 @@ def validate_launch_profile(
             continue
         raise ValueError("invalid launch flags")
     return exact, model, effort
+
+
+
+def validate_sdk_execution(
+    value: object, *, provider: object, model: object, effort: object
+) -> dict[str, object]:
+    """Validate selected SDK configuration, not observed execution or authority.
+
+    The existing ledger schema owns the shape. Provider adapters and result
+    parsers reuse this callable rather than copying its validation. Native SDK
+    availability, current permissions and process settlement remain other owners.
+    """
+    schema = AGENT_RUN_SCHEMA["properties"]["sdkExecution"]
+    if (type(value) is not dict or not set(schema["required"]) <= set(value)
+        or not set(value) <= set(schema["properties"])):
+        raise ValueError("sdkExecution requires its exact versioned fields")
+    revision = next((branch for branch in schema["oneOf"]
+                     if type(value["schemaVersion"]) is int
+                     and value["schemaVersion"] == branch["properties"]["schemaVersion"]["const"]), None)
+    if (revision is None or not set(revision["required"]) <= set(value)
+        or any(name in value for name, rule in revision["properties"].items() if rule is False)):
+        raise ValueError("sdkExecution requires its exact versioned fields")
+    for name, rules in schema["properties"].items():
+        if name not in value:
+            continue
+        field = value[name]
+        if "const" in rules and (type(field) is not type(rules["const"]) or field != rules["const"]):
+            raise ValueError(f"sdkExecution {name} is unsupported")
+        if "enum" in rules and not any(type(field) is type(allowed) and field == allowed for allowed in rules["enum"]):
+            raise ValueError(f"sdkExecution {name} is unsupported")
+        if rules.get("type") == "string" and (
+            type(field) is not str
+            or not rules["minLength"] <= len(field) <= rules["maxLength"]
+            or re.fullmatch(rules["pattern"], field, re.ASCII) is None
+        ):
+            raise ValueError(f"sdkExecution {name} must be one safe domain token")
+    supported_binding = (
+        (provider, value["adapter"], value["sandboxMode"], value["approvalPolicy"])
+        in (
+            ("codex", "openai-codex", "read-only", "deny_all"),
+            ("claude", "claude-agent-sdk", "tool-restricted-read-only", "deny_unadmitted"),
+        )
+    )
+    if not supported_binding or value["model"] != model or value["effort"] != effort:
+        raise ValueError("sdkExecution must bind the declared provider, model, effort and adapter controls")
+    return dict(value)
+
+
+def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
+    """Receive supported SDK routes through the existing event owner only."""
+    run_id = event.get("runId")
+    if "sdkExecution" not in event and event.get("actualExecutionPath") != "direct-external-sdk":
+        return
+    try:
+        validate_sdk_execution(
+            event.get("sdkExecution"), provider=event.get("provider"),
+            model=event.get("model"), effort=event.get("effort"),
+        )
+    except ValueError as exc:
+        fail(errors, f"{run_id}: {exc}")
+    if event.get("schemaVersion") != 2 or event.get("actualExecutionPath") != "direct-external-sdk":
+        fail(errors, f"{run_id}: sdkExecution requires the V2 direct-external-sdk route")
+    if event.get("eventKind") not in ("launch", "terminal"):
+        fail(errors, f"{run_id}: sdkExecution requires a launch/terminal pair")
+    if "launchFlags" in event:
+        fail(errors, f"{run_id}: sdkExecution forbids fabricated launchFlags")
+    for field in ("assignedRole", "artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss"):
+        if not isinstance(event.get(field), str) or not event[field].strip():
+            fail(errors, f"{run_id}: sdkExecution requires {field}")
+    if event.get("externalDispatchId") == event.get("externalEvidenceRunId"):
+        fail(errors, f"{run_id}: SDK dispatch and terminal identities must be distinct")
+    if event.get("eventKind") == "launch":
+        if event.get("externalDispatchId") != run_id:
+            fail(errors, f"{run_id}: SDK launch runId must equal externalDispatchId")
+        if event.get("status") != "running" or event.get("gate") != "none":
+            fail(errors, f"{run_id}: SDK launch requires running status and gate none")
+        if event.get("externalEvidenceRunId") == run_id:
+            fail(errors, f"{run_id}: SDK launch and terminal identities must be distinct")
+        for field in ("terminalClass", "authorizing", "closesRunIds", "closerRunId", "targetTuple"):
+            if field in event:
+                fail(errors, f"{run_id}: SDK launch forbids terminal authority field {field}")
+    elif event.get("eventKind") == "terminal":
+        if event.get("launchRunId") != event.get("externalDispatchId"):
+            fail(errors, f"{run_id}: SDK terminal launchRunId must equal externalDispatchId")
+        if event.get("status") not in ("completed", "revise", "blocked", "cancelled"):
+            fail(errors, f"{run_id}: SDK terminal requires terminal status")
+        if event.get("terminalClass") != "external-nonauthorizing":
+            fail(errors, f"{run_id}: SDK terminal requires external-nonauthorizing")
+        if event.get("authorizing") is not False or event.get("closesRunIds") != []:
+            fail(errors, f"{run_id}: SDK terminal cannot authorize or close another run")
+        if event.get("externalEvidenceRunId") != run_id:
+            fail(errors, f"{run_id}: SDK terminal evidence run must equal its runId")
 
 
 def _kimi_empty_flags_resolved_effort(event: Mapping[str, object]) -> bool:
@@ -1358,6 +1456,8 @@ def _artifact_archive_locator(root, candidate, recorded):
         if locator.selected.exists():
             return locator
     return None
+
+
 
 
 def _resolve_active_slug_in_archive(root: Path, candidate: Path) -> Path | None:
@@ -2644,13 +2744,13 @@ class _CurrentEvidenceV1:
                 self.predicates[key] = selected
                 self.selection_inputs.append(selected)
 
-    def bind_bytes(self, path, raw, *, snapshot=None):
-        key = ("bytes", path, raw)
+    def bind_bytes(self, path, raw, *, snapshot=None, _locator=None):
+        key = ("bytes", path, raw) if _locator is None else ("bytes", path, raw, _locator)
         if key not in self.predicates:
             if self.received:
                 raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: unprepared selected bytes")
             self.predicates[key] = _CurrentPredicateV1("bytes", path, True,
-                snapshot=snapshot, expected_bytes=raw)
+                snapshot=snapshot, expected_bytes=raw, artifact_locator=_locator)
         return self.predicates[key]
 
     def bind_selection(self, path, raw, *, snapshot=None):
@@ -3787,6 +3887,33 @@ def _validate_event_fields(
     elif "artifact" in event and not isinstance(artifact, str):
         fail(errors, f"{run_id}: artifact must be a string")
 
+    sdk_terminal = (event.get("actualExecutionPath") == "direct-external-sdk"
+                    and event.get("eventKind") == "terminal")
+    if "artifactSizeBytes" in event and not (sdk_terminal and artifact):
+        fail(errors, f"{run_id}: artifactSizeBytes requires a persisted SDK terminal artifact")
+    if sdk_terminal and artifact:
+        digest, size = event.get("artifactRevision"), event.get("artifactSizeBytes")
+        if (not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None
+            or type(size) is not int or size < 0):
+            fail(errors, f"{run_id}: SDK artifact requires exact SHA-256 artifactRevision and artifactSizeBytes (WI-SDK-ARTIFACT-BINDING)")
+        elif artifact_path is not None:
+            owner = load_lifecycle_owner()
+            try:
+                if isinstance(artifact_path, _CapturedHistoryPath):
+                    raw, snapshot = artifact_path.read_bytes(), None
+                else:
+                    snapshot = owner._capture_file_snapshot(artifact_path,
+                        failure_id="WI-SDK-ARTIFACT-BINDING", maximum_bytes=size)
+                    raw = snapshot.data
+                if len(raw) != size or hashlib.sha256(raw).hexdigest() != digest:
+                    raise ValueError("received SDK artifact content differs")
+                predicate = _inputs.bind_bytes(artifact_path, raw, snapshot=snapshot,
+                                               _locator=artifact_locator)
+                _evidence.require(predicate,
+                    f"{run_id}: received SDK artifact or locator changed (WI-SDK-ARTIFACT-BINDING)")
+            except (OSError, ValueError, owner.LifecycleError) as exc:
+                fail(errors, f"{run_id}: WI-SDK-ARTIFACT-BINDING: {exc}")
+
     if evidence is not None:
         validate_evidence(evidence, run_id, errors, gate == "PASS")
         for entry, profile in retained_preimage_profiles(event, item, errors):
@@ -4030,6 +4157,8 @@ def _validate_event_fields(
             fail(errors, f"{run_id}: launchRunId is only legal on eventKind terminal")
     if event_kind == "terminal" and "launchRunId" not in event:
         fail(errors, f"{run_id}: eventKind terminal requires launchRunId")
+    _validate_sdk_event(event, errors)
+    sdk_route = event.get("actualExecutionPath") == "direct-external-sdk"
     terminal_class = event.get("terminalClass")
     typed_terminal_fields = {
         "terminalClass", "authorizing", "actualExecutionPath", "artifactIdentity",
@@ -4051,8 +4180,8 @@ def _validate_event_fields(
                 fail(errors, f"{run_id}: external terminal requires {key}")
             if event.get("authorizing") is not False:
                 fail(errors, f"{run_id}: external terminal requires authorizing=false")
-            if event.get("actualExecutionPath") != "direct-external-cli":
-                fail(errors, f"{run_id}: external terminal requires direct-external-cli")
+            if event.get("actualExecutionPath") not in {"direct-external-cli", "direct-external-sdk"}:
+                fail(errors, f"{run_id}: external terminal requires a direct external execution path")
             if event.get("executionRole") not in {
                 "external-worker", "external-reviewer", "consultant", "none",
             }:
@@ -4061,7 +4190,7 @@ def _validate_event_fields(
                 fail(errors, f"{run_id}: external terminal requires empty closesRunIds")
             provider = event.get("provider")
             extended = {"externalDispatchId", "externalEvidenceRunId", "effortMappingLoss"}
-            if provider in {"codex", "claude"}:
+            if provider in {"codex", "claude"} and not sdk_route:
                 for key in sorted(extended & set(event)):
                     fail(errors, f"{run_id}: {provider} external terminal forbids {key}")
             elif provider in {"kimi", "grok"}:
@@ -4069,7 +4198,7 @@ def _validate_event_fields(
                     fail(errors, f"{run_id}: {provider} external terminal requires {key}")
                 if event.get("externalEvidenceRunId") != run_id:
                     fail(errors, f"{run_id}: external terminal evidence run must equal its runId")
-            else:
+            elif not sdk_route:
                 fail(errors, f"{run_id}: external terminal provider must be codex, claude, kimi, or grok")
         elif terminal_class == "internal-authorizing":
             required = {
@@ -4127,6 +4256,8 @@ def _validate_event_fields(
             and event.get("invalidationMode") in {"invalid-current-nonauthorizing", "historical-custody"}
         )
         unexpected_typed = typed_terminal_fields & set(event)
+        if sdk_route and event_kind == "launch":
+            unexpected_typed -= {"actualExecutionPath", "artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss"}
         internal_closer_identity = (
             event.get("schemaVersion") == 2
             and unexpected_typed == {"artifactIdentity"}
@@ -4318,6 +4449,13 @@ def launch_terminal_binding_mismatches(launch, terminal) -> tuple[str, ...]:
         "workItem", "role", "executionRole", "assignedRole", "provider", "model",
         "scope", "promptFile", "effort", "launchFlags",
     )
+    if (launch.get("actualExecutionPath") == "direct-external-sdk"
+        or terminal.get("actualExecutionPath") == "direct-external-sdk"
+        or "sdkExecution" in launch or "sdkExecution" in terminal):
+        binding_fields += (
+            "sdkExecution", "actualExecutionPath", "artifactIdentity",
+            "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss",
+        )
     return tuple(key for key in binding_fields
                  if (key in launch) != (key in terminal)
                  or (key in launch and not equal(launch[key], terminal[key])))
@@ -4435,7 +4573,10 @@ def _derive_authority_masks(
         binding_matches = False
         mismatches = ()
         if target is not None:
-            if not historical_definition:
+            if (not historical_definition
+                or target.get("actualExecutionPath") == "direct-external-sdk"
+                or event.get("actualExecutionPath") == "direct-external-sdk"
+                or "sdkExecution" in target or "sdkExecution" in event):
                 mismatches = launch_terminal_binding_mismatches(target, event)
                 binding_matches = not mismatches
             elif "launchFlags" not in target:
@@ -7748,6 +7889,8 @@ def _history_hold_errors(holds: Sequence[HistoricalLedgerHoldV1], errors: list[s
 
 def _unresolved_history(holds: Sequence[HistoricalLedgerHoldV1]) -> tuple[HistoricalLedgerHoldV1, ...]:
     return tuple(hold for hold in holds if hold.disposition_run_id is None)
+
+
 
 
 def _ordinary_current_disposition_rows(

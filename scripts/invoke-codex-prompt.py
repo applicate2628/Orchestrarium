@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""File-based prompt transport for Codex CLI."""
+"""File-based Codex transport; explicit SDK review is an opt-in route."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ options:
   --prompt-file PATH             read the prompt from PATH
   -PromptFile PATH               legacy spelling for --prompt-file
   --terminal-receipt PATH        write the required terminal receipt to PATH
+  --sdk-review-binding PATH      opt into bounded Windows SDK review; no CLI fallback
   --ledger PATH                  append the optional terminal ledger event
   -Ledger PATH                   legacy spelling for --ledger
   --ledger-role ROLE             record the ledger execution role

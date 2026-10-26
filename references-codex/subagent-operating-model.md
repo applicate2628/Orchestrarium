@@ -6,6 +6,19 @@ Visual companion: [operating-model-diagram.md](operating-model-diagram.md)
 
 This file keeps only Codex-specific runtime and repository concretization for the shared subagent operating model. Use the shared core for canonical blueprint, routing, role, and governance-model text.
 
+### Explicit Codex SDK review integration
+
+The repository-local `--sdk-review-binding` opt-in uses the official Python Codex
+App Server software development kit (SDK), not an ACP proxy or a new Agents
+coordinator. Only an admitted external-reviewer invocation selects it; other roles
+and invocations without the option retain their legacy paths. The same Host retains
+authority. A binding file is nonauthorizing, the current containment path is
+Windows-only, and this bridge selects an empty MCP scope. Installer-managed helper
+files do not install dependencies or qualify execution. Current installed-bridge
+qualification remains pending. Diagnostic recovery is implemented but not yet
+native-qualified; earlier native observations cover an older source snapshot.
+V3 SDK evidence keeps existing receiving/ledger owners and cannot close another run. See [the exact opt-in contract and limits](../docs/sdk-execution.md).
+
 ## Codex-specific runtime notes
 
 - Codex native subagent dispatch is available when the current host exposes it. Admit those native lanes through the shared rolling lane-ready-set contract; do not assume sequential-only internal execution, and do not infer a numeric concurrency cap from an earlier refusal or another runtime.
@@ -30,6 +43,12 @@ This file keeps only Codex-specific runtime and repository concretization for th
 - The generic lead memo and final wording
 
 ## Terms and Abbreviations
+
+- SDK: Software Development Kit.
+- MCP: Model Context Protocol.
+- ACP: Agent Client Protocol.
+- Host: existing invoking orchestration session.
+- V3: version-three SDK provider-result envelope.
 
 - Luna/High and Luna/Extra high (`xhigh`): explicit Luna model profiles at their model-local reasoning efforts; neither adds role authority.
 - V1: the existing named mechanical execution and facts contract.

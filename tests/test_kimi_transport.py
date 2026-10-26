@@ -839,6 +839,8 @@ def _finalize_kimi(
             ledger_role_explicit=True,
             ledger_lane="fixture-lane",
             ledger_artifact="design.md",
+            ledger_max_events=100,
+            ledger_max_bytes=1_048_576,
         )
         provenance = owner.ExternalRoleProvenance(
             "architecture-reviewer", "external-reviewer"
@@ -1321,12 +1323,12 @@ def test_legacy_provider_receipts_parse_without_kimi_capability_fields(
     outcome = owner.FinalOutcome(
         0,
         "COMPLETE:EXTERNAL_NONAUTHORIZING",
-        "passed",
+        "completed",
         "PASS",
         "fixture",
         0,
         "COMPLETE:PASS",
-        "passed",
+        "completed",
         "PASS",
         "fixture",
         "complete",
@@ -1358,12 +1360,12 @@ def test_provider_result_parser_rejects_malformed_or_non_kimi_capability_fields(
     outcome = owner.FinalOutcome(
         0,
         "COMPLETE:EXTERNAL_NONAUTHORIZING",
-        "passed",
+        "completed",
         "PASS",
         "fixture",
         0,
         "COMPLETE:PASS",
-        "passed",
+        "completed",
         "PASS",
         "fixture",
         "complete",
@@ -1749,17 +1751,31 @@ def test_kimi_error_marker_keeps_nonpass_without_stderr_capture_metadata(
     assert not lifecycle.run_dir.exists()
 
 
-def test_generic_capture_metadata_remains_exactly_as_supplied(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("capture_matches", (True, False), ids=("matching", "mismatched"))
+def test_generic_capture_metadata_requires_matching_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], capture_matches: bool,
 ) -> None:
-    """Catches a Kimi-only projection that changes generic provider capture fields."""
+    """Generic capture retains both observed streams, never caller-invented metadata."""
 
     owner = _load_owner()
     root = (tmp_path / "claude-captures").resolve()
     monkeypatch.setenv("CLAUDE_PROMPTS_DIR", str(root))
     lifecycle = owner.RunCaptureLifecycle.create("claude", "generic-capture-golden")
     lifecycle.initialize(b"fixture prompt")
-    stream = owner.StreamCaptureResult(False, 17, 13, "a" * 64, ("fixture",))
+    raw_stdout = b"GATE: PASS\n"
+    raw_stderr = b"generic diagnostic fixture\n"
+    process = _kimi_process_result(raw_stdout, raw_stderr, target_exit_code=0)
+    observed = owner.provider_stream_result(process)
+    stream = observed if capture_matches else owner.StreamCaptureResult(
+        observed.overflow, observed.observed_bytes, observed.persisted_bytes,
+        "a" * 64, observed.issues,
+    )
+    output_context = owner.resolve_provider_output_context(
+        owner.resolve_provider_auth_configuration(
+            "claude", environment={"ANTHROPIC_API_KEY": "synthetic-generic-fixture"}
+        )
+    )
 
     receipt_path = (tmp_path / "generic-terminal.receipt").resolve()
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
@@ -1776,12 +1792,23 @@ def test_generic_capture_metadata_remains_exactly_as_supplied(
             0,
             stream,
             role_provenance=owner.ExternalRoleProvenance("none", "external-reviewer"),
-            raw_stdout=b"GATE: PASS\n",
-            raw_stderr=b"",
+            raw_stdout=raw_stdout,
+            raw_stderr=raw_stderr,
+            process_result=process,
+            credential_needles=output_context.needles,
+            output_context=output_context,
+            attempted=True,
         )
     payload = owner.parse_provider_result(capsys.readouterr().out)
 
-    assert code == 0
+    if capture_matches:
+        assert code == 0
+        assert payload["resultText"] == raw_stdout.decode("ascii")
+    else:
+        assert code != 0
+        assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+        assert payload["resultText"] == ""
+        assert payload["gate"] == "none"
     assert {
         "captureOverflow": payload["captureOverflow"],
         "captureObservedBytes": payload["captureObservedBytes"],
@@ -1789,13 +1816,15 @@ def test_generic_capture_metadata_remains_exactly_as_supplied(
         "captureDigest": payload["captureDigest"],
         "captureIssueCount": payload["captureIssueCount"],
     } == {
-        "captureOverflow": False,
-        "captureObservedBytes": 17,
-        "capturePersistedBytes": 13,
-        "captureDigest": "a" * 64,
-        "captureIssueCount": 1,
+        "captureOverflow": observed.overflow,
+        "captureObservedBytes": observed.observed_bytes,
+        "capturePersistedBytes": observed.persisted_bytes,
+        "captureDigest": observed.digest,
+        "captureIssueCount": len(observed.issues),
     }
     assert "childNonzeroCategory" not in payload
+    assert owner.parse_provider_result(receipt_path.read_text(encoding="utf-8")) == payload
+    assert not lifecycle.run_dir.exists()
 
 
 @pytest.mark.parametrize(
@@ -2698,8 +2727,8 @@ def test_kimi_empty_launch_flags_accept_resolved_effort_and_legacy_unsupported(
     )
     assert provenance.effort == effort
     outcome = owner.FinalOutcome(
-        0, "COMPLETE:EXTERNAL_NONAUTHORIZING", "passed", "PASS", "fixture",
-        0, "COMPLETE:PASS", "passed", "PASS", "fixture", "complete", 0, "", False, 0,
+        0, "COMPLETE:EXTERNAL_NONAUTHORIZING", "completed", "PASS", "fixture",
+        0, "COMPLETE:PASS", "completed", "PASS", "fixture", "complete", 0, "", False, 0,
     )
     payload = owner.parse_provider_result(
         owner.build_provider_result_line(
@@ -3831,6 +3860,7 @@ def test_kimi_private_config_rejects_conflict_without_mutating_user_bytes(
     assert not (run_dir / "kimi-home").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows OSError.winerror contract")
 def test_kimi_private_config_is_removed_when_alias_setup_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -4796,6 +4826,7 @@ def test_kimi_malformed_serialized_terminal_fails_closed() -> None:
 def _serialized_kimi_terminal_for_scan(
     owner, *, result_text: str = "safe", primary_note: str = "complete"
 ) -> str:
+    process = _kimi_process_result(result_text.encode("utf-8"), b"", target_exit_code=0)
     outcome = owner.FinalOutcome(
         0,
         "COMPLETE:EXTERNAL_NONAUTHORIZING",
@@ -4819,9 +4850,10 @@ def _serialized_kimi_terminal_for_scan(
         "high",
         result_text,
         outcome,
-        owner.StreamCaptureResult(False, 4, 4, "a" * 64, ()),
+        owner.provider_stream_result(process),
         cancelled=False,
         timed_out=False,
+        process_result=process,
         kimi_selected={
             "tools": ["1"],
             "mcpNames": [],
@@ -4999,7 +5031,8 @@ def test_kimi_unscannable_selection_has_only_minimal_prelaunch_failure(
         owner.ExternalRoleProvenance("none", "none"), None,
     )
     monkeypatch.setattr(owner, "_resolve_launch_provider_command", lambda *_: (["fixture"], None))
-    monkeypatch.setattr(owner, "resolve_provider_auth_configuration", lambda *_: SimpleNamespace(needles=()))
+    auth = owner.resolve_provider_auth_configuration("kimi", environment={})
+    monkeypatch.setattr(owner, "resolve_provider_auth_configuration", lambda *_: auth)
     monkeypatch.setattr(owner.RunCaptureLifecycle, "create", classmethod(
         lambda *_: pytest.fail("invalid credential selection reached capture/provider setup")
     ))
@@ -5016,8 +5049,15 @@ def test_kimi_unscannable_selection_has_only_minimal_prelaunch_failure(
     assert payload["cleanupStatus"] == "complete"
 
 
+@pytest.mark.parametrize("failure_kind", (
+    "setup-exception",
+    pytest.param("native-junction", marks=pytest.mark.skipif(
+        os.name != "nt", reason="Windows native junction setup failure contract"
+    )),
+))
 def test_kimi_private_home_setup_failure_keeps_safe_primary_cause_without_child(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], failure_kind: str,
 ) -> None:
     """Catches pre-child Kimi setup being masked as unavailable output scanning."""
 
@@ -5052,29 +5092,30 @@ def test_kimi_private_home_setup_failure_keeps_safe_primary_cause_without_child(
     monkeypatch.setattr(
         owner, "_resolve_launch_provider_command", lambda *_: (["fixture"], None)
     )
-    monkeypatch.setattr(
-        owner,
-        "resolve_provider_auth_configuration",
-        lambda _provider: SimpleNamespace(
-            needles=(), output_scan_disposition=owner.AUTH_OUTPUT_SCAN_ENVIRONMENT_EXACT
-        ),
-    )
-    monkeypatch.setattr(
-        owner.os,
-        "symlink",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            OSError(22, "synthetic", None, 1314)
-        ),
-    )
+    auth = owner.resolve_provider_auth_configuration("kimi", environment={})
+    monkeypatch.setattr(owner, "resolve_provider_auth_configuration", lambda _provider: auth)
     monkeypatch.setenv("USERPROFILE", str(user_home))
+    if failure_kind == "native-junction":
+        monkeypatch.setattr(
+            owner.os,
+            "symlink",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                OSError(22, "synthetic", None, 1314)
+            ),
+        )
 
-    def fail_native_junction(source: str, alias: str) -> None:
-        fallback_calls.append((source, alias))
-        raise OSError("native-fallback-detail")
+        def fail_native_junction(source: str, alias: str) -> None:
+            fallback_calls.append((source, alias))
+            raise OSError("native-fallback-detail")
 
-    monkeypatch.setitem(
-        sys.modules, "_winapi", SimpleNamespace(CreateJunction=fail_native_junction)
-    )
+        monkeypatch.setitem(
+            sys.modules, "_winapi", SimpleNamespace(CreateJunction=fail_native_junction)
+        )
+    else:
+        def fail_setup(*_args, **_kwargs):
+            raise OSError("private-setup-detail")
+
+        monkeypatch.setattr(owner.KimiPrivateHomeAliasesV1, "create", classmethod(fail_setup))
     monkeypatch.setattr(
         owner,
         "run_provider_process",
@@ -5101,12 +5142,12 @@ def test_kimi_private_home_setup_failure_keeps_safe_primary_cause_without_child(
     assert payload["cleanupStatus"] == "complete"
     assert payload["captureObservedBytes"] == 0
     assert child_calls == []
-    assert len(fallback_calls) == 1
-    assert len(scan_calls) == 2
-    assert scan_calls[0] == (b"", b"", False)
-    assert scan_calls[1][1:] == (b"", True)
+    assert len(fallback_calls) == (1 if failure_kind == "native-junction" else 0)
+    # No provider streams exist before child launch; scan the exact public envelope.
+    assert scan_calls == [(receipt_path.read_bytes(), b"", True)]
     visible = json.dumps(payload)
     assert "native-fallback-detail" not in visible
+    assert "private-setup-detail" not in visible
     assert str(tmp_path) not in visible
     assert "setup" not in receipt_path.read_text(encoding="utf-8")
     assert not any(capture_root.iterdir())
@@ -5135,6 +5176,7 @@ def test_external_original_output_classes_never_reach_either_sink(
     assert not lifecycle.run_dir.exists()
 
 
+@pytest.mark.parametrize("carrier", ("private-stderr", "selected-output"))
 @pytest.mark.parametrize("text", (
     '{"password":"unconfigured-value"}',
     "sEcReT=unconfigured-value",
@@ -5145,16 +5187,32 @@ def test_external_original_output_classes_never_reach_either_sink(
     json.dumps({"detail": "R:" + chr(92) + "another" + chr(92) + "entry.txt"}),
 ))
 def test_external_safety_general_classes_use_settled_receipt(
-    tmp_path, monkeypatch, capsys, text
+    tmp_path, monkeypatch, capsys, text, carrier
 ):
+    """Private transport stays private; sensitive selected output fails closed."""
+
     owner = _load_owner()
+    stdout = b"safe\nGATE: PASS\n"
+    stderr = text.encode()
+    if carrier == "selected-output":
+        stdout, stderr = stderr + b"\nGATE: PASS\n", b""
     code, payload, _, lifecycle = _finalize_kimi(
         owner, tmp_path, monkeypatch, capsys,
-        stdout=b"safe\nGATE: PASS\n", stderr=text.encode(),
+        stdout=stdout, stderr=stderr,
     )
     durable = (tmp_path / "kimi-terminal.receipt").read_text(encoding="utf-8")
     assert owner.parse_provider_result(durable) == payload
-    assert code != 0 and payload["gate"] == "none"
+    if carrier == "private-stderr":
+        assert code == 0 and payload["gate"] == "PASS"
+        assert payload["resultText"] == stdout.decode("ascii")
+        assert {key: payload[key] for key in _public_stdout_metadata(stdout)} == _public_stdout_metadata(stdout)
+        assert hashlib.sha256(stderr).hexdigest() not in durable
+    else:
+        assert code != 0 and payload["gate"] == "none"
+        assert payload["resultText"] == ""
+        expected = "MACHINE_PATH" if text.startswith(("Q:", '{"detail"')) else "CREDENTIAL"
+        assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_" + expected + "_ECHO"
+    assert text not in durable and text not in json.dumps(payload)
     assert "unconfigured-value" not in durable
     assert not lifecycle.run_dir.exists()
 

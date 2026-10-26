@@ -97,6 +97,27 @@ PosixProcessGroupOwnerV1 = _POSIX_PROCESS_GROUP.PosixProcessGroupOwnerV1
 
 CODEX_BEGIN = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
 CODEX_END = "<!-- END ORCHESTRARIUM CODEX PACK -->"
+# Shared transport closure, not host-native role/configuration policy. Both host
+# packs can route to Codex; shipping other lazy adapters does not activate them.
+SDK_RUNTIME_HELPERS = (
+    "process_supervision/sdk_worker.py",
+    "sdk_execution/__init__.py",
+    "sdk_execution/_async.py",
+    "sdk_execution/acp_streams.py",
+    "sdk_execution/claude.py",
+    "sdk_execution/codex.py",
+    "sdk_execution/codex_tools.py",
+    "sdk_execution/dispatch.py",
+    "sdk_execution/contracts.py",
+    "sdk_execution/coordinator.py",
+    "sdk_execution/grok.py",
+    "sdk_execution/kimi.py",
+    "sdk_execution/mimo.py",
+    "sdk_execution/minimax.py",
+    "sdk_execution/receiving.py",
+    "sdk_execution/runtime.py",
+    "sdk_execution/worker.py",
+)
 RUNTIME_HELPERS = (
     "agent-run-ledger.py",
     "agent-run-ledger.sh",
@@ -120,7 +141,7 @@ RUNTIME_HELPERS = (
     "validate-work-item-state.py",
     "validate-work-item-state.sh",
     "validate-provider-prompt-projections.py",
-)
+) + SDK_RUNTIME_HELPERS
 CODEX_RUNTIME_HELPERS = ("check-hook-health.py", "universal_hooks_manifest.py")
 TRANSPORT_PROJECTION_FILES = (
     "provider_prompt.py",
@@ -131,7 +152,7 @@ TRANSPORT_PROJECTION_FILES = (
     "invoke-grok-prompt.py",
     "external-prompt-governance.md",
     "external-role-taxonomy.v1.json",
-)
+) + SDK_RUNTIME_HELPERS
 TRANSPORT_PROJECTION_MANIFEST = "provider-prompt-projections.v1.json"
 
 
@@ -578,6 +599,8 @@ _CODEX_RETIRED_SH = {
     "scripts/mcp-usage-reminder.sh": "f3e56c8a05aafcd0dce9905b40ab042df4edf40968d6dfda46d70a38e5351d0d",
     "scripts/turn-anchor-reminder.sh": "f0036ab9dd1fda1b9b7479f27f4585de9d5146bbd2a4bec10b4c4468f612c21e",
 }
+
+
 _CLAUDE_RETIRED_SH = {
     "hooks/check-machine-local-path.sh": "7856238ed5fbadaf10b9587ce8ebbf28cd4333cde57b95edebb288a4da6a7a68",
     "hooks/check-mcp-momentum.sh": "8f88b363f6c7f9df4c39d1d7d0c30b95d2540109323f1945af625552f0c3e5a4",
@@ -6523,9 +6546,10 @@ def _transport_predecessor(
         return None
     validator = _projection_validator(root)
     manifest_path = lead / "shared" / TRANSPORT_PROJECTION_MANIFEST
-    manifest = validator._load_manifest(manifest_path)
-    canonical_paths = tuple(lead / "scripts" / name for name in TRANSPORT_PROJECTION_FILES) + (manifest_path,)
-    peer_paths = tuple(projection_root / name for name in TRANSPORT_PROJECTION_FILES) + (
+    manifest = validator._load_manifest(manifest_path, predecessor_only=True)
+    predecessor_files = tuple(manifest["files"])
+    canonical_paths = tuple(lead / "scripts" / name for name in predecessor_files) + (manifest_path,)
+    peer_paths = tuple(projection_root / name for name in predecessor_files) + (
         projection_root.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST,
     )
     canonical_members = tuple(_projection_witness(path) for path in canonical_paths)
@@ -6536,7 +6560,7 @@ def _transport_predecessor(
         bound = validator._open_ordinary_file(path, "predecessor member")
         bound.close()
     digests = tuple((name, validator._validate_record(name, manifest["files"][name])[2])
-                    for name in TRANSPORT_PROJECTION_FILES)
+                    for name in predecessor_files)
     digests += ((TRANSPORT_PROJECTION_MANIFEST, _file_sha256(manifest_path)),)
     if any(member.state != "regular" or peer.state != "regular"
            or member.sha256 != digest or peer.sha256 != digest
@@ -6690,8 +6714,8 @@ def _stage_claude_transport_projection(
         pending_files = files
         manifest_pending = True
     elif states in {
-        ("absent", "absent", "current", "current", "absent", "absent", "absent", "absent"),
-        ("absent", "absent", "absent", "absent", "absent", "absent", "current", "current"),
+        ("absent", "absent", "current", "current", "absent", "absent", "absent", "absent") + ("absent",) * len(SDK_RUNTIME_HELPERS),
+        ("absent", "absent", "absent", "absent", "absent", "absent", "current", "current") + ("absent",) * len(SDK_RUNTIME_HELPERS),
     } and manifest_state == "absent":
         pending_files = tuple(
             (name, payload)
@@ -6716,7 +6740,7 @@ def _stage_claude_transport_projection(
             for name, expected in ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS.items()
             if observed_prior == expected
         ) if predecessor is None else None
-    elif states == ("accepted-prior", "absent", "current", "current", "absent", "absent", "absent", "absent") and manifest_state == "absent":
+    elif states == ("accepted-prior", "absent", "current", "current", "absent", "absent", "absent", "absent") + ("absent",) * len(SDK_RUNTIME_HELPERS) and manifest_state == "absent":
         pending_files = files
         manifest_pending = True
         replace_legacy_singleton = True
@@ -6752,7 +6776,10 @@ def _apply_claude_transport_projection(
             ):
                 raise ValueError("E_TRANSPORT_PROJECTION_PARITY: peer root drift")
         for item in stage.witnesses:
-            validator._walk_ordinary_components(item.path, "predecessor member")
+            # New transport members have no predecessor leaf; their absence is
+            # rechecked below and the create-only owner validates their parents.
+            if item.state != "absent":
+                validator._walk_ordinary_components(item.path, "predecessor member")
     current_witnesses = tuple(_projection_witness(item.path) for item in stage.witnesses)
     if current_witnesses != stage.witnesses:
         raise ValueError("E_TRANSPORT_PROJECTION_PARITY: preflight drift")
@@ -9349,6 +9376,8 @@ def _apply_claude_skill_projection_plan(
             owner.replace_exact_tree_with_projection(
                 relative, item.historical_digest, item.canonical_target
             )
+
+
 
 
 def _install_claude_skill_projections(
