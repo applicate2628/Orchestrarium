@@ -14,6 +14,8 @@ Use it together with:
 
 Current docs in this branch:
 
+- [distribution-runtime-project.md](distribution-runtime-project.md) indexes independent [npm distribution](npm-distribution-project.md) and [native Rust operations](https://github.com/applicate2628/Orchestrarium/pull/21); SDK [design/status is PR18](https://github.com/applicate2628/Orchestrarium/pull/18) and [implementation PR19](https://github.com/applicate2628/Orchestrarium/pull/19)
+
 - [claude-instruction-unification.md](claude-instruction-unification.md) for current-line Claude instruction research, shared-default versus provider-specific ownership, runtime projection alternatives, and the bounded development handoff
 - [routing/sol-6-1-routing-proposal-2026-10-01.md](routing/sol-6-1-routing-proposal-2026-10-01.md) for the approved Sol 6.1 default-family decision, dated public evidence, compatibility scope, and offline verification boundaries
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
