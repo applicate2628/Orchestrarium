@@ -2529,67 +2529,49 @@ def _has_static_posix_continuation_proof(parsed: ShellParseResult) -> bool:
         return False
 
 
-def absolute_literal_root_context(parsed: ShellParseResult) -> tuple[str, str] | None:
-    """Project literal A/R selection independently of route acceptance."""
+def literal_direct_command(parsed: ShellParseResult) -> ExecutableCommand | None:
+    """Reuse one parser-owned literal direct dispatch, including PowerShell &.
+
+    This is syntax/provenance only. Callers still qualify the actual executable,
+    repository, operation, consent and currentness under their existing owner.
+    """
     if type(parsed) is not ShellParseResult:
         return None
-    identity = parsed.identity
-    effective = parsed.effective_publications
     if (
         parsed.dialect not in {"posix", "powershell"}
-        or identity.dialect != parsed.dialect or identity.input_kind != "SHELL_TEXT"
-        or identity.depth != 0 or identity.parent is not None
-        or identity.wrapper_id is not None
-        or parsed.candidates or parsed.children or parsed.wrapper_projections
+        or parsed.identity.dialect != parsed.dialect
+        or parsed.identity.input_kind != "SHELL_TEXT"
+        or parsed.status != "SCG-PARSED" or parsed.candidates
+        or parsed.children or parsed.wrapper_projections
         or parsed.normalizations or parsed.lexical.operations or parsed.lexical.removed_spans
-        or len(parsed.commands) != 1 or len(parsed.pushes) != 1
-        or parsed.status != "SCG-PARSED" or not effective.exact_complete
-        or len(effective.records) != 1
-        or effective.eligible_direct_generic != effective.records
+        or len(parsed.commands) != 1 or not parsed.effective_publications.exact_complete
     ):
         return None
-    record = effective.records[0]
     command = parsed.commands[0]
-    push = record.push
-    argv = command.tokens
+    call_operator = (
+        parsed.dialect == "powershell" and command.nesting_context == "call-operator"
+        and command.boundary_before == "&"
+    )
     if (
-        record.kind != "DIRECT" or record.certainty != "exact"
-        or record.identity != identity or push != parsed.pushes[0]
-        or push.command != command
+        command.confidence != "exact" or command.normalization_state != "literal"
         or command.environment_assignments or command.control_keywords
-        or command.normalization_state != "literal"
-        or len(argv) < 4 or argv[1] != "-C" or argv[3] != "push"
-        or tuple(token.value for token in command.token_records) != argv
+        or (not call_operator and (command.nesting_context != "top-level" or command.boundary_before != "start"))
+        or (command.boundary_after != "end" and not command.trailing_linebreak_only)
+        or tuple(token.value for token in command.token_records) != command.tokens
     ):
         return None
-    executable, root = argv[0], argv[2]
-    if any(not value or "\x00" in value or not Path(value).is_absolute()
-           for value in (executable, root)):
+    # The segment's last boundary alone cannot prove solitary dispatch: empty
+    # prefixes/redirections can otherwise disappear during token projection.
+    operators = [atom for atom in parsed.lexical.atoms if atom.operator_capable
+                 and not (atom.value in "\r\n" and atom.source_span[0] >= command.source_span[1])]
+    if call_operator:
+        if len(operators) != 1 or operators[0].value != "&" or operators[0].source_span[1] > command.source_span[0]:
+            return None
+    elif operators:
         return None
-    if (
-        command.boundary_before != "start" and not (
-            parsed.dialect == "powershell" and command.boundary_before == "&"
-            and push.shell_context == "call-operator"
-        )
-    ) or (
-        command.boundary_after != "end" and not command.trailing_linebreak_only
-    ) or (
-        push.shell_context not in {"top-level", "call-operator"}
-        or push.environment_assignments
-        or push.executable != executable or command.arguments != argv[1:]
-        or push.git_global_options != ("-C", root)
-        or push.git_global_occurrences != (OptionOccurrence("-C", "required-value", "neutral", 1),)
-        or push.post_subcommand_tokens != argv[4:]
-        or push.repository_context != "redirected"
-    ):
+    if parsed.dialect == "powershell" and not call_operator and command.token_records[0].states != ("ordinary",):
         return None
-    if (
-        parsed.dialect == "powershell" and command.boundary_before == "start"
-        and command.token_records[0].states != ("ordinary",)
-    ):
-        return None
-    # Inspect the existing atoms, never reinterpret raw shell syntax. Quoting
-    # alone does not make an expansion-bearing token a literal selection.
+    # This is the existing literal A/R atom proof, shared rather than reparsed.
     for atom in parsed.lexical.atoms:
         if atom.token_membership < 0:
             continue
@@ -2601,13 +2583,48 @@ def absolute_literal_root_context(parsed: ShellParseResult) -> tuple[str, str] |
             return None
         if atom.state == "ordinary" and (
             any(character in "*?[{" for character in atom.value)
-            or (
-                atom.source_span == command.token_records[atom.token_membership].source_spans[0]
-                and atom.value == ("~" if parsed.dialect == "posix" else "@")
-            )
+            or (atom.source_span == command.token_records[atom.token_membership].source_spans[0]
+                and atom.value == ("~" if parsed.dialect == "posix" else "@"))
         ):
             return None
+    return command
+
+
+def absolute_literal_root_context(parsed: ShellParseResult) -> tuple[str, str] | None:
+    """Project literal A/R selection independently of route acceptance."""
+    command = literal_direct_command(parsed)
+    if command is None:
+        return None
+    identity = parsed.identity
+    effective = parsed.effective_publications
+    if (
+        identity.depth != 0 or identity.parent is not None or identity.wrapper_id is not None
+        or len(parsed.pushes) != 1 or len(effective.records) != 1
+        or effective.eligible_direct_generic != effective.records
+    ):
+        return None
+    record = effective.records[0]
+    push = record.push
+    argv = command.tokens
+    if (
+        record.kind != "DIRECT" or record.certainty != "exact" or record.identity != identity
+        or push != parsed.pushes[0] or push.command is not command
+        or len(argv) < 4 or argv[1] != "-C" or argv[3] != "push"
+    ):
+        return None
+    executable, root = argv[0], argv[2]
+    if any(not value or "\x00" in value or not Path(value).is_absolute() for value in (executable, root)):
+        return None
+    if (
+        push.shell_context not in {"top-level", "call-operator"} or push.environment_assignments
+        or push.executable != executable or command.arguments != argv[1:]
+        or push.git_global_options != ("-C", root)
+        or push.git_global_occurrences != (OptionOccurrence("-C", "required-value", "neutral", 1),)
+        or push.post_subcommand_tokens != argv[4:] or push.repository_context != "redirected"
+    ):
+        return None
     return executable, root
+
 
 def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     projection = parsed.effective_publications
@@ -2628,14 +2645,18 @@ def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     if not isinstance(push.command, ExecutableCommand):
         return GenericPushDecision("PGG-PARSE-UNCERTAIN", None)
     literal_context = absolute_literal_root_context(parsed)
-    canonical_literal_root = (
-        literal_context is not None
-        and _is_exact_direct_literal(parsed.raw_command, parsed)
-        and len(parsed.strict_projection.argv) == 6
-        and push.positionals == parsed.strict_projection.argv[4:]
+    literal_command = literal_direct_command(parsed)
+    literal_root = (
+        literal_context is not None and literal_command is push.command
+        and (parsed.dialect == "powershell" or _is_exact_direct_literal(parsed.raw_command, parsed))
+        and len(literal_command.tokens) == 6 and push.positionals == literal_command.tokens[4:]
         and not push.push_options and not push.push_option_occurrences
     )
-    if push.command.control_keywords or (not canonical_literal_root and (
+    literal_call = (
+        literal_command is push.command and parsed.dialect == "powershell"
+        and push.shell_context == "call-operator"
+    )
+    if push.command.control_keywords or (not literal_root and not literal_call and (
         push.shell_context != "top-level"
         or push.command.boundary_before != "start"
         or (
@@ -2644,11 +2665,11 @@ def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
         )
     )):
         return GenericPushDecision("PGG-COMPOUND-CONTEXT", None)
-    if push.repository_context != "ambient" and not canonical_literal_root:
+    if push.repository_context != "ambient" and not literal_root:
         return GenericPushDecision("PGG-REPOSITORY-REDIRECT", None)
     if push.environment_assignments:
         return GenericPushDecision("PGG-ENV-PREFIX", None)
-    if push.git_global_options and not canonical_literal_root:
+    if push.git_global_options and not literal_root:
         return GenericPushDecision("PGG-GIT-GLOBAL-OPTION", None)
     if push.option_status in ("GPO-MISSING-VALUE", "GPO-AMBIGUOUS"):
         return GenericPushDecision("PGG-OPTION-ARITY", None)

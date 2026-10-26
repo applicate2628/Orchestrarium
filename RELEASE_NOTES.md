@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-26
 
+- Publication-query failure normalization now preserves the actual primary exception, cause and owned resources when a timeout or output-limit trigger occurs first. Diagnostic labels no longer decide whether a primary failure may become an ordinary incomplete observation.
+
+- PowerShell literal call-operator invocations now qualify as one direct Git push, including mixed quoting and an explicit tool workdir. Actual executable identity, exact approved source, fresh full-graph scans and current repository binding remain required; genuine compound commands still refuse. Failed metadata queries expose only safe process categories and status codes, preserving denial and cleanup without printing command output or private paths.
+
 - Publication approval stays bound to its exact reviewed pending operation across neutral steering. Original user/scope and later state are requalified; explicit reviewed user scope needs no separate packet/question. Each attempt still requires a new complete graph scan, and derived indexes cannot revive revoked, fulfilled or unresolved authority.
 
 - Clarified scratch retention at the ledger recording step: callers choose the existing typed owner namespace before acquisition and distinguish completed PASS-terminal retention from preserving partial or failed results and later Version 3 close-time retention. Existing verdict, ownership and lifecycle requirements remain unchanged.

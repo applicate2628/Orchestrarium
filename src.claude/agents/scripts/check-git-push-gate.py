@@ -391,6 +391,7 @@ from git_push_gate_preflight import (
     build_preflight_from_stdin,
     ShellParseResult,
     absolute_literal_root_context,
+    literal_direct_command,
     PrRouteDenied,
     resolve_command_dialect,
     parse_transcript_command,
@@ -1104,8 +1105,13 @@ def _native_git_arguments(
     if parsed is None:
         return None
     publication = parsed.strict_projection.status == "canonical"
+    if not publication and parsed.dialect == "powershell":
+        literal = literal_direct_command(parsed)
+        publication = (literal is not None and literal.nesting_context == "call-operator"
+                       and classify_generic_push(parsed).status == "PGG-ADMISSIBLE")
     if publication:
-        argv = parsed.strict_projection.argv
+        argv = (parsed.strict_projection.argv if parsed.strict_projection.status == "canonical"
+                else literal.tokens)
     else:
         # Native argv and read-only queries reuse the exact literal record;
         # neither is reserialized into a shell or made a live push grammar.
@@ -1124,13 +1130,20 @@ def _native_git_arguments(
         ):
             return None
         argv = record.tokens
-    if not argv or not Path(argv[0]).is_absolute():
+    if not argv:
         return None
+    executable = Path(argv[0])
+    if not executable.is_absolute():
+        if not publication or executable.drive or executable.name == argv[0]:
+            return None
+        if type(command.cwd) is not str or not Path(command.cwd).is_absolute():
+            return None
+        executable = Path(command.cwd) / executable
     git = _resolve_executable("git", subject.root)
     if git is None:
         return None
     try:
-        _bind_literal_executable_identity(argv[0], git, "PGG-CONSENT-EXECUTABLE")
+        _bind_literal_executable_identity(str(executable), git, "PGG-CONSENT-EXECUTABLE")
     except PrRouteDenied:
         return None
     selected_root = argv[2] if len(argv) > 2 and argv[1] == "-C" else command.cwd
@@ -3648,6 +3661,40 @@ def _parse_pr_literal_command(
     )
 
 
+_PROCESS_FAILURE_KINDS = frozenset({
+    "spawn-oserror", "deadline", "output-overflow", "reader-loss", "wait-timeout",
+    "pipe-unavailable", "execution-error", "cleanup", "cancelled", "exit-code",
+})
+def _retain_process_failure(error: BaseException, outcome: dict, kind: str, *, native_error: BaseException | None = None, control_origin: str = "unknown") -> None:
+    """Keep the existing five-key outcome and only safe failure categories."""
+    native_error = error if native_error is None else native_error
+    try:
+        setattr(error, "publication_gate_process_outcome", outcome)
+        # Creator branch provenance is independent of the diagnostic trigger.
+        # A later true primary may legitimately retain an earlier trigger kind.
+        setattr(error, "publication_gate_process_control_origin", control_origin)
+        setattr(error, "publication_gate_process_failure", {
+            "kind": kind,
+            "errno": getattr(native_error, "errno", None) if type(getattr(native_error, "errno", None)) is int else None,
+            "winerror": getattr(native_error, "winerror", None) if type(getattr(native_error, "winerror", None)) is int else None,
+        })
+    except BaseException as capture_failure:
+        raise error from capture_failure
+
+
+def _safe_process_failure(error: BaseException) -> tuple[dict, dict] | None:
+    metadata = getattr(error, "publication_gate_process_failure", None)
+    outcome = getattr(error, "publication_gate_process_outcome", None)
+    if (type(metadata) is not dict or set(metadata) != {"kind", "errno", "winerror"}
+            or type(metadata["kind"]) is not str or metadata["kind"] not in _PROCESS_FAILURE_KINDS
+            or any(value is not None and type(value) is not int for key, value in metadata.items() if key != "kind")
+            or type(outcome) is not dict or set(outcome) != {"returncode", "stdout", "stderr", "complete", "resourcesSettled"}
+            or outcome["returncode"] is not None and type(outcome["returncode"]) is not int
+            or type(outcome["complete"]) is not bool or type(outcome["resourcesSettled"]) is not bool):
+        return None
+    return metadata, outcome
+
+
 def _run_process(
     argv: list[str], timeout: float, repository_workdir: str
 ) -> ProcessResult | None:
@@ -3664,8 +3711,12 @@ def _run_process(
             env=env,
             cwd=repository_workdir,
         )
-    except OSError:
-        return None
+    except OSError as error:
+        _retain_process_failure(error, {
+            "returncode": None, "stdout": b"", "stderr": b"",
+            "complete": False, "resourcesSettled": True,
+        }, "spawn-oserror", control_origin="former-none")
+        raise
 
     stdout = bytearray()
     stderr = bytearray()
@@ -3694,11 +3745,13 @@ def _run_process(
     primary_traceback = None
     cleanup_failures: list[BaseException] = []
     failed = False
+    operational_kind: str | None = None
     if process.stdout is None or process.stderr is None:
         primary_failure = RuntimeError("process output pipe unavailable")
         primary_traceback = primary_failure.__traceback__
         readers = ()
         failed = True
+        operational_kind = "pipe-unavailable"
     else:
         readers = (
             threading.Thread(target=drain, args=(process.stdout, stdout), daemon=True),
@@ -3711,6 +3764,7 @@ def _run_process(
             started.append(reader)
         while process.poll() is None:
             if overflow.is_set() or time.monotonic() >= deadline:
+                operational_kind = ("reader-loss" if reader_failures else "output-overflow") if overflow.is_set() else "deadline"
                 failed = True
                 break
             time.sleep(0.01)
@@ -3747,7 +3801,7 @@ def _run_process(
             return termination_succeeded
 
     def wait_for_owned_child() -> None:
-        nonlocal failed, primary_failure, primary_traceback
+        nonlocal failed, primary_failure, primary_traceback, operational_kind
         if termination_attempted and not termination_succeeded:
             return
         try:
@@ -3757,6 +3811,7 @@ def _run_process(
                 process.wait(timeout=1.0)
         except subprocess.TimeoutExpired:
             failed = True
+            operational_kind = "wait-timeout"
             if request_termination():
                 try:
                     process.wait()
@@ -3800,6 +3855,7 @@ def _run_process(
 
     if live_readers:
         failed = True
+        operational_kind = "reader-loss"
         for stream in (process.stdout, process.stderr):
             if stream is None:
                 continue
@@ -3842,7 +3898,7 @@ def _run_process(
     if unsettled:
         cleanup_failures.append(RuntimeError("process resources remain unsettled"))
 
-    def retain_outcome(error: BaseException) -> None:
+    def retain_outcome(error: BaseException, kind: str, control_origin: str) -> None:
         outcome = {
             "returncode": process.returncode,
             "stdout": bytes(stdout),
@@ -3851,7 +3907,9 @@ def _run_process(
             "resourcesSettled": not unsettled,
         }
         try:
-            setattr(error, "publication_gate_process_outcome", outcome)
+            native_error = (reader_failures[0] if kind == "reader-loss" and reader_failures
+                            else cleanup_failures[0] if kind == "cleanup" and cleanup_failures else error)
+            _retain_process_failure(error, outcome, kind, native_error=native_error, control_origin=control_origin)
             if unsettled:
                 setattr(error, "publication_gate_owned_process", process)
                 setattr(error, "publication_gate_owned_readers", tuple(started))
@@ -3860,18 +3918,23 @@ def _run_process(
             raise error from capture_failure
 
     if primary_failure is not None:
-        retain_outcome(primary_failure)
+        retain_outcome(primary_failure, "cancelled" if isinstance(primary_failure, (KeyboardInterrupt, SystemExit))
+                       else operational_kind or "execution-error", "primary")
         if cleanup_failures:
             raise primary_failure.with_traceback(primary_traceback) from cleanup_failures[0]
         raise primary_failure.with_traceback(primary_traceback)
     if cleanup_failures:
         failure = RuntimeError("process cleanup failed")
-        retain_outcome(failure)
+        retain_outcome(failure, "cleanup", "cleanup")
         raise failure from cleanup_failures[0]
     if unsettled:
         raise RuntimeError("process resources remain unsettled")
     if failed or overflow.is_set() or reader_failures:
-        return None
+        failure = RuntimeError("process operational failure")
+        retain_outcome(failure, "reader-loss" if reader_failures else operational_kind or "output-overflow", "former-none")
+        if reader_failures:
+            raise failure from reader_failures[0]
+        raise failure
     return ProcessResult(process.returncode, bytes(stdout), bytes(stderr))
 
 
@@ -4602,6 +4665,17 @@ def _capture_repository_observation(
                 [git_executable, *query.git_args], timeout, str(plan.root)
             )
         except BaseException as primary:
+            categorized = _safe_process_failure(primary)
+            if (categorized is not None
+                    and getattr(primary, "publication_gate_process_control_origin", None) == "former-none"):
+                _metadata, process_outcome = categorized
+                results.append(policy_module.RepositoryQueryResultV1(
+                    key, query.git_args, process_outcome["returncode"],
+                    process_outcome["stdout"], process_outcome["stderr"],
+                    False, process_outcome["resourcesSettled"],
+                    "execution-error" if process_outcome["resourcesSettled"] else "unsettled",
+                ))
+                continue
             process_outcome = getattr(
                 primary, "publication_gate_process_outcome", None
             )
@@ -5548,11 +5622,28 @@ def _run_text(
         raise PrRouteDenied(failure_id, workdir_diagnostic=(
             workdir_diagnostic._replace(check="deadline") if workdir_diagnostic else None
         ))
-    result = _run_process(argv, remaining, repository_workdir)
-    if result is None or result.returncode not in accepted_codes:
-        raise PrRouteDenied(failure_id, workdir_diagnostic=(
+    try:
+        result = _run_process(argv, remaining, repository_workdir)
+    except Exception as primary:
+        categorized = _safe_process_failure(primary)
+        if categorized is None:
+            raise
+        denied = PrRouteDenied(failure_id, workdir_diagnostic=(
             workdir_diagnostic._replace(check="process-result") if workdir_diagnostic else None
         ))
+        denied.publication_gate_process_failure, denied.publication_gate_process_outcome = categorized
+        raise denied from primary
+    if result is None or result.returncode not in accepted_codes:
+        denied = PrRouteDenied(failure_id, workdir_diagnostic=(
+            workdir_diagnostic._replace(check="process-result") if workdir_diagnostic else None
+        ))
+        if result is not None:
+            _retain_process_failure(denied, {
+                "returncode": result.returncode, "stdout": result.stdout,
+                "stderr": result.stderr, "complete": type(result.stdout) is bytes and type(result.stderr) is bytes,
+                "resourcesSettled": True,
+            }, "exit-code")
+        raise denied
     try:
         return result.returncode, result.stdout.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
@@ -6118,7 +6209,10 @@ def _prepare_pr_push(
     if git_exe is None:
         raise PrRouteDenied("PRG-REMOTE-MISMATCH")
     literal = _bind_pr_literal_executable(literal, git_exe)
-    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    repository_workdir = _prove_repository_root(
+        repository_workdir, git_exe,
+        source="literal" if literal_context is not None else repository_workdir_source,
+    )
     return PreparedPrPush(literal, repository_workdir, git_exe)
 
 
@@ -6275,7 +6369,10 @@ def _prepare_simple_pr_push(
             _raise_command_shape("simple", dialect, parsed, "executable")
         raise
     try:
-        repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+        repository_workdir = _prove_repository_root(
+            repository_workdir, git_exe,
+            source="literal" if literal_context is not None else repository_workdir_source,
+        )
     except PrRouteDenied as exc:
         if exc.failure_id == "PRG-COMMAND-SHAPE":
             _raise_command_shape("simple", dialect, parsed, "root")
@@ -6540,7 +6637,15 @@ def _prepare_generic_publication(preflight: PreflightResult) -> PreparedGenericP
             "invocation-qualification", "missing", "invocation", "absent", "missing",
         ))
 
+    literal_command = literal_direct_command(preflight.parsed) if preflight.parsed is not None else None
     literal_executable = None
+    if literal_command is not None:
+        selected_executable = literal_command.executable
+        selected_path = Path(selected_executable)
+        if selected_path.is_absolute() or selected_path.name != selected_executable:
+            if selected_path.drive and not selected_path.is_absolute():
+                raise PrRouteDenied("PGG-EXECUTABLE-MISMATCH")
+            literal_executable = selected_executable
     if literal_context is not None:
         literal_executable, raw_repository_root = literal_context
         repository_workdir = _normalize_repository_workdir(raw_repository_root, subject="literal", source="literal")
@@ -6557,10 +6662,17 @@ def _prepare_generic_publication(preflight: PreflightResult) -> PreparedGenericP
             "executable-resolution", "executable-missing", "executable", "derived-repository", "null",
         ))
     if literal_executable is not None:
+        # Explicit relative paths use the selected invocation cwd, never the
+        # hook's own cwd or an unrelated PATH executable.
+        if not Path(literal_executable).is_absolute():
+            literal_executable = str(Path(repository_workdir) / literal_executable)
         _bind_literal_executable_identity(
             literal_executable, git_exe, "PGG-EXECUTABLE-MISMATCH"
         )
-    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    repository_workdir = _prove_repository_root(
+        repository_workdir, git_exe,
+        source="literal" if literal_context is not None else selected_source,
+    )
     binding = _resolve_generic_scan_binding(
         remote, destination, source, repository_workdir, git_exe
     )
@@ -6755,6 +6867,20 @@ def _format_command_shape_diagnostic(value: object) -> str:
     )
 
 
+def _format_process_failure(error: BaseException) -> str:
+    selected = _safe_process_failure(error)
+    if selected is None:
+        return ""
+    metadata, outcome = selected
+    def number(value):
+        return "none" if value is None else str(value)
+    return (
+        f"Process diagnostics: kind={metadata['kind']}; exit={number(outcome['returncode'])}; "
+        f"errno={number(metadata['errno'])}; winerror={number(metadata['winerror'])}; "
+        f"complete={str(outcome['complete']).lower()}; resources-settled={str(outcome['resourcesSettled']).lower()}."
+    )
+
+
 def _format_gate_denial(failure_id: str) -> str:
     if failure_id not in SCAN_DENIAL_REASONS:
         failure_id = "PRG-INTERNAL"
@@ -6784,6 +6910,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
     transcript_diagnostic = result.transcript_diagnostic
     workdir_diagnostic = result.workdir_diagnostic
     command_shape_diagnostic = None
+    process_diagnostic = ""
     if result.continuation == "EVALUATE_HEAVY":
         try:
             if evaluate_heavy(result):
@@ -6792,6 +6919,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             failure_id = exc.failure_id
             transcript_diagnostic = exc.transcript_diagnostic
             workdir_diagnostic = exc.workdir_diagnostic
+            process_diagnostic = _format_process_failure(exc)
             command_shape_diagnostic = getattr(
                 exc, "command_shape_diagnostic", None
             )
@@ -6864,6 +6992,8 @@ def compose_gate_result(preflight: PreflightResult) -> int:
                         f"subject={diagnostic.subject}; source={diagnostic.source}; "
                         f"value-kind={diagnostic.value_kind}."
                     )
+            if process_diagnostic:
+                reason += " " + process_diagnostic
             if (
                 failure_id in _TRANSCRIPT_FAILURE_IDS
                 and transcript_diagnostic is not None

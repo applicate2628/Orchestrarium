@@ -49,6 +49,7 @@ import tempfile
 import threading
 import time
 import unittest
+import pytest
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
@@ -3985,6 +3986,56 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                     self.assertIn(failure_id, result.stdout)
 
 
+    def test_powershell_literal_call_operator_is_one_direct_dispatch(self) -> None:
+        git = str(Path(shutil.which("git")).resolve(strict=True))
+        root = str(REPO_ROOT.resolve())
+        for script, module in self._modules("literal_PS_dispatch"):
+            owner = module._a3_preflight
+            commands = (
+                "& '" + git + "' push origin 'HEAD:refs/heads/main'",
+                "& " + chr(34) + git + chr(34) + " push 'origin' HEAD:refs/heads/main",
+                "& git push origin main",
+                "& '" + git + "' -C '" + root + "' push origin 'HEAD:refs/heads/main'",
+                owner._serialize_powershell_literal((git, "-C", root, "push", "origin", "main")),
+            )
+            for command in commands:
+                with self.subTest(script=script, command=command), mock.patch.object(owner, "_build_shell_lexical_state", wraps=owner._build_shell_lexical_state) as lexical:
+                    parsed = owner.parse_shell_command(command, "powershell")
+                    decision = owner.classify_generic_push(parsed)
+                    self.assertEqual(decision.status, "PGG-ADMISSIBLE")
+                    self.assertIs(owner.literal_direct_command(parsed), parsed.commands[0])
+                    self.assertEqual(parsed.raw_command, command)
+                    self.assertEqual(parsed.commands[0].boundary_before, "&")
+                    lexical.assert_called_once()
+
+    def test_powershell_call_operator_does_not_hide_other_effects(self) -> None:
+        git = str(Path(shutil.which("git")).resolve(strict=True))
+        base = "& '" + git + "' push origin main"
+        commands = (base + "; Write-Output later", base + " | Out-Null", base + " && Write-Output later",
+                    base + "\nWrite-Output later", base + " &", base + " > sink", "& " + base,
+                    "&& " + base, "(" + base + ")", "& $git push origin main", "& '" + git + "' push origin $ref",
+                    base.replace("push origin", "push --force origin"),
+                    base.replace("push origin", "push --delete origin"))
+        for script, module in self._modules("literal_PS_refusals"):
+            for command in commands:
+                with self.subTest(script=script, command=command):
+                    owner = module._a3_preflight
+                    self.assertNotEqual(owner.classify_generic_push(owner.parse_shell_command(command, "powershell")).status, "PGG-ADMISSIBLE")
+            # Lexical recognition retains an empty source; the existing range
+            # binding owner refuses deletion before any authoritative scan.
+            deletion = base.replace("origin main", "origin :refs/heads/main")
+            with mock.patch.object(module, "_run_authoritative_scan") as forbidden:
+                with self.assertRaises(module.PrRouteDenied) as refused:
+                    module._prepare_generic_publication(_heavy_preflight(
+                        module, command=deletion, dialect="powershell",
+                        repository_workdir=str(REPO_ROOT.resolve()),
+                    ))
+                self.assertEqual(refused.exception.failure_id, "PGG-RANGE-TIP-BINDING")
+                forbidden.assert_not_called()
+            canonical = shlex.join((git, "-C", str(REPO_ROOT.resolve()), "push", "origin", "main"))
+            self.assertEqual(owner.classify_generic_push(owner.parse_shell_command(canonical, "posix")).status, "PGG-ADMISSIBLE")
+            self.assertNotEqual(owner.classify_generic_push(owner.parse_shell_command(" " + canonical, "posix")).status, "PGG-ADMISSIBLE")
+
     def test_publication_gate_single_identity_shell_matrix(self) -> None:
         result = oracle_factory_external()
         self.assertEqual(
@@ -7623,28 +7674,23 @@ class TestPrProviderProcessBounds(unittest.TestCase):
         with temporary_repository_workdir() as repository_workdir:
             for idx, script in enumerate(HOOKS):
                 module = _load_gate_module(script, f"push_gate_output_cap_{idx}")
-                result = module._run_process(
-                    [
-                        sys.executable,
-                        "-c",
-                        f"import sys; sys.stdout.buffer.write(b'x' * {module.PROCESS_OUTPUT_BYTE_CAP + 1})",
-                    ],
-                    2.0,
-                    repository_workdir,
-                )
-                self.assertIsNone(result, script)
+                with self.assertRaises(RuntimeError) as failed:
+                    module._run_process(
+                        [sys.executable, "-c", f"import sys; sys.stdout.buffer.write(b'x' * {module.PROCESS_OUTPUT_BYTE_CAP + 1})"],
+                        2.0, repository_workdir,
+                    )
+                self.assertEqual(failed.exception.publication_gate_process_failure["kind"], "output-overflow")
+                self.assertTrue(failed.exception.publication_gate_process_outcome["resourcesSettled"])
 
     def test_provider_timeout_kills_and_reaps(self) -> None:
         with temporary_repository_workdir() as repository_workdir:
             for idx, script in enumerate(HOOKS):
                 module = _load_gate_module(script, f"push_gate_timeout_{idx}")
                 started = time.monotonic()
-                result = module._run_process(
-                    [sys.executable, "-c", "import time; time.sleep(10)"],
-                    0.05,
-                    repository_workdir,
-                )
-                self.assertIsNone(result, script)
+                with self.assertRaises(RuntimeError) as failed:
+                    module._run_process([sys.executable, "-c", "import time; time.sleep(10)"], 0.05, repository_workdir)
+                self.assertEqual(failed.exception.publication_gate_process_failure["kind"], "deadline")
+                self.assertTrue(failed.exception.publication_gate_process_outcome["resourcesSettled"])
                 self.assertLess(time.monotonic() - started, 2.0, script)
 
 
@@ -7698,7 +7744,7 @@ class TestWorkdirFailureDiagnostics(unittest.TestCase):
                 with mock.patch.object(module.time, "monotonic", side_effect=(0, module.PROCESS_TIMEOUT_SECONDS + 1)):
                     assert_denial(lambda: module._prove_repository_root(str(root), "synthetic-git"), "repository-root-proof", "deadline", subject="repository", source="derived-repository")
                 with mock.patch.object(module, "_resolve_executable", return_value=None):
-                    assert_denial(lambda: module._complete_generic_publication(preflight), "executable-resolution", "executable-missing", subject="executable", source="derived-repository", kind="null")
+                    assert_denial(lambda: module._prepare_generic_publication(preflight), "executable-resolution", "executable-missing", subject="executable", source="derived-repository", kind="null")
 
     def test_both_pr_literal_callers_preserve_agreement_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -13970,7 +14016,38 @@ class TestGenericConsentContinuity(TestGenericOriginalConsentReceiving):
     def test_technical_head_drift_after_real_scan_refuses(self) -> None:
         self._real_invocation_currentness_case("advance-head")
 
-    def _real_invocation_currentness_case(self, mutation: str) -> None:
+    def test_mixed_powershell_call_real_common_owner_and_range(self) -> None:
+        for invocation in ("powershell-call", "powershell-call-root"):
+            with self.subTest(invocation=invocation):
+                self._real_invocation_currentness_case("stable", invocation=invocation)
+
+    def test_mixed_powershell_call_preserves_original_ref_and_head_currentness(self) -> None:
+        for mutation in ("retarget-source", "advance-head"):
+            with self.subTest(mutation=mutation):
+                self._real_invocation_currentness_case(mutation, invocation="powershell-call")
+
+    def test_mixed_powershell_call_refuses_spoofed_literal_callee_before_scan(self) -> None:
+        for mutation in ("spoof-callee", "spoof-relative-callee"):
+            with self.subTest(mutation=mutation):
+                self._real_invocation_currentness_case(mutation, invocation="powershell-call")
+
+    def test_mixed_powershell_target_effect_still_qualifies_actual_git_and_root(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "mixed_PS_native_effect")
+        with temporary_repository_workdir() as root:
+            records, subject, _selection = self._records(module, root)
+            effects = self._fulfilled(module, root, subject)
+            git = str(Path(shutil.which("git")).resolve(strict=True))
+            quote = lambda word: "'" + word.replace("'", "''") + "'"
+            effects[1]["params"]["item"]["command"] = ("& " + quote(git) + " push origin "
+                + quote(subject.source_oid + ":" + subject.destination))
+            with synthetic_transcript([*records, *effects]) as transcript:
+                result = module.receive_generic_publication_consent(self._preflight(module, root, transcript), subject)
+                self.assertEqual(result.state, "fulfilled", result)
+            effects[1]["params"]["item"]["cwd"] = str(Path(root).parent)
+            with synthetic_transcript([*records, *effects]) as transcript:
+                self.assertNotEqual(module.receive_generic_publication_consent(self._preflight(module, root, transcript), subject).state, "fulfilled")
+
+    def _real_invocation_currentness_case(self, mutation: str, *, invocation: str = "canonical") -> None:
         """Actual owner/query/scan path; the approved Git target is never run."""
         module = _load_gate_module(CANONICAL_HOOK, "generic_actual_common_range")
         with tempfile.TemporaryDirectory() as directory:
@@ -14015,17 +14092,47 @@ class TestGenericConsentContinuity(TestGenericOriginalConsentReceiving):
             with synthetic_transcript([user(text), user("Continue independent work")]) as transcript:
                 source_operand = "approved" if mutation == "retarget-source" else oid
                 preflight = self._preflight(module, root, transcript, source_operand)
+                if invocation != "canonical":
+                    selected_git = git
+                    if mutation in {"spoof-callee", "spoof-relative-callee"}:
+                        spoof = top / "spoof" / "git.exe"
+                        spoof.parent.mkdir()
+                        spoof.write_bytes(b"synthetic non-executable callee; must never run")
+                        selected_git = (os.path.relpath(spoof, repo) if mutation == "spoof-relative-callee" else str(spoof.resolve()))
+                    quote = lambda word: "'" + word.replace("'", "''") + "'"
+                    command = "& " + quote(selected_git)
+                    if invocation == "powershell-call-root":
+                        command += " -C " + quote(root)
+                    command += " push origin " + quote(source_operand + ":refs/heads/main")
+                    preflight = module._a3_preflight.build_preflight({
+                        "tool_name": "PowerShell", "cwd": str(top),
+                        "tool_input": {"command": command, "workdir": root},
+                        "transcript_path": str(transcript), "tool_use_id": "actual-mixed-PS-fixture",
+                        "session_id": "native-source-fixture",
+                    })
+                    self.assertEqual(preflight.generic_decision.status, "PGG-ADMISSIBLE")
+                    self.assertEqual(preflight.parsed.raw_command, command)
+                if mutation in {"spoof-callee", "spoof-relative-callee"}:
+                    with mock.patch.object(module, "_run_authoritative_scan") as forbidden:
+                        with self.assertRaises(module.PrRouteDenied) as refused:
+                            module._prepare_generic_publication(preflight)
+                        self.assertEqual(refused.exception.failure_id, "PGG-EXECUTABLE-MISMATCH")
+                        forbidden.assert_not_called()
+                    return
                 actual_prepared = module._prepare_generic_publication(preflight)
                 self.assertEqual(actual_prepared.source_operand, source_operand)
                 self.assertEqual(module.materialize_generic_publication_consent(preflight, selection).state, "pending")
-                with mock.patch.object(module, "_run_authoritative_scan", side_effect=scan):
+                cache_guard = (mock.patch.object(module, "_read_generic_index", side_effect=AssertionError("actual call-local A replaced by cache"))
+                               if invocation != "canonical" else contextlib.nullcontext())
+                actual_A = selection if invocation != "canonical" else None
+                with mock.patch.object(module, "_run_authoritative_scan", side_effect=scan), cache_guard:
                     if mutation == "stable":
-                        self.assertTrue(module.evaluate_heavy(preflight))
+                        self.assertTrue(module.evaluate_heavy(preflight, direct_selection=actual_A))
                         with self.assertRaises(module.PrRouteDenied):
-                            module.evaluate_heavy(self._preflight(module, root, transcript, technical_head))
+                            module.evaluate_heavy(self._preflight(module, root, transcript, technical_head), direct_selection=actual_A)
                     else:
                         with self.assertRaises(module.PrRouteDenied) as refused:
-                            module.evaluate_heavy(preflight)
+                            module.evaluate_heavy(preflight, direct_selection=actual_A)
                         self.assertEqual(refused.exception.failure_id, "PGG-CONSENT-CURRENTNESS")
                 # Deny the changed attempt, not the original genuine approval.
                 self.assertEqual(module.receive_generic_publication_consent(preflight, subject).state, "pending")
@@ -14033,6 +14140,205 @@ class TestGenericConsentContinuity(TestGenericOriginalConsentReceiving):
             # No git push populated the destination; scanning did not fulfill O.
             destination = subprocess.run(["git", "-C", str(remote), "show-ref"], capture_output=True, check=False)
             self.assertEqual(destination.returncode, 1)
+
+
+class TestSafeProcessFailureMetadata(unittest.TestCase):
+    def module(self):
+        return _load_gate_module(CANONICAL_HOOK, "safe_process_failure_" + secrets.token_hex(4))
+
+    def assert_safe_denial(self, module, failure, kind):
+        self.assertEqual(failure.failure_id, "PRG-WORKDIR-INVALID")
+        metadata, outcome = module._safe_process_failure(failure)
+        self.assertEqual(metadata["kind"], kind)
+        self.assertEqual(set(outcome), {"returncode", "stdout", "stderr", "complete", "resourcesSettled"})
+        self.assertTrue(outcome["resourcesSettled"])
+        output = io.StringIO()
+        with mock.patch.object(module, "evaluate_heavy", side_effect=failure), contextlib.redirect_stdout(output):
+            self.assertEqual(module.compose_gate_result(_heavy_preflight(module)), 0)
+        payload = json.loads(output.getvalue())["hookSpecificOutput"]
+        self.assertEqual(payload["permissionDecision"], "deny")
+        self.assertIn("kind=" + kind, payload["permissionDecisionReason"])
+        self.assertNotIn("PRIVATE_PROCESS_CANARY", output.getvalue())
+        self.assertNotIn(str(REPO_ROOT), output.getvalue())
+        return metadata, outcome
+
+    def test_real_root_nonzero_spawn_and_legacy_none(self):
+        module = self.module()
+        root = str(REPO_ROOT.resolve())
+        git = str(Path(shutil.which("git")).resolve(strict=True))
+        self.assertEqual(module._prove_repository_root(root, git, source="tool"), root)
+        diagnostic = module.WorkdirDiagnostic("repository-root-proof", "root-output", "repository", "tool", "string")
+        with self.assertRaises(module.PrRouteDenied) as raised:
+            module._run_text([sys.executable, "-c", "import sys;sys.stderr.write('PRIVATE_PROCESS_CANARY');sys.exit(7)"],
+                             time.monotonic() + 5, "PRG-WORKDIR-INVALID", root, workdir_diagnostic=diagnostic)
+        metadata, outcome = self.assert_safe_denial(module, raised.exception, "exit-code")
+        self.assertEqual(outcome["returncode"], 7)
+        self.assertEqual(outcome["stderr"], b"PRIVATE_PROCESS_CANARY")
+        self.assertTrue(outcome["complete"])
+        self.assertEqual(raised.exception.workdir_diagnostic.source, "tool")
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaises(module.PrRouteDenied) as raised:
+                module._run_text([str(Path(temporary) / "missing-program.exe")], time.monotonic() + 5,
+                                 "PRG-WORKDIR-INVALID", root, workdir_diagnostic=diagnostic)
+            metadata, outcome = self.assert_safe_denial(module, raised.exception, "spawn-oserror")
+            self.assertIsInstance(raised.exception.__cause__, OSError)
+            self.assertEqual(metadata["errno"], raised.exception.__cause__.errno)
+            self.assertIsNone(outcome["returncode"])
+            self.assertFalse(outcome["complete"])
+        with mock.patch.object(module, "_run_process", return_value=None):
+            with self.assertRaises(module.PrRouteDenied) as raised:
+                module._run_text(["legacy-none"], time.monotonic() + 5, "PRG-WORKDIR-INVALID", root,
+                                 workdir_diagnostic=diagnostic)
+        self.assertEqual(raised.exception.workdir_diagnostic.check, "process-result")
+        self.assertIsNone(module._safe_process_failure(raised.exception))
+        self.assertEqual(module._format_process_failure(raised.exception), "")
+
+    def test_deadline_reader_and_cleanup_remain_denied_and_settled(self):
+        module = self.module()
+        root = str(REPO_ROOT.resolve())
+        with self.assertRaises(module.PrRouteDenied) as raised:
+            module._run_text([sys.executable, "-c", "import time;time.sleep(5)"],
+                             time.monotonic() + 0.05, "PRG-WORKDIR-INVALID", root)
+        self.assert_safe_denial(module, raised.exception, "deadline")
+        actual_popen = module.subprocess.Popen
+        for fault, kind in (("reader", "reader-loss"), ("close", "cleanup")):
+            children = []
+            class Stream:
+                def __init__(self, source): self.source = source
+                @property
+                def closed(self): return self.source.closed
+                def read(self, size):
+                    if fault == "reader": raise OSError(5, "PRIVATE_PROCESS_CANARY")
+                    return self.source.read(size)
+                def close(self):
+                    self.source.close()
+                    if fault == "close": raise OSError(5, "PRIVATE_PROCESS_CANARY")
+            def popen(*args, **kwargs):
+                child = actual_popen(*args, **kwargs)
+                child.stdout = Stream(child.stdout)
+                children.append(child)
+                return child
+            with self.subTest(fault=fault), mock.patch.object(module.subprocess, "Popen", side_effect=popen):
+                with self.assertRaises(module.PrRouteDenied) as raised:
+                    module._run_text([sys.executable, "-c", "print('owned diagnostic child')"],
+                                     time.monotonic() + 5, "PRG-WORKDIR-INVALID", root)
+                metadata, outcome = self.assert_safe_denial(module, raised.exception, kind)
+                self.assertEqual(metadata["errno"], 5)
+                self.assertFalse(outcome["complete"])
+                self.assertEqual(len(children), 1)
+                self.assertIsNotNone(children[0].poll())
+                self.assertTrue(children[0].stdout.closed)
+                self.assertTrue(children[0].stderr.closed)
+
+    def test_query_caller_keeps_refusal_and_cancellation_contract(self):
+        module = self.module()
+        policy = _load_exact_module(CANONICAL_HOOK.parent / "publication_review_policy.py", "diagnostic_query_policy")
+        root = REPO_ROOT.resolve()
+        outcome = {"returncode": None, "stdout": b"partial", "stderr": b"PRIVATE_PROCESS_CANARY",
+                   "complete": False, "resourcesSettled": True}
+        failure = OSError(2, "PRIVATE_PROCESS_CANARY")
+        module._retain_process_failure(failure, outcome, "spawn-oserror", control_origin="former-none")
+        observed = []
+        def receive(plan, results):
+            observed.extend(results)
+            return {"status": "unavailable", "repository": None, "diagnostic": "query-execution-error"}
+        with mock.patch.object(module, "_run_process", side_effect=failure), mock.patch.object(policy, "repository_from_query_results", side_effect=receive):
+            result = module._capture_repository_observation(policy, root, "synthetic-git")
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(len(observed), len(module.REPOSITORY_QUERY_ORDER))
+        self.assertTrue(all(not row.complete and row.resources_settled for row in observed))
+        self.assertTrue(all(row.stderr == b"PRIVATE_PROCESS_CANARY" for row in observed))
+        cancellation = KeyboardInterrupt("PRIVATE_PROCESS_CANARY")
+        module._retain_process_failure(cancellation, outcome, "cancelled")
+        with mock.patch.object(module, "_run_process", side_effect=cancellation):
+            with self.assertRaises(KeyboardInterrupt) as raised:
+                module._capture_repository_observation(policy, root, "synthetic-git")
+        self.assertIs(raised.exception, cancellation)
+        self.assertEqual(cancellation.publication_review_query_results[-1].failure_kind, "cancelled")
+
+
+@pytest.mark.parametrize('trigger,held_reader',[('deadline',False),('overflow',False),('deadline',True)],ids=['deadline-then-wait-primary','overflow-then-wait-primary','deadline-primary-owned-reader'])
+def test_combined_trigger_preserves_primary_query_origin(tmp_path,trigger,held_reader):
+ # This bounded fixture adopts the actual read-only NPS-ARCH-1 reproducer;
+ # it is Source regression coverage, not a Platform profession/verdict claim.
+ case=tmp_path/'creator';case.mkdir()
+ def persist(path,data):
+  with path.open('x',encoding='utf8') as stream:
+   json.dump(data,stream,default=str,indent=2);stream.flush();os.fsync(stream.fileno())
+ runner=_load_exact_module(CANONICAL_HOOK.parent/'check-git-push-gate-runner.py','origin_runner_'+secrets.token_hex(4));rp,pf=runner._load_preflight();G=runner._load_policy(rp);policy=_load_exact_module(CANONICAL_HOOK.parent/'publication_review_policy.py','origin_policy_'+secrets.token_hex(4))
+ real_run=G._run_process;real_popen=G.subprocess.Popen;real_thread=G.threading.Thread
+ primary=OSError(17,'synthetic distinct wait primary');original_cause=RuntimeError('synthetic prior cause');primary.__cause__=original_cause
+ children=[];threads=[];acquired=[];release=threading.Event();received=[]
+ class HeldStream:
+  def __init__(self,source):self.source=source
+  @property
+  def closed(self):return self.source.closed
+  def read(self,size):release.wait();return self.source.read(size)
+  def close(self):return self.source.close()
+ def make_thread(*args,**kwargs):
+  t=real_thread(*args,**kwargs);threads.append(t);return t
+ def popen(*args,**kwargs):
+  child=real_popen(*args,**kwargs);children.append(child)
+  persist(case/('child-'+str(len(children))+'.json'),{'pid':child.pid,'ownership':'creator-retained Popen object; cleanup uses its methods only','actualArgv':child.args})
+  wait=child.wait;state={'raised':False}
+  def fail_after_actual_wait(*a,**k):
+   code=wait(*a,**k)
+   if not state['raised']:
+    state['raised']=True;raise primary
+   return code
+  child.wait=fail_after_actual_wait
+  if held_reader:
+   child.stdout=HeldStream(child.stdout);child.stderr=HeldStream(child.stderr)
+  return child
+ def actual_creator(_argv,_timeout,cwd):
+  script="import time;time.sleep(5)"if trigger=='deadline'else"import sys,time;sys.stdout.buffer.write(b'x'*("+str(G.PROCESS_OUTPUT_BYTE_CAP)+"+8192));sys.stdout.flush();time.sleep(5)"
+  try:return real_run([sys.executable,'-I','-S','-B','-c',script],0.0 if trigger=='deadline'else G.PROCESS_TIMEOUT_SECONDS,cwd)
+  except BaseException as error:
+   outcome=getattr(error,'publication_gate_process_outcome',None);snapshot={'samePrimary':error is primary,'cause':error.__cause__,'error':error,'outcome':outcome,'ownedProcess':getattr(error,'publication_gate_owned_process',None),'ownedReaders':getattr(error,'publication_gate_owned_readers',None),'ownedStreams':getattr(error,'publication_gate_owned_streams',None)};acquired.append(snapshot)
+   safe={k:v for k,v in snapshot.items()if k not in('cause','error','outcome','ownedProcess','ownedReaders','ownedStreams')};safe.update(kind=getattr(error,'publication_gate_process_failure',{}).get('kind'),causeType=type(error.__cause__).__name__ if error.__cause__ else None,exactOutcomeKeys=sorted(outcome)if isinstance(outcome,dict)else None,resourcesSettled=outcome.get('resourcesSettled')if isinstance(outcome,dict)else None,ownedProcessRetained=snapshot['ownedProcess']is not None,ownedReaderCount=len(snapshot['ownedReaders']or()),controlOrigin=getattr(error,'publication_gate_process_control_origin',None))
+   for stream in('stdout','stderr'):
+    if isinstance(outcome,dict)and isinstance(outcome.get(stream),bytes):
+     with(case/(str(len(acquired))+'-creator-'+stream+'.bin')).open('xb')as f:f.write(outcome[stream]);f.flush();os.fsync(f.fileno())
+   persist(case/(str(len(acquired))+'-creator.json'),safe)
+   raise
+ def receive(_plan,rows):received.extend(rows);return{'status':'unavailable','repository':None,'diagnostic':'query-execution-error'}
+ caught=None;returned=None
+ try:
+  with mock.patch.object(G.subprocess,'Popen',side_effect=popen),mock.patch.object(G.threading,'Thread',side_effect=make_thread),mock.patch.object(G,'_run_process',side_effect=actual_creator),mock.patch.object(policy,'repository_from_query_results',side_effect=receive):
+   try:returned=G._capture_repository_observation(policy,tmp_path,'synthetic-git-never-executed')
+   except BaseException as error:caught=error
+  observation={'trigger':trigger,'heldReader':held_reader,'creatorErrors':len(acquired),'callerRaisedSamePrimary':caught is primary,'callerExceptionType':type(caught).__name__ if caught else None,'callerReturnedOrdinaryObservation':returned is not None,'queryAttachedOnPrimary':all(hasattr(primary,k)for k in('publication_review_query_plan','publication_review_query_results','publication_review_query_index')),'firstCreatorCausePreserved':bool(acquired)and primary.__cause__ is acquired[0]['cause'],'firstCreatorOutcomeSameObject':bool(acquired)and getattr(primary,'publication_gate_process_outcome',None)is acquired[0]['outcome'],'ownedHandlesSameOnPrimary':bool(acquired)and getattr(primary,'publication_gate_owned_process',None)is acquired[0]['ownedProcess'],'children':len(children)}
+  persist(case/'receiving-before-assert.json',observation)
+  if trigger == 'overflow':
+   assert acquired and getattr(primary, 'publication_gate_process_failure', {}).get('kind') == 'output-overflow', 'overflow must be observed before primary'
+  assert caught is primary,'NPS-ARCH-1: query consumed actual distinct primary as ordinary operational observation'
+  assert acquired and acquired[0]['samePrimary']
+  assert primary.__cause__ is acquired[0]['cause']
+  assert getattr(primary,'publication_gate_process_outcome',None)is acquired[0]['outcome']
+  assert set(primary.publication_gate_process_outcome)=={'returncode','stdout','stderr','complete','resourcesSettled'}
+  assert primary.publication_review_query_index==0
+  assert len(primary.publication_review_query_results)==1
+  if held_reader:
+   assert primary.publication_gate_owned_process is acquired[0]['ownedProcess']
+   assert primary.publication_gate_owned_readers is acquired[0]['ownedReaders']
+   assert primary.publication_gate_owned_streams is acquired[0]['ownedStreams']
+ finally:
+  release.set()
+  cleanup=[]
+  for child in children:
+   # All process actions use the exact object returned by this fixture's Popen.
+   if child.poll()is None:child.kill()
+   try:child.wait(timeout=5)
+   except OSError:child.wait(timeout=5)
+   for stream in(child.stdout,child.stderr):
+    if stream is not None and not stream.closed:stream.close()
+   try:del child.wait
+   except AttributeError:pass
+   cleanup.append({'pid':child.pid,'returncode':child.poll(),'stdoutClosed':child.stdout.closed,'stderrClosed':child.stderr.closed})
+  for t in threads:t.join(timeout=5)
+  persist(case/'fixture-settlement.json',{'children':cleanup,'allThreadsJoined':all(not t.is_alive()for t in threads),'noPIDAncestryCleanup':True})
+  assert all(c['returncode']is not None and c['stdoutClosed']and c['stderrClosed']for c in cleanup)
+  assert all(not t.is_alive()for t in threads)
 
 
 if __name__ == "__main__":
