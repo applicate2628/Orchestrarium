@@ -875,7 +875,14 @@ succeeds, and rolls the whole operation back on failure. Run
 `mutate-work-item.py retire-legacy-backlog` only with an explicit product
 disposition and strict UTC instant; it preserves the original source bytes plus
 an incoming-link inventory in the existing monthly archive and deliberately
-creates no admission, active, or closure history. `terminalize-v1` applies the
+creates no admission, active, or closure history. The generated historical
+catalogue validates that retirement's stored incoming inventory and actual
+archived source bytes, lengths, hashes and membership. It does not select a new
+current mutable-consumer sweep merely to display the historical row. Strict
+retirement and integrity/audit receiving still require their current-link check;
+a later bad citation remains a real current integrity finding. The derived row,
+source paths, digest and repeated refresh receiving remain unchanged.
+`terminalize-v1` applies the
 same operator-authorized missing-evidence repair to every supported flat
 category, including roadmaps, using that category's own UTC/detail/evidence
 fields.

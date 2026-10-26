@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-26
+
+- Historical README catalogues preserve the existing input role when receiving never-admitted retirement records. They retain stored incoming/source inventory and exact archived payload/digest checks without starting an unrelated current-consumer sweep; strict retirement and integrity audits still detect later stale citations.
+
 ## 2026-10-25
 
 - PR-scoped corrective publication no longer depends on branch-protection/rules enumeration or proving rules absent. The hook retains exact open-PR/head/ref binding, scoped human consent and a fresh complete leak scan; the ordinary push remains subject to the server's configured rules and exceptions.
