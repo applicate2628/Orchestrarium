@@ -28,6 +28,7 @@ from process_supervision.process_runner import ENGINE_POLL_INTERVAL_SECONDS, MAX
 from process_supervision.windows_job import WindowsJobError
 from sdk_execution.contracts import CancelReceipt, ExecutionRequest, ExecutionResult, Observation, json_text, strict_json
 from sdk_execution.runtime import RuntimeBindingError
+from sdk_execution.coordination import CoordinationInferenceRequest, CoordinationInferenceResult
 
 
 MAX_FRAME_BYTES = MAX_STDIN_BYTES
@@ -92,11 +93,12 @@ def decode_frame(payload: bytes) -> dict[str, Any]:
 def read_execute_envelope(payload: bytes) -> tuple[ExecutionRequest, dict[str, Any] | None]:
     frame = decode_frame(payload)
     if (set(frame) not in ({"kind", "request"}, {"kind", "request", "runtime_selection"})
-        or frame["kind"] != "execute"):
+        or frame["kind"] not in {"execute", "infer_coordination"}):
         raise ValueError("expected one execute frame")
     if "runtime_selection" in frame and type(frame["runtime_selection"]) is not dict:
         raise ValueError("invalid worker runtime selection")
-    return ExecutionRequest.from_dict(frame["request"]), frame.get("runtime_selection")
+    request_type = CoordinationInferenceRequest if frame["kind"] == "infer_coordination" else ExecutionRequest
+    return request_type.from_dict(frame["request"]), frame.get("runtime_selection")
 
 
 async def serve_operation(
@@ -145,9 +147,11 @@ async def serve_operation(
 
     async def emit_terminal(result: ExecutionResult) -> None:
         nonlocal terminal_emitted
-        if not isinstance(result, ExecutionResult) or result.request != request:
+        expected = CoordinationInferenceResult if type(request) is CoordinationInferenceRequest else ExecutionResult
+        if not isinstance(result, expected) or result.request != request:
             raise ValueError("invalid execution result")
-        payload = encode_frame({"kind": "result", "result": result.to_dict()})
+        kind = "coordination_result" if type(request) is CoordinationInferenceRequest else "result"
+        payload = encode_frame({"kind": kind, "result": result.to_dict()})
         terminal_emitted = True  # A partial/failed write must never be retried.
         await write_frame(payload)
 

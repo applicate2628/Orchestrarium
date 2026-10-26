@@ -350,6 +350,8 @@ Entries are identified independently by script marker: `check-bugfix-discipline`
 
 When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
 
+Coordination Model candidate: [design and qualification holds](docs/codex-coordination-model.md). The candidate is not activated and does not provision dependencies.
+
 ## Terms and Abbreviations
 
 - `SDK`: Software Development Kit; optional provider integration helpers, not launch authority.

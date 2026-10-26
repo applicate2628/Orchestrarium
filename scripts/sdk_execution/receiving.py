@@ -13,6 +13,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from .contracts import ExecutionRequest, ExecutionResult, json_text, strict_json
+from .coordination import CoordinationInferenceRequest
 
 
 def _provider_owner():
@@ -107,21 +108,9 @@ def preworker_failure_payload(run: Any) -> dict[str, object]:
     return owner.parse_provider_result(line)
 
 
-def terminal_payload(request: ExecutionRequest, observation: Any, *, output_context: Any,
-                     admitted_sdk_execution: dict[str, object] | None = None) -> dict[str, object]:
-    """Receive a paired adapter result and its creator-owned process observation.
 
-    The caller must retain the pairing returned by run_sdk_worker. A deserialized
-    arbitrary process receipt is not a substitute for that creator-owned return.
-    """
-    from process_supervision.sdk_worker import SdkWorkerObservation
-
-    if type(observation) is not SdkWorkerObservation or not observation.is_bound_to(request):
-        raise ValueError("SDK worker observation pairing unavailable")
+def _require_sdk_process_settlement(observation):
     result, process = observation.result, observation.process
-    if result is None or result.request != request or result.actual_execution_path != "direct-external-sdk":
-        raise ValueError("SDK receiving identity mismatch")
-    scan_execution_output(result, output_context)
     if not (
         process.event_id == "process.supervision.settled.v1"
         and process.policy_id == "sdk-worker-v1"
@@ -136,6 +125,30 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
         raise ValueError("SDK protocol cleanup unavailable; retain captured result")
     if type(process.target_exit_code) is not int:
         raise ValueError("SDK worker exit observation unavailable")
+    return process
+
+
+def terminal_payload(request: ExecutionRequest, observation: Any, *, output_context: Any,
+                     admitted_sdk_execution: dict[str, object] | None = None) -> dict[str, object]:
+    """Receive a paired adapter result and its creator-owned process observation.
+
+    The caller must retain the pairing returned by run_sdk_worker. A deserialized
+    arbitrary process receipt is not a substitute for that creator-owned return.
+    """
+    from .coordination import CoordinationInferenceRequest
+    if type(request) is CoordinationInferenceRequest:
+        from .coordination_receiving import coordination_terminal_payload
+        return coordination_terminal_payload(request, observation, output_context=output_context,
+                                              admitted_sdk_execution=admitted_sdk_execution)
+    from process_supervision.sdk_worker import SdkWorkerObservation
+
+    if type(observation) is not SdkWorkerObservation or not observation.is_bound_to(request):
+        raise ValueError("SDK worker observation pairing unavailable")
+    result, process = observation.result, observation.process
+    if result is None or result.request != request or result.actual_execution_path != "direct-external-sdk":
+        raise ValueError("SDK receiving identity mismatch")
+    scan_execution_output(result, output_context)
+    process = _require_sdk_process_settlement(observation)
     complete = not (
         process.outcome != "success" or process.failure_id is not None
         or process.target_exit_code != 0 or process.timed_out or process.cancelled
@@ -297,7 +310,9 @@ def receive_terminal(
         "--artifact-revision", hashlib.sha256(expected_artifact).hexdigest(),
         "--artifact-size-bytes", str(len(expected_artifact)),
         "--started-at", started_at, "--updated-at", updated_at,
-        "--evidence", "command:SDK structured review and creator-owned process settlement",
+         "--evidence", ("command:SDK coordination inference and creator-owned process settlement"
+            if type(request) is CoordinationInferenceRequest
+            else "command:SDK structured review and creator-owned process settlement"),
     ]
     if writer.main(args, settlement_output=sys.stderr) != 0:
         raise ValueError("SDK ledger receiving failed; retain captured result")

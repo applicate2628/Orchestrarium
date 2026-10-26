@@ -25,6 +25,7 @@ from process_supervision.process_runner import MAX_STDIN_BYTES
 
 from ._async import drain_owned
 from .contracts import CancelReceipt, ExecutionRequest, ExecutionResult, json_text
+from .coordination import CoordinationInferenceRequest, CoordinationInferenceResult
 from .codex_tools import CODEX_MCP_ISOLATION_OVERRIDES, CodexMcpScope, CodexMcpScopeError
 
 
@@ -163,8 +164,13 @@ def prepare_codex_request(request: ExecutionRequest) -> ExecutionRequest:
 
 def validate_admitted_request(request: ExecutionRequest, selection: Any) -> None:
     """Check exact current common-governance input, without changing admission."""
-    if type(request) is not ExecutionRequest:
+    if type(request) not in {ExecutionRequest, CoordinationInferenceRequest}:
         raise RuntimeBindingError("admitted_execution_request_required")
+    if type(request) is CoordinationInferenceRequest:
+        if (selection.auth_mode != "codex-auth-file"
+            or selection.config_overrides != CODEX_BOUNDED_REVIEW_OVERRIDES
+            or selection.mcp_scope.servers):
+            raise RuntimeBindingError("bounded_subscription_coordination_selection_required")
     runtime_selection_from_dict(request.provider, selection.to_dict())
     frame = _owner().assemble_external_prompt(b"").decode("utf-8")
     instructions = request.prompt if request.provider == "codex" else selection.instructions
@@ -193,11 +199,16 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
         adapter, sandbox, approval = "claude-agent-sdk", "tool-restricted-read-only", "deny_unadmitted"
     else:
         raise RuntimeBindingError("unsupported_runtime_provider")
-    return {
+    value = {
         "schemaVersion": 2, "adapter": adapter, "model": request.model, "effort": request.effort,
         "sandboxMode": sandbox, "approvalPolicy": approval,
         "accountBinding": request.account_binding, "requestSha256": request_sha256(request, selection),
     }
+    if type(request) is CoordinationInferenceRequest:
+        value.update(schemaVersion=3, operationKind="coordination-inference",
+                     innerRequestSha256=request.inner_request_sha256,
+                     outerBudgetBinding=request.outer_budget_id, innerBudgetBinding=request.inner_budget_id)
+    return value
 
 
 def prepare_environment(selection: Any, source: dict[str, str]):
@@ -294,11 +305,13 @@ def assert_current_launch(request: ExecutionRequest, selection: Any, effect: str
     expected = {
         "workItem": request.work_item_id, "provider": request.provider, "model": request.model,
         "effort": request.effort, "scope": list(request.scope), "assignedRole": request.role,
-        "executionRole": "external-reviewer", "artifactIdentity": request.artifact_id,
+        "executionRole": "main" if type(request) is CoordinationInferenceRequest else "external-reviewer", "artifactIdentity": request.artifact_id,
         "externalDispatchId": request.external_dispatch_id, "externalEvidenceRunId": request.external_evidence_run_id,
         "actualExecutionPath": "direct-external-sdk", "sdkExecution": selected_sdk_execution(request, selection),
         "status": "running", "gate": "none",
     }
+    if type(request) is CoordinationInferenceRequest:
+        expected["role"] = "lead"
     if (writer.launch_event_sha256(launch, validator) != selection.expected_launch_sha256
         or any(launch.get(key) != value for key, value in expected.items())
         or any(e.get("launchRunId") == request.external_dispatch_id or e.get("runId") == request.external_evidence_run_id for e in events)):
@@ -323,8 +336,10 @@ def build_launch_arguments(request: ExecutionRequest, selection: Any, *, started
     the result to provider_prompt.prepare_ledger_admission before execution;
     claim_launch remains the sole atomic claim/duplicate-guard owner.
     """
+    actor_role, execution_role = (("lead", "main") if type(request) is CoordinationInferenceRequest
+                                  else ("external-reviewer", "external-reviewer"))
     arguments = ["--work-item", selection.work_item, "append", "--run-id", request.external_dispatch_id,
-        "--role", "external-reviewer", "--execution-role", "external-reviewer", "--assigned-role", request.role,
+        "--role", actor_role, "--execution-role", execution_role, "--assigned-role", request.role,
         "--provider", request.provider, "--model", request.model, "--effort", request.effort,
         "--status", "running", "--gate", "none", "--event-kind", "launch",
         "--actual-execution-path", "direct-external-sdk", "--sdk-execution-json", json_text(selected_sdk_execution(request, selection)),
@@ -366,6 +381,11 @@ def claim_launch(request: ExecutionRequest, selection: Any, *, authority: Callab
 def create_codex_adapter(request: ExecutionRequest, sink: Any, selection: CodexRuntimeSelection):
     """Real worker-only factory, called after creator-verified Job containment."""
     from .codex import CodexReviewAdapter, _official_client_binding
+    adapter_type = CodexReviewAdapter
+    if type(request) is CoordinationInferenceRequest:
+        validate_admitted_request(request, selection)
+        from .coordination_codex import CodexCoordinationAdapter
+        adapter_type = CodexCoordinationAdapter
 
     assert_current_launch(request, selection, "worker_factory")
     environment, _context = prepare_environment(selection, dict(os.environ))
@@ -401,7 +421,7 @@ def create_codex_adapter(request: ExecutionRequest, sink: Any, selection: CodexR
         # Approval is consumed for this exact request/effect, never cached here.
         sink.authorize_from_thread(current, effect)
 
-    return CodexReviewAdapter(
+    return adapter_type(
         client_factory=client_factory,
         assert_current=require_current,
         verify_account=verify_account, record=sink.record_from_thread,
@@ -595,6 +615,8 @@ class SdkReviewExecutor:
     existing launch requires explicit reconciliation, never a second execution.
     """
 
+    _operation_request_type = ExecutionRequest
+
     def __init__(
         self, *, request_id: str, authority: Any, selection: Any, process_owner: Any,
         source_environment: dict[str, str], artifact: str, deadline_monotonic: float,
@@ -626,6 +648,8 @@ class SdkReviewExecutor:
         from .receiving import review_artifact_target
 
         request = self._authority.resolve(self._request_id)
+        if type(request) is not self._operation_request_type:
+            raise RuntimeBindingError("executor_operation_kind_mismatch")
         validate_admitted_request(request, self._selection)
         if type(self._process_owner) is not ProcessRunnerV1:
             raise RuntimeBindingError("existing_process_owner_required")
@@ -679,7 +703,8 @@ class SdkReviewExecutor:
             if run.terminal is None or run.terminal.get("status") != "blocked":
                 raise RuntimeBindingError("runtime_result_unavailable")
             self.terminal = run.terminal
-            result = ExecutionResult(request=request, status="incomplete", execution_error=run.launch_error or "preworker_failure")
+            result_type = CoordinationInferenceResult if type(request) is CoordinationInferenceRequest else ExecutionResult
+            result = result_type(request=request, status="incomplete", execution_error=run.launch_error or "preworker_failure")
         else:
             from datetime import datetime, timezone
             from .receiving import receive_runtime_run
@@ -687,7 +712,8 @@ class SdkReviewExecutor:
             terminal = receive_runtime_run(run, artifact=self._artifact, started_at=self._started_at, updated_at=updated_at)
             self.terminal = terminal
             result = run.observation.result
-            if not isinstance(result, ExecutionResult) or result.request != request:
+            result_type = CoordinationInferenceResult if type(request) is CoordinationInferenceRequest else ExecutionResult
+            if not isinstance(result, result_type) or result.request != request:
                 raise RuntimeBindingError("runtime_result_unavailable")
             if terminal.get("status") == "blocked" and result.status == "completed":
                 result = replace(result, status="incomplete", execution_error="received_execution_incomplete")
@@ -700,6 +726,15 @@ class SdkReviewExecutor:
         return result
 
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
+        """Preserve the existing review Executor protocol, including its result type."""
+        if type(request) is not ExecutionRequest:
+            raise RuntimeBindingError("review_request_required")
+        result = await self._execute_operation(request)
+        if not isinstance(result, ExecutionResult):
+            raise RuntimeBindingError("review_result_required")
+        return result
+
+    async def _execute_operation(self, request):
         with self._lock:
             if self._request is not None:
                 raise RuntimeBindingError("operation_already_consumed")
@@ -719,3 +754,24 @@ class SdkReviewExecutor:
         run = self.runtime_run
         observed = run.observation.cancel if run is not None and run.observation is not None else None
         return observed if observed is not None else CancelReceipt(run_id, True, False)
+
+
+class SdkCoordinationWorker(SdkReviewExecutor):
+    """Same concrete execution/receiving owner; return only persisted outer evidence."""
+    _operation_request_type = CoordinationInferenceRequest
+
+    async def __call__(self, request):
+        if type(request) is not CoordinationInferenceRequest:
+            raise RuntimeBindingError("coordination_request_required")
+        result = await self._execute_operation(request)
+        # Draining retains acquired evidence; it must not turn caller cancellation
+        # into authority to dispatch the inner operation.
+        if self._cancelled():
+            raise asyncio.CancelledError()
+        if (type(result) is not CoordinationInferenceResult or result.status != "completed"
+            or self.runtime_run is None or self.runtime_run.observation is None
+            or self.terminal is None or self.terminal.get("status") != "completed"
+            or self.terminal.get("gate") != "none" or self.terminal.get("executionRole") != "main"
+            or self.terminal.get("authorizing") is not False or self.terminal.get("closesRunIds") != []):
+            raise RuntimeBindingError("coordination_receiving_unverified")
+        return self.runtime_run.observation

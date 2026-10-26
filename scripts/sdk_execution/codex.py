@@ -211,6 +211,18 @@ class CodexReviewAdapter:
         self._finished = False
         self._used = False
 
+    def _output_schema(self, request):
+        return review_schema(request)
+
+    def _parse_final(self, text, request):
+        return validate_review(text, request=request)
+
+    def _check_item(self, item):
+        pass
+
+    def _make_result(self, **values):
+        return ExecutionResult(**values)
+
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
         return await self._run_async(request, None)
 
@@ -413,6 +425,7 @@ class CodexReviewAdapter:
                 raise AdapterError(capture_error) from exc
 
         def accept_item(item: dict[str, Any]) -> None:
+            self._check_item(item)
             item_id = _identifier(item.get("id"))
             if item_id in final_items:
                 if final_items[item_id] != item:
@@ -534,7 +547,7 @@ class CodexReviewAdapter:
                     "approvalPolicy": "never", "approvalsReviewer": "user",
                     "cwd": request.cwd, "model": request.model, "effort": request.effort,
                     "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
-                    "outputSchema": review_schema(request),
+                    "outputSchema": self._output_schema(request),
                 }))
                 # Public turn_start preserves events received before this response.
                 self._turn_id = _identifier(_object(response.get("turn")).get("id"))
@@ -591,7 +604,7 @@ class CodexReviewAdapter:
                     selected = next((item for item in messages if item.get("phase") is None), None)
                 if selected is None or not isinstance(selected.get("text"), str):
                     raise AdapterError("missing_final_answer")
-                review = validate_review(selected["text"], request=request)
+                review = self._parse_final(selected["text"], request)
         except Exception as exc:
             execution_error = str(exc) if isinstance(exc, AdapterError) else "execution_or_interpretation_failed"
             if execution_error == "cancelled_before_effect":
@@ -629,7 +642,7 @@ class CodexReviewAdapter:
                     self._finished = True
         if execution_error or capture_error or cleanup_error:
             status = "incomplete" if provider_status != "failed" else "failed"
-        return ExecutionResult(
+        return self._make_result(
             request=request, status=status, provider_status=provider_status, native_thread_id=self._thread_id, native_turn_id=self._turn_id,
             sdk_execution_json=metadata_json, observations=tuple(observations), review=review,
             usage_json=json_text(usage) if usage is not None else None,

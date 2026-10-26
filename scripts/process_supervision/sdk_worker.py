@@ -21,6 +21,7 @@ from .process_runner import (
     SdkWorkerWindowsProfileV1, SettlePolicyV1,
 )
 from sdk_execution.contracts import CancelReceipt, ExecutionRequest, ExecutionResult, Observation, json_text
+from sdk_execution.coordination import CoordinationInferenceRequest, CoordinationInferenceResult
 from sdk_execution.worker import AUTHORITY_EFFECTS, authority_context, decode_frame, encode_frame, request_binding
 
 
@@ -33,7 +34,7 @@ class SdkWorkerObservation:
 
     request: ExecutionRequest = field(repr=False)
     process: ProcessResultV1
-    result: ExecutionResult | None = field(repr=False)
+    result: ExecutionResult | CoordinationInferenceResult | None = field(repr=False)
     cancel: CancelReceipt | None
     unavailable_reason: str | None
     protocol_error: str | None
@@ -79,7 +80,7 @@ def build_sdk_worker_request(
     """
     if type(owner) is not ProcessRunnerV1:
         raise ValueError("existing process owner is required")
-    if type(request) is not ExecutionRequest:
+    if type(request) not in {ExecutionRequest, CoordinationInferenceRequest}:
         raise ValueError("expected SDK execution request")
     if type(environment) is not tuple or any(type(row) is not EnvironmentRowV1 for row in environment):
         raise ValueError("explicit environment rows are required")
@@ -105,7 +106,8 @@ def build_sdk_worker_request(
 def _execute_payload(
     request: ExecutionRequest, selection: dict[str, object] | None, memory_limit: int,
 ) -> bytes:
-    frame: dict[str, object] = {"kind": "execute", "request": request.to_dict()}
+    kind = "infer_coordination" if type(request) is CoordinationInferenceRequest else "execute"
+    frame: dict[str, object] = {"kind": kind, "request": request.to_dict()}
     if selection is not None:
         if type(selection) is not dict:
             raise ValueError("explicit worker runtime selection must be a dictionary")
@@ -196,8 +198,9 @@ def run_sdk_worker(
                 channel.write_line(response)
                 written_bytes += len(response)
                 authority_sequence += 1
-            elif kind == "result" and set(frame) == {"kind", "result"} and result is None:
-                observed = ExecutionResult.from_dict(frame["result"])
+            elif kind == ("coordination_result" if type(request) is CoordinationInferenceRequest else "result") and set(frame) == {"kind", "result"} and result is None:
+                result_type = CoordinationInferenceResult if type(request) is CoordinationInferenceRequest else ExecutionResult
+                observed = result_type.from_dict(frame["result"])
                 if observed.request != request or unavailable is not None:
                     raise ValueError("worker result request mismatch")
                 result = observed

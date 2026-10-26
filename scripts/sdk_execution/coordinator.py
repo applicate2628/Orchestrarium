@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib
 from importlib import metadata
 import inspect
+import types
 import re
 from typing import Any, Protocol
 
@@ -97,7 +98,14 @@ def _load_agents_sdk() -> tuple[Any, Any]:
     except ImportError as error:
         raise CoordinatorUnavailable("optional openai-agents runtime lacks required public API") from error
     for name in ("Model", "RunHooks"):
-        if not isinstance(getattr(sdk, name, None), type):
+        value = getattr(sdk, name, None)
+        # Public RunHooks may be a parameterized generic alias. Python resolves
+        # this same base when defining CurrentAuthorityHooks below.
+        try:
+            bases = types.resolve_bases((value,)) if name == "RunHooks" else (value,)
+        except TypeError as error:
+            raise CoordinatorUnavailable(f"optional openai-agents runtime lacks required {name} API") from error
+        if len(bases) != 1 or not isinstance(bases[0], type):
             raise CoordinatorUnavailable(f"optional openai-agents runtime lacks required {name} API")
     probe = object()
     _require_call(getattr(sdk.RunHooks, "on_llm_start", None), "RunHooks.on_llm_start",

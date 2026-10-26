@@ -392,6 +392,10 @@ def validate_sdk_execution(
     )
     if not supported_binding or value["model"] != model or value["effort"] != effort:
         raise ValueError("sdkExecution must bind the declared provider, model, effort and adapter controls")
+    if value["schemaVersion"] == 3 and (
+        provider != "codex" or value["outerBudgetBinding"] == value["innerBudgetBinding"]
+    ):
+        raise ValueError("coordination inference requires Codex and distinct turn reservations")
     return dict(value)
 
 
@@ -407,6 +411,12 @@ def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
         )
     except ValueError as exc:
         fail(errors, f"{run_id}: {exc}")
+    selected = event.get("sdkExecution")
+    if type(selected) is dict and selected.get("schemaVersion") == 3:
+        if any(event.get(k) != expected for k, expected in
+               (("provider", "codex"), ("role", "lead"), ("executionRole", "main"),
+                ("assignedRole", "lead"), ("gate", "none"))):
+            fail(errors, f"{run_id}: coordination inference requires its nonauthorizing main/lead operation binding")
     if event.get("schemaVersion") != 2 or event.get("actualExecutionPath") != "direct-external-sdk":
         fail(errors, f"{run_id}: sdkExecution requires the V2 direct-external-sdk route")
     if event.get("eventKind") not in ("launch", "terminal"):
@@ -4182,9 +4192,17 @@ def _validate_event_fields(
                 fail(errors, f"{run_id}: external terminal requires authorizing=false")
             if event.get("actualExecutionPath") not in {"direct-external-cli", "direct-external-sdk"}:
                 fail(errors, f"{run_id}: external terminal requires a direct external execution path")
+            selected_sdk = event.get("sdkExecution")
+            coordination_actor = (
+                sdk_route and event.get("provider") == "codex"
+                and type(selected_sdk) is dict and selected_sdk.get("schemaVersion") == 3
+                and selected_sdk.get("operationKind") == "coordination-inference"
+                and event.get("role") == event.get("assignedRole") == "lead"
+                and event.get("gate") == "none"
+            )
             if event.get("executionRole") not in {
                 "external-worker", "external-reviewer", "consultant", "none",
-            }:
+            } and not (coordination_actor and event.get("executionRole") == "main"):
                 fail(errors, f"{run_id}: external terminal has invalid executionRole")
             if event.get("closesRunIds") != []:
                 fail(errors, f"{run_id}: external terminal requires empty closesRunIds")

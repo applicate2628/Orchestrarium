@@ -119,16 +119,51 @@
       ],
       "oneOf": [
         {
-          "properties": { "schemaVersion": { "const": 1 } },
-          "required": ["sdkVersion", "runtimeVersion"]
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "operationKind": false,
+            "innerRequestSha256": false,
+            "outerBudgetBinding": false,
+            "innerBudgetBinding": false
+          },
+          "required": [
+            "sdkVersion",
+            "runtimeVersion"
+          ]
         },
         {
           "properties": {
-            "schemaVersion": { "const": 2 },
+            "schemaVersion": {
+              "const": 2
+            },
+            "sdkVersion": false,
+            "runtimeVersion": false,
+            "operationKind": false,
+            "innerRequestSha256": false,
+            "outerBudgetBinding": false,
+            "innerBudgetBinding": false
+          },
+          "required": [
+            "requestSha256"
+          ]
+        },
+        {
+          "properties": {
+            "schemaVersion": {
+              "const": 3
+            },
             "sdkVersion": false,
             "runtimeVersion": false
           },
-          "required": ["requestSha256"]
+          "required": [
+            "requestSha256",
+            "operationKind",
+            "innerRequestSha256",
+            "outerBudgetBinding",
+            "innerBudgetBinding"
+          ]
         }
       ],
       "properties": {
@@ -141,7 +176,11 @@
         },
         "schemaVersion": {
           "type": "integer",
-          "enum": [1, 2]
+          "enum": [
+            1,
+            2,
+            3
+          ]
         },
         "adapter": {
           "enum": [
@@ -193,6 +232,28 @@
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+        },
+        "operationKind": {
+          "const": "coordination-inference"
+        },
+        "innerRequestSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Immutable inner execution snapshot, required only for coordination inference."
+        },
+        "outerBudgetBinding": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+        },
+        "innerBudgetBinding": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
         }
       },
       "$comment": "Exact SDK configuration, not permission or qualification evidence. Version 1 retains historical version-bearing metadata. Version 2 records only admitted controls and the request commitment, never fabricating SDK/runtime versions before startup; actual observed versions are retained in the scanned, artifact-bound review evidence. All tokens are bounded 128-character ASCII; version metadata additionally permits standard build/epoch markers. Codex read-only names its OS sandbox; Claude tool-restricted-read-only does not claim OS isolation. Approval-policy labels are not blanket tool denials.",
@@ -231,6 +292,31 @@
               },
               "approvalPolicy": {
                 "const": "deny_unadmitted"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "schemaVersion": {
+                "const": 3
+              }
+            },
+            "required": [
+              "schemaVersion"
+            ]
+          },
+          "then": {
+            "properties": {
+              "adapter": {
+                "const": "openai-codex"
+              },
+              "sandboxMode": {
+                "const": "read-only"
+              },
+              "approvalPolicy": {
+                "const": "deny_all"
               }
             }
           }
@@ -693,6 +779,44 @@
           "eventKind": { "const": "terminal" },
           "status": { "const": "completed" },
           "gate": { "const": "PASS" }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "sdkExecution"
+        ],
+        "properties": {
+          "sdkExecution": {
+            "required": [
+              "schemaVersion"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "const": 3
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "role": {
+            "const": "lead"
+          },
+          "executionRole": {
+            "const": "main"
+          },
+          "assignedRole": {
+            "const": "lead"
+          },
+          "provider": {
+            "const": "codex"
+          },
+          "gate": {
+            "const": "none"
+          }
         }
       }
     }

@@ -58,8 +58,19 @@ def read_binding(path: Path) -> dict[str, Any]:
             raw = stream.read(_BINDING_LIMIT + 1)
             after = os.fstat(stream.fileno())
         current = path.lstat()
-        identity = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
-        if len(raw) > _BINDING_LIMIT or len({identity(v) for v in (before, opened, after, current)}) != 1:
+        owner.validate_no_reparse_components(path)
+        if not stat.S_ISREG(current.st_mode):
+            raise ValueError()
+        with path.open("rb") as stream:
+            reopened = os.fstat(stream.fileno())
+        # Python/Windows path stat and handle fstat expose different ctime
+        # semantics. Compare ctime only between handle observations, as the
+        # runtime executable owner does; retain independent path identity.
+        path_identity = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns)
+        handle_identity = lambda value: (*path_identity(value), value.st_ctime_ns)
+        if (len(raw) > _BINDING_LIMIT
+            or len({path_identity(v) for v in (before, opened, after, current, reopened)}) != 1
+            or len({handle_identity(v) for v in (opened, after, reopened)}) != 1):
             raise ValueError()
         value = strict_json(raw.decode("utf-8"), max_bytes=_BINDING_LIMIT)
         if type(value) is not dict or set(value) != _BINDING_KEYS:
