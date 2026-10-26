@@ -1,7 +1,7 @@
 # Orchestrarium 2.0 product plan
 
-Status: remaining 2.0 product scope after extracting npm distribution and the
-hybrid runtime into an independent project; reconciled 2026-10-23 against main
+Status: remaining 2.0 product scope after extracting npm distribution and
+native operations into independent projects; reconciled 2026-10-23 against main
 `84eefb6bbeec9ebbe032f00788f249ae59da05b5`. This is not an implemented release,
 a measured improvement, or permission to run providers, spend funds, or publish.
 
@@ -13,9 +13,9 @@ complete the separately admitted native-role lifecycle, and retain safe future
 continuation across hosts. Preserve functional ambition, not every mechanism from
 earlier drafts.
 
-npm distribution and the hybrid Python/Rust runtime are now owned by the
-[independent distribution/runtime project](https://github.com/applicate2628/Orchestrarium/pull/17), not the 2.0
-release. Outcomes 1 and 5 below retain their disposition and historical numbering,
+npm distribution is owned by [PR17](https://github.com/applicate2628/Orchestrarium/pull/17),
+and native Rust operations by [PR21](https://github.com/applicate2628/Orchestrarium/pull/21),
+not the 2.0 release. Both are independently based on main. Outcomes 1 and 5 below retain their disposition and historical numbering,
 not duplicate design or delivery obligations. Their qualified slices may ship in
 current versions; 2.0 does not wait for them unless a selected outcome demonstrates
 a concrete dependency.
@@ -109,7 +109,7 @@ not interchangeable. No runtime root cause is established by this plan.
   [Runtime limitations](../README.md) include unavailable generic Windows command
   execution, unavailable generic POSIX Process Runner Version 1, and a source-only
   durable operation store and route activation registry. The historical Rust-to-2.0
-  deferral in those runtime docs is superseded for sequencing by the independent
+  deferral in those runtime docs is superseded for sequencing by the independent native Rust
   project, not by enabling any unavailable path. These are repository facts, not
   provider guarantees or proof of behavior in a particular installed environment.
 
@@ -118,7 +118,7 @@ not interchangeable. No runtime root cause is established by this plan.
 ### 1. npm skill-pack distribution
 
 **Disposition:** extracted into the
-[independent distribution/runtime project](https://github.com/applicate2628/Orchestrarium/pull/17); not a 2.0
+[independent npm distribution project](https://github.com/applicate2628/Orchestrarium/pull/17); not a 2.0
 release deliverable or prerequisite by default. Toolchain Engineer and Product
 Manager retain package ownership there, including the unresolved package contract,
 runtime prerequisites and installer-safe delivery. Consume outcome 2 only for
@@ -158,7 +158,7 @@ after abrupt termination/power loss, reconcile partial persisted state before re
 and preserve foreign changes. Reuse the existing owner, not a new recovery service.
 New ordinary roles/releases should be data, not a migration branch each time.
 Verify global/project and provider differences where they affect the accepted contract.
-The independent distribution/runtime project consumes this owner only where its
+The independent npm distribution project consumes this owner only where its
 package actions require this expanded lifecycle; it does not add a second package
 state manager or make all distribution work depend on outcome 2.
 
@@ -240,9 +240,10 @@ checkable disagreement; majority agreement does not establish truth.
 **Disposition:** extracted into the
 [SDK design/status PR18](https://github.com/applicate2628/Orchestrarium/pull/18),
 [SDK implementation PR19](https://github.com/applicate2628/Orchestrarium/pull/19) and
-[independent npm and Rust task documents in PR17](https://github.com/applicate2628/Orchestrarium/pull/17),
+[npm PR17](https://github.com/applicate2628/Orchestrarium/pull/17) and
+[native Rust PR21](https://github.com/applicate2628/Orchestrarium/pull/21),
 together with outcome 1. Each owning document retains its own boundaries and
-qualification; the two PR17 tasks are independent. Lead and
+qualification; the two projects are independent, not stacked PRs. Lead and
 existing operation owners retain their responsibilities. Qualified slices may ship
 in current versions; no runtime migration or provider activation follows from this
 2.0 plan, and no duplicate implementation is retained here.
@@ -270,7 +271,7 @@ need. Live/concurrent takeover remains conditional and retained, not cancelled.
 If the old host could resume writes to the same authoritative target, a claimed stop
 is insufficient: require verified exclusion. Live takeover requires atomic ownership
 change and commit-time rejection of stale writers; local locks or a ledger alone do
-not prove it. The independent distribution/runtime project is a dependency only
+not prove it. The independent native Rust project is a dependency only
 if the chosen scenario requires a qualified runtime extension; extracting outcome 5
 does not admit takeover or block stopped-handoff work by default.
 
@@ -318,7 +319,7 @@ dependent slice.
 **Next bounded work, independently where inputs and owners permit:**
 1. Toolchain Engineer with Architect: define native-role ownership transitions and
    the legacy-adoption boundary (item 2), using the existing installer transaction.
-   Implement only after that contract is accepted. The external distribution/runtime
+   Implement only after that contract is accepted. The independent npm distribution
    project consumes this owner only for package actions that need the expanded
    lifecycle, not as a second ownership manager.
 2. Lead and QA Engineer: trace one real admitted routing caller and select matched
@@ -331,8 +332,8 @@ dependent slice.
 item 6; live takeover is a separate conditional capability, not an implication of
 runtime migration. Decide named preferences in item 7 only if ordinary instructions
 fail a recurring need. Neither these choices nor Kimi `auto`/Grok integration block
-independent work above. The extracted project retains its own admission, owners,
-implementation boundaries and evidence; its npm/native/SDK design is not repeated
+independent work above. The extracted projects retain their own admission, owners,
+implementation boundaries and evidence; their npm/native/SDK designs are not repeated
 or selected for delivery here. No optional outcome is silently lost.
 
 After accepting a remaining 2.0 slice, implement and independently review its

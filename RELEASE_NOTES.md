@@ -4,7 +4,9 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-26
 
-- Corrected the remaining 2.0 roadmap's SDK ownership links to PR18 design/status and PR19 implementation, while PR17 now owns two independent npm/Rust task documents. Existing lifecycle, routing, evaluation and cross-host scope is unchanged.
+- Finish the npm/Rust review split by updating the remaining roadmap to reference their separate main-based PRs. No implementation or new dependency between the projects is introduced.
+
+- Corrected the remaining 2.0 roadmap's SDK ownership links to PR18 design/status and PR19 implementation, while npm distribution belongs to PR17 and native Rust operations to independent PR21. Existing lifecycle, routing, evaluation and cross-host scope is unchanged.
 
 ## 2026-10-25
 
