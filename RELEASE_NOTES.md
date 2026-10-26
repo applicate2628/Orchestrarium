@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-26
 
+- Reconcile the Codex coordinator documentation with its recorded bounded live qualification while keeping missing portable caller, multi-step and recovery coverage explicit. Restore the previous tracing provider after Runner tests, including setup and cleanup failures, so test-local state does not leak into later tests. No provider is activated or live qualification repeated.
+
 - Prepared a distinct typed Codex coordination-inference worker seam and optional public Agents Model adapter. It translates only validated observed intent after outer settlement; native execution requires its separate typed coordinator launch/receiving bindings and qualified runtime admission. Existing Host-led review remains available; no model or dependency activation follows. Explicit storage selections are rejected until native semantics are supported. Public generic RunHooks remain capability-compatible, and only bound nonauthorizing SDK v3 coordination may retain main/lead terminal provenance; ordinary external terminal restrictions remain intact.
 
 ## 2026-10-25

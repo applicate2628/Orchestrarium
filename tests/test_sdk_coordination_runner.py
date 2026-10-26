@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 import pytest
+from contextlib import contextmanager
 R=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(R/"scripts"))
 from sdk_execution import runtime
@@ -28,13 +29,38 @@ INSTRUCTIONS=("Call execute_admitted only with the admitted_request_id in the in
     "or permission. Do not claim project closure or accepted review.")
 
 
+
+@contextmanager
+def isolated_trace_provider(api, factory):
+    """Restore caller-owned global state even when setup or cleanup fails."""
+    previous = api.get_trace_provider()
+    owned = factory()
+    try:
+        owned.set_disabled(True)
+        api.set_trace_provider(owned)
+        yield owned
+    finally:
+        try:
+            api.set_trace_provider(previous)
+        finally:
+            owned.shutdown()
+
+
+@pytest.fixture(autouse=True)
+def restore_tracing_after_test():
+    pytest.importorskip("agents", reason="real provisioned Agents SDK required")
+    import agents.tracing as api
+    from agents.tracing.provider import DefaultTraceProvider
+    with isolated_trace_provider(api, DefaultTraceProvider):
+        yield
+
+
 def setup_flow(tmp_path,monkeypatch,*,bad_text=None,revoke=None,failed_close=False):
     pytest.importorskip("agents",reason="real provisioned Agents SDK required")
     sdk,_=_load_agents_sdk()
     # Public SDK provider with no processors: no exporter/client/background thread.
-    from agents.tracing import get_trace_provider,set_trace_provider
-    from agents.tracing.provider import DefaultTraceProvider
-    tracing=DefaultTraceProvider();tracing.set_disabled(True);set_trace_provider(tracing)
+    from agents.tracing import get_trace_provider
+    tracing = get_trace_provider()  # Owned and restored by the function fixture.
     inner,selection=fixture(tmp_path)
     selection=dataclasses.replace(selection,config_overrides=runtime.CODEX_BOUNDED_REVIEW_OVERRIDES)
     digest=hashlib.sha256(json_text(inner.to_dict()).encode()).hexdigest()
@@ -112,10 +138,9 @@ def setup_flow(tmp_path,monkeypatch,*,bad_text=None,revoke=None,failed_close=Fal
 
 
 def finish(flow):
-    flow.tracing.shutdown()
     assert flow.owner.close().outcome=="closed"
     assert flow.counts["network"]==0
-    (flow.item.parents[2]/"flow-metrics.json").write_text(json.dumps({**flow.counts,"actualProviderTurns":0,"ownerClosed":True,"tracingShutdown":True}),encoding="utf-8")
+    (flow.item.parents[2]/"flow-metrics.json").write_text(json.dumps({**flow.counts,"actualProviderTurns":0,"ownerClosed":True,"tracingOwnedByFixture":True}),encoding="utf-8")
 
 
 def test_real_runner_dispatches_once_after_persisted_outer_receiving(tmp_path,monkeypatch):

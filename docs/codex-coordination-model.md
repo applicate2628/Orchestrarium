@@ -1,7 +1,10 @@
-# Codex coordination-inference candidate
+# Bounded Codex coordination inference
 
-Status: local, unqualified implementation candidate based on PR19
-9f1e6df297c47a8edf5eb44d2919a6a0ade553cb. Not a provider-supplied CodexModel.
+Status: opt-in implementation published in PR19. The runtime at commit
+`fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8`, tree
+`acf9a9addb0ea73b5544f8b3070d1dff9a773841`, passed one bounded Windows
+outer-to-inner live qualification on 2026-10-26. This is not a provider-supplied
+CodexModel or qualification of arbitrary multi-step orchestration.
 The adapter does not activate a provider, provision an SDK or call a model on import.
 
 ## Public interfaces and ownership
@@ -45,71 +48,74 @@ Raw usage and unknown completeness remain explicit. Public Usage defaults do not
 establish observed zero tokens; a missing raw_usage capability does not manufacture
 token evidence or independently veto an admitted-call budget.
 
-## Qualification holds
+## Implemented ownership and observed qualification
 
-The native factory now uses the existing exact launch owner rather than a constant
-hold. Selected sdkExecution v3 binds operationKind=coordination-inference, immutable
-inner snapshot and distinct reservations, using the existing main/lead actor. The
-same atomic claim/settle writers remain sole ledger owners. Subscription mode,
-bounded profile and empty MCP scope are required. Fresh parent authority is still
-required per effect; selected metadata is neither permission nor native readiness.
+The native factory uses the existing exact launch owner. Selected sdkExecution v3
+binds operationKind=coordination-inference, the immutable inner snapshot and distinct
+reservations, using the existing main/lead actor. The same atomic claim/settle
+writers remain sole ledger owners. Subscription mode, bounded profile and empty MCP
+scope are required. Metadata is neither permission nor readiness.
 SdkCoordinationWorker persists scanned artifact/terminal readback before returning
-outer evidence to Model. The public legacy review Executor rejects coordination
-requests; its private operation lifecycle is shared, not a second supervisor.
-Source wiring has offline coverage; real Runner, native process custody and live
-provider qualification are distinct claims. No live launch has occurred.
+outer evidence. The review Executor rejects coordination requests; its private
+operation lifecycle is shared, not a second supervisor.
 
-A separately authorized isolated offline environment provisioned official PyPI
-openai-agents 0.24.0 and pytest 9.1.1 with their mandatory binary-wheel closure,
-verified primary hashes, full dependency hash lock and matching install report.
-These are test reproducibility pins, not product admission allowlists. The real
-public Runner and this Model passed seven fake-Codex-transport integration cases:
-one Model call and execute_admitted with no post-tool inference, refused/malformed
-intent, current-authority revocation and failed protocol close. The existing
-artifact receipt, atomic ledger settlement and independent readback ran for real;
-process receipts in these integration cases remain explicitly synthetic. Usage
-retains unknown token evidence. No provider was called. Installed public RunHooks
-is a parameterized generic alias; the capability check uses Python's normal base
-resolution rather than requiring that alias itself to be a class.
+The historical `LIVE-AGENTS-CHECKPOINT-v9` qualified the exact runtime tree above:
+- One outer and one inner observed native turn/start on gpt-6-luna/high, through
+  the existing subscription, official Codex SDK 0.163.0 and runtime 0.164.0.
+- The actual Agents Runner dispatched the existing SDK executor; the inner
+  arithmetic review completed with PASS. No repeated or post-tool turn was started.
+- Account/profile/required-hook admission passed; no unexpected native tool items
+  were observed. This does not establish that tool capabilities were absent.
+- Caller and workers exited zero; Windows Job trees were empty, children reaped,
+  resources closed, and receipt/artifact/ledger readback agreed.
+- Outer usage payload was retained; inner usage is unknown, not observed zero.
 
-The ordinary execution sandbox timed out in Python socketpair before test bodies.
-One bounded approved current-user nonadmin probe passed outside that sandbox, with
-sockets and loop closed. Offline tests ran in that approved mode; no firewall,
-ACL, global Python or sandbox setting changed. Synthetic custody tests cover typed
-receiving and refusal conditions but do not prove new-operation OS containment.
-A real Windows Job-owned SDK worker also completed a bounded fail-closed fixture:
-missing runtime selection was rejected before Codex startup, child exit 2, empty
-owned tree, direct reap and closed Job/thread/resources. This qualifies that
-startup/refusal cleanup path, not completed coordination/provider execution.
-The historical venv retains Codex package files but its interpreter is absent;
-it was neither repaired nor reused. Global Python was unchanged.
+Checkpoint SHA-256: `7f13e81558f62be309667a9e652117450d339a237f4d2c0dbe5712746fd11626`.
+Inner receipt SHA-256: `a97f27bf0fe60931f6e9b04095b7362bf388828d2ba52aba11346a10f99e39d2`.
+These digests identify retained private evidence; they are not downloadable logs.
+The record is evidence of that historical run, not authorization for another run
+or a claim that later changed callers have been live-qualified.
 
-## Bounded future live plan, not a command to run
+## Offline coverage and reproducibility boundary
 
-1. Review the typed launch/receiving wiring, provision a verified official compatible Agents/Codex
-   environment in isolation, and pass real Runner plus fake transport and relevant
-   legacy bridge/worker/receiving regression tests. Qualify async loop and creator
-   resource settlement in the actual execution mode.
-2. Preserve official subscription login, startup/account/tool/hook admission and
-   exact executable/home/profile identity; account_read(refreshToken=False).
-   No OAuth extraction, auth copying, private API, key/API billing or fallback.
-3. Reserve at most one outer native turn and one inner native turn separately.
-   Prefer gpt-6-luna/high only if current catalogs and both admitted profiles support
-   it; otherwise stop, never substitute. max_turns=1 is not a monetary or native
-   internal-inference/retry limit.
-4. Use existing AgentsCoordinator Runner.run, forced execute_admitted,
-   parallel_tool_calls=False and stop_on_first_tool, no Session/resume/streaming.
-   Outer returns only the closed observed intent. Inner reviews one harmless
-   in-memory arithmetic statement using the existing closed review schema.
-5. Budget outer at most 45 seconds, inner at most 90 seconds, overall watchdog
-   150 seconds including cleanup, through the existing owner. No post-tool model
-   inference or automatic repeats; reconcile any uncertainty.
-6. Retain outer and inner reservation/launch/terminal receipts, stdout/artifact,
-   existing ledger readback, raw/unknown usage and final native tree/handle cleanup.
-   No PASS when cleanup, actual provider result or provenance is uncertain.
+The controlled earlier subset had 305 passed, 3 skipped and 71 passing subtests;
+it preceded the final Windows binding correction. A separate host-local caller
+suite after that correction had 26 passed. Do not combine those as one full-suite
+result. The historical live caller SHA-256 is
+`e1a45dd690d3a3c87a6dbb4eefadfa22fd92608b2ab40f78b6c1fa945a4255a2`.
+That caller and its tests are not yet tracked here. Publishing a sanitized,
+parameterized reproducer remains an explicit open delivery item; a newly written
+caller cannot inherit that caller's successful run merely by describing it.
 
-Parent reviews the candidate and remaining holds before any live stage. No live
-command is ready or authorized by this document.
+Repository offline tests can be selected with an already provisioned test Python:
+
+```sh
+python -m pytest -q tests/test_sdk_coordination.py tests/test_sdk_coordination_owner.py tests/test_sdk_coordination_runner.py tests/test_sdk_dispatch.py tests/test_sdk_tracing_isolation.py -rs
+```
+
+The real-Runner tests require the separately provisioned optional Agents SDK;
+without it they skip rather than prove the integration. The historical test
+environment used openai-agents 0.24.0 and pytest 9.1.1 with its recorded dependency
+closure, not a product-wide admission allowlist. The repository Runner tests use
+fake Codex transport and synthetic process custody; their inner executor is a
+sentinel. They do not reproduce the complete historical live pair. No provider is
+called by these tests. Trace state is restored after each test, including failure.
+
+## Remaining qualification and future live-run constraints
+
+Session/resume/crash recovery, streaming, arbitrary planning/tool selection,
+other operating systems and live other-provider use remain unqualified by this
+bounded smoke. The forced tool and fixed admitted request test the integration
+chain, not the model's ability to choose or decompose arbitrary tasks.
+
+Any future live run needs fresh explicit user authorization and current admission
+for account, profile, required hooks, exact runtime and both separate reservations.
+Use the existing subscription; do not copy credentials, extract OAuth tokens,
+substitute API billing or weaken admission. Historical time and capture limits are
+provenance, not authority for a fresh run. No test collection, import or ordinary
+offline command may start live providers. A future reproducer must opt in before
+effects, reconcile uncertain outcomes without automatic repetition, and retain
+both operation receipts plus process/resource cleanup evidence.
 
 ## Terms and Abbreviations
 
