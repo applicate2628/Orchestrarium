@@ -324,6 +324,90 @@ def _load_installer():
     return module
 
 
+def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Normal update retains old peer ledger files while current P uses its owner."""
+    from test_provider_prompt_relocation import _load_owner
+    from test_ledger_resource_budget import fixture as ledger_fixture
+    old_source = tmp_path / 'predecessor-source'
+    old_source.mkdir()
+    public_repository = subprocess.run(['git', '--no-optional-locks', 'rev-parse', '--show-toplevel'],
+        cwd=ROOT, capture_output=True, text=True, check=True, timeout=30).stdout.strip()
+    package_bytes = subprocess.run(['git', '--no-optional-locks', 'archive', '--format=tar',
+        '815e9dfbc5932cc13ed1a8b01f44204e4b4d2349'], cwd=public_repository,
+        capture_output=True, check=True, timeout=30).stdout
+    with tarfile.open(fileobj=io.BytesIO(package_bytes), mode='r:') as package:
+        assert not any(Path(member.name).parts[0] in {'.git', '.scratch', 'work-items', '.plans', '.reports'}
+                       for member in package.getmembers())
+        package.extractall(old_source, filter='data')
+    frozen_legacy = _load_owner(old_source / 'scripts/provider_prompt.py', 'admitted_frozen_legacy_ledger_owner')
+    assert frozen_legacy.ledger_helper().samefile(old_source / 'scripts/agent-run-ledger.py')
+    target = tmp_path / 'target'
+    target.mkdir()
+    arguments = ['--target', str(target), '--force', '--allow-unsafe-target', '--no-hypothesis-hook']
+    seeded = subprocess.run([sys.executable, '-X', 'utf8', '-B', str(old_source / 'scripts/install-claude.py'),
+        *arguments], cwd=old_source, capture_output=True, text=True, timeout=180)
+    assert seeded.returncode == 0, seeded.stdout + seeded.stderr
+    peer = target / '.claude/agents'
+    retained_names = ('scripts/agent-run-ledger.py', 'scripts/mutate-work-item.py',
+        'scripts/validate-work-item-state.py', 'scripts/check-work-items-state.py',
+        'shared/schemas/agent-runs.schema.json')
+    retained = {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino) for name in retained_names}
+    assert _sha(retained['scripts/mutate-work-item.py'][0]) == '27960edec46770328bf34bca9290576cda4aad861234dd596ac3f05b1a0e7228'
+    installer = _load_installer()
+    assert installer.install('codex', arguments) == 0
+    assert {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
+            for name in retained_names} == retained
+    canonical = target / '.agents/skills/lead'
+    # The authority dependency is actually supplied by the same normal package.
+    assert (canonical / 'scripts/linked_runtime_subroots.py').read_bytes() == (ROOT / 'scripts/linked_runtime_subroots.py').read_bytes()
+    assert (peer / 'scripts/provider_prompt.py').read_bytes() == (ROOT / 'scripts/provider_prompt.py').read_bytes()
+    source_owner = _load_owner(canonical / 'scripts/provider_prompt.py', 'canonical_ledger_seed_owner')
+    item, before = ledger_fixture(tmp_path / 'work', 4100)
+    launch = ['--work-item', str(item), 'append', '--run-id', 'canonical-owner-launch',
+        '--role', 'external-reviewer', '--execution-role', 'external-reviewer', '--assigned-role', 'qa-engineer',
+        '--provider', 'codex', '--model', 'gpt-6.1-sol', '--effort', 'high', '--status', 'running',
+        '--gate', 'none', '--event-kind', 'launch', '--scope', 'synthetic canonical owner recording',
+        '--started-at', '2026-10-19T00:00:00Z', '--updated-at', '2026-10-19T00:00:00Z']
+    terminal = ['--work-item', str(item), 'settle-launch', '--launch-run-id', 'canonical-owner-launch',
+        '--run-id', 'canonical-owner-terminal', '--status', 'completed', '--gate', 'PASS',
+        '--artifact', 'reviews/qa.md', '--evidence', 'manual-check:synthetic installed owner',
+        '--terminal-class', 'external-nonauthorizing', '--authorizing', 'false',
+        '--actual-execution-path', 'direct-external-cli', '--artifact-identity', 'synthetic-installed-owner',
+        '--started-at', '2026-10-19T00:01:00Z', '--updated-at', '2026-10-19T00:01:00Z']
+    with source_owner.ProcessRunnerV1() as runner:
+        assert source_owner.run_ledger(runner, launch)
+        assert source_owner.run_ledger(runner, terminal)
+    after = (item / 'agent-runs.jsonl').read_bytes()
+    assert after.startswith(before) and len(after.splitlines()) == 4102
+    owner = _load_owner(peer / 'scripts/provider_prompt.py', 'updated_peer_ledger_owner')
+    received = owner.read_back_external_terminal(owner.Control(ledger=str(item)), 'codex', 'canonical-owner-launch')
+    assert received is not None and received['runId'] == 'canonical-owner-terminal'
+    writer = owner._ledger_owner()
+    validator = writer.load_validator()
+    lifecycle = validator.load_lifecycle_owner()
+    assert Path(writer.__file__).samefile(canonical / 'scripts/agent-run-ledger.py')
+    assert Path(validator.__file__).samefile(canonical / 'scripts/validate-work-item-state.py')
+    assert Path(lifecycle.__file__).samefile(canonical / 'scripts/mutate-work-item.py')
+    assert validator.AGENT_RUN_SCHEMA_PATH.samefile(canonical / 'shared/schemas/agent-runs.schema.json')
+    decoy = tmp_path / 'decoy'
+    (decoy / 'scripts').mkdir(parents=True)
+    marker = decoy / 'executed-decoy'
+    (decoy / 'scripts/agent-run-ledger.py').write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n", encoding='utf-8')
+    monkeypatch.chdir(decoy)
+    relative = os.path.relpath(item, decoy)
+    with owner.ProcessRunnerV1() as runner:
+        assert owner.run_ledger(runner, ['--work-item', relative, 'append', '--run-id', 'peer-relative-action',
+            '--role', 'analyst', '--execution-role', 'internal', '--status', 'completed', '--gate', 'none',
+            '--event-kind', 'standalone', '--scope', 'synthetic relative peer action',
+            '--evidence', 'manual-check:synthetic peer action'])
+    relative_result = owner.read_back_external_terminal(owner.Control(ledger=relative), 'codex', 'canonical-owner-launch')
+    assert relative_result == received and not marker.exists()
+    assert {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
+            for name in retained_names} == retained
+    assert (item / 'agent-runs.jsonl').read_bytes().startswith(after)
+
+
 def _receipted_predecessor(tmp_path: Path):
     installer = _load_installer()
     canonical = tmp_path / ".agents" / "skills"

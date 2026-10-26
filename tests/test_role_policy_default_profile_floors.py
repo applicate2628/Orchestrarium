@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RESOLVER_PATH = ROOT / "scripts" / "resolve-agents-mode.py"
 SKILL_ONLY_BY_TASK = {
     "exploration": {"product-analyst"},
-    "planning": {"ux-designer", "consultant"},
+    "planning": {"ux-designer", "consultant", "product-manager"},
     "critical-design": {"performance-engineer", "reliability-engineer", "consultant"},
     "engineering": {
         "frontend-engineer",
@@ -572,6 +572,226 @@ def test_every_skill_only_role_is_task_eligible_and_uses_current_skill_metadata(
             }
             assert role_name not in manifest["roles"]
             assert not (ROOT / "src.codex" / "agents" / f"{role_name}.toml").exists()
+
+
+def test_product_manager_planning_uses_only_the_existing_skill_only_route(
+    tmp_path: Path,
+) -> None:
+    policy, _ = RESOLVER.load_role_policy(ROOT)
+    role_manifest = json.loads(
+        (ROOT / "src.codex" / "agents" / "orchestrarium-role-manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert policy["skillOnlyRoles"]["product-manager"] == {
+        "defaultProfile": "frontier-high",
+        "allowedProfiles": [
+            "balanced-high",
+            "frontier-medium",
+            "frontier-high",
+            "frontier-xhigh",
+            "apex-max",
+            "astra-medium",
+            "astra-high",
+            "astra-xhigh",
+            "astra-max",
+        ],
+    }
+    assert policy["taskRoleEligibility"]["planning"].count("product-manager") == 1
+    assert {
+        task_name
+        for task_name, roles in policy["taskRoleEligibility"].items()
+        if "product-manager" in roles
+    } == {"planning"}
+    assert "product-manager" not in policy["roles"]
+    assert len(role_manifest["roles"]) == 18
+    assert "product-manager" not in role_manifest["roles"]
+    assert role_manifest["policySha256"] == hashlib.sha256(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
+    ).hexdigest()
+
+    host = {
+        **_unknown_astra_host(),
+        "reportedModels": ["gpt-6.1-sol"],
+        "reportedEfforts": ["high"],
+        "reportedAgentTypes": [],
+    }
+    description = RESOLVER.describe_ordinary_native_role_options(
+        "product-manager", "planning", host, repo_root=ROOT
+    )
+    assert description["status"] == "available"
+    assert description["roleKind"] == "skill-only"
+    assert description["defaultProfile"] == "frontier-high"
+    assert [option["profile"] for option in description["options"]] == [
+        "frontier-high"
+    ]
+    assert description["profession"]["skill"] == "$product-manager"
+    assert description["profession"]["skillSha256"] == hashlib.sha256(
+        (ROOT / "src.codex" / "skills" / "product-manager" / "SKILL.md").read_bytes()
+    ).hexdigest()
+
+    selected = RESOLVER.resolve_ordinary_native_dispatch(
+        description,
+        requested_model="gpt-6.1-sol",
+        requested_effort="high",
+        caller_rationale="Bounded product-priority decision with an explicit recommendation artifact.",
+        approved_execution_scope={
+            "authority": "parent-dispatcher-only",
+            "allowedTools": [],
+            "changeSurface": ["one bounded planning recommendation"],
+        },
+    )
+    assert selected["status"] == "resolved"
+    assert selected["resolvedProfile"] == "frontier-high"
+    assert selected["invocation"] == {
+        "mode": "generic-explicit-profile",
+        "forkTurns": "none",
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "high",
+        "professionSkill": "$product-manager",
+        "promptPreamble": description["profession"]["instructions"],
+    }
+    assert selected["fallback"] == "none"
+
+    no_controls = RESOLVER.describe_ordinary_native_role_options(
+        "product-manager",
+        "planning",
+        {
+            "explicitModelControl": False,
+            "explicitReasoningEffortControl": False,
+        },
+        repo_root=ROOT,
+    )
+    controls_denied = RESOLVER.resolve_ordinary_native_dispatch(
+        no_controls,
+        caller_rationale="Bounded product-priority decision.",
+        approved_execution_scope={"changeSurface": ["planning"]},
+    )
+    assert controls_denied["status"] == "denied"
+    assert controls_denied["stableId"] == "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE"
+    assert controls_denied["fallback"] == "none"
+
+    for task_class in ("exploration", "engineering"):
+        denied = RESOLVER.describe_ordinary_native_role_options(
+            "product-manager", task_class, _unknown_astra_host(), repo_root=ROOT
+        )
+        assert denied["status"] == "denied"
+        assert denied["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
+        assert denied["fallback"] == "none"
+
+    luna = RESOLVER.resolve_ordinary_native_dispatch(
+        description,
+        requested_model="gpt-6-luna",
+        requested_effort="high",
+        caller_rationale="Bounded product-priority decision.",
+        approved_execution_scope={"changeSurface": ["planning"]},
+    )
+    assert luna["status"] == "denied"
+    assert luna["fallback"] == "none"
+
+    unfiltered = RESOLVER.describe_ordinary_native_role_options(
+        "product-manager", "planning", _unknown_astra_host(), repo_root=ROOT
+    )
+    max_profile = next(
+        option for option in unfiltered["options"] if option["profile"] == "apex-max"
+    )
+    max_denied = RESOLVER.resolve_ordinary_native_dispatch(
+        unfiltered,
+        requested_model=max_profile["model"],
+        requested_effort=max_profile["effort"],
+        caller_rationale="Bounded product-priority decision.",
+        approved_execution_scope={"changeSurface": ["planning"]},
+    )
+    assert max_denied["status"] == "denied"
+    assert max_denied["fallback"] == "none"
+
+    for provider in ("kimi", "grok"):
+        for role in ("product-manager", "lead"):
+            external = RESOLVER.resolve_external_dispatch(
+                provider, "planning", role, repo_root=ROOT
+            )
+            assert external["status"] == "denied"
+            assert external["stableId"] == f"E_{provider.upper()}_DISPATCH_DENIED"
+            assert external["executionAuthorized"] is False
+            assert external["independentVerification"] is True
+            assert external["fallback"] == "none"
+
+    for provider, task_class, role, expected_status in (
+        ("kimi", "planning", "planner", "external-authorized"),
+        ("kimi", "review", "qa-engineer", "external-authorized"),
+        ("kimi", "engineering", "backend-engineer", "external-authorized"),
+        ("grok", "exploration", "analyst", "unavailable"),
+        ("grok", "review", "qa-engineer", "unavailable"),
+    ):
+        neighbor = RESOLVER.resolve_external_dispatch(
+            provider, task_class, role, repo_root=ROOT
+        )
+        assert neighbor["status"] == expected_status
+        assert neighbor["executionAuthorized"] is (expected_status == "external-authorized")
+        assert neighbor["fallback"] == "none"
+
+    consultant = RESOLVER.resolve_external_dispatch(
+        "kimi", "planning", "consultant", repo_root=ROOT
+    )
+    assert consultant["status"] == "external-authorized"
+    assert consultant["executionAuthorized"] is True
+    assert consultant["fallback"] == "none"
+    consultant_other_task = RESOLVER.resolve_external_dispatch(
+        "kimi", "exploration", "consultant", repo_root=ROOT
+    )
+    assert consultant_other_task["status"] == "denied"
+    assert consultant_other_task["stableId"] == "E_KIMI_DISPATCH_DENIED"
+
+    bounded_nonworker = RESOLVER.resolve_external_dispatch(
+        "kimi", "engineering", "worker", repo_root=ROOT
+    )
+    assert bounded_nonworker["status"] == "denied"
+    assert bounded_nonworker["stableId"] == "E_KIMI_DISPATCH_DENIED"
+    assert bounded_nonworker["executionAuthorized"] is False
+    assert bounded_nonworker["fallback"] == "none"
+
+    final_owner = RESOLVER.resolve_external_dispatch(
+        "kimi", "review", "security-reviewer", repo_root=ROOT
+    )
+    assert final_owner["status"] == "denied"
+    assert final_owner["stableId"] == "E_KIMI_FINAL_OWNER_DENIED"
+    assert final_owner["finalAuthorizingRole"] is True
+    assert final_owner["executionAuthorized"] is False
+    assert final_owner["fallback"] == "none"
+
+    taxonomy_bytes = (
+        ROOT / "shared" / "external-role-taxonomy.v1.json"
+    ).read_bytes()
+    for fixture_name, role_name in (
+        ("taxonomy-none", "knowledge-archivist"),
+        ("taxonomy-missing", "worker"),
+    ):
+        fixture_root = tmp_path / fixture_name
+        shared = fixture_root / "shared"
+        shared.mkdir(parents=True)
+        fixture_policy = json.loads(
+            (ROOT / "shared" / "role-routing-policy.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        fixture_policy["taskRoleEligibility"]["planning"].append(role_name)
+        fixture_taxonomy = json.loads(taxonomy_bytes)
+        if fixture_name == "taxonomy-none":
+            assert fixture_taxonomy["roles"][role_name] == "none"
+        else:
+            assert role_name not in fixture_taxonomy["roles"]
+        (shared / "role-routing-policy.v1.json").write_text(
+            json.dumps(fixture_policy), encoding="utf-8"
+        )
+        (shared / "external-role-taxonomy.v1.json").write_bytes(taxonomy_bytes)
+        for provider in ("kimi", "grok"):
+            denied = RESOLVER.resolve_external_dispatch(
+                provider, "planning", role_name, repo_root=fixture_root
+            )
+            assert denied["status"] == "denied"
+            assert denied["stableId"] == f"E_{provider.upper()}_DISPATCH_DENIED"
+            assert denied["executionAuthorized"] is False
+            assert denied["fallback"] == "none"
 
 
 def test_knowledge_archivist_keeps_medium_effort_with_sol_default() -> None:

@@ -7,7 +7,7 @@
     "maxLineBytes": 131072,
     "maxEvents": 4096,
     "maxLedgerBytes": 536879104,
-    "$comment": "maxEvents/maxLedgerBytes are omitted low-level diagnostic operation defaults, not lifetime ledger validity limits. Managed operations admit sufficient finite demand before dispatch; line/depth bounds remain protocol invariants.",
+    "$comment": "maxEvents/maxLedgerBytes are low-level no-input diagnostic defaults, not lifetime ledger validity limits. Ordinary public omission derives finite admission from actual selected input and planned effects; an explicit positive pair remains a hard cap. Line/depth bounds remain protocol invariants.",
     "maxNestingDepth": 8
   },
   "type": "object",

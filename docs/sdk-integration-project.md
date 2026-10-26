@@ -1,12 +1,53 @@
 # SDK integration project
 
-Status: standalone design and implementation backlog, extracted from
-[PR #17](https://github.com/applicate2628/Orchestrarium/pull/17) at
-`b67b150f197aa53fcf7a088aa67eecaec80e0cf6`. Based directly on
-[main 84eefb6b](https://github.com/applicate2628/Orchestrarium/commit/84eefb6bbeec9ebbe032f00788f249ae59da05b5).
-This PR changes documentation only; it delivers no SDK runtime, dependency install,
-provider activation or launch authority. SDK work is the first implementation
-workstream; it does not wait for Rust, npm or the rest of 2.0.
+Status: design reconciled on 2026-10-26 against implementation
+[PR #19](https://github.com/applicate2628/Orchestrarium/pull/19), exact head
+`9f1e6df297c47a8edf5eb44d2919a6a0ade553cb`. This PR remains documentation only.
+The source matrix below supersedes future-tense implementation claims in the
+original design; an implemented adapter is not proof of live qualification.
+SDK, npm distribution and Rust operations are independent tasks.
+
+## Source-pinned design-to-implementation matrix
+
+All implementation links in this matrix select the exact PR19 head above, not a
+moving branch. The implementation is still a draft, not merged product behavior.
+
+| Work | Implementation and source evidence | Qualification and remaining work |
+| --- | --- | --- |
+| SDK-1 shared execution contract | Immutable [request/result/identity/schema](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/sdk_execution/contracts.py), [parser](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/provider_prompt.py), [ledger](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/agent-run-ledger.py), schema and [receiving](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/sdk_execution/receiving.py) extend existing owners. | Implemented and offline checked; old records and external nonauthority remain. Not a second ledger/framework. |
+| SDK-2A Host-led Codex review | Opt-in [wrapper](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/invoke-codex-prompt.py) with --sdk-review-binding uses [dispatch](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/sdk_execution/dispatch.py) and the direct official Codex adapter. No outer Agents loop starts. | Source/offline receiving exists. Current-head installed Windows bridge and diagnostic/recovery qualification remain; historical Luna smoke is not that head's qualification. |
+| SDK-2B optional Agents coordinator | [AgentsCoordinator](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/sdk_execution/coordinator.py) requires an injected public Model and existing authority/executor. execute_admitted invokes the admitted executor; it does not supply the coordinator's Model. | Coordinator/session/resume contracts have offline coverage. Supported subscription-compatible Model binding, account/budget admission, live loop and Session/resume/crash evidence are separate remaining qualification. |
+| SDK-3 adapters | [SDK execution modules](https://github.com/applicate2628/Orchestrarium/tree/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/sdk_execution) implement direct Codex/Claude and adapter-local ACP routes, including additional provider adapters. | Source and offline tests exist. Other-provider live qualification is deferred due to quotas, not absent implementation and not a blocker for Codex scope. Existing provider eligibility remains; Grok stays unavailable. |
+| SDK-4 simplification | Structured results and the optional SDK-owned loop/session boundary avoid adding duplicate parser, loop and session glue. Existing owners validate and receive evidence. | Delete only superseded code whose consumers are covered. Still-used legacy routes and host hooks remain; there is no artificial task to remove every hook or CLI path. |
+
+Reported qualification of reviewed tree
+`872146aefc8e02277854a71cc2008d465ce8ac4e`: SDK 1103 passed / 5 skipped,
+17 targeted passed; broad changed-owner suite 2171 passed / 97 skipped /
+142 failure entries = 120 distinct failed IDs. All 120 IDs were reproduced on
+clean main 24052b; this is not a green broad suite or full baseline equivalence.
+Integration preserved all 68 non-release SDK paths; release notes were combined.
+Historical Windows synthetic success/collision PASS and one Luna/high smoke PASS
+(18.343 seconds, cleanup PASS) belong to the pre-merge candidate, not PR19 head.
+No runtime tests are rerun by this documentation reconciliation.
+
+## Selected next research goal: coordinator through the existing Codex subscription
+
+Establish whether a public Agents Model can be implemented through the official
+Codex SDK/App Server and the existing subscription login. Current code does not
+contain such a backend. The official [Agents Codex example](https://github.com/openai/openai-agents-python/blob/17d994bd3045dae71acda676a4ef4762ed8ecd94/examples/tools/codex.py)
+places Codex in tools; a tool integration does not make it the outer Model.
+The [official tool documentation](https://openai.github.io/openai-agents-python/tools/#experimental-codex-tool)
+likewise describes a tool, not a subscription-backed coordinator model.
+
+Research must map the public Model request, tool-call/result, streaming, usage,
+cancel/error and Session/resume contracts to supported Codex interfaces, with
+fresh account/profile/budget admission, bounded output/time and owned cleanup.
+Prove official support and honest limitations before implementation or live use.
+No OAuth extraction, private API, copied credentials, API-billing substitution or
+implicit model/account fallback. If the public contract cannot support the loop,
+record the precise gap and retain Host-led mode. A later authorized bounded Codex
+Agents-cycle qualification must include receipt, artifacts, ledger and crash/recovery
+evidence; no such model invocation is authorized by this documentation stage.
 
 ## Purpose and scope
 
@@ -16,10 +57,9 @@ Provider adapters use their selected native SDK or Agent Client Protocol (ACP).
 ACP is local to Kimi/Grok adapters, not the common orchestration abstraction.
 A model API is not a substitute for a provider coding runtime.
 
-This project owns SDK-1 shared contract fixtures, SDK-2 an Agents/Codex vertical
-slice, SDK-3 remaining provider adapters and SDK-4 qualified glue removal. Each implementation PR
-names actual deleted glue and preserved receiving behavior. Native deterministic
-operations, common-hook Rust replacement and npm distribution remain in PR17;
+This project owns SDK-1 shared contract fixtures, SDK-2A a Host-led Codex bridge and SDK-2B an optional Agents coordinator, SDK-3 remaining provider adapters and SDK-4 qualified glue removal. Each implementation PR
+names actual deleted glue and preserved receiving behavior. Independent [npm distribution](https://github.com/applicate2628/Orchestrarium/pull/17) and
+[native Rust operations](https://github.com/applicate2628/Orchestrarium/pull/17) have separate owning documents in PR17;
 ranking/evaluation, expanded role lifecycle and cross-host takeover remain in
 [PR #13](https://github.com/applicate2628/Orchestrarium/pull/13).
 Neither design PR is a blanket merge prerequisite for this one. This extraction
@@ -108,14 +148,13 @@ Selected adapter implementations:
   design target, not activation or permission to probe it. No WebSocket server,
   relay or alternate transport until a concrete remote use case justifies it.
 
-These are chosen integration paths, not a claim of measured reliability or qualified
-platform support. Pin tested released SDK/CLI combinations in dependency locks;
-upstream development-branch source is not a qualified released package.
-Verify the chosen release exists and supports the required public API;
-do not follow floating `latest`, draft protocol extensions or untested version
-combinations. Prefer the stable ACP core; capability negotiation governs required
-extensions. One selected path per operation, no automatic SDK/ACP/CLI fallback,
-parallel duplicate execution or extra Python/Rust ACP stack.
+These are selected integration paths, not measured reliability or universal
+platform qualification. PR19's [capability-based compatibility contract](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/docs/sdk-execution.md#capability-based-compatibility)
+supersedes this draft's mandatory product-wide SDK/CLI pin. Admission checks required
+public APIs, capabilities and actual observed contracts; release strings/digests
+are evidence for a selected run, not an allowlist. Reproducible test dependency
+locks remain useful and are not runtime admission. Preserve executable identity,
+account and permissions within each run; no silent SDK/ACP/CLI fallback.
 
 The executor accepts the existing admitted work-item/run/artifact, role, exact
 provider/profile, scope and constraints. It yields normalized observations and the
@@ -158,38 +197,19 @@ human authority. Cancel acknowledgement is not rollback or descendant settlement
   merely because an upstream automation example uses it. Local stdio avoids new
   ports/server credentials but still needs bounded capture and owned process cleanup.
 
-The [current result parser](../scripts/provider_prompt.py) requires the v2 execution
-path to be `direct-external-cli`. New SDK-owned routes need one narrowly admitted
-contract extension across producer, result parser, ledger writer, JSON schema,
-state validator and persisted readback before activation. Current bindings include
-`shared/schemas/agent-runs.schema.json:107`, `scripts/agent-run-ledger.py:2358,2389`
-and `scripts/validate-work-item-state.py:3918–3935`; changing only the adapter/parser
-would produce rejected or falsely classified records. Preserve old-record decoding
-and external nonauthority: never label SDK work as CLI or internal merely to pass.
-Reuse existing versioned owners, not a new schema/exception per provider.
-Apply this to genuinely new SDK-owned execution routes, including those using ACP.
-Replacing ACP plumbing inside the existing Kimi CLI-owned lane does not by itself
-change its execution path: retain truthful current provenance and record adapter/
-version evidence. Transport readiness never establishes receiving parity.
-Profile and identity evidence must also survive the boundary. Current model/effort
-validation derives from actual `launchFlags` (`provider_prompt.py:1583–1601`;
-`validate-work-item-state.py:4020–4042`); SDK routes must record their actual transport
-configuration, not fabricate CLI arguments. Extend the existing versioned provenance
-owner for that representation. Map SDK/ACP session/request IDs to existing admission,
-launch, dispatch and evidence-run identities; do not replace those identities or
-inject extended fields into legacy records that forbid them. Verify the complete
-admission → launch → result → ledger write → validation/readback chain with mismatched
-profile/run/role/artifact fixtures, old records, unsupported versions and duplicate
-terminal delivery. Keep format adapters at the boundary, not provider branches in
-the domain reducer. Inventory obsolete prompt/launch/parsing glue per supported host
-before deleting it; retain shared semantic checks and any uncovered existing route.
-For Kimi, preserve its existing ACP model/effort readback, selected/observed
-capability receipts and explicit omissions, redaction, and session close/delete
-settlement. Generic ACP availability is not equivalence to this existing adapter.
+PR19 implements the SDK-owned provenance extension across parser, ledger,
+schema, validator and receiving instead of labelling SDK work as direct CLI.
+Its immutable request binds provider/profile, work item, run and artifact identities.
+Observed transport/profile data must not be fabricated as CLI flags. The matrix
+above names these owners; their offline acceptance is not generic route activation.
+Legacy records and still-used CLI parsing retain their interpretation. Kimi's
+profile/capability, omission, redaction and close/delete obligations remain adapter
+requirements, not proof supplied by generic ACP availability.
 
 Application-programming-interface (API) model access, existing CLI capability,
-provider admission and account billing are separate. Agents SDK coordinator-model
-API access is not supplied by a Codex/Claude coding-agent subscription or ACP.
+provider admission and account billing are separate. An injected Agents Model does not automatically acquire a Codex/Claude
+subscription or ACP account binding; the selected research goal above must prove
+a supported Codex subscription path without introducing API billing.
 Select and verify each adapter's authentication/billing lane and credential environment; no coordinator-key inheritance or default
 fallback may silently switch its intended account/billing route. Keep coordinator
 credentials out of adapter environments unless explicitly selected; the excluded
@@ -222,9 +242,9 @@ its descendants inherit that boundary; the supervisor settles it while the worke
 performs protocol/session cleanup. This worker is a process-isolation boundary, not
 another coordinator, daemon, protocol proxy or persistent service. On Windows use
 existing atomic create-in-Job/suspended-start ownership, not adding PIDs after SDK
-spawn. The current generic runner does not admit this SDK-worker route: SDK-1 must
-specify its narrow owner integration and SDK-2 live qualification must prove it.
-Do not claim it already works or bypass unavailable generic execution. POSIX needs
+spawn. PR19 implements a narrow contained SDK worker and offline settlement coverage.
+Current-head installed/native and crash/recovery evidence remain scoped acceptance
+work, not activation of unrelated unavailable generic routes. POSIX needs
 its own containment and crash-settlement proof; process groups alone are not a
 universal guarantee against escaping descendants.
 
@@ -323,52 +343,25 @@ Tool discovery does not prove appropriate MCP use; reminders cannot be removed o
 that basis. Trace/session storage is not project-state authority. For each replacement,
 record actual deleted source and retained route coverage; a new dependency plus all
 old glue is not a completed simplification. Upstream interfaces were inspected through
-GitHub on 2026-10-23; implementation must pin and qualify compatible revisions.
+GitHub on 2026-10-23; implementation records inspected revisions and qualifies required capabilities.
 
-## Design-to-implementation plan
+## Remaining delivery plan
 
-1. **SDK-1: shared contract and acceptance fixtures.**
-   Provider integration/QA with Lead map existing admission, task/profile/artifact/run
-   identity, observations, cancellation and receiving to one small Python executor
-   boundary. Reuse current fixtures; add only uncovered mismatch, incomplete output,
-   current-authority-on-resume and historical-record cases. No separate framework,
-   policy copy, generic registry or production behavior change.
-2. **SDK-2: Agents SDK + direct Codex SDK vertical slice.**
-   Select one read-only repository review: coordinator receives a bounded review
-   request, invokes the Codex adapter, receives structured findings/verdict and passes
-   them to existing independent receiving/ledger owners. The coordinator is not a
-   second reviewer merely because it repeats the result, and an SDK return is not
-   authority to accept or close the task. Use native structured output where supported,
-   not a second model call to convert prose. Exercise streaming, interruption,
-   terminal capture, cleanup and persisted readback through that complete chain.
-   Begin with stubbed model/SDK observations and isolated fixtures. Choose the actual
-   coordinator profile/account before live qualification; current host-led mode
-   remains unchanged until this separately selected mode qualifies. No ACP dependency
-   is required by this slice.
-3. **SDK-3: other adapters through the same contract.**
-   Add direct Claude Agent SDK, then qualify the existing Kimi ACP implementation
-   against the same domain interface without losing its existing profile/capability
-   evidence. Replace Kimi wire plumbing with a library only where beneficial. Grok
-   stays a nonactivated target until separate admission. Adapter-specific wire and
-   permission semantics remain at the boundary; do not add branches or schemas per
-   provider in the coordinator/domain reducer. Do not instantiate model-API agents
-   as substitutes for these coding runtimes.
-4. **SDK-4: remove qualified glue and close regression coverage.**
-   For supported SDK-owned workflows, replace format-only final-line verdict parsing,
-   rendered-transcript reconstruction, or new custom session/pause/model-tool-loop
-   code with the selected SDK mechanics. Record actual deleted code and consumer
-   coverage; preserve host-mode paths still in use. Sessions/RunState retain only
-   their own history/paused calls; existing project owners retain state and current
-   authority. Compare outcome criteria, dependency/maintenance cost and behavior
-   against the current route before making the new mode a default. Do not claim
-   reduced hook count, faster execution or better model judgment without evidence.
+1. Preserve SDK-1's implemented identity/schema/receiving owners; extend only
+   concrete uncovered cases at those owners.
+2. Qualify SDK-2A's current-head installed Windows bridge and diagnostic recovery
+   independently of the optional outer loop; preserve strict trust and profile gates.
+3. Research SDK-2B's supported subscription-backed public Model contract, then,
+   only after admission and separate launch authorization, qualify one bounded
+   Agents cycle and Session/resume/crash receiving. Reuse SDK mechanics rather than
+   creating a parallel scheduler, session store or authoritative ledger.
+4. Keep SDK-3's implemented source/offline coverage; schedule other-provider live
+   evidence when quotas and permissions permit. Codex work need not wait for it.
+5. Apply SDK-4 deletion criteria within each qualified lane. Retain live legacy
+   routes and hooks; do not create a whole-product deletion milestone.
 
-Implementation belongs in bounded separate PRs. SDK-1 prepares SDK-2, not a layer
-shipped alone. SDK-2 validates the shared design with a real end-to-end contract;
-SDK-3 reuses it rather than generalizing from hypothetical providers. SDK-4 deletion
-criteria apply within each qualified implementation PR, not an excuse to accumulate
-old glue until a distant cleanup phase. Rust/npm are not prerequisites. No live
-qualification without the applicable route, data, budget and permissions.
+Rust and npm are independent tasks, not blanket prerequisites. No default route
+change, provider activation or new paid/live launch follows from this plan.
 
 ## Verification and completion
 

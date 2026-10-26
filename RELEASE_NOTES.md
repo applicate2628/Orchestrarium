@@ -2,10 +2,51 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-26
+
+- Reconciled the SDK plan with PR19's exact source head, separating the Host-led review bridge from the optional Agents coordinator. Capability-based admission supersedes product-wide version pins; the remaining supported Codex-subscription Model research and current-head qualification are explicit, without new runtime activation.
+
+## 2026-10-25
+
+- PR-scoped corrective publication no longer depends on branch-protection/rules enumeration or proving rules absent. The hook retains exact open-PR/head/ref binding, scoped human consent and a fresh complete leak scan; the ordinary push remains subject to the server's configured rules and exceptions.
+
+- Updated Claude transport uses its bound canonical Lead ledger helpers after a Codex-only install, so retained historical peer helpers no longer break recording or readback. Source pairing, installed scope and link checks remain enforced without copying or adopting old peer ledger files.
+
+- H1 relocation and scratch settlement now publish their native directory, file and link-entry effects through the held lifecycle owner. First calls and replay retain current custody; link targets remain untouched, and Windows ReadOnly retries preserve their exact restoration contract.
+
+- Ordinary ledger and lifecycle commands derive finite admission from their selected history and planned writes when both numerical controls are omitted. Valid history can grow beyond the old diagnostic event threshold without manual sizing; explicit event/byte ceilings, complete acquisition, corruption checks and byte-preserving replay remain enforced. Automatic terminal recording acquires its current transaction after independent work.
+
+## 2026-10-24
+
+- Restore UTF-8 punctuation and Russian examples in the Codex governance capsule and Lead operating model after a text-edit encoding conversion. Approved native-role configuration rules and all ASCII controls remain unchanged.
+
+- Installer rollback now settles nested owned children before their containers across scalar and create-only paths, preserving foreign files and each inverse's original ownership. Stock native-role compatibility comparisons also remove their temporary readonly clones through the standard-library lifecycle and retain operation and cleanup failures separately.
+
+- Native-role configuration now separates exact factory provenance from the owned profession instructions. All 18 factory native profiles default apps and plugins to false while main-session settings and compatible user tuning remain preserved. Supported user settings and formatting are preserved during selection and upgrades; configured model/effort candidates remain policy checked, and neither role-file declarations nor a resolver result establish native execution or parent permissions.
+
+- Publication workdir denials now retain closed, non-sensitive categories for the actual failing check, stage, selected source and value type through the existing result channel. Permission decisions, failure identifiers, workdir selection, approval rules and retry behavior remain unchanged; the diagnostic does not establish the cause or executing-code identity of a historical denial or authorize publication. PR preparation shares one root-agreement owner and no longer carries unused internal compatibility paths.
+
+- Historical work-item catalogues now show an acquired incomplete canonical schema pair as an explicit, nonauthorizing Archive metadata observation. Refresh reports the original schema diagnostic and actual historical member while a valid unrelated close can proceed; archive bytes, strict audit and selected Goal/history/replay consumers remain protected. Malformed declarations and invalid complete records still refuse.
+
+- Lead can use matching installed plugin methods, including Software Architect for architecture work and Ponytail for reuse and simplification, within the existing assigned role. Reuse guidance checks for already-satisfied behavior, follows a short ready-solution sequence, and preserves required fit; material architecture choices record determining quality priorities from accepted scenarios and constraints. Discovery follows the current host catalog; optional plugins add no installation requirement, mandatory stage, duplicate report or replacement for independent review, and conflicting or unrelated plugin requirements do not expand the task.
+
+- The ordinary-close Source path records schema-version 3 relocation evidence so archived ledgers remain readable by existing history consumers. The bound current-operation result also serves successor startup and affected maintenance paths: inherited obligations keep their actual source identity and target-only authority, genuine source/native failures still refuse, and full historical audit diagnostics remain available. Existing rollback and replay guards are preserved.
+
+- Legacy-ledger settlement retires captured validation candidates and newly created rollback participants through the existing lifecycle file owner. Original validation or cancellation failures and independent retirement failures remain separately visible; changed or foreign objects retain the existing ownership refusals.
+
+- Codex native-role registration now receives user configuration through its bound logical-to-storage selection. Supported file aliases and linked ancestors remain intact during planning, updates, exact no-ops and rollback, including creation of an absent ordinary configuration beneath a linked directory. Managed role files keep strict ordinary-file admission, user configuration bytes outside owned changes remain preserved, and native migration retains the original-inode recovery contract.
+
+- Codex base instructions now keep a short hook-safety capsule and require any actor handling hook installation, changes, removal, trust, health, or contract-dependent diagnosis to read the detailed procedure in the existing installed Lead operating-model. Closed experimental history is removed from active instructions; current hook, trust, publication and host guarantees remain under their existing owners.
+
+- Test-only filesystem fixtures and fresh-module loading now have shared concrete owners. Existing test scenarios, native identity and link checks, caller-supplied module names, and fresh import semantics are preserved while duplicate helper bodies are removed.
+
+
 ## 2026-10-23
 
 - Defined an independent SDK integration project with one common Python/Agents SDK coordinator and existing Orchestrarium contract/state owners. Codex and Claude use direct official SDK adapters; ACP stdio stays inside Kimi/Grok adapters, not a universal layer. The plan starts with contract fixtures and an Agents/Codex read-only review slice, then adapter coverage and removal of replaced glue. Explicit approval/account/resume and result-to-ledger boundaries remain. Activation also requires owned descendant-process settlement, including failure, cancellation and coordinator crash, through the existing supervision owner rather than SDK close alone. This design does not install or activate runtimes.
 
+- Claude document reinstallation now uses a bundled Markdown parser to distinguish real installer ownership from quoted user examples, including list and quote continuations. Custom instructions and imports remain in position, failed classification stays write-free, and existing Python installation commands require no additional package setup. Missing private packages refuse before ambient code can run, and Windows file metadata changes retain the held object on Python 3.11 and newer.
+- A current-line Claude instruction research and development handoff distinguishes newly documented native AGENTS.md discovery from the existing shared-policy import bridge. It establishes shared default policy and separate provider-specific sources as the target, explains why generated runtime projections remain safer than forcing a neutral root through higher-priority configuration, and identifies preservation and qualification prerequisites; this documentation change does not alter installed behavior or join the 2.0 redesign.
 - Windows private-object verification now compares the operating system's rendered discretionary access-control list (DACL) on both sides, avoiding false rejections caused by equivalent numeric and named security identifiers while preserving exact principal, permission, and protection checks.
 - The Russian Claude typed-routing reference now describes the existing nonblocking advisory delivery through stdout and exit code 0, so operators no longer mistake a routing reminder for a failed hook. Hook behavior is unchanged.
 - Publication permission recovery now reads a finite, identity-checked transcript snapshot without fixed record-size or current-turn window cutoffs. The shared reader preserves complete history, genuine user boundaries, revocation and exact grant anchors; malformed, changed or resource-incomplete input still denies publication. Explicitly bounded sibling hooks retain their own policies.
@@ -14,6 +55,9 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - Claude's source-navigation hook now delivers a mandatory-duty reminder in force mode instead of treating a transcript marker as permission. The fitting-MCP obligation, current-root and freshness requirements, restricted alternatives and actual host decisions remain binding; advisory output does not establish compliance.
 - Decision lifecycle checks now admit valid case variants of current V1 metadata consistently across close, migration, replay and normalization while preserving existing legacy readers, link handling and rollback behavior. Identity normalization reuses the lifecycle owner’s native directory creation/removal, so valid decision maintenance no longer invalidates its own custody checks; malformed, duplicate or mismatched metadata still fails before effects.
 - Shared general-case guidance now requires owner-level mechanisms to work for unfamiliar scenarios valid under the accepted contract, without extending scope to hypothetical behavior.
+- Product Manager keeps the existing ordinary planning skill-only route, while ordinary external dispatch now requires an explicit `external-worker` or `external-reviewer` taxonomy lane. This closes the cross-provider path that previously authorized role eligibility alone; Lead guidance still keeps extra functionality outside delivery until the user explicitly agrees to its bounded scope.
+- Reuse guidance now requires assessing ready-component replacement for task-implicated complex custom code, preferring replacement only when constraints fit and whole-lifecycle complexity, error risk, or maintenance burden falls; superseded logic and tests are retired while required contract coverage remains.
+- The shared-spine validation row now directs maintainers to follow existing producer/manifest dependencies and check affected consumers, so stale derived copies can be found before they block installation; provider-prompt parity is an example, not a fixed list or extra stage.
 
 ## 2026-10-22
 

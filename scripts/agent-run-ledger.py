@@ -307,7 +307,7 @@ def stage_legacy_obligation_migration(
     expected_ledger_sha256: str,
     operation_id: str,
     recorded_at: str,
-    normalization_kind: str, ledger_resource_budget=None,
+    normalization_kind: str, ledger_resource_budget=None, selected_snapshot=None, _validator=None,
 ) -> StagedLegacyMigration:
     _strict_migration_inputs(operation_id, recorded_at)
     for value, failure_id in (
@@ -318,21 +318,29 @@ def stage_legacy_obligation_migration(
             _migration_fail(failure_id, "digest must be lowercase SHA-256")
     item = Path(item)
     ledger_path = item / "agent-runs.jsonl"
+    validator = load_validator() if _validator is None else _validator
+    lifecycle = validator.load_lifecycle_owner()
     try:
-        before = load_validator().read_ledger_bytes(ledger_path, ledger_resource_budget)
+        original = (selected_snapshot if selected_snapshot is not None else
+            lifecycle._capture_file_snapshot(ledger_path, failure_id="WI-LEDGER-MIGRATION-LEDGER-DRIFT",
+                maximum_bytes=None, ledger_resource_budget=ledger_resource_budget))
+        if original.path.absolute() != ledger_path.absolute():
+            _migration_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "selected capture targets a different ledger")
+        lifecycle._verify_captured_file(original, "WI-LEDGER-MIGRATION-LEDGER-DRIFT")
+        before = validator.read_ledger_bytes(ledger_path, ledger_resource_budget, source_bytes=original.data)
     except OSError as exc:
         _migration_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", str(exc))
     before_sha = hashlib.sha256(before).hexdigest()
     if before_sha != expected_ledger_sha256:
         _migration_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "ledger digest changed")
 
-    validator = load_validator()
     row = validator.LEGACY_MIGRATION_NORMALIZATIONS.get(normalization_kind)
     if row is None:
         _migration_fail("WI-LEDGER-MIGRATION-NORMALIZATION-KIND", "normalization kind is not closed")
     metadata: list[dict[str, Any]] = []
     parse_errors: list[str] = []
-    events = validator.load_jsonl(ledger_path, parse_errors, metadata, ledger_resource_budget=ledger_resource_budget)
+    events = validator.load_jsonl(ledger_path, parse_errors, metadata, source_bytes=before,
+        ledger_resource_budget=ledger_resource_budget)
     if any(event.get("schemaVersion") == 3 for event in events):
         _migration_fail("WI-LEDGER-MIGRATION-V3-UNSUPPORTED", "V3 ledger is not writable by this migration")
     if parse_errors:
@@ -408,6 +416,15 @@ def stage_legacy_obligation_migration(
     staged = before + prefix + anchor_bytes + b"\n"
     if not staged.startswith(before) or staged[: len(before)] != before:
         _migration_fail("WI-LEDGER-MIGRATION-CANDIDATE-INVALID", "candidate does not preserve prefix")
+    transaction = lifecycle._CURRENT_LIFECYCLE_TRANSACTION.get()
+    resource_inputs = ()
+    if transaction is not None:
+        ledger_resource_budget, _snapshot = transaction.admit_ledger_operation(
+            item, selected_snapshot=original, known_row_bytes=(anchor_bytes + b"\n",))
+    else:
+        ledger_resource_budget, resource_inputs = lifecycle._admit_ledger_operation(
+            item, ledger_path, before, ledger_resource_budget=ledger_resource_budget,
+            known_row_bytes=(anchor_bytes + b"\n",), validator=validator)
     candidate_path: Path | None = None
     try:
         descriptor, candidate_name = tempfile.mkstemp(prefix=".ledger-migration-", suffix=".jsonl", dir=item)
@@ -451,6 +468,10 @@ def stage_legacy_obligation_migration(
     }
     if receipt_finding_class is not None:
         facts["findingClass"] = receipt_finding_class
+    if transaction is None:
+        lifecycle._verify_captured_file(original, "WI-LEDGER-MIGRATION-LEDGER-DRIFT")
+        if any(not predicate.qualify() for predicate in resource_inputs):
+            _migration_fail("WI-LEDGER-RESOURCE-DRIFT", "selected participant changed before staging return")
     return StagedLegacyMigration(staged, facts)
 
 
@@ -683,7 +704,11 @@ def _noncanonical_open_ordinary(
 def _collect_noncanonical_binary_lines(
     stream, *, validator: Any, failure_id: str, ledger_resource_budget=None,
 ) -> bytes:
-    budget = validator._ledger_resource_budget(ledger_resource_budget)
+    if ledger_resource_budget is None:
+        length = os.fstat(stream.fileno()).st_size
+        budget = validator.LedgerResourceBudgetV1(max(1, length), max(1, length))
+    else:
+        budget = validator._ledger_resource_budget(ledger_resource_budget)
     aggregate_limit = budget.max_ledger_bytes
     chunks: list[bytes] = []
     total_bytes = 0
@@ -1450,7 +1475,7 @@ def _capture_ledger_preimage(path: Path, validator: Any, ledger_resource_budget=
         return owner, None, b""
     try:
         snapshot = owner._capture_file_snapshot(path, failure_id="WI-LEDGER-RESOURCE-DRIFT",
-            ledger_resource_budget=validator._ledger_resource_budget(ledger_resource_budget))
+            maximum_bytes=None, ledger_resource_budget=ledger_resource_budget)
     except owner.LifecycleError as error:
         raise ValueError(f"{error.failure_id}: {error}") from error
     data = validator.read_ledger_bytes(path, ledger_resource_budget, source_bytes=snapshot.data)
@@ -1571,6 +1596,13 @@ def _append_event_transaction(
     publication = None
     try:
         lifecycle, original, previous_bytes = _capture_ledger_preimage(ledger_path, validator, ledger_resource_budget)
+        explicit_budget = ledger_resource_budget
+        acquisition_demand = validator.inspect_ledger_resource_demand(
+            ledger_path, explicit_budget, source_bytes=previous_bytes)
+        ledger_resource_budget = validator.resolve_ledger_resource_budget(
+            explicit_budget.max_events if explicit_budget is not None else None,
+            explicit_budget.max_ledger_bytes if explicit_budget is not None else None,
+            demand=acquisition_demand)
         if previous_bytes:
             errors: list[str] = []
             validator.load_jsonl(ledger_path, errors, source_bytes=previous_bytes,
@@ -1579,6 +1611,11 @@ def _append_event_transaction(
                 raise ValueError("; ".join(errors))
         previous = previous_bytes.decode("utf-8")
         event = event_factory(previous)
+        ledger_resource_budget, resource_inputs = lifecycle._admit_ledger_operation(
+            item, ledger_path, previous_bytes, ledger_resource_budget=explicit_budget,
+            known_row_bytes=() if event is None else ((serialize_event(event) + "\n").encode("utf-8"),),
+            unknown_terminal_rows=int(event is not None and event.get("eventKind") == "launch"),
+            validator=validator, transition_resource_budget=transition_resource_budget)
         if event is None:
             states, acquisition = [], []
             errors = validator.validate_work_item(
@@ -1595,16 +1632,11 @@ def _append_event_transaction(
                                       previous_bytes, previous_bytes, requested)
             for observation in result.closure_diagnostics:
                 print(f"OBSERVATION: {observation}")
+            if original is not None:
+                lifecycle._verify_captured_file(original, "WI-LEDGER-RESOURCE-DRIFT")
+            if any(not predicate.qualify() for predicate in resource_inputs):
+                raise ValueError("WI-LEDGER-RESOURCE-DRIFT: selected participant changed before replay receiving")
             return False
-        budget = validator._ledger_resource_budget(ledger_resource_budget)
-        demand = validator.inspect_ledger_resource_demand(
-            ledger_path, budget, source_bytes=previous_bytes,
-            known_row_bytes=((serialize_event(event) + "\n").encode("utf-8"),),
-            unknown_terminal_rows=int(event.get("eventKind") == "launch"),
-        )
-        validator.resolve_ledger_resource_budget(
-            budget.max_events, budget.max_ledger_bytes, demand=demand,
-        )
         with lifecycle.qualified_ledger_publication(ledger_path, original) as publication:
             record = publication.create_qualified_candidate(candidate, _append_candidate_bytes(previous_bytes, event))
             # The logical writer qualifies this actual native object exactly once.
@@ -1620,6 +1652,8 @@ def _append_event_transaction(
                 print(f"OBSERVATION: {observation}")
             if before_replace is not None:
                 before_replace()
+            if any(not predicate.qualify() for predicate in resource_inputs):
+                raise ValueError("WI-LEDGER-RESOURCE-DRIFT: selected participant changed before placement")
             publication.place_qualified_candidate(record, original)
     except BaseException as error:
         if on_abort is not None and (publication is None or publication.qualified_outcome in {"unattempted", "no-effect"}):
@@ -2090,10 +2124,11 @@ def _commit_recovery_append(
         line = (serialize_event(event) + "\n").encode("utf-8")
         prefix = b"" if not previous or previous.endswith(b"\n") else b"\n"
         expected = previous + prefix + line
-        budget = validator._ledger_resource_budget(ledger_resource_budget)
-        demand = validator.inspect_ledger_resource_demand(ledger_path, budget,
+        demand = validator.inspect_ledger_resource_demand(ledger_path, ledger_resource_budget,
             source_bytes=previous, known_row_bytes=(line,))
-        validator.resolve_ledger_resource_budget(budget.max_events, budget.max_ledger_bytes, demand=demand)
+        ledger_resource_budget = validator.resolve_ledger_resource_budget(
+            ledger_resource_budget.max_events if ledger_resource_budget is not None else None,
+            ledger_resource_budget.max_ledger_bytes if ledger_resource_budget is not None else None, demand=demand)
         with lifecycle.qualified_ledger_publication(ledger_path, original) as publication:
             record = publication.create_qualified_candidate(candidate, expected)
             errors = validate_candidate(record.locator, previous, expected)
@@ -2469,7 +2504,8 @@ def main(argv: list[str]) -> int:
     validator = load_validator()
     lifecycle = validator.load_lifecycle_owner()
     try:
-        ledger_resource_budget = validator.resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes)
+        ledger_resource_budget = (None if args.ledger_max_events is None and args.ledger_max_bytes is None
+            else validator.resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes))
         transition_resource_budget = lifecycle._transition_cli_budget(args)
         transition_output_ceiling = lifecycle._transition_cli_budget(args, output=True)
     except (ValueError, lifecycle.LifecycleError) as exc:

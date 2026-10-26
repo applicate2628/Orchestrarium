@@ -690,6 +690,13 @@ class _PreparedLifecycleEffect:
                      or self.forward_observation_values == tx._retained_observations))
 
 
+@dataclass
+class _LedgerAdmissionScope:
+    identity: object
+    owner: object
+    depth: int = 1
+
+
 class LifecycleTransaction:
     """One fail-fast native lock for a repository's physical lifecycle."""
 
@@ -697,10 +704,135 @@ class LifecycleTransaction:
     def work_items_root(self) -> Path:
         return self.repository_root / "work-items"
 
+    def begin_ledger_admission_scope(self, identity, owner):
+        self.verify()
+        active = self._ledger_admission_scope
+        if active is None:
+            active = _LedgerAdmissionScope(identity, owner)
+            self._ledger_admission_scope = active
+            self.ledger_resource_budget = self._caller_ledger_resource_ceiling
+        elif active.identity != identity:
+            raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "another ledger operation is still active")
+        else:
+            active.depth += 1
+        return active, active.depth
+
+    def ensure_selected_ledger_scope(self, *, operation_id=None, owner=None):
+        if self._ledger_admission_scope is not None:
+            if operation_id is not None and self._ledger_admission_scope.identity != ("operation", operation_id):
+                raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "selected request differs from the active ledger operation")
+            return self._ledger_admission_scope
+        if self._selected_ledger_request is None:
+            raise LifecycleError("WI-LEDGER-RESOURCE-MISSING", "actual selected request is unavailable")
+        function, arguments = self._selected_ledger_request
+        operation_id = arguments.arguments.get("operation_id") if operation_id is None else operation_id
+        if operation_id is not None:
+            _validate_transition_operation_id(operation_id)
+            identity = ("operation", operation_id)
+        else:
+            identity = ("request", function, arguments)
+        self._selected_ledger_scope_token = self.begin_ledger_admission_scope(identity,
+            self._selected_ledger_request if owner is None else owner)
+        return self._ledger_admission_scope
+
+    def _end_ledger_admission_scope(self, token):
+        active, depth = token
+        if self._ledger_admission_scope is not active or active.depth != depth:
+            raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "ledger admission scope is not the current owner")
+        composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+        if composer is not None:
+            outcome = composer.finalize()
+            failure = composer.top_level(outcome)
+            if failure is not None:
+                raise failure
+            if outcome.rollback == "incomplete":
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "ledger operation retains incomplete compensation")
+        self.verify()
+        if depth > 1:
+            active.depth -= 1
+        else:
+            self._ledger_admission_scope = None
+            self.ledger_resource_budget = self._caller_ledger_resource_ceiling
+
+    def complete_ledger_intent_scope(self, token, retirement_result):
+        # This is the actual supported retirement result, not inferred absence
+        # or a synthetic terminal flag. Family readback precedes this call.
+        _require_intent_retirement_result(retirement_result)
+        self._end_ledger_admission_scope(token)
+
+    def complete_selected_ledger_scope(self):
+        token = self._selected_ledger_scope_token
+        if token is not None:
+            self._end_ledger_admission_scope(token)
+            self._selected_ledger_scope_token = None
+
+    def admit_ledger_operation(self, item, *, selected_snapshot=None, participant_snapshots=(),
+            known_row_bytes=(), unknown_terminal_rows=0):
+        """Hold one final pair from actual selected captures and producer effects."""
+        self.ensure_selected_ledger_scope()
+        snapshot = (selected_snapshot if selected_snapshot is not None else
+            _capture_file_snapshot(item / "agent-runs.jsonl", failure_id="WI-LEDGER-RESOURCE-DRIFT",
+                maximum_bytes=None, ledger_resource_budget=self.ledger_resource_budget))
+        participants = {str(value.path): value.data for value in participant_snapshots}
+        try:
+            budget, predicates = _admit_ledger_operation(item, snapshot.path, snapshot.data,
+                ledger_resource_budget=self.ledger_resource_budget, participants=participants,
+                known_row_bytes=known_row_bytes, unknown_terminal_rows=unknown_terminal_rows)
+        except ValueError as exc:
+            message = str(exc)
+            failure_id = message.split(":", 1)[0] if message.startswith("WI-LEDGER-RESOURCE-") else "WI-LEDGER-UNSETTLED"
+            raise LifecycleError(failure_id, message) from exc
+        if self.ledger_resource_budget is None:
+            self.ledger_resource_budget = budget
+        self.observe_retained_inputs((snapshot, *participant_snapshots,
+            *(predicate.snapshot for predicate in predicates if predicate.snapshot is not None)))
+        return self.ledger_resource_budget, snapshot
+
+    def admit_ledger_creation(self, path, known_row_bytes, *, participant_snapshots=()):
+        """Use the existing creation owner's proved absence and actual serialized rows."""
+        self.ensure_selected_ledger_scope()
+        _lifecycle_reject_unreduced_reparse(path, failure_id="WI-LEDGER-RESOURCE-DRIFT",
+            message="new ledger path or ancestor is unsafe")
+        if os.path.lexists(path):
+            raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "new ledger creation input is no longer absent")
+        validator = _validator_module()
+        held = self.ledger_resource_budget
+        demand = validator.inspect_ledger_resource_demand(path, held, source_bytes=b"",
+            known_row_bytes=known_row_bytes,
+            participants={str(value.path): value.data for value in participant_snapshots})
+        budget = validator.resolve_ledger_resource_budget(
+            held.max_events if held is not None else None,
+            held.max_ledger_bytes if held is not None else None, demand=demand)
+        if held is None:
+            self.ledger_resource_budget = budget
+        self.observe_retained_inputs(participant_snapshots)
+        return self.ledger_resource_budget
+
+    def admit_captured_ledger_images(self, primary_snapshot, *, participant_snapshots=()):
+        """Admit original captured history without selecting another live namespace."""
+        self.ensure_selected_ledger_scope()
+        validator = _validator_module()
+        held = self.ledger_resource_budget
+        demand = validator.inspect_ledger_resource_demand(primary_snapshot.path, held,
+            source_bytes=primary_snapshot.data,
+            participants={str(value.path): value.data for value in participant_snapshots})
+        budget = validator.resolve_ledger_resource_budget(
+            held.max_events if held is not None else None,
+            held.max_ledger_bytes if held is not None else None, demand=demand)
+        if held is None:
+            self.ledger_resource_budget = budget
+        self.observe_retained_inputs((primary_snapshot, *participant_snapshots))
+        return self.ledger_resource_budget
+
     def __init__(self, root: Path, *, input_role: str = "caller-root", original_root: Path | None = None, binding_evidence: tuple | None = None, ledger_resource_budget=None,
                  transition_resource_budget=None, transition_output_ceiling=None, transition_read_admission=None,
                  _transition_resource_inputs=None):
-        self.ledger_resource_budget = _validator_module()._ledger_resource_budget(ledger_resource_budget)
+        self.ledger_resource_budget = (_validator_module()._ledger_resource_budget(ledger_resource_budget)
+                                       if ledger_resource_budget is not None else None)
+        self._caller_ledger_resource_ceiling = self.ledger_resource_budget
+        self._ledger_admission_scope = None
+        self._selected_ledger_request = None
+        self._selected_ledger_scope_token = None
         inputs = (_transition_resource_inputs if _transition_resource_inputs is not None else
             select_transition_resource_inputs(root, input_role=input_role, read_admission=transition_read_admission,
                 acquisition_ceiling=transition_resource_budget, output_ceiling=transition_output_ceiling))
@@ -1313,7 +1445,25 @@ class LifecycleTransaction:
                     expected_data=None if origin.directory else current.data, inverse=inverse)
         raise LifecycleError("WI-LIFECYCLE-EFFECT", "movement restoration lacks actual owned origin")
 
-    def prepare_owned_effect(self, owner, source, destination, *, data=None, directory=False, replace_existing=False, inverse=None):
+    def _verify_link_entry(self, entry):
+        if (type(entry) is not _CapturedLinkEntry or not self._locked
+                or _CURRENT_LIFECYCLE_TRANSACTION.get() is not self
+                or self._retained_observations.get(entry.path.parent) is not entry.parent
+                or entry.parent.path != entry.path.parent
+                or not entry.path.is_relative_to(self.repository_root)):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "link entry lacks its selected current parent")
+        _verify_owned_directory_snapshot(entry.parent, "WI-LIFECYCLE-EFFECT")
+        metadata = dict(entry.parent.members).get(entry.path.name)
+        current = entry.path.lstat()
+        if (metadata is None or not stat.S_ISLNK(current.st_mode)
+                or _lifecycle_file_snapshot_key(metadata) != _lifecycle_file_snapshot_key(entry.metadata)
+                or _lifecycle_file_snapshot_key(current) != _lifecycle_file_snapshot_key(entry.metadata)
+                or getattr(current, "st_file_attributes", 0) != getattr(entry.metadata, "st_file_attributes", 0)
+                or getattr(current, "st_reparse_tag", 0) != getattr(entry.metadata, "st_reparse_tag", 0)
+                or os.readlink(entry.path) != entry.text):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "selected link entry changed before retirement")
+
+    def prepare_owned_effect(self, owner, source, destination, *, data=None, directory=False, replace_existing=False, inverse=None, link_entry=None):
         """Prepare native observation changes, never domain admission."""
         if not self._locked:
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "native effect requires the held transaction")
@@ -1326,6 +1476,14 @@ class LifecycleTransaction:
             self.verify(creation_owner=capture_owner)
         source = None if source is None else _lifecycle_unresolved_absolute(source)
         destination = None if destination is None else _lifecycle_unresolved_absolute(destination)
+        if link_entry is not None:
+            if (type(link_entry) is not _CapturedLinkEntry or link_entry.path != source
+                    or destination is not None or data is not None or directory
+                    or replace_existing or inverse is not None
+                    or not isinstance(owner, LifecycleWriteTarget) or owner.path != source
+                    or owner._operation_owner is not self):
+                raise LifecycleError("WI-LIFECYCLE-EFFECT", "link retirement differs from its selected entry")
+            self._verify_link_entry(link_entry)
         paths = tuple(path for path in (source, destination) if path is not None)
         if not paths or any(not path.is_relative_to(self.repository_root) for path in paths):
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "effect escapes admitted repository")
@@ -1348,6 +1506,9 @@ class LifecycleTransaction:
             self._verify_owned_inverse(inverse, creation_owner=capture_owner)
         before = {}
         for path in paths:
+            if link_entry is not None:
+                before[path] = (link_entry.metadata, link_entry)
+                continue
             _lifecycle_reject_unreduced_reparse(path, failure_id="WI-LIFECYCLE-EFFECT", message="effect path is unsafe")
             try:
                 info = path.lstat()
@@ -2244,10 +2405,10 @@ def _lifecycle_participant(function, *, input_role: str = "caller-root", subject
             if ledger_resource_budget is not None:
                 observed = _validator_module()._ledger_resource_budget(ledger_resource_budget)
                 held = current_budget_owner.ledger_resource_budget
-                if (observed.max_events, observed.max_ledger_bytes) != (held.max_events, held.max_ledger_bytes):
+                if held is None or (observed.max_events, observed.max_ledger_bytes) != (held.max_events, held.max_ledger_bytes):
                     raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "nested operation changed held resource allowance")
             ledger_resource_budget = current_budget_owner.ledger_resource_budget
-        else:
+        elif ledger_resource_budget is not None:
             ledger_resource_budget = _validator_module()._ledger_resource_budget(ledger_resource_budget)
         if "ledger_resource_budget" in signature.parameters:
             kwargs["ledger_resource_budget"] = ledger_resource_budget
@@ -2291,6 +2452,13 @@ def _lifecycle_participant(function, *, input_role: str = "caller-root", subject
                 )
             _subject, prepared = prepare_subject(root, args, kwargs)
             kwargs.update(prepared)
+            active_scope = current._ledger_admission_scope
+            if active_scope is not None and "operation_id" in signature.parameters:
+                nested = signature.bind(current.repository_root, *args, **kwargs)
+                nested.apply_defaults()
+                operation_id = nested.arguments.get("operation_id")
+                if operation_id is not None and active_scope.identity != ("operation", operation_id):
+                    raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "nested request selects a different operation")
             if ((role == "repository-root" and resolved != current.repository_root)
                     or (role == "work-items-root" and resolved != current.work_items_root)):
                 raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "nested input role differs from the admitted root pair")
@@ -2340,7 +2508,11 @@ def _lifecycle_participant(function, *, input_role: str = "caller-root", subject
                                     ("transition_read_admission", None)):
                     if name in signature.parameters:
                         kwargs[name] = value
+                request_arguments = signature.bind(transaction.repository_root, *args, **kwargs)
+                request_arguments.apply_defaults()
+                transaction._selected_ledger_request = (function, request_arguments)
                 composer.propose_result(function(transaction.repository_root, *args, **kwargs))
+                transaction.complete_selected_ledger_scope()
             except BaseException as exc:
                 composer.capture_primary(exc)
         except BaseException as exc:
@@ -2815,7 +2987,7 @@ def _transition_selected_inventory(transaction):
     return (current,)
 
 
-def _transition_reserve_fixed_output(path, data):
+def _transition_reserve_fixed_output(path, data, *, prepared_demand=None):
     """Existing fixed-image families reserve their exact, immutable output once."""
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
     if transaction is None:
@@ -2838,6 +3010,9 @@ def _transition_reserve_fixed_output(path, data):
     total = sum(info.st_size for leaf, info in other if os.path.normcase(leaf.name).endswith(os.path.normcase(".json")))
     # Atomic publication may retain the old target and one actual creator stage.
     demand = resolve_transition_resource_budget(len(data), total + len(data), len(other) + 2)
+    if prepared_demand is not None:
+        resolve_transition_resource_budget(prepared_demand.max_intent_bytes,
+            prepared_demand.max_inventory_bytes, prepared_demand.max_inventory_entries, demand=demand)
     ceiling = transaction.transition_output_ceiling
     if ceiling is not None:
         resolve_transition_resource_budget(ceiling.max_intent_bytes, ceiling.max_inventory_bytes,
@@ -2925,6 +3100,16 @@ class CapturedDirectorySnapshotV1:
     metadata: os.stat_result
     members: tuple[tuple[str, os.stat_result], ...]
     capture_binding: tuple = field(default=(), repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class _CapturedLinkEntry:
+    """One receipt-selected link entry under a current ordinary parent proof."""
+
+    path: Path
+    parent: CapturedDirectorySnapshotV1
+    metadata: os.stat_result
+    text: str
 
 
 def _directory_capture_binding(snapshot):
@@ -3066,9 +3251,10 @@ def _observe_work_item_terminal(root, item, *, ledger_resource_budget=None, tran
         validator = _validator_module()
         history = validator.observe_captured_work_item_history(validator.bind_settled_work_item_history(port), ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget(transition_resource_budget))
         port.verify()
-        if not history.acquisition_complete or history.diagnostics or (
+        operation_errors = history.operation_diagnostics()
+        if not history.acquisition_complete or operation_errors or (
             history.obligations is not None and (history.obligations.open_revise or history.obligations.open_launches)):
-            raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "; ".join(history.diagnostics) or "original history remains open")
+            raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "; ".join(operation_errors) or "original history remains open")
         leaves = tuple(snapshot.path for snapshot in port._current_files)
         return _terminal_observation(reference, item, LEGACY_COMPLETION_KIND, "archive", True,
             "delivered", port.metadata["terminalInstant"], leaves,
@@ -3603,7 +3789,7 @@ def _capture_legacy_evidence(root, slug, evidence_data, *, ledger_resource_budge
         _legacy_cell(cell)
         path = root / cell["path"]
         resource = None
-        if PurePosixPath(cell["path"]).name == "agent-runs.jsonl":
+        if PurePosixPath(cell["path"]).name == "agent-runs.jsonl" and ledger_resource_budget is not None:
             validator = _validator_module()
             budget = validator._ledger_resource_budget(ledger_resource_budget)
             used = sum(snapshot.length for selected_path, snapshot in selected.items()
@@ -3671,10 +3857,15 @@ def _capture_legacy_evidence(root, slug, evidence_data, *, ledger_resource_budge
                                              _sha256_bytes(snapshot.data)) for path, snapshot in selected.items()),
         tuple(history["absentPaths"]),
         {proof.path.relative_to(root).as_posix(): tuple(name for name, _ in proof.members) for proof in proofs}, live)
+    if ledger in selected:
+        ledger_resource_budget = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_captured_ledger_images(
+            selected[ledger], participant_snapshots=tuple(snapshot for path, snapshot in selected.items()
+                if path != ledger and path.name == "agent-runs.jsonl"))
     observed = validator.observe_captured_work_item_history(binding, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
-    if not observed.acquisition_complete or observed.diagnostics or (observed.obligations is not None
+    operation_errors = observed.operation_diagnostics()
+    if not observed.acquisition_complete or operation_errors or (observed.obligations is not None
             and (observed.obligations.open_revise or observed.obligations.open_launches)):
-        raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "; ".join(observed.diagnostics) or "original history is unresolved")
+        raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "; ".join(operation_errors) or "original history is unresolved")
     live.verify()
     return request, source, bug_manifest, live, observed
 
@@ -3758,12 +3949,15 @@ def _legacy_create_directory(path):
 
 
 @contextlib.contextmanager
-def _legacy_compensation_parent(path):
+def _legacy_compensation_parent(path, *, outcome_composer=None):
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
     if transaction is None:
         raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "compensation transaction is absent")
     transaction._verify_compensation()
-    owner = LifecycleWriteTarget(path, failure_id="WI-LEGACY-COMPLETION-RECOVERY")
+    if outcome_composer is not None and outcome_composer is not _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get():
+        raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "retirement composer differs")
+    owner = LifecycleWriteTarget(path, failure_id="WI-LEGACY-COMPLETION-RECOVERY",
+        _operation_owner=transaction if outcome_composer is not None else None)
     primary = None
     try:
         owner._acquire_existing_parents()
@@ -3938,9 +4132,10 @@ def _legacy_verify_complete(root, intent_path, intent, action, *, _plan=None, le
     validator = _validator_module()
     history = validator.observe_captured_work_item_history(validator.bind_settled_work_item_history(port), ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
     port.verify()
-    if not history.acquisition_complete or history.diagnostics or (history.obligations is not None
+    operation_errors = history.operation_diagnostics()
+    if not history.acquisition_complete or operation_errors or (history.obligations is not None
             and (history.obligations.open_revise or history.obligations.open_launches)):
-        raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "; ".join(history.diagnostics) or "history remains open")
+        raise LifecycleError("WI-LEGACY-COMPLETION-HISTORY", "; ".join(operation_errors) or "history remains open")
     actual_plan = object.__new__(PreparedWorkItemTerminal)
     for key, value in {"transaction": _CURRENT_LIFECYCLE_TRANSACTION.get(), "root": root,
         "source": root / intent["sourcePath"], "archive": archive, "instant": intent["terminalInstant"],
@@ -3988,12 +4183,15 @@ def _legacy_verify_recoverable_originals(root, intent):
             raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "indeterminate finalization: original input is unavailable or changed")
 
 
-def _legacy_finalize_completion(root, intent_path, intent, action, *, _plan=None, ledger_resource_budget=None):
+def _legacy_finalize_completion(root, intent_path, intent, action, *, _plan=None, ledger_resource_budget=None, retirement_results_out=None):
     if _plan is None:
         _plan = _PendingLegacyCompletionPlan.admit(root, intent_path, intent)
         _legacy_verify_complete(root, intent_path, intent, action, _plan=_plan, ledger_resource_budget=ledger_resource_budget)
-    _legacy_settle_completed_resources(_plan)
+    retired = _legacy_settle_completed_resources(_plan)
+    _require_intent_retirement_result(retired)
     _require_legacy_terminal(root, root / intent["archivePath"], ledger_resource_budget=ledger_resource_budget)
+    if retirement_results_out is not None:
+        retirement_results_out.append(retired)
     return action
 
 
@@ -4028,20 +4226,23 @@ def _legacy_settle_completed_resources(plan):
             path.rmdir()
             transaction.publish_owned_effect(effect, native_identity=identity)
     _verify_captured_file(plan.durable, "WI-LEGACY-COMPLETION-NATIVE")
-    with _legacy_compensation_parent(intent_path) as owner:
+    composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+    with _legacy_compensation_parent(intent_path, outcome_composer=composer) as owner:
         image = owner.owned_image(maximum_bytes=plan.durable.length)
         if image != plan.durable_image:
             raise LifecycleError("WI-LEGACY-COMPLETION-RECOVERY", "intent changed before owned removal")
-        owner.remove_owned(intent_path.name, image)
+        retired = owner.remove_owned(intent_path.name, image, outcome_composer=composer)
     _transition_fsync_directory(intent_path.parent)
+    return retired
 
 
-def _recover_legacy_completion(root, intent_path, intent, *, inject_failure_at=None, _plan=None, ledger_resource_budget=None):
+def _recover_legacy_completion(root, intent_path, intent, *, inject_failure_at=None, _plan=None, ledger_resource_budget=None, retirement_results_out=None):
     if _plan is None:
         _plan = _PendingLegacyCompletionPlan.admit(root, intent_path, intent)
     action = _legacy_validate_intent(root, intent)
     if _legacy_completion_is_final(root, intent_path, intent, action, _plan=_plan, ledger_resource_budget=ledger_resource_budget):
-        return _legacy_finalize_completion(root, intent_path, intent, action, _plan=_plan, ledger_resource_budget=ledger_resource_budget)
+        return _legacy_finalize_completion(root, intent_path, intent, action, _plan=_plan,
+            ledger_resource_budget=ledger_resource_budget, retirement_results_out=retirement_results_out)
     archive = root / intent["archivePath"]
     stage = root / ".scratch/work-items/legacy-flat-terminal" / intent["operationId"] / "archive"
     bindings = intent["capturedBindings"]
@@ -4169,7 +4370,8 @@ def _recover_legacy_completion(root, intent_path, intent, *, inject_failure_at=N
     if observed != bound_receipt["image"]:
         raise LifecycleError("WI-LEGACY-COMPLETION-NATIVE", "created action receipt changed")
     _legacy_verify_complete(root, intent_path, intent, action, _plan=_plan, ledger_resource_budget=ledger_resource_budget)
-    return _legacy_finalize_completion(root, intent_path, intent, action, _plan=_plan, ledger_resource_budget=ledger_resource_budget)
+    return _legacy_finalize_completion(root, intent_path, intent, action, _plan=_plan,
+        ledger_resource_budget=ledger_resource_budget, retirement_results_out=retirement_results_out)
 
 
 
@@ -4910,7 +5112,7 @@ def acquire_settled_work_item_history(root: Path, logical_reference: str, *, exp
         nonlocal charged_ledger_bytes
         _legacy_relative(relative)
         resource = None
-        if ledger_input:
+        if ledger_input and ledger_resource_budget is not None:
             validator = _validator_module()
             budget = validator._ledger_resource_budget(ledger_resource_budget)
             if charged_ledger_bytes >= budget.max_ledger_bytes:
@@ -5723,7 +5925,8 @@ def _read_projection_root_binding_at(repository: Path, locator: tuple[str, str],
     except OSError as exc:
         raise LifecycleError(failure_id, "root acquisition ledger unavailable") from exc
     else:
-        evidence.append(("file", _capture_file_snapshot(ledger, failure_id=failure_id, ledger_resource_budget=ledger_resource_budget)))
+        evidence.append(("file", _capture_file_snapshot(ledger, failure_id=failure_id,
+            maximum_bytes=None, ledger_resource_budget=ledger_resource_budget)))
     return target[0], tuple(evidence)
 
 
@@ -9014,6 +9217,38 @@ class LifecycleWriteTarget:
         self._publish_effect(removal, image["identity"]["value"])
         return True if outcome_composer is not None else None
 
+    def remove_link_entry(self, entry: _CapturedLinkEntry) -> None:
+        """Retire only a selected link object; never acquire or mutate its target."""
+        transaction = self._admit_mutation()
+        if (not isinstance(transaction, LifecycleTransaction) or self._operation_owner is not transaction
+                or type(entry) is not _CapturedLinkEntry or entry.path != self.path):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "link retirement lacks its current domain owner")
+        self._verify_owned()
+        removal = self._prepare_effect(self.path, None, link_entry=entry)
+        handle = None
+        primary = None
+        try:
+            if os.name == "nt":
+                handle = self._windows_child(self._parent, self.leaf, delete=True, _link_entry=entry)
+            self._verify_owned()
+            transaction._verify_link_entry(entry)
+            if os.name == "nt":
+                self._verify_effect_source(removal, handle)
+                self._windows_delete(handle)
+            else:
+                current = os.stat(self.leaf, dir_fd=self._parent, follow_symlinks=False)
+                if (_lifecycle_file_snapshot_key(current) != _lifecycle_file_snapshot_key(entry.metadata)
+                        or os.readlink(self.leaf, dir_fd=self._parent) != entry.text):
+                    raise LifecycleError("WI-LIFECYCLE-EFFECT", "parent-relative link entry changed")
+                os.unlink(self.leaf, dir_fd=self._parent)
+        except BaseException as exc:
+            primary = exc
+            raise
+        finally:
+            if handle is not None:
+                self._release_handle(handle, primary)
+        self._publish_effect(removal, _lifecycle_file_identity(entry.metadata))
+
     def promote_create(self, image: dict) -> None:
         """Promote an observed stage without replacing any destination."""
         self._admit_mutation()
@@ -9144,8 +9379,13 @@ class LifecycleWriteTarget:
         except BaseException as primary:
             self._release_handle(handle, primary); raise
 
-    def _windows_child(self, parent, leaf, *, directory=False, create=False, exclusive=False, delete=False, write=False, _creation=None):
+    def _windows_child(self, parent, leaf, *, directory=False, create=False, exclusive=False, delete=False, write=False, _creation=None, _link_entry=None):
         self._check_leaf(leaf)
+        if _link_entry is not None and (
+                type(_link_entry) is not _CapturedLinkEntry or self.path != _link_entry.path
+                or leaf != self.leaf or parent != self._parent or directory or create
+                or exclusive or write or not delete or _creation is not None):
+            raise LifecycleError("WI-LIFECYCLE-EFFECT", "native link request differs from selected retirement")
         if (create or exclusive) and _creation is None:
             raise LifecycleError("WI-LIFECYCLE-EFFECT", "native creator custody must precede acquisition")
         if _creation is not None and (type(_creation) is not _OwnedNativeCreation or _creation.seal is not _NATIVE_CREATION_OWNER
@@ -9162,6 +9402,8 @@ class LifecycleWriteTarget:
         access = (0x1000a0 | (0x10000 if delete else 0)) if directory else 0x100081 | (2 if write else 0) | (0x10000 if delete else 0)
         disposition = 2 if exclusive else 3 if create else 1
         options = 0x200020 | (1 if directory else 0x40)
+        if _link_entry is not None:
+            access, options = 0x110080, 0x200020  # DELETE/read attributes; OPEN_REPARSE_POINT.
         result = nt.NtCreateFile(c.byref(output), access, c.byref(attributes), c.byref(status), None, 0x80,
                                  3 if directory or create else 7, disposition, options, None, 0)
         try:
@@ -9174,7 +9416,19 @@ class LifecycleWriteTarget:
                 _creation.holder, _creation.phase = "inner", "acquired" if _creation.creator else "opened"
             if _creation is not None and not _creation.creator:
                 raise LifecycleError("WI-LIFECYCLE-EFFECT", "native request did not create the admitted object")
-            self._windows_check(output.value, directory=directory)
+            if _link_entry is None:
+                self._windows_check(output.value, directory=directory)
+            else:
+                value = _LifecycleTag()
+                _c, _w, kernel, _nt, _types = self._native
+                if not kernel.GetFileInformationByHandleEx(output.value, 9, c.byref(value), c.sizeof(value)):
+                    raise OSError(c.get_last_error(), "link entry attributes unavailable")
+                if (value.Tag != 0xA000000C or value.Tag != _link_entry.metadata.st_reparse_tag
+                        or value.Attributes != _link_entry.metadata.st_file_attributes
+                        or self._identity(output.value) != _lifecycle_file_identity(_link_entry.metadata)):
+                    raise LifecycleError("WI-LIFECYCLE-EFFECT", "native link entry identity or kind changed")
+                if not kernel.SetHandleInformation(output.value, 1, 0):
+                    raise OSError(c.get_last_error(), "cannot make native link handle non-inheritable")
             if _creation is not None:
                 _creation.holder = "outer"
             return output.value
@@ -9926,7 +10180,9 @@ def _legacy_retirement_entry(item: Path, metadata: Path,
 def _archived_work_item_entry(item: Path,
     *,
     acquired_input=None, prepared_terminal=None, ledger_resource_budget=None,
-transition_resource_budget=None) -> ReadmeEntry:
+    transition_resource_budget=None, input_role: str = "strict") -> ReadmeEntry:
+    if input_role not in ("strict", "historical-catalogue"):
+        raise ValueError("unsupported archived work-item input role")
     if acquired_input is None and _legacy_completion_recognized(item):
         observation = _require_legacy_terminal(item.parent.parent.parent.parent, item, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
         port = observation.acquired_input
@@ -9959,18 +10215,26 @@ transition_resource_budget=None) -> ReadmeEntry:
     )
     if closure_data is None:
         raise LifecycleError("WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", f"archived work-item lacks closure.md: {item}")
+    archive_path = item.relative_to(item.parent.parent.parent.parent).as_posix()
+    source_context = f"input-role={input_role}; archive={archive_path}; member="
+    closure_member = source_context + archive_path + "/closure.md"
+    status_member = source_context + archive_path + "/status.md"
+    status_present = _readme_input_exists(status, prepared_terminal, acquired_input)
+    if status_present and not _readme_input_is_file(status, prepared_terminal, acquired_input):
+        raise LifecycleError("WI-CATEGORY-SCHEMA-INVALID",
+            f"{status_member} must be an ordinary file or supported absence")
     status_data = (
         _readme_input_bytes(status, prepared_terminal, failure_id="WI-README-STALE",
             maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP, acquired_input=acquired_input)
-        if _readme_input_is_file(status, prepared_terminal, acquired_input) else b""
+        if status_present else b""
     )
     if status_data is None:
-        status_data = b""
-    closure_markers = _schema_marker_occurrences(closure_data, "closure.md")
-    status_markers = _schema_marker_occurrences(status_data, "status.md")
+        raise LifecycleError("WI-README-STALE", f"{status_member} present member has no acquired bytes")
+    closure_markers = _schema_marker_occurrences(closure_data, closure_member)
+    status_markers = _schema_marker_occurrences(status_data, status_member)
     fields = _parse_fields(closure_data.decode("utf-8"))
     sources = [closure]
-    if _readme_input_is_file(status, prepared_terminal, acquired_input):
+    if status_present:
         sources.append(status)
 
     if not closure_markers and not status_markers:
@@ -9985,8 +10249,21 @@ transition_resource_budget=None) -> ReadmeEntry:
             LEGACY_READ_CLASSIFICATION,
         )
 
-    _require_canonical_schema_marker(status_markers, "status.md")
-    _require_canonical_schema_marker(closure_markers, "closure.md")
+    declarations = ((status_markers, status_member), (closure_markers, closure_member))
+    for occurrences, member in declarations:
+        if occurrences:
+            _require_canonical_schema_marker(occurrences, member)
+    missing = [member for occurrences, member in declarations if not occurrences]
+    if missing and input_role == "historical-catalogue":
+        return ReadmeEntry(
+            "Archive metadata", f"work-item:{item.name}", archive_path, closure, False,
+            "; ".join(missing) + ": missing canonical schema declaration; "
+            "incomplete historical representation; Version 1 terminal proof unavailable",
+            sources, "WI-CATEGORY-SCHEMA-INVALID",
+        )
+    for occurrences, member in declarations:
+        if not occurrences:
+            _require_canonical_schema_marker(occurrences, member)
     closed = fields.get("closed", "")
     _validate_closure(closure_data, closed)
     expected_month = archive_month(closed)
@@ -10085,7 +10362,7 @@ def _collect_readme_entries(root: Path, *, archive_inventory: ArchiveEntityInven
         if prepared_terminal is not None and entity.path == prepared_terminal.archive:
             continue
         if entity.kind in {"work-item", "invalid-work-item"}:
-            entries.append(_archived_work_item_entry(entity.path, prepared_terminal=prepared_terminal, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget))
+            entries.append(_archived_work_item_entry(entity.path, prepared_terminal=prepared_terminal, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, input_role="historical-catalogue"))
         elif entity.kind == "archive-metadata":
             relative = _relative_link(work_items, entity.path)
             entries.append(ReadmeEntry("Archive metadata", f"archive-observation:{relative}", relative,
@@ -10163,7 +10440,7 @@ def _canonical_timestamp(entries: Iterable[ReadmeEntry], *, prepared_terminal=No
             instant = json.loads(raw)["terminalInstant"]
             _strict_utc(instant); instants.append(instant)
             continue
-        if entry.classification in {"WI-ARCHIVE-ENTITY-UNBOUND", "WI-ARCHIVE-METADATA"}:
+        if entry.classification in {"WI-ARCHIVE-ENTITY-UNBOUND", "WI-ARCHIVE-METADATA", "WI-CATEGORY-SCHEMA-INVALID"}:
             continue
         for path in entry.source_paths:
             if path.name == LEGACY_RETIREMENT_FILE:
@@ -10249,6 +10526,7 @@ def _render_readme_bytes(
     static_guide_override: str | None = None, input_digest_out: list[str] | None = None,
     archive_inventory_out: list[dict] | None = None,
     archive_inventory_witness_out: list[ArchiveEntityInventory] | None = None,
+    observations_out: list[str] | None = None,
     prepared_terminal=None, ledger_resource_budget=None,
 transition_resource_budget=None) -> bytes:
     if prepared_terminal is not None:
@@ -10313,6 +10591,9 @@ transition_resource_budget=None) -> bytes:
         archive_inventory_out.append(inventory.observation(work_items))
     if archive_inventory_witness_out is not None:
         archive_inventory_witness_out.append(inventory)
+    if observations_out is not None:
+        observations_out.extend(f"{entry.classification}: {entry.detail}" for entry in entries
+            if entry.classification == "WI-CATEGORY-SCHEMA-INVALID")
     return rendered
 
 
@@ -10367,19 +10648,23 @@ def observe_readme(root: Path, *, ledger_resource_budget=None, transition_resour
 
 
 def refresh_readme(root: Path, *, allow_marker_bootstrap: bool = False,
-                   archive_inventory_out: list[dict] | None = None, ledger_resource_budget=None,) -> str:
+                   archive_inventory_out: list[dict] | None = None,
+                   observations_out: list[str] | None = None, ledger_resource_budget=None,) -> str:
     work_items = _work_items_root(root, ledger_resource_budget=ledger_resource_budget)
     inventories: list[dict] = []
+    observations: list[str] = []
     expected = _render_readme_bytes(
         root,
         allow_marker_bootstrap=allow_marker_bootstrap,
-        archive_inventory_out=inventories, ledger_resource_budget=ledger_resource_budget
+        archive_inventory_out=inventories, observations_out=observations, ledger_resource_budget=ledger_resource_budget
     )
     readme = work_items / "README.md"
     _atomic_write(readme, expected)
     repeated_inventories: list[dict] = []
-    observed = _render_readme_bytes(root, archive_inventory_out=repeated_inventories, ledger_resource_budget=ledger_resource_budget)
-    if observed != expected or inventories != repeated_inventories or _capture_file_snapshot(
+    repeated_observations: list[str] = []
+    observed = _render_readme_bytes(root, archive_inventory_out=repeated_inventories,
+        observations_out=repeated_observations, ledger_resource_budget=ledger_resource_budget)
+    if observed != expected or inventories != repeated_inventories or observations != repeated_observations or _capture_file_snapshot(
         readme,
         failure_id="WI-README-STALE",
         maximum_bytes=len(expected),
@@ -10387,11 +10672,14 @@ def refresh_readme(root: Path, *, allow_marker_bootstrap: bool = False,
         raise LifecycleError("WI-README-STALE", "README byte verification failed")
     if archive_inventory_out is not None:
         archive_inventory_out.append(inventories[0])
+    if observations_out is not None:
+        observations_out.extend(observations)
     return hashlib.sha256(expected).hexdigest()
 
 
 def reset_readme_static_guide(root: Path, expected_readme_sha256: str, *,
-                            archive_inventory_out: list[dict] | None = None, ledger_resource_budget=None,) -> str:
+                            archive_inventory_out: list[dict] | None = None,
+                            observations_out: list[str] | None = None, ledger_resource_budget=None,) -> str:
     if not re.fullmatch(r"[0-9A-Fa-f]{64}", expected_readme_sha256):
         raise LifecycleError(
             "WI-README-REPAIR-TARGET-MISMATCH",
@@ -10407,10 +10695,11 @@ def reset_readme_static_guide(root: Path, expected_readme_sha256: str, *,
     _static_guide(readme, allow_marker_bootstrap=True)
     current = readme.read_bytes()
     inventories: list[dict] = []
+    observations: list[str] = []
     desired = _render_readme_bytes(
         root,
         static_guide_override=_default_static_guide(),
-        archive_inventory_out=inventories, ledger_resource_budget=ledger_resource_budget
+        archive_inventory_out=inventories, observations_out=observations, ledger_resource_budget=ledger_resource_budget
     )
     current_hash = hashlib.sha256(current).hexdigest()
     expected_hash = expected_readme_sha256.casefold()
@@ -10422,14 +10711,18 @@ def reset_readme_static_guide(root: Path, expected_readme_sha256: str, *,
     if current != desired:
         _atomic_write(readme, desired)
     repeated_inventories: list[dict] = []
-    observed = _render_readme_bytes(root, archive_inventory_out=repeated_inventories, ledger_resource_budget=ledger_resource_budget)
-    if observed != desired or inventories != repeated_inventories or readme.read_bytes() != desired:
+    repeated_observations: list[str] = []
+    observed = _render_readme_bytes(root, archive_inventory_out=repeated_inventories,
+        observations_out=repeated_observations, ledger_resource_budget=ledger_resource_budget)
+    if observed != desired or inventories != repeated_inventories or observations != repeated_observations or readme.read_bytes() != desired:
         raise LifecycleError(
             "WI-README-STALE",
             "README static-guide repair failed complete-byte verification",
         )
     if archive_inventory_out is not None:
         archive_inventory_out.append(inventories[0])
+    if observations_out is not None:
+        observations_out.extend(observations)
     return hashlib.sha256(desired).hexdigest()
 
 
@@ -11364,6 +11657,39 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
     _validate_obligation_transfer_ownership(root, ledger_resource_budget=ledger_resource_budget)
     _preflight_readme(root, ledger_resource_budget=ledger_resource_budget)
     active_parent = work_items / "active"
+    if admission_ledger is not None:
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        participant_snapshots = []
+        if transfer_relation is not None:
+            source_item = resolve_category(root, f"work-item:{transfer_relation[0]}",
+                ledger_resource_budget=ledger_resource_budget)
+            source_snapshot = _capture_file_snapshot(source_item / "agent-runs.jsonl",
+                failure_id="WI-LEDGER-RESOURCE-DRIFT", maximum_bytes=None,
+                require_single_link=True, ledger_resource_budget=ledger_resource_budget)
+            transfer_snapshots = []
+            _source_budget, predicates = _admit_ledger_operation(source_item,
+                source_snapshot.path, source_snapshot.data,
+                ledger_resource_budget=ledger_resource_budget,
+                known_row_bytes=tuple(admission_ledger.splitlines(keepends=True)),
+                selected_snapshot=source_snapshot,
+                transfer_source_item=source_item,
+                transfer_operation_id=transfer_relation[1],
+                selected_transfer_snapshots_out=transfer_snapshots)
+            if transaction.ledger_resource_budget is None:
+                transaction.ledger_resource_budget = _source_budget
+            participant_snapshots.append(source_snapshot)
+            participant_snapshots.extend(predicate.snapshot for predicate in predicates
+                if predicate.snapshot is not None and predicate.snapshot.path.name == "agent-runs.jsonl"
+                and predicate.snapshot.path != source_snapshot.path)
+            participant_snapshots.extend(snapshot for snapshot in transfer_snapshots
+                if snapshot.path.name == "agent-runs.jsonl"
+                and snapshot.path != source_snapshot.path
+                and all(value.path != snapshot.path for value in participant_snapshots))
+            transaction.observe_retained_inputs(tuple(predicate.snapshot for predicate in predicates
+                if predicate.snapshot is not None))
+        ledger_resource_budget = transaction.admit_ledger_creation(active_parent / slug / "agent-runs.jsonl",
+            tuple(admission_ledger.splitlines(keepends=True)),
+            participant_snapshots=tuple(participant_snapshots))
     active_parent.mkdir(parents=True, exist_ok=True)
     target = active_parent / slug
     temp = Path(tempfile.mkdtemp(prefix=f".{slug}.", dir=active_parent))
@@ -11374,13 +11700,45 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
         _atomic_write(temp / "status.md", status_data)
         if admission_ledger is not None:
             _atomic_write(temp / "agent-runs.jsonl", admission_ledger)
-            errors = _validator_module().validate_work_item(
-                temp, strict_revise=transfer_relation is None, ledger_resource_budget=ledger_resource_budget
-            , transition_resource_budget=_transition_resource_budget())
-            if errors:
-                raise LifecycleError("WI-LEDGER-BOOTSTRAP-INVALID", "; ".join(errors))
-        _replace_lifecycle_directory(temp, target)
-        committed = True
+        for current_item in (temp, target):
+            if current_item == target:
+                _replace_lifecycle_directory(temp, target)
+                committed = True
+            if admission_ledger is None:
+                continue
+            validator = _validator_module()
+            ledger = _agent_run_ledger_module()
+            states, acquired, parse_errors, parsed = [], [], [], []
+            requested = validator.load_jsonl(current_item / "agent-runs.jsonl", parse_errors,
+                source_bytes=admission_ledger, ledger_acquisition_complete_out=parsed,
+                ledger_resource_budget=ledger_resource_budget)
+            errors = validator.validate_work_item(current_item, strict_revise=False,
+                obligation_state_out=states, ledger_acquisition_complete_out=acquired,
+                ledger_resource_budget=ledger_resource_budget,
+                transition_resource_budget=_transition_resource_budget())
+            try:
+                if parse_errors or parsed != [True]:
+                    raise ValueError("; ".join((*parse_errors, "admission request acquisition is incomplete")))
+                received, _positions = ledger._receive_append_operation(current_item, validator,
+                    states, acquired, errors, b"", admission_ledger, tuple(requested))
+                failures = list(received.operation_diagnostics(requested_positions=(),
+                    strict=transfer_relation is None, history=True))
+                if transfer_relation is not None:
+                    states.clear()
+                    received.publish(states, None)
+                    expected = []
+                    transferred = tuple(row for row in received.context.rows
+                        if row.projection_transformation == "transferred")
+                    validator._capture_obligation_state(expected, transferred,
+                        tuple(row.event for row in transferred), ())
+                    if (states[0].open_launches or states[0].unresolved_history
+                        or states[0].open_revise != expected[0].open_revise):
+                        failures.append("WI-OBLIGATION-TRANSFER-COVERAGE: startup obligations differ from the qualified source grant")
+                if failures:
+                    raise ValueError("; ".join(failures))
+            except ValueError as exc:
+                outcome = "start committed canonical state; " if committed else ""
+                raise LifecycleError("WI-LEDGER-BOOTSTRAP-INVALID", outcome + str(exc)) from exc
     finally:
         if not committed:
             if moved_candidate.exists() and not backlog.exists() and not _lifecycle_cleanup_intersects_unsettled(moved_candidate, backlog):
@@ -11551,11 +11909,16 @@ def _release_event_binding(
 ) -> tuple[str, dict]:
     matches: list[tuple[str, dict]] = []
     validator = _validator_module()
-    budget = validator._ledger_resource_budget(ledger_resource_budget)
     ledger_bytes = _capture_file_snapshot(
         item / "agent-runs.jsonl", failure_id="WI-SCRATCH-RECONCILIATION-IDENTITY",
-        ledger_resource_budget=budget, require_single_link=True,
+        maximum_bytes=None, ledger_resource_budget=ledger_resource_budget, require_single_link=True,
     ).data
+    try:
+        budget = (validator._ledger_resource_budget(ledger_resource_budget) if ledger_resource_budget is not None else
+                  validator.resolve_ledger_resource_budget(demand=validator.inspect_ledger_resource_demand(
+                      item / "agent-runs.jsonl", None, source_bytes=ledger_bytes)))
+    except ValueError as exc:
+        raise LifecycleError("WI-LEDGER-UNSETTLED", str(exc)) from exc
     errors: list[str] = []
     metadata: list[dict[str, object]] = []
     events = validator.load_jsonl(item / "agent-runs.jsonl", errors, metadata, ledger_bytes,
@@ -12168,6 +12531,46 @@ def _scratch_disposition_plan(
     return tuple(plans)
 
 
+def _capture_scratch_retirement_inputs(path: Path) -> LifecycleTransaction:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if not isinstance(transaction, LifecycleTransaction) or not transaction._locked:
+        raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "scratch retirement requires its held owner")
+    transaction.verify()
+    info = path.lstat()
+    if stat.S_ISDIR(info.st_mode) and not _lifecycle_path_has_reparse(path):
+        snapshots = transaction._capture_effect_tree(path)
+    else:
+        snapshots = (_capture_file_snapshot(path, failure_id="WI-SCRATCH-DISPOSITION-PENDING",
+            maximum_bytes=_scratch_classifier_module().MAX_OWNED_TREE_BYTES),)
+    transaction.observe_retained_inputs(snapshots)
+    return transaction
+
+
+def _remove_scratch_link_entry(path: Path, row: dict) -> None:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if not isinstance(transaction, LifecycleTransaction):
+        raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "link retirement lacks its held owner")
+    parent = transaction._retained_observations.get(path.parent)
+    if not isinstance(parent, CapturedDirectorySnapshotV1):
+        raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "link retirement lacks its admitted parent")
+    text = os.readlink(path)
+    if row.get("kind") != "symlink" or _sha256_bytes(os.fsencode(text)) != row.get("rawTargetSha256"):
+        raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "link text differs from the authenticated receipt")
+    entry = _CapturedLinkEntry(path, parent, path.lstat(), text)
+    transaction._verify_link_entry(entry)
+    owner = LifecycleWriteTarget(path, failure_id="WI-SCRATCH-RELEASE-DRIFT", _operation_owner=transaction)
+    primary = None
+    try:
+        owner._acquire_existing_parents()
+        owner.remove_link_entry(entry)
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        owner.__exit__(type(primary) if primary is not None else None, primary,
+            primary.__traceback__ if primary is not None else None)
+
+
 def _unlink_owned_scratch_file(path: Path) -> None:
     """Unlink an owned leaf; retry only a proven Windows ReadOnly failure."""
     before = path.lstat()
@@ -12182,9 +12585,9 @@ def _unlink_owned_scratch_file(path: Path) -> None:
         maximum_bytes=_scratch_classifier_module().MAX_OWNED_TREE_BYTES,
     ) if eligible else None
     try:
-        path.unlink()
-    except PermissionError as denied:
-        if snapshot is None:
+        _remove_lifecycle_file(path, failure_id="WI-SCRATCH-DISPOSITION-PENDING")
+    except OSError as denied:
+        if snapshot is None or not (isinstance(denied, PermissionError) or denied.errno == 5):
             raise
         current = _capture_file_snapshot(
             path, failure_id="WI-SCRATCH-DISPOSITION-PENDING", require_single_link=True,
@@ -12192,6 +12595,8 @@ def _unlink_owned_scratch_file(path: Path) -> None:
         )
         if current != snapshot or _lifecycle_file_snapshot_key(path.lstat()) != _lifecycle_file_snapshot_key(before):
             raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly leaf changed before retry") from denied
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        attributes = transaction.prepare_owned_effect(transaction, path, path, data=snapshot.data)
         path.chmod(before.st_mode | stat.S_IWRITE, follow_symlinks=False)
         try:
             current = _capture_file_snapshot(
@@ -12204,7 +12609,8 @@ def _unlink_owned_scratch_file(path: Path) -> None:
                 or after.st_file_attributes != (before.st_file_attributes & ~readonly)
             ):
                 raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly leaf changed after attribute update")
-            path.unlink()
+            transaction.publish_owned_effect(attributes, native_identity=snapshot.identity)
+            _remove_lifecycle_file(path, failure_id="WI-SCRATCH-DISPOSITION-PENDING")
         except (OSError, LifecycleError) as retry_failure:
             try:
                 current = _capture_file_snapshot(
@@ -12217,10 +12623,12 @@ def _unlink_owned_scratch_file(path: Path) -> None:
                     or (restoring.st_file_attributes & ~readonly) != (before.st_file_attributes & ~readonly)
                 ):
                     raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly leaf changed before restoration")
+                restoration = transaction.prepare_owned_effect(transaction, path, path, data=snapshot.data)
                 path.chmod(before.st_mode, follow_symlinks=False)
                 _verify_captured_file(snapshot, "WI-SCRATCH-DISPOSITION-PENDING")
                 if path.lstat().st_file_attributes != before.st_file_attributes:
                     raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "ReadOnly attribute restoration differs")
+                transaction.publish_owned_effect(restoration, native_identity=snapshot.identity)
             except (OSError, LifecycleError) as restore_failure:
                 raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", f"ReadOnly restoration refused: {restore_failure}") from retry_failure
             raise retry_failure from denied
@@ -12229,6 +12637,7 @@ def _unlink_owned_scratch_file(path: Path) -> None:
 def _remove_scratch_tree(tree_root: Path) -> None:
     """Remove one already-proven tree without following links or reparses."""
 
+    transaction = _capture_scratch_retirement_inputs(tree_root)
     classifier = _scratch_classifier_module()
     directories: list[Path] = []
     stack = [tree_root]
@@ -12251,7 +12660,9 @@ def _remove_scratch_tree(tree_root: Path) -> None:
             else:
                 raise OSError(f"unsafe non-regular entry during removal: {entry.name}")
     for directory in reversed(directories):
-        directory.rmdir()
+        snapshot = transaction._retained_observations.get(directory)
+        LifecycleWriteTarget._remove_empty_directory_snapshot(snapshot, transaction,
+            failure_id="WI-SCRATCH-DISPOSITION-PENDING")
 
 
 def _settle_released_scratch(
@@ -12288,6 +12699,7 @@ def _settle_released_scratch(
     actual = _release_inventory(root, plan.tombstone, plan.original, verify_link_targets=False)
     if not _release_rows_match(actual, expected, subset=True):
         raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release tombstone differs after rename")
+    transaction = _capture_scratch_retirement_inputs(plan.tombstone)
     remaining = {row["path"] for row in actual}
     file_unlinked = False
     link_unlinked = False
@@ -12318,7 +12730,7 @@ def _settle_released_scratch(
                     root, item, plan.original, (row,), receipt["artifactSha256"],
                     surviving_root=plan.tombstone,
                 )
-            target.unlink()
+            _remove_scratch_link_entry(target, row)
         else:
             _unlink_owned_scratch_file(target)
         if row["kind"] == "symlink" and not link_unlinked:
@@ -12336,7 +12748,9 @@ def _settle_released_scratch(
         inspection = classifier.inspect_root_no_follow(target)
         if not inspection.exists or inspection.is_link_or_reparse or not inspection.is_directory:
             raise LifecycleError("WI-SCRATCH-RELEASE-DRIFT", "release directory changed before removal")
-        target.rmdir()
+        snapshot = transaction._retained_observations.get(target)
+        LifecycleWriteTarget._remove_empty_directory_snapshot(snapshot, transaction,
+            failure_id="WI-SCRATCH-RELEASE-DRIFT")
     if inject_failure_at == "after-final-removal":
         raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", "injected after-final-removal")
 
@@ -12517,10 +12931,12 @@ def _reconcile_retained_scratch_transaction(root: Path, slug: str, request_file:
                 or len(request["subjects"]) > validator.MAX_SCRATCH_EVIDENCE_ENTRIES
             ):
                 raise LifecycleError("WI-SCRATCH-RECONCILIATION-REQUEST", "request shape differs")
-            _capture_file_snapshot(
+            captured_ledger = _capture_file_snapshot(
                 item / "agent-runs.jsonl", failure_id="WI-SCRATCH-RECONCILIATION-IDENTITY",
-                ledger_resource_budget=ledger_resource_budget, require_single_link=True,
+                maximum_bytes=None, ledger_resource_budget=ledger_resource_budget, require_single_link=True,
             )
+            ledger_resource_budget, _snapshot = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
+                item, selected_snapshot=captured_ledger)
             entries = {(run_id, entry["entryId"]): entry for run_id, entry in _scratch_ledger_entries(item, ledger_resource_budget=ledger_resource_budget)}
             retained_inputs = [request_snapshot]
             prepared: list[tuple[Path, dict, dict, bytes, bool]] = []
@@ -12641,6 +13057,11 @@ def _release_retained_scratch_transaction(
     if len(locations) != 1 or "archive" not in locations[0].parts:
         raise LifecycleError("WI-SCRATCH-RELEASE-IDENTITY", "one exact archived item is required")
     item = locations[0]
+    captured_ledger = _capture_file_snapshot(item / "agent-runs.jsonl",
+        failure_id="WI-SCRATCH-RECONCILIATION-IDENTITY", maximum_bytes=None,
+        ledger_resource_budget=ledger_resource_budget, require_single_link=True)
+    ledger_resource_budget, _snapshot = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
+        item, selected_snapshot=captured_ledger)
     _archived_work_item_entry(item, ledger_resource_budget=ledger_resource_budget)
     event_hash, entry = _release_event_binding(item, terminal_run_id, entry_id, ledger_resource_budget=ledger_resource_budget)
     if expected_event_sha256 != event_hash:
@@ -12717,10 +13138,20 @@ def _validate_item_before_close(item: Path, *, ledger_resource_budget=None) -> N
     status_text = (item / "status.md").read_text(encoding="utf-8")
     v1_staged = _parse_fields(status_text).get("template") == "staged"
     if ledger.exists():
+        states, acquired = [], []
         errors = validator.validate_work_item(
             item,
-            validate_status_file=not v1_staged, ledger_resource_budget=ledger_resource_budget
+            validate_status_file=not v1_staged, ledger_resource_budget=ledger_resource_budget,
+            obligation_state_out=states, ledger_acquisition_complete_out=acquired
         , transition_resource_budget=_transition_resource_budget())
+        if (acquired != [True] or len(states) != 1 or type(states[0]) is not validator.WorkItemObligationStateV1
+            or type(states[0]._current_result) is not validator._CurrentReductionV1):
+            raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join((*errors,
+                "WI-LEDGER-OPERATION-RESULT: complete current result unavailable")))
+        received_errors = []
+        result = states[0]._current_result.receive(item, received_errors, observed_diagnostics=errors, strict=True)
+        errors = ([*errors, *received_errors] if result is None else
+                  list(result.operation_diagnostics(requested_positions=(), strict=True)))
         if v1_staged:
             _validate_active_status_bytes(status_text.encode("utf-8"))
     else:
@@ -13923,9 +14354,26 @@ def _close_item_directory(
     locations = _category_locations(root, CATEGORIES["work-item"], slug, ledger_resource_budget=ledger_resource_budget)
     if len(locations) > 1:
         raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", f"duplicate slug: {slug}")
+    if ledger_resource_budget is None and len(locations) == 1 and locations[0].is_dir():
+        selected_item = locations[0]
+        selected_ledger = selected_item / "agent-runs.jsonl"
+        if os.path.lexists(selected_ledger):
+            snapshot = _capture_file_snapshot(selected_ledger, failure_id="WI-LEDGER-RESOURCE-DRIFT",
+                maximum_bytes=None)
+            transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+            ledger_resource_budget, _snapshot = transaction.admit_ledger_operation(
+                selected_item, selected_snapshot=snapshot)
     if len(locations) == 1 and "archive" in locations[0].parts:
         archived = locations[0]
         _archived_work_item_entry(archived, ledger_resource_budget=ledger_resource_budget)
+        settlement = archived / "lifecycle-transition-receipt.json"
+        if os.path.lexists(settlement) and not _legacy_completion_recognized(archived):
+            proof, _raw, _digest = _validate_stable_ledger_settlement(root, root, archived,
+                settlement, slug=slug, ledger_resource_budget=ledger_resource_budget)
+            if proof["schemaVersion"] == 3 and (
+                proof["requestClosureSha256"] != _sha256_bytes(closure_data)
+                or proof["requestTerminalInstant"] != terminal_instant):
+                raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "ordinary replay inputs differ")
         existing = archived / "closure.md"
         if (
             not existing.is_file()
@@ -14012,6 +14460,65 @@ def _close_item_directory(
     readme = work_items / "README.md"
     readme_existed = readme.is_file()
     readme_before = readme.read_bytes() if readme_existed else b""
+    settlement_request = None
+    settlement_request_bytes = None
+    settlement_demand = None
+    settlement_path = target / "lifecycle-transition-receipt.json"
+    ledger_path = active / "agent-runs.jsonl"
+    if os.path.lexists(ledger_path):
+        if os.path.lexists(active / settlement_path.name):
+            raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "active item already has relocation proof")
+        source_capture = _capture_directory_snapshot(active, failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH")
+        ledger_capture = _capture_file_snapshot(ledger_path,
+            failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+            maximum_bytes=None, ledger_resource_budget=ledger_resource_budget)
+        input_captures = [source_capture, ledger_capture,
+            _capture_directory_snapshot(work_items, failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH")]
+        if readme_existed:
+            readme_capture = _capture_file_snapshot(readme,
+                failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", maximum_bytes=max(1, readme.lstat().st_size))
+            readme_before = readme_capture.data
+            input_captures.append(readme_capture)
+        elif os.path.lexists(readme):
+            raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "README absence is not an ordinary absent input")
+        migrations = _migration_receipt_bindings_at(root, active,
+            failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", ledger_resource_budget=ledger_resource_budget)
+        if (active / "ledger-migration-receipts").is_dir():
+            input_captures.append(_capture_directory_snapshot(active / "ledger-migration-receipts",
+                failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"))
+        for row in migrations:
+            input_captures.append(_capture_file_snapshot(root / row["path"],
+                failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"))
+        held.observe_retained_inputs(input_captures)
+        settlement_request = {
+            "schemaVersion": 3, "owner": ORDINARY_CLOSE_TRANSITION_OWNER, "workItem": slug,
+            "terminalInstant": terminal_instant, "archivePath": target.relative_to(root).as_posix(),
+            "requestClosureSha256": _sha256_bytes(closure_data),
+            "requestExpectedLedgerSha256": _sha256_bytes(ledger_capture.data),
+            "requestExpectedReadmeSha256": _sha256_bytes(readme_before) if readme_existed else None,
+            "migrationReceipts": [{"path": (target / (root / row["path"]).relative_to(active)).relative_to(root).as_posix(),
+                                   "sha256": row["sha256"]} for row in migrations],
+        }
+        settlement_request["operationId"] = _ordinary_close_operation_id(settlement_request)
+        settlement_request_bytes = _migration_receipt_bytes(settlement_request)
+        # Count only the missing fixed-width digest members, never serialize
+        # placeholder proof values. Existing members and migration paths are
+        # counted by the actual common JSON codec at their real nesting depth.
+        envelope_bytes = len(_migration_receipt_bytes({**settlement_request, "status": "settled",
+            "requestTerminalInstant": terminal_instant})) + sum(
+                len(json.dumps(key).encode("utf-8")) + 72 for key in (
+                    "ledgerSha256", "statusSha256", "closureSha256", "bugDispositionReceiptSha256", "readmeSha256"))
+        inventory = _transition_selected_inventory(held)
+        members = [(directory.path / name, info) for directory in inventory for name, info in directory.members
+                   if directory.path / name != settlement_path]
+        inventory_bytes = sum(info.st_size for leaf, info in members
+                              if os.path.normcase(leaf.name).endswith(os.path.normcase(".json")))
+        settlement_demand = resolve_transition_resource_budget(envelope_bytes,
+            inventory_bytes + envelope_bytes, len(members) + 2)
+        if held.transition_output_ceiling is not None:
+            ceiling = held.transition_output_ceiling
+            resolve_transition_resource_budget(ceiling.max_intent_bytes, ceiling.max_inventory_bytes,
+                ceiling.max_inventory_entries, demand=settlement_demand)
     created_dirs: list[_OwnedNativeCreation] = []
     touched_bugs: list[BugDispositionPlan] = []
     touched_links: list[dict] = []
@@ -14019,6 +14526,7 @@ def _close_item_directory(
     item_moved = False
     receipt_path = target / BUG_DISPOSITIONS_RECEIPT
     receipt_capture = None
+    settlement_started = False
     _verify_project_binding_evidence(link_plan["ownerEvidence"], "WI-CLOSE-LINK-DRIFT")
     for scratch in scratch_plan:
         if scratch.disposition == "completed-disposal":
@@ -14120,6 +14628,23 @@ def _close_item_directory(
             if _capture_file_snapshot(final, failure_id="WI-CLOSE-LINK-VERIFY").data != row["after"]:
                 raise LifecycleError("WI-CLOSE-LINK-VERIFY", "URI consumer final image differs")
         _verify_parent_archive_link_targets(link_plan, archived=True, failure_id="WI-CLOSE-LINK-VERIFY")
+        if settlement_request is not None:
+            if _migration_receipt_bytes(settlement_request) != settlement_request_bytes:
+                raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "ordinary captured request changed")
+            settlement_data = _migration_receipt_bytes(_settlement_payload(
+                root, settlement_request, readme_sha256, ledger_resource_budget=ledger_resource_budget))
+            if len(settlement_data) != settlement_demand.max_intent_bytes:
+                raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "ordinary settlement differs from its finite envelope")
+            _transition_reserve_fixed_output(settlement_path, settlement_data, prepared_demand=settlement_demand)
+            settlement_started = True
+            _atomic_write(settlement_path, settlement_data)
+            settlement_capture = _capture_file_snapshot(settlement_path,
+                failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+                maximum_bytes=len(settlement_data), require_single_link=True)
+            if settlement_capture.data != settlement_data:
+                raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "ordinary proof postimage differs")
+            held.observe_retained_inputs((settlement_capture,))
+            _verify_settlement(root, settlement_path, json.loads(settlement_data), ledger_resource_budget=ledger_resource_budget)
     except BaseException as exc:
         composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
         composer.capture_primary(exc)
@@ -14141,6 +14666,8 @@ def _close_item_directory(
                     resource=paths[0].relative_to(root).as_posix() if paths else None,
                     diagnostic=label, cause=rollback_exc)
 
+        if settlement_started and os.path.lexists(settlement_path):
+            attempt("remove ordinary settlement", lambda: held.restore_owned_file(settlement_path, None), settlement_path)
         if receipt_path.exists():
             def remove_receipt():
                 if link_maintenance is not None:
@@ -14434,14 +14961,15 @@ def audit_categories(root: Path, *, ledger_resource_budget=None) -> tuple[str, .
     for item in _archived_work_item_candidates(work_items / "archive", ledger_resource_budget=ledger_resource_budget):
         manifest = item / BUG_DISPOSITIONS_MANIFEST
         receipt = item / BUG_DISPOSITIONS_RECEIPT
-        if not manifest.exists() and not receipt.exists():
-            continue
         closure = item / "closure.md"
-        if not closure.is_file():
+        if (manifest.exists() or receipt.exists()) and not closure.is_file():
             raise LifecycleError(
                 "WI-IMMUTABLE-ARCHIVE",
                 f"archived disposition owner lacks closure: {item.name}",
             )
+        _archived_work_item_entry(item, ledger_resource_budget=ledger_resource_budget)
+        if not manifest.exists() and not receipt.exists():
+            continue
         closure_data = closure.read_bytes()
         fields = _parse_fields(closure_data.decode("utf-8"))
         _verify_archived_bug_dispositions(
@@ -14652,8 +15180,10 @@ def _retain_historical_pass_custody(
     with ledger.ledger_write_lock(item):
         captured = _capture_file_snapshot(
             item / "agent-runs.jsonl", failure_id=stale,
-            ledger_resource_budget=ledger_resource_budget,
+            maximum_bytes=None, ledger_resource_budget=ledger_resource_budget,
         )
+        ledger_resource_budget, captured = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
+            item, selected_snapshot=captured)
         raw = captured.data
         errors: list[str] = []
         metadata: list[dict[str, object]] = []
@@ -14700,10 +15230,19 @@ def _retain_historical_pass_custody(
         envelope = _historical_pass_association(raw, target, raw_line_ordinal, expected_raw_line_sha256, expected_original_sha256)
         envelope_bytes = validator._canonical_projection_bytes(envelope)
         candidates = {association_key: envelope_bytes, snapshot_key: original_bytes}
+        states, acquired = [], []
         errors = validator.validate_work_item(
             item, strict_revise=False, historical_pass_custody_blobs=candidates,
-            selected_ledger_bytes=raw, ledger_resource_budget=ledger_resource_budget
+            selected_ledger_bytes=raw, ledger_resource_budget=ledger_resource_budget,
+            obligation_state_out=states, ledger_acquisition_complete_out=acquired
         , transition_resource_budget=_transition_resource_budget())
+        if (acquired != [True] or len(states) != 1 or type(states[0]) is not validator.WorkItemObligationStateV1
+            or type(states[0]._current_result) is not validator._CurrentReductionV1):
+            raise LifecycleError(stale, "; ".join((*errors, "complete current result unavailable")))
+        receiving_errors = []
+        received = states[0]._current_result.receive(item, receiving_errors, observed_diagnostics=errors)
+        errors = ([*errors, *receiving_errors] if received is None else
+            list(received.operation_diagnostics(requested_positions=(), strict=False)))
         if errors:
             failure_id = errors[0].split(":", 1)[0] if errors[0].startswith("WI-LEDGER-CUSTODY-") else stale
             raise LifecycleError(failure_id, "; ".join(errors))
@@ -14944,9 +15483,13 @@ def _migrate_legacy_ledger_obligation_locked(
         normalization_kind=normalization_kind, ledger_resource_budget=ledger_resource_budget
     )
     if committed is not None:
+        ledger_resource_budget, _snapshot = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(item)
         _reconcile_migration_receipt(item, committed)
         return committed
     ledger_owner = _load_agent_run_ledger()
+    selected_snapshot = _capture_file_snapshot(item / "agent-runs.jsonl",
+        failure_id="WI-LEDGER-MIGRATION-LEDGER-DRIFT", maximum_bytes=None,
+        ledger_resource_budget=ledger_resource_budget)
     try:
         staged = ledger_owner.stage_legacy_obligation_migration(
             item,
@@ -14955,10 +15498,12 @@ def _migrate_legacy_ledger_obligation_locked(
             expected_ledger_sha256,
             operation_id,
             recorded_at,
-            normalization_kind, ledger_resource_budget=ledger_resource_budget
+            normalization_kind, ledger_resource_budget=ledger_resource_budget,
+            selected_snapshot=selected_snapshot, _validator=_validator_module()
         )
     except ledger_owner.LedgerMigrationError as exc:
         raise LifecycleError(exc.failure_id, str(exc)) from exc
+    ledger_resource_budget = ledger_resource_budget_for_current_operation(ledger_resource_budget)
     ledger_path = item / "agent-runs.jsonl"
     ledger_path = _require_lifecycle_mutation_path(
         root, ledger_path, failure_id="WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE"
@@ -15031,13 +15576,16 @@ def _revoke_legacy_ledger_obligation_locked(
     ledger_path = _require_lifecycle_mutation_path(
         root, ledger_path, failure_id="WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE"
     )
-    before = _validator_module().read_ledger_bytes(ledger_path, ledger_resource_budget)
+    selected_snapshot = _capture_file_snapshot(ledger_path, failure_id="WI-LEDGER-MIGRATION-LEDGER-DRIFT",
+        maximum_bytes=None, ledger_resource_budget=ledger_resource_budget)
+    before = selected_snapshot.data
     if _sha256_bytes(before) != expected_ledger_sha256:
         raise LifecycleError("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "ledger digest changed")
     validator = ledger_owner.load_validator()
     errors: list[str] = []
     metadata: list[dict[str, object]] = []
-    events = validator.load_jsonl(ledger_path, errors, metadata, ledger_resource_budget=ledger_resource_budget)
+    events = validator.load_jsonl(ledger_path, errors, metadata, source_bytes=before,
+        ledger_resource_budget=ledger_resource_budget)
     positions = [i for i, event in enumerate(events) if event.get("runId") == apply_run_id]
     if len(positions) != 1:
         raise LifecycleError("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "apply anchor is missing or non-unique")
@@ -15074,6 +15622,8 @@ def _revoke_legacy_ledger_obligation_locked(
     }
     line = ledger_owner.serialize_event(revoke).encode("utf-8") + b"\n"
     candidate = before + (b"" if before.endswith(b"\n") else b"\n") + line
+    ledger_resource_budget, _snapshot = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
+        item, selected_snapshot=selected_snapshot, known_row_bytes=(line,))
     temporary = item / ".ledger-revoke-candidate.jsonl"
     try:
         temporary.write_bytes(candidate)
@@ -15153,6 +15703,7 @@ def revoke_legacy_ledger_obligation(
 
 TRANSITION_OWNER = "mutate-work-item:archive-with-successor-v1"
 TRANSFER_TRANSITION_OWNER = "mutate-work-item:archive-with-successor-v2"
+ORDINARY_CLOSE_TRANSITION_OWNER = "mutate-work-item:close-item-v1"
 SUCCESSOR_IMPORT_OWNER = "mutate-work-item:import-active-successor-v1"
 SUCCESSOR_IMPORT_KIND = "active-successor-import-v1"
 SUCCESSOR_IMPORT_RECEIPT = "active-successor-import-receipt.json"
@@ -15207,6 +15758,12 @@ TRANSFER_TRANSITION_SETTLEMENT_FIELDS = (
     "migrationReceipts", "transferInputSha256", "archiveIdentity",
     "predecessorOperationId", "obligations",
 }
+ORDINARY_CLOSE_TRANSITION_SETTLEMENT_FIELDS = (
+    TRANSITION_SETTLEMENT_FIELDS - {
+        "successorPath", "successorSha256", "requestSuccessorSlug",
+        "requestSuccessorSha256", "migrationReceiptSha256",
+    }
+) | {"migrationReceipts"}
 MIGRATION_RECEIPT_BINDING_FIELDS = {"path", "sha256"}
 BUG_SUPERSESSION_INTENT_FIELDS = {
     "schemaVersion", "owner", "kind", "status", "operationId", "terminalInstant",
@@ -15409,14 +15966,27 @@ def _inspect_transfer_obligations(root: Path, item: Path, *, ledger_resource_bud
     status_text = (item / "status.md").read_text(encoding="utf-8")
     v1_staged = _parse_fields(status_text).get("template") == "staged"
     states: list[object] = []
+    acquired = []
     errors = validator.validate_work_item(
         item,
         strict_revise=False,
         validate_status_file=not v1_staged,
-        obligation_state_out=states, ledger_resource_budget=ledger_resource_budget
+        obligation_state_out=states, ledger_acquisition_complete_out=acquired, ledger_resource_budget=ledger_resource_budget
     , transition_resource_budget=_transition_resource_budget())
     if v1_staged:
         _validate_active_status_bytes(status_text.encode("utf-8"))
+    if (acquired != [True] or len(states) != 1 or type(states[0]) is not validator.WorkItemObligationStateV1
+        or type(states[0]._current_result) is not validator._CurrentReductionV1):
+        raise LifecycleError("WI-OBLIGATION-TRANSFER-COVERAGE", "; ".join((*errors,
+            "WI-LEDGER-OPERATION-RESULT: complete current result unavailable")))
+    receiving_errors = []
+    result = states[0]._current_result.receive(item, receiving_errors, observed_diagnostics=errors)
+    if result is None:
+        errors = [*errors, *receiving_errors]
+    else:
+        errors = list(result.veto_diagnostics)
+        states.clear()
+        result.publish(states, None)
     if errors:
         raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join(errors))
     if len(states) != 1:
@@ -16072,6 +16642,7 @@ def supersede_current_bug(
     archive = work_items / "bugs" / "archive" / month / f"{slug}.md"
     receipt = archive.with_name(f"{slug}.supersession-receipt.json")
     _recover_all_transitions(root, ledger_resource_budget=ledger_resource_budget)
+    _CURRENT_LIFECYCLE_TRANSACTION.get().ensure_selected_ledger_scope()
     if receipt.is_file():
         return _bug_supersession_replay(
             root,
@@ -16447,6 +17018,7 @@ def archive_fixed_bug(
     archive = work_items / "bugs" / "archive" / month / f"{slug}.md"
     receipt = archive.with_name(f"{slug}.fixed-archive-receipt.json")
     _recover_all_transitions(root, ledger_resource_budget=ledger_resource_budget)
+    _CURRENT_LIFECYCLE_TRANSACTION.get().ensure_selected_ledger_scope()
     locations = _category_locations(root, CATEGORIES["bug"], slug, ledger_resource_budget=ledger_resource_budget)
     if locations == [archive] and receipt.is_file():
         settled = _verify_fixed_bug_archive_settlement(root, receipt, ledger_resource_budget=ledger_resource_budget)
@@ -16843,7 +17415,7 @@ def _recover_single_bug_transition(
     intent_path: Path,
     intent: dict,
     *,
-    inject_failure_at: str | None = None, ledger_resource_budget=None,
+    inject_failure_at: str | None = None, ledger_resource_budget=None, retirement_results_out=None,
 ) -> dict | None:
     label = _single_bug_transition_label(intent)
     source = _intent_path(root, intent["sourcePath"], ledger_resource_budget=ledger_resource_budget)
@@ -16909,7 +17481,11 @@ def _recover_single_bug_transition(
             _remove_lifecycle_file(receipt, failure_id=rollback_id, missing_ok=True)
         else:
             _atomic_write(receipt, receipt_before)
-        _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
+        retired = _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+            outcome_composer=_CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get())
+        _require_intent_retirement_result(retired)
+        if retirement_results_out is not None:
+            retirement_results_out.append(retired)
         return None
     failure_id = forward_id
     if not archive_exists:
@@ -16970,11 +17546,15 @@ def _recover_single_bug_transition(
         raise LifecycleError(
             forward_id, f"injected {failpoint}6"
         )
-    _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
+    retired = _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+        outcome_composer=_CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get())
+    _require_intent_retirement_result(retired)
     if inject_failure_at == f"{failpoint}7":
         raise LifecycleError(
             forward_id, f"injected {failpoint}7"
         )
+    if retirement_results_out is not None:
+        retirement_results_out.append(retired)
     return settled
 
 
@@ -17260,7 +17840,7 @@ def _read_selected_transition_at(repository: Path, operation_id: str, *, ledger_
     return True, tuple(evidence)
 
 
-def _load_transition_intent_with_family(root: Path, path: Path, *, ledger_resource_budget=None, transition_resource_budget=None) -> tuple[dict, tuple[bool, ...]]:
+def _load_transition_intent_with_family(root: Path, path: Path, *, ledger_resource_budget=None, transition_resource_budget=None, intent_captures_out=None) -> tuple[dict, tuple[bool, ...]]:
     captured = None
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
     if transaction is not None:
@@ -17269,6 +17849,8 @@ def _load_transition_intent_with_family(root: Path, path: Path, *, ledger_resour
         captured = _read_transition_intent_envelope(root, path, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
     payload, snapshot, families = captured
     _verify_captured_file(snapshot, "WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
+    if intent_captures_out is not None:
+        intent_captures_out.append(snapshot)
     if transaction is not None:
         transaction.observe_retained_inputs((snapshot,))
     is_v1, is_v2, is_legacy_v2, is_bug_supersession, is_fixed_bug_archive, is_ledger_h1_relocation, is_successor_import, is_legacy_completion = families
@@ -17338,12 +17920,14 @@ def _load_transition_intent(
     *,
     ledger_resource_budget=None,
     transition_resource_budget=None,
+    intent_captures_out=None,
 ) -> dict:
     payload, _families = _load_transition_intent_with_family(
         root,
         path,
         ledger_resource_budget=ledger_resource_budget,
         transition_resource_budget=transition_resource_budget,
+        intent_captures_out=intent_captures_out,
     )
     return payload
 
@@ -17503,14 +18087,13 @@ def _ledger_location_lexically_exists(path: Path,
 
 def _ledger_location_regular_sha256(
     path: Path, *, failure_id: str, maximum_bytes: int | None = None,
-    acquired_input=None, ledger_resource_budget=None,
+    acquired_input=None, ledger_resource_budget=None, ledger_input=False,
 ) -> str:
     if ledger_resource_budget is not None:
         maximum_bytes = _validator_module()._ledger_resource_budget(ledger_resource_budget).max_ledger_bytes
-    maximum_bytes = (
-        LEDGER_LOCATION_PROOF_BYTE_CAP if maximum_bytes is None else maximum_bytes
-    )
-    if type(maximum_bytes) is not int or maximum_bytes < 0:
+    elif maximum_bytes is None and not ledger_input:
+        maximum_bytes = LEDGER_LOCATION_PROOF_BYTE_CAP
+    if maximum_bytes is not None and (type(maximum_bytes) is not int or maximum_bytes < 0):
         raise LifecycleError(failure_id, "ledger location byte limit is invalid")
     if acquired_input is not None:
         _input_reject_reparse(path, failure_id=failure_id,
@@ -17532,7 +18115,7 @@ def _ledger_location_regular_sha256(
             raise LifecycleError("WI-LEDGER-RESOURCE-INCOMPLETE", "ledger location exceeds admitted byte allowance")
         if (
             not stat.S_ISREG(observed.st_mode)
-            or observed.st_size > maximum_bytes
+            or (maximum_bytes is not None and observed.st_size > maximum_bytes)
             or _input_has_reparse(path, acquired_input)
         ):
             raise OSError("ledger location is not a bounded regular file")
@@ -17543,6 +18126,8 @@ def _ledger_location_regular_sha256(
             before_key = _lifecycle_file_snapshot_key(before)
             if before_key[:5] != _lifecycle_file_snapshot_key(observed)[:5]:
                 raise OSError("ledger location descriptor differs from its pathname")
+            if maximum_bytes is None:
+                maximum_bytes = before.st_size
             digests = []
             # Match snapshot capture's content check without retaining either image.
             for pass_index in range(2):
@@ -17809,6 +18394,11 @@ def _validate_stable_ledger_settlement(
         and payload.get("owner") == TRANSFER_TRANSITION_OWNER
         and isinstance(payload.get("obligations"), list)
     )
+    is_ordinary = (
+        type(schema_version) is int and schema_version == 3
+        and set(payload) == ORDINARY_CLOSE_TRANSITION_SETTLEMENT_FIELDS
+        and payload.get("owner") == ORDINARY_CLOSE_TRANSITION_OWNER
+    )
     terminal_instant = payload.get("terminalInstant")
     try:
         archive_relative = _ledger_location_archive_relative(slug, terminal_instant)
@@ -17820,28 +18410,26 @@ def _validate_stable_ledger_settlement(
     successor_slug = payload.get("requestSuccessorSlug")
     operation_id = payload.get("operationId")
     required_sha_fields = (
-        "successorSha256",
         "ledgerSha256",
         "statusSha256",
         "closureSha256",
         "bugDispositionReceiptSha256",
         "readmeSha256",
         "requestClosureSha256",
-        "requestSuccessorSha256",
         "requestExpectedLedgerSha256",
-        "requestExpectedReadmeSha256",
     )
+    if not is_ordinary:
+        required_sha_fields += ("successorSha256", "requestSuccessorSha256", "requestExpectedReadmeSha256")
     if (
-        not (is_v1 or is_v2 or is_legacy_v2)
+        not (is_v1 or is_v2 or is_legacy_v2 or is_ordinary)
         or payload.get("status") != "settled"
         or payload.get("workItem") != slug
         or payload.get("requestTerminalInstant") != terminal_instant
         or payload.get("archivePath") != archive_relative
         or archive.relative_to(repository).as_posix() != archive_relative
-        or not isinstance(successor_slug, str)
-        or not is_valid_slug(successor_slug)
-        or payload.get("successorPath")
-        != f"work-items/backlog/{successor_slug}.md"
+        or (not is_ordinary and (not isinstance(successor_slug, str)
+            or not is_valid_slug(successor_slug)
+            or payload.get("successorPath") != f"work-items/backlog/{successor_slug}.md"))
         or not isinstance(operation_id, str)
         or any(
             not isinstance(payload.get(key), str)
@@ -17850,11 +18438,16 @@ def _validate_stable_ledger_settlement(
         )
         or payload.get("ledgerSha256")
         != payload.get("requestExpectedLedgerSha256")
+        or (is_ordinary and not (payload["requestExpectedReadmeSha256"] is None
+            or isinstance(payload["requestExpectedReadmeSha256"], str)
+            and SHA256_RE.fullmatch(payload["requestExpectedReadmeSha256"]) is not None))
     ):
         raise LifecycleError(
             "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
             "settled receipt binding or shape differs",
         )
+    if is_ordinary and operation_id != _ordinary_close_operation_id(payload):
+        raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "ordinary request identity differs")
     try:
         _transition_intent_path(root, operation_id, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
     except LifecycleError as exc:
@@ -17906,7 +18499,7 @@ def _validate_stable_ledger_settlement(
         "ledgerSha256": _ledger_location_regular_sha256(
             archive / "agent-runs.jsonl",
             failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-            ledger_resource_budget=ledger_resource_budget,
+            ledger_resource_budget=ledger_resource_budget, ledger_input=True,
          acquired_input=acquired_input),
         "statusSha256": _ledger_location_regular_sha256(
             archive / "status.md",
@@ -17926,7 +18519,7 @@ def _validate_stable_ledger_settlement(
         archive,
         failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
      acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
-    if is_v2:
+    if is_v2 or is_ordinary:
         expected_migration_receipts = _validate_transfer_migration_receipt_bindings(
             root,
             payload.get("archivePath"),
@@ -17962,6 +18555,15 @@ def _validate_stable_ledger_settlement(
             "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
             "settled archive hashes differ",
         )
+    if is_ordinary:
+        bug_receipt, bug_raw = _ledger_location_proof_object(
+            archive / BUG_DISPOSITIONS_RECEIPT,
+            failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+            unreadable="ordinary bug receipt is unreadable", acquired_input=acquired_input)
+        if (_sha256_bytes(bug_raw) != physical_hashes["bugDispositionReceiptSha256"]
+            or bug_receipt.get("readmeSha256") != payload["readmeSha256"]):
+            raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+                "ordinary historical README binding differs from its hash-bound bug receipt")
     return payload, raw, physical_hashes["ledgerSha256"]
 
 
@@ -18091,7 +18693,7 @@ transition_resource_budget=None, transition_output_ceiling=None, transition_read
         ledger_sha256 = _ledger_location_regular_sha256(
             active / "agent-runs.jsonl",
             failure_id="WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE",
-            ledger_resource_budget=ledger_resource_budget,
+            ledger_resource_budget=ledger_resource_budget, ledger_input=True,
          acquired_input=acquired_input)
         if intent is not None and intent.get("expectedLedgerSha256") != ledger_sha256:
             raise LifecycleError(
@@ -18173,7 +18775,7 @@ transition_resource_budget=None, transition_output_ceiling=None, transition_read
     ledger_sha256 = _ledger_location_regular_sha256(
         archive / "agent-runs.jsonl",
         failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
-        ledger_resource_budget=ledger_resource_budget,
+        ledger_resource_budget=ledger_resource_budget, ledger_input=True,
      acquired_input=acquired_input)
     status_after = _unb64(intent.get("statusAfter"))
     closure_after = _unb64(intent.get("closureAfter"))
@@ -18228,92 +18830,69 @@ def _transition_bug_plans(root: Path, intent: dict, *, ledger_resource_budget=No
     return tuple(plans)
 
 
-def _settlement_payload(root: Path, intent: dict, readme_sha256: str, *, ledger_resource_budget=None) -> dict:
-    failure_id = "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
-    archive = _intent_path(root, intent["archivePath"], ledger_resource_budget=ledger_resource_budget)
-    successor = _intent_path(root, intent["successorPath"], ledger_resource_budget=ledger_resource_budget)
-    bug_receipt = archive / BUG_DISPOSITIONS_RECEIPT
-    migration_receipt = None
-    if (
-        "migrationReceiptPath" in intent
-        and intent["migrationReceiptPath"] is not None
-    ):
-        migration_receipt = archive / "ledger-migration-receipts" / Path(intent["migrationReceiptPath"]).name
-    bug_receipt = _require_lifecycle_mutation_path(
-        root, bug_receipt, failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
-    )
-    if migration_receipt is not None:
-        migration_receipt = _require_lifecycle_mutation_path(
-            root, migration_receipt, failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
-        )
+def _ordinary_close_operation_id(binding: Mapping) -> str:
+    frame = {key: binding[key] for key in (
+        "schemaVersion", "owner", "workItem", "terminalInstant", "archivePath",
+        "requestClosureSha256", "requestExpectedLedgerSha256", "requestExpectedReadmeSha256",
+    )}
+    return "close-" + _sha256_bytes(_migration_receipt_bytes(frame))
+
+
+def _settlement_payload(root: Path, request: Mapping, readme_sha256: str, *, ledger_resource_budget=None) -> dict:
+    ordinary = request["schemaVersion"] == 3 and request["owner"] == ORDINARY_CLOSE_TRANSITION_OWNER
+    failure_id = ("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH" if ordinary else
+                  "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE")
+    archive = _intent_path(root, request["archivePath"], ledger_resource_budget=ledger_resource_budget)
+    bug_receipt = _require_lifecycle_mutation_path(root, archive / BUG_DISPOSITIONS_RECEIPT, failure_id=failure_id)
     payload = {
-        "schemaVersion": intent["schemaVersion"],
-        "owner": intent["owner"],
+        "schemaVersion": request["schemaVersion"],
+        "owner": request["owner"],
         "status": "settled",
-        "operationId": intent["operationId"],
-        "workItem": intent["slug"],
-        "terminalInstant": intent["terminalInstant"],
-        "archivePath": intent["archivePath"],
-        "successorPath": intent["successorPath"],
-        "successorSha256": _ledger_location_regular_sha256(successor, failure_id=failure_id),
-        "ledgerSha256": _ledger_location_regular_sha256(
-            archive / "agent-runs.jsonl",
-            failure_id=failure_id,
-            ledger_resource_budget=ledger_resource_budget,
-        ),
-        "statusSha256": _ledger_location_regular_sha256(
-            archive / "status.md",
-            failure_id=failure_id,
-        ),
-        "closureSha256": _ledger_location_regular_sha256(
-            archive / "closure.md",
-            failure_id=failure_id,
-        ),
-        "bugDispositionReceiptSha256": _ledger_location_regular_sha256(
-            bug_receipt,
-            failure_id=failure_id,
-        ),
+        "operationId": request["operationId"],
+        "workItem": request["workItem"] if ordinary else request["slug"],
+        "terminalInstant": request["terminalInstant"],
+        "archivePath": request["archivePath"],
+        "ledgerSha256": _ledger_location_regular_sha256(archive / "agent-runs.jsonl",
+            failure_id=failure_id, ledger_resource_budget=ledger_resource_budget, ledger_input=True),
+        "statusSha256": _ledger_location_regular_sha256(archive / "status.md", failure_id=failure_id),
+        "closureSha256": _ledger_location_regular_sha256(archive / "closure.md", failure_id=failure_id),
+        "bugDispositionReceiptSha256": _ledger_location_regular_sha256(bug_receipt, failure_id=failure_id),
         "readmeSha256": readme_sha256,
-        "requestClosureSha256": intent["closureInputSha256"],
-        "requestSuccessorSlug": intent["successorSlug"],
-        "requestSuccessorSha256": _sha256_bytes(_unb64(intent["successorData"]) or b""),
-        "requestTerminalInstant": intent["terminalInstant"],
-        "requestExpectedLedgerSha256": intent["expectedLedgerSha256"],
-        "requestExpectedReadmeSha256": intent["expectedReadmeSha256"],
+        "requestClosureSha256": request["requestClosureSha256"] if ordinary else request["closureInputSha256"],
+        "requestTerminalInstant": request["terminalInstant"],
+        "requestExpectedLedgerSha256": request["requestExpectedLedgerSha256"] if ordinary else request["expectedLedgerSha256"],
+        "requestExpectedReadmeSha256": request["requestExpectedReadmeSha256"] if ordinary else request["expectedReadmeSha256"],
     }
-    if "migrationReceipts" in intent:
-        expected_migration_receipts = _validate_transfer_migration_receipt_bindings(
-            root,
-            intent["archivePath"],
-            intent["migrationReceipts"],
-            failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", ledger_resource_budget=ledger_resource_budget
-        )
-        physical_migration_receipts = _migration_receipt_bindings_at(
-            root,
-            archive,
-            failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", ledger_resource_budget=ledger_resource_budget
-        )
-        if physical_migration_receipts != expected_migration_receipts:
-            raise LifecycleError(
-                "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
-                "migration receipt set differs from transition intent",
-            )
-        payload["migrationReceipts"] = [
-            dict(row) for row in physical_migration_receipts
-        ]
-    else:
-        payload["migrationReceiptSha256"] = (
-            _ledger_location_regular_sha256(migration_receipt, failure_id=failure_id)
-            if migration_receipt is not None
-            else None
-        )
-    if intent["schemaVersion"] == 2:
+    if not ordinary:
+        successor = _intent_path(root, request["successorPath"], ledger_resource_budget=ledger_resource_budget)
         payload.update({
-            "transferInputSha256": intent["transferInputSha256"],
-            "archiveIdentity": intent["archiveIdentity"],
-            "predecessorOperationId": intent["predecessorOperationId"],
-            "obligations": intent["obligations"],
+            "successorPath": request["successorPath"],
+            "successorSha256": _ledger_location_regular_sha256(successor, failure_id=failure_id),
+            "requestSuccessorSlug": request["successorSlug"],
+            "requestSuccessorSha256": _sha256_bytes(_unb64(request["successorData"]) or b""),
         })
+    elif payload["ledgerSha256"] != request["requestExpectedLedgerSha256"]:
+        raise LifecycleError(failure_id, "ordinary relocation ledger differs from its captured input")
+    if "migrationReceipts" in request:
+        expected_migration_receipts = _validate_transfer_migration_receipt_bindings(
+            root, request["archivePath"], list(request["migrationReceipts"]),
+            failure_id=failure_id, ledger_resource_budget=ledger_resource_budget)
+        physical_migration_receipts = _migration_receipt_bindings_at(
+            root, archive, failure_id=failure_id, ledger_resource_budget=ledger_resource_budget)
+        if physical_migration_receipts != expected_migration_receipts:
+            raise LifecycleError(failure_id, "migration receipt set differs from relocation request")
+        payload["migrationReceipts"] = [dict(row) for row in physical_migration_receipts]
+    else:
+        migration_receipt = None
+        if request.get("migrationReceiptPath") is not None:
+            migration_receipt = _require_lifecycle_mutation_path(root,
+                archive / "ledger-migration-receipts" / Path(request["migrationReceiptPath"]).name,
+                failure_id=failure_id)
+        payload["migrationReceiptSha256"] = (_ledger_location_regular_sha256(migration_receipt,
+            failure_id=failure_id) if migration_receipt is not None else None)
+    if request["schemaVersion"] == 2:
+        payload.update({key: request[key] for key in (
+            "transferInputSha256", "archiveIdentity", "predecessorOperationId", "obligations")})
     return payload
 
 
@@ -18380,93 +18959,20 @@ def _precompute_transition_readme_sha256(
 
 def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None, *, ledger_resource_budget=None) -> dict:
     failure_id = "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
-    receipt = _require_lifecycle_mutation_path(
-        root, receipt, failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
-    )
-    payload, _ = _ledger_location_proof_object(
-        receipt, failure_id=failure_id, unreadable="settled receipt is unreadable"
-    )
-    valid_owner = False
-    if isinstance(payload, dict):
-        schema_version = payload.get("schemaVersion")
-        valid_owner = (
-            schema_version == 1
-            and payload.get("owner") == TRANSITION_OWNER
-            and set(payload) == TRANSITION_SETTLEMENT_FIELDS
-        ) or (
-            schema_version == 2
-            and payload.get("owner") == TRANSFER_TRANSITION_OWNER
-            and isinstance(payload.get("obligations"), list)
-            and set(payload)
-            in (
-                TRANSFER_TRANSITION_SETTLEMENT_FIELDS,
-                LEGACY_TRANSFER_TRANSITION_SETTLEMENT_FIELDS,
-            )
-        )
-    if not isinstance(payload, dict) or payload.get("status") != "settled" or not valid_owner:
-        raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt shape differs")
-    archive = _intent_path(root, payload["archivePath"], ledger_resource_budget=ledger_resource_budget)
-    successor = _intent_path(root, payload["successorPath"], ledger_resource_budget=ledger_resource_budget)
-    readme_path = _require_lifecycle_mutation_path(
-        root, _work_items_root(root, ledger_resource_budget=ledger_resource_budget) / "README.md",
-        failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-    )
-    bug_receipt_path = _require_lifecycle_mutation_path(
-        root, archive / BUG_DISPOSITIONS_RECEIPT,
-        failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-    )
-    physical = {
-        "successorSha256": _ledger_location_regular_sha256(successor, failure_id=failure_id),
-        "ledgerSha256": _ledger_location_regular_sha256(
-            archive / "agent-runs.jsonl",
-            failure_id=failure_id,
-            ledger_resource_budget=ledger_resource_budget,
-        ),
-        "statusSha256": _ledger_location_regular_sha256(
-            archive / "status.md",
-            failure_id=failure_id,
-        ),
-        "closureSha256": _ledger_location_regular_sha256(
-            archive / "closure.md",
-            failure_id=failure_id,
-        ),
-        "bugDispositionReceiptSha256": _ledger_location_regular_sha256(
-            bug_receipt_path,
-            failure_id=failure_id,
-        ),
-        "readmeSha256": _ledger_location_regular_sha256(readme_path, failure_id=failure_id),
-    }
-    migration_receipts = _migration_receipt_bindings_at(
-        root,
-        archive,
-        failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", ledger_resource_budget=ledger_resource_budget
-    )
-    if "migrationReceipts" in payload:
-        expected_migration_receipts = _validate_transfer_migration_receipt_bindings(
-            root,
-            payload["archivePath"],
-            payload["migrationReceipts"],
-            failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", ledger_resource_budget=ledger_resource_budget
-        )
-        if migration_receipts != expected_migration_receipts:
-            raise LifecycleError(
-                "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-                "migration receipt set differs",
-            )
-        physical["migrationReceipts"] = [dict(row) for row in migration_receipts]
-    else:
-        expected_migration_sha = payload.get("migrationReceiptSha256")
-        expected_migration_count = 0 if expected_migration_sha is None else 1
-        if len(migration_receipts) != expected_migration_count:
-            raise LifecycleError(
-                "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-                "migration receipt cardinality differs",
-            )
-        physical["migrationReceiptSha256"] = (
-            migration_receipts[0]["sha256"] if migration_receipts else None
-        )
-    if any(payload.get(key) != value for key, value in physical.items()):
-        raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt hashes differ")
+    receipt = _require_lifecycle_mutation_path(root, receipt, failure_id=failure_id)
+    repository, _work_items = _resolve_project_root_identity(root, input_role="repository-root",
+        ledger_resource_budget=ledger_resource_budget)
+    archive = receipt.parent
+    payload, _raw, _ledger_sha256 = _validate_stable_ledger_settlement(
+        root, repository, archive, receipt, slug=archive.name, ledger_resource_budget=ledger_resource_budget)
+    readme_path = _require_lifecycle_mutation_path(root, _work_items / "README.md", failure_id=failure_id)
+    if _ledger_location_regular_sha256(readme_path, failure_id=failure_id) != payload["readmeSha256"]:
+        raise LifecycleError(failure_id, "settled receipt README hash differs")
+    if payload["schemaVersion"] != 3:
+        successor = _intent_path(root, payload["successorPath"], ledger_resource_budget=ledger_resource_budget)
+        if _ledger_location_regular_sha256(successor, failure_id=failure_id) != payload["successorSha256"]:
+            raise LifecycleError(failure_id, "settled receipt successor hash differs")
+    bug_receipt_path = _require_lifecycle_mutation_path(root, archive / BUG_DISPOSITIONS_RECEIPT, failure_id=failure_id)
     bug_receipt, _ = _ledger_location_proof_object(bug_receipt_path, failure_id=failure_id, unreadable="bug receipt is unreadable")
     if isinstance(bug_receipt, dict) and "linkMaintenance" in bug_receipt:
         rows = bug_receipt.get("bugs")
@@ -18488,11 +18994,39 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None, 
     return payload
 
 
+def _require_intent_retirement_result(result):
+    if result is True:
+        return
+    composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+    failure = composer.top_level(composer.finalize()) if composer is not None else None
+    if failure is not None:
+        raise failure
+    raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "owned intent retirement is incomplete")
+
+
 def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str | None = None,
                         expected_request: dict | None = None, ledger_resource_budget=None,) -> dict | None:
-    intent = _load_transition_intent(root, intent_path, ledger_resource_budget=ledger_resource_budget)
+    captures = []
+    intent = _load_transition_intent(root, intent_path, ledger_resource_budget=ledger_resource_budget,
+        intent_captures_out=captures)
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    token = transaction.begin_ledger_admission_scope(("operation", intent["operationId"]), captures[0])
+    retirements = []
+    result = _recover_transition_in_ledger_scope(root, intent_path, intent,
+        inject_failure_at=inject_failure_at, expected_request=expected_request,
+        ledger_resource_budget=transaction.ledger_resource_budget, retirement_results_out=retirements)
+    if len(retirements) != 1:
+        raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "owned intent retirement outcome is unavailable")
+    transaction.complete_ledger_intent_scope(token, retirements[0])
+    return result
+
+
+def _recover_transition_in_ledger_scope(root: Path, intent_path: Path, intent: dict, *,
+        inject_failure_at=None, expected_request=None, ledger_resource_budget=None,
+        retirement_results_out=None):
     if intent.get("kind") == LEGACY_COMPLETION_KIND:
-        return _recover_legacy_completion(root, intent_path, intent, inject_failure_at=inject_failure_at, ledger_resource_budget=ledger_resource_budget)
+        return _recover_legacy_completion(root, intent_path, intent, inject_failure_at=inject_failure_at,
+            ledger_resource_budget=ledger_resource_budget, retirement_results_out=retirement_results_out)
     if expected_request is not None:
         path_fields = {"activePath", "archivePath", "successorPath"}
         if any(
@@ -18505,21 +19039,28 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         return _recover_ledger_h1_artifact_set_relocation(
             root,
             intent_path,
-            intent, ledger_resource_budget=ledger_resource_budget
+            intent, ledger_resource_budget=ledger_resource_budget, retirement_results_out=retirement_results_out
         )
     if intent.get("kind") == SUCCESSOR_IMPORT_KIND:
-        return _recover_successor_import(root, intent_path, intent, ledger_resource_budget=ledger_resource_budget)
+        return _recover_successor_import(root, intent_path, intent, ledger_resource_budget=ledger_resource_budget,
+            retirement_results_out=retirement_results_out)
     if intent.get("kind") in {BUG_SUPERSESSION_KIND, FIXED_BUG_ARCHIVE_KIND}:
         return _recover_single_bug_transition(
             root,
             intent_path,
             intent,
-            inject_failure_at=inject_failure_at, ledger_resource_budget=ledger_resource_budget
+            inject_failure_at=inject_failure_at, ledger_resource_budget=ledger_resource_budget,
+            retirement_results_out=retirement_results_out
         )
     rollback_failure_id = "WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE"
     forward_failure_id = "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
     active = _intent_path(root, intent["activePath"], ledger_resource_budget=ledger_resource_budget)
     archive = _intent_path(root, intent["archivePath"], ledger_resource_budget=ledger_resource_budget)
+    existing_ledger_items = [item for item in (active, archive)
+        if os.path.lexists(item / "agent-runs.jsonl")]
+    if len(existing_ledger_items) == 1:
+        ledger_resource_budget, _snapshot = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
+            existing_ledger_items[0])
     successor = _intent_path(root, intent["successorPath"], ledger_resource_budget=ledger_resource_budget)
     status_before = _unb64(intent["statusBefore"]) or b""
     status_after = _unb64(intent["statusAfter"]) or b""
@@ -18626,7 +19167,10 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
         _require_lifecycle_mutation_path(
             root, intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
         )
-        _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
+        retired = _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+            outcome_composer=_CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get())
+        _require_intent_retirement_result(retired)
+        retirement_results_out.append(retired)
         return None
     if not archive.is_dir():
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "intent has neither active nor archive identity")
@@ -18734,9 +19278,12 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
     _require_lifecycle_mutation_path(
         root, intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
     )
-    _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
+    retired = _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+        outcome_composer=_CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get())
+    _require_intent_retirement_result(retired)
     if inject_failure_at in {"T8", "T9"}:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE", f"injected {inject_failure_at}")
+    retirement_results_out.append(retired)
     return settlement
 
 
@@ -18798,6 +19345,7 @@ def archive_with_successor(
     allow_protected_uri_updates: bool = False, ledger_resource_budget=None,
 ) -> dict:
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    transaction.ensure_selected_ledger_scope()
     _validate_slug(successor_slug)
     expected_ledger_sha256 = _normalize_sha256_input(expected_ledger_sha256)
     expected_readme_sha256 = _normalize_sha256_input(expected_readme_sha256)
@@ -18811,6 +19359,7 @@ def archive_with_successor(
     )
     payload = None
     if settled_path.is_file():
+        ledger_resource_budget, _snapshot = transaction.admit_ledger_operation(archive)
         payload = _verify_settlement(root, settled_path, ledger_resource_budget=ledger_resource_budget)
         if (
             payload.get("operationId") != operation_id
@@ -18850,11 +19399,12 @@ def archive_with_successor(
     elif payload is not None:
         return payload
     active = _active_migration_item(root, slug, ledger_resource_budget=ledger_resource_budget)
+    ledger_resource_budget, _snapshot = transaction.admit_ledger_operation(active)
     ledger = active / "agent-runs.jsonl"
     if _ledger_location_regular_sha256(
         ledger,
         failure_id="WI-LEDGER-MIGRATION-LEDGER-DRIFT",
-        ledger_resource_budget=ledger_resource_budget,
+        ledger_resource_budget=ledger_resource_budget, ledger_input=True,
     ) != expected_ledger_sha256:
         raise LifecycleError("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "transition ledger digest changed")
     readme = work_items / "README.md"
@@ -20548,6 +21098,7 @@ class _RetainedConsumerScanPreparation:
                 if (ledger_path.exists() if self.acquired_input is None else _input_exists(ledger_path, self.acquired_input)):
                     validator = self.validator()
                     carrier = _capture_file_snapshot(ledger_path, failure_id="WI-CATEGORY-MIGRATION-INVENTORY",
+                                                     maximum_bytes=None,
                                                      ledger_resource_budget=self.ledger_resource_budget,
                                                      acquired_input=self.acquired_input)
                     diagnostics: list[str] = []
@@ -21312,11 +21863,203 @@ def _verify_structural_node(node: tuple, failure_id: str) -> None:
         raise LifecycleError(failure_id, "structural node identity or stat key changed")
 
 
+def _admit_ledger_operation(item, ledger_path, selected_bytes, *, ledger_resource_budget=None,
+        known_row_bytes=(), unknown_terminal_rows=0, validator=None, transition_resource_budget=None,
+        participants=None, selected_snapshot=None, transfer_source_item=None,
+        transfer_operation_id=None, selected_transfer_snapshots_out=None):
+    """Freeze one operation's finite capacity from its exact selected image.
+
+    The caller owns the primary capture (or permitted creation absence). This
+    existing capture owner acquires only selected H1 participants through V's
+    metadata-first selector. Return the existing budget and actual participant
+    predicates; the caller retains/verifies them before any effect. No supplied
+    explicit cap is enlarged and no held transaction is resized here.
+    """
+    validator = _validator_module() if validator is None else validator
+    root = validator.repo_root_for(item)
+    artifacts = []
+    if root is not None:
+        selected_identity = (item / "agent-runs.jsonl").relative_to(root).as_posix()
+        resolution = validator._resolve_ledger_h1_selected(root, item, selected_identity,
+            selected_ledger_bytes=selected_bytes, ledger_resource_budget=ledger_resource_budget,
+            transition_resource_budget=transition_resource_budget, resource_artifacts_out=artifacts)
+        if resolution.classification == "invalid":
+            failure_ids = resolution.context.observation.failure_ids
+            raise LifecycleError(failure_ids[0] if failure_ids else "WI-LEDGER-UNSETTLED",
+                "; ".join(resolution.context.observation.diagnostics))
+    participants = {} if participants is None else dict(participants)
+    byte_participants, predicates = {}, []
+    additional_inputs = validator._CurrentEvidenceV1()
+    transfer_ledger_bytes: dict[str, bytes] = {}
+    transfer_authority_bytes: dict[str, bytes] = {}
+    transfer_snapshots: dict[str, object] = {}
+    if selected_snapshot is not None:
+        if selected_snapshot.path != ledger_path or selected_snapshot.data != selected_bytes:
+            raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "selected primary snapshot differs")
+        additional_inputs.bind_selection(selected_snapshot.path, selected_snapshot.data, snapshot=selected_snapshot)
+        transfer_snapshots[str(selected_snapshot.path)] = selected_snapshot
+
+    def add_transfer_source(source_item, operation_id):
+        transfer_errors: list[str] = []
+        validator._transfer_receipts(
+            root,
+            transfer_errors,
+            ledger_resource_budget=ledger_resource_budget,
+            selected_source_item=source_item,
+            selected_operation_id=operation_id,
+            captured_ledger_bytes_out=transfer_ledger_bytes,
+            captured_authority_bytes_out=transfer_authority_bytes,
+            captured_snapshots_out=transfer_snapshots,
+            preselected_ledger_snapshots=transfer_snapshots,
+        )
+        if transfer_errors:
+            failure_id = transfer_errors[0].split(":", 1)[0]
+            if failure_id not in {
+                "WI-OBLIGATION-TRANSFER-COVERAGE",
+                "WI-OBLIGATION-TRANSFER-OWNER",
+                "WI-OBLIGATION-TRANSFER-DRIFT",
+                "WI-LEDGER-RESOURCE-INCOMPLETE",
+            }:
+                failure_id = "WI-OBLIGATION-TRANSFER-OWNER"
+            raise LifecycleError(failure_id, "; ".join(transfer_errors))
+        for snapshot in transfer_snapshots.values():
+            additional_inputs.bind_selection(snapshot.path, snapshot.data, snapshot=snapshot)
+
+    selected_sources: set[tuple[str, str]] = set()
+    if transfer_source_item is not None or transfer_operation_id is not None:
+        if transfer_source_item is None or not isinstance(transfer_operation_id, str) or not transfer_operation_id:
+            raise LifecycleError("WI-OBLIGATION-TRANSFER-OWNER", "selected start transfer relation is invalid")
+        selected_sources.add((str(transfer_source_item), transfer_operation_id))
+    if (root is not None and isinstance(item, Path) and item.is_dir()
+        and (transfer_source_item is None or Path(item) != Path(transfer_source_item))):
+        status_path = item / "status.md"
+        if status_path.is_file():
+            status_snapshot = _capture_file_snapshot(
+                status_path,
+                failure_id="WI-OBLIGATION-TRANSFER-OWNER",
+            )
+            additional_inputs.bind_selection(status_path, status_snapshot.data, snapshot=status_snapshot)
+            relation_errors: list[str] = []
+            relation = validator._transfer_status_relation(
+                item,
+                relation_errors,
+                selected_status_bytes=status_snapshot.data,
+            )
+            if relation_errors:
+                raise LifecycleError("WI-OBLIGATION-TRANSFER-OWNER", "; ".join(relation_errors))
+            if relation is not None:
+                transfer_authority_bytes[str(status_path)] = status_snapshot.data
+                transfer_snapshots[str(status_path)] = status_snapshot
+                source_slug, operation_id = relation
+                source = resolve_category(root, f"work-item:{source_slug}",
+                    ledger_resource_budget=ledger_resource_budget)
+                selected_sources.add((str(source), operation_id))
+
+    for selected in artifacts:
+        predicates.extend(selected._selected_inputs)
+        selected_ledger_inputs = {}
+        for predicate in selected._selected_inputs:
+            snapshot = getattr(predicate, "snapshot", None)
+            if snapshot is not None and snapshot.path.name == "agent-runs.jsonl":
+                selected_ledger_inputs[str(snapshot.path)] = snapshot
+        for logical, raw in selected.ledger_bytes_by_path.items():
+            location = selected.participant_locations_by_path.get(logical)
+            physical = getattr(location, "physical_ledger_path", logical)
+            path = root.joinpath(*PurePosixPath(physical).parts)
+            if str(path) in selected_ledger_inputs:
+                transfer_snapshots.setdefault(str(path), selected_ledger_inputs[str(path)])
+            if path == ledger_path:
+                if raw != selected_bytes:
+                    raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "primary and participant images differ")
+                continue
+            if str(path) in participants and participants[str(path)] != raw:
+                raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "selected participant images differ")
+            participants[str(path)] = raw
+            location_item = getattr(location, "physical_work_item", None)
+            if not isinstance(location_item, str):
+                location_item = PurePosixPath(physical).parent.as_posix()
+            selected_item_path = root.joinpath(*PurePosixPath(location_item).parts)
+            if selected_item_path.is_dir():
+                status_path = selected_item_path / "status.md"
+                if status_path.is_file():
+                    status_snapshot = _capture_file_snapshot(
+                        status_path,
+                        failure_id="WI-OBLIGATION-TRANSFER-OWNER",
+                    )
+                    additional_inputs.bind_selection(status_path, status_snapshot.data, snapshot=status_snapshot)
+                    relation_errors: list[str] = []
+                    relation = validator._transfer_status_relation(
+                        selected_item_path,
+                        relation_errors,
+                        selected_status_bytes=status_snapshot.data,
+                    )
+                    if relation_errors:
+                        raise LifecycleError("WI-OBLIGATION-TRANSFER-OWNER", "; ".join(relation_errors))
+                    if relation is not None:
+                        transfer_authority_bytes[str(status_path)] = status_snapshot.data
+                        transfer_snapshots[str(status_path)] = status_snapshot
+                        source_slug, operation_id = relation
+                        source = resolve_category(root, f"work-item:{source_slug}",
+                            ledger_resource_budget=ledger_resource_budget)
+                        selected_sources.add((str(source), operation_id))
+        for logical, raw in selected.historical_wire_bytes_by_path.items():
+            byte_participants[f"historical-wire:{logical}"] = raw
+    for source_identity, operation_id in sorted(selected_sources):
+        add_transfer_source(Path(source_identity), operation_id)
+    for identity, raw in transfer_ledger_bytes.items():
+        if identity == str(ledger_path):
+            if raw != selected_bytes:
+                raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "primary and transfer ancestry images differ")
+            continue
+        if identity in participants and participants[identity] != raw:
+            raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "selected transfer participant images differ")
+        participants[identity] = raw
+    for identity, raw in transfer_authority_bytes.items():
+        authority_path = Path(identity)
+        if (authority_path.name != "lifecycle-transition-receipt.json"
+            and authority_path.parent.name != "ledger-migration-receipts"):
+            continue
+        key = f"transfer-authority:{identity}"
+        if key in byte_participants and byte_participants[key] != raw:
+            raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "selected transfer authority images differ")
+        byte_participants[key] = raw
+    demand = validator.inspect_ledger_resource_demand(ledger_path, ledger_resource_budget,
+        source_bytes=selected_bytes, known_row_bytes=known_row_bytes,
+        unknown_terminal_rows=unknown_terminal_rows, participants=participants,
+        byte_participants=byte_participants)
+    explicit = ledger_resource_budget
+    budget = validator.resolve_ledger_resource_budget(
+        explicit.max_events if explicit is not None else None,
+        explicit.max_ledger_bytes if explicit is not None else None, demand=demand)
+    predicates.extend(additional_inputs.selection_inputs)
+    for predicate in predicates:
+        if not predicate.qualify():
+            raise LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "selected participant changed during admission")
+    for snapshot in transfer_snapshots.values():
+        _verify_captured_file(snapshot, "WI-LEDGER-RESOURCE-DRIFT")
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is not None and transfer_snapshots:
+        transaction.observe_retained_inputs(tuple(transfer_snapshots.values()))
+    if selected_transfer_snapshots_out is not None:
+        selected_transfer_snapshots_out.extend(transfer_snapshots.values())
+    return budget, tuple(predicates)
+
+
+def ledger_resource_budget_for_current_operation(value=None):
+    """Inherit a frozen transaction pair; omission never resizes a held pair."""
+    current = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if current is None or current.ledger_resource_budget is None:
+        return value
+    # Explicit remaining-participant sub-allowances remain the arithmetic
+    # owner's inputs. The lifecycle wrapper checks operation-level replacement.
+    return current.ledger_resource_budget if value is None else value
+
+
 def _capture_file_snapshot(
     path: Path,
     *,
     failure_id: str,
-    maximum_bytes: int = 4 * 1024 * 1024,
+    maximum_bytes: int | None = 4 * 1024 * 1024,
     require_single_link: bool = False,
     acquired_input=None,
     ledger_resource_budget=None,
@@ -21332,6 +22075,10 @@ def _capture_file_snapshot(
                                     require_single_link=require_single_link, failure_id=failure_id)
     parent_chain, observed, descriptor, before = _capture_file_identity_prefix(
         path, failure_id=failure_id, maximum_bytes=maximum_bytes, require_single_link=require_single_link)
+    # Ledger callers select this mode explicitly. The very descriptor used for
+    # both reads bounds allocation; the generic capture default remains 4 MiB.
+    if maximum_bytes is None:
+        maximum_bytes = before.st_size
     try:
         with os.fdopen(descriptor, "rb", closefd=True) as stream:
             descriptor = -1
@@ -24834,9 +25581,9 @@ def _projection_entry(manifest: dict, entry_id: str, raw_ordinal: int, root: Pat
             "; ".join(target_errors) or "manifest target is not one safe active or archive work-item ledger",
         )
     snapshot = _capture_file_snapshot(ledger, failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY",
-        ledger_resource_budget=ledger_resource_budget)
+        maximum_bytes=None, ledger_resource_budget=ledger_resource_budget)
     ledger_bytes = snapshot.data if candidate_ledger_bytes is None else candidate_ledger_bytes
-    validator.inspect_ledger_resource_demand(ledger, validator._ledger_resource_budget(ledger_resource_budget),
+    validator.inspect_ledger_resource_demand(ledger, ledger_resource_budget,
         source_bytes=ledger_bytes, physical_lines=True)
     lines = ledger_bytes.splitlines(keepends=True)
     if _sha256_bytes(ledger_bytes) != entry["ledgerSha256"]:
@@ -24993,11 +25740,21 @@ def _projection_reconcile_receipt(receipts: Path, facts: dict) -> None:
 
 def _projection_candidate_errors(entry: dict, manifests: dict[str, bytes], registry_bytes: bytes, *, ledger_resource_budget=None) -> list[str]:
     validator = _load_agent_run_ledger().load_validator()
-    return validator.validate_work_item(
+    states, acquired = [], []
+    errors = validator.validate_work_item(
         entry["_item"], validate_status_file=False,
         projection_manifest_blobs=manifests,
-        projection_registry_bytes=registry_bytes, ledger_resource_budget=ledger_resource_budget
+        projection_registry_bytes=registry_bytes, ledger_resource_budget=ledger_resource_budget,
+        obligation_state_out=states, ledger_acquisition_complete_out=acquired
     , transition_resource_budget=_transition_resource_budget())
+    if (acquired != [True] or len(states) != 1 or type(states[0]) is not validator.WorkItemObligationStateV1
+        or type(states[0]._current_result) is not validator._CurrentReductionV1):
+        return [*errors, "WI-LEDGER-OPERATION-RESULT: complete current result unavailable"]
+    receiving_errors = []
+    result = states[0]._current_result.receive(entry["_item"], receiving_errors,
+        observed_diagnostics=errors, strict=True)
+    return ([*errors, *receiving_errors] if result is None else
+        list(result.operation_diagnostics(requested_positions=(), strict=True)))
 
 
 def _projection_group_ids(operation_id: str, count: int) -> list[str]:
@@ -25084,6 +25841,8 @@ def _apply_legacy_ledger_projection_locked(root: Path, manifest_bytes: bytes, en
     if _lifecycle_path_has_reparse(repository / "work-items"):
         _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "projection writer requires one ordinary repository root")
     seed = _projection_entry(manifest, entry_id, raw_ordinal, repository, selected_entry=selected_entry, ledger_resource_budget=ledger_resource_budget)
+    ledger_resource_budget, _snapshot = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
+        seed["_item"], selected_snapshot=seed["_ledgerSnapshot"])
     ordinals = seed["rawLineOrdinals"]
     child_ids = _projection_group_ids(operation_id, len(ordinals))
     records = [
@@ -25158,6 +25917,7 @@ def apply_legacy_ledger_projection(root: Path, manifest_bytes: bytes, entry_id: 
         return {"schemaVersion": 1, "dryRun": True, "byteInventory": {}, "operationIds": child_ids}
     return _apply_legacy_ledger_projection_transaction(repository, manifest_bytes, entry_id, raw_ordinal,
         expected_registry_sha256, operation_id, recorded_at, inject_failure=inject_failure,
+        ledger_resource_budget=ledger_resource_budget,
         prepared_manifest=manifest, selected_entry=selected, _original_root=root, _binding_evidence=tuple(evidence))
 
 
@@ -25414,7 +26174,9 @@ def _legacy_settlement_target(root: Path, request_bytes: bytes, *, ledger_resour
             "WI-LEDGER-MIGRATION-TARGET-IDENTITY",
             "settlement target is not one ordinary active work-item ledger",
         )
-    ledger_bytes = _validator_module().read_ledger_bytes(ledger, ledger_resource_budget)
+    ledger_snapshot = _capture_file_snapshot(ledger, failure_id="WI-LEDGER-MIGRATION-LEDGER-DRIFT",
+        maximum_bytes=None, ledger_resource_budget=ledger_resource_budget)
+    ledger_bytes = ledger_snapshot.data
     if _sha256_bytes(ledger_bytes) != request["expectedLedgerSha256"]:
         _legacy_settlement_fail(
             "WI-LEDGER-MIGRATION-LEDGER-DRIFT",
@@ -25428,6 +26190,7 @@ def _legacy_settlement_target(root: Path, request_bytes: bytes, *, ledger_resour
         "item": item,
         "ledger": ledger,
         "ledgerBytes": ledger_bytes,
+        "_ledgerSnapshot": ledger_snapshot,
         "manifest": manifest,
         "manifestBytes": manifest_bytes,
         "entryId": entry_id,
@@ -25452,20 +26215,29 @@ def _preflight_legacy_ledger_settlement(
     )
     validator = _load_agent_run_ledger().load_validator()
     obligations: list[object] = []
+    acquired = []
     errors = validator.validate_work_item(
         item,
         strict_revise=False,
         validate_status_file=False,
         projection_manifest_blobs=manifests,
         projection_registry_bytes=registry_candidate,
-        obligation_state_out=obligations, ledger_resource_budget=ledger_resource_budget
+        obligation_state_out=obligations, ledger_resource_budget=ledger_resource_budget,
+        ledger_acquisition_complete_out=acquired
     , transition_resource_budget=_transition_resource_budget())
-    _raise_legacy_settlement_validation(errors)
-    if len(obligations) != 1:
+    if (acquired != [True] or len(obligations) != 1
+        or type(obligations[0]) is not validator.WorkItemObligationStateV1
+        or type(obligations[0]._current_result) is not validator._CurrentReductionV1):
         _legacy_settlement_fail(
             "WI-LEDGER-LEGACY-SETTLEMENT-INCOMPLETE",
             "existing reducer did not return one obligation state",
         )
+    receiving_errors = []
+    received = obligations[0]._current_result.receive(item, receiving_errors, observed_diagnostics=errors)
+    _raise_legacy_settlement_validation([*errors, *receiving_errors] if received is None else
+        list(received.operation_diagnostics(requested_positions=(), strict=False)))
+    obligations.clear()
+    received.publish(obligations, None)
     obligation_state = obligations[0]
     open_rows = tuple(obligation_state.open_revise) + tuple(obligation_state.open_launches)
     open_ids = [row.run_id for row in open_rows]
@@ -25598,7 +26370,10 @@ def _legacy_settlement_validate_after_image(
     plan: dict, ledger_resource_budget=None,
 ) -> tuple[bytes, dict, bytes, dict[str, bytes], bytes, list[dict]]:
     settlement_events = _legacy_settlement_events(plan)
-    suffix = b"".join(_projection_json(event) + b"\n" for event in settlement_events)
+    serialized_rows = tuple(_projection_json(event) + b"\n" for event in settlement_events)
+    suffix = b"".join(serialized_rows)
+    ledger_resource_budget, _snapshot = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
+        plan["item"], selected_snapshot=plan["_ledgerSnapshot"], known_row_bytes=serialized_rows)
     candidate_ledger = plan["ledgerBytes"] + suffix
     final_manifest, final_manifest_bytes, entry_id, _events = (
         _legacy_settlement_manifest(
@@ -25624,10 +26399,13 @@ def _legacy_settlement_validate_after_image(
             "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
             "settlement candidate path is not empty",
         )
+    primary = None
+    composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
     try:
         _atomic_write(candidate_path, candidate_ledger)
         validator = _load_agent_run_ledger().load_validator()
         obligations: list[object] = []
+        acquired = []
         errors = validator.validate_work_item(
             plan["item"],
             ledger_path=candidate_path,
@@ -25635,14 +26413,21 @@ def _legacy_settlement_validate_after_image(
             validate_status_file=False,
             projection_manifest_blobs=manifests,
             projection_registry_bytes=registry_candidate,
-            obligation_state_out=obligations, ledger_resource_budget=ledger_resource_budget
+            obligation_state_out=obligations, ledger_resource_budget=ledger_resource_budget,
+            ledger_acquisition_complete_out=acquired
         , transition_resource_budget=_transition_resource_budget())
-        _raise_legacy_settlement_validation(errors)
-        if len(obligations) != 1:
-            _legacy_settlement_fail(
-                "WI-LEDGER-LEGACY-SETTLEMENT-INCOMPLETE",
-                "after-image reducer did not return one obligation state",
-            )
+        parse_errors, parsed = [], []
+        requested = validator.load_jsonl(candidate_path, parse_errors, source_bytes=suffix,
+            ledger_acquisition_complete_out=parsed, ledger_resource_budget=ledger_resource_budget) if suffix else []
+        try:
+            if suffix and (parse_errors or parsed != [True]):
+                raise ValueError("; ".join((*parse_errors, "settlement request acquisition is incomplete")))
+            received, _positions = _load_agent_run_ledger()._receive_append_operation(plan["item"], validator,
+                obligations, acquired, errors, plan["ledgerBytes"], candidate_ledger, tuple(requested))
+        except ValueError as exc:
+            _raise_legacy_settlement_validation([str(exc)])
+        obligations.clear()
+        received.publish(obligations, None)
         expected_open = [
             row["targetRunId"]
             for row in plan["request"]["settlements"]
@@ -25655,8 +26440,29 @@ def _legacy_settlement_validate_after_image(
                 "WI-LEDGER-LEGACY-SETTLEMENT-INCOMPLETE",
                 "after-image obligations differ from explicit dispositions",
             )
+    except BaseException as exc:
+        primary = exc
+        if composer is not None:
+            composer.capture_primary(primary)
+        raise
     finally:
-        candidate_path.unlink(missing_ok=True)
+        try:
+            _remove_lifecycle_file(candidate_path,
+                failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", missing_ok=True)
+        except BaseException as retirement:
+            if primary is None:
+                raise
+            if composer is not None:
+                composer.record_write_cleanup(
+                    phase="write-temp-cleanup",
+                    failure_id=getattr(retirement, "failure_id", "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE"),
+                    resource=candidate_path.relative_to(Path(root).resolve()).as_posix(),
+                    diagnostic=f"settlement candidate retirement failed: {retirement}",
+                    cause=retirement,
+                )
+            else:
+                BaseException.add_note(primary,
+                    f"secondary settlement candidate retirement: {type(retirement).__name__}: {retirement}")
     return (
         candidate_ledger,
         final_manifest,
@@ -25668,11 +26474,15 @@ def _legacy_settlement_validate_after_image(
 
 
 def _restore_legacy_settlement_snapshot(
-    snapshots: Mapping[Path, bytes | None], created_directories: tuple[Path, ...]
+    snapshots: Mapping[Path, bytes | None], created_directories: tuple[Path, ...],
+    *, atomic_write_paths: tuple[Path, ...],
 ) -> None:
     for path, before in reversed(tuple(snapshots.items())):
         if before is None:
-            if path.exists():
+            if path in atomic_write_paths:
+                _remove_lifecycle_file(path,
+                    failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", missing_ok=True)
+            elif path.exists():
                 if not path.is_file() or _lifecycle_path_has_reparse(path):
                     raise OSError(f"unsafe rollback target: {path}")
                 path.unlink()
@@ -25705,6 +26515,7 @@ def _settle_legacy_ledger_locked(
         registry_candidate,
         settlement_events,
     ) = _legacy_settlement_validate_after_image(root, result, plan, ledger_resource_budget=ledger_resource_budget)
+    ledger_resource_budget = ledger_resource_budget_for_current_operation(ledger_resource_budget)
     manifests_path, registry_path, receipts_path = _projection_paths(root, input_role="repository-root", ledger_resource_budget=ledger_resource_budget)
     manifest_path = manifests_path / f"{final_manifest['manifestId']}.json"
     receipt_path = receipts_path / f"{plan['request']['operationId']}.json"
@@ -25742,6 +26553,10 @@ def _settle_legacy_ledger_locked(
         "result": final_result,
     }
     receipt_bytes = _projection_json(receipt) + b"\n"
+    atomic_writes = (
+        (registry_path, registry_candidate, "after-registry"),
+        (plan["ledger"], candidate_ledger, "after-ledger"),
+    )
     try:
         _projection_create_or_exact(
             manifest_path,
@@ -25750,12 +26565,10 @@ def _settle_legacy_ledger_locked(
         )
         if inject_failure == "after-manifest":
             raise OSError("injected failure after manifest")
-        _atomic_write(registry_path, registry_candidate)
-        if inject_failure == "after-registry":
-            raise OSError("injected failure after registry")
-        _atomic_write(plan["ledger"], candidate_ledger)
-        if inject_failure == "after-ledger":
-            raise OSError("injected failure after ledger")
+        for path, data, boundary in atomic_writes:
+            _atomic_write(path, data)
+            if inject_failure == boundary:
+                raise OSError(f"injected failure {boundary.replace('-', ' ')}")
         _projection_create_or_exact(
             receipt_path,
             receipt_bytes,
@@ -25772,7 +26585,8 @@ def _settle_legacy_ledger_locked(
             raise OSError("settlement participant readback differs")
     except BaseException as exc:
         try:
-            _restore_legacy_settlement_snapshot(snapshots, created_directories)
+            _restore_legacy_settlement_snapshot(snapshots, created_directories,
+                atomic_write_paths=tuple(path for path, _data, _boundary in atomic_writes))
         except BaseException as rollback_exc:
             raise LifecycleError(
                 "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
@@ -25814,6 +26628,7 @@ def settle_legacy_ledger(
             _legacy_settlement_target(root, request_bytes, ledger_resource_budget=ledger_resource_budget)
         return _settle_legacy_ledger_transaction(
             root, request_bytes, inject_failure=inject_failure,
+            ledger_resource_budget=ledger_resource_budget,
             _original_root=original_root, _binding_evidence=tuple(evidence),
         )
     if inject_failure is not None:
@@ -26723,7 +27538,8 @@ def _sealed_prefix_path(
     )
 
 
-def _sealed_prefix_existing_bytes(path: Path, failure_id: str, *, ledger_resource_budget=None) -> bytes | None:
+def _sealed_prefix_existing_bytes(path: Path, failure_id: str, *, ledger_resource_budget=None,
+                                  ledger_input=False, ledger_captures_out=None) -> bytes | None:
     try:
         info = path.lstat()
     except FileNotFoundError:
@@ -26733,9 +27549,13 @@ def _sealed_prefix_existing_bytes(path: Path, failure_id: str, *, ledger_resourc
     if _lifecycle_path_has_reparse(path) or not stat.S_ISREG(info.st_mode):
         _projection_fail(failure_id, "sealed-prefix participant is not a regular non-reparse file")
     try:
-        if ledger_resource_budget is not None:
-            return _capture_file_snapshot(path, failure_id=failure_id,
-                                          ledger_resource_budget=ledger_resource_budget).data
+        if ledger_input or ledger_resource_budget is not None:
+            snapshot = _capture_file_snapshot(path, failure_id=failure_id,
+                                          maximum_bytes=None,
+                                          ledger_resource_budget=ledger_resource_budget)
+            if ledger_captures_out is not None:
+                ledger_captures_out.append(snapshot)
+            return snapshot.data
         return path.read_bytes()
     except OSError as exc:
         raise LifecycleError(failure_id, "sealed-prefix participant cannot be read") from exc
@@ -27004,7 +27824,7 @@ def _sealed_prefix_candidate_contexts(
 
 def _sealed_prefix_apply_preflight(
     root: Path,
-    request: SealedPrefixActivationRequestV1, ledger_resource_budget=None,
+    request: SealedPrefixActivationRequestV1, ledger_resource_budget=None, *, ledger_captures_out=None,
 ) -> tuple[SealedPrefixActivationPlanV1, Mapping[str, bytes]]:
     manifest = _sealed_prefix_manifest(request)
     repository, work_items = _sealed_prefix_repository(root, ledger_resource_budget=ledger_resource_budget)
@@ -27033,7 +27853,7 @@ def _sealed_prefix_apply_preflight(
         _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "H1 and ledger manifests name different policy decisions")
 
     resource_owner = _validator_module()
-    budget = resource_owner._ledger_resource_budget(ledger_resource_budget)
+    budget = resource_owner._ledger_resource_budget(ledger_resource_budget) if ledger_resource_budget is not None else None
     charged_bytes = charged_events = 0
     ledger_bytes_by_path: dict[str, bytes] = {}
     for entry in manifest["entries"]:
@@ -27051,19 +27871,27 @@ def _sealed_prefix_apply_preflight(
             prefix=("work-items", "active"),
             failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY",
         )
-        remaining = budget.max_ledger_bytes - charged_bytes
-        if remaining <= 0:
-            raise LifecycleError("WI-LEDGER-RESOURCE-INCOMPLETE", "complete group byte allowance exhausted")
-        member_budget = resource_owner.LedgerResourceBudgetV1(budget.max_events, remaining)
+        member_budget = None
+        if budget is not None:
+            remaining = budget.max_ledger_bytes - charged_bytes
+            if remaining <= 0:
+                raise LifecycleError("WI-LEDGER-RESOURCE-INCOMPLETE", "complete group byte allowance exhausted")
+            member_budget = resource_owner.LedgerResourceBudgetV1(budget.max_events, remaining)
         raw = _sealed_prefix_existing_bytes(ledger_path, "WI-LEDGER-MIGRATION-TARGET-IDENTITY",
-                                             ledger_resource_budget=member_budget)
+                                             ledger_resource_budget=member_budget, ledger_input=True,
+                                             ledger_captures_out=ledger_captures_out)
         if raw is None:
             _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "manifest ledger is missing")
         charged_bytes += len(raw)
         charged_events += raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n"))
-        if charged_events > budget.max_events:
+        if budget is not None and charged_events > budget.max_events:
             raise LifecycleError("WI-LEDGER-RESOURCE-INCOMPLETE", "complete group physical line allowance exhausted")
         ledger_bytes_by_path[ledger_relative] = raw
+    if ledger_resource_budget is None:
+        selected_path, selected_raw = next(iter(ledger_bytes_by_path.items()))
+        ledger_resource_budget = resource_owner.resolve_ledger_resource_budget(
+            demand=resource_owner.inspect_ledger_resource_demand(selected_path, None, source_bytes=selected_raw,
+                participants=ledger_bytes_by_path, physical_lines=True))
 
     registry_path = work_items / LEGACY_PROJECTION_REGISTRY
     registry_before_live = _sealed_prefix_existing_bytes(
@@ -27283,7 +28111,13 @@ def _apply_sealed_prefix_activation_locked(
 ) -> dict[str, object]:
     if inject_failure is not None and inject_failure not in _SEALED_PREFIX_FAILURE_BOUNDARIES:
         _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "unknown activation failure boundary")
-    plan, ledger_bytes_by_path = _sealed_prefix_apply_preflight(root, request, ledger_resource_budget=ledger_resource_budget)
+    captures = []
+    plan, ledger_bytes_by_path = _sealed_prefix_apply_preflight(root, request,
+        ledger_resource_budget=ledger_resource_budget, ledger_captures_out=captures)
+    if not captures:
+        _projection_fail("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "qualified ledger inputs are unavailable")
+    ledger_resource_budget = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_captured_ledger_images(
+        captures[0], participant_snapshots=tuple(captures[1:]))
     inventory = _sealed_prefix_inventory(root, plan, ledger_resource_budget=ledger_resource_budget)
     if plan.replay:
         return _sealed_prefix_result(plan, dry_run=False, inventory={})
@@ -27383,12 +28217,13 @@ def apply_sealed_prefix_activation(
         root,
         request,
         inject_failure=inject_failure,
+        ledger_resource_budget=ledger_resource_budget,
     )
 
 
 def _sealed_prefix_revoke_preflight(
     root: Path,
-    request: SealedPrefixRevokeRequestV1, ledger_resource_budget=None,
+    request: SealedPrefixRevokeRequestV1, ledger_resource_budget=None, *, ledger_captures_out=None,
 ) -> tuple[SealedPrefixActivationPlanV1, Mapping[str, bytes]]:
     if type(request) is not SealedPrefixRevokeRequestV1:
         _projection_fail("WI-LEDGER-COMPAT-RECEIPT-INVALID", "revoke request type is invalid")
@@ -27455,7 +28290,7 @@ def _sealed_prefix_revoke_preflight(
     if not isinstance(entries, list) or len(entries) != 2:
         _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "revoke manifest entries are invalid")
     resource_owner = _validator_module()
-    budget = resource_owner._ledger_resource_budget(ledger_resource_budget)
+    budget = resource_owner._ledger_resource_budget(ledger_resource_budget) if ledger_resource_budget is not None else None
     charged_bytes = charged_events = 0
     ledger_bytes_by_path: dict[str, bytes] = {}
     for entry in entries:
@@ -27467,12 +28302,15 @@ def _sealed_prefix_revoke_preflight(
             prefix=("work-items", "active"),
             failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY",
         )
-        remaining = budget.max_ledger_bytes - charged_bytes
-        if remaining <= 0:
-            raise LifecycleError("WI-LEDGER-RESOURCE-INCOMPLETE", "complete group byte allowance exhausted")
-        member_budget = resource_owner.LedgerResourceBudgetV1(budget.max_events, remaining)
+        member_budget = None
+        if budget is not None:
+            remaining = budget.max_ledger_bytes - charged_bytes
+            if remaining <= 0:
+                raise LifecycleError("WI-LEDGER-RESOURCE-INCOMPLETE", "complete group byte allowance exhausted")
+            member_budget = resource_owner.LedgerResourceBudgetV1(budget.max_events, remaining)
         raw = _sealed_prefix_existing_bytes(ledger_path, "WI-LEDGER-MIGRATION-TARGET-IDENTITY",
-                                             ledger_resource_budget=member_budget)
+                                             ledger_resource_budget=member_budget, ledger_input=True,
+                                             ledger_captures_out=ledger_captures_out)
         if raw is None:
             _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "revoke ledger is missing")
         if (
@@ -27482,9 +28320,14 @@ def _sealed_prefix_revoke_preflight(
             _projection_fail("WI-LEDGER-COMPAT-REVOKE-AFTER-SUFFIX", "revoke refuses a ledger with suffix or prefix drift")
         charged_bytes += len(raw)
         charged_events += raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n"))
-        if charged_events > budget.max_events:
+        if budget is not None and charged_events > budget.max_events:
             raise LifecycleError("WI-LEDGER-RESOURCE-INCOMPLETE", "complete group physical line allowance exhausted")
         ledger_bytes_by_path[entry["ledgerPath"]] = raw
+    if ledger_resource_budget is None:
+        selected_path, selected_raw = next(iter(ledger_bytes_by_path.items()))
+        ledger_resource_budget = resource_owner.resolve_ledger_resource_budget(
+            demand=resource_owner.inspect_ledger_resource_demand(selected_path, None, source_bytes=selected_raw,
+                participants=ledger_bytes_by_path, physical_lines=True))
     registry_path = work_items / LEGACY_PROJECTION_REGISTRY
     registry_live = _sealed_prefix_existing_bytes(registry_path, "WI-LEDGER-COMPAT-ACTIVATION-PARTIAL")
     if registry_live is None:
@@ -27653,7 +28496,13 @@ def _revoke_sealed_prefix_activation_locked(
 ) -> dict[str, object]:
     if inject_failure not in {None, "after-registry-readback", "after-receipt-create"}:
         _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "unknown revoke failure boundary")
-    plan, ledger_bytes = _sealed_prefix_revoke_preflight(root, request, ledger_resource_budget=ledger_resource_budget)
+    captures = []
+    plan, ledger_bytes = _sealed_prefix_revoke_preflight(root, request,
+        ledger_resource_budget=ledger_resource_budget, ledger_captures_out=captures)
+    if not captures:
+        _projection_fail("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "qualified ledger inputs are unavailable")
+    ledger_resource_budget = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_captured_ledger_images(
+        captures[0], participant_snapshots=tuple(captures[1:]))
     inventory = _sealed_prefix_inventory(root, plan, ledger_resource_budget=ledger_resource_budget)
     if plan.replay:
         return _sealed_prefix_result(plan, dry_run=False, inventory={})
@@ -27735,6 +28584,7 @@ def revoke_sealed_prefix_activation(
         root,
         request,
         inject_failure=inject_failure,
+        ledger_resource_budget=ledger_resource_budget,
     )
 
 
@@ -28632,7 +29482,7 @@ def _ledger_h1_apply_contract_after(
 def _ledger_h1_restore_before_receipt(
     root: Path,
     intent_path: Path,
-    intent: Mapping[str, object], ledger_resource_budget=None,
+    intent: Mapping[str, object], ledger_resource_budget=None, _created_directories=None,
 ) -> None:
     receipt_path = _intent_path(root, str(intent["receiptPath"]), ledger_resource_budget=ledger_resource_budget)
     if _ledger_h1_lexically_exists(receipt_path):
@@ -28647,7 +29497,7 @@ def _ledger_h1_restore_before_receipt(
     artifact_base = _intent_path(root, str(intent["artifactBase"]), ledger_resource_budget=ledger_resource_budget)
     for member, source, target, side in reversed(distribution):
         if side == "target":
-            source.parent.mkdir(parents=True, exist_ok=True)
+            LifecycleWriteTarget.make_directories(source.parent, _CURRENT_LIFECYCLE_TRANSACTION.get())
             (_replace_lifecycle_directory(target, source) if member["kind"] == "directory" else _replace_lifecycle_directory(target, source, directory=False))
             _ledger_h1_exact_member_at(
                 source,
@@ -28670,15 +29520,18 @@ def _ledger_h1_restore_before_receipt(
                 "H1 rollback root contract cannot be proven",
             )
         _atomic_write(contract_path, root_before)
-    try:
-        artifact_base.rmdir()
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        raise LifecycleError(
-            "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
-            "H1 rollback target base is not empty",
-        ) from exc
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if _created_directories is not None:
+        for record in reversed(_created_directories):
+            if os.path.lexists(record.locator):
+                LifecycleWriteTarget.remove_created_directory(record, transaction,
+                    failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE")
+    elif os.path.lexists(artifact_base):
+        snapshot = _capture_owned_directory_snapshot(artifact_base, failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE")
+        transaction.observe_retained_inputs((snapshot,))
+        LifecycleWriteTarget._remove_empty_directory_snapshot(
+            transaction._retained_observations[artifact_base], transaction,
+            failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE")
     _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
     _transition_fsync_directory(intent_path.parent)
 
@@ -28721,7 +29574,7 @@ def _ledger_h1_settle_receipt(
 def _recover_ledger_h1_artifact_set_relocation(
     root: Path,
     intent_path: Path,
-    intent: Mapping[str, object], ledger_resource_budget=None,
+    intent: Mapping[str, object], ledger_resource_budget=None, retirement_results_out=None,
 ) -> dict[str, object] | None:
     _validate_ledger_h1_relocation_intent_shape(root, intent, intent_path, ledger_resource_budget=ledger_resource_budget)
     repository, _work_items = _resolve_project_root_identity(
@@ -28757,22 +29610,25 @@ def _recover_ledger_h1_artifact_set_relocation(
                 "root-only H1 recovery unexpectedly has a receipt",
             )
         if _ledger_h1_lexically_exists(artifact_base):
-            try:
-                artifact_base.rmdir()
-            except OSError as exc:
-                raise LifecycleError(
-                    "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
-                    "root-only H1 recovery target is not empty",
-                ) from exc
-        _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
+            transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+            snapshot = _capture_owned_directory_snapshot(artifact_base, failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE")
+            transaction.observe_retained_inputs((snapshot,))
+            LifecycleWriteTarget._remove_empty_directory_snapshot(
+                transaction._retained_observations[artifact_base], transaction,
+                failure_id="WI-LEDGER-COMPAT-COMMIT-INDETERMINATE")
+        retired = _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+            outcome_composer=_CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get())
+        _require_intent_retirement_result(retired)
         _transition_fsync_directory(intent_path.parent)
+        if retirement_results_out is not None:
+            retirement_results_out.append(retired)
         return None
     if _ledger_h1_lexically_exists(receipt_path) and source_count:
         raise LifecycleError(
             "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
             "split H1 recovery unexpectedly has a receipt",
         )
-    artifact_base.mkdir(exist_ok=True)
+    LifecycleWriteTarget.make_directories(artifact_base, _CURRENT_LIFECYCLE_TRANSACTION.get())
     for member, source, target, side in distribution:
         if side == "source":
             (_replace_lifecycle_directory(source, target) if member["kind"] == "directory" else _replace_lifecycle_directory(source, target, directory=False))
@@ -28809,8 +29665,12 @@ def _recover_ledger_h1_artifact_set_relocation(
             "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
             "H1 recovery settlement cannot be proven",
         )
-    _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID")
+    retired = _remove_lifecycle_file(intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+        outcome_composer=_CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get())
+    _require_intent_retirement_result(retired)
     _transition_fsync_directory(intent_path.parent)
+    if retirement_results_out is not None:
+        retirement_results_out.append(retired)
     return {
         "schemaVersion": 1,
         "status": "settled",
@@ -28882,6 +29742,8 @@ def _relocate_ledger_h1_artifact_set_locked(
             "unknown H1 relocation failure boundary",
         )
     _recover_all_transitions(root, ledger_resource_budget=ledger_resource_budget)
+    _CURRENT_LIFECYCLE_TRANSACTION.get().ensure_selected_ledger_scope(
+        operation_id=request.operation_id, owner=request)
     replay = _ledger_h1_replay_result(
         root, request, applied=True, input_role="repository-root", ledger_resource_budget=ledger_resource_budget
     )
@@ -28895,18 +29757,23 @@ def _relocate_ledger_h1_artifact_set_locked(
             "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
             "H1 relocation intent still exists after recovery",
         )
-    intent_path.parent.mkdir(parents=True, exist_ok=True)
     _transition_reserve_fixed_output(intent_path, _migration_receipt_bytes(intent))
     _atomic_write(intent_path, _migration_receipt_bytes(intent))
     _transition_fsync_directory(intent_path.parent)
     receipt_committed = False
+    created_directories = []
     try:
         if inject_failure == "after-intent":
             raise LifecycleError(
                 "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
                 "injected failure after H1 relocation intent",
             )
-        plan.artifact_base.mkdir()
+        if os.path.lexists(plan.artifact_base):
+            _ledger_h1_relocation_fail("H1 artifact base appeared before exclusive creation")
+        LifecycleWriteTarget.make_directories(plan.artifact_base, _CURRENT_LIFECYCLE_TRANSACTION.get(),
+            created=created_directories)
+        if not any(record.locator == plan.artifact_base for record in created_directories):
+            _ledger_h1_relocation_fail("H1 artifact base lacks its actual creator")
         _transition_fsync_directory(plan.archive_owner)
         for index, member in enumerate(plan.members, start=1):
             source = plan.repository.joinpath(
@@ -28972,7 +29839,8 @@ def _relocate_ledger_h1_artifact_set_locked(
         )
     except BaseException:
         if not receipt_committed:
-            _ledger_h1_restore_before_receipt(root, intent_path, intent, ledger_resource_budget=ledger_resource_budget)
+            _ledger_h1_restore_before_receipt(root, intent_path, intent, ledger_resource_budget=ledger_resource_budget,
+                _created_directories=created_directories)
         raise
 
 
@@ -28998,6 +29866,7 @@ def relocate_ledger_h1_artifact_set(
             root,
             request,
             inject_failure=inject_failure,
+            ledger_resource_budget=ledger_resource_budget,
         )
     if inject_failure is not None:
         raise LifecycleError(
@@ -29159,7 +30028,7 @@ def write_legacy_ledger_irrecoverable_disposition(root: Path, disposition_bytes:
     return _write_legacy_ledger_irrecoverable_disposition_transaction(root, disposition_bytes)
 
 
-def _successor_import_tree(root: Path, *, retained_snapshots=None) -> list[tuple[str, bytes]]:
+def _successor_import_tree(root: Path, *, retained_snapshots=None, ledger_resource_budget=None) -> list[tuple[str, bytes]]:
     """Capture every ordinary leaf without following a source or archive alias."""
 
     failure = "WI-SUCCESSOR-IMPORT-UNSAFE-INPUT"
@@ -29208,9 +30077,12 @@ def _successor_import_tree(root: Path, *, retained_snapshots=None) -> list[tuple
             if stat.S_ISDIR(info.st_mode):
                 pending.append(path)
             elif stat.S_ISREG(info.st_mode):
+                ledger_input = path == root / "agent-runs.jsonl"
                 snapshot = _capture_file_snapshot(
                     path, failure_id=failure,
-                    maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+                    maximum_bytes=None if ledger_input else LEDGER_LOCATION_PROOF_BYTE_CAP,
+                    ledger_resource_budget=(ledger_resource_budget_for_current_operation(ledger_resource_budget)
+                        if ledger_input else None),
                     require_single_link=True,
                 )
                 if retained_snapshots is not None:
@@ -29508,8 +30380,11 @@ def preflight_import_active_successor(
             or occupied_locations(successor_slug)):
         raise LifecycleError("WI-SUCCESSOR-IDENTITY-CONFLICT", "predecessor dual pair or empty successor identity is absent")
     archive = archives[0]
-    source_files = _successor_import_tree(active)
-    archive_files = _successor_import_tree(archive)
+    source_captures, archive_captures = [], []
+    source_files = _successor_import_tree(active, retained_snapshots=source_captures,
+        ledger_resource_budget=ledger_resource_budget)
+    archive_files = _successor_import_tree(archive, retained_snapshots=archive_captures,
+        ledger_resource_budget=ledger_resource_budget)
     source_map = dict(source_files)
     archive_map = dict(archive_files)
     if (not source_files or "status.md" not in source_map
@@ -29517,12 +30392,33 @@ def preflight_import_active_successor(
             or "agent-runs.jsonl" not in archive_map
             or "bug-dispositions-receipt.json" not in archive_map):
         raise LifecycleError("WI-SUCCESSOR-IMPORT-UNSAFE-INPUT", "source or archive lacks required leaves")
+    source_ledger_capture = next(value for value in source_captures
+        if isinstance(value, CapturedFileSnapshot) and value.path == active / "agent-runs.jsonl")
+    archive_ledger_capture = next(value for value in archive_captures
+        if isinstance(value, CapturedFileSnapshot) and value.path == archive / "agent-runs.jsonl")
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    ledger_resource_budget = transaction.admit_captured_ledger_images(archive_ledger_capture,
+        participant_snapshots=(source_ledger_capture,))
+    transaction.observe_retained_inputs((*source_captures, *archive_captures))
     _status_entry(root, active, ledger_resource_budget=ledger_resource_budget)
     ledger = source_map["agent-runs.jsonl"]
     archived_ledger = archive_map["agent-runs.jsonl"]
     if (not ledger or not ledger.endswith(b"\n") or not archived_ledger.startswith(ledger)):
         raise LifecycleError("WI-SUCCESSOR-LEDGER-DIVERGENCE", "source ledger is not an exact archived prefix")
-    errors, _events, _runtime = _validator_module().validate_archived_ledger_obligations(archive, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget())
+    validator = _validator_module()
+    states, acquired = [], []
+    errors, _events, _runtime = validator.validate_archived_ledger_obligations(archive,
+        ledger_resource_budget=ledger_resource_budget, transition_resource_budget=_transition_resource_budget(),
+        obligation_state_out=states, ledger_acquisition_complete_out=acquired)
+    if (acquired != [True] or len(states) != 1 or type(states[0]) is not validator.WorkItemObligationStateV1
+        or type(states[0]._current_result) is not validator._CurrentReductionV1):
+        raise LifecycleError("WI-SUCCESSOR-LEDGER-DIVERGENCE", "; ".join((*errors,
+            "WI-LEDGER-OPERATION-RESULT: complete archive result unavailable")))
+    receiving_errors = []
+    result = states[0]._current_result.receive(archive, receiving_errors,
+        observed_diagnostics=errors, history=True)
+    errors = ([*errors, *receiving_errors] if result is None else
+              [*result.veto_diagnostics, *result.obligation_diagnostics(strict=False, history=True)])
     if errors:
         raise LifecycleError("WI-SUCCESSOR-LEDGER-DIVERGENCE", "; ".join(errors))
     bindings = []
@@ -30017,7 +30913,7 @@ def _successor_import_release_stage_parent(
 
 @_lifecycle_participant
 def _recover_successor_import(
-    root: Path, intent_path: Path, intent: dict, *, stage_parent_creations=(), ledger_resource_budget=None,
+    root: Path, intent_path: Path, intent: dict, *, stage_parent_creations=(), ledger_resource_budget=None, retirement_results_out=None,
 ) -> dict | None:
     operation = intent["operationId"]
     failure = "WI-SUCCESSOR-IMPORT-RECOVERY"
@@ -30074,6 +30970,8 @@ def _recover_successor_import(
             if type(intent_retired) is not bool:
                 raise LifecycleError(failure, "successor terminal intent retirement has no bound disposition")
             transaction.verify()
+            if retirement_results_out is not None:
+                retirement_results_out.append(intent_retired)
             return settled
         source_here = source.is_dir()
         hold_here = hold.is_dir()
@@ -30123,6 +31021,8 @@ def _recover_successor_import(
             raise LifecycleError(failure, "successor terminal intent retirement has no bound disposition")
         _successor_import_source_bytes(source, plan, failure)
         transaction.verify()
+        if retirement_results_out is not None:
+            retirement_results_out.append(intent_retired)
         return None
     except BaseException as exc:
         raise LifecycleError(
@@ -30144,6 +31044,7 @@ def apply_import_active_successor(
     _validate_slug(predecessor_slug)
     _validate_slug(successor_slug)
     intent_path = _transition_intent_path(repository, operation_id, ledger_resource_budget=ledger_resource_budget)
+    _CURRENT_LIFECYCLE_TRANSACTION.get().ensure_selected_ledger_scope()
     successor = work_items / "active" / successor_slug
     receipt_path = successor / SUCCESSOR_IMPORT_RECEIPT
     if intent_path.exists():
@@ -30681,7 +31582,8 @@ def main(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        ledger_resource_budget = _validator_module().resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes)
+        ledger_resource_budget = (None if args.ledger_max_events is None and args.ledger_max_bytes is None
+            else _validator_module().resolve_ledger_resource_budget(args.ledger_max_events, args.ledger_max_bytes))
         transition_resource_budget = _transition_cli_budget(args)
         transition_output_ceiling = _transition_cli_budget(args, output=True)
         transition_read_admission = args.transition_read_admission
@@ -30767,6 +31669,7 @@ def main(argv: list[str]) -> int:
             print(result)
         elif args.command == "refresh":
             archive_inventories: list[dict] = []
+            observations: list[str] = []
             if args.reset_static_guide:
                 if not args.expected_readme_sha256:
                     raise LifecycleError(
@@ -30776,7 +31679,7 @@ def main(argv: list[str]) -> int:
                 readme_hash = reset_readme_static_guide(
                     root,
                     args.expected_readme_sha256,
-                    archive_inventory_out=archive_inventories, ledger_resource_budget=ledger_resource_budget
+                    archive_inventory_out=archive_inventories, observations_out=observations, ledger_resource_budget=ledger_resource_budget
                 , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             else:
                 if args.expected_readme_sha256:
@@ -30784,9 +31687,11 @@ def main(argv: list[str]) -> int:
                         "WI-README-REPAIR-TARGET-MISMATCH",
                         "--expected-readme-sha256 requires --reset-static-guide",
                     )
-                readme_hash = refresh_readme(root, archive_inventory_out=archive_inventories, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
+                readme_hash = refresh_readme(root, archive_inventory_out=archive_inventories, observations_out=observations, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             for row in archive_inventories[0]["unbound"]:
                 print(f"INFO WI-ARCHIVE-ENTITY-UNBOUND: {row['path']}")
+            for observation in observations:
+                print(f"INFO {observation}")
             print(f"README-SHA256: {readme_hash}")
         elif args.command == "resolve":
             if args.reference:

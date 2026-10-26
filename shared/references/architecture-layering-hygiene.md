@@ -29,6 +29,9 @@ payoff is FOUR properties, which organize the rest of this file:
   concurrency are owned at the right ring, so a module stays embeddable, observable, reproducible,
   leak-free, and race-free under execution.
 
+These are relevant concerns, not a fixed ranking; the canonical Architect input contract selects the
+determining qualities and their priorities from accepted scenarios and constraints.
+
 These SHARPEN, not replace, the always-on spine rules. The spine rule each one extends is tagged
 inline as `[spine: <rule>]`; an item with no tag is net-new.
 

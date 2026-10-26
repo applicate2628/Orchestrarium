@@ -1909,7 +1909,8 @@ def test_retained_consumer_cached_carrier_drift_never_refreshes_approval(tmp_pat
         assert (item if fault != "parent" else item.with_name("moved-custodian")).joinpath(profile["ref"]).read_bytes() == before
 
 
-def test_snapshot_reads_captured_size_and_preserves_drift_refusal(tmp_path: Path):
+@pytest.mark.parametrize('derived', [False, True])
+def test_snapshot_reads_captured_size_and_preserves_drift_refusal(tmp_path: Path, derived):
     module = load_module()
     real_fdopen = module.os.fdopen
     original = b"captured payload"
@@ -1949,11 +1950,11 @@ def test_snapshot_reads_captured_size_and_preserves_drift_refusal(tmp_path: Path
         with patch.object(module, "_open_readonly_nofollow", side_effect=capture_open), \
              patch.object(module.os, "fdopen", side_effect=observed_fdopen):
             if fault in (None, "empty"):
-                snapshot = module._capture_file_snapshot(target, failure_id="WI-SNAPSHOT-COST", maximum_bytes=0 if fault == "empty" else 1024)
+                snapshot = module._capture_file_snapshot(target, failure_id="WI-SNAPSHOT-COST", maximum_bytes=None if derived else 0 if fault == "empty" else 1024)
                 assert snapshot.data == case_bytes
             else:
                 with pytest.raises(module.LifecycleError) as caught:
-                    module._capture_file_snapshot(target, failure_id="WI-SNAPSHOT-COST", maximum_bytes=1024)
+                    module._capture_file_snapshot(target, failure_id="WI-SNAPSHOT-COST", maximum_bytes=None if derived else 1024)
                 assert caught.value.failure_id == "WI-SNAPSHOT-COST"
         if fault in (None, "empty", "growth", "shrink", "rewrite"):
             assert requests == [len(case_bytes) + 1, len(case_bytes) + 1], fault
@@ -2390,6 +2391,184 @@ def write_empty_bug_dispositions(root: Path, item_slug: str, instant: str) -> Pa
     return write_bug_dispositions(root, item_slug, instant, [])
 
 
+def _seed_ordinary_ledger_close(tmp_path, slug="ordinary-ledger"):
+    module = load_module()
+    root = tmp_path / "repo"
+    seed_active(module, root, slug)
+    item = root / "work-items/active" / slug
+    result = run_ledger(item, "append", "--run-id", "ordinary-current-record", "--role", "analyst",
+        "--execution-role", "internal", "--status", "completed", "--gate", "none", "--event-kind", "standalone",
+        "--scope", "actual ordinary lifecycle fixture", "--evidence", "manual-check:synthetic useful current result")
+    assert result.returncode == 0, result.stdout + result.stderr
+    instant = "2026-10-24T00:00:00Z"
+    write_empty_bug_dispositions(root, slug, instant)
+    return module, root, item, instant
+
+
+def test_ordinary_close_settlement_binds_inputs_migrations_and_immutable_retry(tmp_path):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    migrations = item / "ledger-migration-receipts"
+    migrations.mkdir()
+    for name in ("alpha.json", "omega.json"):
+        (migrations / name).write_text(json.dumps({"synthetic": name}), encoding="utf-8")
+    ledger_before = (item / "agent-runs.jsonl").read_bytes()
+    readme_before = (root / "work-items/README.md").read_bytes()
+    (item / "criteria.md").write_bytes(b"Ledger required: True.\n")
+    (item / "acquisition.md").write_bytes(b"Synthetic original history selection.\n")
+    requested_closure = closure(instant).encode()
+    archive = module.close_item(root, item.name, requested_closure, instant)
+    receipt = archive / "lifecycle-transition-receipt.json"
+    raw = receipt.read_bytes()
+    proof = json.loads(raw)
+    assert set(proof) == module.ORDINARY_CLOSE_TRANSITION_SETTLEMENT_FIELDS and len(proof) == 17
+    assert proof["operationId"] == module._ordinary_close_operation_id(proof)
+    assert proof["requestExpectedReadmeSha256"] == hashlib.sha256(readme_before).hexdigest()
+    assert proof["requestClosureSha256"] == hashlib.sha256(requested_closure).hexdigest()
+    assert proof["closureSha256"] == hashlib.sha256((archive / "closure.md").read_bytes()).hexdigest()
+    assert (archive / "agent-runs.jsonl").read_bytes() == ledger_before
+    assert proof["migrationReceipts"] == [{"path": p.relative_to(root).as_posix(), "sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
+                                          for p in sorted((archive / "ledger-migration-receipts").glob("*.json"))]
+    logical = f"work-items/active/{item.name}"
+    direct = module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+        logical_ledger_path=logical + "/agent-runs.jsonl")
+    assert direct.physical_work_item == archive.relative_to(root).as_posix()
+    omitted = {**proof, "migrationReceipts": proof["migrationReceipts"][:1]}
+    receipt.write_bytes(module._migration_receipt_bytes(omitted))
+    with pytest.raises(module.LifecycleError, match="migration receipt set differs"):
+        module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+            logical_ledger_path=logical + "/agent-runs.jsonl")
+    receipt.write_bytes(raw)
+    from tests.test_ledger_h1_effective_view import _capture_current_history
+    validator = module._validator_module()
+    captured = _capture_current_history(validator, root, archive, prepare=False)
+    transfer_errors = []
+    assert validator._transfer_receipts(root, transfer_errors) == {} and transfer_errors == []
+    receiver = validator.load_lifecycle_owner()
+    bound = receiver.resolve_work_item_ledger_location(root, logical_work_item=logical,
+        logical_ledger_path=logical + "/agent-runs.jsonl", acquired_input=captured._current_item.owner_input)
+    assert bound.logical_ledger_path == direct.logical_ledger_path and bound.ledger_sha256 == direct.ledger_sha256
+    assert captured.operation_diagnostics() == ()
+    module.create_candidate(root, "later-legitimate-task", b"Task: Later real item.\nNext action: Start.\nupdated: 2026-10-24T00:00:00Z\n")
+    assert (root / "work-items/README.md").read_bytes() != readme_before
+    assert module.close_item(root, item.name, requested_closure, instant) == archive
+    assert receipt.read_bytes() == raw
+    board = (root / "work-items/README.md").read_bytes()
+    with pytest.raises(module.LifecycleError, match="ordinary replay inputs differ"):
+        module.close_item(root, item.name, requested_closure + b"\n", instant)
+    assert receipt.read_bytes() == raw and (root / "work-items/README.md").read_bytes() == board
+
+
+def test_ordinary_close_settlement_refuses_distinct_invalid_bindings_and_locations(tmp_path):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    archive = module.close_item(root, item.name, closure(instant).encode(), instant)
+    receipt = archive / "lifecycle-transition-receipt.json"
+    original = receipt.read_bytes()
+    proof = json.loads(original)
+    logical = f"work-items/active/{item.name}"
+    cases = []
+    missing = dict(proof); missing.pop("requestExpectedReadmeSha256"); cases.append(missing)
+    for key, value in (("schemaVersion", True), ("owner", module.TRANSITION_OWNER),
+        ("operationId", "close-" + "0" * 64), ("statusSha256", "0" * 64),
+        ("ledgerSha256", "0" * 64), ("requestClosureSha256", "0" * 64),
+        ("archivePath", "work-items/archive/2026-10/other"), ("requestTerminalInstant", "2026-10-25T00:00:00Z"),
+        ("requestExpectedReadmeSha256", ""), ("migrationReceipts", None), ("readmeSha256", "short"),
+        ("readmeSha256", "0" * 64)):
+        case = dict(proof); case[key] = value; cases.append(case)
+    extra = dict(proof, successorPath="work-items/backlog/foreign.md"); cases.append(extra)
+    for case in cases:
+        receipt.write_bytes(module._migration_receipt_bytes(case))
+        before = receipt.read_bytes()
+        with pytest.raises(module.LifecycleError):
+            module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+                logical_ledger_path=logical + "/agent-runs.jsonl")
+        assert receipt.read_bytes() == before
+        board = (root / "work-items/README.md").read_bytes()
+        with pytest.raises(module.LifecycleError):
+            module.close_item(root, item.name, closure(instant).encode(), instant)
+        assert receipt.read_bytes() == before and (root / "work-items/README.md").read_bytes() == board
+    receipt.write_bytes(original)
+    held = archive / "owned-held-proof"
+    receipt.rename(held)
+    with pytest.raises(module.LifecycleError, match="no lifecycle relocation proof"):
+        module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+            logical_ledger_path=logical + "/agent-runs.jsonl")
+    receipt.symlink_to(held.name)
+    with pytest.raises(module.LifecycleError):
+        module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+            logical_ledger_path=logical + "/agent-runs.jsonl")
+    receipt.unlink(); held.rename(receipt)
+    item.mkdir()
+    with pytest.raises(module.LifecycleError, match="one physical lifecycle location"):
+        module.resolve_work_item_ledger_location(root, logical_work_item=logical,
+            logical_ledger_path=logical + "/agent-runs.jsonl")
+    item.rmdir()
+    assert receipt.read_bytes() == original
+
+
+@pytest.mark.parametrize("phase", ["write", "readback", "foreign-replacement"])
+def test_ordinary_close_settlement_failure_uses_owned_rollback(tmp_path, monkeypatch, phase):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    before = {p: p.read_bytes() for p in (item / "status.md", item / "agent-runs.jsonl", root / "work-items/README.md")}
+    original_write, original_verify = module._atomic_write, module._verify_settlement
+    replacement = {}
+    def write(path, data, **kwargs):
+        if phase == "write" and path.name == "lifecycle-transition-receipt.json":
+            raise module.LifecycleError("WI-TEST-PROOF-WRITE", "controlled ordinary proof write failure")
+        return original_write(path, data, **kwargs)
+    def verify(root, receipt, *args, **kwargs):
+        result = original_verify(root, receipt, *args, **kwargs)
+        if phase == "foreign-replacement":
+            foreign = tmp_path / "foreign-replacement.json"
+            replacement["bytes"] = receipt.read_bytes()
+            foreign.write_bytes(replacement["bytes"])
+            os.replace(foreign, receipt)
+            replacement["identity"] = module._lifecycle_file_identity(receipt.lstat())
+        raise module.LifecycleError("WI-TEST-PROOF-READBACK", "controlled ordinary proof receiving failure")
+    monkeypatch.setattr(module, "_atomic_write", write)
+    monkeypatch.setattr(module, "_verify_settlement", verify)
+    with pytest.raises(module.LifecycleError):
+        module.close_item(root, item.name, closure(instant).encode(), instant)
+    archive = root / "work-items/archive/2026-10" / item.name
+    if phase == "foreign-replacement":
+        leaves = [p for p in (archive / "lifecycle-transition-receipt.json", item / "lifecycle-transition-receipt.json") if p.exists()]
+        assert len(leaves) == 1 and leaves[0].read_bytes() == replacement["bytes"]
+        assert module._lifecycle_file_identity(leaves[0].lstat()) == replacement["identity"]
+    else:
+        assert item.is_dir() and not archive.exists() and not (item / "closure.md").exists()
+        assert all(p.read_bytes() == data for p, data in before.items())
+
+
+def test_ordinary_close_output_ceiling_refuses_before_business_effects(tmp_path):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    paths = (item / "status.md", item / "agent-runs.jsonl", root / "work-items/README.md")
+    before = tuple(p.read_bytes() for p in paths)
+    @module._lifecycle_participant
+    def constrained(root):
+        return module.close_item(root, item.name, closure(instant).encode(), instant)
+    with pytest.raises(module.LifecycleError, match="exceeds"):
+        constrained(root, transition_output_ceiling=module.resolve_transition_resource_budget(0, 0, 0))
+    assert tuple(p.read_bytes() for p in paths) == before
+    assert not (root / "work-items/archive/2026-10" / item.name).exists()
+
+
+@pytest.mark.parametrize("presence", ["absent", "empty"])
+def test_ordinary_close_readme_absence_is_not_an_empty_preimage(tmp_path, presence):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    readme = root / "work-items/README.md"
+    if presence == "empty":
+        readme.write_bytes(b"")
+        with pytest.raises(module.LifecycleError, match="ordered generated marker pair"):
+            module.close_item(root, item.name, closure(instant).encode(), instant)
+        assert readme.read_bytes() == b"" and item.is_dir()
+    else:
+        readme.unlink()
+        archive = module.close_item(root, item.name, closure(instant).encode(), instant)
+        proof = json.loads((archive / "lifecycle-transition-receipt.json").read_bytes())
+        assert proof["requestExpectedReadmeSha256"] is None
+        changed = {**proof, "requestExpectedReadmeSha256": hashlib.sha256(b"").hexdigest()}
+        assert module._ordinary_close_operation_id(changed) != proof["operationId"]
+
+
 def test_ordinary_close_updates_standalone_incoming_evidence_links(tmp_path: Path) -> None:
     """NCL1: public close preserves both targets and every non-URI byte."""
     module = load_module()
@@ -2820,7 +2999,7 @@ def test_close_uri_rollback_restores_owned_bytes_or_preserves_concurrent_authori
     status_before, readme_before = (active / "status.md").read_bytes(), (root / "work-items" / "README.md").read_bytes()
     original_refresh = module.refresh_readme
     concurrent = None
-    def fail_after_move(_root):
+    def fail_after_move(_root, *, ledger_resource_budget=None):
         nonlocal concurrent
         if concurrent_authoring:
             concurrent = bug.read_bytes() + b"Concurrent user bytes.\n"
@@ -6877,14 +7056,126 @@ def test_legacy_archive_projection_is_informational_and_byte_preserving(
     assert "archive/2026-04/legacy-closed-on/closure.md" in readme
 
 
+@pytest.mark.parametrize("missing", ("status", "closure", "absent-status"))
+def test_incomplete_archive_schema_is_catalogue_only(tmp_path: Path, missing: str) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    item = root / "work-items/archive/2037-02/unfamiliar-record"
+    status = "status: completed\nupdated: 2099-01-01T00:00:00Z\n"
+    closure_text = "Closed: 2099-02-01\nOutcome: Synthetic incomplete history.\n"
+    if missing != "closure":
+        closure_text += LIFECYCLE_SCHEMA_MARKER + "\n"
+    else:
+        status += LIFECYCLE_SCHEMA_MARKER + "\n"
+    write(item / "closure.md", closure_text)
+    if missing != "absent-status":
+        write(item / "status.md", status)
+    before = tree_file_bytes(item)
+    entry, = module.collect_readme_entries(root)
+    assert entry.section == "Archive metadata" and not entry.checked
+    assert entry.classification == "WI-CATEGORY-SCHEMA-INVALID"
+    assert entry.logical_reference == "work-item:unfamiliar-record"
+    assert set(entry.source_paths) == {item / name for name in before}
+    assert module._canonical_timestamp([entry]) == "none"
+    with pytest.raises(module.LifecycleError) as strict:
+        module._archived_work_item_entry(item)
+    assert strict.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+    expected_member = "closure.md" if missing == "closure" else "status.md"
+    assert "input-role=strict" in str(strict.value)
+    assert f"work-items/archive/2037-02/unfamiliar-record/{expected_member}" in str(strict.value)
+    with pytest.raises(ValueError, match="input role"):
+        module._archived_work_item_entry(item, input_role="unknown")
+    assert tree_file_bytes(item) == before
+
+
+def test_incomplete_schema_refresh_is_visible_byte_current_but_audit_strict(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    item = root / "work-items/archive/2037-02/historical"
+    write(item / "status.md", "status: completed\nupdated: 2099-01-01T00:00:00Z\n")
+    write(item / "closure.md", "Closed: 2099-02-01T00:00:00Z\n" + LIFECYCLE_SCHEMA_MARKER + "\n")
+    before = {path: (path.read_bytes(), module._lifecycle_file_identity(path.lstat())) for path in item.iterdir()}
+    result = run_cli("refresh", "--root", str(root))
+    assert result.returncode == 0, result.stdout
+    assert "INFO WI-CATEGORY-SCHEMA-INVALID:" in result.stdout
+    assert "input-role=historical-catalogue" in result.stdout
+    assert "work-items/archive/2037-02/historical/status.md" in result.stdout
+    assert "Version 1 terminal proof unavailable" in result.stdout
+    readme = root / "work-items/README.md"
+    board = readme.read_bytes()
+    assert b"Canonical changes through: none" in board
+    section = board.decode().split("## Archive metadata\n", 1)[1]
+    assert "- [x]" not in section and "- [ ]" not in section
+    observed = module.observe_readme(root)
+    assert observed["matches"] is True
+    assert observed["archiveInventory"] == {"schemaVersion": 1, "acquisitionComplete": True,
+        "classificationComplete": True, "unbound": []}
+    expected = hashlib.sha256()
+    for path, (data, _) in sorted(before.items()):
+        logical = path.relative_to(root / "work-items").as_posix().encode()
+        expected.update(len(logical).to_bytes(8, "big") + logical + len(data).to_bytes(8, "big") + data)
+    assert observed["inputDigest"] == expected.hexdigest()
+    module.check_readme(root)
+    for operation in (module.audit_categories, module.audit):
+        with pytest.raises(module.LifecycleError) as rejected:
+            operation(root)
+        assert rejected.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+        assert "input-role=strict" in str(rejected.value)
+    reset = run_cli("refresh", "--root", str(root), "--reset-static-guide",
+        "--expected-readme-sha256", hashlib.sha256(board).hexdigest())
+    assert reset.returncode == 0 and "INFO WI-CATEGORY-SCHEMA-INVALID:" in reset.stdout
+    assert readme.read_bytes() == board
+    assert all(path.read_bytes() == data and module._lifecycle_file_identity(path.lstat()) == identity
+        for path, (data, identity) in before.items())
+    (item / "status.md").write_bytes(before[item / "status.md"][0] + b"\nIndependent history bytes.\n")
+    assert module.observe_readme(root)["matches"] is False
+    with pytest.raises(module.LifecycleError) as stale:
+        module.check_readme(root)
+    assert stale.value.failure_id == "WI-README-STALE"
+
+
+def test_close_with_unfamiliar_incomplete_history_preserves_rollback_and_selected_input(tmp_path: Path) -> None:
+    slug = "selected-current"
+    module, root, active, instant = _seed_ordinary_ledger_close(tmp_path, slug)
+    historical = root / "work-items/archive/2037-02/unfamiliar-opposite"
+    write(historical / "status.md", marked_status())
+    write(historical / "closure.md", "Closed: 2037-02-01\nOutcome: Synthetic incomplete history.\n")
+    history_before = tree_file_bytes(historical)
+    module.refresh_readme(root)
+    before = tree_file_bytes(root / "work-items")
+    with pytest.raises(module.LifecycleError) as failed:
+        module.close_item(root, slug, closure(instant).encode(), instant, inject_readme_failure=True)
+    assert failed.value.failure_id == "WI-README-STALE"
+    assert tree_file_bytes(root / "work-items") == before
+    original_status = (active / "status.md").read_bytes()
+    (active / "status.md").write_bytes(original_status + (LIFECYCLE_SCHEMA_MARKER + "\n").encode())
+    with pytest.raises(module.LifecycleError) as marked_active:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    assert marked_active.value.failure_id == "WI-LEDGER-UNSETTLED"
+    with pytest.raises(module.LifecycleError) as producer_refusal:
+        module._terminalize_status((active / "status.md").read_bytes())
+    assert producer_refusal.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+    (active / "status.md").write_bytes(original_status)
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+    assert not active.exists() and (archived / module.BUG_DISPOSITIONS_RECEIPT).is_file()
+    assert json.loads((archived / "lifecycle-transition-receipt.json").read_bytes())["schemaVersion"] == 3
+    assert all((archived / name).read_bytes().count(LIFECYCLE_SCHEMA_MARKER.encode()) == 1
+        for name in ("status.md", "closure.md"))
+    assert module.close_item(root, slug, closure(instant).encode(), instant) == archived
+    assert tree_file_bytes(historical) == history_before
+    with pytest.raises(module.LifecycleError) as selected_history:
+        module.close_item(root, historical.name, closure(instant).encode(), instant)
+    assert selected_history.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+    module.check_readme(root)
+
+
 def test_archive_schema_marker_matrix_fails_closed(tmp_path: Path) -> None:
     module = load_module()
     instant = "2026-08-01T00:00:00Z"
     canonical_status = marked_status()
     canonical_closure = marked_closure(instant)
     cases = {
-        "status-only": (canonical_status, closure(instant)),
-        "closure-only": ("status: completed\n", canonical_closure),
+        "unsupported-only": ("", closure(instant) + "Lifecycle-schema: unsupported\n"),
         "duplicate-status": (
             canonical_status + f"{LIFECYCLE_SCHEMA_MARKER}\n",
             canonical_closure,
@@ -6922,12 +7213,88 @@ def test_archive_schema_marker_matrix_fails_closed(tmp_path: Path) -> None:
         item = root / "work-items" / "archive" / "2026-08" / slug
         write(item / "status.md", status)
         write(item / "closure.md", closure_text)
-        try:
+        for operation in (module.collect_readme_entries, lambda _root: module._archived_work_item_entry(item)):
+            with pytest.raises(module.LifecycleError) as failure:
+                operation(root)
+            assert failure.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID", slug
+
+
+@pytest.mark.parametrize("kind", ("absent", "empty", "directory"))
+def test_historical_status_presence_requires_acquired_file_or_true_absence(tmp_path: Path, kind: str) -> None:
+    module = load_module()
+    root, slug, instant = tmp_path / "repo", "selected-current", "2026-10-24T10:00:00Z"
+    seed_active(module, root, slug)
+    write_empty_bug_dispositions(root, slug, instant)
+    item = root / "work-items/archive/2037-02/historical"
+    write(item / "closure.md", marked_closure("2037-02-01T00:00:00Z"))
+    status = item / "status.md"
+    if kind == "directory":
+        status.mkdir()
+    elif kind == "empty":
+        status.write_bytes(b"")
+    close_file = root / "requested-closure.md"
+    write(close_file, closure(instant))
+
+    def snapshot(base):
+        return {path.relative_to(base).as_posix(): (
+            "directory" if path.is_dir() else "file", module._lifecycle_file_identity(path.lstat()),
+            None if path.is_dir() else path.read_bytes()) for path in (base, *sorted(base.rglob("*")))}
+
+    before, archive_before = snapshot(root), snapshot(item)
+    if kind == "directory":
+        with pytest.raises(module.LifecycleError) as rejected:
             module.collect_readme_entries(root)
-        except module.LifecycleError as exc:
-            assert exc.failure_id == "WI-CATEGORY-SCHEMA-INVALID", slug
-        else:
-            raise AssertionError(f"malformed schema pair downgraded to legacy: {slug}")
+        assert rejected.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+        assert "work-items/archive/2037-02/historical/status.md" in str(rejected.value)
+    else:
+        entry = next(row for row in module.collect_readme_entries(root)
+            if row.logical_reference == "work-item:historical")
+        assert entry.classification == "WI-CATEGORY-SCHEMA-INVALID"
+        assert (status in entry.source_paths) is (kind == "empty")
+    refreshed = run_cli("refresh", "--root", str(root))
+    if kind == "directory":
+        assert refreshed.returncode != 0 and "WI-CATEGORY-SCHEMA-INVALID" in refreshed.stdout
+        assert "INFO " not in refreshed.stdout and "README-SHA256:" not in refreshed.stdout
+    else:
+        assert refreshed.returncode == 0 and "INFO WI-CATEGORY-SCHEMA-INVALID:" in refreshed.stdout
+        inputs = [item / "closure.md", root / "work-items/active" / slug / "status.md"]
+        if kind == "empty":
+            inputs.append(status)
+        expected = hashlib.sha256()
+        for path in sorted(inputs):
+            logical = path.relative_to(root / "work-items").as_posix().encode()
+            data = path.read_bytes()
+            expected.update(len(logical).to_bytes(8, "big") + logical + len(data).to_bytes(8, "big") + data)
+        assert module.observe_readme(root)["inputDigest"] == expected.hexdigest()
+    closed = run_cli("close", "--root", str(root), "--slug", slug,
+        "--closure-file", str(close_file), "--terminal-instant", instant)
+    if kind == "directory":
+        assert closed.returncode != 0 and "WI-CATEGORY-SCHEMA-INVALID" in closed.stdout
+        assert "INFO " not in closed.stdout and "README-SHA256:" not in closed.stdout
+        assert snapshot(root) == before
+    else:
+        assert closed.returncode == 0, closed.stdout
+        assert not (root / "work-items/active" / slug).exists()
+    assert snapshot(item) == archive_before
+
+
+def test_archive_schema_acquisition_and_fenced_declarations_stay_strict(tmp_path: Path) -> None:
+    module = load_module()
+    item = tmp_path / "repo/work-items/archive/2037-02/acquired"
+    write(item / "status.md", "status: completed\n```\nLifecycle-schema: unsupported\n```\n")
+    write(item / "closure.md", "Outcome: Synthetic history.\n" + LIFECYCLE_SCHEMA_MARKER + "\n")
+    entry, = module.collect_readme_entries(tmp_path / "repo")
+    assert entry.classification == "WI-CATEGORY-SCHEMA-INVALID"
+    (item / "status.md").write_bytes(b"\xff")
+    with pytest.raises(module.LifecycleError) as utf8:
+        module.collect_readme_entries(tmp_path / "repo")
+    assert utf8.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+    assert "work-items/archive/2037-02/acquired/status.md" in str(utf8.value)
+    (item / "status.md").write_bytes(b"status: completed\n")
+    (item / "closure.md").unlink()
+    with pytest.raises(module.LifecycleError) as missing:
+        module._archived_work_item_entry(item, input_role="historical-catalogue")
+    assert missing.value.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
 
 
 def test_v1_archive_pair_preserves_strict_evidence_status_and_month(

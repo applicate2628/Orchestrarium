@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import os
 import subprocess
@@ -9,6 +8,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from _module_loading_support import load_module
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,15 +20,6 @@ LIFECYCLE_SCHEMA_MARKER = "Lifecycle-schema: work-items-physical-v1"
 REGENERATION_MARKER = (
     "Scratch evidence: regeneration-only; all load-bearing observations retained."
 )
-
-
-def load_module(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def write(path: Path, text: str) -> None:
