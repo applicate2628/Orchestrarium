@@ -59,7 +59,7 @@ A model API is not a substitute for a provider coding runtime.
 
 This project owns SDK-1 shared contract fixtures, SDK-2A a Host-led Codex bridge and SDK-2B an optional Agents coordinator, SDK-3 remaining provider adapters and SDK-4 qualified glue removal. Each implementation PR
 names actual deleted glue and preserved receiving behavior. Independent [npm distribution](https://github.com/applicate2628/Orchestrarium/pull/17) and
-[native Rust operations](https://github.com/applicate2628/Orchestrarium/pull/17) have separate owning documents in PR17;
+[native Rust operations](https://github.com/applicate2628/Orchestrarium/pull/21) have independent main-based PRs and owning plans;
 ranking/evaluation, expanded role lifecycle and cross-host takeover remain in
 [PR #13](https://github.com/applicate2628/Orchestrarium/pull/13).
 Neither design PR is a blanket merge prerequisite for this one. This extraction
@@ -81,7 +81,7 @@ moves the SDK design, not the earlier manual-trust documentation/test repair in 
   client is an implementation dependency of those two adapters only, not a core
   protocol, mandatory prerequisite for other adapters or a proxy service.
 - Existing deterministic operations and project-state writers retain their contracts
-  and sole ownership. They remain Python today; later Rust replacements from PR17
+  and sole ownership. They remain Python today; later Rust replacements from PR21
   are consumed through those boundaries, not prerequisites for SDK integration.
 - Each process tree has one OS containment/settlement owner. The adapter owns SDK
   protocol/session cleanup, not a competing tree-kill mechanism. SDK-created
