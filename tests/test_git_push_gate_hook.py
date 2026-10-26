@@ -3986,6 +3986,73 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                     self.assertIn(failure_id, result.stdout)
 
 
+    @unittest.skipUnless(os.name == "nt", "Windows host recovery contract")
+    def test_wrong_supported_label_uses_the_same_literal_dispatch_proof(self) -> None:
+        git = str(Path(shutil.which("git")).resolve(strict=True))
+        raw = "& '" + git + "' push origin 'HEAD:refs/heads/main'"
+        for script, module in self._modules("wrong_supported_label"):
+            owner = module._a3_preflight
+            for name, field in (("Bash", "command"), ("PowerShell", "command"), ("functions.exec_command", "cmd")):
+                with self.subTest(script=script, operation=name):
+                    pre = owner.build_preflight({"tool_name": name, "tool_input": {field: raw}, "cwd": str(REPO_ROOT)})
+                    self.assertEqual(pre.dialect, "powershell")
+                    self.assertEqual(owner.classify_generic_push(pre.parsed).status, "PGG-ADMISSIBLE")
+                    self.assertIs(owner.literal_direct_command(pre.parsed), pre.parsed.effective_publications.records[0].push.command)
+                    self.assertEqual(pre.parsed.raw_command, raw)
+                    # Syntax alone still cannot authorize a transcript-less push.
+                    self.assertEqual(pre.failure_id, "PRG-TRANSCRIPT-UNAVAILABLE")
+
+    def test_wrong_label_recovery_preserves_host_primary_and_correlation_guards(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "recovery_guard_pairs")
+        owner = module._a3_preflight
+        raw = "& 'literal-git' push origin 'HEAD:refs/heads/main'"
+        resolution = owner.CommandDialectResolution("posix", True)
+        primary = owner.parse_shell_command(raw, "posix")
+        for host in ("posix", "unsupported"):
+            with mock.patch.object(owner, "_host_command_dialect", return_value=host):
+                self.assertIs(owner._recover_mislabeled_command_dialect(raw, resolution, primary)[1], primary)
+        with mock.patch.object(owner, "_host_command_dialect", return_value="powershell"):
+            unsupported = owner.CommandDialectResolution("unsupported", False)
+            self.assertIs(owner._recover_mislabeled_command_dialect(raw, unsupported, primary)[1], primary)
+            canonical_raw = "git push origin main"
+            canonical = owner.parse_shell_command(canonical_raw, "posix")
+            self.assertIs(owner._recover_mislabeled_command_dialect(canonical_raw, resolution, canonical)[1], canonical)
+            foreign = owner.parse_shell_command("git push foreign other", "powershell").commands[0]
+            with mock.patch.object(owner, "literal_direct_command", return_value=foreign):
+                self.assertIs(owner._recover_mislabeled_command_dialect(raw, resolution, primary)[1], primary)
+            # If both interpretations qualified, uniqueness must still refuse recovery.
+            with mock.patch.object(owner, "literal_direct_command", side_effect=lambda parsed: parsed.commands[0]):
+                self.assertIs(owner._recover_mislabeled_command_dialect(raw, resolution, primary)[1], primary)
+            for tail in ("; echo other", " | sink", " && echo other", " &", " > sink", "\necho other"):
+                mixed = raw + tail
+                parsed = owner.parse_shell_command(mixed, "posix")
+                result = owner._recover_mislabeled_command_dialect(mixed, resolution, parsed)
+                self.assertEqual(result[0].dialect, "posix")
+            for dynamic in ("& $git push origin main", "& 'literal-git' push origin $ref", "& 'literal-git' push origin `main", "& 'literal-git' pu`sh origin main", "& 'literal-git' push origin 'unterminated"):
+                parsed = owner.parse_shell_command(dynamic, "posix")
+                self.assertEqual(owner._recover_mislabeled_command_dialect(dynamic, resolution, parsed)[0].dialect, "posix")
+
+    def test_compound_denial_has_only_safe_revision_and_parser_facts(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "safe_compound_context")
+        owner = module._a3_preflight
+        canary = "SENSITIVE_COMMAND_PATH_ENV_CANARY"
+        for raw, expected_branch in (("git push origin main; echo " + canary, "cardinality"),
+                                     ("& 'C:/" + canary + "/git.exe' push origin main", "shell-boundary")):
+            with synthetic_transcript([user("[approve-publication]")]) as transcript:
+                with mock.patch.object(owner, "_host_command_dialect", return_value="posix"):
+                    pre = owner.build_preflight({"tool_name": "Bash", "tool_input": {"command": raw, "workdir": str(REPO_ROOT)}, "cwd": str(REPO_ROOT), "transcript_path": str(transcript)})
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(module.compose_gate_result(pre), 0)
+                payload = json.loads(output.getvalue())
+                self.assertEqual(payload["hookSpecificOutput"]["permissionDecision"], "deny")
+                reason = payload["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn("PGG-COMPOUND-CONTEXT", reason)
+                for token in ("branch=" + expected_branch, "operation=UNAVAILABLE", "dialect=posix", "commands=", "effective=", "eligible=", "literal=false", module.PUBLICATION_GATE_REVISION, owner.PUBLICATION_PREFLIGHT_REVISION):
+                    self.assertIn(token, reason)
+                self.assertNotIn(canary, reason)
+                self.assertNotIn(str(REPO_ROOT), reason)
+                self.assertNotIn(str(transcript), reason)
+
     def test_powershell_literal_call_operator_is_one_direct_dispatch(self) -> None:
         git = str(Path(shutil.which("git")).resolve(strict=True))
         root = str(REPO_ROOT.resolve())
@@ -4091,7 +4158,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                     self.assertEqual(parsed.strict_projection.status, "canonical")
                     self.assertEqual(parsed.strict_projection.argv, argv)
 
-    def test_windows_bash_label_recovers_only_exact_powershell_literal(self) -> None:
+    def test_windows_bash_label_recovers_only_proved_powershell_literal(self) -> None:
         argv = (
             r"C:\Program Files\Git\cmd\git.exe",
             "push",
@@ -4100,7 +4167,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         )
         for script, module in self._modules("windows_bash_label_recovery"):
             exact = module._a3_preflight._serialize_powershell_literal(argv)
-            near_match = exact.replace("'push'", "push")
+            equivalent_literal = exact.replace("'push'", "push")
             with self.subTest(script=script):
                 with synthetic_transcript([user("push now")]) as transcript_path, \
                      mock.patch.object(
@@ -4118,11 +4185,11 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                         },
                         "transcript_path": str(transcript_path),
                     })
-                    not_recovered = module._a3_preflight.build_preflight({
+                    literal_recovered = module._a3_preflight.build_preflight({
                         "tool_name": "Bash",
                         "cwd": str(REPO_ROOT.parent),
                         "tool_input": {
-                            "command": near_match,
+                            "command": equivalent_literal,
                             "workdir": str(REPO_ROOT),
                         },
                         "transcript_path": str(transcript_path),
@@ -4142,8 +4209,11 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                     [record.kind for record in recovered.parsed.effective_publications.records],
                     ["DIRECT"],
                 )
-                self.assertEqual(not_recovered.dialect, "posix")
-                self.assertNotEqual(not_recovered.parsed.strict_projection.status, "canonical")
+                self.assertEqual(literal_recovered.dialect, "powershell")
+                self.assertEqual(module._a3_preflight.classify_generic_push(literal_recovered.parsed).status, "PGG-ADMISSIBLE")
+                self.assertIs(module._a3_preflight.literal_direct_command(literal_recovered.parsed), literal_recovered.parsed.effective_publications.records[0].push.command)
+                self.assertTrue(module._a3_preflight._is_exact_direct_literal(exact, recovered.parsed))
+                self.assertFalse(module._a3_preflight._is_exact_direct_literal(equivalent_literal, literal_recovered.parsed))
                 self.assertEqual(simple.dialect, "posix")
 
     def test_installed_codex_agents_lead_path_accepts_host_dialect(self) -> None:
@@ -14016,6 +14086,18 @@ class TestGenericConsentContinuity(TestGenericOriginalConsentReceiving):
     def test_technical_head_drift_after_real_scan_refuses(self) -> None:
         self._real_invocation_currentness_case("advance-head")
 
+    @unittest.skipUnless(os.name == "nt", "Windows host recovery contract")
+    def test_wrong_bash_label_real_common_owner_and_range(self) -> None:
+        for invocation in ("powershell-call", "powershell-call-root"):
+            with self.subTest(invocation=invocation):
+                self._real_invocation_currentness_case("stable", invocation=invocation, tool_name="Bash")
+
+    @unittest.skipUnless(os.name == "nt", "Windows host recovery contract")
+    def test_wrong_bash_label_preserves_callee_and_invocation_currentness(self) -> None:
+        for mutation in ("spoof-callee", "retarget-source", "advance-head"):
+            with self.subTest(mutation=mutation):
+                self._real_invocation_currentness_case(mutation, invocation="powershell-call", tool_name="Bash")
+
     def test_mixed_powershell_call_real_common_owner_and_range(self) -> None:
         for invocation in ("powershell-call", "powershell-call-root"):
             with self.subTest(invocation=invocation):
@@ -14047,7 +14129,7 @@ class TestGenericConsentContinuity(TestGenericOriginalConsentReceiving):
             with synthetic_transcript([*records, *effects]) as transcript:
                 self.assertNotEqual(module.receive_generic_publication_consent(self._preflight(module, root, transcript), subject).state, "fulfilled")
 
-    def _real_invocation_currentness_case(self, mutation: str, *, invocation: str = "canonical") -> None:
+    def _real_invocation_currentness_case(self, mutation: str, *, invocation: str = "canonical", tool_name: str = "PowerShell") -> None:
         """Actual owner/query/scan path; the approved Git target is never run."""
         module = _load_gate_module(CANONICAL_HOOK, "generic_actual_common_range")
         with tempfile.TemporaryDirectory() as directory:
@@ -14105,7 +14187,7 @@ class TestGenericConsentContinuity(TestGenericOriginalConsentReceiving):
                         command += " -C " + quote(root)
                     command += " push origin " + quote(source_operand + ":refs/heads/main")
                     preflight = module._a3_preflight.build_preflight({
-                        "tool_name": "PowerShell", "cwd": str(top),
+                        "tool_name": tool_name, "cwd": str(top),
                         "tool_input": {"command": command, "workdir": root},
                         "transcript_path": str(transcript), "tool_use_id": "actual-mixed-PS-fixture",
                         "session_id": "native-source-fixture",

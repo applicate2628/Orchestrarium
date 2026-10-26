@@ -2859,6 +2859,8 @@ def _is_exact_direct_literal(command: str, parsed: ShellParseResult) -> bool:
     return serialized == command
 
 
+PUBLICATION_PREFLIGHT_REVISION = "PF-native-dialect-recovery-20261026"
+
 def _recover_mislabeled_command_dialect(
     command: str,
     resolution: CommandDialectResolution,
@@ -2882,7 +2884,14 @@ def _recover_mislabeled_command_dialect(
     candidates: list[tuple[str, ShellParseResult]] = []
     for dialect in ("posix", "powershell"):
         candidate = parsed if dialect == resolution.dialect else parse_shell_command(command, dialect)
-        if _is_exact_direct_literal(command, candidate):
+        literal = literal_direct_command(candidate)
+        publications = candidate.effective_publications.records
+        if (
+            literal is not None and len(publications) == 1
+            and publications[0].kind == "DIRECT"
+            and publications[0].certainty == "exact"
+            and publications[0].push.command is literal
+        ):
             candidates.append((dialect, candidate))
     if len(candidates) != 1 or candidates[0][0] != host_dialect:
         return resolution, parsed

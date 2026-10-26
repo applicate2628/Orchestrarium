@@ -381,7 +381,10 @@ from hook_common import (
 )
 
 
+PUBLICATION_GATE_REVISION = "G-native-dialect-recovery-20261026"
+
 from git_push_gate_preflight import (
+    PUBLICATION_PREFLIGHT_REVISION,
     PreflightResult,
     TranscriptDiagnostic,
     WorkdirDiagnostic,
@@ -6892,6 +6895,33 @@ def _format_gate_denial(failure_id: str) -> str:
     return f"{failure_id}: {scope}. {remediation}"
 
 
+def _format_compound_context_diagnostic(result: PreflightResult) -> str:
+    """Expose only closed parser facts; revision labels are not attestations."""
+    parsed = result.parsed
+    if parsed is None:
+        return (
+            f"Command context: gate={PUBLICATION_GATE_REVISION}; "
+            f"preflight={PUBLICATION_PREFLIGHT_REVISION}; branch=UNAVAILABLE; "
+            "operation=UNAVAILABLE; dialect=UNAVAILABLE; commands=UNAVAILABLE; "
+            "effective=UNAVAILABLE; eligible=UNAVAILABLE; literal=UNAVAILABLE."
+        )
+    projection = parsed.effective_publications
+    counts = (len(parsed.commands), len(projection.records), len(projection.eligible_direct_generic))
+    branch = "UNAVAILABLE"
+    if classify_generic_push(parsed).status == "PGG-COMPOUND-CONTEXT":
+        branch = "cardinality" if counts != (1, 1, 1) else "shell-boundary"
+    dialect = parsed.dialect if parsed.dialect in {"posix", "powershell"} else "UNAVAILABLE"
+    # The validated preflight does not retain the incoming tool operation.
+    # Never guess it from command text, dialect or a native handler label.
+    return (
+        f"Command context: gate={PUBLICATION_GATE_REVISION}; "
+        f"preflight={PUBLICATION_PREFLIGHT_REVISION}; branch={branch}; "
+        f"operation=UNAVAILABLE; dialect={dialect}; commands={counts[0]}; "
+        f"effective={counts[1]}; eligible={counts[2]}; "
+        f"literal={str(literal_direct_command(parsed) is not None).lower()}."
+    )
+
+
 def compose_gate_result(preflight: PreflightResult) -> int:
     """Compose one validated preflight into the stable gate result payload."""
     try:
@@ -6981,6 +7011,8 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             remediation = pr_reasons.get(failure_id, pr_reasons["PRG-INTERNAL"])
             scope = _denial_scope(failure_id)
             reason = f"{failure_id}: {scope}. {remediation}"
+            if failure_id == "PGG-COMPOUND-CONTEXT":
+                reason += " " + _format_compound_context_diagnostic(result)
             if failure_id == "PRG-WORKDIR-INVALID" and workdir_diagnostic is not None:
                 try:
                     diagnostic = validate_workdir_diagnostic(workdir_diagnostic)
