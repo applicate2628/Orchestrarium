@@ -1,8 +1,8 @@
 # SDK integration project
 
-Status: design reconciled on 2026-10-26 against implementation
+Status: design reconciled on 2026-10-26 against the consolidated implementation
 [PR #19](https://github.com/applicate2628/Orchestrarium/pull/19), exact head
-`9f1e6df297c47a8edf5eb44d2919a6a0ade553cb`. This PR remains documentation only.
+`fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8`. This PR remains documentation only.
 The source matrix below supersedes future-tense implementation claims in the
 original design; an implemented adapter is not proof of live qualification.
 SDK, npm distribution and Rust operations are independent tasks.
@@ -14,10 +14,10 @@ moving branch. The implementation is still a draft, not merged product behavior.
 
 | Work | Implementation and source evidence | Qualification and remaining work |
 | --- | --- | --- |
-| SDK-1 shared execution contract | Immutable [request/result/identity/schema](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/sdk_execution/contracts.py), [parser](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/provider_prompt.py), [ledger](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/agent-run-ledger.py), schema and [receiving](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/sdk_execution/receiving.py) extend existing owners. | Implemented and offline checked; old records and external nonauthority remain. Not a second ledger/framework. |
-| SDK-2A Host-led Codex review | Opt-in [wrapper](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/invoke-codex-prompt.py) with --sdk-review-binding uses [dispatch](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/sdk_execution/dispatch.py) and the direct official Codex adapter. No outer Agents loop starts. | Source/offline receiving exists. Current-head installed Windows bridge and diagnostic/recovery qualification remain; historical Luna smoke is not that head's qualification. |
-| SDK-2B optional Agents coordinator | [AgentsCoordinator](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/sdk_execution/coordinator.py) requires an injected public Model and existing authority/executor. execute_admitted invokes the admitted executor; it does not supply the coordinator's Model. | Coordinator/session/resume contracts have offline coverage. Supported subscription-compatible Model binding, account/budget admission, live loop and Session/resume/crash evidence are separate remaining qualification. |
-| SDK-3 adapters | [SDK execution modules](https://github.com/applicate2628/Orchestrarium/tree/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/scripts/sdk_execution) implement direct Codex/Claude and adapter-local ACP routes, including additional provider adapters. | Source and offline tests exist. Other-provider live qualification is deferred due to quotas, not absent implementation and not a blocker for Codex scope. Existing provider eligibility remains; Grok stays unavailable. |
+| SDK-1 shared execution contract | Immutable [request/result/identity/schema](https://github.com/applicate2628/Orchestrarium/blob/fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8/scripts/sdk_execution/contracts.py), [parser](https://github.com/applicate2628/Orchestrarium/blob/fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8/scripts/provider_prompt.py), [ledger](https://github.com/applicate2628/Orchestrarium/blob/fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8/scripts/agent-run-ledger.py), schema and [receiving](https://github.com/applicate2628/Orchestrarium/blob/fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8/scripts/sdk_execution/receiving.py) extend existing owners. | Implemented and offline checked; old records and external nonauthority remain. Not a second ledger/framework. |
+| SDK-2A Host-led Codex review | Opt-in [wrapper](https://github.com/applicate2628/Orchestrarium/blob/fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8/scripts/invoke-codex-prompt.py) with --sdk-review-binding uses [dispatch](https://github.com/applicate2628/Orchestrarium/blob/fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8/scripts/sdk_execution/dispatch.py) and the direct official Codex adapter. No outer Agents loop starts. | Source/offline receiving exists. Current-head installed Windows bridge and diagnostic/recovery qualification remain; historical Luna smoke is not that head's qualification. |
+| SDK-2B optional Agents coordinator | [AgentsCoordinator](https://github.com/applicate2628/Orchestrarium/blob/fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8/scripts/sdk_execution/coordinator.py) requires an explicit public Model and existing authority/executor. PR19 now supplies the optional Codex coordination Model adapter; execute_admitted invokes the admitted executor. | One bounded Windows outer-to-inner cycle through the existing subscription passed on runtime tree acf9a9addb0ea73b5544f8b3070d1dff9a773841. Session/resume/crash, arbitrary planning and other-platform live evidence remain separate qualification. |
+| SDK-3 adapters | [SDK execution modules](https://github.com/applicate2628/Orchestrarium/tree/fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8/scripts/sdk_execution) implement direct Codex/Claude and adapter-local ACP routes, including additional provider adapters. | Source and offline tests exist. Other-provider live qualification is deferred due to quotas, not absent implementation and not a blocker for Codex scope. Existing provider eligibility remains; Grok stays unavailable. |
 | SDK-4 simplification | Structured results and the optional SDK-owned loop/session boundary avoid adding duplicate parser, loop and session glue. Existing owners validate and receive evidence. | Delete only superseded code whose consumers are covered. Still-used legacy routes and host hooks remain; there is no artificial task to remove every hook or CLI path. |
 
 Reported qualification of reviewed tree
@@ -25,29 +25,38 @@ Reported qualification of reviewed tree
 17 targeted passed; broad changed-owner suite 2171 passed / 97 skipped /
 142 failure entries = 120 distinct failed IDs. All 120 IDs were reproduced on
 clean main 24052b; this is not a green broad suite or full baseline equivalence.
-Integration preserved all 68 non-release SDK paths; release notes were combined.
+The original SDK-only integration preserved 68 non-release paths; the subsequent
+coordinator extension has its own runtime tree and evidence below.
 Historical Windows synthetic success/collision PASS and one Luna/high smoke PASS
-(18.343 seconds, cleanup PASS) belong to the pre-merge candidate, not PR19 head.
+(18.343 seconds, cleanup PASS) belong to the pre-merge candidate, not sufficient by themselves to qualify the consolidated PR19 head.
 No runtime tests are rerun by this documentation reconciliation.
 
-## Selected next research goal: coordinator through the existing Codex subscription
+## Codex subscription coordinator: implemented bounded slice
 
-Establish whether a public Agents Model can be implemented through the official
-Codex SDK/App Server and the existing subscription login. Current code does not
-contain such a backend. The official [Agents Codex example](https://github.com/openai/openai-agents-python/blob/17d994bd3045dae71acda676a4ef4762ed8ecd94/examples/tools/codex.py)
-places Codex in tools; a tool integration does not make it the outer Model.
-The [official tool documentation](https://openai.github.io/openai-agents-python/tools/#experimental-codex-tool)
-likewise describes a tool, not a subscription-backed coordinator model.
+PR19 implements an Orchestrarium adapter of the public Agents Model interface
+through the official Codex SDK/App Server and existing subscription. It is not an
+upstream prebuilt CodexModel; the official Codex tool example is a different layer.
+The actual Runner executes one forced execute_admitted call after validated outer
+intent and durable outer receiving, then stops without a summarizing model call.
 
-Research must map the public Model request, tool-call/result, streaming, usage,
-cancel/error and Session/resume contracts to supported Codex interfaces, with
-fresh account/profile/budget admission, bounded output/time and owned cleanup.
-Prove official support and honest limitations before implementation or live use.
-No OAuth extraction, private API, copied credentials, API-billing substitution or
-implicit model/account fallback. If the public contract cannot support the loop,
-record the precise gap and retain Host-led mode. A later authorized bounded Codex
-Agents-cycle qualification must include receipt, artifacts, ledger and crash/recovery
-evidence; no such model invocation is authorized by this documentation stage.
+The historical LIVE-AGENTS-CHECKPOINT-v9 records exactly two observed native
+turn/start operations, one outer and one inner, on gpt-6-luna/high, SDK 0.163.0 /
+runtime 0.164.0. Current account/profile/required-hook admission passed for that
+run. Inner review PASS, receipt/artifact/ledger agreement and owned process cleanup
+were observed. No unexpected native tool activity was observed. Inner usage is
+unknown, not zero. This is not arbitrary multi-step routing or crash qualification.
+
+The exact qualified runtime tree is `acf9a9addb0ea73b5544f8b3070d1dff9a773841`.
+Checkpoint SHA-256: `7f13e81558f62be309667a9e652117450d339a237f4d2c0dbe5712746fd11626`.
+The sanitized portable live caller is not yet in the repository; retained hashes
+are not publicly reproducible execution steps. That delivery gap remains open.
+
+Next qualification is scoped to the missing portable caller and deliberately
+selected recovery/platform scenarios, not re-implementing an absent Model backend.
+Keep streaming, arbitrary tool selection and other-vendor live use unqualified.
+No new paid/live launch is authorized by this document. Preserve existing owners,
+explicit budgets and cleanup; no OAuth extraction, private API, credential copying,
+API-billing substitution or implicit fallback.
 
 ## Purpose and scope
 
@@ -149,7 +158,7 @@ Selected adapter implementations:
   relay or alternate transport until a concrete remote use case justifies it.
 
 These are selected integration paths, not measured reliability or universal
-platform qualification. PR19's [capability-based compatibility contract](https://github.com/applicate2628/Orchestrarium/blob/9f1e6df297c47a8edf5eb44d2919a6a0ade553cb/docs/sdk-execution.md#capability-based-compatibility)
+platform qualification. PR19's [capability-based compatibility contract](https://github.com/applicate2628/Orchestrarium/blob/fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8/docs/sdk-execution.md#capability-based-compatibility)
 supersedes this draft's mandatory product-wide SDK/CLI pin. Admission checks required
 public APIs, capabilities and actual observed contracts; release strings/digests
 are evidence for a selected run, not an allowlist. Reproducible test dependency
@@ -208,8 +217,9 @@ requirements, not proof supplied by generic ACP availability.
 
 Application-programming-interface (API) model access, existing CLI capability,
 provider admission and account billing are separate. An injected Agents Model does not automatically acquire a Codex/Claude
-subscription or ACP account binding; the selected research goal above must prove
-a supported Codex subscription path without introducing API billing.
+subscription or ACP account binding. The bounded Codex path above has recorded
+subscription-backed evidence; each further route still needs its own explicit
+account and billing qualification without introducing an implicit API fallback.
 Select and verify each adapter's authentication/billing lane and credential environment; no coordinator-key inheritance or default
 fallback may silently switch its intended account/billing route. Keep coordinator
 credentials out of adapter environments unless explicitly selected; the excluded
@@ -269,7 +279,8 @@ runner or introduce a Rust dependency just to claim this is solved.
 ## Concrete SDK cases: replacement, deletion and proof
 
 Use ready components only where their ownership removes existing glue or avoids a
-new duplicate mechanism. These are implementation choices, not qualified live routes.
+new duplicate mechanism. The matrix above records the implemented bounded Codex
+slice; the broader cases below are not blanket live-route qualification.
 No blanket hook-count reduction follows; host-mode hooks and foreign registrations
 (including Graft) remain outside SDK-owned-lane deletion.
 
