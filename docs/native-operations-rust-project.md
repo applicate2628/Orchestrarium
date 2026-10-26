@@ -2,7 +2,7 @@
 
 Status: independent design task, no native implementation or activation. Baseline
 main `317e1448a020aeaa58f65aaceb180e835741d6de`; source observations do not prove
-installed behavior. npm delivery and SDK coordination are independent consumers,
+installed behavior. PowerShell/npm delivery and SDK coordination are independent consumers,
 not blanket prerequisites or mandatory phases of a Rust port.
 
 ## Goal, quality attributes and architecture
@@ -16,9 +16,36 @@ operations. Do not introduce a daemon, scheduler, ledger or transaction framewor
 | Decision | Benefit | Cost / acceptance boundary |
 | --- | --- | --- |
 | One common hook implementation and descriptor | Avoid host copies and basename-based ownership | Qualify all currently supported consumers before shared cutover |
-| Existing installer owns retained payload | Reuse admission, recovery and readback | Extend its typed descriptor/resource contract; no separate runtime manager |
-| First slice has no child processes or state writes | Small deterministic parity surface | Provides no proof for process, publication, transfer or installer ports |
+| One installer operation owner, migrated from Python to Rust | Reuse admission, recovery and readback | Thin PowerShell/npm channels never implement managed-file changes or trust |
+| Candidate reminder slice has no child processes or state writes | Small deterministic parity surface | Provides no proof for process, publication, transfer or installer ports |
 | Independent later operation slices | Keeps risky owners separate | Each retains its own evidence and platform qualification |
+
+## Delivery channels and native installer ownership
+
+The accepted target is Rust CLI plus a thin PowerShell bootstrap, with npm retained
+as a compatible delivery channel. [PR17](https://github.com/applicate2628/Orchestrarium/pull/17)
+owns release selection, download/verification and dispatch. This PR owns native
+operation behavior; the installer is not reimplemented in PowerShell or JavaScript.
+
+Rust install/update and, when separately qualified, managed-file removal preserve
+the current installer's target admission, user-file preservation, coupled
+configuration/registration ownership, trust boundaries, interruption recovery and
+persisted readback. Uninstalling a distribution channel does not remove applied
+packs. Full-pack removal is not inferred from the existing narrow hook-retirement
+operation; inventory, all consumers and foreign/unknown content must be qualified
+before enabling it. No global garbage collector or parallel installer is added.
+
+Both delivery channels invoke the same qualified Rust executable/resources for
+an admitted release and target. Native installation must not require npm. Existing
+Python installation remains explicit until Rust parity/cutover, with no silent
+fallback or competing writer. This plan does not override the live Python-owner
+policy; update its owner documents only with the admitted production cutover.
+
+The installer migration is a bounded operation slice, not a prerequisite for all
+other native hooks or optional SDK coordination. Neither selecting this architecture
+nor implementing a bootstrap authorizes building, publishing, trusting or activating
+native binaries. The first implementation slice will be chosen with the user after
+SDK acceptance; the existing reminder proposal below is a candidate, not a launch.
 
 ## Existing behavior and target architecture
 
@@ -113,7 +140,7 @@ Installation of source-only components remains a separate decision. Owner-equiva
 manual execution retains the same guarantees and is not a host-denial bypass.
 
 
-## First vertical slice: mcp-usage-reminder
+## Candidate first vertical slice: mcp-usage-reminder
 
 Source: [canonical entrypoint](https://github.com/applicate2628/Orchestrarium/blob/317e1448a020aeaa58f65aaceb180e835741d6de/scripts/universal-hooks/scripts/mcp-usage-reminder.py),
 [emitter](https://github.com/applicate2628/Orchestrarium/blob/317e1448a020aeaa58f65aaceb180e835741d6de/scripts/universal-hooks/scripts/hook_common.py),
@@ -175,8 +202,10 @@ missing native descriptor and lifecycle cases. Source review is not installed pr
 
 ## Independent subsequent slices
 
-After the first hook, select another simple shared hook; then justified pure
-reducers/validators; then state-owner/installer operations. Process supervision,
+If the reminder is selected first, a possible later order is another simple
+shared hook, then justified pure reducers/validators, then state-owner/installer
+operations. Choose the actual first slice together with the user; the order here
+is not implementation authorization. Process supervision,
 publication and repository transfer are separate high-risk migrations with their
 own authority, creator-custody and complete-graph/settlement requirements.
 Unavailable generic routes stay unavailable. A simple hook does not wait for
@@ -259,7 +288,7 @@ targets. This document is a source-based plan, not that production cutover appro
 Matched benchmarks must include packaging/update/bridge maintenance and actual
 platform behavior before claiming speed or reliability improvements.
 
-The [independent npm task (PR17)](https://github.com/applicate2628/Orchestrarium/pull/17) owns distribution; this task consumes
+The [independent delivery task (PR17)](https://github.com/applicate2628/Orchestrarium/pull/17) owns PowerShell/bootstrap and npm distribution; this task consumes
 only the existing installer's minimal retained payload contract. SDK design is
 [PR18](https://github.com/applicate2628/Orchestrarium/pull/18), source implementation
 is [PR19](https://github.com/applicate2628/Orchestrarium/pull/19). Neither activates
@@ -269,6 +298,8 @@ an unavailable route or grants native/provider launch authority.
 
 - Rust / Cargo: native programming language / its build and package tool.
 - CLI / argv: command-line interface / exact argument vector.
+- PowerShell bootstrap: download/verification/launch channel, not managed-state logic.
+- npm: compatible optional distribution channel for the same native release.
 - JSON / UTF-8: structured interchange data / Unicode byte encoding.
 - SDK / ACP: software development kit / Agent Client Protocol.
 - MCP: Model Context Protocol; the reminder names no particular server.
