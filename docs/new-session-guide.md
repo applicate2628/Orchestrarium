@@ -78,7 +78,7 @@ Run the smallest useful check first, then the affected pack checks.
 
 | Change surface | Checks |
 |---|---|
-| Shared spine | `python scripts\validate-agents-spine.py --spine shared\AGENTS.shared.md` |
+| Shared spine and affected derived consumers | `python scripts\validate-agents-spine.py --spine shared\AGENTS.shared.md`; follow existing producer/manifest dependencies and run each affected consumer's check (provider-prompt source parity: `python scripts/validate-provider-prompt-projections.py --require --scope source --source-root .`). |
 | Codex pack | `bash src.codex/skills/lead/scripts/validate-skill-pack.sh` |
 | Claude pack | `bash src.claude/agents/scripts/validate-skill-pack.sh` |
 | Agents-mode docs/schema | `python scripts\sync-agents-mode-docs.py --root . --check` |

@@ -580,11 +580,11 @@ print('FRESH_PUBLIC_READERS_OK')
                 fired.append(cut)
                 raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
             return result
-        def removed(owner, name, image):
+        def removed(owner, name, image, *, outcome_composer=None):
             if cut == "last-cleanup" and owner.path == intent_path and name == intent_path.name:
                 fired.append(cut)
                 raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
-            result = remove(owner, name, image)
+            result = remove(owner, name, image, outcome_composer=outcome_composer)
             if cut == "remove-before-save" and name.startswith(f".{self.source.name}.") and name.endswith(".hold"):
                 fired.append(cut)
                 raise m.LifecycleError("WI-TEST-FINALIZATION", cut)

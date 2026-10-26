@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import ctypes
-import importlib.util
 import inspect
 import io
 import json
@@ -17,6 +16,8 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
+
+from _module_loading_support import load_module as _load
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,15 +43,6 @@ BYPASS_TOKENS = (
     "BYPASS_" + "HOOK_TRUST",
     "dangerously-" + "bypass-hook-trust",
 )
-
-
-def _load(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 HELPER = _load(HELPER_PATH, "hook_runtime_helper")
@@ -1003,7 +995,7 @@ def test_decision_parity_oracle_requires_one_utf8_json_document() -> None:
 
 
 def test_trust_guidance_contract() -> None:
-    for path in (ROOT / "INSTALL.md", ROOT / "src.codex/AGENTS.codex.md"):
+    for path in (ROOT / "INSTALL.md", ROOT / "src.codex/skills/lead/operating-model.md"):
         _assert_exact_order(path.read_text(encoding="utf-8"), CANONICAL_TRUST_GUIDANCE)
 
     install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")

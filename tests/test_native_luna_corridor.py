@@ -5,10 +5,12 @@ import importlib.util
 import inspect
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import tomllib
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -119,6 +121,10 @@ def _stock_fast_policy_manifest_pair() -> tuple[bytes, bytes]:
 
 
 def _stock_native_contract_prior_pair(kind: str) -> tuple[bytes, bytes]:
+    if kind == "configured-ownership":
+        fixture = ROOT / "tests/fixtures/native-luna-policy-priors/pre-configurable-roles"
+        return ((fixture / "role-routing-policy.v1.json").read_bytes(),
+                (fixture / "orchestrarium-role-manifest.json").read_bytes())
     if kind == "fast":
         return _stock_fast_policy_manifest_pair()
     fixture = ROOT / "tests/fixtures/native-luna-policy-priors/default-model-unbinding"
@@ -127,6 +133,65 @@ def _stock_native_contract_prior_pair(kind: str) -> tuple[bytes, bytes]:
     assert hashlib.sha256(policy).hexdigest() == "0a7ecdc12d3fd802b32bd7d41f78129bbdb8a5681beb1f1382d46e6b2fb82b90"
     assert hashlib.sha256(manifest).hexdigest() == "1362c1206cb957b879109e33c577047c0d6b7b65860f602d1f51f400a6967d77"
     return policy, manifest
+
+
+@pytest.mark.parametrize("operation", ("readonly", "missing", "failed-body", "cleanup-only", "dual-failure"))
+def test_native_prior_clone_lifetime_cleans_readonly_and_preserves_primary(tmp_path: Path, monkeypatch, operation: str) -> None:
+    installed, current, temporary = (tmp_path / name for name in ("installed", "current", "temporary"))
+    temporary.mkdir()
+    old_policy, old_manifest = _stock_native_contract_prior_pair("configured-ownership")
+    for root, policy, manifest in ((installed, old_policy, old_manifest),
+                                  (current, POLICY_PATH.read_bytes(), (AGENTS_SOURCE / installer.CODEX_ROLE_MANIFEST).read_bytes())):
+        (root / "shared").mkdir(parents=True)
+        (root / "shared/role-routing-policy.v1.json").write_bytes(policy)
+        (root / "shared/orchestrarium-role-manifest.json").write_bytes(manifest)
+        (root / "readonly").mkdir()
+        (root / "readonly/value").write_bytes(b"public owned readonly clone fixture")
+        (root / "readonly/value").chmod(stat.S_IREAD)
+        root.chmod(stat.S_IREAD | stat.S_IEXEC)
+    stage = SimpleNamespace(path=current, digest=installer._tree_sha256(current, ignore_runtime_cache=True))
+    monkeypatch.setattr(installer.tempfile, "tempdir", str(temporary))
+    actual_copy = installer._copy_tree
+    primary = FileNotFoundError("original missing clone input") if operation == "missing" else RuntimeError("original failed clone operation")
+    if operation in ("missing", "failed-body", "dual-failure"):
+        def fail_copy(*args, **kwargs):
+            if operation != "missing":
+                actual_copy(*args, **kwargs)
+            raise primary
+        monkeypatch.setattr(installer, "_copy_tree", fail_copy)
+    if operation in ("cleanup-only", "dual-failure"):
+        cleanup = PermissionError("owned synthetic clone cleanup failure")
+        held = []
+        actual_cleanup = installer.tempfile.TemporaryDirectory.cleanup
+        def fail_cleanup(owner):
+            held.append(owner)
+            raise cleanup
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(installer.tempfile.TemporaryDirectory, "cleanup", fail_cleanup)
+                with pytest.raises(installer._InstallFailure if operation == "dual-failure" else PermissionError) as raised:
+                    installer._exact_stock_native_role_contract_prior_pair(installed, stage)
+            assert len(held) == 1 and Path(held[0].name).exists()
+            if operation == "dual-failure":
+                assert raised.value.cause is primary
+                assert raised.value.__cause__ is primary
+                assert raised.value.members[0].cause_exception is cleanup
+                assert raised.value.recovery_path == Path(held[0].name)
+                assert raised.value.unresolved_paths == (Path(held[0].name),)
+            else:
+                assert raised.value is cleanup
+        finally:
+            for owner in held:
+                actual_cleanup(owner)
+    elif operation in ("missing", "failed-body"):
+        with pytest.raises(type(primary)) as raised:
+            installer._exact_stock_native_role_contract_prior_pair(installed, stage)
+        assert raised.value is primary
+    else:
+        pair = installer._exact_stock_native_role_contract_prior_pair(installed, stage)
+        assert pair == installer._STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS[0]
+    assert list(temporary.iterdir()) == []
+    assert (installed / "readonly/value").read_bytes() == b"public owned readonly clone fixture"
 
 
 def _seed_native_contract_prior(project: Path, kind: str) -> tuple[Path, Path]:
@@ -176,6 +241,173 @@ def _resolver_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _nrc_source_layout(tmp_path: Path) -> Path:
+    root = tmp_path / "nrc-source"
+    (root / "shared").mkdir(parents=True)
+    shutil.copy2(POLICY_PATH, root / "shared/role-routing-policy.v1.json")
+    shutil.copytree(AGENTS_SOURCE, root / "src.codex/agents")
+    return root
+
+
+def _nrc_configured_role_bytes(factory: bytes) -> bytes:
+    assert "model_verbosity" not in tomllib.loads(factory.decode())
+    return b'# user tuning preserves factory feature reductions\nmodel_verbosity = "low"\n' + factory
+
+
+def test_nrc_configured_all_roles_keep_owned_profession_and_factory_identity(tmp_path: Path) -> None:
+    root = _nrc_source_layout(tmp_path)
+    resolver = _resolver_module()
+    policy = _policy()
+    manifest = json.loads((root / "src.codex/agents/orchestrarium-role-manifest.json").read_text())
+    controls = {"explicitModelControl": True, "explicitReasoningEffortControl": True}
+    for role in policy["roles"]:
+        path = root / "src.codex/agents" / (role + ".toml")
+        path.write_bytes(_nrc_configured_role_bytes(path.read_bytes()))
+        assert tomllib.loads(path.read_text())["features"] == {"apps": False, "plugins": False}
+        before = path.read_bytes()
+        task = next(name for name, roles in policy["taskRoleEligibility"].items()
+                    if role in roles and (name in resolver._MECHANICAL_TASK_CLASSES) == (role in resolver._MECHANICAL_ROLES))
+        if role in resolver._MECHANICAL_ROLES:
+            result = resolver.resolve_role_dispatch(task, role, "enabled", repo_root=root)
+            assert result["status"] == "native-required", result
+        else:
+            description = resolver.describe_ordinary_native_role_options(role, task, controls, repo_root=root)
+            assert description["status"] == "available", description
+            result = resolver.resolve_ordinary_native_dispatch(description, caller_rationale="synthetic configured role", approved_execution_scope={"read": True})
+            assert result["status"] == "resolved", result
+            provenance = description["configurationProvenance"]
+            assert provenance["factorySha256"] == manifest["roles"][role]["sha256"]
+            assert provenance["runtimeSha256"] == hashlib.sha256(before).hexdigest()
+            assert provenance["classification"] == "configured"
+            assert provenance["hostValidation"] == "not-observed"
+        assert path.read_bytes() == before
+
+
+def test_nrc_configured_controls_core_and_snapshot_are_independent(tmp_path: Path) -> None:
+    root = _nrc_source_layout(tmp_path)
+    resolver = _resolver_module()
+    controls = {"explicitModelControl": True, "explicitReasoningEffortControl": True}
+    path = root / "src.codex/agents/platform-engineer.toml"
+    original = path.read_text()
+    policy = _policy()
+    alternate = policy["profiles"]["astra-high"]
+    configured = original.replace('model = "gpt-6.1-sol"', 'model = "' + alternate["codexModel"] + '"')
+    path.write_text(configured)
+    description = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
+    assert description["status"] == "available", description
+    result = resolver.resolve_ordinary_native_dispatch(description, caller_rationale="configured default", approved_execution_scope={"write": True})
+    assert result["status"] == "resolved" and result["resolvedModel"] == alternate["codexModel"]
+    path.write_text(configured + "# same profession, new snapshot\n")
+    stale = resolver.resolve_ordinary_native_dispatch(description, caller_rationale="stale", approved_execution_scope={"write": True})
+    assert stale["status"] == "denied" and stale["configurationDiagnostic"]["stage"] == "snapshot-drift"
+    path.write_text(original.replace('model_reasoning_effort = "high"\n', ''))
+    partial = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
+    assert partial["status"] == "available"
+    unresolved = resolver.resolve_ordinary_native_dispatch(partial, caller_rationale="partial", approved_execution_scope={"read": True})
+    assert unresolved["configurationDiagnostic"]["stage"] == "inherited-control-unresolved"
+    path.write_text(original.replace('AGENTS.md', 'PRIVATE-NRC-CANARY', 1))
+    # Even an arbitrary edit retaining the trust marker cannot retain ownership.
+    denied = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
+    assert denied["status"] == "denied"
+    assert denied["configurationDiagnostic"]["stage"] == "owned-profession-contract"
+    assert "PRIVATE-NRC-CANARY" not in json.dumps(denied)
+
+
+def test_nrc_general_encoding_v1_max_and_carrier_controls(tmp_path: Path) -> None:
+    root = _nrc_source_layout(tmp_path)
+    resolver = _resolver_module()
+    controls = {"explicitModelControl": True, "explicitReasoningEffortControl": True}
+    role = root / "src.codex/agents/platform-engineer.toml"
+    original = role.read_bytes()
+    values = tomllib.loads(original.decode())
+    role.write_text('# order and encoding are user owned\nfeatures = { apps = false, plugins = false }\n' +
+                    '\n'.join(key + ' = ' + json.dumps(value) for key, value in reversed(tuple(values.items())) if key != "features") + '\n')
+    encoded = role.read_bytes()
+    description = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
+    assert description["status"] == "available", description
+    assert role.read_bytes() == encoded
+    role.write_bytes(original)
+    manifest_path = root / "src.codex/agents/orchestrarium-role-manifest.json"
+    v2 = manifest_path.read_bytes()
+    manifest_path.write_bytes((ROOT / "tests/fixtures/native-luna-policy-priors/pre-configurable-roles/orchestrarium-role-manifest.json").read_bytes())
+    for old in (ROOT / "tests/fixtures/native-luna-policy-priors/pre-configurable-roles").glob("*.toml"):
+        (root / "src.codex/agents" / old.name).write_bytes(old.read_bytes())
+    assert resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)["status"] == "available"
+    role.write_bytes(original + b'# changed v1 lacks independent ownership\n')
+    denied = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
+    assert denied["configurationDiagnostic"] == {"stage": "manifest/version", "reason": "owned-contract-version-required"}
+    manifest_path.write_bytes(v2)
+    for current in AGENTS_SOURCE.glob("*.toml"):
+        (root / "src.codex/agents" / current.name).write_bytes(current.read_bytes())
+    review = root / "src.codex/agents/architecture-reviewer.toml"
+    review.write_text(review.read_text().replace('model_reasoning_effort = "xhigh"', 'model_reasoning_effort = "max"'))
+    description = resolver.describe_ordinary_native_role_options("architecture-reviewer", "review", controls, repo_root=root)
+    kwargs = dict(caller_rationale="synthetic max", approved_execution_scope={"read": True})
+    assert resolver.resolve_ordinary_native_dispatch(description, **kwargs)["configurationDiagnostic"]["reason"] == "maximum-approval-required"
+    assert resolver.resolve_ordinary_native_dispatch(description, user_approved_max=True, **kwargs)["resolvedEffort"] == "max"
+    carrier = root / "src.codex/agents/default.toml"
+    carrier.write_bytes(b'model = "gpt-6-astra"\nmodel_reasoning_effort = "high"\n' + carrier.read_bytes())
+    description = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
+    assert resolver.resolve_ordinary_native_dispatch(description, **kwargs)["status"] == "resolved"
+    explicit = resolver.resolve_ordinary_native_dispatch(description, requested_model="gpt-6.1-sol", requested_effort="high", **kwargs)
+    assert explicit["configurationDiagnostic"]["stage"] == "configured-carrier-conflict"
+    assert explicit["fallback"] == "none"
+    serialized = json.loads(json.dumps(description))
+    assert resolver.resolve_ordinary_native_dispatch(serialized, requested_model="gpt-6.1-sol", requested_effort="high", **kwargs)["configurationDiagnostic"]["stage"] == "configured-carrier-conflict"
+    role.write_text(original.decode().replace('model = "gpt-6.1-sol"', 'model = "PRIVATE-NRC-CANARY"'))
+    description = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
+    result = resolver.resolve_ordinary_native_dispatch(description, **kwargs)
+    assert result["configurationDiagnostic"]["stage"] == "configured-profile-policy"
+    assert "PRIVATE-NRC-CANARY" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("mode", ("project", "global"))
+def test_nrc_public_installer_upgrades_v1_and_preserves_all_configured_roles(tmp_path: Path, monkeypatch, mode: str) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    args = ["--force", "--no-hypothesis-hook"]
+    if mode == "global":
+        monkeypatch.setenv("USERPROFILE", str(project))
+        monkeypatch.setenv("HOME", str(project))
+        args.append("--global")
+    else:
+        args.extend(["--target", str(project), "--allow-unsafe-target"])
+    assert installer.install("codex", args) == 0
+    lead = project / ".agents/skills/lead"
+    installed_manifest = lead / "shared/orchestrarium-role-manifest.json"
+    _seed_native_contract_prior(project, "configured-ownership")
+    agents = project / ".codex/agents"
+    for path in agents.glob("*.toml"):
+        path.write_bytes(_nrc_configured_role_bytes(path.read_bytes()))
+        assert tomllib.loads(path.read_text())["features"] == {"apps": False, "plugins": False}
+    config = project / ".codex/config.toml"
+    config.write_bytes(config.read_bytes().replace(b'description = "', b'description = "User guidance: ', 1))
+    preserved = {path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path)) for path in [config, *agents.glob("*.toml")]}
+    old_manifest = installed_manifest.read_bytes()
+    original_install = installer._install_codex_native_roles
+    def fail_after_native(*args, **kwargs):
+        original_install(*args, **kwargs)
+        raise RuntimeError("synthetic NRC transaction failure")
+    with monkeypatch.context() as fault:
+        fault.setattr(installer, "_install_codex_native_roles", fail_after_native)
+        assert installer.install("codex", args) == 1
+    assert installed_manifest.read_bytes() == old_manifest
+    assert {path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path)) for path in preserved} == preserved
+    assert installer.install("codex", args) == 0
+    assert installed_manifest.read_bytes() == (AGENTS_SOURCE / installer.CODEX_ROLE_MANIFEST).read_bytes()
+    assert {path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path)) for path in preserved} == preserved
+    resolver = lead / "scripts/resolve-agents-mode.py"
+    command = [sys.executable, "-B", str(resolver), "--provider", "codex", "--project-root", str(project if mode == "project" else tmp_path / "foreign-project"),
+               "--home", str(tmp_path / "clean-home" if mode == "project" else project), "--repo-root", str(tmp_path / "not-source"),
+               "--ordinary-native-action", "describe", "--task-class", "engineering", "--role", "platform-engineer",
+               "--host-controls", "explicit", "--json"]
+    actual = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    assert actual.returncode == 0 and actual.stderr == "", actual.stderr
+    description = json.loads(actual.stdout)
+    assert description["status"] == "available", description
+    assert description["configurationProvenance"]["classification"] == "configured"
 
 
 def _resolve(tmp_path: Path) -> dict:
@@ -1700,6 +1932,7 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
             "model_reasoning_effort": "high",
             "sandbox_mode": sandbox,
             "developer_instructions": role["developer_instructions"],
+            "features": {"apps": False, "plugins": False},
         }
         assert "standalone" in role["developer_instructions"].casefold()
         assert "mechanical" in role["developer_instructions"].casefold()
@@ -1708,6 +1941,7 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
         assert manifest["roles"][role_name] == {
             "relativePath": f"{role_name}.toml",
             "sha256": hashlib.sha256(role_bytes).hexdigest(),
+            "developerInstructionsSha256": hashlib.sha256(role["developer_instructions"].encode()).hexdigest(),
         }
     assert "mechanical-scout" in installer._READ_ONLY_ROLES
     assert "mechanical-worker" not in installer._READ_ONLY_ROLES
@@ -1721,6 +1955,7 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
         assert manifest["roles"][role_name] == {
             "relativePath": f"{role_name}.toml",
             "sha256": hashlib.sha256(role_bytes).hexdigest(),
+            "developerInstructionsSha256": hashlib.sha256(role["developer_instructions"].encode()).hexdigest(),
         }
         if "model" not in role:
             description = _resolver_module().describe_ordinary_native_role_options(
@@ -1739,7 +1974,11 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
         else:
             assert role["model"] == "gpt-6.1-sol"
             assert role_bytes.count(b'model = "gpt-6.1-sol"') == 1
-            prior_bytes = role_bytes.replace(
+            historical = (ROOT / "tests/fixtures/native-luna-policy-priors/pre-configurable-roles" / f"{role_name}.toml").read_bytes()
+            prior = tomllib.loads(historical.decode())
+            assert {key: value for key, value in role.items() if key != "features"} == prior
+            assert role["features"] == {"apps": False, "plugins": False}
+            prior_bytes = historical.replace(
                 b'model = "gpt-6.1-sol"', b'model = "gpt-6-sol"', 1
             )
             assert hashlib.sha256(prior_bytes).hexdigest() == expected_digest
@@ -1752,10 +1991,12 @@ def test_sol_migrated_roles_keep_independent_nonmodel_contract() -> None:
         assert set(role) == {
             "name", "description", "model", "model_reasoning_effort",
             "sandbox_mode", "developer_instructions",
+            "features",
         }
         assert role["name"] == name
         assert role["description"] == description
         assert role["sandbox_mode"] == sandbox
+        assert role["features"] == {"apps": False, "plugins": False}
         assert role["developer_instructions"] == "\n".join(
             (*role_lines, TRUST_BOUNDARY, "")
         )
@@ -2222,7 +2463,7 @@ def test_installed_role_dispatch_fails_closed_on_layout_or_input_drift(
     elif mutation == "missing-role":
         role.unlink()
     elif mutation == "drifted-role":
-        role.write_text(role.read_text(encoding="utf-8") + "# drift\n", encoding="utf-8")
+        role.write_text(role.read_text(encoding="utf-8").replace("AGENTS.md", "changed instructions", 1), encoding="utf-8")
     elif mutation == "reparse-roles":
         real_roles = project_root / "roles-real"
         installed_agents.rename(real_roles)

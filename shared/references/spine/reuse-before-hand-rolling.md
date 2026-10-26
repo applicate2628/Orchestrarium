@@ -2,14 +2,17 @@
 
 ## Fundamental rule
 
-Do not build a non-trivial generic capability from scratch when a repo-standard mechanism, framework feature, installed dependency, or mature optimized library/tool can satisfy the requirement.
+Do not build a non-trivial generic capability from scratch when a repo-standard mechanism, framework feature, installed dependency, or mature optimized library/tool can satisfy the task's constraints. For an existing complex or error-prone custom implementation implicated by the admitted task, assess replacement with a ready component as well as repair or extension; existing ownership alone is not a reason to extend custom logic. Prefer replacement only when the component meets the accepted contract and whole-lifecycle constraints and reduces complexity, error risk, or maintenance burden; functional fit alone does not compel replacement.
 
-The rule is not "always add a dependency." It is a build-vs-buy gate:
+The rule is a build-vs-buy and keep-vs-replace assessment, not "always add a dependency":
 
-- first look for existing repository mechanisms and installed dependencies;
+- first inventory existing repository mechanisms and installed dependencies;
+- for complex or error-prone custom code implicated by the admitted task, compare replacing it with a ready component against repairing or extending it; existing ownership alone does not justify extension;
+- prefer replacement only when the component meets correctness, external-contract/API/ABI, performance, security, portability, licensing, provisioning, build, and integration requirements and yields a net reduction in whole-lifecycle complexity, error risk, or maintenance burden; availability or functional compatibility alone does not compel replacement;
+- when required fit or net benefit is absent, retaining or extending the custom implementation remains valid where otherwise justified;
 - when local options or current knowledge are insufficient, or the tradeoff is consequential, proactively research relevant current mature solutions;
 - present meaningful alternatives with benefits, constraints, and integration cost;
-- only hand-roll when the user explicitly asked for a from-scratch implementation or evidence shows the existing options fail the task's constraints.
+- hand-roll a new reusable capability only when the user explicitly requests a from-scratch implementation or evidence shows existing options fail the task's constraints.
 
 This is a targeted decision step: it neither requires web search nor creates a report gate for every task.
 
@@ -42,7 +45,7 @@ Hand-rolling is allowed when one of these is true:
 - the requirement is small, local, and not a reusable generic capability;
 - existing options are unavailable in the target environment;
 - existing options fail a verified constraint such as correctness, performance, licensing, security, deployment size, or platform support;
-- the repo already owns a custom implementation and the task is to extend that owner rather than introduce a parallel mechanism.
+- the admitted task extends the existing custom owner because no available component meets the accepted constraints, or a fitting component offers no net reduction in whole-lifecycle complexity, error risk, or maintenance burden; existing ownership alone is not sufficient.
 
 ## Commit discipline
 

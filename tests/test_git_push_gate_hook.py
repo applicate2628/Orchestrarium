@@ -3504,7 +3504,7 @@ class TestR10WrapperGrammarInProcess(unittest.TestCase):
                 self.module.PrRouteDenied, "PRG-COMMAND-SHAPE"
             ):
                 self.module._evaluate_active_pr_route(
-                    grant, "eval git push origin main", "Bash", parsed,
+                    grant, "Bash", parsed,
                     str(REPO_ROOT), "tool",
                 )
         executable.assert_not_called()
@@ -4192,13 +4192,13 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
             with self.subTest(script=script):
                 with temporary_repository_workdir() as repository_workdir:
                     self.assertEqual(
-                        module._validate_repository_workdir(repository_workdir, git_exe),
+                        module._prove_repository_root(module._normalize_repository_workdir(repository_workdir), git_exe),
                         repository_workdir,
                     )
                 with tempfile.TemporaryDirectory() as directory, self.assertRaises(
                     module.PrRouteDenied
                 ) as caught:
-                    module._validate_repository_workdir(directory, git_exe)
+                    module._prove_repository_root(module._normalize_repository_workdir(directory), git_exe)
                 self.assertEqual(caught.exception.failure_id, "PRG-WORKDIR-INVALID")
                 with self.assertRaises(module.PrRouteDenied):
                     module._normalize_repository_workdir(str(Path(__file__)))
@@ -4251,9 +4251,9 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                  mock.patch.object(module, "_verify_pr_oracle", return_value=verified) as oracle, \
                  mock.patch.object(module, "_run_authoritative_scan") as scanner:
                 self.assertTrue(module._evaluate_active_pr_route(
-                    grant, command, dialect, parsed, workdir, "tool"
+                    grant, dialect, parsed, workdir, "tool"
                 ))
-            normalize.assert_called_once_with(workdir)
+            normalize.assert_called_once_with(workdir, source="tool")
             prove.assert_called_once_with(workdir, git_exe)
             self.assertEqual(oracle.call_args.args[2], workdir)
             self.assertEqual(scanner.call_args.args[1], workdir)
@@ -4286,8 +4286,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                  mock.patch.object(module, "_normalize_repository_workdir") as normalize, \
                  self.assertRaises(module.PrRouteDenied) as caught:
                 module._evaluate_active_pr_route(
-                    grant, "git push --force origin HEAD:refs/heads/feature",
-                    "posix", parsed, absolute_missing, "envelope",
+                    grant, "posix", parsed, absolute_missing, "envelope",
                 )
             self.assertEqual(caught.exception.failure_id, "PRG-COMMAND-SHAPE")
             normalize.assert_not_called()
@@ -4532,7 +4531,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                         ), mock.patch.object(module, "_resolve_executable") as resolve:
                             with self.assertRaises(module.PrRouteDenied) as caught:
                                 module._prepare_pr_push(
-                                    pr_command, pr_dialect, parsed, str(invalid_workdir), "tool"
+                                    pr_dialect, parsed, str(invalid_workdir), "tool"
                                 )
                         self.assertEqual(caught.exception.failure_id, "PRG-WORKDIR-INVALID")
                         resolve.assert_not_called()
@@ -5437,7 +5436,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     "number": pr_number,
                     "url": f"https://github.com/acme/project/pull/{pr_number}",
                     "headRefName": head_ref,
-                    "headRepository": {"id": "R_head"},
+                    "headRepository": {"id": changes.get("head_repo_id", "R_head")},
                 }]))
             if changes.get("provider_timeout") and args[:2] == ["pr", "view"]:
                 return None
@@ -5452,26 +5451,30 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     "state": state, "closed": closed, "mergedAt": None,
                     "baseRefName": "main", "baseRefOid": "3" * 40,
                     "headRefName": head_ref, "headRefOid": self.REMOTE_OID,
-                    "headRepository": {"id": "R_head", "name": head_repo_name},
+                    "headRepository": {"id": changes.get("head_repo_id", "R_head"), "name": head_repo_name},
                     "headRepositoryOwner": {"login": head_owner},
                 })
             if args[:3] == ["repo", "view", "acme/project"]:
                 return result(0, {
-                    "id": "R_base", "nameWithOwner": "acme/project",
+                    "id": changes.get("base_repo_id", "R_base"), "nameWithOwner": "acme/project",
                     "defaultBranchRef": {"name": "main"},
                     "url": "https://github.com/acme/project",
                 })
             if args[:3] == ["repo", "view", head_repo]:
                 return result(0, {
-                    "id": "R_head", "nameWithOwner": head_repo,
+                    "id": changes.get("head_repo_id", "R_head"), "nameWithOwner": head_repo,
                     "defaultBranchRef": {"name": changes.get("head_default", "trunk")},
                     "url": f"https://github.com/{head_repo}",
                 })
             if args[:4] == ["check-ref-format", "--branch", head_ref][:4]:
                 return result(0, head_ref + "\n")
             if args[:3] == ["api", "--hostname", "github.com"] and "/rules/branches/" in args[3]:
+                if changes.get("protection_api_unavailable"):
+                    return result(1, b"", b"synthetic rules feature unavailable")
                 return result(0, changes.get("rules", []))
             if args[:3] == ["api", "--hostname", "github.com"] and "/branches/" in args[3]:
+                if changes.get("protection_api_unavailable"):
+                    return result(1, b"", b"synthetic protection feature unavailable")
                 return result(0, {"name": head_ref, "protected": protected})
             if args[:5] == ["remote", "get-url", "--push", "--all", "origin"]:
                 if changes.get("multiple_urls"):
@@ -5513,7 +5516,18 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
         if script == CANONICAL_HOOK:
             dialect_override = "powershell" if (tool_name or self._tool_name(script)) == "PowerShell" else "posix"
 
+        actual_authoritative_scan = module._run_authoritative_scan
+
         def authoritative(binding, repository_workdir, git_exe):
+            if oracle_changes.get("actual_range_child"):
+                observation = actual_authoritative_scan(binding, repository_workdir, git_exe)
+                oracle_changes["actual_range_observations"].append({
+                    "kind": observation.parsed_outcome.kind,
+                    "commits": observation.parsed_outcome.receipt.commits,
+                    "source": observation.parsed_outcome.receipt.source,
+                    "consumed": bool(observation.consumption_id),
+                })
+                return observation
             self.assertEqual(repository_workdir, str(REPO_ROOT.resolve()))
             self.assertEqual(git_exe, self.OWNED_GIT_IDENTITY)
             if "scan_failure_id" in oracle_changes:
@@ -5601,7 +5615,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                             module, "_prove_repository_root", side_effect=lambda path, _git: path
                         ) as prove:
                             prepared = module._prepare_pr_push(
-                                command, dialect, parsed, tool_workdir, "tool"
+                                dialect, parsed, tool_workdir, "tool"
                             )
                         self.assertEqual(prepared.repository_workdir, canonical)
                         resolve.assert_called_once_with("git", canonical)
@@ -5718,7 +5732,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         side_effect=lambda path, _git: path,
                     ) as prove:
                         prepared = module._prepare_pr_push(
-                            command, dialect, parsed, lower_canonical, "tool"
+                            dialect, parsed, lower_canonical, "tool"
                         )
                     normalized_roots = [call.args[0] for call in normalize.call_args_list]
                     self.assertEqual(
@@ -6149,7 +6163,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                  mock.patch.object(module, "_resolve_executable", side_effect=resolver), \
                  mock.patch.object(
                      module, "_run_process",
-                     side_effect=self._oracle(module, observed),
+                     side_effect=self._oracle(module, observed, protection_api_unavailable=True, protected=True, rules=[{"type": "required_status_checks"}]),
                  ), mock.patch.object(
                      module, "_run_authoritative_scan", side_effect=authoritative,
                  ), mock.patch.object(
@@ -7317,7 +7331,8 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             )
             self.assertFalse(denies_text(stdout1))
             self.assertFalse(denies_text(stdout2))
-            self.assertIn("PRG-DESTINATION-UNSAFE", unsafe)
+            self.assertFalse(denies_text(unsafe), unsafe)
+            self.assertFalse(any(argv[1] == "api" for argv in calls3))
             self.assertEqual(sum(argv[1:3] == ["pr", "view"] for argv in calls1 + calls2 + calls3), 3)
 
     def test_active_route_command_provider_remote_and_no_fallback_matrix(self) -> None:
@@ -7387,6 +7402,81 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 )
                 self.assertFalse(denies_text(stdout), stdout)
 
+    def test_pr_scope_does_not_query_protection_or_rules_capability(self) -> None:
+        routes = (
+            [user(self.GRANT), user("continue")],
+            [user("[approve-pr-publication]")],
+            [user(self.GRANT), user("[approve-pr-publication]"), user("continue")],
+        )
+        for script in (CANONICAL_HOOK, *HOOKS):
+            for entries in routes:
+                with self.subTest(script=script, route=entries):
+                    stdout, calls = self._run_module(
+                        script, entries, self._literal_command(script),
+                        protected=True, rules=[{"type": "required_status_checks"}],
+                        protection_api_unavailable=True,
+                    )
+                    self.assertFalse(denies_text(stdout), stdout)
+                    self.assertTrue(any(argv[1:3] == ["pr", "view"] for argv in calls))
+                    self.assertTrue(any(argv[1:3] == ["ls-remote", "--heads"] for argv in calls))
+                    self.assertFalse(any(argv[1] == "api" for argv in calls))
+
+    def test_public_pr_entry_runs_actual_range_child_without_protection_queries(self) -> None:
+        """Real main/range subprocess; only PR-oracle transport uses the existing model."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            remote, repo = root / "remote.git", root / "repo"
+            subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            for key, value in (("user.name", "T"), ("user.email", "t@t")):
+                subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
+            (repo / "seed.txt").write_text("clean seed\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "seed.txt"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
+            subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", str(remote)], check=True)
+            subprocess.run(["git", "-C", str(repo), "push", "-q", "origin", "HEAD:refs/heads/feature"], check=True)
+            base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+            (repo / "next.txt").write_text("clean next\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "next.txt"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "next"], check=True)
+            head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+            real_git = str(Path(shutil.which("git")).resolve(strict=True))
+            scans = []
+            with mock.patch.dict(globals(), {"REPO_ROOT": repo}), \
+                 mock.patch.object(self, "OWNED_GIT_IDENTITY", real_git), \
+                 mock.patch.object(self, "REMOTE_OID", base), \
+                 mock.patch.object(self, "LOCAL_TIP", head):
+                stdout, calls = self._run_module(
+                    CANONICAL_HOOK, [user(self.GRANT), user("continue")],
+                    self._literal_command(CANONICAL_HOOK), actual_range_child=True,
+                    actual_range_observations=scans, protection_api_unavailable=True,
+                    protected=True, rules=[{"type": "required_status_checks"}],
+                    head_repo="acme/project", head_repo_id="R_base",
+                )
+            self.assertFalse(denies_text(stdout), stdout)
+            self.assertFalse(any(argv[1] == "api" for argv in calls))
+            self.assertEqual(sum(a[1:3] == ["repo", "view"] and "id,nameWithOwner,defaultBranchRef,url" in a for a in calls), 1)
+            self.assertEqual(scans, [{"kind": "valid-v3", "commits": 1, "source": head, "consumed": True}])
+
+    def test_same_repository_metadata_reuse_requires_exact_identity(self) -> None:
+        entries = [user(self.GRANT), user("continue")]
+        cases = (
+            ({"head_repo": "acme/project", "head_repo_id": "R_base"}, 1, None),
+            ({}, 2, None),
+            ({"head_repo": "Acme/project", "head_repo_id": "R_base"}, 2, None),
+            ({"head_repo": "acme/project", "head_repo_id": "R_other"}, 2, "PRG-BINDING-DRIFT"),
+        )
+        for script in (CANONICAL_HOOK, *HOOKS):
+            for changes, expected_reads, denial in cases:
+                with self.subTest(script=script, changes=changes):
+                    stdout, calls = self._run_module(script, entries, self._literal_command(script), **changes)
+                    reads = [a for a in calls if a[1:3] == ["repo", "view"] and "id,nameWithOwner,defaultBranchRef,url" in a]
+                    self.assertEqual(len(reads), expected_reads)
+                    if denial:
+                        self.assertIn(denial, stdout)
+                    else:
+                        self.assertFalse(denies_text(stdout), stdout)
+
     def test_strict_provider_and_binding_failure_matrix(self) -> None:
         entries = [user(self.GRANT), user("continue"), *self._scan_pair()]
         cases = (
@@ -7395,7 +7485,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             ({"pr_raw": b'{} trailing'}, "PRG-PR-UNAVAILABLE"),
             ({"state": "CLOSED"}, "PRG-PR-STATE"),
             ({"head_default": "feature"}, "PRG-DESTINATION-UNSAFE"),
-            ({"rules": [{"type": "required_status_checks"}]}, "PRG-DESTINATION-UNSAFE"),
             ({"remote_oid": "8" * 40}, "PRG-BRANCH-DRIFT"),
         )
         for script in HOOKS:
@@ -7526,6 +7615,108 @@ class TestPrProviderProcessBounds(unittest.TestCase):
                 )
                 self.assertIsNone(result, script)
                 self.assertLess(time.monotonic() - started, 2.0, script)
+
+
+class TestWorkdirFailureDiagnostics(unittest.TestCase):
+    def test_existing_workdir_predicates_retain_safe_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            child = root / "child"
+            child.mkdir()
+            ordinary_file = root / "file"
+            ordinary_file.write_text("synthetic", encoding="utf-8")
+            for target in TARGETS:
+                module = _load_gate_module(target, f"workdir_origins_{target.label}")
+                preflight = _heavy_preflight(module, repository_workdir=str(root))
+
+                def assert_denial(action, stage, check, subject="invocation", source="unacquired", kind="string"):
+                    with self.assertRaises(module.PrRouteDenied) as raised:
+                        action()
+                    error = raised.exception
+                    self.assertEqual(error.failure_id, "PRG-WORKDIR-INVALID")
+                    self.assertEqual(error.workdir_diagnostic, module.WorkdirDiagnostic(stage, check, subject, source, kind))
+                    output = io.StringIO()
+                    with mock.patch.object(module, "evaluate_heavy", side_effect=error), contextlib.redirect_stdout(output):
+                        self.assertEqual(module.compose_gate_result(preflight), 0)
+                    reason = json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecisionReason"]
+                    self.assertIn(f"stage={stage}; check={check}; subject={subject}; source={source}; value-kind={kind}.", reason)
+                    for private in ("PRIVATE-WORKDIR-CANARY", str(root), "OSError", "ValueError"):
+                        self.assertNotIn(private, output.getvalue())
+
+                for value, check, kind in ((False, "non-string", "boolean"), ("", "empty", "string"),
+                                            ("PRIVATE-WORKDIR-CANARY", "relative", "string"),
+                                            (str(root / "absent"), "resolve-failed", "string"),
+                                            (str(ordinary_file), "not-directory", "string"),
+                                            (str(child) + os.sep + "..", "canonical-mismatch", "string")):
+                    with self.subTest(target=target.label, check=check):
+                        assert_denial(lambda: module._normalize_repository_workdir(value), "invocation-qualification", check, kind=kind)
+                with mock.patch.object(module, "_directory_generation", side_effect=ValueError("PRIVATE-WORKDIR-CANARY")):
+                    assert_denial(lambda: module._normalize_repository_workdir(str(root)), "invocation-qualification", "ordinary-directory")
+                assert_denial(lambda: module._prepare_selected_repository_workdir(None, {}, "tool"), "invocation-qualification", "selected-types", source="tool", kind="object")
+                assert_denial(lambda: module._prepare_selected_repository_workdir(("PRIVATE-WORKDIR-CANARY", str(root)), str(root), "tool"), "invocation-qualification", "literal-context", subject="literal", source="literal", kind="other")
+                assert_denial(lambda: module._prepare_selected_repository_workdir(None, str(root), "PRIVATE-WORKDIR-CANARY"), "invocation-qualification", "selection-source")
+                assert_denial(lambda: module._canonicalize_numeric_pr_grant(7, "PRIVATE-WORKDIR-CANARY", preflight=preflight), "authorization-normalization", "relative", subject="authorization", source="authorization-context")
+                with mock.patch.object(module.os, "stat", side_effect=OSError("PRIVATE-WORKDIR-CANARY")):
+                    assert_denial(lambda: module._repository_identity(str(root)), "repository-identity", "stat-failed", subject="repository", source="derived-repository")
+                for text, check in (("", "root-output"), (str(root / "absent"), "resolve-failed"), (str(child), "root-mismatch")):
+                    with mock.patch.object(module, "_run_text", return_value=(0, text)):
+                        assert_denial(lambda: module._prove_repository_root(str(root), "synthetic-git"), "repository-root-proof", check, subject="repository", source="derived-repository")
+                for result, check in ((None, "process-result"), (subprocess.CompletedProcess([], 1, b""), "process-result"), (subprocess.CompletedProcess([], 0, b"\xff"), "decode")):
+                    with mock.patch.object(module, "_run_process", return_value=result):
+                        assert_denial(lambda: module._prove_repository_root(str(root), "synthetic-git"), "repository-root-proof", check, subject="repository", source="derived-repository")
+                with mock.patch.object(module.time, "monotonic", side_effect=(0, module.PROCESS_TIMEOUT_SECONDS + 1)):
+                    assert_denial(lambda: module._prove_repository_root(str(root), "synthetic-git"), "repository-root-proof", "deadline", subject="repository", source="derived-repository")
+                with mock.patch.object(module, "_resolve_executable", return_value=None):
+                    assert_denial(lambda: module._complete_generic_publication(preflight), "executable-resolution", "executable-missing", subject="executable", source="derived-repository", kind="null")
+
+    def test_both_pr_literal_callers_preserve_agreement_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            other = root / "other"
+            other.mkdir()
+            for target in TARGETS:
+                module = _load_gate_module(target, f"literal_workdir_origins_{target.label}")
+                parsed = module._a3_preflight.parse_shell_command(
+                    shlex.join((str(root / "git.exe"), "-C", str(other), "push", "origin", "HEAD:refs/heads/topic")), "posix",
+                )
+                self.assertEqual(parsed.strict_projection.status, "canonical")
+                for prepare in (module._prepare_pr_push, module._prepare_simple_pr_push):
+                    with self.subTest(target=target.label, prepare=prepare.__name__), \
+                         mock.patch.object(module, "_parse_pr_literal_shape", return_value=SimpleNamespace(repository_root=str(other))), \
+                         mock.patch.object(module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE", "posix"), \
+                         mock.patch.object(module, "absolute_literal_root_context", return_value=None), \
+                         mock.patch.object(module, "_resolve_executable", side_effect=AssertionError("diagnostic changed predicate ordering")):
+                        with self.assertRaises(module.PrRouteDenied) as raised:
+                            prepare("posix", parsed, str(root), "tool")
+                    self.assertEqual(raised.exception.failure_id, "PRG-WORKDIR-INVALID")
+                    self.assertEqual(raised.exception.workdir_diagnostic, module.WorkdirDiagnostic(
+                        "literal-agreement", "root-mismatch", "invocation", "tool", "string",
+                    ))
+
+    def test_corrupt_workdir_detail_never_becomes_output_or_credit(self) -> None:
+        module = _load_gate_module(TARGETS[0], "corrupt_workdir_diagnostic")
+        preflight = _heavy_preflight(module)
+        diagnostic = module.WorkdirDiagnostic("input-selection", "non-string", "invocation", "tool", "object")
+        for field in diagnostic._fields:
+            error = module.PrRouteDenied("PRG-WORKDIR-INVALID", workdir_diagnostic=diagnostic)
+            error.workdir_diagnostic = diagnostic._replace(**{field: "PRIVATE-WORKDIR-CANARY"})
+            output = io.StringIO()
+            with mock.patch.object(module, "evaluate_heavy", side_effect=error), contextlib.redirect_stdout(output):
+                self.assertEqual(module.compose_gate_result(preflight), 0)
+            body = json.loads(output.getvalue())["hookSpecificOutput"]
+            self.assertEqual(body["permissionDecision"], "deny")
+            self.assertTrue(body["permissionDecisionReason"].startswith("PRG-WORKDIR-INVALID:"))
+            self.assertNotIn("PRIVATE-WORKDIR-CANARY", output.getvalue())
+            self.assertNotIn("Workdir diagnostics:", output.getvalue())
+        invalid = module._a3_preflight.PreflightResult(
+            "DEFER", "PFP-DENY-KNOWN", "RENDER_DENY", None, None, "", None,
+            None, None, False, "PRG-WORKDIR-INVALID", workdir_diagnostic=("PRIVATE-WORKDIR-CANARY",),
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(module.compose_gate_result(invalid), 0)
+        self.assertIn('"permissionDecision": "deny"', output.getvalue())
+        self.assertNotIn("PRIVATE-WORKDIR-CANARY", output.getvalue())
 
 
 class TestTranscriptFailureDiagnostics(unittest.TestCase):
@@ -8758,7 +8949,13 @@ class TestR14CooperativeOracle(unittest.TestCase):
             REPO_ROOT / "references-claude" / "claude-md-structural-enforcement.md",
             REPO_ROOT / "RELEASE_NOTES.md",
         )
-        codex_surface = REPO_ROOT / "src.codex" / "AGENTS.codex.md"
+        codex_surface = REPO_ROOT / "src.codex" / "skills" / "lead" / "operating-model.md"
+        codex_base = REPO_ROOT / "src.codex" / "AGENTS.codex.md"
+        procedure_binding = (
+            "**Mandatory read:** Any actor, regardless of profession, who installs, upgrades, "
+            "removes, or changes Codex hooks; handles hook trust or health; or diagnoses behavior "
+            "based on hook contracts MUST read the Codex hook procedure in the existing Lead operating-model."
+        )
         codex_qualification = (
             "Cooperative captured verification is not same-user arbitrary-code containment "
             "or native reviewer attestation; repository/remote freshness outside the selected "
@@ -8787,10 +8984,13 @@ class TestR14CooperativeOracle(unittest.TestCase):
                 for phrase in prohibited:
                     self.assertNotIn(phrase, text)
         codex_text = " ".join(codex_surface.read_text(encoding="utf-8").split())
+        codex_base_text = " ".join(codex_base.read_text(encoding="utf-8").split())
+        self.assertEqual(codex_base_text.count(procedure_binding), 1)
         self.assertEqual(codex_text.count(codex_qualification), 1)
         self.assertEqual(codex_text.count(codex_authority_owner), 1)
-        for phrase in prohibited:
-            self.assertNotIn(phrase, codex_text)
+        for text in (codex_text, codex_base_text):
+            for phrase in prohibited:
+                self.assertNotIn(phrase, text)
         russian_text = " ".join(russian_surface.read_text(encoding="utf-8").split())
         self.assertEqual(russian_text.count(russian), 1)
         for phrase in prohibited:

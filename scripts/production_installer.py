@@ -29,6 +29,13 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from installer_markdown import document_context as _markdown_document_context
+except ModuleNotFoundError as error:
+    if error.name != "installer_markdown":
+        raise
+    from scripts.installer_markdown import document_context as _markdown_document_context
+
+try:
     from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
 except ModuleNotFoundError:
     from scripts.provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
@@ -472,6 +479,12 @@ UI_CONTINUITY_CONTRACT_TARGET = Path("contracts") / "ui-transition-continuity.md
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 CODEX_ROLE_MANIFEST = "orchestrarium-role-manifest.json"
 _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
+    (
+        (Path("shared") / "role-routing-policy.v1.json",
+         "b6b76525d5e9d054cf8c1a9d89ea038c42ce8b488a1a835873d6d38f6e5b8bd3"),
+        (Path("shared") / "orchestrarium-role-manifest.json",
+         "fd79267b2f7419e917cfac8b9a7df2713ac137164453548213baba96a1ef2d22"),
+    ),
     (
         (Path("shared") / "role-routing-policy.v1.json",
          "dcab8e4da55b05475f9b9c507a3a9a97679a0c7b72006ff7ffca4b95ccd13451"),
@@ -1217,6 +1230,7 @@ class _SliceAMigratedFileRecord:
     prepared_state: _PhysicalNode | None = None
     old_current: _PhysicalNode | None = None
     new_current: _PhysicalNode | None = None
+    selection_links: tuple[tuple[Path, _PhysicalNode], ...] = ()
 
     @property
     def proof_key(self) -> tuple[Any, ...]:
@@ -2348,10 +2362,24 @@ class _InstallTransaction:
     def _assert_readonly_parents(self, parents) -> None:
         for parent, before in parents:
             if before is None and not self._node_metadata_matches(parent, None):
-                # Only an original creator row can supply a formerly absent parent.
+                # Both persistent-parent producers retain an original birth proof;
+                # consume it here without adding a second inverse owner.
                 creators = [record.current_node for record in self._slice_a_created
                     if not record.consumed and record.kind == "directory" and record.leaf_path == parent
                     and record.current_node is not None]
+                for entry in self._entries:
+                    if (entry["kind"] != "scalar" or entry["current_path"] != parent
+                        or entry["before_node"] is not None or entry.get("born") is not True
+                        or entry["consumed"] or self._scalar_origin_consumed(entry)):
+                        continue
+                    origin, current = entry["origin"], entry["current_node"]
+                    if (not isinstance(origin, _PhysicalNode) or not isinstance(current, _PhysicalNode)
+                        or origin.kind != "directory" or current.kind != "directory"
+                        or not self._same_origin(current, origin.python_identity, origin.native_proof)
+                        or not self._point_matches(parent, origin) or not self._point_matches(parent, current)):
+                        raise ValueError("E_READ_ONLY_DEPENDENCY_CHANGED: scalar creator")
+                    self._assert_scalar_binding(entry, check_storage=False)
+                    creators.append(current)
                 before = creators[0] if len(creators) == 1 else None
             if not (self._node_metadata_matches(parent, None) if before is None else self._point_matches(parent, before)):
                 raise ValueError("E_READ_ONLY_DEPENDENCY_CHANGED: original parent")
@@ -2633,7 +2661,8 @@ class _InstallTransaction:
                     return self._read_copy_metadata(os.fstat(descriptor), descriptor, None)
             progress(operation, projected, label="timestamps", sets_times=True)
             requested_identity = self._chmod_identity(node.python_identity, mode)
-            progress(lambda: self._chmod_owned(path, node.python_identity, mode, descriptor=descriptor),
+            progress(lambda: self._chmod_owned(path, node.python_identity, mode, descriptor=descriptor,
+                                               native_proof=node.native_proof),
                       current, identity=requested_identity, label="mode")
             if desired.flags is not None and desired.flags != current.flags:
                 if not hasattr(os, "fchflags"):
@@ -3028,11 +3057,12 @@ class _InstallTransaction:
                    and not self._same_origin(origin, record.old_identity, record.old_native_proof)
                    for record in self._slice_a_migrated)
 
-    def _settle_scalars(self, blocked: list[Path]) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
+    def _settle_scalars(self, blocked: list[Path], *, entries=None) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
         unresolved, failures = [], []
         retained_errors = ()
+        selected = None if entries is None else {id(entry) for entry in entries}
         for ordinal, entry in reversed(tuple(enumerate(self._entries))):
-            if entry["kind"] != "scalar" or entry["consumed"]:
+            if entry["kind"] != "scalar" or entry["consumed"] or (selected is not None and id(entry) not in selected):
                 continue
             path = entry["current_path"]
             try:
@@ -3397,6 +3427,39 @@ class _InstallTransaction:
             return False
         raise OSError(error, os.strerror(error), str(target))
 
+    @contextmanager
+    def _migration_selection_guard(self, migration, source: Path, target: Path):
+        """Keep frozen config witnesses and native parent custody at forward effects."""
+        forward = migration is not None and migration.selection_links and (
+            (source == migration.leaf_path and target == migration.tombstone_path)
+            or (source == migration.prepared_path and target == migration.leaf_path))
+        if not forward:
+            yield None
+            return
+        with ExitStack() as resources:
+            selected = {"links": migration.selection_links}
+            self._assert_scalar_binding(selected, check_storage=False)
+            parent = self._bind_scalar_parent(migration.parent_path,
+                dict(migration.selection_links)[migration.parent_path], resources)
+            self._assert_scalar_binding(selected, check_storage=False)
+            primary = None
+            try:
+                yield (parent, parent) if os.name != "nt" else None
+            except BaseException as error:
+                primary = error
+                raise
+            finally:
+                try:
+                    self._assert_scalar_binding(selected, check_storage=False)
+                except BaseException as drift:
+                    if primary is None:
+                        raise
+                    paths, members, errors = self._settlement_failure(drift, "migration", -1,
+                        migration.leaf_path, "E_ROLLBACK_CREATED_IDENTITY_CHANGED", participant="migration")
+                    raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "migration", primary,
+                        members=tuple(members), unresolved_paths=tuple(paths),
+                        retained_errors=errors) from primary
+
     def _publish_retained(self, source: Path, target: Path, *,
                           effect: _DeclaredPathEffect | None = None,
                           migration: _SliceAMigratedFileRecord | None = None,
@@ -3426,38 +3489,41 @@ class _InstallTransaction:
             before = self._observe(source)  # Original unbound direct-source acquisition.
         if not before or not self._image_matches(target, {}):
             raise FileExistsError(f"E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: publication {target}")
-        try:
-            supported = (self._native_publish_no_replace(source, target, parent_descriptors=parent_descriptors)
-                         if parent_descriptors is not None else self._native_publish_no_replace(source, target))
-        except BaseException:
+        with self._migration_selection_guard(migration, source, target) as selected_parents:
+            if selected_parents is not None:
+                parent_descriptors = selected_parents
             try:
-                metadata = target.lstat()
-                moved_root = (metadata.st_dev, metadata.st_ino) == before[source].python_identity[:2]
-                if moved_root and self._image_matches(source, {}):
-                    self._moved(source, target, before, effect, migration)
-            except FileNotFoundError:
-                pass
-            raise
-        if supported:
-            self._moved(source, target, before, effect, migration)
-            return self._relocate(before, source, target)
-        if (not self._image_matches(source, before)) or not self._image_matches(target, {}):
-            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: ambiguous publication")
-        if ((effect is not None and source == effect.location)
-                or (migration is not None and source == migration.leaf_path)):
-            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained-object atomic capability")
-        if before[source].kind == "file":
-            os.link(source, target, follow_symlinks=False)
-            actual = self._relocate(before, source, target)
-            if (not self._image_matches(target, actual)) or (not self._image_matches(source, before)):
-                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: linked publication drift")
-            self._dispose_node(source, before[source])
-            self._moved(source, target, before, effect, migration)
-            return actual
-        if (before[source].kind != "directory" or effect is None
-                or source != effect.retained or not effect.before or effect.actual):
-            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unsupported retained type")
-        return self._construct_exclusive_tree(source, target, before, effect)
+                supported = (self._native_publish_no_replace(source, target, parent_descriptors=parent_descriptors)
+                             if parent_descriptors is not None else self._native_publish_no_replace(source, target))
+            except BaseException:
+                try:
+                    metadata = target.lstat()
+                    moved_root = (metadata.st_dev, metadata.st_ino) == before[source].python_identity[:2]
+                    if moved_root and self._image_matches(source, {}):
+                        self._moved(source, target, before, effect, migration)
+                except FileNotFoundError:
+                    pass
+                raise
+            if supported:
+                self._moved(source, target, before, effect, migration)
+                return self._relocate(before, source, target)
+            if (not self._image_matches(source, before)) or not self._image_matches(target, {}):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: ambiguous publication")
+            if ((effect is not None and source == effect.location)
+                    or (migration is not None and source == migration.leaf_path)):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained-object atomic capability")
+            if before[source].kind == "file":
+                os.link(source, target, follow_symlinks=False)
+                actual = self._relocate(before, source, target)
+                if (not self._image_matches(target, actual)) or (not self._image_matches(source, before)):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: linked publication drift")
+                self._dispose_node(source, before[source])
+                self._moved(source, target, before, effect, migration)
+                return actual
+            if (before[source].kind != "directory" or effect is None
+                    or source != effect.retained or not effect.before or effect.actual):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unsupported retained type")
+            return self._construct_exclusive_tree(source, target, before, effect)
 
     def _create_owned_directory(self, path: Path, record, *, parent_descriptor: int | None = None,
                                 parent_reference: _WindowsBoundNode | None = None,
@@ -3654,7 +3720,8 @@ class _InstallTransaction:
                 if fsync != "best-effort":
                     raise
         if mode is not None:
-            changed = self._chmod_owned(target, node.python_identity, mode, descriptor=descriptor)
+            changed = self._chmod_owned(target, node.python_identity, mode, descriptor=descriptor,
+                                        native_proof=node.native_proof)
             node = replace(node, python_identity=changed)
             record(target, node)
         if digest.hexdigest() != expected_digest:
@@ -3847,13 +3914,25 @@ class _InstallTransaction:
         expected = _InstallTransaction._chmod_identity(before, requested)
         if _CreateOnlyMutablePath._identity(path) != before:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal permission beforeimage")
-        if os.name == "nt" and descriptor is None:
+        if os.name == "nt":
             if native_proof is None:
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: missing permission native proof")
-            with _WindowsBoundNode(path, purpose="attributes") as bound:
-                if bound.proof != native_proof:
+            if descriptor is None:
+                with _WindowsBoundNode(path, purpose="attributes") as bound:
+                    if bound.proof != native_proof:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: permission native identity")
+                    bound.set_readonly(not bool(requested & stat.S_IWRITE))
+            else:
+                bound = _WindowsBoundNode(path)
+                bound.descriptor = descriptor  # Borrowed; caller alone owns closure.
+                metadata = bound.python_metadata()
+                identity = (metadata.st_dev, metadata.st_ino, metadata.st_mode,
+                            getattr(metadata, "st_file_attributes", 0))
+                if identity != before or bound.proof != native_proof:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: permission native identity")
                 bound.set_readonly(not bool(requested & stat.S_IWRITE))
+                if bound.proof != native_proof:
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: permission native transition")
         elif descriptor is None:
             path.chmod(requested)
         else:
@@ -4765,13 +4844,14 @@ class _InstallTransaction:
         return unresolved, failures, retained_errors
 
     def _settle_snapshots(
-        self, unresolved: list[Path]
+        self, unresolved: list[Path], *, entries=None,
     ) -> tuple[list[_RollbackFailureMember], bool, tuple[BaseException, ...]]:
         failures: list[_RollbackFailureMember] = []
         retained_errors = ()
         retain_backup = False
+        selected = None if entries is None else {id(entry) for entry in entries}
         for ordinal, entry in enumerate(self._entries):
-            if entry["kind"] == "scalar":
+            if entry["kind"] == "scalar" or (selected is not None and id(entry) not in selected):
                 continue
             path = entry["path"]
             assert isinstance(path, Path)
@@ -4796,6 +4876,70 @@ class _InstallTransaction:
                 failures.extend(child_members)
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
                 retain_backup = True
+        return failures, retain_backup, retained_errors
+
+    def _settle_container_inverses(self, unresolved, scalar_directories):
+        """Compose the finite original inverses; their owners keep all authority."""
+        failures, retained_errors, retain_backup = [], (), False
+        pending = [("scalar", ordinal, entry["current_path"], entry)
+                   for ordinal, entry in reversed(tuple(enumerate(self._entries)))
+                   if any(entry is original for original in scalar_directories) and not entry["consumed"]]
+        pending += [("snapshot", ordinal, entry["path"], entry)
+                    for ordinal, entry in enumerate(self._entries) if entry["kind"] != "scalar"]
+        pending += [("created", ordinal, record.leaf_path, record)
+                    for ordinal, record in reversed(tuple(enumerate(self._slice_a_created)))
+                    if record.kind == "directory" and not record.consumed]
+        pending += [("retention", ordinal, directory, None)
+                    for ordinal, directory in enumerate(self._migration_retention)]
+
+        def depends(parent, child):
+            kind, _ordinal, path, _record = parent
+            child_kind, _child_ordinal, child_path, child_record = child
+            if path != child_path and path in child_path.parents:
+                return True
+            if kind == "snapshot" and path == child_path and child_kind != "snapshot":
+                return True
+            if kind == "retention" and child_kind in {"scalar", "snapshot"}:
+                backup = child_record.get("operation_backup" if child_kind == "scalar" else "backup")
+                return backup is not None and (backup == path or path in backup.parents)
+            return False
+
+        while pending:
+            ready = next((item for item in pending if not any(
+                other is not item and depends(item, other) for other in pending)), None)
+            if ready is None:
+                for kind, ordinal, path, _record in pending:
+                    unresolved.append(path)
+                    failures.append(_RollbackFailureMember("snapshot", ordinal, str(path),
+                        "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", "unresolved inverse dependency cycle", participant=kind))
+                retain_backup = True
+                break
+            pending.remove(ready)
+            kind, ordinal, path, record = ready
+            if any(self._paths_overlap(path, blocked) for blocked in unresolved):
+                unresolved.append(path)
+                failures.append(_RollbackFailureMember("snapshot", ordinal, str(path),
+                    "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", "unresolved descendant inverse", participant=kind))
+                retain_backup = True
+                continue
+            if kind == "scalar":
+                paths, members, errors = self._settle_scalars(unresolved, entries=(record,))
+            elif kind == "created":
+                paths, members, errors = self._settle_created(unresolved, records=(record,))
+            elif kind == "retention":
+                paths, members, errors = self._settle_migration_retention(directories=(path,), blocked=unresolved)
+                if not members and path in self._migration_retention:
+                    paths = [*paths, path]  # Explicit custody must also preserve its enclosing containers.
+                    members = [*members, _RollbackFailureMember("backup", ordinal, str(path),
+                        "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", "retained inverse support", participant="backup")]
+            else:
+                members, kept, errors = self._settle_snapshots(unresolved, entries=(record,))
+                retain_backup = retain_backup or kept
+                paths = [Path(member.path) for member in members]
+            unresolved.extend(paths)
+            failures.extend(members)
+            retained_errors = _merge_copy_setter_operation_errors(retained_errors, errors)
+            retain_backup = retain_backup or bool(members)
         return failures, retain_backup, retained_errors
 
     def _discard_backup(self) -> _InstallFailure | None:
@@ -4926,32 +5070,23 @@ class _InstallTransaction:
         unresolved.extend(migrated_unresolved)
         failures.extend(migrated_failures)
         retained_errors = _merge_copy_setter_operation_errors(retained_errors, migrated_errors)
-        scalar_unresolved, scalar_failures, scalar_errors = self._settle_scalars(unresolved)
+        scalar_directories = tuple(entry for entry in self._entries
+            if entry["kind"] == "scalar" and not entry["consumed"] and entry.get("born") is True
+            and entry["before_node"] is None and entry["origin"] is not None and entry["origin"].kind == "directory")
+        scalar_files = tuple(entry for entry in self._entries
+            if entry["kind"] == "scalar" and not any(entry is directory for directory in scalar_directories))
+        scalar_unresolved, scalar_failures, scalar_errors = self._settle_scalars(unresolved, entries=scalar_files)
         unresolved.extend(scalar_unresolved)
         failures.extend(scalar_failures)
         retained_errors = _merge_copy_setter_operation_errors(retained_errors, scalar_errors)
-        retention_unresolved, retention_failures, retention_errors = self._settle_migration_retention(only_empty=True, blocked=unresolved)
-        unresolved.extend(retention_unresolved)
-        failures.extend(retention_failures)
-        retained_errors = _merge_copy_setter_operation_errors(retained_errors, retention_errors)
-        directories = tuple(record for record in self._slice_a_created if record.kind == "directory")
         leaves = tuple(record for record in self._slice_a_created if record.kind != "directory")
         created_unresolved, created_failures, created_errors = self._settle_created(unresolved, records=leaves)
         unresolved.extend(created_unresolved)
         failures.extend(created_failures)
         retained_errors = _merge_copy_setter_operation_errors(retained_errors, created_errors)
-        snapshot_failures, retain_backup, snapshot_errors = self._settle_snapshots(unresolved)
+        snapshot_failures, retain_backup, snapshot_errors = self._settle_container_inverses(unresolved, scalar_directories)
         failures.extend(snapshot_failures)
         retained_errors = _merge_copy_setter_operation_errors(retained_errors, snapshot_errors)
-        directory_unresolved, directory_failures, directory_errors = self._settle_created(
-            unresolved + [Path(member.path) for member in snapshot_failures], records=directories)
-        unresolved.extend(directory_unresolved)
-        failures.extend(directory_failures)
-        retained_errors = _merge_copy_setter_operation_errors(retained_errors, directory_errors)
-        retention_unresolved, retention_failures, retention_errors = self._settle_migration_retention(blocked=unresolved)
-        unresolved.extend(retention_unresolved)
-        failures.extend(retention_failures)
-        retained_errors = _merge_copy_setter_operation_errors(retained_errors, retention_errors)
         recovery_path: Path | None = None
         if retain_backup:
             recovery_path = self._temporary
@@ -5745,12 +5880,18 @@ class _CreateOnlyMutablePath:
 
     def migrate_exact_file(
         self, relative: Path, expected_digest: str, payload: bytes,
-        *, retention_parent: Path | None = None,
+        *, retention_parent: Path | None = None, selection=None,
     ) -> Path:
         """Replace one hash-pinned regular file and retain its inode for rollback."""
 
         path = self.destination(relative)
         self._assert_regular(path, existing=True)
+        if selection is not None:
+            storage, before, links, _leaf = selection
+            if storage != path or before is None or before.data != expected_digest:
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: config migration selection")
+            self.transaction._assert_scalar_binding(
+                {"links": links, "current_path": path, "current_node": before})
         if _file_sha256(path) != expected_digest:
             raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
         if self.dry_run:
@@ -5796,6 +5937,7 @@ class _CreateOnlyMutablePath:
                 prepared_state=prepared,
                 old_current=old_node,
                 new_current=prepared,
+                selection_links=selection[2] if selection is not None else (),
             )
             self.transaction.register_slice_a_migrated(record, self)
             self.transaction._advance(temporary, {temporary: prepared})
@@ -5941,6 +6083,9 @@ class _CreateOnlyMutablePath:
                                           members=tuple(failures), recovery_path=effect.retained,
                                           unresolved_paths=tuple(_unresolved), retained_errors=retained_errors)
             self.transaction._migration_settled(record, (effect,) if effect is not None else ())
+            # Restore safe owned storage even when a foreign logical alias drifted;
+            # still report that drift rather than claiming clean receiving.
+            self.transaction._assert_scalar_binding({"links": record.selection_links}, check_storage=False)
         except (OSError, ValueError):
             self._rollback_identity_changed()
 
@@ -5949,6 +6094,7 @@ class _CreateOnlyMutablePath:
 
         record = next((current for current in self.transaction._slice_a_migrated
                        if current.proof_key == record.proof_key), record)
+        self.transaction._assert_scalar_binding({"links": record.selection_links}, check_storage=False)
         self._walk_existing(record.leaf_path)
         self._walk_existing(record.tombstone_path)
         self._assert_migration_retention_record(record)
@@ -5964,6 +6110,7 @@ class _CreateOnlyMutablePath:
         self.transaction._dispose_node(record.tombstone_path, old_current)
         self.transaction._advance(record.tombstone_path, {})
         self.transaction._migration_settled(record)
+        self.transaction._assert_scalar_binding({"links": record.selection_links}, check_storage=False)
 
     @_InstallTransaction.direct_writer
     def replace_exact_tree(
@@ -7567,13 +7714,23 @@ def _source_codex_role_manifest_unchecked(
     root: Path, source_agents: Path
 ) -> dict[str, Any]:
     manifest = _load_json_object(source_agents / CODEX_ROLE_MANIFEST, "E_NATIVE_ROLE_MANIFEST_INVALID")
-    if manifest.get("schemaVersion") != 1 or not isinstance(manifest.get("roles"), dict):
+    if (type(manifest.get("schemaVersion")) is not int
+        or manifest.get("schemaVersion") not in (1, 2)
+        or set(manifest) != {"schemaVersion", "packRevision", "policySha256", "roles"}
+        or not isinstance(manifest.get("roles"), dict)):
         raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: schema or roles")
     if manifest.get("policySha256") != _file_sha256(root / "shared" / "role-routing-policy.v1.json"):
         raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: role policy digest drifted")
+    policy_roles = _load_json_object(root / "shared/role-routing-policy.v1.json", "E_NATIVE_ROLE_MANIFEST_INVALID")["roles"]
+    if set(manifest["roles"]) != set(policy_roles):
+        raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: role catalogue")
     for name, record in manifest["roles"].items():
         if not isinstance(name, str) or not _ROLE_NAME.fullmatch(name) or not isinstance(record, dict):
             raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: role")
+        if set(record) != ({"relativePath", "sha256"} | (
+            {"developerInstructionsSha256"} if manifest["schemaVersion"] == 2 else set()
+        )):
+            raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: role record")
         relative = record.get("relativePath")
         source = source_agents / str(relative)
         if relative != f"{name}.toml" or not source.is_file() or source.is_symlink() or _is_reparse_metadata(source.lstat()):
@@ -7581,6 +7738,12 @@ def _source_codex_role_manifest_unchecked(
         if record.get("sha256") != _file_sha256(source):
             raise ValueError(f"E_NATIVE_ROLE_MANIFEST_INVALID: role digest {name}")
         parsed = tomllib.loads(source.read_text(encoding="utf-8"))
+        if manifest["schemaVersion"] == 2 and (
+            type(parsed.get("developer_instructions")) is not str
+            or record.get("developerInstructionsSha256") != hashlib.sha256(
+                parsed["developer_instructions"].encode("utf-8")).hexdigest()
+        ):
+            raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: profession binding")
         if parsed.get("name") != name or not isinstance(
             parsed.get("description"), str
         ) or not parsed["description"].strip():
@@ -7621,6 +7784,8 @@ class _NativeRoleFilePlan:
     payload: bytes
     installed_digest: str | None
     accepted_prior: str | None
+    configured: bool = False
+    installed_identity: tuple[int, int, int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -7633,6 +7798,7 @@ class _CodexNativeRolesPlan:
     config_prior_digest: str | None
     legacy_path: Path | None
     legacy_exists: bool
+    config_selection: tuple[Path, _PhysicalNode | None, tuple[tuple[Path, _PhysicalNode], ...], Path]
 
 
 def _native_role_registrations(
@@ -7670,6 +7836,45 @@ def _preflight_native_regular_file(path: Path, relative: Path) -> bytes | None:
     ):
         raise ValueError(f"E_CREATE_ONLY_TYPE_COLLISION: {relative}")
     return path.read_bytes()
+
+
+def _read_native_config_selection(config_path: Path, transaction: _InstallTransaction,
+                                  *, expected=None):
+    """Receive mutable configuration through the existing complete storage binding."""
+    try:
+        selected = transaction._bind_scalar_storage(config_path)
+    except ValueError as error:
+        if str(error) == "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar storage type":
+            raise ValueError("E_CREATE_ONLY_TYPE_COLLISION: native config storage") from error
+        raise
+    if expected is not None and selected != expected:
+        prior_components, current_components = dict(expected[2]), dict(selected[2])
+        added = tuple((path, None) for path in current_components if path not in prior_components)
+        if (selected[:2] != expected[:2] or selected[3] != expected[3] or not added
+            or any(current_components.get(path) != node for path, node in prior_components.items())
+            or any(current_components[path].kind != "directory" for path, _ in added)):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: config selection drift")
+        try:
+            # Reuse the original-creator proof already required for a previously
+            # absent read dependency. No foreign or replacement parent is adopted.
+            transaction._assert_readonly_parents(added)
+        except ValueError:
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: config selection drift") from None
+    storage, node, links, leaf = selected
+    if node is None:
+        if leaf != storage or any(member.kind in {"link", "reparse"} and not path.is_dir()
+                                  for path, member in links):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: dangling config selection")
+        if transaction._bind_scalar_storage(config_path) != selected:
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: config input drift")
+        return selected, None
+    with transaction._copy_reference(storage, node) as (descriptor, _bound):
+        payload = transaction._descriptor_bytes(descriptor, path=storage)
+        if hashlib.sha256(payload).hexdigest() != node.data:
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: config input bytes")
+    if transaction._bind_scalar_storage(config_path) != selected:
+        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: config input drift")
+    return selected, payload
 
 
 def _skip_toml_string(text: str, start: int) -> int:
@@ -7834,8 +8039,8 @@ def _preflight_codex_native_roles(
 
     manifest = _source_codex_role_manifest(root, source_agents)
     registrations = _native_role_registrations(source_agents, manifest)
-    config_relative = Path(".codex") / "config.toml"
-    config_bytes = _preflight_native_regular_file(config_path, config_relative)
+    config_selection, config_bytes = _read_native_config_selection(
+        config_path, _InstallTransaction([], enabled=False))
     config_exists = config_bytes is not None
     original_config = config_bytes if config_bytes is not None else b""
     config_text, parsed = _parse_codex_config(original_config)
@@ -7867,6 +8072,9 @@ def _preflight_codex_native_roles(
         if actual is None or actual == expected:
             continue
         if actual not in _STOCK_NATIVE_ROLE_REGISTRATION_PRIORS.get(name, ()):
+            if (isinstance(actual, dict) and actual.get("config_file") == expected["config_file"]
+                and type(actual.get("description")) is str and actual["description"].strip()):
+                continue
             raise ValueError(f"E_CREATE_ONLY_COLLISION: agents.{name}")
         payload = _replace_stock_registration_description(
             payload, name, str(actual["description"]), str(expected["description"])
@@ -7931,22 +8139,36 @@ def _preflight_codex_native_roles(
                 raise ValueError(f"E_CREATE_ONLY_COLLISION: agents/{entry.name}")
 
     role_files: list[_NativeRoleFilePlan] = []
+    contract_reader = _load_module_from_path(
+        "orchestrarium_native_role_contract", root / "scripts/resolve-agents-mode.py")
     for name, record in sorted(manifest["roles"].items()):
         relative = Path(record["relativePath"])
         source_payload = (source_agents / relative).read_bytes()
-        installed = _preflight_native_regular_file(target_agents / relative, Path("agents") / relative)
+        target = target_agents / relative
+        identity = _CreateOnlyMutablePath._identity(target) if target.exists() else None
+        installed = _preflight_native_regular_file(target, Path("agents") / relative)
+        if identity is not None and _CreateOnlyMutablePath._identity(target) != identity:
+            raise ValueError("E_CREATE_ONLY_ROLE_CONTRACT: snapshot-drift")
         installed_digest = (
             hashlib.sha256(installed).hexdigest() if installed is not None else None
         )
         source_digest = hashlib.sha256(source_payload).hexdigest()
         accepted_prior = None
+        configured = False
         if installed_digest is not None and installed_digest != source_digest:
             if installed_digest not in _STOCK_NATIVE_ROLE_MIGRATION_SHA256.get(name, frozenset()):
-                raise ValueError(f"E_CREATE_ONLY_COLLISION: agents/{relative}")
-            accepted_prior = installed_digest
+                try:
+                    contract_reader.validate_native_role_configuration(installed, name, record, manifest["schemaVersion"])
+                except contract_reader.NativeRoleContractError as error:
+                    raise ValueError(f"E_CREATE_ONLY_ROLE_CONTRACT: {error.stage}/{error.reason}") from None
+                source_payload, configured = installed, True
+            else:
+                accepted_prior = installed_digest
         role_files.append(
-            _NativeRoleFilePlan(relative, source_payload, installed_digest, accepted_prior)
+            _NativeRoleFilePlan(relative, source_payload, installed_digest, accepted_prior, configured, identity)
         )
+    _read_native_config_selection(config_path, _InstallTransaction([], enabled=False),
+                                  expected=config_selection)
     return _CodexNativeRolesPlan(
         manifest,
         registrations,
@@ -7956,6 +8178,7 @@ def _preflight_codex_native_roles(
         hashlib.sha256(original_config).hexdigest() if config_exists else None,
         legacy_path if legacy_exists else None,
         legacy_exists,
+        config_selection,
     )
 
 
@@ -7972,13 +8195,19 @@ def _install_codex_native_roles(
         target_relative = target_agents.relative_to(owner.anchor)
         for item in plan.role_files:
             relative = target_relative / item.relative_path
+            if item.configured and (
+                not (target_agents / item.relative_path).exists()
+                or _CreateOnlyMutablePath._identity(target_agents / item.relative_path) != item.installed_identity
+                or _file_sha256(target_agents / item.relative_path) != item.installed_digest
+            ):
+                raise ValueError("E_CREATE_ONLY_ROLE_CONTRACT: snapshot-drift")
             if item.installed_digest is None or item.accepted_prior is None:
                 owner.create_file(relative, item.payload)
             else:
                 owner.migrate_exact_file(
                     relative, item.accepted_prior, item.payload
                 )
-            print(f"  Native role create-only verified: {item.relative_path}")
+            print(f"  Native role {'configured bytes preserved' if item.configured else 'create-only verified'}: {item.relative_path}")
         return
     manifest = (
         manifest
@@ -7986,6 +8215,8 @@ def _install_codex_native_roles(
         else _source_codex_role_manifest(root, source_agents)
     )
     target_relative = target_agents.relative_to(owner.anchor)
+    contract_reader = _load_module_from_path(
+        "orchestrarium_native_role_contract", root / "scripts/resolve-agents-mode.py")
     known_roles = {f"{name}.toml" for name in manifest["roles"]}
     if target_agents.exists() or target_agents.is_symlink():
         owner.destination(target_relative)
@@ -8005,13 +8236,26 @@ def _install_codex_native_roles(
             if installed_digest == hashlib.sha256(payload).hexdigest():
                 owner.create_file(target_relative / relative, payload)
             elif installed_digest not in expected_priors:
-                raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {target_relative / relative}")
+                configured = target.read_bytes()
+                try:
+                    contract_reader.validate_native_role_configuration(configured, name, record, manifest["schemaVersion"])
+                except contract_reader.NativeRoleContractError as error:
+                    raise ValueError(f"E_CREATE_ONLY_ROLE_CONTRACT: {error.stage}/{error.reason}") from None
+                owner.create_file(target_relative / relative, configured)
             else:
                 owner.migrate_exact_file(
                     target_relative / relative, installed_digest, payload
                 )
         else:
-            owner.create_file(target_relative / relative, payload)
+            if target.exists() and _file_sha256(target) != hashlib.sha256(payload).hexdigest():
+                configured = target.read_bytes()
+                try:
+                    contract_reader.validate_native_role_configuration(configured, name, record, manifest["schemaVersion"])
+                except contract_reader.NativeRoleContractError as error:
+                    raise ValueError(f"E_CREATE_ONLY_ROLE_CONTRACT: {error.stage}/{error.reason}") from None
+                owner.create_file(target_relative / relative, configured)
+            else:
+                owner.create_file(target_relative / relative, payload)
         print(f"  Native role create-only verified: {relative}")
 
 
@@ -8436,15 +8680,28 @@ def _exact_stock_native_role_contract_prior_pair(
     )
     if not prior_pair:
         return ()
-    candidate = Path(tempfile.mkdtemp(prefix="orchestrarium-native-role-contract-prior-"))
+    temporary = tempfile.TemporaryDirectory(prefix="orchestrarium-native-role-contract-prior-")
+    candidate = Path(temporary.name) / "candidate"
+    primary = None
     try:
-        shutil.rmtree(candidate)
         _copy_tree(installed, candidate, ignore_runtime_cache=True)
         for relative, _expected_digest in prior_pair:
             (candidate / relative).write_bytes((stage.path / relative).read_bytes())
         return prior_pair if _tree_sha256(candidate, ignore_runtime_cache=True) == stage.digest else ()
+    except BaseException as error:
+        primary = error
+        raise
     finally:
-        shutil.rmtree(candidate, ignore_errors=True)
+        try:
+            temporary.cleanup()
+        except BaseException as cleanup:
+            if primary is None:
+                raise
+            raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "disposal-close", primary,
+                members=(_RollbackFailureMember("backup", -1, temporary.name,
+                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                    cause_exception=cleanup),), recovery_path=Path(temporary.name),
+                unresolved_paths=(Path(temporary.name),)) from primary
 
 
 def _preflight_canonical_skills(
@@ -9436,6 +9693,41 @@ def _append_native_role_blocks(
     return result + newline.join(blocks)
 
 
+def _write_native_config_selection(config_path: Path, owner: _CreateOnlyMutablePath,
+                                   selection, payload: bytes) -> None:
+    """Keep native migration/inode rollback while writing only selected storage."""
+    selection, original = _read_native_config_selection(config_path, owner.transaction, expected=selection)
+    storage, before, links, _leaf = selection
+    if original == payload:
+        print("  Codex config registration is exact and left byte-exact")
+        return
+    if owner.dry_run:
+        print("  [dry-run] would reconcile selected Codex native-role config")
+        return
+    owner.transaction._assert_scalar_binding({"links": links}, check_storage=False)
+    if before is None:
+        if storage.is_relative_to(owner.anchor):
+            selected_owner = owner
+        else:
+            anchor = next(parent for parent in storage.parents
+                          if parent in dict(links) and dict(links)[parent].kind == "directory")
+            selected_owner = _CreateOnlyMutablePath(anchor, owner.transaction, dry_run=owner.dry_run)
+        selected_owner.create_file(storage.relative_to(selected_owner.anchor), payload)
+    else:
+        selected_owner = owner if storage.is_relative_to(owner.anchor) else _CreateOnlyMutablePath(
+            storage.parent, owner.transaction, dry_run=owner.dry_run)
+        selected_owner.migrate_exact_file(storage.relative_to(selected_owner.anchor),
+            str(before.data), payload, selection=selection)
+    owner.transaction._assert_scalar_binding({"links": links}, check_storage=False)
+    received, received_payload = _read_native_config_selection(config_path, owner.transaction)
+    if received[0] != storage or received_payload != payload:
+        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: config receiving")
+    if before is None:
+        print(f"  Created Codex multi_agent_v2 and native-role config: {config_path}")
+    else:
+        print("  Updated Codex native-role config without rewriting unrelated bytes")
+
+
 def _reconcile_codex_native_config(
     config_path: Path,
     owner: _CreateOnlyMutablePath,
@@ -9447,26 +9739,14 @@ def _reconcile_codex_native_config(
     plan: _CodexNativeRolesPlan | None = None,
 ) -> None:
     relative = config_path.relative_to(owner.anchor)
+    selection, config_bytes = _read_native_config_selection(config_path, owner.transaction,
+        expected=plan.config_selection if plan is not None else None)
     if plan is not None:
-        config_exists = config_path.exists() or config_path.is_symlink()
-        if plan.config_exists:
-            owner.destination(relative)
-            owner._assert_regular(config_path, existing=True)
-            if _file_sha256(config_path) != plan.config_prior_digest:
-                raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
-            if config_path.read_bytes() != plan.config_payload:
-                owner.migrate_exact_file(
-                    relative, str(plan.config_prior_digest), plan.config_payload
-                )
-                print("  Updated Codex native-role config without rewriting unrelated bytes")
-            else:
-                print("  Codex config registration is exact and left byte-exact")
-        else:
-            if config_exists:
-                owner.create_file(relative, plan.config_payload)
-            else:
-                owner.create_file(relative, plan.config_payload)
-            print(f"  Created Codex multi_agent_v2 and native-role config: {config_path}")
+        if (config_bytes is not None) != plan.config_exists or (
+            config_bytes is not None and hashlib.sha256(config_bytes).hexdigest() != plan.config_prior_digest
+        ):
+            raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
+        _write_native_config_selection(config_path, owner, selection, plan.config_payload)
         if plan.legacy_exists:
             assert plan.legacy_path is not None
             legacy_owner = role_owner or owner
@@ -9481,14 +9761,8 @@ def _reconcile_codex_native_config(
                 legacy_owner.remove_exact_file(legacy_relative, CODEX_LEGACY_LUNA_SHA256)
             print(f"  Removed frozen legacy native role: {plan.legacy_path}")
         return
-    config_exists = config_path.exists() or config_path.is_symlink()
-    if config_exists:
-        owner.destination(relative)
-        owner._assert_regular(config_path, existing=True)
-        payload = config_path.read_bytes()
-    else:
-        payload = b""
-    prior_payload = payload
+    config_exists = config_bytes is not None
+    payload = config_bytes if config_bytes is not None else b""
     try:
         parsed = tomllib.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
@@ -9567,13 +9841,9 @@ def _reconcile_codex_native_config(
         initial = b"[features]\nmulti_agent_v2 = true\n"
         if registrations:
             initial = _append_native_role_blocks(initial, registrations)
-        owner.create_file(relative, initial)
-        print(f"  Created Codex multi_agent_v2 and native-role config: {config_path}")
-    elif config_path.read_bytes() != payload:
-        owner.migrate_exact_file(relative, hashlib.sha256(prior_payload).hexdigest(), payload)
-        print("  Updated Codex native-role config without rewriting unrelated bytes")
+        _write_native_config_selection(config_path, owner, selection, initial)
     else:
-        print("  Codex config registration is exact and left byte-exact")
+        _write_native_config_selection(config_path, owner, selection, payload)
 
     if legacy_exists:
         assert legacy_path is not None
@@ -9731,29 +10001,89 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
         _write_owned_text(target, content, mutable_owner)
 
 
+_CLAUDE_DOC_MARKER_PREFIXES = tuple(
+    f"<!-- {edge} ORCHESTRARIUM {kind} MANAGED"
+    for kind in ("CLAUDE", "SHARED") for edge in ("BEGIN", "END")
+)
+
+
+def _claude_document_context(text: str) -> tuple[str, list[tuple[int, int]]]:
+    """Delegate code status and original-offset transport to the pinned parser."""
+    return _markdown_document_context(text)
+
+
+def _render_claude_document(existing: str | None, payload: str, *, claude: bool) -> str:
+    """Replace only proven body ownership; unknown legacy extent is not ownership."""
+    kind, name = ("CLAUDE", "CLAUDE.md") if claude else ("SHARED", "AGENTS.md")
+    begin = f"<!-- BEGIN ORCHESTRARIUM {kind} MANAGED -->\n"
+    end = f"<!-- END ORCHESTRARIUM {kind} MANAGED -->\n"
+    anchor = "@AGENTS.md\n"
+    if (not payload or not payload.endswith("\n")
+            or any(prefix in payload for prefix in _CLAUDE_DOC_MARKER_PREFIXES)
+            or (claude and re.search(r"(?m)^@AGENTS\.md$", payload))):
+        raise ValueError(f"E_CLAUDE_DOC_SOURCE_SHAPE: {name}")
+    owned = (anchor if claude else "") + begin + payload + end
+    if existing is None:
+        return owned
+
+    visible, code = _claude_document_context(existing)
+    anchors = list(re.finditer(r"(?m)^@AGENTS\.md$", visible)) if claude else []
+
+    markers = list(re.finditer("|".join(map(re.escape, _CLAUDE_DOC_MARKER_PREFIXES)), visible))
+    if markers:
+        # Every reserved-prefix occurrence must be one of these two complete lines.
+        if (len(markers) != 2
+                or any(match.start() and existing[match.start() - 1] != "\n" for match in markers)
+                or not existing.startswith(begin, markers[0].start())
+                or not existing.startswith(end, markers[1].start())
+                or (claude and not any(match.end() <= markers[0].start()
+                    or match.start() >= markers[1].start() + len(end) for match in anchors))):
+            raise ValueError(f"E_CLAUDE_DOC_MARKERS_INVALID: {name}")
+        start = markers[0].start() + len(begin)
+        return existing[:start] + payload + existing[markers[1].start():]
+
+    signatures = r"(?m)^(?:# Claude Code Pack|# Claudestrator)$" if claude else r"(?m)^# Shared Governance$"
+    active_signatures = {match.start() for match in re.finditer(signatures, visible)}
+    if active_signatures:
+        source_visible, _ = _claude_document_context(payload)
+        source_signatures = {match.start() for match in re.finditer(signatures, source_visible)}
+        # Exact original bodies may contain their own code. Only a signature at
+        # this occurrence can prove ownership; outside code cannot supply it.
+        matches = [match for match in re.finditer(r"(?m)^(?=" + re.escape(payload) + ")", existing)
+                   if not any(start < match.start() < stop for start, stop in code)
+                   and any(match.start() + relative in active_signatures for relative in source_signatures)]
+        if (len(matches) != 1
+                or any(not matches[0].start() <= position < matches[0].start() + len(payload)
+                       for position in active_signatures)
+                or (claude and not any(match.end() <= matches[0].start()
+                or match.start() >= matches[0].start() + len(payload) for match in anchors))):
+            raise ValueError(f"E_CLAUDE_DOC_LEGACY_AMBIGUOUS: {name}")
+        start = matches[0].start()
+        return existing[:start] + begin + payload + end + existing[start + len(payload):]
+    if anchors:
+        offset = anchors[0].start()
+        return existing[:offset] + begin + payload + end + existing[offset:]
+    return owned + "\n" + existing
+
+
 def _merge_claude_docs(root: Path, source: Path, target: Path, dry_run: bool, *,
                        mutable_owner: _CreateOnlyMutablePath | None = None) -> None:
     claude_source = (source / "CLAUDE.md").read_text(encoding="utf-8")
-    existing = _read_owned_text(target, mutable_owner)
-    if existing is not None:
-        starts = [
-            position
-            for marker in ("\n@AGENTS.md", "\n# Claude Code Pack", "\n# Claudestrator")
-            if (position := ("\n" + existing).find(marker)) >= 0
-        ]
-        content = existing[: min(starts)] + claude_source if starts else claude_source + "\n" + existing
-    else:
-        content = claude_source
+    anchor = "@AGENTS.md\n"
+    if not claude_source.startswith(anchor):
+        raise ValueError("E_CLAUDE_DOC_SOURCE_SHAPE: CLAUDE.md")
     shared = (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
     agents_target = target.parent / "AGENTS.md"
+    # Classify both documents before publishing either, including on dry-run.
+    content = _render_claude_document(_read_owned_text(target, mutable_owner),
+                                     claude_source[len(anchor):], claude=True)
+    shared_content = _render_claude_document(_read_owned_text(agents_target, mutable_owner),
+                                            shared, claude=False)
     if dry_run:
         print(f"    [dry-run] would merge {target} and {agents_target}")
     else:
-        agents_existing = _read_owned_text(agents_target, mutable_owner)
-        if agents_existing is not None and "# Shared Governance" not in agents_existing:
-            shared = shared.rstrip() + "\n\n" + agents_existing
         _write_owned_text(target, content, mutable_owner)
-        _write_owned_text(agents_target, shared, mutable_owner)
+        _write_owned_text(agents_target, shared_content, mutable_owner)
 
 
 def _load_claude_settings(settings_path: Path, *,

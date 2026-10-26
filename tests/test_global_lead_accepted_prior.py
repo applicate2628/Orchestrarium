@@ -15,6 +15,11 @@ from pathlib import Path
 
 import pytest
 
+from _filesystem_fixture_support import (
+    _flip_directory_binding_attributes,
+    _write_directory_attributes,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER_PATH = ROOT / "scripts" / "production_installer.py"
@@ -1953,39 +1958,6 @@ def _receipt_fixture(tmp_path: Path):
     skills = anchor / ".agents" / "skills"
     skills.mkdir(parents=True)
     return installer, source, anchor, skills, skills / ".orchestrarium-lead-receipt.v1.json"
-
-
-def _write_directory_attributes(installer, path: Path, attributes: int) -> None:
-    ctypes_api, _wintypes, kernel, *_rest = installer._WindowsBoundNode._api()
-    with installer._WindowsBoundNode(path, purpose="attributes") as bound:
-        basic = bound.basic()
-        basic.attributes = attributes
-        if not kernel.SetFileInformationByHandle(
-            bound.live_handle, 0, ctypes_api.byref(basic), ctypes_api.sizeof(basic)
-        ):
-            raise ctypes_api.WinError(ctypes_api.get_last_error())
-
-
-def _flip_directory_binding_attributes(installer, path: Path):
-    before = installer._InstallTransaction._capture_node(path)
-    raw_change_bits = stat.FILE_ATTRIBUTE_ARCHIVE | stat.FILE_ATTRIBUTE_READONLY
-    attributes = before.python_identity[3] ^ raw_change_bits
-    _write_directory_attributes(installer, path, attributes)
-    requested = stat.S_IMODE(before.python_identity[2])
-    if attributes & stat.FILE_ATTRIBUTE_READONLY:
-        requested &= ~stat.S_IWRITE
-    else:
-        requested |= stat.S_IWRITE
-    path.chmod(requested)
-    after = installer._InstallTransaction._capture_node(path)
-    assert before.kind == after.kind == "directory"
-    assert before.python_identity[:2] == after.python_identity[:2]
-    assert before.native_proof == after.native_proof
-    assert before.python_identity[3] ^ after.python_identity[3] == raw_change_bits
-    assert after.python_identity[2] == installer._InstallTransaction._chmod_identity(
-        before.python_identity, requested
-    )[2]
-    return before, after
 
 
 def _apply_receipted(installer, source: Path, anchor: Path, skills: Path,

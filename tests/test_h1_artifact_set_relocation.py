@@ -1,5 +1,4 @@
 import hashlib
-import importlib.util
 import json
 import os
 import shutil
@@ -10,18 +9,11 @@ from pathlib import Path
 
 import pytest
 
+from _module_loading_support import load_module
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SUPPORT_PATH = ROOT / "tests" / "test_ledger_h1_activation_writer.py"
-
-
-def load_module(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def canonical(value: object) -> bytes:
@@ -700,6 +692,23 @@ def test_selector_requires_persistent_archived_owner_identity(tmp_path: Path) ->
     assert rejected.value.failure_id == "WI-LEDGER-COMPAT-SET-TOPOLOGY"
 
 
+def test_h1_preflight_refuses_catalogue_only_incomplete_owner(tmp_path: Path) -> None:
+    root = tmp_path / "incomplete-owner"
+    support, writer, _reader, request, _items, _paths = activated_relocation_fixture(root)
+    archived = root.joinpath(*request.archive_owner.split("/"))
+    closure = archived / "closure.md"
+    closure.write_bytes(closure.read_bytes() + b"Lifecycle-schema: work-items-physical-v1\n")
+    entry = writer._archived_work_item_entry(archived, input_role="historical-catalogue")
+    assert entry.classification == "WI-CATEGORY-SCHEMA-INVALID"
+    before = support.tree_state(root)
+    with pytest.raises(writer.LifecycleError) as rejected:
+        writer.relocate_ledger_h1_artifact_set(root, request)
+    assert rejected.value.failure_id == "WI-CATEGORY-SCHEMA-INVALID"
+    assert "input-role=strict" in str(rejected.value)
+    assert f"{request.archive_owner}/status.md" in str(rejected.value)
+    assert support.tree_state(root) == before
+
+
 def test_preflight_rejects_noncalendar_archive_month(tmp_path: Path) -> None:
     root = tmp_path / "archive-month"
     support, writer, _reader, request, _items, _paths = activated_relocation_fixture(
@@ -986,3 +995,25 @@ def test_h1_repository_role_survives_dynamic_reader_and_recovery(tmp_path: Path,
     assert writer._CURRENT_LIFECYCLE_TRANSACTION.get() is None
     assert not (tmp_path / ".scratch").exists()
     print("ROOT_ROLE_SERIALIZED_H1", json.dumps({"physical_base": location.physical_base, "receipt_path": location.receipt_path}, sort_keys=True))
+
+
+def test_h1_rollback_preserves_uncreated_foreign_empty_artifact_base(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "foreign-base"
+    _support, writer, _reader, request, _items, _paths = activated_relocation_fixture(root)
+    base = root / request.archive_owner / "ledger-h1-compatibility"
+    fsync = writer._transition_fsync_directory
+    foreign_identity = []
+
+    def foreign_base_after_intent(path):
+        result = fsync(path)
+        if path.name == "work-items-lifecycle-transitions" and not foreign_identity:
+            base.mkdir()
+            foreign_identity.append((base.stat().st_dev, base.stat().st_ino))
+        return result
+
+    monkeypatch.setattr(writer, "_transition_fsync_directory", foreign_base_after_intent)
+    with pytest.raises(writer.LifecycleError):
+        writer.relocate_ledger_h1_artifact_set(root, request, apply=True)
+    assert len(foreign_identity) == 1 and base.is_dir()
+    assert (base.stat().st_dev, base.stat().st_ino) == foreign_identity[0]
+    assert not list(base.iterdir())

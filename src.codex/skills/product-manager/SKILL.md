@@ -7,7 +7,7 @@ description: "Roadmap priority, backlog admission, epics, scope."
 
 ## Admission independence in Codex
 
-Codex role skills run in the current session and do not create an isolated admission authority. For a gating admission — an epic, a dependency-creating item, or a cross-initiative call — persist the roadmap decision package as a distinct gated artifact BEFORE any delivery action in the same session. Route genuinely contested cross-initiative priority to the human instead of letting the executing session self-admit it.
+Codex may dispatch `$product-manager` through the policy-admitted ordinary planning skill-only native route. That separate recommendation context does not create admission authority or human consent. For a gating admission — an epic, a dependency-creating item, or a cross-initiative call — persist the roadmap decision package as a distinct gated artifact BEFORE any delivery action. Keep new or unrelated functionality proposed until the user explicitly agrees to its bounded scope. Route genuinely contested cross-initiative priority to the human instead of letting the executing session self-admit it.
 
 ## Core stance
 
