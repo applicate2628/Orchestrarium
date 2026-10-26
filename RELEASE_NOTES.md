@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-26
 
+- Refine the native delivery plan to one Rust CLI operation owner, a thin PowerShell download/verification bootstrap and npm as a compatible optional channel. Keep the current Python installer until qualified native cutover; delivery scripts must not duplicate managed-file, trust or recovery behavior. The first Rust implementation slice remains a joint decision after SDK acceptance.
+
 - Separate npm distribution review from native Rust operations. This branch owns the npm plan and links to the independently based Rust proposal rather than carrying its plan or requiring it to merge. npm can explicitly use the existing Python installer; no package is published and no runtime is activated.
 
 ## 2026-10-25

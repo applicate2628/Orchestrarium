@@ -2,10 +2,10 @@
 
 This former combined project now indexes two independent documentation tasks:
 
-- [npm distribution](npm-distribution-project.md): thin dispatcher, complete
-  versioned payload and explicit apply through the existing installer.
+- [PowerShell and npm delivery](npm-distribution-project.md): thin Windows bootstrap
+  and compatible npm dispatcher delivering the same versioned Rust CLI/resources.
 - [Native operations in Rust](https://github.com/applicate2628/Orchestrarium/pull/21): one common
-  operation CLI, first mcp-usage-reminder slice and separately qualified cutovers.
+  operation CLI, candidate mcp-usage-reminder slice and separately qualified cutovers.
 
 Each linked document owns its requirements and acceptance; they are not two
 mandatory consecutive phases. No normative requirements are duplicated here.
