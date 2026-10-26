@@ -2,6 +2,14 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-26
+
+- Reconcile the SDK design matrix with the consolidated coordinator implementation and its one bounded subscription-backed live cycle. Separate completed integration from the still-missing portable live caller and unqualified recovery, streaming and arbitrary planning scenarios; this status correction starts no provider.
+
+- Point SDK ownership references to separate npm PR17 and native Rust PR21 so neither independent project is mistaken for a combined prerequisite. This is link/ownership maintenance only, with no change to SDK behavior or qualification.
+
+- Reconciled the SDK plan with PR19's exact source head, separating the Host-led review bridge from the optional Agents coordinator. Capability-based admission supersedes product-wide version pins; the remaining supported Codex-subscription Model research and current-head qualification are explicit, without new runtime activation.
+
 ## 2026-10-25
 
 - PR-scoped corrective publication no longer depends on branch-protection/rules enumeration or proving rules absent. The hook retains exact open-PR/head/ref binding, scoped human consent and a fresh complete leak scan; the ordinary push remains subject to the server's configured rules and exceptions.
@@ -38,6 +46,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 
 ## 2026-10-23
+
+- Defined an independent SDK integration project with one common Python/Agents SDK coordinator and existing Orchestrarium contract/state owners. Codex and Claude use direct official SDK adapters; ACP stdio stays inside Kimi/Grok adapters, not a universal layer. The plan starts with contract fixtures and an Agents/Codex read-only review slice, then adapter coverage and removal of replaced glue. Explicit approval/account/resume and result-to-ledger boundaries remain. Activation also requires owned descendant-process settlement, including failure, cancellation and coordinator crash, through the existing supervision owner rather than SDK close alone. This design does not install or activate runtimes.
 
 - Claude document reinstallation now uses a bundled Markdown parser to distinguish real installer ownership from quoted user examples, including list and quote continuations. Custom instructions and imports remain in position, failed classification stays write-free, and existing Python installation commands require no additional package setup. Missing private packages refuse before ambient code can run, and Windows file metadata changes retain the held object on Python 3.11 and newer.
 - A current-line Claude instruction research and development handoff distinguishes newly documented native AGENTS.md discovery from the existing shared-policy import bridge. It establishes shared default policy and separate provider-specific sources as the target, explains why generated runtime projections remain safer than forcing a neutral root through higher-priority configuration, and identifies preservation and qualification prerequisites; this documentation change does not alter installed behavior or join the 2.0 redesign.
