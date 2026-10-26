@@ -83,14 +83,17 @@ it preceded the final Windows binding correction. A separate host-local caller
 suite after that correction had 26 passed. Do not combine those as one full-suite
 result. The historical live caller SHA-256 is
 `e1a45dd690d3a3c87a6dbb4eefadfa22fd92608b2ab40f78b6c1fa945a4255a2`.
-That caller and its tests are not yet tracked here. Publishing a sanitized,
-parameterized reproducer remains an explicit open delivery item; a newly written
-caller cannot inherit that caller's successful run merely by describing it.
+The retrieved caller is now available as the explicit
+[Windows qualification example](../examples/sdk/README.md). Only its checkout-root
+locator changed; a byte-equivalence regression test verifies that boundary.
+Execution, admission and resource behavior are retained, not generalized to other
+platforms. The original 26-test host-local suite is not transferred, and the
+relocated caller has not been live-qualified again.
 
 Repository offline tests can be selected with an already provisioned test Python:
 
 ```sh
-python -m pytest -q tests/test_sdk_coordination.py tests/test_sdk_coordination_owner.py tests/test_sdk_coordination_runner.py tests/test_sdk_dispatch.py tests/test_sdk_tracing_isolation.py -rs
+python -m pytest -q tests/test_sdk_coordination.py tests/test_sdk_coordination_owner.py tests/test_sdk_coordination_runner.py tests/test_sdk_dispatch.py tests/test_sdk_tracing_isolation.py tests/test_sdk_live_caller_example.py -rs
 ```
 
 The real-Runner tests require the separately provisioned optional Agents SDK;
@@ -113,8 +116,8 @@ for account, profile, required hooks, exact runtime and both separate reservatio
 Use the existing subscription; do not copy credentials, extract OAuth tokens,
 substitute API billing or weaken admission. Historical time and capture limits are
 provenance, not authority for a fresh run. No test collection, import or ordinary
-offline command may start live providers. A future reproducer must opt in before
-effects, reconcile uncertain outcomes without automatic repetition, and retain
+offline command may start live providers. The tracked example requires explicit opt-in before
+effects, rejects automatic repetition of the same output, and retains
 both operation receipts plus process/resource cleanup evidence.
 
 ## Terms and Abbreviations
