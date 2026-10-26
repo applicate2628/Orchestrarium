@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-26
 
+- Optional review-closure V2 now separates actual source-bound Root semantic receiving from independently acquired machine promises. Unknown JSON/prose gains no schema from its keys or layout; an explicitly commissioned six-field review-loop result is checked by its existing value/state owner, retained source binding and known-aware reader marker. Genuine findings, native currentness, cold replay and minimal durable transfer remain required.
+
 - Publication-query failure normalization now preserves the actual primary exception, cause and owned resources when a timeout or output-limit trigger occurs first. Diagnostic labels no longer decide whether a primary failure may become an ordinary incomplete observation.
 
 - PowerShell literal call-operator invocations now qualify as one direct Git push, including mixed quoting and an explicit tool workdir. Actual executable identity, exact approved source, fresh full-graph scans and current repository binding remain required; genuine compound commands still refuse. Failed metadata queries expose only safe process categories and status codes, preserving denial and cleanup without printing command output or private paths.
