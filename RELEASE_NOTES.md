@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-27
 
+- Review loops can now stop a precisely bound admitted round before any fresh attempt starts, without inventing review results or resetting history and round budgets. The existing close operation records the reason and original attempts; partial execution and completed-review acceptance retain their existing checks. Historical records remain readable without new fields, while replay of the new operation requires its matching stop receipt.
+
 - Installer tree identity now hashes a complete versioned member manifest, preventing file bytes from impersonating later entries. Legacy receipts require independent factory structure; supported stock upgrades, no-op and native rollback preserve user changes.
 
 - Ordinary model selection now exposes exact GPT-6.1 Terra profiles without changing fixed role or user defaults. Low and below-family-minimum choices refuse; every Astra or Max attempt requires individual user agreement, including omitted/configured routes. Existing profile identities, mechanical/critical gates and explicit host controls remain preserved.
