@@ -8,12 +8,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_PATHS = (
     ROOT / "src.codex/skills/github-pr-review-bot/SKILL.md",
-    ROOT / "src.claude/skills/github-pr-review-bot/SKILL.md",
 )
 PROTOCOL_PATH = ROOT / "shared/references/github-pr-review-bot-protocol.md"
 LEAD_PATHS = (
     ROOT / "src.codex/skills/lead/SKILL.md",
-    ROOT / "src.claude/skills/lead/SKILL.md",
 )
 SHARED_GOVERNANCE_PATH = ROOT / "shared/AGENTS.shared.md"
 RETRYABLE_TERMINAL_BODY = (
@@ -25,7 +23,6 @@ RETRYABLE_TERMINAL_BODY = (
 def test_clean_requires_complete_review_thread_inventory() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "pageInfo.hasNextPage=false",
@@ -43,7 +40,6 @@ def test_clean_requires_complete_review_thread_inventory() -> None:
 def test_clean_review_result_taxonomy_includes_semantic_issue_comments() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "substantive bot-authored current-head review-result",
@@ -69,7 +65,6 @@ def test_clean_review_result_taxonomy_includes_semantic_issue_comments() -> None
 def test_automatic_run_clean_evidence_requires_authoritative_identity_and_correlation() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     required_contract = (
         "fresh authoritative connector-account lookup",
         "embedded REST author type differs",
@@ -99,7 +94,6 @@ def test_automatic_run_clean_evidence_requires_authoritative_identity_and_correl
 def test_retryable_terminal_failure_uses_the_exact_incident_predicate() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "Orchestrarium repo-local coordinator convention",
@@ -127,7 +121,6 @@ def test_retryable_terminal_failure_uses_the_exact_incident_predicate() -> None:
 def test_uncorrelated_terminal_failure_refuses_overlapping_same_head_runs() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "Ordering proves only that an issue comment is later",
@@ -146,7 +139,6 @@ def test_uncorrelated_terminal_failure_refuses_overlapping_same_head_runs() -> N
 def test_uncorrelated_clean_result_refuses_overlapping_same_head_runs() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "Apply the same ownership rule to uncorrelated clean evidence",
@@ -164,7 +156,6 @@ def test_uncorrelated_clean_result_refuses_overlapping_same_head_runs() -> None:
 def test_unlisted_error_like_prose_fails_closed_and_failure_record_is_bound() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "separately exact-listed",
@@ -190,7 +181,6 @@ def test_unlisted_error_like_prose_fails_closed_and_failure_record_is_bound() ->
 def test_retryable_terminal_failure_allows_one_explicitly_authorized_retry() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "at most one subsequent retry",
@@ -203,10 +193,9 @@ def test_retryable_terminal_failure_allows_one_explicitly_authorized_retry() -> 
         assert clause in body, f"missing bounded retry clause: {clause}"
 
 
-def test_pr_cycle_preserves_provider_parity_and_owner_pointers() -> None:
+def test_pr_cycle_preserves_live_owner_pointers() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
 
     protocol = PROTOCOL_PATH.read_text(encoding="utf-8")
     assert "Authorization continuity" in protocol
@@ -215,32 +204,36 @@ def test_pr_cycle_preserves_provider_parity_and_owner_pointers() -> None:
         lead = path.read_text(encoding="utf-8")
         assert "authorization-continuity rule before asking again" in lead
     shared = SHARED_GOVERNANCE_PATH.read_text(encoding="utf-8")
-    assert "apply checked current PR-bound grant" in shared
+    assert "Active PR: checked" in shared
 
 
-def test_pr_grant_scope_is_behavioral_not_branchwide_gate_state() -> None:
+def test_pr_grant_scope_remains_with_root_and_scan_remains_technical() -> None:
     required = (
         "Lead behaviorally reuses an active same-PR grant only",
         "unrelated same-branch work requires fresh consent",
-        "gate mechanically binds repository, remote, head branch, and pull request",
-        "not semantic task scope or branch-wide consent",
+        "Root owns this semantic scope, not branch-wide consent",
+        "does not authenticate chat consent",
+        "special marker or stored binding",
+        "PR oracle",
+        "no-push instruction",
+        "fresh complete range scan",
     )
-    protocol = PROTOCOL_PATH.read_text(encoding="utf-8")
-    for clause in required:
-        assert clause in protocol
-    bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
-    assert bodies[0] == bodies[1]
-    for clause in required:
-        assert clause in bodies[0]
+    for path in (*SKILL_PATHS, PROTOCOL_PATH):
+        body = path.read_text(encoding="utf-8")
+        for clause in required:
+            assert clause in body, (path, clause)
     shared = SHARED_GOVERNANCE_PATH.read_text(encoding="utf-8")
-    assert "not unrelated same-branch work" in shared
-    assert "not semantic scope/branchwide consent" in shared
+    assert "grants no wider semantic/branch consent" in shared
+    assert "Revocation/no-push stops" in shared
+    ru = (ROOT / "shared/references/ru/github-pr-review-bot-protocol.md").read_text(encoding="utf-8")
+    assert "не требует специального маркера или сохранённой привязки" in ru
+    assert "no-push инструкция" in ru
+    assert "свежий полный range scan" in ru
 
 
 def test_issue_comment_order_is_repo_local_total_order_for_rest_comments() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "IssueCommentOrder",
@@ -261,7 +254,6 @@ def test_issue_comment_order_is_repo_local_total_order_for_rest_comments() -> No
 def test_retry_creation_success_is_bound_before_lineage_count_increments() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "retryTransitionState",
@@ -280,7 +272,6 @@ def test_retry_creation_success_is_bound_before_lineage_count_increments() -> No
 def test_retry_creation_failure_and_ambiguity_fail_closed_differently() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "explicit creation failure",
@@ -298,7 +289,6 @@ def test_retry_creation_failure_and_ambiguity_fail_closed_differently() -> None:
 def test_retry_budget_is_owned_by_the_failed_run_and_its_successor_lineage() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "one retry lineage",
@@ -314,7 +304,6 @@ def test_retry_budget_is_owned_by_the_failed_run_and_its_successor_lineage() -> 
 def test_protocol_terms_expand_transport_and_normalization_acronyms() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     body = bodies[0]
     required_contract = (
         "**REST** — Representational State Transfer.",
@@ -339,10 +328,9 @@ def _canonical_skill_body_sha256(path: Path) -> str:
     return hashlib.sha256(b"".join(lines[body_start:])).hexdigest()
 
 
-def test_provider_bodies_and_validator_pins_match_the_canonical_body() -> None:
+def test_live_validator_pins_match_the_canonical_skill_body() -> None:
     bodies = [path.read_bytes() for path in SKILL_PATHS]
 
-    assert bodies[0] == bodies[1]
     expected = _canonical_skill_body_sha256(SKILL_PATHS[0])
     validator_paths = (
         ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.py",
