@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-26
 
+- Historical PASS artifact retention now supplies its exact selected custody evidence to existing compatibility/resource admission before placement. This allows a verified original copy to be retained when the old artifact is already absent, for both active and revoked historical ledgers, without changing ledger bytes or relaxing digest, replay, resource-cap or receiving checks.
+
 - Reconcile the opt-in SDK branch with current review-closure receiving changes: preserve SDK execution metadata and artifact constraints alongside source-bound review closure proofs and the current ledger reader limits. No SDK route is enabled and no live qualification is implied by this integration.
 
 - Add the recovered Windows Codex coordination caller as an explicit, parameterized qualification example. Only its source-checkout locator changes, with byte-equivalence and no-provider entry-point tests; operators can inspect the complete outer-to-inner composition without activating a provider. Existing admission, separate reservations, Windows restriction and cleanup remain intact. This is not a new live qualification or a transfer of the original host-local test suite.
