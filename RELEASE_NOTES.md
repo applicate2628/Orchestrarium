@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-27
 
+- Ledger-free quick-fix obligation checks now capture and verify actual ledger absence through the existing physical-state owner instead of confusing an absent file with a failed read. Present unreadable, nonregular or drifting inputs remain refused, and frozen selection semantics are preserved. Related goal, closure, waiver and alias tests now exercise current owner-issued contracts and distinguish Windows-native scenarios from verified POSIX refusal.
+
 - Work-item stale-running diagnostics no longer hide a valid unsettled launch merely because another historical row has a validation error; both diagnostics remain visible without admitting invalid launch authority. Ledger transport tests distinguish the cross-platform writer contract from the Windows-only native wrapper instead of treating the intentional POSIX refusal as a regression.
 
 - Reconcile SDK qualification documentation with the retained installed Windows success/recovery checks and bounded real Codex/Agents runs. Operators can distinguish already completed verification from genuinely broader, unqualified scenarios without repeating model calls or treating historical evidence as a fresh run of every later shared-owner change.

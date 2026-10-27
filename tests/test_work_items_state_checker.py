@@ -67,24 +67,42 @@ def load_validator_module():
     return module
 
 
-def test_false_event_validity_cannot_settle_revise_or_register_terminal():
+def test_false_event_validity_cannot_settle_revise_or_register_terminal(tmp_path: Path):
     validator = load_validator_module()
-    revise = {
-        "schemaVersion": 2, "runId": "revise-001", "role": "qa-engineer",
-        "executionRole": "internal", "gate": "REVISE", "status": "revise",
-    }
-    closer = {
-        "schemaVersion": 2, "runId": "closer-001", "role": "qa-engineer",
-        "executionRole": "internal", "gate": "PASS", "status": "completed",
-        "closesRunIds": ["revise-001"], "eventKind": "terminal", "launchRunId": "launch-001",
-    }
-    launch = {"schemaVersion": 2, "runId": "launch-001", "eventKind": "launch"}
-    errors: list[str] = []
-    open_revise, open_launches = validator.validate_closure(
-        [launch, revise, closer], errors, event_validity=[True, True, False]
+    item = write_valid_item(tmp_path)
+    common = ledger_event(schemaVersion=2, lane="implementation", effort="high")
+    launch = {**common, "runId": "launch-001", "eventKind": "launch",
+              "status": "running", "gate": "none"}
+    revise = {**common, "runId": "revise-001", "eventKind": "standalone",
+              "gate": "REVISE", "status": "revise", "findingClass": "correctness"}
+    closer = {**common, "runId": "closer-001", "closesRunIds": ["revise-001"],
+              "eventKind": "terminal", "launchRunId": "launch-001"}
+    events = [launch, revise, closer]
+    ledger = item / "agent-runs.jsonl"
+    before = ("".join(json.dumps(event) + "\n" for event in events)).encode()
+    ledger.write_bytes(before)
+    context = validator.load_effective_ledger_view(
+        tmp_path, item, ledger.relative_to(tmp_path).as_posix()
     )
+    errors: list[str] = []
+    validity = validator.derive_event_validity(context.rows, item, errors, context=context)
+    assert errors == []
+    assert all(row.current_schema_valid for row in validity)
+    open_revise, open_launches = validator.validate_closure(
+        context.rows, errors, event_validity=[True, True, False], context=context
+    )
+    assert errors == []
     assert [event["runId"] for event in open_revise] == ["revise-001"]
     assert [event["runId"] for event in open_launches] == ["launch-001"]
+    assert validator.validate_closure(
+        context.rows, errors, event_validity=[True, True, True], context=context
+    ) == ([], [])
+    assert errors == []
+    # Caller booleans can restrict an issued result, never create authority.
+    refused: list[str] = []
+    assert validator.validate_closure(events, refused, event_validity=[True] * 3) == ([], [])
+    assert any("EFFECTIVE-VIEW-BYPASS" in error for error in refused)
+    assert ledger.read_bytes() == before
 
 
 def test_invalid_launch_does_not_enter_authority_reduction():
@@ -360,12 +378,35 @@ class TestLegacyFlatGoalConsumer(unittest.TestCase):
         historical = next(row for row in observation["members"] if row["slug"] == "historical-member")
         assert historical["proofProfile"] == "legacy-read-compatible"
 
+    @unittest.skipUnless(os.name == "posix", "POSIX native-owner refusal contract")
+    def test_posix_native_apply_refuses_without_source_move_or_receipts(self):
+        _request, arguments = self.flat.legacy_request()
+        before = self.flat.canonical_images()
+        source_identity = self.flat.source.stat().st_dev, self.flat.source.stat().st_ino
+        archive = self.flat.root / "work-items/archive/2026-10" / self.flat.slug
+        for extra in ([], ["--inject-failure-at", "after-board"]):
+            with self.subTest(extra=extra):
+                result = subprocess.run(
+                    [sys.executable, "-B", str(MUTATOR), *arguments, "--apply", *extra],
+                    text=True, capture_output=True, timeout=240, check=False,
+                )
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("WI-LEGACY-COMPLETION-NATIVE-UNSUPPORTED", result.stdout + result.stderr)
+                self.assertEqual(self.flat.canonical_images(), before)
+                self.assertEqual(
+                    (self.flat.source.stat().st_dev, self.flat.source.stat().st_ino), source_identity
+                )
+                self.assertFalse(archive.exists())
+                self.assertFalse((self.flat.root / ".scratch/work-items/legacy-flat-terminal").exists())
+
+    @unittest.skipUnless(os.name == "nt", "native creator-bound flat close is Windows-only")
     def test_public_original_history_absence_uses_real_owner_and_both_receipts(self):
         self.complete_flat()
         result, observation = self.public_observation()
         self.assertEqual(result.returncode, 0, observation)
         self.assert_flat_credit(observation)
 
+    @unittest.skipUnless(os.name == "nt", "native creator-bound flat close is Windows-only")
     def test_public_present_original_settled_history_keeps_raw_bytes_and_authority(self):
         self.complete_flat(history=True)
         before = self.owner.observe_work_item_terminal(self.roots["B"], f"work-item:{self.flat.slug}")
@@ -387,6 +428,7 @@ class TestLegacyFlatGoalConsumer(unittest.TestCase):
             for field in first[ordinal].__dataclass_fields__:
                 self.assertEqual(getattr(first[ordinal], field), getattr(second[ordinal], field), (ordinal, field))
 
+    @unittest.skipUnless(os.name == "nt", "native creator-bound flat close is Windows-only")
     def test_pending_owner_is_not_goal_credit(self):
         self.complete_flat(pending=True)
         result, observation = self.public_observation()
@@ -395,6 +437,7 @@ class TestLegacyFlatGoalConsumer(unittest.TestCase):
         self.assertTrue(any("PENDING" in cause["detail"] for cause in observation["causes"]), observation)
         self.assertFalse(any(row["slug"] == self.flat.slug for row in observation["members"]))
 
+    @unittest.skipUnless(os.name == "nt", "native creator-bound flat close is Windows-only")
     def test_pending_receipts_and_useful_outcome_refuse(self):
         self.complete_flat()
         original_receipt, original_acceptance = copy.deepcopy(self.flat_row["receipt"]), copy.deepcopy(self.flat_row["acceptance"])
@@ -428,6 +471,7 @@ class TestLegacyFlatGoalConsumer(unittest.TestCase):
             finally:
                 saved.rename(path)
 
+    @unittest.skipUnless(os.name == "nt", "native creator-bound flat close is Windows-only")
     def test_held_native_drift_and_new_ambiguity_refuse(self):
         self.complete_flat()
         self.checker.load_lifecycle_owner = lambda: self.owner
@@ -739,8 +783,8 @@ def test_goal_taskless_domain_expectations_and_recheck_are_not_missing_equals_em
     goal.update(copy.deepcopy(original))
     original_profile = checker._goal_root_profile
     counts = {"B": 0}
-    def acquire_then_appear(*args):
-        result = original_profile(*args)
+    def acquire_then_appear(*args, **kwargs):
+        result = original_profile(*args, **kwargs)
         if args[1] == "B":
             counts["B"] += 1
             if counts["B"] == 1:
@@ -1294,6 +1338,10 @@ def test_blocked_by_done_target_not_reported(tmp_path: Path):
     arch = tmp_path / "work-items" / "archive" / "2026-05" / "done-dep"
     arch.mkdir(parents=True)
     (arch / "status.md").write_text("State: closed\n", encoding="utf-8")
+    (arch / "closure.md").write_text(
+        "Closed: 2026-05-03T10:05:00Z\nOutcome: Delivered the synthetic dependency.\n"
+        "Evidence: Accepted fixture result.\nResidual risk: None.\n", encoding="utf-8"
+    )
     write_item_with_status(tmp_path, "item-y", status_with_depends("done-dep"))
     result = run_checker(tmp_path)
     assert result.returncode == 0, result.stdout
@@ -2081,41 +2129,39 @@ def _numeric_v2_pass(**updates: object) -> dict:
     )
 
 
-def test_archived_numeric_v1_revise_is_only_a_linked_v2_target(tmp_path: Path, monkeypatch) -> None:
+def test_archived_numeric_v1_revise_is_only_a_linked_v2_target(tmp_path: Path) -> None:
     validator = load_validator_module()
-    original_reducer = validator.resolve_closure_invalidations
-    observed_validity = []
-
-    def observe_reducer(rows, validity, errors, telemetry=None, *, context=None):
-        observed_validity.append(validity[0])
-        return original_reducer(rows, validity, errors, telemetry, context=context)
-
-    monkeypatch.setattr(validator, "resolve_closure_invalidations", observe_reducer)
+    authority = []
     linked = _numeric_v1_archive_case(
         tmp_path / "linked", _numeric_v1_revise(), _numeric_v2_pass(),
     )
     before = (linked / "agent-runs.jsonl").read_bytes()
 
-    errors, open_revise, open_launches = validator.validate_archived_ledger_obligations(linked)
+    errors, open_revise, open_launches = validator.validate_archived_ledger_obligations(
+        linked, authority_state_out=authority
+    )
 
     assert errors == []
     assert open_revise == [] and open_launches == []
     assert (linked / "agent-runs.jsonl").read_bytes() == before
-    linked_mask = observed_validity[-1]
-    assert linked_mask.current_schema_valid is False
+    assert len(authority) == 1
+    linked_mask = authority[0][1]
     assert (
-        linked_mask.authority.launch_eligible,
-        linked_mask.authority.terminal_eligible,
-        linked_mask.authority.revise_target_eligible,
-        linked_mask.authority.closer_eligible,
-        linked_mask.authority.artifact_evidence_eligible,
+        linked_mask.launch_eligible,
+        linked_mask.terminal_eligible,
+        linked_mask.revise_target_eligible,
+        linked_mask.closer_eligible,
+        linked_mask.artifact_evidence_eligible,
     ) == (False, False, True, False, False)
 
     unlinked = _numeric_v1_archive_case(tmp_path / "unlinked", _numeric_v1_revise())
-    assert validator.validate_archived_ledger_obligations(unlinked) == ([], [], [])
-    unlinked_mask = observed_validity[-1]
-    assert unlinked_mask.current_schema_valid is False
-    assert not any(vars(unlinked_mask.authority).values())
+    unlinked_before = (unlinked / "agent-runs.jsonl").read_bytes()
+    assert validator.validate_archived_ledger_obligations(
+        unlinked, authority_state_out=authority
+    ) == ([], [], [])
+    assert len(authority) == 2
+    assert not any(vars(authority[1][1]).values())
+    assert (unlinked / "agent-runs.jsonl").read_bytes() == unlinked_before
     active_errors: list[str] = []
     validator.validate_closure(
         [_numeric_v1_revise(), _numeric_v2_pass()], active_errors,
@@ -2352,11 +2398,26 @@ def test_checker_aliases_validate_base_transfer_receipt(tmp_path: Path) -> None:
     receipt = support.run_transfer(fixture)
     receipt_path = base / receipt["archivePath"] / "lifecycle-transition-receipt.json"
     original = receipt_path.read_bytes()
+    archive = receipt_path.parent
+    authority = []
+    errors, open_revise, open_launches = load_validator_module().validate_archived_ledger_obligations(
+        archive, authority_state_out=authority
+    )
+    expected_revise = [row["runId"] for row in receipt["obligations"]]
+    assert errors == []
+    assert [row["runId"] for row in open_revise] == expected_revise
+    assert open_launches == []
+    assert (archive / "agent-runs.jsonl").read_bytes() == fixture["ledgerBefore"]
+    raw_events = [json.loads(line) for line in fixture["ledgerBefore"].splitlines()]
+    terminal_ids = [raw_events[ordinal - 1]["runId"] for ordinal, mask in authority[0].items()
+                    if mask.terminal_eligible]
+    target = next(event for event in raw_events if event["runId"] == expected_revise[0])
+    assert terminal_ids == [f"{target['launchRunId']}-migration-neutral"]
     for alias, active in ((base, "work-items/active"), (base / "work-items", "active")):
         full = run_checker(alias, "--active-dir", active)
         assert full.returncode == 1, full.stdout + full.stderr
-        assert "open REVISE obligation survived archival" in full.stdout
-        assert "duplicate terminal" in full.stdout
+        assert f"open REVISE obligation survived archival: {expected_revise[0]}" in full.stdout
+        assert "duplicate terminal" not in full.stdout
         assert "FAIL obligation transfer ownership" not in full.stdout
         checked = run_checker(alias, "--active-dir", active, "--active-only")
         assert checked.returncode == 0, checked.stdout + checked.stderr

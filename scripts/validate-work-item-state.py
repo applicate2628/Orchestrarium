@@ -12725,11 +12725,22 @@ def _obligations_observation(
     acquisition_complete: list[bool] = []
     try:
         captured = None
-        selected_absent = False
+        owner = load_lifecycle_owner()
+        selection_evidence = []
         try:
-            captured = read_ledger_bytes(selected, ledger_resource_budget)
-        except FileNotFoundError:
-            selected_absent = True
+            # Capture absence through its owner, not a failed file capture:
+            # missing, unreadable and drifting files share the latter's error.
+            selected_absent = owner._observe_project_path_at(
+                selected, "file", selection_evidence, "WI-LEDGER-RESOURCE-DRIFT"
+            ) is None
+            if not selected_absent:
+                captured = read_ledger_bytes(selected, ledger_resource_budget)
+            owner._verify_project_binding_evidence(
+                tuple(selection_evidence), "WI-LEDGER-RESOURCE-DRIFT"
+            )
+        except owner.LifecycleError as exc:
+            raise ValueError(f"{exc.failure_id}: {exc}") from exc
+        if selected_absent:
             if ledger_path is None:
                 status = item / "status.md"
                 if status.exists() and is_quick_fix_status(status.read_text(encoding="utf-8")):
