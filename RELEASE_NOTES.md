@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-28
 
+- Model selection binds the selected installed script package through its logical and physical paths, retaining identity checks when paths or links change. Model-selection guidance now follows the existing explicit selector contract while preserving user controls and approved factory-only migration.
+
 - A minimal project-local Ruff configuration supports standard local Ruff use and identifies the Python project to supported language tools; it adds no automatic formatting or mandatory lint gate.
 
 - Publication retains genuine human approval bound to the reviewed source, repository and destination across neutral messages. Git pre-push checks the actual updates with a fresh nonempty Version 3 union and a separate Version 4 scan; prior approval does not replace these checks.
