@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import importlib.util
@@ -1842,22 +1843,63 @@ def test_rejected_artifact_escape_never_queries_owned_outside_namespace(tmp_path
     assert not [path for path in directory_reads
                 if path != root_key and not path.startswith(root_key + ntpath.sep)]
 
-    # The allowed alias owner must reject its outside target before querying it.
-    alias = items[0] / "outside-alias.md"
-    alias.symlink_to(outside[0])
-    seen.clear()
-    alias_errors = []
-    with mock.patch.object(ntpath, "_getfinalpathname", observe):
-        assert module.resolve_work_item_path(items[0], alias.name, "artifact", "outside-alias", alias_errors) is None
-    assert any("escape" in value.lower() for value in alias_errors)
-    assert not [path for path in seen if any(path == parent or path.startswith(parent + ntpath.sep)
+
+def _create_test_symlink(link, target, *, target_is_directory=False):
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        if sys.platform == "win32" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink creation requires a privilege unavailable to this process")
+        raise
+
+
+def test_rejected_artifact_symlink_never_queries_owned_outside_namespace(tmp_path):
+    outer = tmp_path / "owned-outer"
+    root = outer / "l1/l2/l3/repo"
+    item = root / "work-items/active/reader-a"
+    item.mkdir(parents=True)
+    outside = [root.parent / "outside/report.md", outer / "outside/report.md"]
+    for path in outside:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"owned synthetic outside target\n")
+    alias = item / "outside-alias.md"
+    _create_test_symlink(alias, outside[0])
+    module = load_validator()
+    seen = []
+    real_lstat = os.lstat
+
+    def observe_lstat(path, *args, **kwargs):
+        seen.append(os.path.normcase(os.path.abspath(os.fsdecode(path))))
+        return real_lstat(path, *args, **kwargs)
+
+    native_observer = contextlib.nullcontext()
+    if sys.platform == "win32":
+        import ntpath
+        real_final = ntpath._getfinalpathname
+
+        def observe_final(path):
+            seen.append(ntpath.normcase(ntpath.abspath(os.fsdecode(path))))
+            return real_final(path)
+
+        native_observer = mock.patch.object(ntpath, "_getfinalpathname", observe_final)
+    errors = []
+    with mock.patch.object(os, "lstat", observe_lstat), native_observer:
+        assert module.resolve_work_item_path(item, alias.name, "artifact", "outside-alias", errors) is None
+    assert any("escape" in value.lower() for value in errors)
+    parents = [os.path.normcase(os.path.abspath(path.parent)) for path in outside]
+    assert not [path for path in seen if any(path == parent or path.startswith(parent + os.sep)
                                            for parent in parents)]
-    # A self-expanding directory-link cycle terminates by visited state, without a hop cap.
-    cycle = items[0] / "expanding-cycle"
-    cycle.symlink_to("expanding-cycle/tail", target_is_directory=True)
-    cycle_errors = []
-    assert module.resolve_work_item_path(items[0], cycle.name, "artifact", "cycle", cycle_errors) is None
-    assert any("cycle" in value.lower() for value in cycle_errors)
+
+
+def test_rejected_artifact_symlink_cycle_terminates(tmp_path):
+    root = tmp_path / "repo"
+    item = root / "work-items/active/reader-a"
+    item.mkdir(parents=True)
+    cycle = item / "expanding-cycle"
+    _create_test_symlink(cycle, "expanding-cycle/tail", target_is_directory=True)
+    errors = []
+    assert load_validator().resolve_work_item_path(item, cycle.name, "artifact", "cycle", errors) is None
+    assert any("cycle" in value.lower() for value in errors)
 
 
 def test_composite_status_consumes_parent_diagnostics_once(tmp_path):

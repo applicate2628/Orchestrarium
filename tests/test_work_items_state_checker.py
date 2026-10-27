@@ -478,8 +478,8 @@ class TestLegacyFlatGoalConsumer(unittest.TestCase):
         original_observe = self.owner.observe_work_item_terminal
         original_verify = self.owner.WorkItemTerminalObservation.verify
         held = []
-        def observe(root, reference):
-            value = original_observe(root, reference)
+        def observe(root, reference, **kwargs):
+            value = original_observe(root, reference, **kwargs)
             if reference == f"work-item:{self.flat.slug}": held.append(value)
             return value
         calls = []
