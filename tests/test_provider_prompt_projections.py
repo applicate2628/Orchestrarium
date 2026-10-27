@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR_PATH = ROOT / "scripts" / "validate-provider-prompt-projections.py"
 INSTALLER_PATH = ROOT / "scripts" / "production_installer.py"
 TRANSPORT_FILES = (
+    "model_routing/launch_policy.py",
     "provider_prompt.py",
     "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",

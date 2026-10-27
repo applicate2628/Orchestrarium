@@ -20,6 +20,7 @@ from typing import Any, Sequence
 STABLE_ID = "E_TRANSPORT_PROJECTION_PARITY"
 SCHEMA_VERSION = 1
 TRANSPORT_FILES = (
+    "model_routing/launch_policy.py",
     "provider_prompt.py",
     "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
@@ -146,7 +147,10 @@ def _open_ordinary_file(path: Path, label: str) -> _BoundOrdinaryFile:
     return _open_ordinary_leaf(path, label)
 
 
-def _load_manifest(path: Path) -> dict[str, Any]:
+PRIOR_TRANSPORT_FILES_V1 = tuple(name for name in TRANSPORT_FILES if name != "model_routing/launch_policy.py")
+
+
+def _load_manifest(path: Path, *, allow_prior_transport: bool = False) -> dict[str, Any]:
     bound = _open_ordinary_file(path, "manifest")
     try:
         raw = bound.read_bytes()
@@ -166,7 +170,10 @@ def _load_manifest(path: Path) -> dict[str, Any]:
     if not isinstance(revision, str) or not revision.strip():
         raise _fail("manifest pack revision")
     files = manifest.get("files")
-    if not isinstance(files, dict) or tuple(files) != TRANSPORT_FILES:
+    if not isinstance(files, dict) or not (
+        tuple(files) == TRANSPORT_FILES
+        or (allow_prior_transport and tuple(files) == PRIOR_TRANSPORT_FILES_V1)
+    ):
         raise _fail("manifest must bind the complete ordered transport set")
     return manifest
 

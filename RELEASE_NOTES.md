@@ -2,6 +2,12 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-27
+
+- Installer tree identity now hashes a complete versioned member manifest, preventing file bytes from impersonating later entries. Legacy receipts require independent factory structure; supported stock upgrades, no-op and native rollback preserve user changes.
+
+- Ordinary model selection now exposes exact GPT-6.1 Terra profiles without changing fixed role or user defaults. Low and below-family-minimum choices refuse; every Astra or Max attempt requires individual user agreement, including omitted/configured routes. Existing profile identities, mechanical/critical gates and explicit host controls remain preserved.
+
 ## 2026-10-26
 
 - Publication hooks recover one proved literal PowerShell Git invocation when a supported host label incorrectly selects Bash parsing. Mixed quoting retains the original command and all publication checks; compound refusals now show only safe parser facts and compiled revision labels for diagnosis.

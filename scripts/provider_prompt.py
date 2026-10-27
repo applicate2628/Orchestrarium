@@ -254,6 +254,7 @@ class Control:
         default_factory=lambda: KimiCapabilitySelectionV1()
     )
     kimi_effort: str = "high"
+    user_approved_launch: bool = False
     provider_flags: list[str] = field(default_factory=list)
 
 
@@ -2858,6 +2859,13 @@ def parse_control(
         if token == "--":
             result.provider_flags.extend(argv[index + 1 :])
             break
+        if key == "--user-approved-launch":
+            if "user_approved_launch" in seen_values:
+                raise ValueError("duplicate --user-approved-launch")
+            seen_values["user_approved_launch"] = True
+            result.user_approved_launch = True
+            index += 1
+            continue
         if key in value_flags:
             if index + 1 >= len(argv):
                 raise ValueError(f"{token} requires a value")
@@ -3205,6 +3213,56 @@ def external_role_provenance(control: Control, provider: str) -> ExternalRolePro
     else:
         execution = "none"
     return ExternalRoleProvenance(assigned, execution)
+
+
+def _load_model_launch_policy(*, runtime_namespace: Path | None = None):
+    """Load captured policy bytes beside the selected logical module namespace."""
+    script = Path(os.path.abspath(__file__))
+    namespace = script.parent if runtime_namespace is None else Path(runtime_namespace)
+    if not namespace.is_absolute():
+        raise ValueError("E_MODEL_LAUNCH_NAMESPACE_INVALID: selected namespace must be absolute")
+    participant = namespace / "provider_prompt.py"
+    selected = namespace / "model_routing" / "launch_policy.py"
+    def association(path):
+        value = path.lstat()
+        linked = stat.S_ISLNK(value.st_mode) or bool(getattr(value, "st_file_attributes", 0) & 0x400)
+        if linked and not (stat.S_ISLNK(value.st_mode) or getattr(value, "st_reparse_tag", None) in {
+            getattr(stat, "IO_REPARSE_TAG_SYMLINK", 0xA000000C),
+            getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003),
+        }):
+            raise ValueError("unsupported selected companion link")
+        return (value.st_dev, value.st_ino, value.st_mode,
+                getattr(value, "st_file_attributes", 0), os.readlink(path) if linked else None)
+    try:
+        paths = (script, participant, *reversed(selected.parents), selected)
+        witnessed = tuple((path, association(path)) for path in paths)
+        # Native identity correlates the actual P participant with the selected
+        # namespace; it does not grant trust, task authority or user agreement.
+        if _ledger_file_identity(participant.resolve(strict=True)) != _ledger_file_identity(script.resolve(strict=True)):
+            raise ValueError("actual provider runtime is outside the selected namespace")
+        resolved = selected.resolve(strict=True)
+        identity = _ledger_file_identity(resolved)
+        payload = resolved.read_bytes()
+        if _ledger_file_identity(resolved) != identity:
+            raise ValueError("selected companion changed while reading")
+        def assert_current():
+            if any(association(path) != identity for path, identity in witnessed):
+                raise ValueError("selected companion association changed")
+            if selected.resolve(strict=True) != resolved:
+                raise ValueError("selected companion target changed")
+            if _ledger_file_identity(resolved) != identity or resolved.read_bytes() != payload:
+                raise ValueError("selected companion bytes changed")
+
+        assert_current()
+        spec = importlib.util.spec_from_file_location("_orchestrarium_model_launch_policy", selected)
+        if spec is None or spec.loader is None:
+            raise ValueError("selected companion cannot be loaded")
+        module = importlib.util.module_from_spec(spec)
+        exec(compile(payload, str(selected), "exec"), module.__dict__)
+        assert_current()
+        return module
+    except (OSError, ValueError, ImportError, SyntaxError) as exc:
+        raise ValueError("E_MODEL_LAUNCH_POLICY_UNAVAILABLE: complete the selected logical runtime package") from exc
 
 
 def _load_external_dispatch_resolver() -> object:
@@ -7589,11 +7647,24 @@ def finalize_reserved_run_once(
     return terminal_outcome.exit_code
 
 
+def _qualify_managed_model_launch(provider: str, selected: PolicyBoundLaunch, *,
+                                  runtime_namespace: Path | None = None) -> None:
+    """Use actual assigned-role provenance, not filename, flags or a guessed role."""
+    if selected.role_provenance.assigned_role == "none":
+        return
+    reason = _load_model_launch_policy(runtime_namespace=runtime_namespace).qualify_launch(
+        provider, selected.model, selected.effort,
+        user_approved_launch=selected.control.user_approved_launch)
+    if reason is not None:
+        raise ValueError("E_MODEL_LAUNCH_POLICY_DENIED: " + reason)
+
+
 def launch(
     provider: str,
     argv: list[str],
     *,
     native_parser_contract: WindowsParserContractV1 | None = None,
+    runtime_namespace: Path | None = None,
 ) -> int:
     """Provider-launch composition root and sole owner of the injected runner."""
 
@@ -7623,6 +7694,7 @@ def launch(
                 role_provenance,
                 None,
             )
+        _qualify_managed_model_launch(provider, prevalidated, runtime_namespace=runtime_namespace)
         if provider == "kimi" and os.name != "nt":
             return fail("E_KIMI_WINDOWS_ONLY: Kimi bundle review is Windows-only")
         if prevalidated.control.terminal_receipt is None:
@@ -7698,14 +7770,14 @@ def launch(
             )
 
 
-def kimi_main(argv: list[str]) -> int:
+def kimi_main(argv: list[str], *, runtime_namespace: Path | None = None) -> int:
     """Route Kimi maintenance modes locally; all other arguments remain launches."""
 
     if argv in (["--help"], ["-h"]):
         print(
             "usage: invoke-kimi-prompt.py <topic> --prompt-file <path> "
             "--terminal-receipt <path> --task-class <class> --role <role> "
-            "[--kimi-capabilities-file <json>] [wrapper options]\n"
+            "[--kimi-capabilities-file <json>] [--user-approved-launch] [wrapper options]\n"
             "\nRuns the fixed kimi-code/k3 file-prompt transport. Omitting the "
             "capabilities file keeps the no-tools, no-subagents profile.\n"
             "Maintenance diagnostics: --enroll-executable, "
@@ -7721,7 +7793,7 @@ def kimi_main(argv: list[str]) -> int:
     }
     selected = maintenance_flags.intersection(argv)
     if not selected:
-        return launch("kimi", argv)
+        return launch("kimi", argv, runtime_namespace=runtime_namespace)
     if argv == ["--enroll-executable"]:
         try:
             home = _kimi_user_home()

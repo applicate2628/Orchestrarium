@@ -2,9 +2,14 @@
   "schemaVersion": 1,
   "packRevision": "1.x-slice-b",
   "files": {
+    "model_routing/launch_policy.py": {
+      "source": "scripts/model_routing/launch_policy.py",
+      "sha256": "f2868f23f559c792a7cf00137fe80f636b9afc6ab104f4648a3a9de9b1906027",
+      "destination": "scripts/model_routing/launch_policy.py"
+    },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "35e0e60ee5b8a1392103d956589ac83ae9505c0028ffbdbe68912850d6c677c8",
+      "sha256": "e2c0beceaeedb8c0546f3c984f2cd2d4abdf475a0708be46a4931c9520f0a596",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
@@ -14,22 +19,22 @@
     },
     "invoke-codex-prompt.py": {
       "source": "scripts/invoke-codex-prompt.py",
-      "sha256": "04fbc5fae33e623f0b10f783b6753947e4d8a5e62ab06bc058b9df776b76f79b",
+      "sha256": "52ce79e75504427dbb52cb3a3d9ab6c46d9dfed8ddd3108307723d8705a7ecea",
       "destination": "scripts/invoke-codex-prompt.py"
     },
     "invoke-claude-prompt.py": {
       "source": "scripts/invoke-claude-prompt.py",
-      "sha256": "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3",
+      "sha256": "87f51ac63568056939a2bc0b4fb60d2738ec74d992b9cf15d0c6ad119c5db324",
       "destination": "scripts/invoke-claude-prompt.py"
     },
     "invoke-kimi-prompt.py": {
       "source": "scripts/invoke-kimi-prompt.py",
-      "sha256": "480af94ce089d5a6340e92d00239a5762c9c1374375a8c12c921afdcfcaa6e47",
+      "sha256": "2f6fd8937e3fff9315f8b112d77eb043746802974c1c9ab4af51532800f3d785",
       "destination": "scripts/invoke-kimi-prompt.py"
     },
     "invoke-grok-prompt.py": {
       "source": "scripts/invoke-grok-prompt.py",
-      "sha256": "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559",
+      "sha256": "1013c9d166d6a5773a958bb69c4a44cffe61085bc8c142f0af72edd665f67011",
       "destination": "scripts/invoke-grok-prompt.py"
     },
     "external-prompt-governance.md": {

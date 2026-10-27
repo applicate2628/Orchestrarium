@@ -1484,6 +1484,11 @@ def _describe_ordinary_native_role_options_in_layout(
     option_names = [
         name for name in contract["roleConfig"]["allowedProfiles"] if name in admissible
     ]
+    try:
+        launch_policy = _load_model_launch_policy()
+    except ValueError:
+        return _ordinary_native_denied(task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID",
+            diagnostic={"stage": "model-launch-policy", "reason": "selected-companion-unavailable"})
     options = []
     explicit_controls = (
         host_observation["explicitModelControl"]
@@ -1491,6 +1496,9 @@ def _describe_ordinary_native_role_options_in_layout(
     )
     for name in option_names:
         profile = policy["profiles"][name]
+        forbidden, _needs_agreement = launch_policy.launch_requirements("codex", profile["codexModel"], profile["effort"])
+        if forbidden is not None:
+            continue
         if reported_models is not None and profile["codexModel"] not in reported_models:
             continue
         if reported_efforts is not None and profile["effort"] not in reported_efforts:
@@ -1648,6 +1656,45 @@ def describe_ordinary_native_role_options(
     )
 
 
+def _load_model_launch_policy():
+    """Load captured policy bytes beside the selected logical module namespace."""
+    script = Path(os.path.abspath(__file__))
+    selected = script.parent / "model_routing" / "launch_policy.py"
+    def association(path):
+        value = path.lstat()
+        linked = stat.S_ISLNK(value.st_mode) or bool(getattr(value, "st_file_attributes", 0) & 0x400)
+        if linked and not (stat.S_ISLNK(value.st_mode) or getattr(value, "st_reparse_tag", None) in {
+            getattr(stat, "IO_REPARSE_TAG_SYMLINK", 0xA000000C),
+            getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003),
+        }):
+            raise ValueError("unsupported selected companion link")
+        return (value.st_dev, value.st_ino, value.st_mode,
+                getattr(value, "st_file_attributes", 0), os.readlink(path) if linked else None)
+    try:
+        paths = (script, *reversed(selected.parents), selected)
+        witnessed = tuple((path, association(path)) for path in paths)
+        resolved = selected.resolve(strict=True)
+        payload, snapshot = _native_snapshot(resolved)
+        def assert_current():
+            if any(association(path) != identity for path, identity in witnessed):
+                raise ValueError("selected companion association changed")
+            if selected.resolve(strict=True) != resolved:
+                raise ValueError("selected companion target changed")
+            if _native_snapshot(resolved)[1] != snapshot:
+                raise ValueError("selected companion bytes changed")
+
+        assert_current()
+        spec = importlib.util.spec_from_file_location("_orchestrarium_model_launch_policy", selected)
+        if spec is None or spec.loader is None:
+            raise ValueError("selected companion cannot be loaded")
+        module = importlib.util.module_from_spec(spec)
+        exec(compile(payload, str(selected), "exec"), module.__dict__)
+        assert_current()
+        return module
+    except (OSError, ValueError, ImportError, SyntaxError) as exc:
+        raise ValueError("E_MODEL_LAUNCH_POLICY_UNAVAILABLE: complete the selected logical runtime package") from exc
+
+
 def resolve_ordinary_native_dispatch(
     description: Any,
     *,
@@ -1656,6 +1703,7 @@ def resolve_ordinary_native_dispatch(
     caller_rationale: Any,
     approved_execution_scope: Any,
     user_approved_max: bool = False,
+    user_approved_launch: bool = False,
 ) -> dict[str, Any]:
     if (
         not isinstance(description, dict)
@@ -1677,9 +1725,6 @@ def resolve_ordinary_native_dispatch(
     if not explicit and description.get("defaultConfigurationError"):
         return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
             "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic=description["defaultConfigurationError"])
-    if not explicit and description.get("defaultEffort") == "max" and user_approved_max is not True:
-        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
-            "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": "configured-profile-policy", "reason": "maximum-approval-required"})
     selected = None
     default_mode = description["defaultInvocation"]["mode"]
     if not explicit and default_mode == "named-role-default" and (
@@ -1733,7 +1778,7 @@ def resolve_ordinary_native_dispatch(
             ),
             None,
         )
-        if selected is None or (requested_effort == "max" and user_approved_max is not True):
+        if selected is None:
             return _ordinary_native_denied(
                 description.get("taskClass"),
                 description.get("role"),
@@ -1771,6 +1816,15 @@ def resolve_ordinary_native_dispatch(
         if conflict:
             return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
                 "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic=conflict)
+    try:
+        reason = _load_model_launch_policy().qualify_launch(
+            "codex", resolved_model, resolved_effort,
+            user_approved_launch=user_approved_launch, user_approved_max=user_approved_max)
+    except ValueError:
+        reason = "selected-companion-unavailable"
+    if reason is not None:
+        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": "model-launch-policy", "reason": reason})
     return {
         "schemaVersion": 1,
         "status": "resolved",
@@ -2350,6 +2404,7 @@ def main() -> int:
     parser.add_argument("--caller-rationale")
     parser.add_argument("--approved-scope-json")
     parser.add_argument("--user-approved-max", action="store_true")
+    parser.add_argument("--user-approved-launch", action="store_true")
     parser.add_argument("--json", action="store_true", help="emit JSON output")
     args = parser.parse_args()
 
@@ -2445,6 +2500,7 @@ def main() -> int:
                 caller_rationale=args.caller_rationale,
                 approved_execution_scope=approved_scope,
                 user_approved_max=args.user_approved_max,
+                user_approved_launch=args.user_approved_launch,
             )
         json.dump(decision, sys.stdout, sort_keys=True, separators=(",", ":"))
         sys.stdout.write("\n")
