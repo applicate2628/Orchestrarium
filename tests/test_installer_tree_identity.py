@@ -170,3 +170,120 @@ def test_independent_structural_receipt_precedes_stock_fallback(
             owner._discard_canonical_skills_plan(plan)
     assert owner._InstallTransaction._observe(skills) == before
     assert bool(calls) == (evidence == "legacy")
+
+@pytest.mark.parametrize("baseline,name", [
+    ("2dbf91b3e96e9dbf2bf785d16bf6964faf766d46", "github-pr-review-bot"),
+    ("2dbf91b3e96e9dbf2bf785d16bf6964faf766d46", "manual-repo-transfer"),
+    ("4e193102e852b25437b3244a4896b31a5e8fc6c5", "architect"),
+    ("4e193102e852b25437b3244a4896b31a5e8fc6c5", "architecture-reviewer"),
+    ("4e193102e852b25437b3244a4896b31a5e8fc6c5", "toolchain-engineer"),
+    ("65efb6b679d2808c5cdd3f95774a82942c65ad35", "graphics-engineer"),
+    ("65efb6b679d2808c5cdd3f95774a82942c65ad35", "visualization-engineer"),
+    ("8521b63843293583c1ebcc0fb8ffdd6f88529007", "consultant"),
+    ("8521b63843293583c1ebcc0fb8ffdd6f88529007", "design-panel"),
+    ("8521b63843293583c1ebcc0fb8ffdd6f88529007", "external-brigade"),
+    ("8521b63843293583c1ebcc0fb8ffdd6f88529007", "external-reviewer"),
+    ("8521b63843293583c1ebcc0fb8ffdd6f88529007", "external-worker"),
+    ("8521b63843293583c1ebcc0fb8ffdd6f88529007", "init-project"),
+    ("8521b63843293583c1ebcc0fb8ffdd6f88529007", "review-loop"),
+    ("8521b63843293583c1ebcc0fb8ffdd6f88529007", "second-opinion"),
+    ("7872d36d1019d1ac8c2e1615a9f9dbde47395815", "consultant"),
+    ("7872d36d1019d1ac8c2e1615a9f9dbde47395815", "design-panel"),
+    ("7872d36d1019d1ac8c2e1615a9f9dbde47395815", "init-project"),
+    ("7872d36d1019d1ac8c2e1615a9f9dbde47395815", "manual-repo-transfer"),
+    ("7872d36d1019d1ac8c2e1615a9f9dbde47395815", "review-loop"),
+    ("7872d36d1019d1ac8c2e1615a9f9dbde47395815", "second-opinion"),
+    ("3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa", "consultant"),
+    ("3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa", "external-reviewer"),
+    ("3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa", "external-worker"),
+    ("3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa", "init-project"),
+])
+def test_historical_fixture_has_independent_structural_witness(baseline, name, tmp_path):
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    historical = root / "tests" / "fixtures" / "canonical-skill-priors" / baseline / name
+    if not historical.is_dir():
+        historical = tmp_path / name
+        prefix = f"src.codex/skills/{name}/"
+        paths = subprocess.check_output(
+            ["git", "ls-tree", "-r", "--name-only", baseline, "--", prefix],
+            cwd=root, text=True,
+        ).splitlines()
+        assert paths
+        for path in paths:
+            assert path.startswith(prefix)
+            destination = historical / path[len(prefix):]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(subprocess.check_output(
+                ["git", "show", f"{baseline}:{path}"], cwd=root,
+            ))
+    weak = installer._legacy_tree_sha256(historical)
+    assert installer._legacy_factory_identity_v2(name, weak) == installer._tree_sha256(historical)
+
+
+def test_legacy_stream_collision_is_not_admitted(tmp_path: Path, monkeypatch) -> None:
+    stock, twin = tmp_path / "stock", tmp_path / "twin"
+    stock.mkdir()
+    twin.mkdir()
+    (stock / "a").write_bytes(b"body")
+    (stock / "b").write_bytes(b"companion")
+    (twin / "a").write_bytes(b"bodyF\0b\0companion")
+    weak = installer._legacy_tree_sha256(stock)
+    monkeypatch.setattr(installer, "ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256", {
+        "example": {weak: installer._tree_sha256(stock)}
+    })
+    assert installer._qualify_legacy_tree("example", stock, weak) == installer._tree_sha256(stock)
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION"):
+        installer._qualify_legacy_tree("example", twin, weak)
+
+@pytest.mark.parametrize("name", ("consultant", "manual-repo-transfer", "external-reviewer", "external-worker", "init-project"))
+def test_witnessed_prior_migrates_and_transaction_rolls_back(tmp_path: Path, name: str) -> None:
+    import shutil
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    target = tmp_path / "target"
+    skills = target / ".agents" / "skills"
+    skills.mkdir(parents=True)
+    installed = skills / name
+    if name != "manual-repo-transfer":
+        revision = "604d7d0b29fc320f2679fc0d49dbedd776551cb7"
+        prefix = f"src.codex/skills/{name}/"
+        paths = subprocess.check_output(
+            ["git", "ls-tree", "-r", "--name-only", revision, "--", prefix],
+            cwd=root, text=True,
+        ).splitlines()
+        assert paths
+        for path in paths:
+            assert path.startswith(prefix)
+            destination = installed / path[len(prefix):]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(subprocess.check_output(
+                ["git", "show", f"{revision}:{path}"], cwd=root,
+            ))
+    else:
+        shutil.copytree(root / "tests" / "fixtures" / "canonical-skill-priors" /
+                        "2dbf91b3e96e9dbf2bf785d16bf6964faf766d46" / name, installed)
+    before = installer._InstallTransaction._observe(installed)
+    weak = installer._legacy_tree_sha256(installed, ignore_runtime_cache=True)
+    strong = installer._tree_sha256(installed, ignore_runtime_cache=True)
+    assert installer._legacy_factory_identity_v2(name, weak) == strong
+    plan = installer._preflight_canonical_skills(root / "src.codex" / "skills", skills, root=root)
+    try:
+        selected = next(item for item in plan.skills if item.name == name)
+        assert selected.accepted_prior == strong
+        with pytest.raises(RuntimeError, match="forced rollback"):
+            with installer._InstallTransaction([installed], enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(target, transaction, dry_run=False)
+                installer._apply_canonical_skills_plan(plan, skills, owner, root=root)
+                assert installer._tree_sha256(installed, ignore_runtime_cache=True) == selected.source_digest
+                raise RuntimeError("forced rollback")
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+    assert installer._InstallTransaction._observe(installed) == before
+    (installed / "SKILL.md").write_bytes((installed / "SKILL.md").read_bytes() + b"user change")
+    modified = installer._InstallTransaction._observe(installed)
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION"):
+        installer._preflight_canonical_skills(root / "src.codex" / "skills", skills, root=root)
+    assert installer._InstallTransaction._observe(installed) == modified

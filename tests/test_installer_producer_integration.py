@@ -507,33 +507,61 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertFalse(target.exists())
         self.assert_clean()
 
-    def test_typed_stale_file_tree_and_link_restore_original_objects(self):
+    def test_claude_instructions_preserve_custom_on_success_rerun_and_rollback(self):
+        for scope in ("agents", "commands"):
+            with self.subTest(scope=scope):
+                source = self.source / scope
+                target = self.target / scope
+                source.mkdir()
+                target.mkdir()
+                for name in ("custom.md", "equal.md", "new.md"):
+                    (source / name).write_bytes(b"---\nname: stock\n---\nstock body\n")
+                custom = target / "custom.md"
+                original = b"---\nname: user\nextra: retained\n---\nuser body\n"
+                custom.write_bytes(original)
+                equal = target / "equal.md"
+                equal.write_bytes((source / "equal.md").read_bytes())
+                new = target / "new.md"
+                paths = [custom, equal, new]
+                for _ in range(2):
+                    with self.transaction(paths, paths) as transaction:
+                        PI._sync_tree(source, target, False, mutable_owner=self.owner(transaction),
+                                      instruction_scope=scope)
+                        transaction.commit()
+                    self.assertEqual(original, custom.read_bytes())
+                    self.assertEqual((source / "equal.md").read_bytes(), equal.read_bytes())
+                    self.assertEqual((source / "new.md").read_bytes(), new.read_bytes())
+                new.unlink()
+                with self.assertRaisesRegex(RuntimeError, "forced failure"):
+                    with self.transaction(paths, paths) as transaction:
+                        PI._sync_tree(source, target, False, mutable_owner=self.owner(transaction),
+                                      instruction_scope=scope)
+                        raise RuntimeError("forced failure")
+                self.assertFalse(new.exists())
+                self.assertEqual(original, custom.read_bytes())
+        self.assert_clean()
+
+    def test_unowned_stale_file_tree_and_link_are_preserved(self):
         commands = self.target / "commands"
         skills = self.target / "skills"
         commands.mkdir()
         skills.mkdir()
         stale_file = commands / "agents-stale.md"
         stale_tree = skills / "agents-stale"
-        stale_file.write_bytes(b"stale file")
+        stale_file.write_bytes(b"user stale file")
         stale_tree.mkdir()
-        (stale_tree / "leaf").write_bytes(b"stale tree")
+        (stale_tree / "leaf").write_bytes(b"user stale tree")
         link = skills / "agents-link"
         link.symlink_to(stale_tree.name, target_is_directory=True)
         original = {p: PI._CreateOnlyMutablePath._identity(p) for p in (stale_file, stale_tree, link)}
-        transaction = self.transaction([stale_file, skills])
-        primary = RuntimeError("later")
-        with self.assertRaises(RuntimeError) as caught:
-            with transaction:
-                owner = self.owner(transaction)
-                PI._reclaim_claude_namespace(self.source, commands, skills, False,
-                                             commands_owner=owner, skills_owner=owner)
-                self.assertFalse(stale_file.exists())
-                self.assertFalse(stale_tree.exists())
-                self.assertFalse(link.is_symlink())
-                raise primary
-        self.assertIs(primary, caught.exception)
+        with self.transaction([]) as transaction:
+            owner = self.owner(transaction)
+            PI._reclaim_claude_namespace(self.source, commands, skills, False,
+                                         commands_owner=owner, skills_owner=owner)
+            transaction.commit()
         self.assertEqual(original, {p: PI._CreateOnlyMutablePath._identity(p) for p in original})
-        self.assertEqual(b"stale tree", (stale_tree / "leaf").read_bytes())
+        self.assertEqual(b"user stale file", stale_file.read_bytes())
+        self.assertEqual(b"user stale tree", (stale_tree / "leaf").read_bytes())
         self.assertEqual(stale_tree.name, os.readlink(link))
         self.assert_clean()
 
@@ -555,22 +583,20 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertTrue(referent.is_dir())
         self.assert_clean()
 
-    def test_equal_byte_foreign_stale_leaf_is_refused_and_preserved(self):
-        commands = self.target / "commands"
-        commands.mkdir()
-        stale = commands / "agents-stale.md"
-        stale.write_bytes(b"stale")
-        transaction = self.transaction([stale])
-        with self.assertRaises(PI._InstallFailure) as caught:
+    def test_instruction_copy_race_is_refused_and_preserved(self):
+        source = self.source / "commands"
+        target = self.target / "commands"
+        source.mkdir()
+        target.mkdir()
+        (source / "new.md").write_bytes(b"stock")
+        destination = target / "new.md"
+        transaction = self.transaction([destination], [destination])
+        with self.assertRaises(PI._InstallFailure):
             with transaction:
-                foreign = self.target / "foreign"
-                foreign.write_bytes(b"stale")
-                os.replace(foreign, stale)
-                PI._reclaim_claude_namespace(self.source, commands, self.target / "skills", False,
-                                             commands_owner=self.owner(transaction))
-        self.assertIn("retention original source", str(caught.exception.cause))
-        self.assertEqual(b"stale", stale.read_bytes())
-        self.assertTrue(caught.exception.recovery_path.is_dir())
+                destination.write_bytes(b"concurrent user")
+                PI._sync_tree(source, target, False, mutable_owner=self.owner(transaction),
+                              instruction_scope="commands")
+        self.assertEqual(b"concurrent user", destination.read_bytes())
 
     def test_native_no_plan_config_uses_its_existing_migration_inverse(self):
         config = self.target / "config.toml"

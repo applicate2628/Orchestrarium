@@ -367,55 +367,61 @@ STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
     }
 )
 ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
-    "consultant": frozenset({"1beebf6b349048182e254d01f1b2c755199f98f45f60fb21f7990d5f014814e3"}),
-    "architect": frozenset(
-        {"51612976f7fde46e3046222d607435b2fba5ef27ede636a06a80cb86c6fc7f5e"}
-    ),
-    "architecture-reviewer": frozenset(
-        {"19b179fe14a2bb6135e46dd7435265e7483d0bf6d5ec97b55520e39f3cbb1b4d"}
-    ),
+    "consultant": {
+        '1beebf6b349048182e254d01f1b2c755199f98f45f60fb21f7990d5f014814e3': 'f1ba467f431a38c82b57355d256694bcfede73e4848791a5c19a7d0ef07a0154',
+        '57da94b645283cc695ff8f82a108a6f490f0036a564be76c22f663ba6afa3a38': '4bf409f769e8017af1fb6bdf045ed1afc69b6ef3918feaa283e23b2826e1cdf7',
+        'f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793': 'ee6efc0264ab7b68aa1d80819353606623f458ec02632ad5a2904408060095e4',
+        '63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a': '27be58b964681c09d3260252d49c468540f576aead370ecd784163fca4240e62',
+    },
+    "architect": {"51612976f7fde46e3046222d607435b2fba5ef27ede636a06a80cb86c6fc7f5e": "454bceff6e257da86c5d6f1b6fdd53f877be180cc441a7c4432646cea6f1a44b"},
+    "architecture-reviewer": {"19b179fe14a2bb6135e46dd7435265e7483d0bf6d5ec97b55520e39f3cbb1b4d": "88695a4250ac42e79b5b61b12141769c93eb14f4c4180c938b0803b3e0912876"},
     "external-reviewer": {
-        '17234ecc797094a872e3b02844c6c4c369628c1e503ef26fa797ff74872673ed': None,
-        '4623816c87f9d1b017472011601951eab8bc8e4ceeea2d13911e29a876c853e8': None,
+        '17234ecc797094a872e3b02844c6c4c369628c1e503ef26fa797ff74872673ed': 'c03a9c2b34a8b07812d7e82c42580caebfd7e4cd5c09eeb1889f455f5698e6ed',
+        '4623816c87f9d1b017472011601951eab8bc8e4ceeea2d13911e29a876c853e8': '49ab68961d7a01432d00b77826f92b523e0439f3a56cd70009877b7665e1a3b7',
         'ec68618f9d3869333c6d84e566dcaf7b61f7d36a11e247e69c14909807086698': 'dbd495e1955a15f19e2e20c8d87f59554cc5ff11d806426f0c9dff9ac80f2e5b',
+        '9bd5a9811b6573a6d6697f627caee4ebe975460de0118e22bd9e8cd7bb76e0c5': 'd4310591384a3fc94cad7a834ed2418fdfc900581f2d671ad99e3c3e1710bfea',
     },
     "external-worker": {
         '77be8a3c22b83d9e7a6570b6a9b7f7e1287c19592fa4a294fe68cbcaafffcc9a': '8e5187a3c5d5dfaf7220b79a7b33799b4151ce0e75df265a691fd00dc097a8f7',
-        'ca74db54391a1994c30a2da6d80021261556db9f75ac89ec8878ee1a5c50f32c': None,
-        'fa5374735bc396314f283489e189a4d1f82a6716068cf3384c9244a2c3c04097': None,
+        'ca74db54391a1994c30a2da6d80021261556db9f75ac89ec8878ee1a5c50f32c': '3d5bc98822356337053b099c1aa81b0e1f913d21e02c249936dc22078ed5c6c9',
+        'fa5374735bc396314f283489e189a4d1f82a6716068cf3384c9244a2c3c04097': '58dde97a53d00d4fca10d9062e2abe4808920cf293e86e967cdbbdb824686e73',
+        '170628e06c5866ddc9d9e4d5aaabbb1422f57ab067ce0085bd99960f34d53c3c': '04529aebe115e1a58745e1b5151e6ab7c5e78ddf4c182c42210fa7c1c0ea9058',
     },
-    "graphics-engineer": frozenset(
-        {"e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d"}
-    ),
-    "github-pr-review-bot": frozenset(
-        {"d1a5bff367e42891951371faa2d66274cb34f0eb7b9c86c214376e75833f6841"}
-    ),
-    "init-project": frozenset(
-        {"905f0866931702acbc064dee39e487b51828e06df9dce99ac9db55d252499f07",
-            "c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c",
-            "21dc5adc3f4ccb8e646546cd0d3ccf979c37d4e4e8dcefcc9620122f500dadb4",
-        }
-    ),
-    "manual-repo-transfer": frozenset(
-        {
-            "45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b",
-            "b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3",
-            "e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc",
-            "cdc90d427cc593ee7b7212dd0ddeacbb13dc7474525b493bd8950318bbc3d92f",
-        }
-    ),
-    "second-opinion": frozenset(
-        {"fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6"}
-    ),
-    "toolchain-engineer": frozenset(
-        {"51cf24ae0699a6bb379ee6bbf7b51e2a982cba12aaeab2dc76e57d4b4ccf2a74"}
-    ),
-    "review-loop": frozenset(
-        {"3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a"}
-    ),
-    "visualization-engineer": frozenset(
-        {"56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0"}
-    ),
+    "graphics-engineer": {"e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d": "d7c8d542f3808549750b3981c9192c4dd83867e1eb1b5ab38ffaaacf6e898ba5"},
+    "github-pr-review-bot": {"d1a5bff367e42891951371faa2d66274cb34f0eb7b9c86c214376e75833f6841": "4caf17f6a0b87220b0754c1e9ddcebe01e64e57bc76a139fc4d45b87c1ce1700"},
+    "init-project": {
+        '905f0866931702acbc064dee39e487b51828e06df9dce99ac9db55d252499f07': '10fa991feccb30d815cd238eb6a02b9409ffe54222f04b0df57a127a89db3b7b',
+        'c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c': None,
+        '21dc5adc3f4ccb8e646546cd0d3ccf979c37d4e4e8dcefcc9620122f500dadb4': '05b04ee821e83997b617a6ad052e2da2ee6516a8d01379b45b1de6513913cb81',
+        '4f0a5fdb8af605dc10cb2044f33db3339b410feaf23764cc395f9c3feaaf6353': '7ed43bf3286a8c9f4ff6a69d5b8835f6e1d5d81fa7981352082b88106c2c469d',
+        'cd5bc7386f286393ee8dab782ed603fff7ad61e8c828f34cca102a3a5e2aba9f': '19b4794614f08a2233097f14c7e5b2343ca831e477c8802341fdd601770b6613',
+    },
+    "manual-repo-transfer": {
+        '45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b': None,
+        'b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3': None,
+        'e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc': '44b24222acc7152cde916b4afbe63a6577a900ecef61760cf8355fb5874211f6',
+        'cdc90d427cc593ee7b7212dd0ddeacbb13dc7474525b493bd8950318bbc3d92f': None,
+        '03c0c2fd12a8273f8325fb145dc2b8e9e97502e497649fc2d474988a9f95070b': '5131cc4d18265cba6d7abf10225d717e3d8ac2a8b0f683efc803ca610dc95674',
+    },
+    "second-opinion": {
+        'fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6': None,
+        'f9a2114c8baead9ec8a259288ff74e157af60864c9f3d70ba0bcc52154b2b4b6': '7be172e27fac00bd7bfde542d7bd87b9a1dd874caee15b90c06d0b292201fc60',
+        'b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432': 'b8b8d488ce57f60d19afcf2ccf152be16e9f47c096638b06317cb21882238825',
+    },
+    "toolchain-engineer": {"51cf24ae0699a6bb379ee6bbf7b51e2a982cba12aaeab2dc76e57d4b4ccf2a74": "f83bdad4a5a53723d0d4f8d77f6b32577da60d902972910f0543747148b94ad3"},
+    "review-loop": {
+        '3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a': None,
+        '2d78f499bf7b4bb2e6dafdf0ef875f2d9d39448c28df6f3835bc8153fba02ce0': 'b4074ade6274381b9a89f87a6d01ee251981a7d5dd164f9444ac0e3d56f88167',
+        'd956cf70db42a7c936d21984fe6aeb83748de02c544eec56ca54971629f85f7e': '70392ab319a1ec665a177775ea8bc09def2aebefff868ebd84f70de0edd9f34f',
+    },
+    "visualization-engineer": {"56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0": "c09eecc45add2ded8571b999883bc7a03d90b82fd95c72a64bf6cf2537fc0230"},
+    'design-panel': {
+        'ac107c9d6c4a3833d0af90756c8b560f7ca4c4dfcc3d14d6a14faae1530f859f': '784d66c963af2a858ac053ec5089bfc58a37c819dce6522804a89e17958c07b4',
+        '685b75f5726dd16dbcf2b5fb3238652b8564242e5b66f0daf2b582267905f67b': '2e026b6dc68007ea972dc6f571ef08a855e4d106b40fa5ca595e9e94e31486ed',
+    },
+    'external-brigade': {
+        '7a931c84bc3b72a85afcee813e9bb4705923301b6644892dcd291ffacb837113': '5286483022342c63f6cc8e5f5bfdb96a693701e141b02ee2dc33c52f7f295ec9',
+    },
 }
 GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = {
     '006161c105d8fcaaa3e9ae891e8b14e42ca170c026445062f983884a9296a3c6': None,
@@ -7254,7 +7260,10 @@ def _sync_tree(
     *,
     excluded_files: frozenset[Path] = frozenset(),
     mutable_owner: _CreateOnlyMutablePath | None = None,
+    instruction_scope: str | None = None,
 ) -> None:
+    if instruction_scope not in (None, "agents", "commands"):
+        raise ValueError("invalid Claude instruction scope")
     for item in sorted(source.rglob("*")):
         relative = item.relative_to(source)
         if "__pycache__" in relative.parts or item.suffix.casefold() == ".ps1":
@@ -7263,6 +7272,25 @@ def _sync_tree(
             continue
         destination = target / relative
         if item.is_file():
+            instruction = (instruction_scope is not None
+                           and relative.suffix.casefold() == ".md"
+                           and (instruction_scope == "commands" or len(relative.parts) == 1))
+            if instruction:
+                if mutable_owner is not None and mutable_owner.transaction.enabled:
+                    transaction = mutable_owner.transaction
+                    image = _admitted_mutation_image(transaction, destination)
+                    if not transaction._image_matches(destination, image):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: instruction currentness")
+                    node = image.get(Path(os.path.abspath(destination)))
+                    if node is not None:
+                        if node.kind != "file" or node.data != _file_sha256(item):
+                            print(f"  Preserved custom instruction; not updated: {destination}")
+                        continue
+                elif destination.exists() or destination.is_symlink():
+                    if (destination.is_symlink() or not destination.is_file()
+                            or _file_sha256(destination) != _file_sha256(item)):
+                        print(f"  Preserved custom instruction; not updated: {destination}")
+                    continue
             _copy_file(item, destination, dry_run, mutable_owner=mutable_owner)
 
 
@@ -7328,10 +7356,7 @@ def _installer_mutation_paths(
                     target_tree if directory == "agents" else commands_target,
                 )
             )
-        # Canonical skills and projections are Slice-A create-only objects.
-        paths.extend(
-            _claude_stale_namespace_paths(source, commands_target, skills_target)
-        )
+        # Unknown stale instructions are reported and preserved, not mutation paths.
         paths.extend(claude_projection_snapshot_paths)
         paths.append(target / "AGENTS.md")
         helper_target = target_tree / "scripts"
@@ -10000,27 +10025,11 @@ def _reclaim_claude_namespace(
     commands_owner: _CreateOnlyMutablePath | None = None,
     skills_owner: _CreateOnlyMutablePath | None = None,
 ) -> None:
-    for installed in _claude_stale_namespace_paths(
-        source, commands_target, skills_target
-    ):
+    for installed in _claude_stale_namespace_paths(source, commands_target, skills_target):
         root = commands_target if installed.is_relative_to(commands_target) else skills_target
-        relative = installed.relative_to(root).as_posix()
         namespace = "commands" if root == commands_target else "skills"
-        if dry_run:
-            print(
-                "    [dry-run] would reclaim stale pack namespace: "
-                f"{namespace}/{relative}"
-            )
-            continue
-        owner = commands_owner if root == commands_target else skills_owner
-        if owner is not None and owner.transaction.enabled:
-            owner.retain_path(installed.relative_to(owner.anchor),
-                              _admitted_mutation_image(owner.transaction, installed))
-        elif installed.is_symlink() or installed.is_file():
-            installed.unlink()
-        else:
-            shutil.rmtree(installed)
-        print(f"  Reclaimed stale pack item: {namespace}/{relative}")
+        print(f"  Preserved unowned stale instruction; not removed: {namespace}/{installed.relative_to(root).as_posix()}")
+
 
 
 def _owned_byte_context(target: Path, owner: _CreateOnlyMutablePath):
@@ -11680,9 +11689,6 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 if not logical.is_symlink():
                     transaction_paths = [path for path in transaction_paths if path != logical]
                 transaction_paths.append(storage)
-        namespace_removals = (_claude_stale_namespace_paths(
-            source, claude_commands_target, claude_skills_projection_target)
-            if provider == "claude" else ())
         copy_paths = {
             canonical_agents_root / UI_CONTINUITY_CONTRACT_TARGET,
             agents_root / UI_CONTINUITY_CONTRACT_TARGET,
@@ -11706,7 +11712,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             transaction_paths,
             enabled=not args.dry_run,
             copy_paths=tuple(sorted(copy_paths)),
-            link_object_paths=namespace_removals + byte_pointer_objects,
+            link_object_paths=byte_pointer_objects,
         )
         for authority in claude_link_authorities:
             _assert_global_claude_linked_subroot_authority(root, authority)
@@ -11842,11 +11848,12 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     args.dry_run,
                     excluded_files=claude_sync_excluded,
                     mutable_owner=claude_agents_owner,
+                    instruction_scope="agents",
                 )
                 for authority in claude_link_authorities:
                     _assert_global_claude_linked_subroot_authority(root, authority)
                 _sync_tree(source / "commands", claude_commands_target, args.dry_run,
-                           mutable_owner=claude_commands_owner)
+                           mutable_owner=claude_commands_owner, instruction_scope="commands")
                 for authority in claude_link_authorities:
                     _assert_global_claude_linked_subroot_authority(root, authority)
                 _reclaim_claude_namespace(
