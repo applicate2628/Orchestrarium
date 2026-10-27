@@ -839,6 +839,182 @@ def test_generated_inventory_is_read_only_and_detects_registration_drift(
         )
 
 
+@pytest.mark.parametrize("header,nested", [(True, False), (False, True), (True, True)])
+def test_inventory_accepts_bound_source_aliases(
+    tmp_path: Path, header: bool, nested: bool
+) -> None:
+    target = tmp_path / "hooks.json"
+    rows, _ = _host_trust_fixture(target)
+    inventory = tmp_path / CHECKER.INVENTORY_NAME
+    specs = [(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows]
+    alias = tmp_path / "alias.json"
+    _make_file_symlink(alias, target)
+    CHECKER.write_codex_inventory(target=alias, specs=specs, inventory_path=inventory, host_os="posix")
+    payload = json.loads(inventory.read_text(encoding="utf-8"))
+    if header:
+        payload["sourcePath"] = str(alias)
+    if nested:
+        for hook in payload["hooks"]:
+            identity = json.loads(hook["identity"])
+            identity["sourcePath"] = str(alias)
+            hook["identity"] = json.dumps(identity, separators=(",", ":"), sort_keys=True)
+    inventory.write_text(json.dumps(payload), encoding="utf-8")
+    CHECKER.verify_config(target=alias, platform="codex", host_os="posix", repo_root=ROOT,
+                          verify_fires=False, inventory_path=inventory)
+
+
+@pytest.mark.parametrize("header", [True, False])
+def test_inventory_rejects_unbound_source(tmp_path: Path, header: bool) -> None:
+    target = tmp_path / "hooks.json"
+    rows, _ = _host_trust_fixture(target)
+    inventory = tmp_path / CHECKER.INVENTORY_NAME
+    specs = [(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows]
+    CHECKER.write_codex_inventory(target=target, specs=specs, inventory_path=inventory, host_os="posix")
+    other = tmp_path / "other.json"
+    other.write_bytes(target.read_bytes())
+    payload = json.loads(inventory.read_text(encoding="utf-8"))
+    if header:
+        payload["sourcePath"] = str(other)
+    else:
+        identity = json.loads(payload["hooks"][0]["identity"])
+        identity["sourcePath"] = str(other)
+        payload["hooks"][0]["identity"] = json.dumps(identity, separators=(",", ":"), sort_keys=True)
+    inventory.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="sourcePath is not a witnessed spelling"):
+        CHECKER._load_codex_inventory(inventory, target=target, host_os="posix")
+
+
+def test_inventory_rejects_source_alias_retarget_during_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "hooks.json"
+    rows, _ = _host_trust_fixture(target)
+    inventory = tmp_path / CHECKER.INVENTORY_NAME
+    specs = [(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows]
+    alias = tmp_path / "alias.json"
+    _make_file_symlink(alias, target)
+    CHECKER.write_codex_inventory(target=alias, specs=specs, inventory_path=inventory, host_os="posix")
+    other = tmp_path / "other.json"
+    other.write_bytes(target.read_bytes())
+    payload = json.loads(inventory.read_text(encoding="utf-8"))
+    payload["sourcePath"] = str(alias)
+    inventory.write_text(json.dumps(payload), encoding="utf-8")
+    recheck = CHECKER._recheck_inventory_authority
+
+    def retarget(*args, **kwargs):
+        alias.unlink()
+        _make_file_symlink(alias, other)
+        return recheck(*args, **kwargs)
+
+    monkeypatch.setattr(CHECKER, "_recheck_inventory_authority", retarget)
+    with pytest.raises(ValueError, match="symlink identity or target changed"):
+        CHECKER._load_codex_inventory(inventory, target=alias, host_os="posix")
+
+
+@pytest.mark.parametrize("source", [r"\\foreign-host\share\hooks.json", r"\\?\GLOBALROOT\device\hooks.json", "sub/../hooks.json"])
+@pytest.mark.parametrize("header", [True, False])
+def test_inventory_unwitnessed_source_never_drives_filesystem_io(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, header: bool
+) -> None:
+    target = tmp_path / "hooks.json"
+    rows, _ = _host_trust_fixture(target)
+    inventory = tmp_path / CHECKER.INVENTORY_NAME
+    specs = [(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows]
+    CHECKER.write_codex_inventory(target=target, specs=specs, inventory_path=inventory, host_os="posix")
+    payload = json.loads(inventory.read_text(encoding="utf-8"))
+    if header:
+        payload["sourcePath"] = source
+    else:
+        identity = json.loads(payload["hooks"][0]["identity"])
+        identity["sourcePath"] = source
+        payload["hooks"][0]["identity"] = json.dumps(identity, separators=(",", ":"), sort_keys=True)
+    inventory.write_text(json.dumps(payload), encoding="utf-8")
+    resolve_target = CHECKER._resolve_hooks_target
+    observed = []
+
+    def record(path, **kwargs):
+        observed.append(str(path))
+        assert str(path) == str(target)
+        return resolve_target(path, **kwargs)
+
+    monkeypatch.setattr(CHECKER, "_resolve_hooks_target", record)
+    for method in ("stat", "lstat", "readlink"):
+        original = getattr(Path, method)
+
+        def guarded(path, *args, _original=original, **kwargs):
+            assert str(path) != source
+            return _original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, method, guarded)
+    with pytest.raises(ValueError, match="sourcePath is not a witnessed spelling"):
+        CHECKER._load_codex_inventory(inventory, target=target, host_os="posix")
+    assert observed == [str(target)]
+
+
+def test_inventory_accepts_intermediate_witnessed_link(tmp_path: Path) -> None:
+    target = tmp_path / "hooks.json"
+    rows, _ = _host_trust_fixture(target)
+    inventory = tmp_path / CHECKER.INVENTORY_NAME
+    intermediate, selected = tmp_path / "middle.json", tmp_path / "selected.json"
+    _make_file_symlink(intermediate, target)
+    _make_file_symlink(selected, intermediate)
+    specs = [(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows]
+    CHECKER.write_codex_inventory(target=selected, specs=specs, inventory_path=inventory, host_os="posix")
+    payload = json.loads(inventory.read_text(encoding="utf-8"))
+    payload["sourcePath"] = str(intermediate)
+    identity = json.loads(payload["hooks"][0]["identity"])
+    identity["sourcePath"] = str(intermediate)
+    payload["hooks"][0]["identity"] = json.dumps(identity, separators=(",", ":"), sort_keys=True)
+    inventory.write_text(json.dumps(payload), encoding="utf-8")
+    CHECKER.verify_config(target=selected, platform="codex", host_os="posix", repo_root=ROOT,
+                          verify_fires=False, inventory_path=inventory)
+
+
+@pytest.mark.parametrize("header,nested", [(True, False), (False, True), (True, True)])
+def test_inventory_accepts_absolute_lexical_source(tmp_path: Path, header: bool, nested: bool) -> None:
+    target = tmp_path / "hooks.json"
+    rows, _ = _host_trust_fixture(target)
+    inventory = tmp_path / CHECKER.INVENTORY_NAME
+    specs = [(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows]
+    CHECKER.write_codex_inventory(target=target, specs=specs, inventory_path=inventory, host_os="posix")
+    alias = str(tmp_path / "sub" / ".." / target.name)
+    payload = json.loads(inventory.read_text(encoding="utf-8"))
+    if header:
+        payload["sourcePath"] = alias
+    if nested:
+        for hook in payload["hooks"]:
+            identity = json.loads(hook["identity"])
+            identity["sourcePath"] = alias
+            hook["identity"] = json.dumps(identity, separators=(",", ":"), sort_keys=True)
+    inventory.write_text(json.dumps(payload), encoding="utf-8")
+    CHECKER.verify_config(target=target, platform="codex", host_os="posix", repo_root=ROOT,
+                          verify_fires=False, inventory_path=inventory)
+
+
+def test_inventory_rejects_duplicate_identity_key_and_recovers_stale_inventory(tmp_path: Path) -> None:
+    target = tmp_path / "hooks.json"
+    rows, _ = _host_trust_fixture(target)
+    before = target.read_bytes()
+    inventory = tmp_path / CHECKER.INVENTORY_NAME
+    specs = [(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows]
+    CHECKER.write_codex_inventory(target=target, specs=specs, inventory_path=inventory, host_os="posix")
+    payload = json.loads(inventory.read_text(encoding="utf-8"))
+    identity = payload["hooks"][0]["identity"]
+    payload["hooks"][0]["identity"] = identity.replace('"event":', '"event":"ambiguous","event":', 1)
+    inventory.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate keys"):
+        CHECKER._load_codex_inventory(inventory, target=target, host_os="posix")
+    payload["hooks"][0]["identity"] = identity
+    payload["sourcePath"] = str(tmp_path / "old-alias.json")
+    inventory.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="regenerate inventory"):
+        CHECKER._load_codex_inventory(inventory, target=target, host_os="posix")
+    CHECKER.write_codex_inventory(target=target, specs=specs, inventory_path=inventory, host_os="posix")
+    CHECKER.verify_config(target=target, platform="codex", host_os="posix", repo_root=ROOT,
+                          verify_fires=False, inventory_path=inventory)
+    assert target.read_bytes() == before
+
+
 def test_codex_hook_health_report_and_require_accept_file_symlink_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -926,10 +926,42 @@ def _load_codex_inventory(
         data = _load(authority.inventory)
         if data.get("schemaVersion") != 1:
             raise ValueError("Codex hook inventory schema is unsupported")
-        if data.get("sourcePath") != _source_identity(authority.target, host_os):
-            raise ValueError(
-                "Codex hook inventory sourcePath does not match the selected config"
+        def spelling(path: Path | str) -> str:
+            value = str(path).replace("\\", "/")
+            return value.casefold() if host_os == "windows" else value
+
+        witnessed = {spelling(authority.target), spelling(authority.resolved_target)}
+        current = authority.target
+        for candidate, _identity, raw_target, _kind in authority.link_chain:
+            link = Path(candidate)
+            suffix = current.relative_to(link)
+            destination = Path(raw_target)
+            current = _lexical_absolute(
+                (destination if destination.is_absolute() else link.parent / destination) / suffix
             )
+            witnessed.add(spelling(current))
+
+        def bind_source(value: Any) -> str:
+            if (
+                not isinstance(value, str)
+                or not Path(value).is_absolute()
+                or spelling(_lexical_absolute(Path(value))) not in witnessed
+            ):
+                raise ValueError(
+                    "Codex hook inventory sourcePath is not a witnessed spelling; "
+                    "regenerate inventory from the selected config"
+                )
+            return _source_identity(authority.target, host_os)
+
+        def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("Codex hook inventory identity contains duplicate keys")
+                result[key] = value
+            return result
+
+        bind_source(data.get("sourcePath"))
         hooks = data.get("hooks")
         if not isinstance(hooks, list) or not hooks:
             raise ValueError("Codex hook inventory is empty or malformed")
@@ -942,9 +974,7 @@ def _load_codex_inventory(
             identity = hook.get("identity")
             if not isinstance(stem, str) or not stem or not isinstance(identity, str):
                 raise ValueError("Codex hook inventory entry lacks stem or identity")
-            if stem in stems or identity in identities:
-                raise ValueError("Codex hook inventory contains duplicate entries")
-            payload = json.loads(identity)
+            payload = json.loads(identity, object_pairs_hook=unique_pairs)
             if not isinstance(payload, dict) or set(payload) != {
                 "command",
                 "event",
@@ -953,6 +983,12 @@ def _load_codex_inventory(
                 "sourcePath",
             }:
                 raise ValueError("Codex hook inventory identity is incomplete")
+            if identity != json.dumps(payload, separators=(",", ":"), sort_keys=True):
+                raise ValueError("Codex hook inventory identity is not canonical")
+            payload["sourcePath"] = bind_source(payload["sourcePath"])
+            identity = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+            if stem in stems or identity in identities:
+                raise ValueError("Codex hook inventory contains duplicate entries")
             stems.add(stem)
             identities.add(identity)
         _recheck_inventory_authority(authority, for_write=False)
