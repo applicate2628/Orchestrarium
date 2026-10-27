@@ -426,7 +426,7 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
 GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = {
     '006161c105d8fcaaa3e9ae891e8b14e42ca170c026445062f983884a9296a3c6': None,
     '03a7d0587eef6c8997e1f78136510d8ca01c61e9d1d06290fe453e34dafbb435': None,
-    '0627712baff8adf6423d8cb766e5effcfa8001196e077eaf5d1b4f17e5d97a85': None,
+    '0627712baff8adf6423d8cb766e5effcfa8001196e077eaf5d1b4f17e5d97a85': 'e00e18b805aad33393cf2849b2f2a6612ac641135b225879b8d4f84240a003bc',
     '0c8cf87923774de9e345a72e071600d05a19b01e588f5f7acd053a6398e2f81e': None,
     '0da7db4510b37eac407ad9577ff171fbaa86985e30a53f341b00f05aeb433975': None,
     '1e4bdc38283d81f2901a3b089c13fc9a0d10946605b1900ae15006cd42534dc6': None,
@@ -508,6 +508,10 @@ _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
         (Path("shared") / "orchestrarium-role-manifest.json",
          "1362c1206cb957b879109e33c577047c0d6b7b65860f602d1f51f400a6967d77"),
     ),
+    ((Path("shared") / "role-routing-policy.v1.json", "ab1eae65674ee61f3535a1515683c601c028cb87d656efa140a4ea4b28b356c5"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "d6f523fa1060dfde9274969142ff067eccb442472a16007f8e2590bd064f9fbe")),
+    ((Path("shared") / "role-routing-policy.v1.json", "7a9799398a32f16b67198297af56d168d2777a2c164e0b14440538205e4c6163"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "c457f3eaeb2535344372145f20e66634d8b730abb82b784bf6fa797d69a0ea60")),
 )
 CODEX_LEGACY_LUNA_CONFIG_NAME = "luna_mechanical"
 CODEX_LEGACY_LUNA_ROLE = Path("agents") / "luna-mechanical.toml"
@@ -7715,26 +7719,42 @@ _READ_ONLY_ROLES = frozenset({
     "security-reviewer", "qa-engineer", "mechanical-scout",
 })
 _BOUNDED_WRITE_ROLES = frozenset({"default", "worker", "backend-engineer", "platform-engineer", "knowledge-archivist", "mechanical-worker", "scientific-software-engineer"})
+_TERRA_RANKING_PRIOR_ROLE_SHA256 = frozenset({
+    "03375f98ee2f442d1b236afce90919547f738348dd77cb9ca67c704e21772172",
+    "392be7e7e35a5e76f27c0073c2be0545a1be6aa856753209cb4f8ba95976ce5e",
+    "f3b85eac0023a12de0d529a47766762f5a2ffaeac092c42e9b1b11be6a246c27",
+    "d54979aced93372dd0d20b18f413a472ec5b2f481848609e38045f8ed6a191f0",
+    "82ff6b4e4cbc433175ae36b23216f001cbec427e341d01b2b01709b25d744e02",
+    "5d2aded1f8ec4650b7c7fbd7715699a11b300b9019ff5d97849efa4745734e7d",
+    "574410dbf3e8a7645cb54597be5a6c515974a0ae72d539df12384ff88b1d1022",
+    "6a9ce338b24adc913bf5bb9496acc8d9e539d606c65cf6ebe7e94c06e48a49e2",
+})
 _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
     "qa-engineer": frozenset({
+        "6a9ce338b24adc913bf5bb9496acc8d9e539d606c65cf6ebe7e94c06e48a49e2",
         "3e964408acb6fe3ea1ba8a43158927e83b6d23bb121dd34b6b843863caf4a9fd",
     }),
     "backend-engineer": frozenset({
+        "f3b85eac0023a12de0d529a47766762f5a2ffaeac092c42e9b1b11be6a246c27",
         "38d99e26339cb0942eb66d4062e0de33f085c5b39f445cc358ac217b03010589",
     }),
     "explorer": frozenset({
+        "03375f98ee2f442d1b236afce90919547f738348dd77cb9ca67c704e21772172",
         "a98b89ec3c513f8242459adda45808612645ed5f5cb07b9da8839fe66b670e89",
     }),
     "analyst": frozenset({
+        "5d2aded1f8ec4650b7c7fbd7715699a11b300b9019ff5d97849efa4745734e7d",
         "0f26fae798309c1b69f3fe5077196e3e5895211bc661f7575aa683fd01e2225b",
     }),
     "knowledge-archivist": frozenset({
+        "82ff6b4e4cbc433175ae36b23216f001cbec427e341d01b2b01709b25d744e02",
         "8f69d0f67010b77b71c81b77ad74119300ad245061c4363cbcfd2f1d0fab510c",
     }),
     "scientific-software-engineer": frozenset({
         "b4ee95a146843dd06a4470b380d7d263fb5c149edf9b2204c0944090e0d4ba3b",
     }),
     "planner": frozenset({
+        "574410dbf3e8a7645cb54597be5a6c515974a0ae72d539df12384ff88b1d1022",
         "dcde16fa86661eee94b21618fb6320026185ddb425541b15239b4c7d232c4faa",
     }),
     "algorithm-scientist": frozenset({
@@ -7759,12 +7779,14 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "fd846b4791aea45f743661615d913d2f3cc96ee0b86fdb8abe53871b97e3c07c",
     }),
     "worker": frozenset({
+        "392be7e7e35a5e76f27c0073c2be0545a1be6aa856753209cb4f8ba95976ce5e",
         "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815",
         "2d950ebfa4e9cc7293ee32cbc71ad3910fa6938a80a339bbbc3434ecc6c4d860",
         "960f0c617b4b5856585fa3f3afac7e0ef9fb99bfc1977b74fe6dd99626b2a57d",
         "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475",
     }),
     "platform-engineer": frozenset({
+        "d54979aced93372dd0d20b18f413a472ec5b2f481848609e38045f8ed6a191f0",
         "3e4c199ba984cbfba080249ad28c645ffbf78a08daf8519e0aa058e7f92aaa40",
         "2f62aaf20edd4b30838db3e728d6a907e8f6826620d2eede78c02a1cd0b7a214",
         "ceb30fcd546bef82045f7b3c3b48e39f98ae83ebbea17a6c5210c2b46cb2140d",
@@ -7828,7 +7850,8 @@ def _source_codex_role_manifest_unchecked(
         raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: schema or roles")
     if manifest.get("policySha256") != _file_sha256(root / "shared" / "role-routing-policy.v1.json"):
         raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: role policy digest drifted")
-    policy_roles = _load_json_object(root / "shared/role-routing-policy.v1.json", "E_NATIVE_ROLE_MANIFEST_INVALID")["roles"]
+    policy = _load_json_object(root / "shared/role-routing-policy.v1.json", "E_NATIVE_ROLE_MANIFEST_INVALID")
+    policy_roles = policy["roles"]
     if set(manifest["roles"]) != set(policy_roles):
         raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: role catalogue")
     for name, record in manifest["roles"].items():
@@ -7845,6 +7868,10 @@ def _source_codex_role_manifest_unchecked(
         if record.get("sha256") != _file_sha256(source):
             raise ValueError(f"E_NATIVE_ROLE_MANIFEST_INVALID: role digest {name}")
         parsed = tomllib.loads(source.read_text(encoding="utf-8"))
+        profile = policy["profiles"][policy_roles[name]["defaultProfile"]]
+        expected_tuple = (None, None) if name == "default" else (profile["codexModel"], profile["effort"])
+        if (parsed.get("model"), parsed.get("model_reasoning_effort")) != expected_tuple:
+            raise ValueError(f"E_NATIVE_ROLE_MANIFEST_INVALID: factory profile {name}")
         if manifest["schemaVersion"] == 2 and (
             type(parsed.get("developer_instructions")) is not str
             or record.get("developerInstructionsSha256") != hashlib.sha256(
@@ -8139,8 +8166,33 @@ def _replace_stock_registration_description(
     return "".join(lines).encode("utf-8")
 
 
+def _migrate_native_role_controls(payload: bytes, parsed: dict[str, Any], profile: dict[str, Any]) -> bytes | None:
+    """Replace only parsed root string tokens; leave every other byte intact."""
+    try:
+        text = payload.decode("utf-8")
+        edits = []
+        for key, value in (("model", profile["codexModel"]), ("model_reasoning_effort", profile["effort"])):
+            start = _toml_root_value_start(text, key)
+            if start is None or text[start] not in "\"'":
+                return None
+            end = _skip_toml_string(text, start)
+            if tomllib.loads("value = " + text[start:end])["value"] != parsed[key]:
+                return None
+            edits.append((start, end, json.dumps(value)))
+        for start, end, replacement in sorted(edits, reverse=True):
+            text = text[:start] + replacement + text[end:]
+        expected = dict(parsed)
+        expected.update(model=profile["codexModel"], model_reasoning_effort=profile["effort"])
+        if tomllib.loads(text) != expected:
+            return None
+        return text.encode("utf-8")
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError, ValueError, KeyError, IndexError):
+        return None
+
+
 def _preflight_codex_native_roles(
-    root: Path, source_agents: Path, target_agents: Path, config_path: Path
+    root: Path, source_agents: Path, target_agents: Path, config_path: Path,
+    *, prior_factory_pair: tuple[tuple[Path, str], ...] = (),
 ) -> _CodexNativeRolesPlan:
     """Classify the complete native-role/config change before transaction entry."""
 
@@ -8248,6 +8300,8 @@ def _preflight_codex_native_roles(
     role_files: list[_NativeRoleFilePlan] = []
     contract_reader = _load_module_from_path(
         "orchestrarium_native_role_contract", root / "scripts/resolve-agents-mode.py")
+    policy = _load_json_object(root / "shared/role-routing-policy.v1.json", "E_NATIVE_ROLE_MANIFEST_INVALID")
+    prior_pair = _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS[-1]
     for name, record in sorted(manifest["roles"].items()):
         relative = Path(record["relativePath"])
         source_payload = (source_agents / relative).read_bytes()
@@ -8263,12 +8317,24 @@ def _preflight_codex_native_roles(
         accepted_prior = None
         configured = False
         if installed_digest is not None and installed_digest != source_digest:
-            if installed_digest not in _STOCK_NATIVE_ROLE_MIGRATION_SHA256.get(name, frozenset()):
+            if (installed_digest not in _STOCK_NATIVE_ROLE_MIGRATION_SHA256.get(name, frozenset())
+                or (installed_digest in _TERRA_RANKING_PRIOR_ROLE_SHA256 and prior_factory_pair != prior_pair)):
                 try:
-                    contract_reader.validate_native_role_configuration(installed, name, record, manifest["schemaVersion"])
+                    parsed = contract_reader.validate_native_role_configuration(installed, name, record, manifest["schemaVersion"])
                 except contract_reader.NativeRoleContractError as error:
                     raise ValueError(f"E_CREATE_ONLY_ROLE_CONTRACT: {error.stage}/{error.reason}") from None
-                source_payload, configured = installed, True
+                configured = True
+                source_payload = installed
+                old_name = policy["roles"][name].get("previousFactoryProfile")
+                if prior_factory_pair == prior_pair and old_name:
+                    old = policy["profiles"][old_name]
+                    current = policy["profiles"][policy["roles"][name]["defaultProfile"]]
+                    if (parsed.get("model"), parsed.get("model_reasoning_effort")) == (old["codexModel"], old["effort"]):
+                        migrated = _migrate_native_role_controls(installed, parsed, current)
+                        if migrated is not None:
+                            source_payload, accepted_prior = migrated, installed_digest
+                        else:
+                            print(f"  Native role controls preserved; token positions unresolved: {relative}")
             else:
                 accepted_prior = installed_digest
         role_files.append(
@@ -8314,7 +8380,9 @@ def _install_codex_native_roles(
                 owner.migrate_exact_file(
                     relative, item.accepted_prior, item.payload
                 )
-            print(f"  Native role {'configured bytes preserved' if item.configured else 'create-only verified'}: {item.relative_path}")
+            action = ("configured controls migrated" if item.configured and item.accepted_prior is not None
+                      else "configured bytes preserved" if item.configured else "create-only verified")
+            print(f"  Native role {action}: {item.relative_path}")
         return
     manifest = (
         manifest
@@ -8336,7 +8404,7 @@ def _install_codex_native_roles(
         relative = Path(record["relativePath"])
         payload = (source_agents / relative).read_bytes()
         target = owner.destination(target_relative / relative)
-        expected_priors = _STOCK_NATIVE_ROLE_MIGRATION_SHA256.get(name, frozenset())
+        expected_priors = _STOCK_NATIVE_ROLE_MIGRATION_SHA256.get(name, frozenset()) - _TERRA_RANKING_PRIOR_ROLE_SHA256
         if expected_priors and (target.exists() or target.is_symlink()):
             owner._assert_regular(target, existing=True)
             installed_digest = _file_sha256(target)
@@ -11619,11 +11687,24 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 )
             )
             assert codex_agents_target is not None
+            prior_factory_pair: tuple[tuple[Path, str], ...] = ()
+            lead_plan = next((item for item in canonical_plan.skills if item.name == "lead"), None)
+            candidate_pair = _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS[-1]
+            if lead_plan is not None and lead_plan.installed_digest is not None:
+                before = _tree_sha256(canonical_lead, ignore_runtime_cache=True)
+                if before == lead_plan.installed_digest:
+                    observed = []
+                    for relative, expected in candidate_pair:
+                        payload = _preflight_native_regular_file(canonical_lead / relative, relative)
+                        observed.append(payload is not None and hashlib.sha256(payload).hexdigest() == expected)
+                    if all(observed) and _tree_sha256(canonical_lead, ignore_runtime_cache=True) == before:
+                        prior_factory_pair = candidate_pair
             codex_native_role_plan = _preflight_codex_native_roles(
                 root,
                 source / "agents",
                 codex_agents_target,
                 target / "config.toml",
+                prior_factory_pair=prior_factory_pair,
             )
         assert canonical_plan is not None
         if args.dry_run and args.replace_unreceipted_lead_sha256 is not None:

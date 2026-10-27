@@ -938,6 +938,16 @@ def load_role_policy(repo_root: Path, *, source_bytes: bytes | None = None) -> t
             raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} corridor")
         if any(profile not in profiles for profile in allowed):
             raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} profile")
+        previous = role.get("previousFactoryProfile")
+        if previous is not None and previous not in profiles:
+            raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} previous factory profile")
+        overrides = role.get("taskDefaultProfiles", {})
+        if not isinstance(overrides, dict) or any(
+            task not in task_classes or role_name not in eligibility.get(task, ())
+            or profile not in allowed or profile not in task_classes[task].get("admissibleProfiles", ())
+            for task, profile in overrides.items()
+        ):
+            raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} task default")
     if any(role_name not in role_catalog for role_name in final_authorizing_roles):
         raise ValueError("E_ROLE_POLICY_INVALID: finalAuthorizingRoles role")
 
@@ -967,7 +977,7 @@ def load_role_policy(repo_root: Path, *, source_bytes: bytes | None = None) -> t
                 raise ValueError(
                     f"E_ROLE_POLICY_INVALID: task {task_name} unknown role {role_name}"
                 )
-            default_profile = role_catalog[role_name]["defaultProfile"]
+            default_profile = role_catalog[role_name].get("taskDefaultProfiles", {}).get(task_name, role_catalog[role_name]["defaultProfile"])
             profile = profiles[default_profile]
             if task_name in _MECHANICAL_TASK_CLASSES and (
                 model_index[profile["modelTier"]] < model_index[required_model]
@@ -1219,7 +1229,7 @@ def _load_role_dispatch_contract(
                 requested_effort=None,
                 sandbox=None,
             )
-        profile_name = roles[role_name]["defaultProfile"]
+        profile_name = roles[role_name].get("taskDefaultProfiles", {}).get(task_class, roles[role_name]["defaultProfile"])
         profile = policy["profiles"][profile_name]
         model_index = {
             value: index for index, value in enumerate(policy["modelTierOrder"])
@@ -1529,14 +1539,16 @@ def _describe_ordinary_native_role_options_in_layout(
     control_source = "policy-explicit-default"
     if contract["roleKind"] == "native":
         model, effort = contract["configuredModel"], contract["configuredEffort"]
-        if model is not None and effort is not None:
+        factory = policy["profiles"][contract["roleConfig"]["defaultProfile"]]
+        factory_tuples = {(factory["codexModel"], factory["effort"])}
+        if model is not None and effort is not None and (model, effort) not in factory_tuples:
             effective = next((option for option in options if option["model"] == model and option["effort"] == effort), None)
             if effective is None:
                 default_error = {"stage": "configured-profile-policy", "reason": "configured-tuple-not-admitted"}
             else:
                 contract = {**contract, "profile": effective["profile"], "model": model, "effort": effort}
                 control_source = "role-configuration"
-        elif role != "default" or model is not None or effort is not None:
+        elif (model is None) != (effort is None):
             default_error = {"stage": "inherited-control-unresolved", "reason": "effective-tuple-unacquired"}
     snapshots = list(contract["snapshots"])
     carrier = None
@@ -1568,6 +1580,8 @@ def _describe_ordinary_native_role_options_in_layout(
                 carrier_error = {"stage": "configured-carrier-conflict", "reason": "carrier-contract-invalid"}
     except (OSError, ValueError):
         carrier_error = {"stage": "configured-carrier-conflict", "reason": "carrier-contract-invalid"}
+    if carrier is not None and (carrier[0] is None) != (carrier[1] is None):
+        carrier_error = {"stage": "configured-carrier-conflict", "reason": "incomplete-configured-tuple"}
     profession = _profession_skill_metadata(
         repo_root, contract["role"], contract["developerInstructions"]
     )
@@ -1576,12 +1590,8 @@ def _describe_ordinary_native_role_options_in_layout(
             task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
         )
     default_invocation = {
-        "mode": "named-role-default",
-        "agentType": contract["role"],
-    }
-    if contract["roleKind"] == "skill-only" or contract["role"] == "default":
-        default_invocation = {
             "mode": "generic-explicit-profile",
+            "omitAgentType": True,
             "forkTurns": "none",
             "model": contract["model"],
             "reasoningEffort": contract["effort"],
@@ -1712,110 +1722,76 @@ def resolve_ordinary_native_dispatch(
         or not caller_rationale.strip()
         or not isinstance(approved_execution_scope, dict)
         or not approved_execution_scope
-        or (requested_model is None) != (requested_effort is None)
     ):
         return _ordinary_native_denied("", "", "E_ORDINARY_NATIVE_SELECTION_INVALID")
-    explicit = requested_model is not None
+    if (requested_model is None) != (requested_effort is None):
+        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID")
     if isinstance(description, _NativeRoleSelection):
         try:
             description.assert_current()
         except NativeRoleContractError as error:
             return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
                 "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": error.stage, "reason": error.reason})
-    if not explicit and description.get("defaultConfigurationError"):
+    if description.get("defaultConfigurationError"):
         return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
             "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic=description["defaultConfigurationError"])
-    selected = None
-    default_mode = description["defaultInvocation"]["mode"]
-    if not explicit and default_mode == "named-role-default" and (
-        description.get("defaultAgentTypeCapability") == "reported-absent"
+    if not (
+        description["hostObservation"].get("explicitModelControl")
+        and description["hostObservation"].get("explicitReasoningEffortControl")
     ):
         return _ordinary_native_denied(
             description.get("taskClass"),
             description.get("role"),
-            "E_ORDINARY_NATIVE_AGENT_TYPE_UNAVAILABLE",
+            "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE",
         )
-    if not explicit and default_mode == "generic-explicit-profile":
-        if not (
-            description["hostObservation"].get("explicitModelControl")
-            and description["hostObservation"].get("explicitReasoningEffortControl")
-        ):
-            return _ordinary_native_denied(
-                description.get("taskClass"),
-                description.get("role"),
-                "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE",
-            )
-        selected = next(
-            (
-                option
-                for option in description.get("options", ())
-                if option.get("profile") == description.get("defaultProfile")
-            ),
-            None,
-        )
-        if selected is None:
-            return _ordinary_native_denied(
-                description.get("taskClass"),
-                description.get("role"),
-                "E_ORDINARY_NATIVE_SELECTION_INVALID",
-            )
-    if explicit:
-        if not (
-            description["hostObservation"].get("explicitModelControl")
-            and description["hostObservation"].get("explicitReasoningEffortControl")
-        ):
-            return _ordinary_native_denied(
-                description.get("taskClass"),
-                description.get("role"),
-                "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE",
-            )
-        selected = next(
-            (
-                option
-                for option in description.get("options", ())
-                if option.get("model") == requested_model
-                and option.get("effort") == requested_effort
-            ),
-            None,
-        )
-        if selected is None:
-            return _ordinary_native_denied(
-                description.get("taskClass"),
-                description.get("role"),
-                "E_ORDINARY_NATIVE_SELECTION_INVALID",
-            )
-    invocation = copy.deepcopy(description["defaultInvocation"])
-    resolved_profile = description["defaultProfile"]
-    resolved_model_tier = description["defaultModelTier"]
-    resolved_model = description["defaultModel"]
-    resolved_effort = description["defaultEffort"]
-    host_capability = description.get(
-        "defaultAgentTypeCapability", "capability-unknown"
+    selected = next(
+        (
+            option
+            for option in description.get("options", ())
+            if (option.get("profile") == description.get("defaultProfile")
+                if requested_model is None else
+                option.get("model") == requested_model and option.get("effort") == requested_effort)
+        ),
+        None,
     )
-    if selected is not None:
-        resolved_profile = selected["profile"]
-        resolved_model_tier = selected["modelTier"]
-        resolved_model = selected["model"]
-        resolved_effort = selected["effort"]
-        host_capability = selected["hostCapability"]
-        invocation = {
-            "mode": "generic-explicit-profile",
-            "forkTurns": "none",
-            "model": resolved_model,
-            "reasoningEffort": resolved_effort,
-            "professionSkill": description["profession"]["skill"],
-            "promptPreamble": description["profession"]["instructions"],
-        }
-    if invocation["mode"] == "generic-explicit-profile":
-        carrier = getattr(description, "carrier", None)
-        conflict = description.get("carrierConfigurationError")
-        if description.get("configurationProvenance", {}).get("genericProfileCompatibility", {}).get(resolved_profile) == "conflict":
-            conflict = {"stage": "configured-carrier-conflict", "reason": "requested-tuple-overridden"}
-        if carrier is not None and any(pin is not None and pin != value for pin, value in zip(carrier, (resolved_model, resolved_effort))):
-            conflict = {"stage": "configured-carrier-conflict", "reason": "requested-tuple-overridden"}
-        if conflict:
-            return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
-                "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic=conflict)
+    if selected is None:
+        return _ordinary_native_denied(
+            description.get("taskClass"),
+            description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID",
+        )
+    resolved_profile = selected["profile"]
+    resolved_model_tier = selected["modelTier"]
+    resolved_model = selected["model"]
+    resolved_effort = selected["effort"]
+    host_capability = selected["hostCapability"]
+    if (
+        description.get("configurationProvenance", {}).get("selectedControlSource") == "role-configuration"
+        and (resolved_model, resolved_effort) != (description["defaultModel"], description["defaultEffort"])
+    ):
+        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": "configured-profile-policy", "reason": "requested-tuple-overridden"})
+    invocation = {
+        "mode": "generic-explicit-profile",
+        "omitAgentType": True,
+        "forkTurns": "none",
+        "model": resolved_model,
+        "reasoningEffort": resolved_effort,
+        "professionSkill": description["profession"]["skill"],
+        "promptPreamble": description["profession"]["instructions"],
+    }
+    carrier = getattr(description, "carrier", None)
+    conflict = description.get("carrierConfigurationError")
+    if carrier is None:
+        conflict = {"stage": "configured-carrier-conflict", "reason": "carrier-unacquired"}
+    if not conflict and description.get("configurationProvenance", {}).get("genericProfileCompatibility", {}).get(resolved_profile) == "conflict":
+        conflict = {"stage": "configured-carrier-conflict", "reason": "requested-tuple-overridden"}
+    if not conflict and carrier is not None and any(pin is not None and pin != value for pin, value in zip(carrier, (resolved_model, resolved_effort))):
+        conflict = {"stage": "configured-carrier-conflict", "reason": "requested-tuple-overridden"}
+    if conflict:
+        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic=conflict)
     try:
         reason = _load_model_launch_policy().qualify_launch(
             "codex", resolved_model, resolved_effort,
@@ -2210,14 +2186,22 @@ def _installed_role_dispatch_layout(
         / "resolve-agents-mode.py"
     )
     matches = [
-        (project_resolver, project_root / ".codex" / "agents"),
-        (global_resolver, home / ".codex" / "agents"),
+        ("project", project_resolver, project_root / ".codex" / "agents"),
+        ("global", global_resolver, home / ".codex" / "agents"),
     ]
     selected = [
-        ("project" if candidate == project_resolver else "global", role_root)
-        for candidate, role_root in matches
+        (scope, role_root)
+        for scope, candidate, role_root in matches
         if _same_path(resolver, candidate)
     ]
+    if (
+        len(selected) == 2
+        and _same_path(project_root, home)
+        and _same_path(project_resolver, global_resolver)
+        and _same_path(selected[0][1], selected[1][1])
+    ):
+        # The single global authority retains its linked-root permissions.
+        selected = [selected[1]]
     if len(selected) != 1:
         raise ValueError("installed resolver layout is missing or ambiguous")
     scope, selected_root = selected[0]
