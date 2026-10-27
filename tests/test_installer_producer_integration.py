@@ -10,6 +10,7 @@ import io
 import json
 import os
 import runpy
+import shlex
 from pathlib import Path
 import sys
 import subprocess
@@ -1667,6 +1668,54 @@ class ProducerIntegrationTests(unittest.TestCase):
                 self.assertEqual({specs[0][0]}, I._load_codex_inventory(
                     inventory, target=selected, host_os="windows" if os.name == "nt" else "posix")[0])
                 transaction.commit()
+        self.assert_clean()
+
+    def test_repeated_hook_install_reconciles_stale_inventory_and_rolls_back(self):
+        specs, selected, storage, inventory, _original, _foreign = self.hook_fixture(linked=True)
+        host = "windows" if os.name == "nt" else "posix"
+        link = os.readlink(selected)
+        checks = []
+
+        def health(*_args):
+            data = json.loads(storage.read_bytes())
+            rows = list(I._iter_owned_hooks(data, {specs[0][0]}, "codex", host))
+            records = [{"eventName": event, "matcher": matcher, "handlerType": "command",
+                        "command": subprocess.list2cmdline(argv) if host == "windows" else shlex.join(argv),
+                        "sourcePath": str(storage), "enabled": True, "trustStatus": "trusted",
+                        "currentHash": "sha256:synthetic"}
+                       for event, _stem, argv, matcher in rows]
+            with patch.object(I, "_codex_hooks_list", return_value=records):
+                I.verify_config(target=selected, platform="codex", host_os=host, repo_root=self.source,
+                                verify_fires=False, inventory_path=inventory, codex_trust_mode="require",
+                                codex_command=["synthetic-codex"], codex_home=self.root, query_cwd=self.root)
+            checks.append(True)
+            return subprocess.CompletedProcess([], 0)
+
+        def install(primary=None):
+            transaction = self.transaction([storage, inventory, selected], link_objects=(selected,))
+            with self.hook_support(specs, primary), patch.object(PI, "_run_hook_health_bounded", side_effect=health):
+                with transaction:
+                    PI._install_hooks(self.source, "codex", selected, self.source, "target", inventory,
+                                      transaction=transaction, mutable_owner=self.owner(transaction))
+                    transaction.commit()
+
+        install()
+        hooks_before = storage.read_bytes()
+        payload = json.loads(inventory.read_bytes())
+        payload["sourcePath"] = str(self.root / "unwitnessed-old-alias.json")
+        stale = json.dumps(payload).encode("utf-8")
+        inventory.write_bytes(stale)
+        install()
+        self.assertEqual(hooks_before, storage.read_bytes())
+        self.assertNotEqual(stale, inventory.read_bytes())
+        self.assertEqual(link, os.readlink(selected))
+        inventory.write_bytes(stale)
+        with self.assertRaisesRegex(RuntimeError, "synthetic later failure"):
+            install(RuntimeError("synthetic later failure"))
+        self.assertEqual(stale, inventory.read_bytes())
+        self.assertEqual(hooks_before, storage.read_bytes())
+        self.assertEqual(link, os.readlink(selected))
+        self.assertGreaterEqual(len(checks), 3)
         self.assert_clean()
 
     def test_malformed_hook_json_systemexit_becomes_visible_stage_cause(self):
