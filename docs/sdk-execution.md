@@ -10,9 +10,10 @@ workflow remains separate from this Host-led path.
 Existing host-led Codex/Claude command-line interface (CLI) execution remains the
 default. The explicit Codex review bridge described below is an opt-in source
 contract, not an automatically selected fallback or an installed-runtime
-qualification claim. Diagnostic recovery is implemented; its native qualification
-and current installed-bridge qualification remain pending. Do not describe this
-candidate as ready for general use.
+qualification claim. The historical installed Windows success and receiving-collision
+checks and the bounded live Codex review passed on October 25; the outer Agents
+cycle passed on October 26. Their exact evidence boundaries are recorded below.
+These results do not enable a default route or qualify arbitrary general use.
 
 ## Explicit Codex review opt-in (repository-local contract)
 
@@ -73,15 +74,43 @@ An exception after worker invocation has uncertain effects; it must not be recas
 as a preworker failure or replayed. Acquired execution evidence is retained before
 receiving, and receiving/receipt failures remain failures rather than permission
 to append another terminal. Diagnostic/recovery delivery across those failure
-paths is implemented but remains pending native qualification.
+paths was exercised by the historical installed Windows receiving-collision check:
+the diagnostic was retained and did not confer replay authority. This is evidence
+for that tested scenario, not every possible crash or recovery path.
 
 Installer-managed SDK helpers are shared by both host packs. The dispatch module
-is registered in the source installer payload; its installed readback and the
-current bridge must be verified together before claiming delivery.
+is registered in the source installer payload. The historical installed check
+verified source and installed-file hashes together; subsequent changes must retain
+their own source, installer and shared-owner regression evidence.
 
-Verification note: earlier native observations cover an older source snapshot,
-not this bridge/helper payload. Offline fixtures and official API source evidence
-do not establish installed execution.
+### Verified native evidence and subsequent changes
+
+- October 25 installed Windows fixture: success and receiving-collision passed
+  against candidate935, source-manifest SHA-256
+  `bdd601615e7ef4bff2a595b5799c8e0744a544983965822e688508cb82307d5f`.
+  The check verified 935 source files and 76 installed files, real hook-trust
+  metadata probes, receipt/artifact/ledger agreement, retained nonreplayable
+  collision diagnostics, and closure of the owned process trees and resources.
+  The workers were synthetic; this fixture alone was not a model call.
+- October 25 Host-led Codex review: one wrapper and one real Luna/high SDK turn
+  completed in 18.343 seconds with coherent receipt/artifact/ledger readback and
+  settled resources. This qualified the bounded review, not arbitrary tasks.
+- October 26 outer Agents Runner to inner Codex SDK cycle: the separate
+  [coordinator evidence](codex-coordination-model.md) records the live-qualified
+  implementation tree `acf9a9addb0ea73b5544f8b3070d1dff9a773841`, two observed
+  turns, current account/profile/hook checks and settled Windows Jobs.
+- Through the October 27 custody correction, SDK modules, process supervision,
+  provider-prompt and installer source are unchanged from that October 26 tree.
+  Shared ledger/schema/validator changes are covered separately by the current
+  delta-focused regression results; historical native results are not relabelled
+  as a fresh complete-current-tree run.
+
+The retained Windows archive has SHA-256
+`b8dcc2c55fae195e438bc5f08f1bbe58a05f35fd2fd129e9374933de833d866c`;
+its 20 manifest-listed payload hashes were independently checked during evidence
+reconciliation. Raw operational logs and local account/configuration data are not
+part of the published source. Offline fixtures alone still do not establish
+native execution; the claims above rely on the separately retained native results.
 
 ### Bounded Codex CLI startup qualification
 
@@ -423,7 +452,7 @@ Official references: [Agents MCP filtering](https://openai.github.io/openai-agen
 [Claude permissions](https://code.claude.com/docs/en/agent-sdk/permissions),
 [ACP session setup](https://agentclientprotocol.com/protocol/session-setup).
 
-## Explicit limitations before live use
+## Limits beyond the bounded native qualification
 
 1. The inspected Codex release uses an unbounded internal stdout line reader and
    line-count-bounded stderr storage. That release's public configuration does not expose a
@@ -432,10 +461,12 @@ Official references: [Agents MCP filtering](https://openai.github.io/openai-agen
    and the existing hard deadline/settlement. The memory cap addresses uncontrolled
    decoder/buffer allocation without a private SDK fork; it is not a raw-output
    byte limit or complete capture of unavailable internal diagnostics. Allocation
-   failure or missing required public evidence never counts as success. Native
-   enforcement still requires platform tests before a live provider run.
-2. Existing Windows atomic Job ownership is reused, but this branch's source/unit
-   evidence alone does not qualify SDK descendant cleanup on Windows. Generic
+   failure or missing required public evidence never counts as success. The bounded
+   Windows runs established native ownership and settlement; they are not exhaustive
+   memory-pressure or failure-path qualification. Another platform or materially
+   changed containment path requires its own qualification.
+2. Existing Windows atomic Job ownership is reused. The native runs above verify
+   their owned descendant cleanup; source/unit evidence alone would not. Generic
    POSIX execution remains unavailable; process groups do not prove containment
    of escaping descendants. No generic private-directory hold is bypassed.
 3. The caller must retain the actual Host/account/budget admission owner. Only

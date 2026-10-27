@@ -2,6 +2,12 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-27
+
+- Work-item stale-running diagnostics no longer hide a valid unsettled launch merely because another historical row has a validation error; both diagnostics remain visible without admitting invalid launch authority. Ledger transport tests distinguish the cross-platform writer contract from the Windows-only native wrapper instead of treating the intentional POSIX refusal as a regression.
+
+- Reconcile SDK qualification documentation with the retained installed Windows success/recovery checks and bounded real Codex/Agents runs. Operators can distinguish already completed verification from genuinely broader, unqualified scenarios without repeating model calls or treating historical evidence as a fresh run of every later shared-owner change.
+
 ## 2026-10-26
 
 - Historical PASS artifact retention now supplies its exact selected custody evidence to existing compatibility/resource admission before placement. This allows a verified original copy to be retained when the old artifact is already absent, for both active and revoked historical ledgers, without changing ledger bytes or relaxing digest, replay, resource-cap or receiving checks.

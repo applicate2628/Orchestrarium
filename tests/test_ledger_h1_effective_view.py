@@ -928,9 +928,15 @@ class LedgerH1EffectiveViewTests(unittest.TestCase):
         checker = load_checker()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            artifacts, items, _paths, _expected = synthetic_artifacts(module, root)
+            artifacts, items, paths, _expected = synthetic_artifacts(module, root)
             materialize_live_artifacts(root, artifacts)
 
+            context = module.load_effective_ledger_view(root, items[1], paths[1])
+            self.assertEqual(context.observation.activation_state, "active")
+            self.assertEqual(
+                context.observation.diagnostics,
+                (SYNTHETIC_READER_B_INVALID_LAUNCH_OBSERVATION,),
+            )
             errors = checker.stale_running_errors(
                 items[1],
                 datetime(2026, 9, 10, tzinfo=UTC),
@@ -939,8 +945,51 @@ class LedgerH1EffectiveViewTests(unittest.TestCase):
             )
 
             self.assertEqual(len(errors), 1)
-            self.assertIn("launch-b-open", errors[0])
+            self.assertIn("launch-b-open: stale running agent", errors[0])
+            self.assertNotIn("launch-b-bad1: stale running agent", "\n".join(errors))
             self.assertNotIn("legacy-running", "\n".join(errors))
+
+            # Only eligible, stale launches enter this age-specific diagnostic;
+            # the full public checker retains unrelated validation errors below.
+            self.assertEqual(
+                checker.stale_running_errors(
+                    items[1], datetime(2026, 9, 8, 1, 0, 1, tzinfo=UTC),
+                    timedelta(hours=1), module,
+                ),
+                [],
+            )
+            self.assertEqual(
+                checker.stale_running_errors(
+                    items[0], datetime(2026, 9, 10, tzinfo=UTC),
+                    timedelta(hours=1), module,
+                ),
+                [],
+            )
+            checked = subprocess.run(
+                [sys.executable, str(CHECKER), "--root", str(root),
+                 "--stale-hours", "1", "--now", "2026-09-10T00:00:00Z"],
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(checked.returncode, 1)
+            self.assertEqual(
+                checked.stdout.count(SYNTHETIC_READER_B_INVALID_LAUNCH_OBSERVATION), 1,
+            )
+            self.assertEqual(checked.stdout.count("launch-b-open: stale running agent"), 1)
+
+            # A broken receipt still yields no qualified launches or raw fallback.
+            receipt_path, receipt_bytes = next(iter(artifacts.receipt_bytes_by_path.items()))
+            receipt = json.loads(receipt_bytes)
+            receipt["registryAfterSha256"] = "0" * 64
+            (root / receipt_path).write_bytes(canonical(receipt) + b"\n")
+            invalid = module.load_effective_ledger_view(root, items[1], paths[1])
+            self.assertEqual(invalid.observation.activation_state, "invalid")
+            self.assertEqual(
+                checker.stale_running_errors(
+                    items[1], datetime(2026, 9, 10, tzinfo=UTC),
+                    timedelta(hours=1), module,
+                ),
+                [],
+            )
 
     def test_active_status_requires_current_closure_result(self):
         module = load_validator()
