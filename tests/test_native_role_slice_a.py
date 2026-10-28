@@ -4017,7 +4017,7 @@ def test_role_profile_floor_migration_admits_only_stock_prior_role_bytes(
 
 
 @pytest.mark.parametrize("fixture", ("customized", "unknown"))
-def test_role_profile_floor_migration_refuses_customized_and_unknown_roles(
+def test_role_profile_floor_migration_preserves_customized_and_unknown_roles(
     tmp_path: Path, fixture: str
 ) -> None:
     """The exception is not a general native-role update or adoption mechanism."""
@@ -4035,7 +4035,7 @@ def test_role_profile_floor_migration_refuses_customized_and_unknown_roles(
 
     result = _run_codex_installer(project, install_hooks=False)
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert path.read_bytes() == payload
 
 

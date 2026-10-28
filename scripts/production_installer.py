@@ -8277,7 +8277,6 @@ def _preflight_codex_native_roles(
         )
     _parse_codex_config(payload)
 
-    known_roles = {f"{name}.toml" for name in manifest["roles"]}
     try:
         target_metadata = target_agents.lstat()
     except FileNotFoundError:
@@ -8290,11 +8289,7 @@ def _preflight_codex_native_roles(
         ):
             raise ValueError("E_CREATE_ONLY_TYPE_COLLISION: agents")
         for entry in sorted(os.scandir(target_agents), key=lambda candidate: candidate.name):
-            if entry.name == CODEX_ROLE_MANIFEST or (
-                entry.name.endswith(".toml")
-                and entry.name not in known_roles
-                and not (legacy_exists and entry.name == CODEX_LEGACY_LUNA_ROLE.name)
-            ):
+            if entry.name == CODEX_ROLE_MANIFEST:
                 raise ValueError(f"E_CREATE_ONLY_COLLISION: agents/{entry.name}")
 
     role_files: list[_NativeRoleFilePlan] = []
@@ -8392,13 +8387,10 @@ def _install_codex_native_roles(
     target_relative = target_agents.relative_to(owner.anchor)
     contract_reader = _load_module_from_path(
         "orchestrarium_native_role_contract", root / "scripts/resolve-agents-mode.py")
-    known_roles = {f"{name}.toml" for name in manifest["roles"]}
     if target_agents.exists() or target_agents.is_symlink():
         owner.destination(target_relative)
         for entry in sorted(os.scandir(target_agents), key=lambda candidate: candidate.name):
-            if entry.name == CODEX_ROLE_MANIFEST or (
-                entry.name.endswith(".toml") and entry.name not in known_roles
-            ):
+            if entry.name in (CODEX_ROLE_MANIFEST, CODEX_LEGACY_LUNA_ROLE.name):
                 raise ValueError(f"E_CREATE_ONLY_COLLISION: {target_relative / entry.name}")
     for name, record in sorted(manifest["roles"].items()):
         relative = Path(record["relativePath"])

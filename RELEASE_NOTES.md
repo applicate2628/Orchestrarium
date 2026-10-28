@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-28
 
+- The Codex installer preserves unrelated user native-role files while continuing to validate managed roles.
+
 - Transfer guidance now defaults to a verified clone and only required current local state, with a separate full-recovery option. Root documentation also aligns publication checks, human consent, installer entry points and model selection with their existing owners.
 
 - Decision and approval requests about changes now include a concise, understandable change list with effects, reasons, checks and material risks or choices; detailed diffs remain optional context.
