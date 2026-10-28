@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-28
 
+- Decision and approval requests about changes now include a concise, understandable change list with effects, reasons, checks and material risks or choices; detailed diffs remain optional context.
+
 - Ordinary work-item close assesses the accepted outcome and current obligations without treating historical ledger bookkeeping as an automatic veto. Actual history remains intact, and explicit ledger and transfer operations retain their contracts.
 
 - Native publication-entry mismatch refusals can suggest owner-generated callback arguments without granting publication authority; a later attempt still requires full fresh checks.
