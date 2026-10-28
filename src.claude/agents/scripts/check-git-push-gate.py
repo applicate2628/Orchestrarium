@@ -3324,13 +3324,36 @@ def _qualify_native_recursion(push, git_exe: str, cwd: str) -> None:
 class _NativeEntryDenied(PrRouteDenied):
     """Retain only the fixed, non-sensitive native-entry decision stage."""
 
-    _STAGES = frozenset({"invocation-unqualified", "command-mismatch", "registration-event-mismatch"})
+    _STAGES = frozenset({
+        "invocation-unqualified", "registration-event-mismatch", "command-multiple",
+        "command-malformed-or-shape", "command-interpreter-token", "command-script-token",
+        "command-serialization",
+    })
 
     def __init__(self, stage: str) -> None:
         if stage not in self._STAGES:
             raise ValueError("invalid native-entry diagnostic stage")
         super().__init__("PGG-NATIVE-ENTRY-REQUIRED")
         self.stage = stage
+
+
+def _native_command_mismatch_stage(values: list[str], expected: str) -> str:
+    """Explain only a rejected literal command using fixed, non-sensitive labels."""
+    if len(values) != 1:
+        return "command-multiple"
+    try:
+        supplied_tokens = shlex.split(values[0])
+        expected_tokens = shlex.split(expected)
+    except ValueError:
+        return "command-malformed-or-shape"
+    if (len(supplied_tokens) != 3 or len(expected_tokens) != 3
+        or supplied_tokens[2] != "--git-pre-push" or expected_tokens[2] != "--git-pre-push"):
+        return "command-malformed-or-shape"
+    if supplied_tokens[0] != expected_tokens[0]:
+        return "command-interpreter-token"
+    if supplied_tokens[1] != expected_tokens[1]:
+        return "command-script-token"
+    return "command-serialization"
 
 
 def _qualify_native_push_command(preflight: PreflightResult) -> bool:
@@ -3361,8 +3384,9 @@ def _qualify_native_push_command(preflight: PreflightResult) -> bool:
     supplied = git_prefix_configuration(push)
     own = [(key, value) for key, value in supplied if key.startswith(own_prefix)]
     events = [value for key, value in own if key == own_prefix + "event"]
-    if not any(key == own_prefix + "command" and value == expected for key, value in own):
-        raise _NativeEntryDenied("command-mismatch")
+    supplied_commands = [value for key, value in own if key == own_prefix + "command"]
+    if not any(value == expected for value in supplied_commands):
+        raise _NativeEntryDenied(_native_command_mismatch_stage(supplied_commands, expected))
     if not events or "" not in events or events[len(events) - 1 - events[::-1].index(""):] != ["", "pre-push"]:
         raise _NativeEntryDenied("registration-event-mismatch")
     commands = _native_config_values(git_exe, push.git_global_options, cwd, own_prefix + "command")

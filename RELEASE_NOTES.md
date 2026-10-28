@@ -4,7 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-28
 
-- Native publication-entry refusals now identify the bounded decision stage, making diagnosis clearer without changing publication checks or exposing paths.
+- Native publication-entry refusals now identify the bounded decision stage and distinguish interpreter-token, script-token and format mismatches without exposing their values or changing publication checks.
 
 - Hook ownership now uses the bound selected package and proven legacy identities, preserving foreign and unknown hooks. Health and inventory checks report their actual selected scope and handle supported links and path casing consistently.
 

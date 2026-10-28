@@ -423,17 +423,30 @@ def test_native_entry_denial_reports_only_fixed_decision_stage(tmp_path: Path, m
     denied([], "invocation-unqualified")
     interpreter = gate._interpreter_identity().absolute_resolved_path
     entry = os.path.abspath(gate.__file__)
-    for executable, script in ((str(repo / sentinel / "python.exe"), entry),
-                               (interpreter, str(repo / sentinel / "gate.py"))):
+    for executable, script, stage in ((str(repo / sentinel / "python.exe"), entry, "command-interpreter-token"),
+                                      (interpreter, str(repo / sentinel / "gate.py"), "command-script-token"),
+                                      (str(repo / sentinel / "python.exe"), str(repo / sentinel / "gate.py"), "command-interpreter-token")):
         wrong = base.copy()
         wrong[1] = "hook.orchestrarium-publication.command=" + shlex.join((executable, script, "--git-pre-push"))
-        denied(wrong, "command-mismatch")
+        denied(wrong, stage)
+    malformed = base.copy()
+    malformed[1] = "hook.orchestrarium-publication.command='" + sentinel
+    denied(malformed, "command-malformed-or-shape")
+    shape = base.copy()
+    shape[1] = "hook.orchestrarium-publication.command=" + sentinel
+    denied(shape, "command-malformed-or-shape")
+    serialized = base.copy()
+    serialized[1] = "hook.orchestrarium-publication.command=" + '"' + interpreter + '" "' + entry + '" --git-pre-push'
+    assert serialized[1] != base[1]
+    denied(serialized, "command-serialization")
+    multiple = shape + ["-c", "hook.orchestrarium-publication.command=" + sentinel + "-other"]
+    denied(multiple, "command-multiple")
     wrong_event = base.copy()
     wrong_event[5] = "hook.orchestrarium-publication.event=unexpected"
     denied(wrong_event, "registration-event-mismatch")
     both = wrong_event.copy()
     both[1] = "hook.orchestrarium-publication.command=" + sentinel
-    denied(both, "command-mismatch")
+    denied(both, "command-malformed-or-shape")
     assert gate._qualify_native_push_command(build(base)) is True
 
 
