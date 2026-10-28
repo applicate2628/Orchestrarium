@@ -31,8 +31,8 @@ Root confirms the genuine human review and consent for the selected publication 
 - Human review is mandatory before `git push`, release, or equivalent publication.
 - `RELEASE_NOTES.md` is the canonical tracked release log for this repository.
 - Keep `RELEASE_NOTES.md` in reverse-chronological `## YYYY-MM-DD` sections. New release-relevant notes belong under the current date heading, or under a newly created heading for today's date if that heading does not exist yet.
-- Default publication-gate approver is `$knowledge-archivist`.
-- `$lead` is the primary operator of the publication-safety scan and prepares the staged diff for publication, but the publication approver must be a different role than the role that accepted the artifact into the pipeline.
+- Default technical publication-readiness reviewer is `$knowledge-archivist`; the user supplies the separate human review and consent.
+- `$lead` is the primary operator of the publication-safety scan and prepares the staged diff for publication, but the technical reviewer must be a different role than the role that accepted the artifact into the pipeline.
 - The reviewer must check the staged diff for leak-prone content, including machine-specific paths, raw operational detail, and sensitive values.
 - If staged tracked changes are release-relevant, the staged diff must also contain the matching `RELEASE_NOTES.md` update before publication, and that entry must explain the practical effect of the change rather than only naming it. If no explanatory entry is present, the reviewer must explicitly determine that the change is release-notes-exempt; otherwise publication is `BLOCKED`.
 - If tracked content looks like scratch material, move it back to local-only space or redact it before commit.
