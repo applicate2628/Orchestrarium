@@ -391,7 +391,7 @@ First run the exact request without the positive apply marker. This acquires and
 python -B scripts/mutate-work-item.py recover-mixed-current-ledger --root . --request-file <reviewed-request.json>
 ```
 
-Only after the separately required review and gates, apply that same request with `--apply-admitted`. The owner publishes `agent-runs.history.<original-ledger-sha256>.jsonl` create-once from the exact old bytes, validates and atomically appends all typed controls under the existing writer lock, reads back the complete suffix, then creates `agent-runs.mixed.<operation-id>.receipt.json`. A handled pre-append failure reclaims only newly owned unchanged staging/history; pre-existing or changed files are preserved and reported. An interrupted pre-append attempt may replay only exact owned bytes. A committed exact suffix with a missing receipt is reconstructed without appending again. Partial suffix, changed history, drift, or ambiguous residue fail closed without truncation. Normal append remains available afterward; default strict close/audit still reject open `REVISE` and launch obligations.
+Only after the separately required review and gates, apply that same request with `--apply-admitted`. The owner publishes `agent-runs.history.<original-ledger-sha256>.jsonl` create-once from the exact old bytes, validates and atomically appends all typed controls under the existing writer lock, reads back the complete suffix, then creates `agent-runs.mixed.<operation-id>.receipt.json`. A handled pre-append failure reclaims only newly owned unchanged staging/history; pre-existing or changed files are preserved and reported. An interrupted pre-append attempt may replay only exact owned bytes. A committed exact suffix with a missing receipt is reconstructed without appending again. Partial suffix, changed history, drift, or ambiguous residue fail closed without truncation. Normal append and audit retain their own validation contracts; ordinary close assesses the current outcome and obligations separately.
 
 ```powershell
 python -B scripts/mutate-work-item.py recover-mixed-current-ledger --root . --request-file <reviewed-request.json> --apply-admitted
@@ -401,7 +401,7 @@ python -B scripts/mutate-work-item.py recover-mixed-current-ledger --root . --re
 
 The same `recover-mixed-current-ledger` command admits malformed application history without requiring a historical semantic run ID. Version 1 requests and receipts retain their existing migration/disposition behavior. Version 2 targets use `custody-invalid-history` or `dispose-history-custody`; they bind `sourcePrefixSha256`, `sourcePrefixBytes`, `rawLineOrdinal`, and `physicalLineSha256`. The prefix is the exact captured byte stream and the line digest includes its terminator. Missing or invalid old IDs remain opaque. All valid decoded IDs remain reserved, and case-insensitive collisions, forged work-item identities, conflicting valid terminal relations, or damaged owner controls refuse.
 
-Admission appends a nonauthorizing `closure-invalidation` with `invalidationMode="historical-custody"` and `custodyAction="admit"`. It neither invents old timestamps/scope nor turns old output into a successful verdict. The existing evaluator conserves independently valid authority and closure effects, including valid orphan artifact/closer axes. The public obligation state exposes physically bound `unresolved_history` separately from real review/launch obligations. Fresh fully valid launches and terminals remain appendable; invalid fresh input still refuses the whole candidate. Default strict validation, ordinary close, and transfer reject unresolved historical holds with `WI-LEDGER-HISTORY-UNRESOLVED`.
+Admission appends a nonauthorizing `closure-invalidation` with `invalidationMode="historical-custody"` and `custodyAction="admit"`. It neither invents old timestamps/scope nor turns old output into a successful verdict. The existing evaluator conserves independently valid authority and closure effects, including valid orphan artifact/closer axes. The public obligation state exposes physically bound `unresolved_history` separately from real review/launch obligations. Fresh fully valid launches and terminals remain appendable; invalid fresh input still refuses the whole candidate. Strict validation and transfer retain their historical-hold checks; ordinary close assesses the current outcome and obligations separately.
 
 A structurally exact ordinary invalidation whose current effect is unresolved may also enter this existing custody route. Its earlier unique closer, body digest, and every earlier review target must bind exactly. The preserved control cannot execute; the reducer withholds only that referenced closer's closing effect for all its targets, preserving independently proved terminal and artifact axes. Those original obligations remain visible until a different genuine current closer discharges them. Malformed, ambiguous, nested custody/migration, or foreign controls still refuse. Disposition cannot relabel dependent review obligations as bookkeeping, and resolving a hold never revives the old closing effect.
 
@@ -578,6 +578,13 @@ Ordinary directory `close` is the positive operation and omits `--apply`. That
 flag belongs only to the separate `--legacy-evidence-file` close route, not an
 extra confirmation for ordinary close.
 
+The close decision requires evidence of the substantive outcome and actual current
+acceptance, safety, publication and owned-resource obligations. Closure prose alone
+does not establish that a feature works. Historical ledger diagnostics or an old
+review finding without established current relevance do not automatically veto that
+decision; preserve the actual history without inventing a terminal or verdict. Ledger
+append and successor transfer retain their own validation and effect contracts.
+
 When the active item has `agent-runs.jsonl`, ordinary `close` writes a schema
 version 3 `lifecycle-transition-receipt.json` in the archive as part of the
 same rollback-safe lifecycle transaction. The lifecycle owner binds the close
@@ -589,6 +596,17 @@ not transfer successor or review ownership. An archived replay must match the
 recorded closure and terminal instant, and a mismatch refuses. Existing
 archives are not backfilled. This proof does not replace ordinary close's
 current-result, bug-disposition, status, current-obligation, or README checks.
+
+For an ordinary close with a ledger, `bug-dispositions-receipt.json` records
+`scratchSelection` as the actual selected terminal `runId` and `scratchEvidence`
+entry pairs, or an explicit empty array when none were selected. The existing
+lifecycle proof binds the complete receipt bytes. Archived receiving exposes the
+selection only after verifying that proof and matching the parsed-byte SHA-256;
+scratch planning then uses the recorded selection. Without a proof or for a
+recognized legacy receipt, receiving checks its shape but omits the optional field
+from its nonauthorizing view and uses the original ledger planner fallback. The
+physical receipt and history remain unchanged. New closes without a ledger omit
+the field and do not manufacture a proof; absence never means an empty selection.
 
 Incoming-link upkeep changes only captured hrefs that still name the same
 target at its archive location. The lifecycle owner first admits the captured
@@ -707,8 +725,8 @@ admission and receipt contracts.
 ### Archive with a backlog successor
 
 Use this after accepted terminal evidence, exact `bug-dispositions.json`, and
-the first-use gates below. Omit the optional transfer file for the ordinary
-strict-close path; supply it only when every unresolved review obligation is
+the first-use gates below. Omit the optional transfer file for this operation's
+strict non-transfer path; supply it only when every unresolved review obligation is
 being transferred to the one successor created by this command:
 
 ```powershell
@@ -979,8 +997,8 @@ This section describes Version 1 live-inventory release. Recording an accepted
 completed disposal uses the separate metadata-only operation below; it cannot
 fabricate this inventory or delete a newly present root.
 
-An archived ledger entry with `scratchEvidence.disposition: retain` remains
-required by ordinary close replay. Release is an opt-in post-close operation
+A selected archived ledger entry with `scratchEvidence.disposition: retain`
+remains required by ordinary close replay. Release is an opt-in post-close operation
 for exactly one terminal `runId` and `entryId`; it does not authorize a batch
 cleanup or change existing archive bytes. First independently accept a
 same-item canonical artifact and a concrete evidence or reproduction rationale.

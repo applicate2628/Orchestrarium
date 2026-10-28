@@ -88,9 +88,10 @@ green mechanical validator never closes it** (the always-on spine carries this c
 dispositions are the only alternatives: `WAIVED:user` (user-authorized, evidence-carried; never legal
 against protected or unclassified findings) and `WAIVED:security-reviewer` (completed, exact
 target-bound `manual-check` evidence, with `role` or `assignedRole` equal to `security-reviewer`). For
-TRACKED work-items the relation is mechanical: the wrapper-owner terminal-ledger protocol records
-launch+terminal events, the closer names the exact `closesRunIds`, and `check-work-items-state` fails on open
-obligations. Replacement-reviewer equivalence must preserve: the review scope, independence from the
+TRACKED work-items the selected ledger operation records actual launch+terminal events and names the
+exact `closesRunIds` for obligations it discharges. Ordinary task close separately assesses current
+required review obligations; historical bookkeeping alone does not establish a current obligation.
+Replacement-reviewer equivalence must preserve: the review scope, independence from the
 author, the same evidence target/version, and an equal-or-stronger declared tier — recorded in
 structured fields, not prose. Reviews outside any work-item remain governed by the spine clause alone
 (declared residual).
@@ -107,16 +108,17 @@ that edit makes a NEW snapshot and a NEW round; it never mutates what the curren
 Full lesson: `work-items/lessons/2026-07-17-review-a-frozen-snapshot-not-a-live-tree.md`.
 
 **Ledger read-back before reporting a verdict (2026-07-17, live incident).** On a tracked item, a
-lane's verdict may be reported or acted on ONLY after reading the ledger back and confirming the
-terminal event exists for that launch `runId`. The wrapper result's `resultText` is evidence of what the
+lane's accepted verdict requires actual terminal acceptance and canonical settlement/readback for
+the selected operation. For a wrapper ledger operation, confirm the terminal event for that launch
+`runId`. The wrapper result's `resultText` is evidence of what the
 reviewer said, never evidence that the obligation moved. This is the polling-anchor discipline
 applied to closure: anchor on the authoritative store, not on a self-derived signal. The incident
 that forced the rule: a validator defect rejected terminal events whose artifact was a repository
 file, the wrapper only WARNed, and TWO real `PASS` verdicts were reported to the operator from prose
 while the ledger held nothing (`work-items/bugs/2026-07-17-validator-artifact-workitem-relative-only.md`).
 
-**Close every open runId of the lane, not just the latest.** Each round's `REVISE` is its own
-obligation, so a lane that went `REVISE → fix → REVISE → fix → PASS` needs the final closer to carry
-`closesRunIds` for EVERY still-open runId of that lane. Closing only the most recent one silently
-leaves the earlier obligations open — the checker will say so at the gate, which is the backstop, not
-the plan.
+**Discharge current review obligations, not just the latest finding.** A commissioned loop must
+resolve each finding still relevant to its current accepted artifact through the required independent
+review. When an explicit ledger closer discharges multiple open events, it names the exact targets
+under that operation's contract. Old bookkeeping alone does not establish current relevance or create
+a new verdict; preserve the historical events as recorded.

@@ -677,6 +677,8 @@ def test_root_aliases_share_recorded_scratch_and_real_ownership_guards(tmp_path:
     closed = close_at(root / "work-items")
     archived = root / "work-items" / "archive" / "2026-08" / slug
     assert closed.returncode == 0 and (archived / module.BUG_DISPOSITIONS_RECEIPT).is_file(), closed.stdout
+    receipt = json.loads((archived / module.BUG_DISPOSITIONS_RECEIPT).read_bytes())
+    assert receipt["scratchSelection"] == [{"runId": "scratch-terminal-001", "entry": entry}]
     assert close_at(root).returncode == 0
     retained.rename(root / "held-retained")
     missing = close_at(root / "work-items")
@@ -2405,6 +2407,136 @@ def _seed_ordinary_ledger_close(tmp_path, slug="ordinary-ledger"):
     return module, root, item, instant
 
 
+@pytest.mark.parametrize("history", [
+    b"not-json\n",
+    b"\xff\xfe\n",
+    b'{"schemaVersion":"obsolete","runId":"old"}\n',
+    b'{"schemaVersion":2,"runId":"old-launch","status":"running"}\n',
+])
+def test_ordinary_close_preserves_opaque_unsettled_history(tmp_path, history):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_bytes(ledger.read_bytes() + history)
+    before = ledger.read_bytes()
+    request = closure(instant).encode()
+    archive = module.close_item(root, item.name, request, instant)
+    assert (archive / ledger.name).read_bytes() == before
+    proof = json.loads((archive / "lifecycle-transition-receipt.json").read_bytes())
+    assert proof["ledgerSha256"] == hashlib.sha256(before).hexdigest()
+    assert module.close_item(root, item.name, request, instant) == archive
+
+
+def test_ordinary_close_empty_scratch_ignores_opaque_history(tmp_path):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_bytes(ledger.read_bytes() + b"\xff\n")
+    before = ledger.read_bytes()
+    (root / ".scratch/work-items" / item.name).mkdir(parents=True)
+    request = closure(instant).encode()
+    archive = module.close_item(root, item.name, request, instant)
+    assert (archive / ledger.name).read_bytes() == before
+    assert json.loads((archive / module.BUG_DISPOSITIONS_RECEIPT).read_bytes())["scratchSelection"] == []
+    assert module.close_item(root, item.name, request, instant) == archive
+
+
+def test_ordinary_close_enforces_explicit_event_ceiling(tmp_path):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_bytes(ledger.read_bytes() + b"old history\n")
+    before = ledger.read_bytes()
+    budget = module._validator_module().LedgerResourceBudgetV1(1, 10000000)
+    with pytest.raises(ValueError, match="WI-LEDGER-RESOURCE-INCOMPLETE"):
+        module.close_item(root, item.name, closure(instant).encode(), instant, ledger_resource_budget=budget)
+    assert ledger.read_bytes() == before
+    assert not (root / "work-items/archive/2026-10" / item.name).exists()
+
+
+def test_scratch_receipt_selection_rejects_invalid_declarations(tmp_path):
+    module, root, item, _instant = _seed_ordinary_ledger_close(tmp_path)
+    entry = {"entryId": "proof", "path": f".scratch/work-items/{item.name}/run/proof",
+             "disposition": "delete", "reason": "synthetic", "canonicalPointer": "implementation.md",
+             "proof": {}}
+    for selection in ([{"runId": "../escape", "entry": entry}],
+                      [{"runId": "run", "entry": entry}], [{"runId": "run", "entry": entry, "extra": 1}]):
+        with pytest.raises(module.LifecycleError, match="scratch selection"):
+            module._scratch_receipt_entries(item, selection)
+
+
+def test_unbound_scratch_selection_cannot_replace_legacy_replay_inputs(tmp_path):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    write(item / "implementation.md", "Synthetic retained evidence pointer.\n")
+    retained = root / ".scratch/work-items" / item.name / "scratch-terminal-001/evidence"
+    write(retained / "payload.txt", "Original retained bytes.\n")
+    entry = {"entryId": "evidence", "path": retained.relative_to(root).as_posix(),
+             "disposition": "retain", "reason": "Explicit synthetic retention.",
+             "canonicalPointer": "implementation.md"}
+    for run_id, status, gate, kind, extra in (
+        ("scratch-launch-001", "running", "none", "launch", []),
+        ("scratch-terminal-001", "completed", "PASS", "terminal", ["--artifact", "implementation.md",
+         "--evidence", "command:receipt binding regression", "--launch-run-id", "scratch-launch-001",
+         "--scratch-evidence-json", json.dumps(entry)])):
+        result = run_ledger(item, "append", "--run-id", run_id, "--role", "platform-engineer",
+            "--execution-role", "internal", "--status", status, "--gate", gate, "--event-kind", kind,
+            "--scope", "scratch lifecycle", "--started-at", "2026-08-09T00:00:00Z",
+            "--updated-at", "2026-08-09T00:00:00Z", *extra)
+        assert result.returncode == 0, result.stdout + result.stderr
+    request = closure(instant).encode()
+    archived = module.close_item(root, item.name, request, instant)
+    archived_closure = (archived / "closure.md").read_bytes()
+    proof_path = archived / "lifecycle-transition-receipt.json"
+    proof_before = proof_path.read_bytes()
+    proof_path.unlink()
+    receipt_path = archived / module.BUG_DISPOSITIONS_RECEIPT
+    receipt = json.loads(receipt_path.read_bytes())
+    receipt.pop("scratchSelection")
+    retained.rename(root / "held-retained")
+    readme_before = (root / "work-items/README.md").read_bytes()
+    ledger_before = (archived / "agent-runs.jsonl").read_bytes()
+
+    for injected_projection in (False, True):
+        if injected_projection:
+            receipt["scratchSelection"] = []
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        before = tree_file_bytes(archived)
+        received = module._verify_archived_bug_dispositions(root, archived, archived_closure, instant)
+        assert "scratchSelection" not in received
+        with pytest.raises(module.LifecycleError) as failure:
+            module.close_item(root, item.name, request, instant)
+        assert failure.value.failure_id == "WI-SCRATCH-RETAINED-EVIDENCE-MISSING"
+        assert tree_file_bytes(archived) == before
+        assert (root / "work-items/README.md").read_bytes() == readme_before
+
+    for proof in (b'{"schemaVersion":3}', proof_before):
+        proof_path.write_bytes(proof)
+        with pytest.raises(module.LifecycleError) as failure:
+            module._verify_archived_bug_dispositions(root, archived, archived_closure, instant)
+        assert failure.value.failure_id == "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
+    assert (archived / "agent-runs.jsonl").read_bytes() == ledger_before
+    assert (root / "held-retained/payload.txt").read_text() == "Original retained bytes.\n"
+
+
+def test_scratch_selection_binding_covers_exact_parsed_receipt_bytes(tmp_path, monkeypatch):
+    module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
+    archived = module.close_item(root, item.name, closure(instant).encode(), instant)
+    receipt_path = archived / module.BUG_DISPOSITIONS_RECEIPT
+    receipt_before = receipt_path.read_bytes()
+    proof_path = archived / "lifecycle-transition-receipt.json"
+    proof = json.loads(proof_path.read_bytes())
+    validate = module._validate_stable_ledger_settlement
+
+    def drift_after_receipt_parse(*args, **kwargs):
+        replacement = receipt_before + b"\n"
+        receipt_path.write_bytes(replacement)
+        proof["bugDispositionReceiptSha256"] = hashlib.sha256(replacement).hexdigest()
+        proof_path.write_text(json.dumps(proof), encoding="utf-8")
+        return validate(*args, **kwargs)
+
+    monkeypatch.setattr(module, "_validate_stable_ledger_settlement", drift_after_receipt_parse)
+    with pytest.raises(module.LifecycleError, match="scratch selection receipt bytes differ") as failure:
+        module._verify_archived_bug_dispositions(root, archived, (archived / "closure.md").read_bytes(), instant)
+    assert failure.value.failure_id == "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
+
+
 def test_ordinary_close_settlement_binds_inputs_migrations_and_immutable_retry(tmp_path):
     module, root, item, instant = _seed_ordinary_ledger_close(tmp_path)
     migrations = item / "ledger-migration-receipts"
@@ -3392,6 +3524,8 @@ def test_close_retains_declared_unmatched_scratch_evidence_root(tmp_path: Path) 
     assert archived_pointer.read_bytes() == pointer_before
     receipt = json.loads((archived / "bug-dispositions-receipt.json").read_text(encoding="utf-8"))
     assert receipt["evidenceRetention"] == manifest["evidenceRetention"]
+    assert "scratchSelection" not in receipt
+    assert not (archived / "lifecycle-transition-receipt.json").exists()
 
     shutil.rmtree(retained.parent)
     assert module.close_item(root, slug, closure(instant).encode(), instant) == archived
