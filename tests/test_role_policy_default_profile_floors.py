@@ -80,8 +80,8 @@ def test_role_migration_and_luna_docs_have_no_stale_create_only_contract() -> No
     )
 
     for source in (codex_readme, root_readme, install):
-        assert "prior working or currently-disabled stock" in source
-        assert "customized payloads fail closed" in source
+        assert "Factory payload hashes and approved stock-only migrations remain exact" in source
+        assert "compatible user runtime tuning" in source
         assert "native-required" in source
         assert "E_NATIVE_V2_DISABLED" in source
         assert "E_LUNA_UNAVAILABLE" in source
@@ -1154,7 +1154,7 @@ def test_supervised_luna_does_not_admit_other_efforts() -> None:
         assert decision["fallback"] == "none"
 
 
-@pytest.mark.parametrize("drift", ("malformed-policy", "mixed-manifest", "custom-role"))
+@pytest.mark.parametrize("drift", ("malformed-policy", "mixed-manifest", "custom-role", "owned-instructions"))
 def test_supervised_luna_keeps_input_pairing_and_preserves_refused_bytes(
     tmp_path: Path, drift: str,
 ) -> None:
@@ -1179,9 +1179,15 @@ def test_supervised_luna_keeps_input_pairing_and_preserves_refused_bytes(
         manifest = json.loads(path.read_bytes())
         manifest["policySha256"] = "0" * 64
         path.write_text(json.dumps(manifest), encoding="utf-8")
-    else:
+    elif drift == "custom-role":
         path = tmp_path / paths[2]
         path.write_bytes(path.read_bytes() + b"# user-owned customization\n")
+    else:
+        path = tmp_path / paths[2]
+        payload = path.read_bytes()
+        marker = b'developer_instructions = """'
+        assert marker in payload
+        path.write_bytes(payload.replace(marker, marker + b"Changed owned instructions. ", 1))
     before = {name: (tmp_path / name).read_bytes() for name in paths}
     refused = RESOLVER.describe_ordinary_native_role_options(
         "backend-engineer", "engineering", _supervised_luna_host(), repo_root=tmp_path,

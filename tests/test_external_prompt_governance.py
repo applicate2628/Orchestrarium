@@ -52,8 +52,8 @@ KIMI_TRANSPORT_OWNER_CONTRACTS = (
 )
 
 SHARED_KIMI_TRANSPORT_REQUIREMENTS = (
-    "fixed wrapper `kimi-code/k3`",
-    "independent verification; nonauthorizing",
+    "fixed kimi-code/k3",
+    "independent check/nonauthority",
     "use orchestrating runtime/approved wrapper, never an internal relay",
     "file-based prompt via stdin/file, never argv",
 )
@@ -332,15 +332,13 @@ def _terminal_receipt_args(tmp_path: Path, label: str) -> list[str]:
     ),
 )
 def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, payload: bytes
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    name: str, payload: bytes,
 ) -> None:
     """Catches stdin bypassing the strict bounded task snapshot before any launch side effect."""
 
     provider_prompt = _load_module()
     calls: list[str] = []
-    monkeypatch.setattr(
-        provider_prompt, "_requires_early_native_windows_refusal", lambda _provider: False
-    )
     monkeypatch.setattr(provider_prompt.sys, "stdin", _PipedStdin(payload))
     monkeypatch.setattr(
         provider_prompt,
@@ -351,7 +349,8 @@ def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
         provider_prompt,
         "resolve_provider_auth_configuration",
         lambda _provider: calls.append("auth-configuration")
-        or SimpleNamespace(
+        or provider_prompt.ProviderAuthConfiguration(
+            mode="codex-api-key",
             child_environment={},
             needles=(),
             output_scan_disposition="environment-exact",
@@ -359,7 +358,7 @@ def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
     )
     monkeypatch.setattr(
         provider_prompt.RunCaptureLifecycle,
-        "create",
+        "_acquire",
         lambda *_args: pytest.fail(f"capture allocation reached for {name}"),
     )
     monkeypatch.setattr(
@@ -372,18 +371,16 @@ def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
         "codex", ["strict-stdin", *_terminal_receipt_args(tmp_path, name)]
     ) == 1
     assert calls == ["binary-preflight", "auth-configuration"]
+    assert "FAIL: E_EXTERNAL_PROMPT_INVALID" in capsys.readouterr().err
 
 
 def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Catches a wrapper that validates task bytes but not capsule-plus-frame bytes."""
 
     provider_prompt = _load_module(tmp_path)
     calls: list[str] = []
-    monkeypatch.setattr(
-        provider_prompt, "_requires_early_native_windows_refusal", lambda _provider: False
-    )
     task = tmp_path / "task.md"
     overhead = (
         len(provider_prompt.EXTERNAL_GOVERNANCE_BEGIN)
@@ -400,7 +397,8 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
         provider_prompt,
         "resolve_provider_auth_configuration",
         lambda _provider: calls.append("auth-configuration")
-        or SimpleNamespace(
+        or provider_prompt.ProviderAuthConfiguration(
+            mode="codex-api-key",
             child_environment={},
             needles=(),
             output_scan_disposition="environment-exact",
@@ -408,7 +406,7 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
     )
     monkeypatch.setattr(
         provider_prompt.RunCaptureLifecycle,
-        "create",
+        "_acquire",
         lambda *_args: pytest.fail("capture allocation reached for composed overflow"),
     )
     monkeypatch.setattr(
@@ -429,6 +427,7 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
         ],
     ) == 1
     assert calls == ["binary-preflight", "auth-configuration"]
+    assert "FAIL: E_EXTERNAL_PROMPT_INVALID" in capsys.readouterr().err
 
 
 def test_claude_auth_refusal_follows_provider_preflight_and_precedes_invalid_prompt(
@@ -481,8 +480,8 @@ def test_claude_auth_refusal_follows_provider_preflight_and_precedes_invalid_pro
     assert calls == ["binary-preflight", "auth-refusal"]
 
 
-def test_external_contracts_require_wrappers_and_forbid_inline_or_sidecar_prompt_routes() -> None:
-    """Catches documentation that would authorize an unframed substantive provider path."""
+def test_external_contracts_preserve_owner_guarantees_and_forbid_unvalidated_prompt_routes() -> None:
+    """Keep working helpers preferred without forbidding admitted owner-equivalent execution."""
 
     contracts = (
         ROOT / "src.codex" / "skills" / "lead" / "external-dispatch.md",
@@ -492,7 +491,14 @@ def test_external_contracts_require_wrappers_and_forbid_inline_or_sidecar_prompt
     )
     for contract in contracts:
         text = contract.read_text(encoding="utf-8")
-        assert "prompt routes are unsupported" in text
+        if contract in KIMI_TRANSPORT_OWNER_CONTRACTS:
+            assert "declared owner-equivalent" in text
+            assert "unvalidated raw provider Command-Line Interface (CLI) prompt routes remain unsupported" in text
+            assert "same actual data, ownership, serialization, preimages, rollback, truthful provenance, independent readback and resource guarantees" in text
+            assert "Record actual manual provenance without impersonating the wrapper" in text
+        else:
+            assert "external-dispatch.md" in text
+            assert "prompt routes are unsupported" in text
         assert "invoke-" in text
         assert "transport-neutral inline chain" not in text
         assert "inline path bypasses" not in text
@@ -504,7 +510,7 @@ def test_external_contracts_require_wrappers_and_forbid_inline_or_sidecar_prompt
         assert "inline prompt argv is allowed" not in text
 
 
-def test_kimi_orchestration_is_wrapper_only_and_callers_do_not_compose_provider_argv() -> None:
+def test_kimi_owner_equivalent_execution_preserves_protocol_and_prompt_boundaries() -> None:
     """Catches shared or full-owner Kimi transport boundaries from drifting."""
 
     shared_text = (ROOT / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
@@ -512,15 +518,20 @@ def test_kimi_orchestration_is_wrapper_only_and_callers_do_not_compose_provider_
         assert statement in shared_text, f"shared governance omits Kimi boundary: {statement}"
 
     required = (
-        "`invoke-kimi-prompt` is the only approved Kimi launch surface",
-        "The wrapper alone owns every Kimi provider argument",
-        "Callers pass the unchanged task prompt file to the wrapper",
-        "must not invoke `kimi`, `kimi.exe`, `kimi --prompt`, or compose `--auto`",
+        "prefer the working `invoke-kimi-prompt` launch helper",
+        "owns provider argument construction for actual wrapper execution",
+        "If it is defective, declared owner-equivalent launch",
+        "same admitted provider protocol, exact fixed `kimi-code/k3` model",
+        "authentication/capability controls, unchanged file/stdin prompt and governance inputs",
+        "output/resource bounds, timeout/cancellation and real terminal oracle",
+        "Manual execution uses actual manual provenance, never a reserved wrapper frame",
+        "Direct `kimi`/`kimi.exe` invocation is permitted only when those guarantees are established",
+        "task prompts in argv (`kimi --prompt`) and independently invented `--auto` controls remain prohibited",
     )
     for contract in KIMI_TRANSPORT_OWNER_CONTRACTS:
         text = contract.read_text(encoding="utf-8")
         for statement in required:
-            assert statement in text, f"{contract} omits Kimi wrapper-only contract: {statement}"
+            assert statement in text, f"{contract} omits Kimi owner-equivalent boundary: {statement}"
 
 
 def test_kimi_read_only_is_behavioral_not_a_capability_sandbox() -> None:

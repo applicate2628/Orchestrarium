@@ -97,6 +97,31 @@ PosixProcessGroupOwnerV1 = _POSIX_PROCESS_GROUP.PosixProcessGroupOwnerV1
 
 CODEX_BEGIN = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
 CODEX_END = "<!-- END ORCHESTRARIUM CODEX PACK -->"
+# Shared transport closure, not host-native role/configuration policy. Both host
+# packs can route to Codex; shipping other lazy adapters does not activate them.
+SDK_RUNTIME_HELPERS = (
+    "process_supervision/sdk_worker.py",
+    "sdk_execution/__init__.py",
+    "sdk_execution/_async.py",
+    "sdk_execution/acp_streams.py",
+    "sdk_execution/claude.py",
+    "sdk_execution/codex.py",
+    "sdk_execution/codex_tools.py",
+    "sdk_execution/dispatch.py",
+    "sdk_execution/contracts.py",
+    "sdk_execution/coordinator.py",
+    "sdk_execution/coordination.py",
+    "sdk_execution/coordination_codex.py",
+    "sdk_execution/coordination_model.py",
+    "sdk_execution/coordination_receiving.py",
+    "sdk_execution/grok.py",
+    "sdk_execution/kimi.py",
+    "sdk_execution/mimo.py",
+    "sdk_execution/minimax.py",
+    "sdk_execution/receiving.py",
+    "sdk_execution/runtime.py",
+    "sdk_execution/worker.py",
+)
 RUNTIME_HELPERS = (
     "model_routing/launch_policy.py",
     "agent-run-ledger.py",
@@ -121,7 +146,7 @@ RUNTIME_HELPERS = (
     "validate-work-item-state.py",
     "validate-work-item-state.sh",
     "validate-provider-prompt-projections.py",
-)
+) + SDK_RUNTIME_HELPERS
 CODEX_RUNTIME_HELPERS = ("check-hook-health.py", "universal_hooks_manifest.py")
 TRANSPORT_PROJECTION_FILES = (
     "model_routing/launch_policy.py",
@@ -133,7 +158,7 @@ TRANSPORT_PROJECTION_FILES = (
     "invoke-grok-prompt.py",
     "external-prompt-governance.md",
     "external-role-taxonomy.v1.json",
-)
+) + SDK_RUNTIME_HELPERS
 TRANSPORT_PROJECTION_MANIFEST = "provider-prompt-projections.v1.json"
 
 
@@ -366,64 +391,98 @@ STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
         "63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a",
     }
 )
-ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
-    "consultant": {
-        '1beebf6b349048182e254d01f1b2c755199f98f45f60fb21f7990d5f014814e3': 'f1ba467f431a38c82b57355d256694bcfede73e4848791a5c19a7d0ef07a0154',
-        '57da94b645283cc695ff8f82a108a6f490f0036a564be76c22f663ba6afa3a38': '4bf409f769e8017af1fb6bdf045ed1afc69b6ef3918feaa283e23b2826e1cdf7',
-        'f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793': 'ee6efc0264ab7b68aa1d80819353606623f458ec02632ad5a2904408060095e4',
-        '63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a': '27be58b964681c09d3260252d49c468540f576aead370ecd784163fca4240e62',
-    },
-    "architect": {"51612976f7fde46e3046222d607435b2fba5ef27ede636a06a80cb86c6fc7f5e": "454bceff6e257da86c5d6f1b6fdd53f877be180cc441a7c4432646cea6f1a44b"},
-    "architecture-reviewer": {"19b179fe14a2bb6135e46dd7435265e7483d0bf6d5ec97b55520e39f3cbb1b4d": "88695a4250ac42e79b5b61b12141769c93eb14f4c4180c938b0803b3e0912876"},
-    "external-reviewer": {
-        '17234ecc797094a872e3b02844c6c4c369628c1e503ef26fa797ff74872673ed': 'c03a9c2b34a8b07812d7e82c42580caebfd7e4cd5c09eeb1889f455f5698e6ed',
-        '4623816c87f9d1b017472011601951eab8bc8e4ceeea2d13911e29a876c853e8': '49ab68961d7a01432d00b77826f92b523e0439f3a56cd70009877b7665e1a3b7',
-        'ec68618f9d3869333c6d84e566dcaf7b61f7d36a11e247e69c14909807086698': 'dbd495e1955a15f19e2e20c8d87f59554cc5ff11d806426f0c9dff9ac80f2e5b',
-        '9bd5a9811b6573a6d6697f627caee4ebe975460de0118e22bd9e8cd7bb76e0c5': 'd4310591384a3fc94cad7a834ed2418fdfc900581f2d671ad99e3c3e1710bfea',
-    },
-    "external-worker": {
-        '77be8a3c22b83d9e7a6570b6a9b7f7e1287c19592fa4a294fe68cbcaafffcc9a': '8e5187a3c5d5dfaf7220b79a7b33799b4151ce0e75df265a691fd00dc097a8f7',
-        'ca74db54391a1994c30a2da6d80021261556db9f75ac89ec8878ee1a5c50f32c': '3d5bc98822356337053b099c1aa81b0e1f913d21e02c249936dc22078ed5c6c9',
-        'fa5374735bc396314f283489e189a4d1f82a6716068cf3384c9244a2c3c04097': '58dde97a53d00d4fca10d9062e2abe4808920cf293e86e967cdbbdb824686e73',
-        '170628e06c5866ddc9d9e4d5aaabbb1422f57ab067ce0085bd99960f34d53c3c': '04529aebe115e1a58745e1b5151e6ab7c5e78ddf4c182c42210fa7c1c0ea9058',
-    },
-    "graphics-engineer": {"e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d": "d7c8d542f3808549750b3981c9192c4dd83867e1eb1b5ab38ffaaacf6e898ba5"},
-    "github-pr-review-bot": {"d1a5bff367e42891951371faa2d66274cb34f0eb7b9c86c214376e75833f6841": "4caf17f6a0b87220b0754c1e9ddcebe01e64e57bc76a139fc4d45b87c1ce1700"},
-    "init-project": {
-        '905f0866931702acbc064dee39e487b51828e06df9dce99ac9db55d252499f07': '10fa991feccb30d815cd238eb6a02b9409ffe54222f04b0df57a127a89db3b7b',
-        'c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c': None,
-        '21dc5adc3f4ccb8e646546cd0d3ccf979c37d4e4e8dcefcc9620122f500dadb4': '05b04ee821e83997b617a6ad052e2da2ee6516a8d01379b45b1de6513913cb81',
-        '4f0a5fdb8af605dc10cb2044f33db3339b410feaf23764cc395f9c3feaaf6353': '7ed43bf3286a8c9f4ff6a69d5b8835f6e1d5d81fa7981352082b88106c2c469d',
-        'cd5bc7386f286393ee8dab782ed603fff7ad61e8c828f34cca102a3a5e2aba9f': '19b4794614f08a2233097f14c7e5b2343ca831e477c8802341fdd601770b6613',
-    },
-    "manual-repo-transfer": {
-        '45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b': None,
-        'b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3': None,
-        'e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc': '44b24222acc7152cde916b4afbe63a6577a900ecef61760cf8355fb5874211f6',
-        'cdc90d427cc593ee7b7212dd0ddeacbb13dc7474525b493bd8950318bbc3d92f': None,
-        '03c0c2fd12a8273f8325fb145dc2b8e9e97502e497649fc2d474988a9f95070b': '5131cc4d18265cba6d7abf10225d717e3d8ac2a8b0f683efc803ca610dc95674',
-    },
-    "second-opinion": {
-        'fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6': None,
-        'f9a2114c8baead9ec8a259288ff74e157af60864c9f3d70ba0bcc52154b2b4b6': '7be172e27fac00bd7bfde542d7bd87b9a1dd874caee15b90c06d0b292201fc60',
-        'b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432': 'b8b8d488ce57f60d19afcf2ccf152be16e9f47c096638b06317cb21882238825',
-    },
-    "toolchain-engineer": {"51cf24ae0699a6bb379ee6bbf7b51e2a982cba12aaeab2dc76e57d4b4ccf2a74": "f83bdad4a5a53723d0d4f8d77f6b32577da60d902972910f0543747148b94ad3"},
-    "review-loop": {
-        '3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a': None,
-        '2d78f499bf7b4bb2e6dafdf0ef875f2d9d39448c28df6f3835bc8153fba02ce0': 'b4074ade6274381b9a89f87a6d01ee251981a7d5dd164f9444ac0e3d56f88167',
-        'd956cf70db42a7c936d21984fe6aeb83748de02c544eec56ca54971629f85f7e': '70392ab319a1ec665a177775ea8bc09def2aebefff868ebd84f70de0edd9f34f',
-    },
-    "visualization-engineer": {"56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0": "c09eecc45add2ded8571b999883bc7a03d90b82fd95c72a64bf6cf2537fc0230"},
-    'design-panel': {
-        'ac107c9d6c4a3833d0af90756c8b560f7ca4c4dfcc3d14d6a14faae1530f859f': '784d66c963af2a858ac053ec5089bfc58a37c819dce6522804a89e17958c07b4',
-        '685b75f5726dd16dbcf2b5fb3238652b8564242e5b66f0daf2b582267905f67b': '2e026b6dc68007ea972dc6f571ef08a855e4d106b40fa5ca595e9e94e31486ed',
-    },
-    'external-brigade': {
-        '7a931c84bc3b72a85afcee813e9bb4705923301b6644892dcd291ffacb837113': '5286483022342c63f6cc8e5f5bfdb96a693701e141b02ee2dc33c52f7f295ec9',
-    },
-}
+# Independently reconstructed from the immutable e7a691de factory archive.
+# Legacy digests are lookup keys only; values bind the versioned member structure.
+ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {'accessibility-reviewer': {'bef5e73f3e5f4b8263d07c877a7c940a169fe895d5e84bddbed2b148f6fac3a8': '0ff9f88e2f685a22c624acff1c03d04cace35ae110fd2e93dfc0d30367039137'},
+ 'algorithm-scientist': {'359a20634fe1b18f051531278e27dcb1b9c05b761dba96d0e52bf32772f54e22': '10805b5d70d233deea21e52556e764fafdea2423a795f1b26179adf2d6387247'},
+ 'analyst': {'d66d3d8c1ddb2eb81bfd3cb4b35c0466779effb6a87fe6043f7417dbd8e4c8cf': '30f249624964a1a818ecce187777e3658c6c1c06b268d2fd40e38f4b39f2b109'},
+ 'analyzing-video-bugs': {'d9d0ab65e70080f6bc39bd4e20fca007504425fdc02a874ef1415684ced79ca0': '236d9da0daa96e6bdd96c8bde7710da9820ffd5d721e3eb19ea303f29201cb30'},
+ 'architect': {'51612976f7fde46e3046222d607435b2fba5ef27ede636a06a80cb86c6fc7f5e': '454bceff6e257da86c5d6f1b6fdd53f877be180cc441a7c4432646cea6f1a44b'},
+ 'architecture-reviewer': {'19b179fe14a2bb6135e46dd7435265e7483d0bf6d5ec97b55520e39f3cbb1b4d': '88695a4250ac42e79b5b61b12141769c93eb14f4c4180c938b0803b3e0912876'},
+ 'backend-engineer': {'e62cdd9fba1248d420670c513e9131aa525d517f74c89f7a5b9fc46078db2181': '4590e1a6b350e0cf960c87224063a82c6e55103ace2f7a10d381cb2f5d34c1e6'},
+ 'bug-hunting': {'c61c14574c6252375c2565d97905f36350c6c7e42d34506f5d27463dfa73e8d8': 'fd84595e5bb2d1005599676a96b9f7572c1bf029b3419aacb4630bc0504de468'},
+ 'computational-scientist': {'c8d1d1623e48993ad8168d68aaa071e164ad5f2b14d39ae43fded6dfa5b794cf': '380bb708a939b9bd3fd71bed64a68c1ef1141b6395a8a1b79d335e25e6d92ee5'},
+ 'consultant': {
+    # Authenticated src.codex/skills tree at 815e9dfbc5932cc13ed1a8b01f44204e4b4d2349.
+    '862a08ad882340eb79f5b08f0698c7ea7e07358a8ca2d61c4d80b4bf31fd9c5f': '167c2898c39d0fd5e2f6152900fc3f0780931229c6654c4239e67f8b749b7e01',
+    '1beebf6b349048182e254d01f1b2c755199f98f45f60fb21f7990d5f014814e3': 'f1ba467f431a38c82b57355d256694bcfede73e4848791a5c19a7d0ef07a0154',
+                '2b8294473d5402361082876b569f38b6307f56aa8170e92539bd95bb3c26a6b6': '60f27902d740dea7dd1688a19ccad0a6226841c685b97a37e8a0ed1dd1f4b2c2',
+                '57da94b645283cc695ff8f82a108a6f490f0036a564be76c22f663ba6afa3a38': '4bf409f769e8017af1fb6bdf045ed1afc69b6ef3918feaa283e23b2826e1cdf7',
+                '63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a': '27be58b964681c09d3260252d49c468540f576aead370ecd784163fca4240e62',
+                'f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793': 'ee6efc0264ab7b68aa1d80819353606623f458ec02632ad5a2904408060095e4'},
+ 'data-engineer': {'57b9821d3a53d0759baee45a7a3fa5edea7d2963fdda35b552e8a63b70792531': 'b5653ca61e2b394dbaad03bbd6f839d422b200a3b9ca06fea195cb47eb870628'},
+ 'design-panel': {'685b75f5726dd16dbcf2b5fb3238652b8564242e5b66f0daf2b582267905f67b': '2e026b6dc68007ea972dc6f571ef08a855e4d106b40fa5ca595e9e94e31486ed',
+                  'ac107c9d6c4a3833d0af90756c8b560f7ca4c4dfcc3d14d6a14faae1530f859f': '784d66c963af2a858ac053ec5089bfc58a37c819dce6522804a89e17958c07b4',
+                  'fb9d97b09517ec38e4560e1b597794024e2e2d27184c25cfa79af0de8616973f': '98a78a2ede0d2e89e1056a42c0593417e4e63544a08e87ba10c7bbcf390fc0f9'},
+ 'explain-simply': {'fac8324b1107c8cc292d39bdeec91a1e50f3e27b75b08dcd1d4a13c5654c5384': 'd649fe3f6d0c1647ac53509467010ecf7c8c2599f2c600315ca6b2b47af66d4a'},
+ 'external-brigade': {'7a931c84bc3b72a85afcee813e9bb4705923301b6644892dcd291ffacb837113': '5286483022342c63f6cc8e5f5bfdb96a693701e141b02ee2dc33c52f7f295ec9',
+                      'abe6def46092b9caf7e081829b0832960831d940d8b062757cc020f4842bec8c': '56c8f8d40842a103ae782e028638d5d539bee964f7af9038f262047287cb9f67'},
+ 'external-reviewer': {'17234ecc797094a872e3b02844c6c4c369628c1e503ef26fa797ff74872673ed': 'c03a9c2b34a8b07812d7e82c42580caebfd7e4cd5c09eeb1889f455f5698e6ed',
+                       '4623816c87f9d1b017472011601951eab8bc8e4ceeea2d13911e29a876c853e8': '49ab68961d7a01432d00b77826f92b523e0439f3a56cd70009877b7665e1a3b7',
+                       '9153bde23c68612926c560a1d43673ed51923d017e31618a02363ddbe6faf750': '210dc7cd11990aeb3203b944cab3ed65bbec0f0e39e666f7618070f7189f2a70',
+                       '9bd5a9811b6573a6d6697f627caee4ebe975460de0118e22bd9e8cd7bb76e0c5': 'd4310591384a3fc94cad7a834ed2418fdfc900581f2d671ad99e3c3e1710bfea',
+                       'ec68618f9d3869333c6d84e566dcaf7b61f7d36a11e247e69c14909807086698': 'dbd495e1955a15f19e2e20c8d87f59554cc5ff11d806426f0c9dff9ac80f2e5b'},
+ 'external-worker': {'170628e06c5866ddc9d9e4d5aaabbb1422f57ab067ce0085bd99960f34d53c3c': '04529aebe115e1a58745e1b5151e6ab7c5e78ddf4c182c42210fa7c1c0ea9058',
+                     '3a457ffd5b9f55b786c3f18b6003073f64dda089f9c00e35302f6b6140e7c512': '6b32fc5da5d59eb45af31cba0076a685b0d5745a82ef80d1dda8d35ca74451cf',
+                     '77be8a3c22b83d9e7a6570b6a9b7f7e1287c19592fa4a294fe68cbcaafffcc9a': '8e5187a3c5d5dfaf7220b79a7b33799b4151ce0e75df265a691fd00dc097a8f7',
+                     'ca74db54391a1994c30a2da6d80021261556db9f75ac89ec8878ee1a5c50f32c': '3d5bc98822356337053b099c1aa81b0e1f913d21e02c249936dc22078ed5c6c9',
+                     'fa5374735bc396314f283489e189a4d1f82a6716068cf3384c9244a2c3c04097': '58dde97a53d00d4fca10d9062e2abe4808920cf293e86e967cdbbdb824686e73'},
+ 'frontend-engineer': {'b54a33be9cff7c08e296f76eda5aaf4a307a5e75f1d22c6f8305a479669a379d': '52e214dd4cb4160296d5e45ea88364c03b43013d6f953df1836cea93838c51e2'},
+ 'geometry-engineer': {'84a9d0a7047672e0cbbea2188c7b7ed5b2145ca045eef79a520a6093a5654a21': 'ac34aff41b2ecc1fba57696d4cf33fd52a857ad65cfc215b2cdc1331d54669ff'},
+ 'github-pr-review-bot': {
+    # Authenticated src.codex/skills tree at 815e9dfbc5932cc13ed1a8b01f44204e4b4d2349.
+    'd7a47f95d381f37228cecdc9be8c288de15ffe09f440d5edbee3546e86d6e0c3': '835d3464c35632659d177bdc7a9e3ca756c224bfe6f9d5d5364d1a6199597946',
+    'd1a5bff367e42891951371faa2d66274cb34f0eb7b9c86c214376e75833f6841': '4caf17f6a0b87220b0754c1e9ddcebe01e64e57bc76a139fc4d45b87c1ce1700'},
+ 'graphics-engineer': {'e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d': 'd7c8d542f3808549750b3981c9192c4dd83867e1eb1b5ab38ffaaacf6e898ba5'},
+ 'init-project': {'21dc5adc3f4ccb8e646546cd0d3ccf979c37d4e4e8dcefcc9620122f500dadb4': '05b04ee821e83997b617a6ad052e2da2ee6516a8d01379b45b1de6513913cb81',
+                  '378850fefc2c8b9b352988a34290e515f958b8ea2622c183a5ca5d9b636562fe': '7119c0781eb326dfc236198ba2b59aebf4648ee7e1cbc3bfaaf4272b4812f14d',
+                  '4f0a5fdb8af605dc10cb2044f33db3339b410feaf23764cc395f9c3feaaf6353': '7ed43bf3286a8c9f4ff6a69d5b8835f6e1d5d81fa7981352082b88106c2c469d',
+                  '905f0866931702acbc064dee39e487b51828e06df9dce99ac9db55d252499f07': '10fa991feccb30d815cd238eb6a02b9409ffe54222f04b0df57a127a89db3b7b',
+                  'c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c': None,
+                  'cd5bc7386f286393ee8dab782ed603fff7ad61e8c828f34cca102a3a5e2aba9f': '19b4794614f08a2233097f14c7e5b2343ca831e477c8802341fdd601770b6613'},
+ 'knowledge-archivist': {'112f1c024e39ca4a7833647aded8a93dbe8c16e94cd384b437c40c636af15eb4': '496f5577880769022a8207f77e3b1f89b656cd68614f342ad85245093214f862'},
+ 'manual-repo-transfer': {
+    # Authenticated src.codex/skills tree at 815e9dfbc5932cc13ed1a8b01f44204e4b4d2349.
+    '08adbe09ea67b47c77d5dc9c29965c1b487e9e7ea373dbea27da04266b6af632': '0da6838dff54201df4bf0c8e646d026d482ed8927ca095c083faaa6c9f9b1584',
+    '03c0c2fd12a8273f8325fb145dc2b8e9e97502e497649fc2d474988a9f95070b': '5131cc4d18265cba6d7abf10225d717e3d8ac2a8b0f683efc803ca610dc95674',
+                          '45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b': None,
+                          'b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3': None,
+                          'cdc90d427cc593ee7b7212dd0ddeacbb13dc7474525b493bd8950318bbc3d92f': None,
+                          'e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc': '44b24222acc7152cde916b4afbe63a6577a900ecef61760cf8355fb5874211f6'},
+ 'mathtype-book-page': {'2673b2e3132971af915a0302a2939df9f0f89e0b4d9e987616127452584ce862': '478581ba51149d7b69d167f8ec6327582069e5abc3f427f9bda8b2cf31a932e5'},
+ 'model-view-engineer': {'94fd65fd9fd36911ae3e37b589849ec4ce93ff0ad38571a1c0f964b965abddae': 'dc9fa7eacba38a21f9f695da2a72842171c5b0f6271fb094145a6eaa35098970'},
+ 'performance-engineer': {'7f4c7d373a272bc3a4991f6fa770fa27477cb43f2ea68223d2880a34fb6c4290': '72a4ce7b93a79780180fd925bb18d441a0cbf50debfe090ae13b372db48f10d7'},
+ 'performance-reviewer': {'5d0d24b1067767959f10c57dd6e17554447f1d5e437b2f2968114149c1f60164': '1dd5822ed331cb2695c0520046b564c936626c7a6b29404171e99ea6acc9d850'},
+ 'planner': {'72df3a85d5fea94f54968dd594294a3d8fad67349f33fa63ff880687b93cf314': '18c61c5ce6971ab16cb0f60ac863bdfa937722c763ee725570605303a7a216f1'},
+ 'platform-engineer': {'09cb9e683bd8316a5219bb167dc45cd4609cbea84fb1440d92d9b31f922b0140': '3c2a31dc2c6a72184ca210c2e45fbd7cbee55383e1c3b3254470ce09b57ad9a6'},
+ 'product-analyst': {'74051651c7f100527f405306d3a8fd82e81eca9ffe0f0edee9dde530c73893e9': 'a537af20d248aa556e6bb725768911a266f14beba05b603c430fc3b0835ebd45'},
+ 'product-manager': {'e8f61582ec285db969191a47f498bcc3fdf2ba2c092994e07debc964674530e7': 'b65462a0ce694e94da53bf0e205e7e5648dd6a384a5415d8d9e3433ed1c6b467'},
+ 'qa-engineer': {'c32b6e90e9ba229d13df62f3d3fd0d049ff503773d42c0a04f96ff1d574d7289': '17a5189eaad169c78ee48613574fafdf7345a27ea0cd47eae9f27338b4baf236'},
+ 'qt-ui-engineer': {'0b68ec493fd04370ac1b31d66b38c61a316aea261a23339c57aad8e27290b689': 'dfaf4429990776bd9b1da5f0d334c728be82b3424fe3f29b574dde09e081ec05'},
+ 'reliability-engineer': {'4f0b905495492c57226d9109f02016a4bcec80f723d54da1f62f12d5dc2235ea': '3925423d3941f7159abf014a44df2ddf13b05ce344d92ec333da6cce0456fda1'},
+ 'review-changes': {'16047092a3e29a47c5f261f3920fe653b03678e76ffc2a14835a2ce69010de71': 'a7e084b0f126cd8e5f014748cf231c437bfd49f3034693f9d8ee66ffbf383d28'},
+ 'review-loop': {'2d78f499bf7b4bb2e6dafdf0ef875f2d9d39448c28df6f3835bc8153fba02ce0': 'b4074ade6274381b9a89f87a6d01ee251981a7d5dd164f9444ac0e3d56f88167',
+                 '3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a': None,
+                 '90148e258a4584787194bddf14eac8730de4ed08c80ce69fd2562a0d15f67bf2': '8dbe55f5a208ab9f340e25e664d346cb73ab81baeda56e3bdd5e62dcc1d37730',
+                 'd5a5190926d170a6498399e221028e11087974aef7fb7e49abb1d2052acac089': 'ac7a0a8942be1b295958a93cfa9cb4ac2bca943f3a4eb8459eb6b06f42c2cb69',
+                 'd956cf70db42a7c936d21984fe6aeb83748de02c544eec56ca54971629f85f7e': '70392ab319a1ec665a177775ea8bc09def2aebefff868ebd84f70de0edd9f34f'},
+ 'second-opinion': {'b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432': 'b8b8d488ce57f60d19afcf2ccf152be16e9f47c096638b06317cb21882238825',
+                    'd3f1e93ddb6641b21e05c13e28e1f291137e608922c00c00a59fa28ccad54741': '2f65f8de5fca6dee975bd01859e60527d15208325339e2dbf50d916d5e1d10b5',
+                    'f9a2114c8baead9ec8a259288ff74e157af60864c9f3d70ba0bcc52154b2b4b6': '7be172e27fac00bd7bfde542d7bd87b9a1dd874caee15b90c06d0b292201fc60',
+                    'fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6': None},
+ 'security-engineer': {'2ffbb3f112e3d3cd05c8ae547eb6a9c3bfe642129cad60f086479c11a7b8fc07': '553f936b913adedf369643531ec1d2085ac3bd502a04dbcb352d03a4d385f5c1'},
+ 'security-reviewer': {'5ab908e960e9f25d8acb56f995160ac114dfcaa9bb01d1726f7ba446e8b394f5': 'c36e6eec324971b231f563915652c3be3ae6104618f35745a44c83d02382ec04'},
+ 'toolchain-engineer': {'51cf24ae0699a6bb379ee6bbf7b51e2a982cba12aaeab2dc76e57d4b4ccf2a74': 'f83bdad4a5a53723d0d4f8d77f6b32577da60d902972910f0543747148b94ad3'},
+ 'ui-test-engineer': {'15f27958e69176649338bd3df92e711ed3ffbdb22be95711ee3cd517ec5525fb': 'f1316812c3ed71f77afc0e74e9a90074c3be66cd6cdb9deca72c5b387b74954d'},
+ 'ux-designer': {'4dd1ea16f1d4ab9681ead98de4a36251aff577636f50b75b283b7ecec723c65c': 'f49c5b31b294d7159c4e5891937f59efb373a61c34a4f35217ee17c128ab6fc9'},
+ 'ux-reviewer': {'e5ab300a8d1344a2556b74ec2f65d60e0551d5d5e4275912109d77aaa70f2088': '22b7a867c3c4e03f0df54e407933e6c88f69539395d7a731c973403c102987eb'},
+ 'vak-dissertation-review': {'8423dc31e6b356aa37d786dcb1de62653d6c97a696cffe254eb14f67c82a23e2': '67631191bb1b8cf72927e5838345d6de9147162918d36b4db5744de29d026928'},
+ 'visualization-engineer': {'56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0': 'c09eecc45add2ded8571b999883bc7a03d90b82fd95c72a64bf6cf2537fc0230'},
+ 'windows-gui-manual-testing': {'80f895204f0a0f390fab8261806f63bc85d0f09a9f6f7b4fe09f8ad2151d3bd9': 'dac6af50ceadaa1d33a2340bff1e05afcf233397520b52eab6862ceeb0e85b47'}}
 GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = {
+    # Exact factory outputs: e7a691de and 815e9dfb, independently reconstructed.
+    '9bebb43f56bcb0ecb8b8ff8219d227a66b50af026a8c1b900374498c9c494117': '798b074f6b588f379d380ce3977bbf5d2902c121e048338e9fb613a2d5b44e6d',
+    '26ec9e51012340737f43dd99daa7f7a596fad2e2114eddef93f32503909bbeb7': '4966218b503fa5e52875b43dfdda244f6639983404467c748caa8e2906d30abd',
     '006161c105d8fcaaa3e9ae891e8b14e42ca170c026445062f983884a9296a3c6': None,
     '03a7d0587eef6c8997e1f78136510d8ca01c61e9d1d06290fe453e34dafbb435': None,
     '0627712baff8adf6423d8cb766e5effcfa8001196e077eaf5d1b4f17e5d97a85': 'e00e18b805aad33393cf2849b2f2a6612ac641135b225879b8d4f84240a003bc',
@@ -593,6 +652,8 @@ _CODEX_RETIRED_SH = {
     "scripts/mcp-usage-reminder.sh": "f3e56c8a05aafcd0dce9905b40ab042df4edf40968d6dfda46d70a38e5351d0d",
     "scripts/turn-anchor-reminder.sh": "f0036ab9dd1fda1b9b7479f27f4585de9d5146bbd2a4bec10b4c4468f612c21e",
 }
+
+
 _CLAUDE_RETIRED_SH = {
     "hooks/check-machine-local-path.sh": "7856238ed5fbadaf10b9587ce8ebbf28cd4333cde57b95edebb288a4da6a7a68",
     "hooks/check-mcp-momentum.sh": "8f88b363f6c7f9df4c39d1d7d0c30b95d2540109323f1945af625552f0c3e5a4",
@@ -618,15 +679,15 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     parser.add_argument("--force", "-Force", action="store_true")
     parser.add_argument(
         "--replace-unreceipted-lead-sha256",
-        metavar="SHA256",
-        help="Global Codex/Claude only: adopt one unreceipted Lead tree with this exact observed SHA-256 digest",
+        metavar="tree-v2:SHA256",
+        help="Global Codex/Claude only: adopt one unreceipted Lead tree using the exact versioned adoption token from controlled diagnostics",
     )
     parser.add_argument(
         "--replace-unreceipted-skill-sha256",
         action="append",
         default=[],
-        metavar="NAME=SHA256",
-        help="Global Codex/Claude only: adopt one unreceipted non-Lead canonical skill with its exact observed SHA-256 digest",
+        metavar="NAME=tree-v2:SHA256",
+        help="Global Codex/Claude only: adopt one unreceipted non-Lead skill using its exact versioned adoption token from controlled diagnostics",
     )
     parser.add_argument(
         "--migrate-legacy-skill",
@@ -1605,6 +1666,18 @@ def _installer_failure_text(error: BaseException) -> str:
                 "validation-failed" if isinstance(error, ValueError) else "operation-failed")
             original = "failure-id=unavailable | context=unavailable | cause=" + cause
         additions = []
+        if typed and attributes is not None:
+            adoption = dict.get(attributes, "_installer_adoption")
+            # Explicit typed evidence only: never parse arbitrary exception text.
+            if (type(adoption) is tuple and len(adoption) == 2
+                and all(type(value) is str for value in adoption)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", adoption[0])
+                and re.fullmatch(r"[0-9a-f]{64}", adoption[1])
+                and context == "migration"
+                and ((identity == "E_CANONICAL_LEAD_ADOPTION_REQUIRED" and adoption[0] == "lead")
+                     or (identity == "E_CANONICAL_SKILL_ADOPTION_REQUIRED" and adoption[0] != "lead"))):
+                prefix = "" if adoption[0] == "lead" else adoption[0] + "="
+                additions.append("adoption=" + prefix + "tree-v2:" + adoption[1])
         def render(context):
             try:
                 return _CopySetterDiagnostic.render(context) if type(context) is _CopySetterDiagnostic else "unavailable"
@@ -1718,6 +1791,7 @@ class _InstallFailure(RuntimeError):
         unresolved_paths: tuple[Path, ...] = (),
         retained_errors: tuple[BaseException, ...] = (),
         association_source: BaseException | None = None,
+        adoption: tuple[str, str] | None = None,
     ) -> None:
         self.stable_id = stable_id
         self.context = context
@@ -1725,6 +1799,7 @@ class _InstallFailure(RuntimeError):
         self.members = members
         self.recovery_path = recovery_path
         self.unresolved_paths = unresolved_paths
+        self._installer_adoption = adoption
         diagnostic = _copy_setter_detail(cause)
         if diagnostic is not None:
             _store_copy_setter_detail(self, diagnostic)
@@ -1769,7 +1844,8 @@ class _InstallFailure(RuntimeError):
         result = _InstallFailure(dict.__getitem__(source, "stable_id"), dict.__getitem__(source, "context"),
             dict.__getitem__(source, "cause"), members=dict.__getitem__(source, "members"),
             recovery_path=recovery_path, unresolved_paths=dict.__getitem__(source, "unresolved_paths"),
-            retained_errors=(self,) if _copy_setter_operation_errors(self) else (), association_source=self)
+            retained_errors=(self,) if _copy_setter_operation_errors(self) else (), association_source=self,
+            adoption=dict.get(source, "_installer_adoption"))
         return result
 
 
@@ -1786,6 +1862,8 @@ SLICE_A_FAILURE_IDS = frozenset(
         "E_MUTABLE_PATH_IDENTITY_CHANGED",
         "E_MUTABLE_PATH_POSTCONDITION",
         "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE",
+        "E_CANONICAL_LEAD_ADOPTION_REQUIRED",
+        "E_CANONICAL_SKILL_ADOPTION_REQUIRED",
         "E_CANONICAL_LEAD_STAGE_INVALID",
         "E_CANONICAL_LEAD_POSTWRITE",
         "E_HOOK_INVENTORY_TARGET_INVALID",
@@ -5458,18 +5536,21 @@ class _CreateOnlyMutablePath:
                     self._rollback_identity_changed()
                 self.transaction._dispose_node(record.leaf_path, current)
             elif record.kind == "projection":
+                # The target may already have been reclaimed by an earlier
+                # owned inverse. Prove the exact link object without following
+                # it; never acquire authority over a replacement destination.
+                expected = _PhysicalNode(
+                    "link" if stat.S_ISLNK(record.leaf_identity[2]) else "reparse",
+                    record.leaf_identity, record.projection_data,
+                    record.native_proof, record.reparse_data,
+                )
                 if (
                     record.projection_target is None
                     or not (stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata))
-                    or not _projection_resolves_to(
-                        record.leaf_path, record.projection_target
-                    )
+                    or not self.transaction._image_matches(record.leaf_path, {record.leaf_path: expected})
                 ):
                     self._rollback_identity_changed()
-                self.transaction._dispose_node(record.leaf_path,
-                    _PhysicalNode("link" if stat.S_ISLNK(record.leaf_identity[2]) else "reparse",
-                                  record.leaf_identity,
-                                  record.projection_data, record.native_proof, record.reparse_data))
+                self.transaction._dispose_node(record.leaf_path, expected)
             elif record.kind == "directory":
                 if (
                     not stat.S_ISDIR(metadata.st_mode)
@@ -6541,14 +6622,17 @@ def _transport_predecessor(
         return None
     validator = _projection_validator(root)
     manifest_path = lead / "shared" / TRANSPORT_PROJECTION_MANIFEST
-    manifest = validator._load_manifest(manifest_path, allow_prior_transport=True)
+    manifest = validator._load_manifest(manifest_path, predecessor_only=True)
     member_names = tuple(manifest["files"])
-    introduced_absences = ()
-    if member_names == validator.PRIOR_TRANSPORT_FILES_V1:
-        introduced_absences = tuple(_projection_witness(path) for path in (
-            lead / "scripts" / "model_routing/launch_policy.py", projection_root / "model_routing/launch_policy.py"))
-        if any(witness.state != "absent" for witness in introduced_absences):
-            return None
+    # Newly introduced leaves must be absent in both selected predecessor homes.
+    # The exact predecessor manifest owns its members, never arbitrary subsets.
+    introduced_absences = tuple(
+        _projection_witness(home / name)
+        for name in TRANSPORT_PROJECTION_FILES if name not in member_names
+        for home in (lead / "scripts", projection_root)
+    )
+    if any(witness.state != "absent" for witness in introduced_absences):
+        return None
     canonical_paths = tuple(lead / "scripts" / name for name in member_names) + (manifest_path,)
     peer_paths = tuple(projection_root / name for name in member_names) + (
         projection_root.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST,
@@ -7671,7 +7755,8 @@ def _adoption_identity_v2(name: str, target: Path, token: str, *, factory: Path 
         return token[len("tree-v2:"):]
     if re.fullmatch(r"[0-9a-f]{64}", token):
         return _qualify_legacy_tree(name, target, token, factory=factory)
-    raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
+    raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH" if name == "lead"
+                     else "E_CANONICAL_SKILL_ADOPTION_MISMATCH")
 
 
 def _projection_resolves_to(path: Path, expected: Path) -> bool:
@@ -9045,12 +9130,14 @@ def _preflight_canonical_skills(
                 if not adopting or _adoption_identity_v2("lead", installed, replace_unreceipted_lead_sha256, factory=materialized) != observed:
                     raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH")
             if adopting and replace_unreceipted_lead_sha256 is None:
-                raise ValueError(f"E_CANONICAL_LEAD_ADOPTION_REQUIRED: {observed}")
+                raise _InstallFailure("E_CANONICAL_LEAD_ADOPTION_REQUIRED", "migration",
+                                      adoption=("lead", observed))
             if (skill.name != "lead" and global_install and nonlead_receipt is None
                 and observed is not None and observed != current
                 and observed not in accepted_priors):
                 if skill.name not in grants:
-                    raise ValueError(f"E_CANONICAL_SKILL_ADOPTION_REQUIRED: {skill.name}={observed}")
+                    raise _InstallFailure("E_CANONICAL_SKILL_ADOPTION_REQUIRED", "migration",
+                                          adoption=(skill.name, observed))
                 if _adoption_identity_v2(skill.name, installed, grants[skill.name], factory=materialized) != observed:
                     raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
                 nonlead_adopted = True
@@ -9171,19 +9258,7 @@ def _assert_canonical_skills_plan_current(
             raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: preflight drift {skill.name}")
     if plan.lead_receipt is not None:
         receipt_path = target / _LEAD_RECEIPT_NAME
-        receipt_effect = None
-        if transaction is not None and plan.lead_receipt.observed is not None:
-            payload, identity, _digest, _schema = plan.lead_receipt.observed
-            receipt_effect = next((effect for effect in transaction._effects
-                                   if effect.path == receipt_path and len(effect.before) == 1
-                                   and receipt_path in effect.before
-                                   and effect.before[receipt_path].kind == "file"
-                                   and effect.before[receipt_path].python_identity == identity
-                                   and effect.before[receipt_path].data == hashlib.sha256(payload).hexdigest()), None)
-            if receipt_effect is not None:
-                transaction.assert_effect_current(receipt_effect)
-        if receipt_effect is None and _read_lead_receipt(receipt_path) != plan.lead_receipt.observed:
-            raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT: preflight drift")
+        _assert_lead_receipt_current(plan.lead_receipt, receipt_path, transaction)
         restaged = _stage_canonical_lead_tree(
             root, plan.lead_receipt.source_lead,
             (lead_effect.retained if lead_effect is not None and lead_effect.retained_state is not None
@@ -9540,6 +9615,8 @@ def _apply_claude_skill_projection_plan(
             )
 
 
+
+
 def _install_claude_skill_projections(
     canonical_source: Path,
     historical_claude_source: Path,
@@ -9658,6 +9735,39 @@ def _preflight_codex_legacy_skill_projections(
     return tuple(plans), root_identity
 
 
+def _assert_codex_legacy_canonical_current(
+    plan: tuple[_SkillProjectionPlan, ...], canonical_plan: _CanonicalSkillsPlan,
+    *, dry_run: bool, finalized_lead_digest: str | None = None,
+) -> None:
+    """Keep frozen source and separately finalized target commitments distinct."""
+    canonical_by_name = {skill.name: skill for skill in canonical_plan.skills}
+    if finalized_lead_digest is not None:
+        lead = canonical_by_name.get("lead")
+        if (dry_run or type(finalized_lead_digest) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", finalized_lead_digest) is None
+                or lead is None or lead.managed_after is not None
+                or lead.source != canonical_plan.stage.path
+                or lead.source_digest != canonical_plan.stage.digest
+                or _tree_manifest_sha256(canonical_plan.stage.manifest) != canonical_plan.stage.digest):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: finalized Lead binding")
+    for item in plan:
+        canonical = canonical_by_name[item.name]
+        expected_target = item.canonical_digest
+        if item.name == "lead" and finalized_lead_digest is not None:
+            if item.canonical_digest != canonical_plan.stage.digest:
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: finalized Lead source")
+            expected_target = finalized_lead_digest
+        if canonical.managed_after is not None:
+            _assert_canonical_member_source_current(canonical)
+            if not dry_run:
+                _assert_canonical_member_state(canonical, item.canonical_target, after=True)
+        elif (_tree_sha256(canonical.source, ignore_runtime_cache=canonical.ignore_runtime_cache)
+              != item.canonical_digest or (not dry_run and
+              _tree_sha256(item.canonical_target, ignore_runtime_cache=canonical.ignore_runtime_cache)
+              != expected_target)):
+            raise ValueError(f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}")
+
+
 def _assert_codex_legacy_skill_projection_plan_current(
     plan: tuple[_SkillProjectionPlan, ...],
     canonical_plan: _CanonicalSkillsPlan,
@@ -9666,6 +9776,7 @@ def _assert_codex_legacy_skill_projection_plan_current(
     *,
     dry_run: bool,
     backup_digest_reader=None,
+    finalized_lead_digest: str | None = None,
 ) -> None:
     canonical_by_name = {skill.name: skill for skill in canonical_plan.skills}
     try:
@@ -9683,30 +9794,10 @@ def _assert_codex_legacy_skill_projection_plan_current(
     )
     if not root_current:
         raise ValueError("E_LEGACY_CODEX_SKILL_COLLISION:<root>")
+    _assert_codex_legacy_canonical_current(
+        plan, canonical_plan, dry_run=dry_run, finalized_lead_digest=finalized_lead_digest)
     for item in plan:
         canonical = canonical_by_name[item.name]
-        if canonical.managed_after is not None:
-            _assert_canonical_member_source_current(canonical)
-            if not dry_run:
-                _assert_canonical_member_state(canonical, item.canonical_target, after=True)
-        elif (
-            _tree_sha256(
-                canonical.source,
-                ignore_runtime_cache=canonical.ignore_runtime_cache,
-            )
-            != item.canonical_digest
-            or (
-                not dry_run
-                and _tree_sha256(
-                    item.canonical_target,
-                    ignore_runtime_cache=canonical.ignore_runtime_cache,
-                )
-                != item.canonical_digest
-            )
-        ):
-            raise ValueError(
-                f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}"
-            )
         installed = projection_root / item.name
         if item.action == "create":
             current = not (installed.exists() or installed.is_symlink())
@@ -9755,6 +9846,7 @@ def _apply_codex_legacy_skill_projection_plan(
     root_identity: tuple[int, int, int, int] | None,
     home_owner: _CreateOnlyMutablePath,
     projection_owner: _CreateOnlyMutablePath,
+    *, finalized_lead_digest: str | None = None,
 ) -> tuple[str, ...]:
     transaction = projection_owner.transaction
     if home_owner.transaction is not transaction:
@@ -9771,6 +9863,7 @@ def _apply_codex_legacy_skill_projection_plan(
         root_identity,
         dry_run=projection_owner.dry_run,
         backup_digest_reader=backup_digest if dependencies else None,
+        finalized_lead_digest=finalized_lead_digest,
     )
     projection_relative = projection_root.relative_to(projection_owner.anchor)
     canonical_by_name = {skill.name: skill for skill in canonical_plan.skills}
@@ -10905,7 +10998,24 @@ def _install_codex_legacy_skill_compatibility(
     authorized_migrations: frozenset[str],
     *,
     dry_run: bool,
+    finalized_lead_digest: str | None = None,
+    canonical_authority: Any | None = None,
 ) -> None:
+    if not dry_run and finalized_lead_digest is None:
+        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing finalized Lead")
+    def assert_canonical_binding():
+        if canonical_authority is not None:
+            canonical_authority.assert_current()
+            expected_root = canonical_authority.resolved_root
+        else:
+            expected_root = home / ".agents"
+            current = _linked_runtime_subroots_module(root).LinkedRuntimeSubrootAuthority.bind(
+                expected_root, scope="global", trusted_global_roots=(expected_root,))
+            if current is not None:
+                raise ValueError("E_RUNTIME_SUBROOT_IDENTITY_CHANGED")
+        if canonical_skills_target != expected_root / "skills":
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: canonical compatibility root")
+    assert_canonical_binding()
     logical_root = target / "skills"
     try:
         authority = _linked_runtime_subroots_module(
@@ -10968,9 +11078,13 @@ def _install_codex_legacy_skill_compatibility(
             root_identity,
             home_owner,
             projection_owner,
+            finalized_lead_digest=finalized_lead_digest,
         )
         if authority is not None:
             authority.assert_current()
+        assert_canonical_binding()
+        _assert_codex_legacy_canonical_current(
+            plan, canonical_plan, dry_run=dry_run, finalized_lead_digest=finalized_lead_digest)
         transaction.commit()
     if collisions:
         raise ValueError(
@@ -11343,12 +11457,38 @@ def _checkpoint(
         raise RuntimeError(f"hook transaction checkpoint failed at {stage}")
 
 
+def _assert_lead_receipt_current(
+    receipt_plan: _LeadReceiptPlan, receipt_path: Path,
+    transaction: _InstallTransaction | None,
+) -> tuple[bytes, tuple[int, int, int, int], str, str] | None:
+    """Accept the frozen receipt or a current effect rooted in that observation."""
+    current = _read_lead_receipt(receipt_path)
+    if current == receipt_plan.observed:
+        return current
+    for effect in transaction._effects if transaction is not None else ():
+        if effect.path != receipt_path:
+            continue
+        prior = receipt_plan.observed
+        if prior is None:
+            admitted = not effect.before
+        else:
+            payload, identity, _digest, _schema = prior
+            node = effect.before.get(receipt_path)
+            admitted = (len(effect.before) == 1 and node is not None
+                        and node.kind == "file" and node.python_identity == identity
+                        and node.data == hashlib.sha256(payload).hexdigest())
+        if admitted:
+            transaction.assert_effect_current(effect)
+            return current
+    raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT: preflight drift")
+
+
 def _finalize_canonical_lead_receipt(
     plan: _CanonicalSkillsPlan,
     target: Path,
     owner: _CreateOnlyMutablePath,
     reclaimed: tuple[tuple[Path, str], ...] = (),
-) -> None:
+) -> str | None:
     """Publish the existing receipt only for the bound stage minus proven removals."""
     if owner.dry_run:
         return
@@ -11359,25 +11499,30 @@ def _finalize_canonical_lead_receipt(
             relative = removed.relative_to(lead).as_posix()
         except ValueError:
             continue
-        if expected.get(relative) != digest:
+        if (type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                or expected.get(relative) != digest):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: unbound Lead reclamation")
         del expected[relative]
     if _stage_tree_manifest(lead, ignore_runtime_cache=True) != tuple(sorted(expected.items())):
         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final Lead manifest")
+    digest = _tree_manifest_sha256(tuple(sorted(expected.items())))
     if plan.lead_receipt is not None:
-        digest = _tree_sha256(lead, ignore_runtime_cache=True)
-        if digest is None:
-            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final Lead digest")
         payload = _lead_receipt_bytes(digest)
-        current_receipt = _read_lead_receipt(target / _LEAD_RECEIPT_NAME)
+        receipt_path = target / _LEAD_RECEIPT_NAME
+        current_receipt = _assert_lead_receipt_current(
+            plan.lead_receipt, receipt_path, owner.transaction)
         if current_receipt is not None and current_receipt[0] == payload:
-            return
+            return digest
         prior_receipt = plan.lead_receipt.observed
         relative = target.relative_to(owner.anchor) / _LEAD_RECEIPT_NAME
         if prior_receipt is None:
             owner.create_file(relative, payload)
         elif prior_receipt[0] != payload:
             owner.replace_exact_file(relative, hashlib.sha256(prior_receipt[0]).hexdigest(), payload)
+        published = _assert_lead_receipt_current(plan.lead_receipt, receipt_path, owner.transaction)
+        if published is None or published[0] != payload:
+            raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT: receipt publication")
+    return digest
 
 
 def _reclaim_retired(
@@ -12201,7 +12346,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     claude_agents_owner, claude_commands_owner, create_only) if owner is not None),
             )
             assert canonical_plan is not None
-            _finalize_canonical_lead_receipt(
+            finalized_lead_digest = _finalize_canonical_lead_receipt(
                 canonical_plan, canonical_skills_target, canonical_skills_owner, reclaimed
             )
             transaction.commit()
@@ -12210,7 +12355,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             assert canonical_plan is not None
             _install_codex_legacy_skill_compatibility(
                 root, home, target, canonical_plan, canonical_skills_target,
-                legacy_codex_skill_migrations, dry_run=args.dry_run)
+                legacy_codex_skill_migrations, dry_run=args.dry_run,
+                finalized_lead_digest=finalized_lead_digest,
+                canonical_authority=canonical_agents_authority)
         if args.dry_run:
             print("RESULT: DRY-RUN complete (no files modified).")
             return 0

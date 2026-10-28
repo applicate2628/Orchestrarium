@@ -63,6 +63,16 @@ def test_ledger_source_pairing_ignores_a_cwd_owner(tmp_path, monkeypatch):
     assert Path(module._ledger_owner().__file__).samefile(ROOT / 'scripts/agent-run-ledger.py')
 
 
+
+def _remove_test_directory_link(path: Path) -> None:
+    # POSIX directory symlinks unlink; Windows junctions use rmdir.
+    if path.is_symlink():
+        path.unlink()
+    else:
+        assert sys.platform == "win32" and path.is_junction()
+        path.rmdir()
+
+
 def _ledger_project_scope(tmp_path, *, provider_target=None):
     from test_legacy_obligation_migration import make_directory_link
     base = tmp_path / 'scope'
@@ -123,7 +133,7 @@ def test_ledger_projection_witness_survives_until_actual_use(tmp_path, monkeypat
     unrelated = tmp_path / 'unrelated-lead'
     unrelated.mkdir()
     before = projection.resolve(strict=True)
-    projection.rmdir()
+    _remove_test_directory_link(projection)
     make_directory_link(projection, unrelated)
     assert projection.resolve(strict=True) != before
     monkeypatch.setattr(module, '_ledger_helper_binding', lambda: selected)
@@ -153,7 +163,7 @@ def test_ledger_projection_is_rechecked_before_canonical_bootstrap(tmp_path, mon
     def read_then_retarget(path):
         payload = read(path)
         if path == authority:
-            projection.rmdir()
+            _remove_test_directory_link(projection)
             make_directory_link(projection, unrelated)
             reached.append(True)
         return payload
@@ -171,7 +181,7 @@ def test_ledger_initial_wrong_projection_and_unrelated_file_do_not_change_scope(
     selected.assert_current()
     unrelated = tmp_path / 'unrelated-lead'
     unrelated.mkdir()
-    projection.rmdir()
+    _remove_test_directory_link(projection)
     make_directory_link(projection, unrelated)
     assert module.ledger_helper() is None
     with pytest.raises(ValueError, match='WI-LEDGER-RESOURCE-MISSING'):

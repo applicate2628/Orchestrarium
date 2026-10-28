@@ -4,6 +4,15 @@ This file is the canonical shared core for the repository's subagent operating m
 
 Visual companion remains pack-local: use the corresponding `operating-model-diagram.md` next to the pack-local addendum.
 
+### Optional SDK execution representation
+
+The source-mode SDK integration retains this methodology and its existing admission,
+review, resource and receiving owners. It does not create a second Lead or make
+provider output authorizing. Versioned SDK records use actual SDK configuration,
+not fabricated CLI arguments; older CLI records keep their original representation.
+See [SDK implementation boundaries](../../docs/sdk-execution.md). A transport result,
+SDK paused approval or test fixture does not authorize a new effect or lifecycle closure.
+
 ## 1. Main rule for the lead
 
 > **Split subagents by the stages selected for the task and by triggered risk type.**

@@ -867,6 +867,44 @@ def test_codex_hook_trust_uses_target_sidecar_and_ignores_helper_sibling(
     assert str(stale_inventory) not in observed
 
 
+@pytest.mark.parametrize("caller_deadline,expected_deadline", [(None, 130.0), (105.0, 105.0), (200.0, 130.0)])
+def test_hook_trust_support_request_inherits_caller_bounds(tmp_path, monkeypatch, caller_deadline, expected_deadline):
+    captured = []
+    cancellation_probe = lambda: False
+    monkeypatch.setattr(owner.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(owner, "codex_hook_health_helper", lambda _home: tmp_path / "synthetic-helper.py")
+    monkeypatch.setattr(owner.ProcessRunnerV1, "run", lambda self, request: captured.append(request) or SimpleNamespace(outcome="success", target_exit_code=0))
+    kwargs = {} if caller_deadline is None else {"deadline_monotonic": caller_deadline, "cancellation_probe": cancellation_probe}
+    with owner.ProcessRunnerV1() as runner:
+        assert owner.require_codex_hook_trust(runner, ["synthetic-codex"], tmp_path, tmp_path, **kwargs) == 0
+    assert captured[0].deadline_monotonic == expected_deadline
+    assert captured[0].cancellation_probe is (None if caller_deadline is None else cancellation_probe)
+    assert captured[0].settle_policy.timeout_seconds == 5.0
+
+
+def test_support_command_expired_caller_deadline_prevents_native_effect(tmp_path, monkeypatch):
+    process_owner = sys.modules[owner.ProcessRunnerV1.__module__]
+    original_run = owner.ProcessRunnerV1.run
+    def validate_then_run(runner, request):
+        with pytest.raises(owner.ProcessSupervisionError) as caught:
+            process_owner.validate_process_request(request)
+        assert caught.value.failure_id == "PSV1-REQUEST-INVALID"
+        return original_run(runner, request)
+    monkeypatch.setattr(owner.ProcessRunnerV1, "run", validate_then_run)
+    marker = tmp_path / "must-not-start"
+    with owner.ProcessRunnerV1() as runner:
+        result, stdout, stderr = owner.run_support_command(
+            runner, [FIXTURE_PYTHON_EXECUTABLE, "-c", "from pathlib import Path; Path(" + repr(str(marker)) + ").touch()"],
+            cwd=tmp_path, environment={}, timeout_secs=30, deadline_monotonic=0.0,
+            cancellation_probe=lambda: False,
+        )
+    assert result.outcome != "success"
+    # POSIX intentionally fails closed before full request validation; Windows
+    # reaches the same existing deadline validator checked above.
+    assert result.failure_id in {"PSV1-REQUEST-INVALID", "PSV1-POSIX-ORACLE-UNAVAILABLE"}
+    assert not marker.exists()
+
+
 def test_result_limit_control_has_safe_default_and_positive_override() -> None:
     assert owner.parse_control(["topic"]).result_max_bytes == 1024 * 1024
     assert owner.parse_control(["topic", "--result-max-bytes", "17"]).result_max_bytes == 17
@@ -3271,7 +3309,9 @@ def test_codex_terminal_record_requires_actual_terminal_readback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     item = _make_work_item(tmp_path, "codex-terminal-readback")
-    control = owner.Control(ledger=str(item))
+    control = owner.Control(
+        ledger=str(item), ledger_max_events=100, ledger_max_bytes=1048576
+    )
     outcome = owner.FinalOutcome(
         0, "COMPLETE:EXTERNAL_NONAUTHORIZING", "completed", "PASS", "fixture",
         0, "COMPLETE:PASS", "completed", "PASS", "fixture",
@@ -4459,32 +4499,14 @@ def test_finalizer_uses_output_context_instead_of_coverage_labels(
     disposition: str | None,
     needles: tuple[bytes, ...],
 ) -> None:
-    child = tmp_path / "synthetic-provider.py"
-    child.write_text(
-        "import sys\nsys.stdin.buffer.read()\nsys.stdout.buffer.write(b'GATE: PASS\\n')\n",
-        encoding="utf-8",
-    )
-    environment = {"PATH": os.environ["PATH"]}
-    for name in ("SYSTEMROOT", "WINDIR"):
-        if name in os.environ:
-            environment[name] = os.environ[name]
-    process_result, raw_stdout, raw_stderr = owner.run_provider_process(
-        owner.ProcessRunnerV1(),
-        [FIXTURE_PYTHON_EXECUTABLE, str(child)],
-        [],
-        environment,
-        ROOT,
-        b"synthetic task",
-        owner.Control(timeout_secs=5, capture_max_bytes=1024),
-        "claude",
-    )
     lifecycle = _lifecycle(tmp_path, monkeypatch)
+    _write_result(lifecycle, b"GATE: PASS\n")
     stream = _BinaryOutput()
     monkeypatch.setattr(owner.sys, "stdout", stream)
 
     receipt_path = (tmp_path / f"coverage-{disposition}.receipt").resolve()
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
-        code = owner.finalize_reserved_run_once(
+        code = _finalize_observed_fixture(
             owner.Control(terminal_receipt=receipt_path),
             "claude",
             "opus",
@@ -4493,14 +4515,9 @@ def test_finalizer_uses_output_context_instead_of_coverage_labels(
             "",
             _initialized_reserved(receipt, lifecycle),
             0,
-            owner.provider_stream_result(process_result),
             credential_needles=needles,
             auth_output_scan_disposition=disposition,
             output_context=owner.ProviderOutputContext(needles) if disposition is not None else None,
-            attempted=True,
-            raw_stdout=raw_stdout,
-            raw_stderr=raw_stderr,
-            process_result=process_result,
         )
 
     payload = owner.parse_provider_result(stream.getvalue())
@@ -5361,3 +5378,35 @@ def test_capture_transfer_one_owner_preserves_phase_and_primary(monkeypatch, sta
     count = len(closes)
     assert reserved.cleanup_once() is result and len(closes) == count
     assert all(kind != "native" or value != 37 for kind, value in closes)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink integration; Windows qualification is separate")
+def test_parent_preserves_hook_alias_for_inventory(tmp_path, monkeypatch):
+    from tests.test_hook_health import CHECKER, _host_trust_fixture
+
+    home = tmp_path / "home"
+    home.mkdir()
+    physical = home / "physical-hooks.json"
+    rows, _ = _host_trust_fixture(physical)
+    selected = home / "hooks.json"
+    selected.symlink_to(physical)
+    inventory = home / CHECKER.INVENTORY_NAME
+    specs = [(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows]
+    CHECKER.write_codex_inventory(
+        target=selected, specs=specs, inventory_path=inventory, host_os="posix")
+    value = json.loads(inventory.read_text())
+    value["sourcePath"] = str(selected)
+    inventory.write_text(json.dumps(value))
+    CHECKER._load_codex_inventory(inventory, target=selected, host_os="posix")
+
+    def support(_runner, argv, **_kwargs):
+        target = Path(argv[argv.index("--target") + 1])
+        try:
+            CHECKER._load_codex_inventory(inventory, target=target, host_os="posix")
+        except ValueError as error:
+            return (SimpleNamespace(outcome="error", target_exit_code=1),
+                    b"", str(error).encode())
+        return SimpleNamespace(outcome="success", target_exit_code=0), b"", b""
+
+    monkeypatch.setattr(owner, "run_support_command", support)
+    assert owner.require_codex_hook_trust(object(), ["fixture-codex"], home, tmp_path) == 0

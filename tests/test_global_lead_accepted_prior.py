@@ -2193,10 +2193,10 @@ def test_unreceipted_lead_adoption_is_digest_bound_global_only(tmp_path: Path) -
     (source / "lead" / "SKILL.md").write_bytes(b"next version")
     observed = installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
     assert observed is not None
-    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_REQUIRED") as failure:
+    with pytest.raises(installer._InstallFailure, match="E_CANONICAL_LEAD_ADOPTION_REQUIRED") as failure:
         installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
-    assert observed in str(failure.value)
-    for supplied in ("0" * 64, observed.upper()):
+    assert "adoption=tree-v2:" + observed in installer._installer_failure_text(failure.value)
+    for supplied in ("tree-v2:" + "0" * 64, observed.upper()):
         with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_MISMATCH"):
             installer._preflight_canonical_skills(
                 source, skills, root=ROOT, global_install=True,
@@ -2204,12 +2204,12 @@ def test_unreceipted_lead_adoption_is_digest_bound_global_only(tmp_path: Path) -
             )
     with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_MISMATCH"):
         installer._preflight_canonical_skills(
-            source, skills, root=ROOT, replace_unreceipted_lead_sha256=observed,
+            source, skills, root=ROOT, replace_unreceipted_lead_sha256="tree-v2:" + observed,
         )
     assert installer._parser("codex").parse_args(["--global", "--force"]).force
     plan = installer._preflight_canonical_skills(
         source, skills, root=ROOT, global_install=True,
-        replace_unreceipted_lead_sha256=observed,
+        replace_unreceipted_lead_sha256="tree-v2:" + observed,
     )
     try:
         with installer._InstallTransaction([skills], enabled=True) as transaction:
@@ -2225,7 +2225,7 @@ def test_unreceipted_lead_adoption_is_digest_bound_global_only(tmp_path: Path) -
     with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_MISMATCH"):
         installer._preflight_canonical_skills(
             source, skills, root=ROOT, global_install=True,
-            replace_unreceipted_lead_sha256=observed,
+            replace_unreceipted_lead_sha256="tree-v2:" + observed,
         )
 
 
@@ -2238,7 +2238,7 @@ def test_unreceipted_lead_adoption_dry_run_is_read_only(tmp_path: Path) -> None:
     digest = installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
     plan = installer._preflight_canonical_skills(
         source, skills, root=ROOT, global_install=True,
-        replace_unreceipted_lead_sha256=digest,
+        replace_unreceipted_lead_sha256="tree-v2:" + digest,
     )
     try:
         owner = installer._CreateOnlyMutablePath(
@@ -2370,9 +2370,9 @@ def test_global_codex_native_preflight_precedes_transaction_without_adoption(
     )
     def reject_transaction(*_args, **_kwargs):
         raise AssertionError("transaction entered before native preflight")
-    monkeypatch.setattr(installer, "_InstallTransaction", reject_transaction)
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", reject_transaction)
     assert installer.install("codex", ["--global", "--no-hypothesis-hook"]) == 1
-    assert "E_CREATE_ONLY_CONFIG_INVALID" in capsys.readouterr().err
+    assert "cause=validation-failed" in capsys.readouterr().err
     assert _tree_bytes(home) == before
     assert installer._CreateOnlyMutablePath._identity(config) == identity
 
@@ -2392,7 +2392,7 @@ def test_claude_global_adoption_dry_run_skips_codex_preflight(
     monkeypatch.setenv("HOME", str(anchor))
     assert installer.install("claude", [
         "--global", "--dry-run", "--no-hypothesis-hook",
-        "--replace-unreceipted-lead-sha256", observed,
+        "--replace-unreceipted-lead-sha256", "tree-v2:" + observed,
     ]) == 0
     output = capsys.readouterr().out
     assert f"{observed}: 2 replacements" in output

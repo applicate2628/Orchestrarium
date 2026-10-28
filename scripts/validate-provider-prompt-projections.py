@@ -19,8 +19,7 @@ from typing import Any, Sequence
 
 STABLE_ID = "E_TRANSPORT_PROJECTION_PARITY"
 SCHEMA_VERSION = 1
-TRANSPORT_FILES = (
-    "model_routing/launch_policy.py",
+PRE_SDK_TRANSPORT_FILES = (
     "provider_prompt.py",
     "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
@@ -30,6 +29,32 @@ TRANSPORT_FILES = (
     "external-prompt-governance.md",
     "external-role-taxonomy.v1.json",
 )
+PRE_POLICY_SDK_TRANSPORT_FILES = PRE_SDK_TRANSPORT_FILES + (
+    "process_supervision/sdk_worker.py",
+    "sdk_execution/__init__.py",
+    "sdk_execution/_async.py",
+    "sdk_execution/acp_streams.py",
+    "sdk_execution/claude.py",
+    "sdk_execution/codex.py",
+    "sdk_execution/codex_tools.py",
+    "sdk_execution/dispatch.py",
+    "sdk_execution/contracts.py",
+    "sdk_execution/coordinator.py",
+    "sdk_execution/coordination.py",
+    "sdk_execution/coordination_codex.py",
+    "sdk_execution/coordination_model.py",
+    "sdk_execution/coordination_receiving.py",
+    "sdk_execution/grok.py",
+    "sdk_execution/kimi.py",
+    "sdk_execution/mimo.py",
+    "sdk_execution/minimax.py",
+    "sdk_execution/receiving.py",
+    "sdk_execution/runtime.py",
+    "sdk_execution/worker.py",
+)
+POLICY_TRANSPORT_FILES = ("model_routing/launch_policy.py",) + PRE_SDK_TRANSPORT_FILES
+TRANSPORT_FILES = ("model_routing/launch_policy.py",) + PRE_POLICY_SDK_TRANSPORT_FILES
+PREDECESSOR_TRANSPORT_SETS = (PRE_SDK_TRANSPORT_FILES, POLICY_TRANSPORT_FILES, PRE_POLICY_SDK_TRANSPORT_FILES)
 EXTERNAL_GOVERNANCE_BEGIN = "<!-- BEGIN ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->"
 EXTERNAL_GOVERNANCE_END = "<!-- END ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->"
 _TOP_KEYS = frozenset({"schemaVersion", "packRevision", "files"})
@@ -147,10 +172,7 @@ def _open_ordinary_file(path: Path, label: str) -> _BoundOrdinaryFile:
     return _open_ordinary_leaf(path, label)
 
 
-PRIOR_TRANSPORT_FILES_V1 = tuple(name for name in TRANSPORT_FILES if name != "model_routing/launch_policy.py")
-
-
-def _load_manifest(path: Path, *, allow_prior_transport: bool = False) -> dict[str, Any]:
+def _load_manifest(path: Path, *, predecessor_only: bool = False) -> dict[str, Any]:
     bound = _open_ordinary_file(path, "manifest")
     try:
         raw = bound.read_bytes()
@@ -170,10 +192,8 @@ def _load_manifest(path: Path, *, allow_prior_transport: bool = False) -> dict[s
     if not isinstance(revision, str) or not revision.strip():
         raise _fail("manifest pack revision")
     files = manifest.get("files")
-    if not isinstance(files, dict) or not (
-        tuple(files) == TRANSPORT_FILES
-        or (allow_prior_transport and tuple(files) == PRIOR_TRANSPORT_FILES_V1)
-    ):
+    admitted_sets = (TRANSPORT_FILES, *PREDECESSOR_TRANSPORT_SETS) if predecessor_only else (TRANSPORT_FILES,)
+    if not isinstance(files, dict) or tuple(files) not in admitted_sets:
         raise _fail("manifest must bind the complete ordered transport set")
     return manifest
 

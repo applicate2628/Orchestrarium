@@ -435,6 +435,46 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertEqual(b"old", target.read_bytes())
         self.assert_clean()
 
+    def test_sdk_runtime_delivery_is_complete_and_rollback_preserves_unmanaged_files(self):
+        """Use the real delivery inventory and copy owner, without invoking providers."""
+        expected = {f"sdk_execution/{path.name}" for path in
+                    (ROOT / "scripts/sdk_execution").glob("*.py")}
+        expected.add("process_supervision/sdk_worker.py")
+        self.assertTrue(expected)
+        for host, relative in (("codex", "skills/lead/scripts"),
+                               ("claude", "agents/scripts")):
+            with self.subTest(host=host):
+                target = self.target / host / relative
+                destinations = PI._runtime_file_destinations(
+                    ROOT, target, include_codex_helpers=host == "codex")
+                selected = tuple((source, dest) for source, dest in destinations
+                                 if source.is_relative_to(ROOT / "scripts")
+                                 if source.relative_to(ROOT / "scripts").as_posix() in expected)
+                self.assertEqual(expected, {dest.relative_to(target).as_posix()
+                                            for _, dest in selected})
+                sentinel = target / "sdk_execution/operator-local.txt"
+                sentinel.parent.mkdir(parents=True)
+                sentinel.write_bytes(b"preserve operator file")
+                existing = target / "sdk_execution/contracts.py"
+                existing.write_bytes(b"prior installed contracts")
+                os.utime(existing, ns=(1_600_000_000_100_000_000, 1_600_000_000_200_000_000))
+                prior_mtime = existing.stat().st_mtime_ns
+                transaction = self.transaction([dest for _, dest in selected],
+                                               [dest for _, dest in selected])
+                with self.assertRaisesRegex(RuntimeError, "later producer failure"):
+                    with transaction:
+                        PI._install_runtime_files(ROOT, target, False,
+                            destinations=selected, mutable_owner=self.owner(transaction))
+                        for source, dest in selected:
+                            self.assertEqual(source.read_bytes(), dest.read_bytes())
+                        self.assertEqual(b"preserve operator file", sentinel.read_bytes())
+                        raise RuntimeError("later producer failure")
+                self.assertTrue(all(not dest.exists() for _, dest in selected if dest != existing))
+                self.assertEqual(b"prior installed contracts", existing.read_bytes())
+                self.assertEqual(prior_mtime, existing.stat().st_mtime_ns)
+                self.assertEqual(b"preserve operator file", sentinel.read_bytes())
+        self.assert_clean()
+
     def test_runtime_and_sync_wrappers_propagate_owner_and_skip_excluded(self):
         source = self.source / "runtime.py"
         source.write_bytes(b"runtime")
@@ -628,8 +668,11 @@ class ProducerIntegrationTests(unittest.TestCase):
         legacy = self.target / "legacy.toml"
         legacy.write_bytes(b"synthetic frozen legacy")
         original_identity = PI._CreateOnlyMutablePath._identity(legacy)
+        selection, config_payload = PI._read_native_config_selection(
+            config, PI._InstallTransaction([], enabled=False))
         plan = SimpleNamespace(config_exists=True, config_prior_digest=PI._file_sha256(config),
-                               config_payload=config.read_bytes(), legacy_exists=True, legacy_path=legacy)
+                               config_selection=selection, config_payload=config_payload,
+                               legacy_exists=True, legacy_path=legacy)
         transaction = self.transaction([])
         primary = RuntimeError("later")
         with patch.object(PI, "CODEX_LEGACY_LUNA_SHA256", PI._file_sha256(legacy)):
@@ -700,7 +743,10 @@ class ProducerIntegrationTests(unittest.TestCase):
                 backup.mkdir()
                 (backup / "leaf").write_bytes(b"historical")
                 foreign = transaction._capture_node(backup)
-                self.assertNotEqual(original.native_proof, foreign.native_proof)
+                if original.native_proof is not None:
+                    self.assertNotEqual(original.native_proof, foreign.native_proof)
+                else:
+                    self.assertNotEqual(original.python_identity[:2], foreign.python_identity[:2])
                 foreign_identity = PI._CreateOnlyMutablePath._identity(backup)
                 def observed(path, **kwargs):
                     if Path(path) == backup:
@@ -716,6 +762,8 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(failure, f"replacement committed; foreign digest reads={len(foreign_reads)}; "
             f"source_is_original={PI._CreateOnlyMutablePath._identity(installed)==source_identity}; "
             f"recovery={transaction._remaining_recovery()}")
+        self.assertIsInstance(failure.cause, ValueError)
+        self.assertTrue(str(failure.cause).startswith("E_READ_ONLY_DEPENDENCY_CHANGED:"))
         self.assertEqual(foreign_reads, [])
         self.assertEqual(foreign_native_reads, [])
         self.assertFalse(transaction._effects)
@@ -731,14 +779,17 @@ class ProducerIntegrationTests(unittest.TestCase):
         transaction = self.transaction([installed, backup], readonly=(backup,))
         digest = PI._tree_sha256
         reads = []
-        with self.assertRaises(PI._InstallFailure):
+        with self.assertRaises(PI._InstallFailure) as caught:
             with transaction:
                 member = backup / "leaf"
                 before = transaction._original[backup][member]
                 member.rename(self.root / "original-backup-member")
                 member.write_bytes(b"historical")
                 foreign = transaction._capture_node(member, kind="file", data=before.data)
-                self.assertNotEqual(before.native_proof, foreign.native_proof)
+                if before.native_proof is not None:
+                    self.assertNotEqual(before.native_proof, foreign.native_proof)
+                else:
+                    self.assertNotEqual(before.python_identity[:2], foreign.python_identity[:2])
                 def observed(path, **kwargs):
                     if Path(path) == backup:
                         reads.append(path)
@@ -747,6 +798,8 @@ class ProducerIntegrationTests(unittest.TestCase):
                     owner = self.owner(transaction)
                     PI._apply_codex_legacy_skill_projection_plan(plan, canonical, projection,
                         PI._CreateOnlyMutablePath._identity(projection), owner, owner)
+        self.assertIsInstance(caught.exception.cause, ValueError)
+        self.assertTrue(str(caught.exception.cause).startswith("E_READ_ONLY_DEPENDENCY_CHANGED:"))
         self.assertEqual(reads, [])
         self.assertEqual(PI._CreateOnlyMutablePath._identity(installed), source_identity)
         self.assertFalse(transaction._effects)

@@ -47,6 +47,7 @@ def main(argv: list[str]) -> int:
     # CLI argv0 retains the selected launcher even when its file is a link.
     # A direct main() library call uses its selected module origin instead.
     runtime_namespace = Path(os.path.abspath(sys.argv[0] if __name__ == "__main__" else __file__)).parent
+    sys.path.insert(0, str(runtime_namespace))  # Import the selected adjacent participant.
     from provider_prompt import launch
 
     return launch("codex", argv, runtime_namespace=runtime_namespace)

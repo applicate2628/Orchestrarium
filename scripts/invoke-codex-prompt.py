@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""File-based prompt transport for Codex CLI."""
+"""File-based Codex transport; explicit SDK review is an opt-in route."""
 
 from __future__ import annotations
 
@@ -18,6 +18,8 @@ options:
   --prompt-file PATH             read the prompt from PATH
   -PromptFile PATH               legacy spelling for --prompt-file
   --terminal-receipt PATH        write the required terminal receipt to PATH
+  --sdk-review-binding PATH      opt into bounded Windows SDK review; no CLI fallback
+
   --user-approved-launch         caller asserts genuine agreement for this one managed Astra/Max attempt
   --ledger PATH                  append the optional terminal ledger event
   -Ledger PATH                   legacy spelling for --ledger
@@ -47,6 +49,7 @@ def main(argv: list[str]) -> int:
     # CLI argv0 retains the selected launcher even when its file is a link.
     # A direct main() library call uses its selected module origin instead.
     runtime_namespace = Path(os.path.abspath(sys.argv[0] if __name__ == "__main__" else __file__)).parent
+    sys.path.insert(0, str(runtime_namespace))  # Import the selected adjacent participant.
     from provider_prompt import launch
 
     return launch("codex", argv, runtime_namespace=runtime_namespace)

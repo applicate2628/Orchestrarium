@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-import io
 import json
 import os
 import shutil
 import stat
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
 
 import pytest
@@ -25,6 +23,21 @@ INSTALLER = ROOT / "scripts" / "production_installer.py"
 RECEIPT = ".orchestrarium-nonlead-skills-receipt.v1.json"
 SCHEMA = "orchestrarium.canonical-nonlead-skills-install.v1"
 NAMES = ("analyst", "knowledge-archivist")
+
+
+def _copy_current_package(receiver: Path) -> None:
+    # This is the current-package case, not a historical migration fixture.
+    # Read the same tracked working source as the imported installer, even before commit.
+    names = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).split(b"\0")
+    for raw in names:
+        if not raw:
+            continue
+        relative = Path(os.fsdecode(raw))
+        if not (ROOT / relative).is_file():
+            continue
+        (receiver / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, receiver / relative, follow_symlinks=False)
+    assert (receiver / "scripts/production_installer.py").read_bytes() == INSTALLER.read_bytes()
 
 
 def _installer():
@@ -79,7 +92,9 @@ def test_nonlead_receipt_two_named_skills_upgrade_a_b_c(tmp_path: Path) -> None:
             for name in NAMES
         }
         assert json.loads(receipt.read_bytes()) == {
-            "schema": SCHEMA, "skills": observed,
+            "schema": installer._NONLEAD_MEMBER_RECEIPT_SCHEMA,
+            "skills": {name: {"members": dict(installer._stage_tree_manifest(
+                skills / name, ignore_runtime_cache=True))} for name in NAMES},
         }
         versions.append(observed)
     assert all(versions[0][name] != versions[1][name] != versions[2][name]
@@ -156,10 +171,10 @@ def test_nonlead_unreceipted_unknown_requires_exact_grant(tmp_path: Path) -> Non
     receipt.unlink()
     (source / "knowledge-archivist" / "SKILL.md").write_bytes(b"next release\n")
     observed = installer._tree_sha256(skills / "knowledge-archivist", ignore_runtime_cache=True)
-    with pytest.raises(ValueError, match=f"E_CANONICAL_SKILL_ADOPTION_REQUIRED: knowledge-archivist={observed}"):
+    with pytest.raises(installer._InstallFailure, match="E_CANONICAL_SKILL_ADOPTION_REQUIRED"):
         installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
     for grants in (
-        ("knowledge-archivist=" + "0" * 64,),
+        ("knowledge-archivist=tree-v2:" + "0" * 64,),
         ("knowledge-archivist=" + observed.upper(),),
         ("knowledge-archivist=" + observed,) * 2,
         ("lead=" + observed,),
@@ -172,7 +187,7 @@ def test_nonlead_unreceipted_unknown_requires_exact_grant(tmp_path: Path) -> Non
             )
     plan = installer._preflight_canonical_skills(
         source, skills, root=ROOT, global_install=True,
-        replace_unreceipted_skill_sha256=(f"knowledge-archivist={observed}",),
+        replace_unreceipted_skill_sha256=(f"knowledge-archivist=tree-v2:{observed}",),
     )
     try:
         with installer._InstallTransaction([skills], enabled=True) as transaction:
@@ -181,18 +196,18 @@ def test_nonlead_unreceipted_unknown_requires_exact_grant(tmp_path: Path) -> Non
             transaction.commit()
     finally:
         installer._discard_canonical_skills_plan(plan)
-    assert json.loads(receipt.read_bytes())["skills"]["knowledge-archivist"] == installer._tree_sha256(
-        skills / "knowledge-archivist", ignore_runtime_cache=True
-    )
+    assert json.loads(receipt.read_bytes())["skills"]["knowledge-archivist"] == {
+        "members": dict(installer._stage_tree_manifest(skills / "knowledge-archivist", ignore_runtime_cache=True))
+    }
     with pytest.raises(ValueError, match="E_CANONICAL_SKILL_ADOPTION_MISMATCH"):
         installer._preflight_canonical_skills(
             source, skills, root=ROOT, global_install=True,
-            replace_unreceipted_skill_sha256=(f"knowledge-archivist={observed}",),
+            replace_unreceipted_skill_sha256=(f"knowledge-archivist=tree-v2:{observed}",),
         )
 
 
 @pytest.mark.parametrize("drift", ["byte", "extra", "missing", "map-member"])
-def test_nonlead_receipted_drift_refuses_without_writes(tmp_path: Path, drift: str) -> None:
+def test_nonlead_receipt_protects_managed_members_and_foreign_files(tmp_path: Path, drift: str) -> None:
     installer, source, home, skills, receipt = _fixture(tmp_path)
     _apply(installer, source, home, skills)
     if drift == "byte":
@@ -206,14 +221,22 @@ def test_nonlead_receipted_drift_refuses_without_writes(tmp_path: Path, drift: s
         del entries["skills"]["analyst"]
         receipt.write_bytes((json.dumps(entries, separators=(",", ":")) + "\n").encode())
     (source / "analyst" / "SKILL.md").write_bytes(b"new source")
+    extra_identity = (skills / "analyst" / "extra.txt").stat().st_ino if drift == "extra" else None
     before = _inventory(skills)
     signal = "E_CANONICAL_SKILLS_RECEIPT_INVALID" if drift == "map-member" else "E_CANONICAL_SKILLS_RECEIPT_DRIFT: analyst"
+    if drift == "extra":
+        _apply(installer, source, home, skills)
+        assert (skills / "analyst" / "extra.txt").read_bytes() == b"customized"
+        assert (skills / "analyst" / "extra.txt").stat().st_ino == extra_identity
+        assert "extra.txt" not in json.loads(receipt.read_bytes())["skills"]["analyst"]["members"]
+        assert (skills / "analyst" / "SKILL.md").read_bytes() == b"new source"
+        return
     with pytest.raises(ValueError, match=signal):
         installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
     assert _inventory(skills) == before
 
 
-def test_nonlead_current_stale_map_repairs_only_receipt(tmp_path: Path) -> None:
+def test_nonlead_unknown_legacy_map_refuses_without_repair(tmp_path: Path) -> None:
     installer, source, home, skills, receipt = _fixture(tmp_path)
     _apply(installer, source, home, skills)
     original = receipt.read_bytes()
@@ -221,8 +244,10 @@ def test_nonlead_current_stale_map_repairs_only_receipt(tmp_path: Path) -> None:
     record = json.loads(original)
     record["skills"]["analyst"] = "0" * 64
     receipt.write_bytes((json.dumps(record, separators=(",", ":")) + "\n").encode())
-    _apply(installer, source, home, skills)
-    assert receipt.read_bytes() == original
+    before = _inventory(skills)
+    with pytest.raises(ValueError, match="E_LEGACY_TREE_WITNESS_UNAVAILABLE"):
+        _apply(installer, source, home, skills)
+    assert _inventory(skills) == before
     assert {name: (skills / name).stat().st_ino for name in NAMES} == inodes
 
 
@@ -256,10 +281,12 @@ def test_nonlead_tree_and_map_transaction_rollback(
     (source / "analyst" / "SKILL.md").write_bytes(b"next source")
     plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
     try:
-        method = (installer._CreateOnlyMutablePath.replace_exact_tree if failpoint == "tree"
+        method = (installer._CreateOnlyMutablePath.migrate_exact_file if failpoint == "tree"
                   else installer._CreateOnlyMutablePath.replace_exact_file)
+        touched = []
         def abort_after(self, *args, **kwargs):
             result = method(self, *args, **kwargs)
+            touched.append(args[0])
             raise RuntimeError("after nonlead " + failpoint)
         monkeypatch.setattr(installer._CreateOnlyMutablePath, method.__name__, abort_after)
         with pytest.raises(RuntimeError, match="after nonlead"):
@@ -267,6 +294,7 @@ def test_nonlead_tree_and_map_transaction_rollback(
                 owner = installer._CreateOnlyMutablePath(home, transaction, dry_run=False)
                 installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
                 transaction.commit()
+        assert len(touched) == 1
     finally:
         installer._discard_canonical_skills_plan(plan)
     assert _inventory(skills) == before
@@ -289,13 +317,13 @@ def test_nonlead_global_cli_adoption_dry_run_reports_exact_grant(
     monkeypatch.setenv("HOME", str(home))
     assert installer.install("codex", ["--global", "--force", "--dry-run",
                                         "--no-hypothesis-hook"]) == 1
-    assert f"knowledge-archivist={observed}" in capsys.readouterr().err
+    assert f"knowledge-archivist=tree-v2:{observed}" in capsys.readouterr().err
     assert installer.install("codex", [
         "--global", "--dry-run", "--no-hypothesis-hook",
-        "--replace-unreceipted-skill-sha256", f"knowledge-archivist={observed}",
+        "--replace-unreceipted-skill-sha256", f"knowledge-archivist=tree-v2:{observed}",
     ]) == 0
     output = capsys.readouterr().out
-    assert f"knowledge-archivist={observed}" in output
+    assert f"knowledge-archivist=tree-v2:{observed}" in output
     assert "2 replacements" in output
     assert _inventory(home) == before
 
@@ -383,13 +411,17 @@ def test_nonlead_old_curated_prior_seeds_map(tmp_path: Path, monkeypatch: pytest
     installer, source, home, skills, receipt = _fixture(tmp_path)
     _apply(installer, source, home, skills)
     receipt.unlink()
-    prior = installer._tree_sha256(skills / "analyst", ignore_runtime_cache=True)
+    # Qualify the frozen source A independently, before mutating it to B.
+    prior = installer._legacy_tree_sha256(source / "analyst", ignore_runtime_cache=True)
+    strong = installer._tree_sha256(source / "analyst", ignore_runtime_cache=True)
     monkeypatch.setitem(installer.E7_CANONICAL_SKILL_TREE_SHA256, "analyst", prior)
+    monkeypatch.setitem(installer.ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256,
+                        "analyst", {prior: strong})
     (source / "analyst" / "SKILL.md").write_bytes(b"new version")
     _apply(installer, source, home, skills)
-    assert json.loads(receipt.read_bytes())["skills"]["analyst"] == installer._tree_sha256(
-        skills / "analyst", ignore_runtime_cache=True
-    )
+    assert json.loads(receipt.read_bytes())["skills"]["analyst"] == {
+        "members": dict(installer._stage_tree_manifest(skills / "analyst", ignore_runtime_cache=True))
+    }
 
 
 @pytest.mark.parametrize("order", [("codex", "claude"), ("claude", "codex")])
@@ -399,10 +431,7 @@ def test_nonlead_provider_orders_without_git_preserve_links_and_lead(
     installer = _installer()
     receiver = tmp_path / "receiver"
     receiver.mkdir()
-    archive = subprocess.run(["git", "archive", "--format=tar", "HEAD"],
-                             cwd=ROOT, check=True, capture_output=True).stdout
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
-        package.extractall(receiver, filter="data")
+    _copy_current_package(receiver)
     assert not (receiver / ".git").exists()
     monkeypatch.setattr(installer, "_repo_root", lambda _script: receiver)
     home = tmp_path / "home"
@@ -425,7 +454,8 @@ def test_nonlead_provider_orders_without_git_preserve_links_and_lead(
     current = json.loads(receipt.read_bytes())["skills"]
     for name in NAMES:
         assert current[name] != prior[name]
-        assert current[name] == installer._tree_sha256(skills / name, ignore_runtime_cache=True)
+        assert current[name] == {"members": dict(installer._stage_tree_manifest(
+            skills / name, ignore_runtime_cache=True))}
     assert lead_receipt.read_bytes() == lead_bytes
     for provider, inode in links.items():
         assert (home / f".{provider}" / "skills" / "lead").lstat().st_ino == inode
@@ -437,10 +467,7 @@ def test_nonlead_claude_projection_failure_rolls_back_map_and_trees(
     installer = _installer()
     receiver = tmp_path / "receiver"
     receiver.mkdir()
-    archive = subprocess.run(["git", "archive", "--format=tar", "HEAD"],
-                             cwd=ROOT, check=True, capture_output=True).stdout
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
-        package.extractall(receiver, filter="data")
+    _copy_current_package(receiver)
     monkeypatch.setattr(installer, "_repo_root", lambda _script: receiver)
     home = tmp_path / "home"
     home.mkdir()
@@ -476,9 +503,8 @@ def test_nonlead_mixed_case_safe_names_install_then_upgrade(tmp_path: Path) -> N
     second = json.loads(receipt.read_bytes())
     for name in ("a", "Z"):
         assert second["skills"][name] != first["skills"][name]
-        assert second["skills"][name] == installer._tree_sha256(
-            skills / name, ignore_runtime_cache=True
-        )
+        assert second["skills"][name] == {"members": dict(installer._stage_tree_manifest(
+            skills / name, ignore_runtime_cache=True))}
 
 
 def _member_fixture(tmp_path: Path):
