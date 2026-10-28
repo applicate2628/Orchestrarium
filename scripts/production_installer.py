@@ -10753,23 +10753,6 @@ def _run_hook_health_bounded(
                 pass
 
 
-_HOOK_METADATA = (
-    ("check-bugfix-discipline", "scripts", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
-    ("check-git-push-gate", "scripts", "PreToolUse", "Bash|PowerShell"),
-    ("check-passive-polling-stop", "scripts", "Stop", None),
-    ("check-machine-local-path", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
-    ("check-no-trash-in-repo", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell"),
-    ("check-parallel-mcp-momentum", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
-    ("check-stale-relation-residue", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
-    ("check-repository-orientation", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
-    ("check-mcp-momentum", "hooks", "PreToolUse", "Grep|Bash|PowerShell|shell_command|exec_command"),
-    ("mcp-usage-reminder", "scripts", "SessionStart", None),
-    ("check-typed-routing", "hooks", "PreToolUse", "Agent"),
-    ("agents-mode-reminder", "scripts", "SessionStart", None),
-    ("check-scratch-valuables", "scripts", "SessionStart", None),
-    ("turn-anchor-reminder", "scripts", "UserPromptSubmit", None),
-)
-
 _CODEX_HOOK_STATUS_MESSAGES = {
     "agents-mode-reminder": "Load delegation mode",
     "check-bugfix-discipline": "Check fix discipline",
@@ -10785,15 +10768,6 @@ _CODEX_HOOK_STATUS_MESSAGES = {
     "turn-anchor-reminder": "Anchor active work",
 }
 
-_HOOK_DIRECTORY_OVERRIDES = {
-    ("claude", "check-mcp-momentum"): "scripts",
-}
-
-_HOOK_SCRIPT_OVERRIDES = {
-    "check-git-push-gate": "check-git-push-gate-runner.py",
-}
-
-
 def _universal_hook_manifest_module():
     path = Path(__file__).with_name("universal_hooks_manifest.py")
     spec = importlib.util.spec_from_file_location("orchestrarium_universal_hook_manifest", path)
@@ -10805,14 +10779,13 @@ def _universal_hook_manifest_module():
     return module
 
 
+_HOOK_MANIFEST = _universal_hook_manifest_module()
+_HOOK_METADATA = _HOOK_MANIFEST.HOOK_METADATA
+_HOOK_SCRIPT_OVERRIDES = _HOOK_MANIFEST.HOOK_SCRIPT_OVERRIDES
+
+
 def _hook_specs(provider: str, installed_root: Path):
-    scripts = installed_root / "scripts"
-    hooks = installed_root / "hooks"
-    membership = _universal_hook_manifest_module().registered_hook_stems(provider)
-    metadata = {stem: (directory, event, matcher) for stem, directory, event, matcher in _HOOK_METADATA}
-    missing = sorted(membership.difference(metadata))
-    if missing:
-        raise RuntimeError("registered hook metadata is missing for: " + ", ".join(missing))
+    membership = _HOOK_MANIFEST.registered_hook_stems(provider)
     missing_statuses = (
         sorted(membership.difference(_CODEX_HOOK_STATUS_MESSAGES))
         if provider == "codex"
@@ -10823,21 +10796,59 @@ def _hook_specs(provider: str, installed_root: Path):
             "Codex hook status-message catalog is missing: "
             + ", ".join(missing_statuses)
         )
-    roots = {"scripts": scripts, "hooks": hooks}
-    specs = [
-        (
-            stem,
-            roots[_HOOK_DIRECTORY_OVERRIDES.get((provider, stem), directory)]
-            / _HOOK_SCRIPT_OVERRIDES.get(stem, f"{stem}.py"),
-            event,
-            matcher,
-        )
-        for stem, directory, event, matcher in _HOOK_METADATA
-        if stem in membership
-    ]
-    if len(specs) != len(membership):
-        raise RuntimeError("registered hook membership did not resolve uniquely")
-    return specs
+    return _HOOK_MANIFEST.registered_hook_specs(provider, installed_root)
+
+
+def _verified_legacy_hook_targets(provider: str, installed_root: Path, markers: set[str], *,
+                                  legacy_provider_root: Path | None = None, witnesses=None):
+    """Admit only exact hash-pinned retired leaves under the selected package."""
+    powershell = _CODEX_RETIRED_PS1 if provider == "codex" else _CLAUDE_RETIRED_PS1
+    shells = _CODEX_RETIRED_SH if provider == "codex" else _CLAUDE_RETIRED_SH
+    prefix = ("skills", "lead") if provider == "codex" else ("agents",)
+    result = {marker: set() for marker in markers}
+    for name, digest in (*powershell.items(), *shells.items()):
+        relative = Path(name)
+        parts = relative.parts
+        if parts[:len(prefix)] == prefix:
+            relative = Path(*parts[len(prefix):])
+        if len(relative.parts) != 2 or relative.parts[0] not in ("scripts", "hooks"):
+            continue
+        marker = relative.stem
+        if marker not in result:
+            continue
+        roots = [installed_root]
+        if provider == "codex" and parts[:len(prefix)] == prefix and legacy_provider_root is not None:
+            roots.append(legacy_provider_root / "skills/lead")
+        for root in roots:
+            candidate = root / relative
+            try:
+                before = candidate.lstat()
+                if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode) or getattr(before, "st_file_attributes", 0) & 0x400:
+                    continue
+                descriptor = os.open(candidate, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+                with os.fdopen(descriptor, "rb") as stream:
+                    opened = os.fstat(stream.fileno())
+                    payload = stream.read()
+                after = candidate.lstat()
+                identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+                if identity(before) == identity(opened) == identity(after) and hashlib.sha256(payload).hexdigest() == digest:
+                    result[marker].add(str(candidate))
+                    if witnesses is not None:
+                        witnesses[str(candidate)] = (identity(after), digest)
+            except OSError:
+                continue
+    return result
+
+
+def _recheck_legacy_hook_targets(provider: str, installed_root: Path, marker: str,
+                                 expected: dict, legacy_provider_root: Path | None) -> None:
+    if not expected:
+        return
+    current = {}
+    _verified_legacy_hook_targets(provider, installed_root, {marker},
+                                  legacy_provider_root=legacy_provider_root, witnesses=current)
+    if any(current.get(path) != witness for path, witness in expected.items()):
+        raise ValueError("verified legacy hook artifact changed")
 
 
 def _hook_health_module(root: Path):
@@ -11012,7 +11023,7 @@ def _publish_hook_data(helper, registration: Path, data: dict[str, Any],
 
 def _transform_hook_registration(helper, registration: Path, owner: _CreateOnlyMutablePath,
                                  marker: str, event: str, platform: str, host: str, *,
-                                 entry=None, expected_entry=None) -> None:
+                                 entry=None, expected_entry=None, managed_targets=None) -> None:
     data = helper.load_existing(_HookConfigInput(registration, _read_owned_text(registration, owner)))
     removal = entry is None
     if removal:
@@ -11024,7 +11035,8 @@ def _transform_hook_registration(helper, registration: Path, owner: _CreateOnlyM
                 entries, marker, platform, host):
             print(f"  Preserving unmatched {marker} registration identities")
     else:
-        changed = helper.install(data, entry, event, marker, platform=platform, host_os=host)
+        changed = helper.install(data, entry, event, marker, platform=platform, host_os=host,
+                                 managed_targets=managed_targets)
     if not changed:
         print(f"  {marker} hook already present in {registration} (no-op)")
         return
@@ -11044,6 +11056,7 @@ def _install_hooks(
 ) -> None:
     installer = root / "scripts" / "install-hypothesis-hook.py"
     host = "windows" if os.name == "nt" else "posix"
+    selected_specs = list(_hook_specs(provider, installed_root))
     owned = transaction is not None and transaction.enabled
     if owned and (mutable_owner is None or mutable_owner.transaction is not transaction):
         raise ValueError("E_MUTABLE_PATH_ESCAPE: hooks require their admitted writer")
@@ -11084,7 +11097,7 @@ def _install_hooks(
     )
     if preflight.returncode:
         raise RuntimeError("hook transaction preflight failed")
-    for _marker, script, _event, _matcher in _hook_specs(provider, installed_root):
+    for _marker, script, _event, _matcher in selected_specs:
         proc = _run([*base, "--script-path", str(script), "--validate-only"], root)
         if proc.returncode:
             raise RuntimeError(f"hook target preflight failed for {script}")
@@ -11100,6 +11113,19 @@ def _install_hooks(
             ["--script-path", str(installed_root / directory / f"{marker}.py"), "--tool-matcher", matcher],
         ))
     health_module = _hook_health_module(root) if provider == "codex" else None
+    managed_targets = {marker: {str(script)} for marker, script, _event, _matcher in selected_specs}
+    legacy_witnesses = {}
+    legacy_root = registration.parent if provider == "codex" else None
+    legacy_targets = _verified_legacy_hook_targets(
+        provider, installed_root, set(managed_targets), legacy_provider_root=legacy_root,
+        witnesses=legacy_witnesses,
+    )
+
+    def recheck_legacy(marker):
+        expected = {path: legacy_witnesses[path] for path in legacy_targets.get(marker, ())}
+        _recheck_legacy_hook_targets(provider, installed_root, marker, expected, legacy_root)
+    for marker, paths in legacy_targets.items():
+        managed_targets[marker].update(paths)
     before_definitions = (
         health_module.owned_definition_snapshots(
             target=registration,
@@ -11108,6 +11134,7 @@ def _install_hooks(
             repo_root=root,
             stems=health_module._manifest_stems(root, "codex")
             | {marker for marker, _event, _arguments in retired_specs},
+            managed_targets=managed_targets,
         )
         if health_module is not None and registration.is_file()
         else {}
@@ -11151,12 +11178,8 @@ def _install_hooks(
             if health_module is not None
             else registration.parent / CODEX_HOOK_INVENTORY
         )
-    if health_module is not None:
-        manifest_stems = health_module._manifest_stems(root, "codex")
-        spec_stems = {marker for marker, *_rest in _hook_specs(provider, installed_root)}
-        if manifest_stems != spec_stems:
-            raise RuntimeError("Codex hook specifications drifted from universal manifest")
-    for marker, script, event, matcher in _hook_specs(provider, installed_root):
+    for marker, script, event, matcher in selected_specs:
+        recheck_legacy(marker)
         if owned:
             try:
                 require_namespace()
@@ -11165,7 +11188,8 @@ def _install_hooks(
                                                  _CODEX_HOOK_STATUS_MESSAGES[marker])
                          if provider == "codex" else helper.build_claude_entry(hook_target, event, matcher))
                 _transform_hook_registration(helper, registration, mutable_owner, marker, event,
-                                             provider, host, entry=entry)
+                                             provider, host, entry=entry, managed_targets=managed_targets)
+                recheck_legacy(marker)
             except (OSError, ValueError, SystemExit) as exc:
                 raise RuntimeError(f"hook registration failed for {marker}") from exc
             continue
@@ -11189,6 +11213,7 @@ def _install_hooks(
                 platform=provider,
                 host_os=host,
                 repo_root=root,
+                    managed_targets=managed_targets,
             ),
         )
         if health_module is not None
@@ -11199,7 +11224,7 @@ def _install_hooks(
             try:
                 require_namespace()
                 plan = health_module.plan_codex_inventory(
-                    target=registration, specs=_hook_specs(provider, installed_root),
+                    target=registration, specs=selected_specs,
                     inventory_path=inventory_path, host_os=host)
                 health_module._recheck_inventory_authority(plan.authority, for_write=True)
                 storage, _node, inventory_owner = _owned_byte_context(plan.authority.inventory, mutable_owner)
@@ -11217,7 +11242,7 @@ def _install_hooks(
                     "E_HOOK_INVENTORY_TARGET_INVALID", "inventory", str(exc)) from exc
         else:
             health_module.write_codex_inventory(
-                target=registration, specs=_hook_specs(provider, installed_root),
+                target=registration, specs=selected_specs,
                 inventory_path=inventory_path, host_os=host)
     health_arguments = [
         str(root / "scripts" / "check-hook-health.py"),
@@ -11229,7 +11254,12 @@ def _install_hooks(
         host,
         "--repo-root",
         str(root),
+        "--installed-root",
+        str(installed_root),
     ]
+    selected_hook_args = [item for marker, _script, _event, _matcher in selected_specs
+                          for item in ("--selected-hook", marker)]
+    health_arguments.extend(selected_hook_args)
     if provider == "codex":
         assert codex_command is not None
         health_arguments.extend(
@@ -11267,6 +11297,8 @@ def _install_hooks(
                 "codex",
                 "--host-os",
                 host,
+                "--installed-root",
+                str(installed_root),
                 "--inventory",
                 str(inventory_path),
                 "--codex-trust-mode",
@@ -11277,6 +11309,7 @@ def _install_hooks(
                 str(registration.parent.resolve()),
                 "--query-cwd",
                 str(root.resolve()),
+                *selected_hook_args,
                 *[
                     item
                     for identity in sorted(touched_identities)

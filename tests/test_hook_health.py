@@ -46,9 +46,9 @@ def _source_dirs(platform: str) -> tuple[Path, ...]:
 
 
 def _target_for(platform: str, stem: str) -> Path:
-    for directory in _source_dirs(platform):
-        candidate = directory / f"{stem}.py"
-        if candidate.is_file():
+    package = ROOT / ("src.claude/agents" if platform == "claude" else "src.codex/skills/lead")
+    for marker, candidate, _event, _matcher in CHECKER._hook_manifest(ROOT).registered_hook_specs(platform, package):
+        if marker == stem and candidate.is_file():
             return candidate
     raise AssertionError(f"missing Python target for {platform}:{stem}")
 
@@ -85,6 +85,7 @@ def test_registered_command_executes_every_owned_hook(
         platform=platform,
         host_os="posix",
         repo_root=ROOT,
+        installed_root=ROOT / ("src.claude/agents" if platform == "claude" else "src.codex/skills/lead"),
         verify_fires=True,
     )
     expected = CHECKER._manifest_stems(ROOT, platform)
@@ -148,6 +149,7 @@ def test_hook_health_uses_force_mode_and_accepts_claude_advisory(
         platform="claude",
         host_os="posix",
         repo_root=ROOT,
+        installed_root=ROOT / "src.claude/agents",
         verify_fires=True,
     )
     assert messages == ["PASS claude PreToolUse check-mcp-momentum"]
@@ -235,6 +237,7 @@ def test_hook_health_rejects_invalid_mcp_positive_probe(
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
+            installed_root=ROOT / "src.claude/agents",
             verify_fires=True,
         )
 
@@ -252,12 +255,13 @@ def test_missing_executable_and_missing_target_are_distinct(tmp_path: Path) -> N
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
+            installed_root=ROOT / "src.claude/agents",
             verify_fires=False,
         )
 
     target_config = _config("claude")
     target_config["hooks"]["PreToolUse"][0]["hooks"][0]["args"] = [
-        str(tmp_path / "agents-mode-reminder.py")
+        str(tmp_path / "scripts/agents-mode-reminder.py")
     ]
     target_json = tmp_path / "missing-target.json"
     target_json.write_text(json.dumps(target_config), encoding="utf-8")
@@ -267,16 +271,24 @@ def test_missing_executable_and_missing_target_are_distinct(tmp_path: Path) -> N
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
+            installed_root=tmp_path,
             verify_fires=False,
         )
 
 
 def test_leftover_wrapper_warning_is_read_only(tmp_path: Path) -> None:
-    target = tmp_path / "settings.json"
-    target.write_text(json.dumps(_config("claude")), encoding="utf-8")
     installed = tmp_path / "agents"
+    for source_dir in _source_dirs("claude"):
+        shutil.copytree(source_dir, installed / source_dir.name)
+    config = _config("claude")
+    for entry in config["hooks"]["PreToolUse"]:
+        for hook in entry["hooks"]:
+            source = Path(hook["args"][0])
+            hook["args"] = [str(installed / source.parent.name / source.name)]
+    target = tmp_path / "settings.json"
+    target.write_text(json.dumps(config), encoding="utf-8")
     wrapper = installed / "scripts" / "check-bugfix-discipline.ps1"
-    wrapper.parent.mkdir(parents=True)
+    wrapper.parent.mkdir(parents=True, exist_ok=True)
     wrapper.write_text("wrapper\n", encoding="utf-8")
     completed = subprocess.run(
         [
@@ -346,6 +358,8 @@ def test_hook_health_nonzero_names_failing_hook(tmp_path: Path) -> None:
             "windows" if os.name == "nt" else "posix",
             "--repo-root",
             str(ROOT),
+            "--installed-root",
+            str(installed_root),
             "--verify-fires",
         ],
         cwd=tmp_path,
@@ -371,6 +385,7 @@ def test_foreign_entry_without_args_is_tolerated(tmp_path: Path) -> None:
         platform="claude",
         host_os="posix",
         repo_root=ROOT,
+        installed_root=ROOT / "src.claude/agents",
         verify_fires=False,
     )
     expected = CHECKER._manifest_stems(ROOT, "claude")
@@ -399,6 +414,7 @@ def test_unparseable_entry_naming_owned_stem_fails_loudly(tmp_path: Path) -> Non
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
+            installed_root=ROOT / "src.claude/agents",
             verify_fires=False,
         )
 
@@ -422,6 +438,7 @@ def test_corrupted_args_on_owned_entry_names_the_stem(tmp_path: Path) -> None:
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
+            installed_root=ROOT / "src.claude/agents",
             verify_fires=False,
         )
     assert "missing registered hooks" not in str(excinfo.value)
@@ -445,24 +462,186 @@ def test_ownership_ignores_metadata_and_foreign_arguments(platform: str) -> None
     assert list(CHECKER._iter_owned_hooks(data, {stem}, platform, "posix")) == []
 
 
+@pytest.mark.parametrize("platform", ("codex", "claude"))
+def test_health_uses_logical_target_package_and_ignores_unproven_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    project = tmp_path / "project"
+    config_dir = project / (".codex" if platform == "codex" else ".claude")
+    config_dir.mkdir(parents=True)
+    target = config_dir / ("hooks.json" if platform == "codex" else "settings.json")
+    package = project / (".agents/skills/lead" if platform == "codex" else ".claude/agents")
+    script = package / "scripts/check-synthetic.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("pass\n", encoding="utf-8")
+    foreign = tmp_path / "user/check-synthetic.py"
+    if platform == "codex":
+        handlers = [{"command": shlex.join([sys.executable, str(foreign)])},
+                    {"command": shlex.join([sys.executable, str(script)])}]
+    else:
+        handlers = [{"command": sys.executable, "args": [str(foreign)]},
+                    {"command": sys.executable, "args": [str(script)]}]
+    target.write_text(json.dumps({"hooks": {"Stop": [{"hooks": handlers}]}}), encoding="utf-8")
+    monkeypatch.setattr(CHECKER, "_manifest_stems", lambda *_args: {"check-synthetic"})
+    monkeypatch.setattr(CHECKER, "_hook_manifest", lambda *_args: type("Manifest", (), {
+        "registered_hook_specs": staticmethod(lambda _platform, root: [("check-synthetic", root / "scripts/check-synthetic.py", "Stop", None)])
+    })())
+    assert CHECKER._installed_root_for_target(target, platform) == package
+    messages = CHECKER.verify_config(target=target, platform=platform, host_os="posix", repo_root=ROOT,
+                                     verify_fires=False)
+    assert any(message.startswith("PASS ") for message in messages)
+    assert not foreign.exists()
+
+
+def test_package_inference_keeps_logical_config_parent_for_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "project/.codex/hooks.json"
+    external = tmp_path / "external/hooks.json"
+    external.parent.mkdir()
+    external.write_text("{}", encoding="utf-8")
+    _make_file_symlink(target, external)
+    assert CHECKER._installed_root_for_target(target, "codex") == tmp_path / "project/.agents/skills/lead"
+    assert target.is_symlink()
+    assert CHECKER._installed_root_for_target(external, "codex") is None
+
+
+def test_inventory_command_never_supplies_managed_authority(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    marker = "check-synthetic"
+    package = tmp_path / "managed"
+    script = package / "scripts/check-synthetic.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("pass\n", encoding="utf-8")
+    target = tmp_path / "hooks.json"
+    inventory = tmp_path / CHECKER.INVENTORY_NAME
+    command = subprocess.list2cmdline([sys.executable, str(script)])
+    target.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{"command": command}]}]}}), encoding="utf-8")
+    CHECKER.write_codex_inventory(target=target, specs=[(marker, script, "Stop", None)], inventory_path=inventory, host_os="windows")
+    payload = json.loads(inventory.read_text(encoding="utf-8"))
+    identity = json.loads(payload["hooks"][0]["identity"])
+    foreign = r"\\untrusted-host\share\check-synthetic.py"
+    identity["command"] = CHECKER._command_identity([sys.executable, foreign], "windows")
+    payload["hooks"][0]["identity"] = json.dumps(identity, separators=(",", ":"), sort_keys=True)
+    inventory.write_text(json.dumps(payload), encoding="utf-8")
+    target.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{"command": subprocess.list2cmdline([sys.executable, foreign])}]}]}}), encoding="utf-8")
+    monkeypatch.setattr(CHECKER, "_hook_manifest", lambda *_args: type("Manifest", (), {
+        "registered_hook_specs": staticmethod(lambda _platform, root: [(marker, root / "scripts/check-synthetic.py", "Stop", None)])
+    })())
+    for method in ("stat", "lstat"):
+        original = getattr(Path, method)
+        def guarded(path, *args, _original=original, **kwargs):
+            assert "untrusted-host" not in str(path).casefold()
+            return _original(path, *args, **kwargs)
+        monkeypatch.setattr(Path, method, guarded)
+    monkeypatch.setattr(CHECKER, "_resolve_executable", lambda *_args: pytest.fail("untrusted command was inspected"))
+    with pytest.raises(ValueError, match="drifted from generated inventory"):
+        CHECKER.verify_config(target=target, platform="codex", host_os="windows", repo_root=ROOT,
+                              verify_fires=False, inventory_path=inventory, installed_root=package)
+
+
+def test_selected_hook_scope_cannot_be_reduced_by_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    package = tmp_path / "managed"
+    scripts = package / "scripts"
+    scripts.mkdir(parents=True)
+    specs = []
+    for index in range(12):
+        marker = f"check-synthetic-{index}"
+        script = scripts / f"{marker}.py"
+        script.write_text("pass\n", encoding="utf-8")
+        specs.append((marker, script, "Stop", None))
+    target = tmp_path / "hooks.json"
+    inventory = tmp_path / CHECKER.INVENTORY_NAME
+    monkeypatch.setattr(CHECKER, "_hook_manifest", lambda *_args: type("Manifest", (), {
+        "registered_hook_specs": staticmethod(lambda _platform, _root: specs)
+    })())
+
+    def seed(rows):
+        handlers = [{"command": subprocess.list2cmdline([sys.executable, str(script)])}
+                    for _marker, script, _event, _matcher in rows]
+        handlers.append({"command": "python /unknown/check-synthetic-user.py"})
+        target.write_text(json.dumps({"hooks": {"Stop": [{"hooks": handlers}]}}), encoding="utf-8")
+        CHECKER.write_codex_inventory(target=target, specs=rows, inventory_path=inventory, host_os="windows")
+        records = [{"eventName": "Stop", "matcher": None, "handlerType": "command",
+                    "command": subprocess.list2cmdline([sys.executable, str(script)]),
+                    "sourcePath": str(target), "enabled": True, "trustStatus": "trusted", "currentHash": "sha256:synthetic"}
+                   for _marker, script, _event, _matcher in rows]
+        monkeypatch.setattr(CHECKER, "_codex_hooks_list", lambda **_kwargs: records)
+
+    all_stems = {row[0] for row in specs}
+    seed(specs[:1])
+    with pytest.raises(ValueError, match="inventory does not match the selected hook scope"):
+        CHECKER.verify_config(target=target, platform="codex", host_os="windows", repo_root=ROOT,
+                              verify_fires=False, inventory_path=inventory, installed_root=package,
+                              selected_stems=all_stems)
+    chosen = specs[:11]
+    seed(chosen)
+    kwargs = dict(target=target, platform="codex", host_os="windows", repo_root=ROOT,
+                  verify_fires=False, inventory_path=inventory, installed_root=package,
+                  codex_trust_mode="require", codex_command=[sys.executable], codex_home=tmp_path, query_cwd=tmp_path)
+    full = CHECKER.verify_config(**kwargs, selected_stems={row[0] for row in chosen})
+    assert sum(message.startswith("PASS CODEX_HOOK_TRUST_TRUSTED") for message in full) == 11
+    assert not any(message.startswith("SCOPE ") for message in full)
+    limited = CHECKER.verify_config(**kwargs)
+    assert "SCOPE inventory-declared registrations only" in limited
+    assert sum(message.startswith("PASS CODEX_HOOK_TRUST_TRUSTED") for message in limited) == 11
+
+
+def test_no_inventory_health_accepts_selected_package_junction_physical_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    target = project / ".claude/settings.json"
+    physical = tmp_path / "physical-agents"
+    script = physical / "scripts/check-synthetic.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("pass\n", encoding="utf-8")
+    logical = project / ".claude/agents"
+    if os.name == "nt":
+        _make_directory_junction(logical, physical)
+    else:
+        logical.symlink_to(physical, target_is_directory=True)
+    target.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{"command": sys.executable, "args": [str(script)]}]}]}}), encoding="utf-8")
+    monkeypatch.setattr(CHECKER, "_manifest_stems", lambda *_args: {"check-synthetic"})
+    monkeypatch.setattr(CHECKER, "_hook_manifest", lambda *_args: type("Manifest", (), {
+        "registered_hook_specs": staticmethod(lambda _platform, root: [("check-synthetic", root / "scripts/check-synthetic.py", "Stop", None)])
+    })())
+    assert CHECKER.verify_config(target=target, platform="claude", host_os="windows" if os.name == "nt" else "posix",
+                                 repo_root=ROOT, verify_fires=False)
+
+
 def test_invocation_grammar_runner_ambiguity_and_target_position() -> None:
     marker = "check-git-push-gate"
     handler = {"command": "python3.12 -B /hooks/check-git-push-gate-runner.py /other.py"}
-    invocation = CHECKER.classify_hook_invocation(handler, {marker}, "codex", "posix")
+    target = "/hooks/check-git-push-gate-runner.py"
+    invocation = CHECKER.classify_hook_invocation(handler, {marker}, "codex", "posix", {marker: {target}})
     assert invocation.kind == "current-owned"
     assert invocation.marker == marker
     assert CHECKER._target_path(list(invocation.argv)) == Path("/hooks/check-git-push-gate-runner.py")
     with pytest.raises(ValueError, match="ambiguous owned hook markers"):
-        CHECKER.classify_hook_invocation(handler, {marker, marker + "-runner"}, "codex", "posix")
+        CHECKER.classify_hook_invocation(handler, {marker, marker + "-runner"}, "codex", "posix",
+                                         {marker: {target}, marker + "-runner": {target}})
     for command in ("python -c print /hooks/check-git-push-gate.py",
                     "bash -c /hooks/check-git-push-gate.sh"):
         assert CHECKER.classify_hook_invocation({"command": command}, {marker}, "codex", "posix").kind == "foreign"
     legacy = {"command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:/hooks/check-git-push-gate.ps1"}
-    assert CHECKER.classify_hook_invocation(legacy, {marker}, "codex", "windows").kind == "legacy-owned"
+    targets = {marker: {"C:/hooks/check-git-push-gate.ps1"}}
+    assert CHECKER.classify_hook_invocation(legacy, {marker}, "codex", "windows", targets).kind == "legacy-owned"
     with pytest.raises(ValueError, match="legacy invocation"):
-        list(CHECKER._iter_owned_hooks({"hooks": {"Stop": [{"hooks": [legacy]}]}}, {marker}, "codex", "windows"))
+        list(CHECKER._iter_owned_hooks({"hooks": {"Stop": [{"hooks": [legacy]}]}}, {marker}, "codex", "windows", targets))
     malformed = {"command": 'python "C:/hooks/check-git-push-gate.py"', "args": []}
-    assert CHECKER.classify_hook_invocation(malformed, {marker}, "codex", "windows").kind == "malformed-owned"
+    assert CHECKER.classify_hook_invocation(malformed, {marker}, "codex", "windows",
+                                            {marker: {"C:/hooks/check-git-push-gate.py"}}).kind == "malformed-owned"
+
+
+def test_windows_quoted_legacy_operand_preserves_backslashes_and_binding() -> None:
+    marker = "check-bugfix-discipline"
+    target = r"C:\Program Files\managed\check-bugfix-discipline.ps1"
+    foreign = r"C:\Program Files\user\check-bugfix-discipline.ps1"
+    selected = {marker: {target}}
+    command = lambda path: {"command": f'powershell.exe -NoProfile -File "{path}"'}
+    invocation = CHECKER.classify_hook_invocation(command(target), {marker}, "codex", "windows", selected)
+    assert invocation.kind == "legacy-owned"
+    assert invocation.target == target
+    assert CHECKER.classify_hook_invocation(command(foreign), {marker}, "codex", "windows", selected).kind == "unproven"
 
 
 def test_definition_snapshots_distinguish_full_values_positions_and_survivors(tmp_path: Path) -> None:
@@ -475,7 +654,8 @@ def test_definition_snapshots_distinguish_full_values_positions_and_survivors(tm
     def snapshot():
         target.write_text(json.dumps(config), encoding="utf-8")
         return CHECKER.owned_definition_snapshots(
-            target=target, platform="codex", host_os="posix", repo_root=ROOT, stems={marker}
+            target=target, platform="codex", host_os="posix", repo_root=ROOT, stems={marker},
+            managed_targets={marker: {"/hooks/check-bugfix-discipline.py"}},
         )
 
     missing = snapshot()
@@ -522,6 +702,7 @@ def test_hook_health_report_allows_only_touched_pending(
             CHECKER._manifest_stems(ROOT, "codex"),
             "codex",
             "posix",
+            {stem: {str(_target_for("codex", stem))} for stem in CHECKER._manifest_stems(ROOT, "codex")},
         )
     )
     touched = CHECKER.canonical_identity(
@@ -550,6 +731,7 @@ def test_hook_health_report_allows_only_touched_pending(
         platform="codex",
         host_os="posix",
         repo_root=ROOT,
+        installed_root=ROOT / "src.codex/skills/lead",
         verify_fires=False,
         codex_trust_mode="report",
         touched_identities={touched},
@@ -563,6 +745,7 @@ def test_hook_health_report_allows_only_touched_pending(
             platform="codex",
             host_os="posix",
             repo_root=ROOT,
+            installed_root=ROOT / "src.codex/skills/lead",
             verify_fires=False,
             codex_trust_mode="require",
             touched_identities={touched},
@@ -573,6 +756,7 @@ def test_hook_health_report_allows_only_touched_pending(
             platform="codex",
             host_os="posix",
             repo_root=ROOT,
+            installed_root=ROOT / "src.codex/skills/lead",
             verify_fires=False,
             codex_trust_mode="report",
         )
@@ -580,9 +764,10 @@ def test_hook_health_report_allows_only_touched_pending(
 
 def _host_trust_fixture(target: Path) -> tuple[list[tuple], list[dict]]:
     target.write_text(json.dumps(_config("codex")), encoding="utf-8")
+    stems = CHECKER._manifest_stems(ROOT, "codex")
     rows = list(CHECKER._iter_owned_hooks(
         json.loads(target.read_text(encoding="utf-8")),
-        CHECKER._manifest_stems(ROOT, "codex"), "codex", "posix",
+        stems, "codex", "posix", {stem: {str(_target_for("codex", stem))} for stem in stems},
     ))
     records = [{
         "eventName": event, "matcher": matcher, "handlerType": "command",
@@ -599,13 +784,15 @@ def test_complete_fingerprint_detects_matcher_only_upgrade(tmp_path: Path) -> No
     config["hooks"]["PreToolUse"][0]["matcher"] = "Bash"
     target.write_text(json.dumps(config), encoding="utf-8")
     before = CHECKER.owned_canonical_identities(
-        target=target, platform="codex", host_os="posix", repo_root=ROOT
+        target=target, platform="codex", host_os="posix", repo_root=ROOT,
+        managed_targets={stem: {str(_target_for("codex", stem))} for stem in CHECKER._manifest_stems(ROOT, "codex")},
     )
     entry = config["hooks"]["PreToolUse"][0]
     entry["matcher"] += "|MatcherOnlyUpgrade"
     target.write_text(json.dumps(config), encoding="utf-8")
     after = CHECKER.owned_canonical_identities(
-        target=target, platform="codex", host_os="posix", repo_root=ROOT
+        target=target, platform="codex", host_os="posix", repo_root=ROOT,
+        managed_targets={stem: {str(_target_for("codex", stem))} for stem in CHECKER._manifest_stems(ROOT, "codex")},
     )
     assert len(after - before) == len(before - after) == 1
 
@@ -625,6 +812,7 @@ def test_require_rejects_disabled_empty_hash_or_wrong_source(
     with pytest.raises(ValueError, match=discriminator):
         CHECKER.verify_config(
             target=target, platform="codex", host_os="posix", repo_root=ROOT,
+            installed_root=ROOT / "src.codex/skills/lead",
             verify_fires=False, codex_trust_mode="require",
             codex_command=[str(Path(sys.executable).resolve())],
             codex_home=tmp_path / "codex-home", query_cwd=tmp_path,
@@ -639,6 +827,7 @@ def test_require_rejects_wrong_host_command(tmp_path: Path, monkeypatch: pytest.
     with pytest.raises(ValueError, match="CODEX_HOOK_LIST_MISSING"):
         CHECKER.verify_config(
             target=target, platform="codex", host_os="posix", repo_root=ROOT,
+            installed_root=ROOT / "src.codex/skills/lead",
             verify_fires=False, codex_trust_mode="require",
             codex_command=[str(Path(sys.executable).resolve())],
             codex_home=tmp_path / "home", query_cwd=tmp_path,
@@ -824,6 +1013,7 @@ def test_generated_inventory_is_read_only_and_detects_registration_drift(
     monkeypatch.setattr(CHECKER, "_codex_hooks_list", lambda **_kwargs: records)
     CHECKER.verify_config(
         target=target, platform="codex", host_os="posix", repo_root=ROOT,
+        installed_root=ROOT / "src.codex/skills/lead",
         verify_fires=False, inventory_path=inventory,
         codex_trust_mode="require",
         codex_command=[str(Path(sys.executable).resolve())],
@@ -835,6 +1025,7 @@ def test_generated_inventory_is_read_only_and_detects_registration_drift(
     with pytest.raises(ValueError, match="drifted from generated inventory"):
         failure = CHECKER.verify_config(
             target=target, platform="codex", host_os="posix", repo_root=ROOT,
+            installed_root=ROOT / "src.codex/skills/lead",
             verify_fires=False, inventory_path=inventory,
         )
 
@@ -860,7 +1051,7 @@ def test_inventory_accepts_bound_source_aliases(
             hook["identity"] = json.dumps(identity, separators=(",", ":"), sort_keys=True)
     inventory.write_text(json.dumps(payload), encoding="utf-8")
     CHECKER.verify_config(target=alias, platform="codex", host_os="posix", repo_root=ROOT,
-                          verify_fires=False, inventory_path=inventory)
+                          verify_fires=False, inventory_path=inventory, installed_root=ROOT / "src.codex/skills/lead")
 
 
 @pytest.mark.parametrize("header", [True, False])
@@ -967,7 +1158,7 @@ def test_inventory_accepts_intermediate_witnessed_link(tmp_path: Path) -> None:
     payload["hooks"][0]["identity"] = json.dumps(identity, separators=(",", ":"), sort_keys=True)
     inventory.write_text(json.dumps(payload), encoding="utf-8")
     CHECKER.verify_config(target=selected, platform="codex", host_os="posix", repo_root=ROOT,
-                          verify_fires=False, inventory_path=inventory)
+                          verify_fires=False, inventory_path=inventory, installed_root=ROOT / "src.codex/skills/lead")
 
 
 @pytest.mark.parametrize("header,nested", [(True, False), (False, True), (True, True)])
@@ -988,7 +1179,7 @@ def test_inventory_accepts_absolute_lexical_source(tmp_path: Path, header: bool,
             hook["identity"] = json.dumps(identity, separators=(",", ":"), sort_keys=True)
     inventory.write_text(json.dumps(payload), encoding="utf-8")
     CHECKER.verify_config(target=target, platform="codex", host_os="posix", repo_root=ROOT,
-                          verify_fires=False, inventory_path=inventory)
+                          verify_fires=False, inventory_path=inventory, installed_root=ROOT / "src.codex/skills/lead")
 
 
 def test_inventory_rejects_duplicate_identity_key_and_recovers_stale_inventory(tmp_path: Path) -> None:
@@ -1011,7 +1202,7 @@ def test_inventory_rejects_duplicate_identity_key_and_recovers_stale_inventory(t
         CHECKER._load_codex_inventory(inventory, target=target, host_os="posix")
     CHECKER.write_codex_inventory(target=target, specs=specs, inventory_path=inventory, host_os="posix")
     CHECKER.verify_config(target=target, platform="codex", host_os="posix", repo_root=ROOT,
-                          verify_fires=False, inventory_path=inventory)
+                          verify_fires=False, inventory_path=inventory, installed_root=ROOT / "src.codex/skills/lead")
     assert target.read_bytes() == before
 
 
@@ -1046,6 +1237,7 @@ def test_codex_hook_health_report_and_require_accept_file_symlink_target(
             platform="codex",
             host_os="posix",
             repo_root=ROOT,
+            installed_root=ROOT / "src.codex/skills/lead",
             verify_fires=False,
             inventory_path=inventory,
             codex_trust_mode=mode,
@@ -1097,6 +1289,7 @@ def test_codex_hook_health_accepts_file_symlink_referent_through_junction(
         platform="codex",
         host_os="posix",
         repo_root=ROOT,
+        installed_root=ROOT / "src.codex/skills/lead",
         verify_fires=False,
         inventory_path=inventory,
         codex_trust_mode="require",
@@ -1256,6 +1449,7 @@ def test_codex_hook_inventory_exact_parent_negative(
         platform="codex",
         host_os="posix",
         repo_root=ROOT,
+        installed_root=ROOT / "src.codex/skills/lead",
         verify_fires=False,
         inventory_path=exact,
         codex_trust_mode="require",
@@ -1372,8 +1566,10 @@ def test_post_reclaim_installed_helper_trusted_and_modified_smoke(
     sys.modules[spec.name] = installed
     spec.loader.exec_module(installed)
     monkeypatch.setattr(installed, "_codex_hooks_list", lambda **_kwargs: records)
+    monkeypatch.setattr(installed, "_hook_manifest", lambda *_args: CHECKER._hook_manifest(ROOT))
     trusted = installed.verify_config(
         target=target, platform="codex", host_os="posix", repo_root=tmp_path,
+        installed_root=ROOT / "src.codex/skills/lead",
         verify_fires=False, inventory_path=inventory, codex_trust_mode="require",
         codex_command=[str(Path(sys.executable).resolve())],
         codex_home=target.parent, query_cwd=tmp_path,
@@ -1385,6 +1581,7 @@ def test_post_reclaim_installed_helper_trusted_and_modified_smoke(
     records[0]["trustStatus"] = "modified"
     report = installed.verify_config(
         target=target, platform="codex", host_os="posix", repo_root=tmp_path,
+        installed_root=ROOT / "src.codex/skills/lead",
         verify_fires=False, inventory_path=inventory, codex_trust_mode="report",
         touched_identities={touched}, codex_command=[str(Path(sys.executable).resolve())],
         codex_home=target.parent, query_cwd=tmp_path,
@@ -1469,6 +1666,7 @@ def test_hook_health_read_only_trust_probe(
         platform="codex",
         host_os="posix",
         repo_root=ROOT,
+        installed_root=ROOT / "src.codex/skills/lead",
         verify_fires=False,
         codex_trust_mode="require",
         codex_command=[str(Path(sys.executable).resolve())],
@@ -1514,6 +1712,7 @@ def test_installed_require_derives_target_sidecar_and_ignores_helper_sibling(
         "--codex-home", str(target.parent),
         "--query-cwd", str(tmp_path),
         "--repo-root", str(ROOT),
+        "--installed-root", str(ROOT / "src.codex/skills/lead"),
     ]
     monkeypatch.setattr(sys, "argv", arguments)
     assert installed.main() == 0

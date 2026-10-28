@@ -1677,16 +1677,23 @@ class ProducerIntegrationTests(unittest.TestCase):
         checks = []
 
         def health(*_args):
+            arguments = _args[0]
+            selected_stems = {arguments[index + 1] for index, value in enumerate(arguments) if value == "--selected-hook"}
+            self.assertEqual(selected_stems, {marker for marker, _script, _event, _matcher in specs})
             data = json.loads(storage.read_bytes())
-            rows = list(I._iter_owned_hooks(data, {specs[0][0]}, "codex", host))
+            targets = {marker: {str(script)} for marker, script, _event, _matcher in specs}
+            rows = list(I._iter_owned_hooks(data, set(targets), "codex", host, targets))
             records = [{"eventName": event, "matcher": matcher, "handlerType": "command",
                         "command": subprocess.list2cmdline(argv) if host == "windows" else shlex.join(argv),
                         "sourcePath": str(storage), "enabled": True, "trustStatus": "trusted",
                         "currentHash": "sha256:synthetic"}
                        for event, _stem, argv, matcher in rows]
-            with patch.object(I, "_codex_hooks_list", return_value=records):
+            manifest = SimpleNamespace(registered_hook_specs=lambda _platform, _root: specs)
+            with patch.object(I, "_codex_hooks_list", return_value=records), patch.object(I, "_hook_manifest", return_value=manifest):
                 I.verify_config(target=selected, platform="codex", host_os=host, repo_root=self.source,
                                 verify_fires=False, inventory_path=inventory, codex_trust_mode="require",
+                                installed_root=self.source,
+                                selected_stems=selected_stems,
                                 codex_command=["synthetic-codex"], codex_home=self.root, query_cwd=self.root)
             checks.append(True)
             return subprocess.CompletedProcess([], 0)
@@ -1716,6 +1723,44 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertEqual(hooks_before, storage.read_bytes())
         self.assertEqual(link, os.readlink(selected))
         self.assertGreaterEqual(len(checks), 3)
+        self.assert_clean()
+
+    def test_changed_verified_legacy_is_rejected_before_registration_merge(self):
+        specs, selected, storage, inventory, _original, _foreign = self.hook_fixture()
+        marker = specs[0][0]
+        legacy = self.source / "scripts" / (marker + ".sh")
+        legacy.parent.mkdir()
+        legacy.write_bytes(b"synthetic-pinned-legacy\n")
+        digest = hashlib.sha256(legacy.read_bytes()).hexdigest()
+        config = {"hooks": {"PreToolUse": [{"matcher": specs[0][3], "hooks": [
+            {"type": "command", "command": subprocess.list2cmdline(["bash", str(legacy)])}
+        ]}]}}
+        storage.write_text(json.dumps(config), encoding="utf-8")
+        before = storage.read_bytes()
+        original = PI._verified_legacy_hook_targets
+        calls = []
+
+        def change_after_admission(*args, **kwargs):
+            result = original(*args, **kwargs)
+            calls.append(True)
+            if len(calls) == 1:
+                self.assertIn(str(legacy), result[marker])
+                self.assertIn(str(legacy), kwargs["witnesses"])
+                self.assertTrue(kwargs["witnesses"][str(legacy)])
+                legacy.write_bytes(b"changed-before-merge\n")
+            return result
+
+        transaction = self.transaction([storage, inventory])
+        with self.hook_support(specs), patch.dict(PI._CODEX_RETIRED_SH, {"scripts/" + legacy.name: digest}), \
+             patch.object(PI, "_verified_legacy_hook_targets", side_effect=change_after_admission):
+            with self.assertRaisesRegex(ValueError, "verified legacy hook artifact changed"):
+                with transaction:
+                    PI._install_hooks(self.source, "codex", selected, self.source, "target", inventory,
+                                      transaction=transaction, mutable_owner=self.owner(transaction))
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertEqual(before, storage.read_bytes())
+        self.assertFalse(inventory.exists())
+        self.assertEqual(b"changed-before-merge\n", legacy.read_bytes())
         self.assert_clean()
 
     def test_malformed_hook_json_systemexit_becomes_visible_stage_cause(self):

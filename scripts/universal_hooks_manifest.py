@@ -144,6 +144,42 @@ REGISTERED_HOOK_STEMS_BY_PLATFORM = {
     }),
 }
 
+HOOK_METADATA = (
+    ("check-bugfix-discipline", "scripts", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
+    ("check-git-push-gate", "scripts", "PreToolUse", "Bash|PowerShell"),
+    ("check-passive-polling-stop", "scripts", "Stop", None),
+    ("check-machine-local-path", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
+    ("check-no-trash-in-repo", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell"),
+    ("check-parallel-mcp-momentum", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
+    ("check-stale-relation-residue", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
+    ("check-repository-orientation", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
+    ("check-mcp-momentum", "hooks", "PreToolUse", "Grep|Bash|PowerShell|shell_command|exec_command"),
+    ("mcp-usage-reminder", "scripts", "SessionStart", None),
+    ("check-typed-routing", "hooks", "PreToolUse", "Agent"),
+    ("agents-mode-reminder", "scripts", "SessionStart", None),
+    ("check-scratch-valuables", "scripts", "SessionStart", None),
+    ("turn-anchor-reminder", "scripts", "UserPromptSubmit", None),
+)
+HOOK_DIRECTORY_OVERRIDES = {("claude", "check-mcp-momentum"): "scripts"}
+HOOK_SCRIPT_OVERRIDES = {"check-git-push-gate": "check-git-push-gate-runner.py"}
+
+
+def hook_artifact_target(platform: str, installed_root: Path, marker: str) -> Path | None:
+    for stem, directory, _event, _matcher in HOOK_METADATA:
+        if stem == marker:
+            directory = HOOK_DIRECTORY_OVERRIDES.get((platform, stem), directory)
+            return installed_root / directory / HOOK_SCRIPT_OVERRIDES.get(stem, f"{stem}.py")
+    return None
+
+
+def registered_hook_specs(platform: str, installed_root: Path):
+    membership = registered_hook_stems(platform)
+    specs = [(stem, hook_artifact_target(platform, installed_root, stem), event, matcher)
+             for stem, directory, event, matcher in HOOK_METADATA if stem in membership]
+    if len(specs) != len(membership):
+        raise ValueError("registered hook membership did not resolve uniquely")
+    return specs
+
 MIRROR_SCRIPT_DIRS = ("src.claude/agents/scripts", "src.codex/skills/lead/scripts")
 MIRROR_HOOK_DIRS = ("src.claude/agents/hooks", "src.codex/skills/lead/hooks")
 
