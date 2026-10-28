@@ -390,6 +390,53 @@ def range_receipt_v3(
     )
 
 
+def test_native_entry_denial_reports_only_fixed_decision_stage(tmp_path: Path, monkeypatch, capsys) -> None:
+    """Synthetic PreToolUse coverage; no push or user Git configuration is used."""
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = shutil.which("git")
+    assert git is not None
+    subprocess.run([git, "init", "-q", str(repo)], check=True, timeout=15)
+    gate = _load_gate_module(CANONICAL_HOOK, "native_entry_stage_test")
+    preflight = gate._a3_preflight
+    base = list(gate.native_git_config_arguments())
+    sentinel = "SYNTHETIC-NATIVE-PRIVATE"
+
+    def build(options):
+        argv = ("git", "-C", str(repo), *options, "push", "origin", "a" * 40 + ":refs/heads/main")
+        command = "& " + " ".join("'" + word.replace("'", "''") + "'" for word in argv)
+        return preflight.build_preflight({"tool_name": "PowerShell", "cwd": str(repo),
+                                          "tool_input": {"command": command, "workdir": str(repo)}})
+
+    def denied(options, stage):
+        assert gate.compose_gate_result(build(options)) == 0
+        output = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+        assert output["permissionDecision"] == "deny"
+        reason = output["permissionDecisionReason"]
+        assert reason.startswith("PGG-NATIVE-ENTRY-REQUIRED:")
+        assert f"Native-entry diagnostic: stage={stage}." in reason
+        assert sentinel not in reason and str(repo) not in reason
+
+    denied([], "invocation-unqualified")
+    interpreter = gate._interpreter_identity().absolute_resolved_path
+    entry = os.path.abspath(gate.__file__)
+    for executable, script in ((str(repo / sentinel / "python.exe"), entry),
+                               (interpreter, str(repo / sentinel / "gate.py"))):
+        wrong = base.copy()
+        wrong[1] = "hook.orchestrarium-publication.command=" + shlex.join((executable, script, "--git-pre-push"))
+        denied(wrong, "command-mismatch")
+    wrong_event = base.copy()
+    wrong_event[5] = "hook.orchestrarium-publication.event=unexpected"
+    denied(wrong_event, "registration-event-mismatch")
+    both = wrong_event.copy()
+    both[1] = "hook.orchestrarium-publication.command=" + sentinel
+    denied(both, "command-mismatch")
+    assert gate._qualify_native_push_command(build(base)) is True
+
+
 class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
     ALL_HOOKS = (CANONICAL_HOOK, *HOOKS)
 

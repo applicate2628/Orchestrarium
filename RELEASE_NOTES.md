@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-28
 
+- Native publication-entry refusals now identify the bounded decision stage, making diagnosis clearer without changing publication checks or exposing paths.
+
 - Hook ownership now uses the bound selected package and proven legacy identities, preserving foreign and unknown hooks. Health and inventory checks report their actual selected scope and handle supported links and path casing consistently.
 
 - Model selection binds the selected installed script package through its logical and physical paths, retaining identity checks when paths or links change. Model-selection guidance now follows the existing explicit selector contract while preserving user controls and approved factory-only migration.

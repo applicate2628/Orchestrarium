@@ -3321,10 +3321,22 @@ def _qualify_native_recursion(push, git_exe: str, cwd: str) -> None:
         raise PrRouteDenied("PGG-NATIVE-CONFIGURATION")
 
 
+class _NativeEntryDenied(PrRouteDenied):
+    """Retain only the fixed, non-sensitive native-entry decision stage."""
+
+    _STAGES = frozenset({"invocation-unqualified", "command-mismatch", "registration-event-mismatch"})
+
+    def __init__(self, stage: str) -> None:
+        if stage not in self._STAGES:
+            raise ValueError("invalid native-entry diagnostic stage")
+        super().__init__("PGG-NATIVE-ENTRY-REQUIRED")
+        self.stage = stage
+
+
 def _qualify_native_push_command(preflight: PreflightResult) -> bool:
     push = native_push_invocation(preflight.parsed) if preflight.parsed is not None else None
     if push is None:
-        raise PrRouteDenied("PGG-NATIVE-ENTRY-REQUIRED")
+        raise _NativeEntryDenied("invocation-unqualified")
     verification = [row.spelling for row in push.push_option_occurrences if row.spelling in {"--verify", "--no-verify"}]
     if verification and verification[-1] == "--no-verify":
         raise PrRouteDenied("PGG-NATIVE-DISABLED")
@@ -3349,12 +3361,10 @@ def _qualify_native_push_command(preflight: PreflightResult) -> bool:
     supplied = git_prefix_configuration(push)
     own = [(key, value) for key, value in supplied if key.startswith(own_prefix)]
     events = [value for key, value in own if key == own_prefix + "event"]
-    if (
-        not any(key == own_prefix + "command" and value == expected for key, value in own)
-        or not events or "" not in events
-        or events[len(events) - 1 - events[::-1].index(""):] != ["", "pre-push"]
-    ):
-        raise PrRouteDenied("PGG-NATIVE-ENTRY-REQUIRED")
+    if not any(key == own_prefix + "command" and value == expected for key, value in own):
+        raise _NativeEntryDenied("command-mismatch")
+    if not events or "" not in events or events[len(events) - 1 - events[::-1].index(""):] != ["", "pre-push"]:
+        raise _NativeEntryDenied("registration-event-mismatch")
     commands = _native_config_values(git_exe, push.git_global_options, cwd, own_prefix + "command")
     if not commands or any(value != os.fsencode(expected) for value in commands):
         raise PrRouteDenied("PGG-NATIVE-COLLISION")
@@ -3460,6 +3470,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
     failure_id = result.failure_id or "PRG-INTERNAL"
     workdir_diagnostic = result.workdir_diagnostic
     process_diagnostic = ""
+    native_entry_stage = None
     if result.continuation == "EVALUATE_HEAVY":
         try:
             if evaluate_heavy(result):
@@ -3468,6 +3479,8 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             failure_id = exc.failure_id
             workdir_diagnostic = exc.workdir_diagnostic
             process_diagnostic = _format_process_failure(exc)
+            if type(exc) is _NativeEntryDenied and exc.stage in _NativeEntryDenied._STAGES:
+                native_entry_stage = exc.stage
         except Exception:
             failure_id = "PRG-INTERNAL"
     reasons = {
@@ -3505,6 +3518,8 @@ def compose_gate_result(preflight: PreflightResult) -> int:
     if failure_id not in reasons:
         failure_id = "PRG-INTERNAL"
     reason = f"{failure_id}: {reasons[failure_id]}"
+    if failure_id == "PGG-NATIVE-ENTRY-REQUIRED" and native_entry_stage is not None:
+        reason += f" Native-entry diagnostic: stage={native_entry_stage}."
     if failure_id == "PGG-COMPOUND-CONTEXT":
         reason += " " + _format_compound_context_diagnostic(result)
     if failure_id == "PRG-WORKDIR-INVALID" and workdir_diagnostic is not None:
