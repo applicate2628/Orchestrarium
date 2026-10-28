@@ -411,7 +411,7 @@ def test_native_entry_denial_reports_only_fixed_decision_stage(tmp_path: Path, m
         return preflight.build_preflight({"tool_name": "PowerShell", "cwd": str(repo),
                                           "tool_input": {"command": command, "workdir": str(repo)}})
 
-    def denied(options, stage):
+    def denied(options, stage, *, hint=False):
         assert gate.compose_gate_result(build(options)) == 0
         output = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
         assert output["permissionDecision"] == "deny"
@@ -419,35 +419,81 @@ def test_native_entry_denial_reports_only_fixed_decision_stage(tmp_path: Path, m
         assert reason.startswith("PGG-NATIVE-ENTRY-REQUIRED:")
         assert f"Native-entry diagnostic: stage={stage}." in reason
         assert sentinel not in reason and str(repo) not in reason
+        label = " Native callback arguments JSON (local only): "
+        if hint:
+            assert json.loads(reason.split(label, 1)[1]) == list(gate.native_git_config_arguments())
+        else:
+            assert label not in reason
 
     denied([], "invocation-unqualified")
     interpreter = gate._interpreter_identity().absolute_resolved_path
     entry = os.path.abspath(gate.__file__)
-    for executable, script, stage in ((str(repo / sentinel / "python.exe"), entry, "command-interpreter-token"),
-                                      (interpreter, str(repo / sentinel / "gate.py"), "command-script-token"),
-                                      (str(repo / sentinel / "python.exe"), str(repo / sentinel / "gate.py"), "command-interpreter-token")):
+    for executable, script in ((str(repo / sentinel / "python.exe"), entry),
+                               (interpreter, str(repo / sentinel / "gate.py"))):
         wrong = base.copy()
         wrong[1] = "hook.orchestrarium-publication.command=" + shlex.join((executable, script, "--git-pre-push"))
-        denied(wrong, stage)
-    malformed = base.copy()
-    malformed[1] = "hook.orchestrarium-publication.command='" + sentinel
-    denied(malformed, "command-malformed-or-shape")
-    shape = base.copy()
-    shape[1] = "hook.orchestrarium-publication.command=" + sentinel
-    denied(shape, "command-malformed-or-shape")
-    serialized = base.copy()
-    serialized[1] = "hook.orchestrarium-publication.command=" + '"' + interpreter + '" "' + entry + '" --git-pre-push'
-    assert serialized[1] != base[1]
-    denied(serialized, "command-serialization")
-    multiple = shape + ["-c", "hook.orchestrarium-publication.command=" + sentinel + "-other"]
-    denied(multiple, "command-multiple")
+        denied(wrong, "command-mismatch", hint=True)
     wrong_event = base.copy()
     wrong_event[5] = "hook.orchestrarium-publication.event=unexpected"
     denied(wrong_event, "registration-event-mismatch")
     both = wrong_event.copy()
     both[1] = "hook.orchestrarium-publication.command=" + sentinel
-    denied(both, "command-malformed-or-shape")
+    denied(both, "command-mismatch", hint=True)
+    wrong = base.copy()
+    wrong[1] = "hook.orchestrarium-publication.command=" + sentinel
+    original_interpreter = gate._interpreter_identity()
+    changed_interpreter = original_interpreter._replace(absolute_resolved_path=str(repo / sentinel / "changed.exe"))
+    with mock.patch.object(gate, "_interpreter_identity", side_effect=[original_interpreter, original_interpreter, changed_interpreter]):
+        denied(wrong, "command-mismatch")
+    original_regular = gate._regular_identity
+    observed_entry = []
+    def changed_entry(path, *, single_link):
+        identity = original_regular(path, single_link=single_link)
+        if Path(path) == Path(entry) and single_link:
+            observed_entry.append(True)
+            if len(observed_entry) == 3:
+                return (*identity, 1)
+        return identity
+    with mock.patch.object(gate, "_regular_identity", side_effect=changed_entry):
+        denied(wrong, "command-mismatch")
     assert gate._qualify_native_push_command(build(base)) is True
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Python launcher identity")
+def test_native_hint_uses_fired_runner_interpreter(tmp_path: Path, monkeypatch) -> None:
+    """Two local Python processes exercise a real runner without publishing."""
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = shutil.which("git")
+    assert git is not None
+    subprocess.run([git, "init", "-q", str(repo)], check=True, timeout=15)
+    venv = tmp_path / "alternate"
+    subprocess.run([sys.executable, "-B", "-m", "venv", "--without-pip", str(venv)], check=True, timeout=30)
+    alternate = venv / "Scripts/python.exe"
+    assert alternate.is_file()
+    assert alternate.resolve() != Path(sys.executable).resolve()
+    gate = _load_gate_module(CANONICAL_HOOK, "native_hint_alternate_interpreter")
+    source_args = gate.native_git_config_arguments()
+    argv = ("git", "-C", str(repo), *source_args, "push", "origin", "a" * 40 + ":refs/heads/main")
+    command = "& " + " ".join("'" + word.replace("'", "''") + "'" for word in argv)
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "PowerShell", "cwd": str(repo),
+               "tool_input": {"command": command, "workdir": str(repo)}}
+    runner = CANONICAL_HOOK.with_name("check-git-push-gate-runner.py")
+    result = subprocess.run([str(alternate), "-B", str(runner)], input=json.dumps(payload),
+                            cwd=repo, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0
+    output = json.loads(result.stdout)["hookSpecificOutput"]
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert reason.startswith("PGG-NATIVE-ENTRY-REQUIRED:")
+    label = " Native callback arguments JSON (local only): "
+    hint = json.loads(reason.split(label, 1)[1])
+    assert hint[1] == "hook.orchestrarium-publication.command=" + shlex.join((
+        str(alternate.resolve()), str(CANONICAL_HOOK.resolve()), "--git-pre-push"))
+    assert hint[2:] == list(source_args[2:])
 
 
 class TestCanonicalPublicationCommandGrammar(unittest.TestCase):

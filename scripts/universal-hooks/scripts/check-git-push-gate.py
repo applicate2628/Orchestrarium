@@ -3322,38 +3322,32 @@ def _qualify_native_recursion(push, git_exe: str, cwd: str) -> None:
 
 
 class _NativeEntryDenied(PrRouteDenied):
-    """Retain only the fixed, non-sensitive native-entry decision stage."""
+    """Retain the decision stage and an optional owner-generated local hint."""
 
-    _STAGES = frozenset({
-        "invocation-unqualified", "registration-event-mismatch", "command-multiple",
-        "command-malformed-or-shape", "command-interpreter-token", "command-script-token",
-        "command-serialization",
-    })
+    _STAGES = frozenset({"invocation-unqualified", "registration-event-mismatch", "command-mismatch"})
 
-    def __init__(self, stage: str) -> None:
+    def __init__(self, stage: str, native_hint: tuple[str, ...] | None = None) -> None:
         if stage not in self._STAGES:
             raise ValueError("invalid native-entry diagnostic stage")
+        if native_hint is not None and (stage != "command-mismatch" or type(native_hint) is not tuple
+                                        or not all(type(item) is str for item in native_hint)):
+            raise ValueError("invalid native-entry hint")
         super().__init__("PGG-NATIVE-ENTRY-REQUIRED")
         self.stage = stage
+        self.native_hint = native_hint
 
 
-def _native_command_mismatch_stage(values: list[str], expected: str) -> str:
-    """Explain only a rejected literal command using fixed, non-sensitive labels."""
-    if len(values) != 1:
-        return "command-multiple"
+def _native_entry_hint(interpreter_before, entry: Path, entry_before, expected: str) -> tuple[str, ...] | None:
+    """Offer this process's own callback arguments only while identity remains bound."""
     try:
-        supplied_tokens = shlex.split(values[0])
-        expected_tokens = shlex.split(expected)
-    except ValueError:
-        return "command-malformed-or-shape"
-    if (len(supplied_tokens) != 3 or len(expected_tokens) != 3
-        or supplied_tokens[2] != "--git-pre-push" or expected_tokens[2] != "--git-pre-push"):
-        return "command-malformed-or-shape"
-    if supplied_tokens[0] != expected_tokens[0]:
-        return "command-interpreter-token"
-    if supplied_tokens[1] != expected_tokens[1]:
-        return "command-script-token"
-    return "command-serialization"
+        arguments = native_git_config_arguments()
+        if (len(arguments) < 2 or arguments[1] != f"hook.{NATIVE_PUBLICATION_HOOK}.command=" + expected
+            or _interpreter_identity() != interpreter_before or _regular_identity(entry, single_link=True) != entry_before):
+            return None
+        return arguments
+    except Exception:
+        # A diagnostic hint cannot replace or weaken the existing denial.
+        return None
 
 
 def _qualify_native_push_command(preflight: PreflightResult) -> bool:
@@ -3386,7 +3380,7 @@ def _qualify_native_push_command(preflight: PreflightResult) -> bool:
     events = [value for key, value in own if key == own_prefix + "event"]
     supplied_commands = [value for key, value in own if key == own_prefix + "command"]
     if not any(value == expected for value in supplied_commands):
-        raise _NativeEntryDenied(_native_command_mismatch_stage(supplied_commands, expected))
+        raise _NativeEntryDenied("command-mismatch", _native_entry_hint(interpreter_before, entry, entry_before, expected))
     if not events or "" not in events or events[len(events) - 1 - events[::-1].index(""):] != ["", "pre-push"]:
         raise _NativeEntryDenied("registration-event-mismatch")
     commands = _native_config_values(git_exe, push.git_global_options, cwd, own_prefix + "command")
@@ -3495,6 +3489,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
     workdir_diagnostic = result.workdir_diagnostic
     process_diagnostic = ""
     native_entry_stage = None
+    native_entry_hint = None
     if result.continuation == "EVALUATE_HEAVY":
         try:
             if evaluate_heavy(result):
@@ -3505,6 +3500,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             process_diagnostic = _format_process_failure(exc)
             if type(exc) is _NativeEntryDenied and exc.stage in _NativeEntryDenied._STAGES:
                 native_entry_stage = exc.stage
+                native_entry_hint = exc.native_hint
         except Exception:
             failure_id = "PRG-INTERNAL"
     reasons = {
@@ -3544,6 +3540,8 @@ def compose_gate_result(preflight: PreflightResult) -> int:
     reason = f"{failure_id}: {reasons[failure_id]}"
     if failure_id == "PGG-NATIVE-ENTRY-REQUIRED" and native_entry_stage is not None:
         reason += f" Native-entry diagnostic: stage={native_entry_stage}."
+        if native_entry_hint is not None:
+            reason += " Native callback arguments JSON (local only): " + json.dumps(native_entry_hint, ensure_ascii=True, separators=(",", ":"))
     if failure_id == "PGG-COMPOUND-CONTEXT":
         reason += " " + _format_compound_context_diagnostic(result)
     if failure_id == "PRG-WORKDIR-INVALID" and workdir_diagnostic is not None:
