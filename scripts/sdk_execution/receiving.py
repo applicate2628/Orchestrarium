@@ -338,6 +338,8 @@ def review_artifact_target(work_item: str | Path, artifact: str, *, must_be_new:
         raise ValueError("SDK review artifact must be work-item relative")
     item = Path(work_item).resolve(strict=True)
     target = item / relative
+    if target in {item / "agent-runs.jsonl", item / "agent-runs.jsonl.lock"}:
+        raise ValueError("SDK review artifact aliases reserved ledger state")
     if not target.resolve(strict=False).is_relative_to(item):
         raise ValueError("SDK review artifact is outside work item")
     owner = _provider_owner()

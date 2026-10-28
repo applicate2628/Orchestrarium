@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-28
 
+- SDK coordinator artifact preflight now rejects the work-item ledger and its lock as result destinations before any model or worker execution. This prevents wasted calls and an unresolved launch caused by a predictable output collision while preserving the CLI diagnostic.
+
 - Upgrades recognize the exact shipped consultant, pull-request review and repository-transfer skills from the prior 815e9df source revision. Source-authenticated tree identities restore this migration path without admitting user-modified files or weakening strong identity checks.
 
 - Lead receipt finalization now refuses a replaced or changed receipt unless the current transaction proves its own update. This preserves concurrent user changes and reports the failure instead of silently accepting inconsistent installation records.

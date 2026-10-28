@@ -339,11 +339,12 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         raise DispatchError("E_CODEX_SDK_ENVIRONMENT_INVALID")
     binding = read_binding(Path(binding_path))
     item = Path(c.ledger).resolve(strict=True)
-    artifact = receiving.review_artifact_target(item, c.ledger_artifact, must_be_new=True)
+    artifact = item / c.ledger_artifact
     receipt_target = c.terminal_receipt.resolve(strict=False)
     reserved = {item / "agent-runs.jsonl", item / "agent-runs.jsonl.lock"}
     if artifact == receipt_target or artifact in reserved or receipt_target in reserved:
         raise DispatchError("E_CODEX_SDK_OUTPUT_ALIAS")
+    receiving.review_artifact_target(item, c.ledger_artifact, must_be_new=True)
     cwd = Path.cwd().resolve(strict=True)
     command, _expected = owner._resolve_launch_provider_command("codex", cwd)
     if len(command) != 1 or not Path(command[0]).is_absolute():
