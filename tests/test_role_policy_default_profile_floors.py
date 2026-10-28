@@ -80,8 +80,8 @@ def test_role_migration_and_luna_docs_have_no_stale_create_only_contract() -> No
     )
 
     for source in (codex_readme, root_readme, install):
-        assert "prior working or currently-disabled stock" in source
-        assert "customized payloads fail closed" in source
+        assert "Factory payload hashes and approved stock-only migrations remain exact" in source
+        assert "compatible user runtime tuning" in source
         assert "native-required" in source
         assert "E_NATIVE_V2_DISABLED" in source
         assert "E_LUNA_UNAVAILABLE" in source
@@ -128,7 +128,7 @@ def test_loader_rejects_ordinary_default_outside_exact_task_membership(
     ]
     policy_path.write_text(json.dumps(policy), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="task recovery role worker default"):
+    with pytest.raises(ValueError, match="role worker task default"):
         RESOLVER.load_role_policy(tmp_path)
 
 
@@ -147,7 +147,7 @@ def _scientific_scope() -> dict[str, object]:
     }
 
 
-def test_scientific_role_discovery_exposes_named_default_and_astra_range() -> None:
+def test_scientific_role_discovery_exposes_explicit_default_and_astra_range() -> None:
     description = RESOLVER.describe_ordinary_native_role_options(
         "scientific-software-engineer",
         "engineering",
@@ -157,10 +157,9 @@ def test_scientific_role_discovery_exposes_named_default_and_astra_range() -> No
 
     assert description["status"] == "available"
     assert description["defaultProfile"] == "frontier-high"
-    assert description["defaultInvocation"] == {
-        "mode": "named-role-default",
-        "agentType": "scientific-software-engineer",
-    }
+    assert description["defaultInvocation"]["mode"] == "generic-explicit-profile"
+    assert (description["defaultInvocation"]["model"], description["defaultInvocation"]["reasoningEffort"]) == ("gpt-6.1-sol", "high")
+    assert description["defaultInvocation"]["omitAgentType"] is True
     assert description["explicitInvocation"] == {
         "mode": "generic-explicit-profile",
         "omitAgentType": True,
@@ -172,7 +171,7 @@ def test_scientific_role_discovery_exposes_named_default_and_astra_range() -> No
     }
     assert {
         ("gpt-6-astra", effort, "capability-unknown")
-        for effort in ("low", "medium", "high", "xhigh", "max")
+        for effort in ("medium", "high", "xhigh", "max")
     } <= discovered
     assert {
         ("gpt-5.6-terra", "high", "capability-unknown"),
@@ -186,7 +185,7 @@ def test_scientific_role_discovery_exposes_named_default_and_astra_range() -> No
     assert "$scientific-software-engineer" in description["profession"]["instructions"]
 
 
-def test_ordinary_resolver_keeps_named_default_but_explicit_tuple_uses_generic_spawn() -> None:
+def test_ordinary_resolver_uses_generic_for_default_and_explicit_tuple() -> None:
     description = RESOLVER.describe_ordinary_native_role_options(
         "scientific-software-engineer",
         "engineering",
@@ -203,19 +202,19 @@ def test_ordinary_resolver_keeps_named_default_but_explicit_tuple_uses_generic_s
     explicit = RESOLVER.resolve_ordinary_native_dispatch(
         description,
         requested_model="gpt-6-astra",
-        requested_effort="low",
+        requested_effort="medium",
         caller_rationale="The contract is bounded, clear, and directly testable.",
         approved_execution_scope=scope,
+        user_approved_launch=True,
     )
 
-    assert default["invocation"] == {
-        "mode": "named-role-default",
-        "agentType": "scientific-software-engineer",
-    }
+    assert default["invocation"]["mode"] == "generic-explicit-profile"
+    assert (default["invocation"]["model"], default["invocation"]["reasoningEffort"]) == ("gpt-6.1-sol", "high")
+    assert default["invocation"]["omitAgentType"] is True
     assert default["requestedModel"] is None
     assert default["resolvedEffort"] == "high"
     assert explicit["invocation"]["model"] == "gpt-6-astra"
-    assert explicit["invocation"]["reasoningEffort"] == "low"
+    assert explicit["invocation"]["reasoningEffort"] == "medium"
     assert explicit["invocation"]["forkTurns"] == "none"
     assert "agentType" not in explicit["invocation"]
     assert explicit["approvedExecutionScope"] == scope
@@ -228,11 +227,11 @@ def test_ordinary_resolver_keeps_named_default_but_explicit_tuple_uses_generic_s
     assert explicit["fallback"] == "none"
 
 
-def test_analyst_exploration_preserves_explicit_terra_with_sol_default() -> None:
+def test_analyst_exploration_uses_terra_default_and_keeps_legacy_explicit_choice() -> None:
     host = {
         "explicitModelControl": True,
         "explicitReasoningEffortControl": True,
-        "reportedModels": ["gpt-5.6-terra", "gpt-6.1-sol"],
+        "reportedModels": ["gpt-5.6-terra", "gpt-6.1-sol", "gpt-6.1-terra"],
         "reportedEfforts": ["medium", "high"],
         "reportedAgentTypes": ["analyst"],
     }
@@ -250,13 +249,15 @@ def test_analyst_exploration_preserves_explicit_terra_with_sol_default() -> None
 
     assert description["status"] == "available"
     assert description["mutationClass"] == "read-only"
-    assert description["defaultProfile"] == "frontier-high"
-    assert description["defaultModel"] == "gpt-6.1-sol"
-    assert description["defaultEffort"] == "high"
+    assert description["defaultProfile"] == "terra-6.1-medium"
+    assert description["defaultModel"] == "gpt-6.1-terra"
+    assert description["defaultEffort"] == "medium"
     assert [
         (option["profile"], option["model"], option["effort"])
         for option in description["options"]
     ] == [
+        ("terra-6.1-medium", "gpt-6.1-terra", "medium"),
+        ("terra-6.1-high", "gpt-6.1-terra", "high"),
         ("balanced-medium", "gpt-5.6-terra", "medium"),
         ("balanced-high", "gpt-5.6-terra", "high"),
         ("frontier-medium", "gpt-6.1-sol", "medium"),
@@ -276,13 +277,11 @@ def test_analyst_exploration_preserves_explicit_terra_with_sol_default() -> None
         approved_execution_scope=scope,
     )
 
-    assert default["resolvedProfile"] == "frontier-high"
-    assert default["resolvedModel"] == "gpt-6.1-sol"
-    assert default["resolvedEffort"] == "high"
-    assert default["invocation"] == {
-        "mode": "named-role-default",
-        "agentType": "analyst",
-    }
+    assert default["resolvedProfile"] == "terra-6.1-medium"
+    assert default["resolvedModel"] == "gpt-6.1-terra"
+    assert default["resolvedEffort"] == "medium"
+    assert default["invocation"]["mode"] == "generic-explicit-profile"
+    assert default["invocation"]["omitAgentType"] is True
     assert explicit["status"] == "resolved"
     assert explicit["resolvedProfile"] == "balanced-medium"
     assert explicit["resolvedModel"] == "gpt-5.6-terra"
@@ -307,7 +306,6 @@ def test_ordinary_discovery_filters_reported_host_capabilities_and_max_needs_app
         repo_root=ROOT,
     )
     assert [(option["effort"], option["hostCapability"]) for option in description["options"]] == [
-        ("low", "reported"),
         ("max", "reported"),
     ]
 
@@ -404,6 +402,7 @@ def test_ordinary_native_cli_projects_explicit_host_controls_without_launching()
             "Demanding accepted implementation contract.",
             "--approved-scope-json",
             '{"authority":"parent-dispatcher-only","allowedTools":[]}',
+            "--user-approved-launch",
             "--json",
         ],
         cwd=ROOT,
@@ -436,13 +435,15 @@ def test_skill_only_catalog_resolves_default_and_explicit_choices_without_agent_
         description,
         caller_rationale="Use the policy default for this bounded UI implementation.",
         approved_execution_scope=_scientific_scope(),
+        user_approved_launch=True,
     )
     explicit = RESOLVER.resolve_ordinary_native_dispatch(
         description,
         requested_model="gpt-6-astra",
-        requested_effort="low",
+        requested_effort="medium",
         caller_rationale="The accepted UI change is bounded and directly testable.",
         approved_execution_scope=_scientific_scope(),
+        user_approved_launch=True,
     )
 
     assert description["roleKind"] == "skill-only"
@@ -456,7 +457,7 @@ def test_skill_only_catalog_resolves_default_and_explicit_choices_without_agent_
     assert default["invocation"]["forkTurns"] == "none"
     assert "agentType" not in default["invocation"]
     assert explicit["resolvedModel"] == "gpt-6-astra"
-    assert explicit["resolvedEffort"] == "low"
+    assert explicit["resolvedEffort"] == "medium"
     assert "agentType" not in explicit["invocation"]
     assert explicit["profession"] == default["profession"]
 
@@ -478,7 +479,7 @@ def test_fallback_default_emits_omitted_policy_tuple_without_named_agent_type() 
     assert decision["resolvedModel"] == "gpt-6.1-sol"
     assert decision["resolvedEffort"] == "xhigh"
     assert decision["invocation"] == {
-        "mode": "generic-explicit-profile", "forkTurns": "none",
+        "mode": "generic-explicit-profile", "forkTurns": "none", "omitAgentType": True,
         "model": "gpt-6.1-sol", "reasoningEffort": "xhigh",
         "professionSkill": None,
         "promptPreamble": description["profession"]["instructions"],
@@ -523,7 +524,7 @@ def test_generic_fallback_default_refuses_missing_required_controls_or_policy_op
     'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "xhigh"\n',
     'model = ""\nmodel_reasoning_effort = ""\n',
 ))
-def test_fallback_loader_requires_absent_bindings_not_empty_partial_or_matching_values(
+def test_fallback_loader_rejects_empty_or_partial_controls_and_accepts_complete_tuple(
     tmp_path: Path, bindings: str,
 ) -> None:
     policy = tmp_path / "shared/role-routing-policy.v1.json"
@@ -542,9 +543,13 @@ def test_fallback_loader_requires_absent_bindings_not_empty_partial_or_matching_
     result = RESOLVER.describe_ordinary_native_role_options(
         "default", "recovery", _unknown_astra_host(), repo_root=tmp_path,
     )
-    assert result["status"] == ("denied" if bindings else "available")
-    if bindings:
+    if '""' in bindings:
+        assert result["status"] == "denied"
         assert result["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
+    else:
+        assert result["status"] == "available"
+        selected = RESOLVER.resolve_ordinary_native_dispatch(result, caller_rationale="Test carrier controls", approved_execution_scope=_scientific_scope())
+        assert selected["status"] == ("denied" if bindings and bindings.count("\n") == 1 else "resolved")
 
 
 def test_every_skill_only_role_is_task_eligible_and_uses_current_skill_metadata() -> None:
@@ -586,6 +591,8 @@ def test_product_manager_planning_uses_only_the_existing_skill_only_route(
     assert policy["skillOnlyRoles"]["product-manager"] == {
         "defaultProfile": "frontier-high",
         "allowedProfiles": [
+            "terra-6.1-high",
+            "terra-6.1-xhigh",
             "balanced-high",
             "frontier-medium",
             "frontier-high",
@@ -595,6 +602,7 @@ def test_product_manager_planning_uses_only_the_existing_skill_only_route(
             "astra-high",
             "astra-xhigh",
             "astra-max",
+            "terra-6.1-max",
         ],
     }
     assert policy["taskRoleEligibility"]["planning"].count("product-manager") == 1
@@ -645,6 +653,7 @@ def test_product_manager_planning_uses_only_the_existing_skill_only_route(
     assert selected["resolvedProfile"] == "frontier-high"
     assert selected["invocation"] == {
         "mode": "generic-explicit-profile",
+        "omitAgentType": True,
         "forkTurns": "none",
         "model": "gpt-6.1-sol",
         "reasoningEffort": "high",
@@ -794,7 +803,7 @@ def test_product_manager_planning_uses_only_the_existing_skill_only_route(
             assert denied["fallback"] == "none"
 
 
-def test_knowledge_archivist_keeps_medium_effort_with_sol_default() -> None:
+def test_knowledge_archivist_uses_terra_medium_default() -> None:
     description = RESOLVER.describe_ordinary_native_role_options(
         "knowledge-archivist",
         "engineering",
@@ -810,15 +819,15 @@ def test_knowledge_archivist_keeps_medium_effort_with_sol_default() -> None:
         approved_execution_scope=_scientific_scope(),
     )
 
-    assert description["defaultProfile"] == "frontier-medium"
-    assert description["defaultAgentTypeCapability"] == "reported"
+    assert description["defaultProfile"] == "terra-6.1-medium"
+    assert description["defaultAgentTypeCapability"] == "not-applicable"
     assert decision["status"] == "resolved"
-    assert decision["resolvedModel"] == "gpt-6.1-sol"
+    assert decision["resolvedModel"] == "gpt-6.1-terra"
     assert decision["resolvedEffort"] == "medium"
-    assert decision["invocation"]["agentType"] == "knowledge-archivist"
+    assert decision["invocation"]["omitAgentType"] is True
 
 
-def test_every_former_terra_default_is_sol_without_removing_explicit_terra() -> None:
+def test_factory_defaults_use_approved_models_and_preserve_legacy_terra() -> None:
     policy, _ = RESOLVER.load_role_policy(ROOT)
     roles = {**policy["roles"], **policy["skillOnlyRoles"]}
     sol_defaults = {
@@ -832,9 +841,9 @@ def test_every_former_terra_default_is_sol_without_removing_explicit_terra() -> 
     for name in sol_defaults:
         role = roles[name]
         profile = policy["profiles"][role["defaultProfile"]]
-        assert profile["codexModel"] == "gpt-6.1-sol", name
+        assert profile["codexModel"] == ("gpt-6.1-terra" if name in {"explorer", "analyst", "planner", "backend-engineer", "qa-engineer", "knowledge-archivist"} else "gpt-6.1-sol"), name
         assert profile["effort"] == (
-            "medium" if name == "knowledge-archivist" else "high"
+            "medium" if name in {"explorer", "backend-engineer", "knowledge-archivist"} else "high"
         ), name
     assert not {
         name for name, role in roles.items()
@@ -849,7 +858,7 @@ def test_every_former_terra_default_is_sol_without_removing_explicit_terra() -> 
             assert "balanced-medium" in roles[name]["allowedProfiles"]
 
 
-def test_native_named_default_denies_only_when_reported_agent_types_exclude_it() -> None:
+def test_generic_default_does_not_require_named_agent_type() -> None:
     unknown = RESOLVER.describe_ordinary_native_role_options(
         "scientific-software-engineer",
         "engineering",
@@ -885,14 +894,14 @@ def test_native_named_default_denies_only_when_reported_agent_types_exclude_it()
         approved_execution_scope=_scientific_scope(),
     )
 
-    assert unknown["defaultAgentTypeCapability"] == "capability-unknown"
-    assert reported["defaultAgentTypeCapability"] == "reported"
-    assert absent["defaultAgentTypeCapability"] == "reported-absent"
+    assert unknown["defaultAgentTypeCapability"] == "not-applicable"
+    assert reported["defaultAgentTypeCapability"] == "not-applicable"
+    assert absent["defaultAgentTypeCapability"] == "not-applicable"
     assert unknown_result["status"] == "resolved"
     assert unknown_result["hostCapability"] == "capability-unknown"
-    assert reported_result["hostCapability"] == "reported"
-    assert absent_result["status"] == "denied"
-    assert absent_result["stableId"] == "E_ORDINARY_NATIVE_AGENT_TYPE_UNAVAILABLE"
+    assert reported_result["hostCapability"] == "capability-unknown"
+    assert absent_result["status"] == "resolved"
+    assert absent_result["invocation"]["omitAgentType"] is True
     assert absent_result["fallback"] == "none"
 
 
@@ -925,7 +934,7 @@ def test_ordinary_native_cli_accepts_reported_agent_types() -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout)["defaultAgentTypeCapability"] == "reported"
+    assert json.loads(result.stdout)["defaultAgentTypeCapability"] == "not-applicable"
 
 
 def test_invalid_task_shape_is_typed_denial_for_native_and_skill_only_roles() -> None:
@@ -979,7 +988,8 @@ def test_historical_review_profile_resolves_only_exact_admitted_intersections(
         caller_rationale="Explicit read-only review at the admitted historical floor.",
         approved_execution_scope=scope,
     )
-    assert default["invocation"] == {"mode": "named-role-default", "agentType": role}
+    assert default["invocation"]["mode"] == "generic-explicit-profile"
+    assert default["invocation"]["omitAgentType"] is True
     assert default["resolvedModel"] == "gpt-6.1-sol"
     assert explicit["status"] == "resolved"
     assert explicit["resolvedProfile"] == "sol-5.6-xhigh"
@@ -1052,7 +1062,7 @@ def _supervised_luna_host() -> dict:
         "explicitModelControl": True,
         "explicitReasoningEffortControl": True,
         "reportedModels": [
-            "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol",
+            "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol",
         ],
         "reportedEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "reportedAgentTypes": [
@@ -1091,8 +1101,9 @@ def test_supervised_luna_producers_use_ordinary_explicit_route_keep_defaults(
             approved_execution_scope=scope,
         )
         assert default["status"] == explicit["status"] == "resolved", role
-        assert default["resolvedModel"] == "gpt-6.1-sol", role
-        assert default["resolvedEffort"] == ("medium" if role == "knowledge-archivist" else "high")
+        expected_profile = policy["roles"].get(role, policy["skillOnlyRoles"].get(role))
+        selected_profile = expected_profile.get("taskDefaultProfiles", {}).get(task, expected_profile["defaultProfile"])
+        assert (default["resolvedModel"], default["resolvedEffort"]) == (policy["profiles"][selected_profile]["codexModel"], policy["profiles"][selected_profile]["effort"]), role
         assert explicit["resolvedProfile"] == f"luna-{effort}"
         assert explicit["invocation"]["mode"] == "generic-explicit-profile"
         assert explicit["invocation"]["model"] == "gpt-6-luna"
@@ -1103,12 +1114,9 @@ def test_supervised_luna_producers_use_ordinary_explicit_route_keep_defaults(
         assert explicit["approvedExecutionScope"] == scope
         assert explicit["failurePolicy"] == default["failurePolicy"]
         assert explicit["fallback"] == "none"
-        if description["roleKind"] == "native":
-            assert default["invocation"] == {"mode": "named-role-default", "agentType": role}
-        else:
-            assert default["invocation"]["model"] == "gpt-6.1-sol"
-            assert default["invocation"]["forkTurns"] == "none"
-            assert "agentType" not in default["invocation"]
+        assert default["invocation"]["forkTurns"] == "none"
+        assert default["invocation"]["omitAgentType"] is True
+        assert "agentType" not in default["invocation"]
 
 
 @pytest.mark.parametrize("effort", ("high", "xhigh"))
@@ -1133,20 +1141,20 @@ def test_supervised_luna_does_not_admit_protected_tasks(effort: str) -> None:
 
 def test_supervised_luna_does_not_admit_other_efforts() -> None:
     scope = {"authority": "parent-dispatcher-only", "purpose": "unsupported effort probe"}
-    for effort in ("low", "medium", "max", "ultra"):
+    for effort in ("low", "medium", "ultra"):
         description = RESOLVER.describe_ordinary_native_role_options(
             "backend-engineer", "engineering", _supervised_luna_host(), repo_root=ROOT,
         )
         decision = RESOLVER.resolve_ordinary_native_dispatch(
             description, requested_model="gpt-6-luna", requested_effort=effort,
-            caller_rationale="Only the exact ordinary High and Extra high profiles are admitted.",
+            caller_rationale="Below-minimum and unsupported ordinary Luna efforts remain denied.",
             approved_execution_scope=scope, user_approved_max=True,
         )
         assert decision["status"] == "denied", effort
         assert decision["fallback"] == "none"
 
 
-@pytest.mark.parametrize("drift", ("malformed-policy", "mixed-manifest", "custom-role"))
+@pytest.mark.parametrize("drift", ("malformed-policy", "mixed-manifest", "custom-role", "owned-instructions"))
 def test_supervised_luna_keeps_input_pairing_and_preserves_refused_bytes(
     tmp_path: Path, drift: str,
 ) -> None:
@@ -1171,14 +1179,97 @@ def test_supervised_luna_keeps_input_pairing_and_preserves_refused_bytes(
         manifest = json.loads(path.read_bytes())
         manifest["policySha256"] = "0" * 64
         path.write_text(json.dumps(manifest), encoding="utf-8")
-    else:
+    elif drift == "custom-role":
         path = tmp_path / paths[2]
         path.write_bytes(path.read_bytes() + b"# user-owned customization\n")
+    else:
+        path = tmp_path / paths[2]
+        payload = path.read_bytes()
+        marker = b'developer_instructions = """'
+        assert marker in payload
+        path.write_bytes(payload.replace(marker, marker + b"Changed owned instructions. ", 1))
     before = {name: (tmp_path / name).read_bytes() for name in paths}
     refused = RESOLVER.describe_ordinary_native_role_options(
         "backend-engineer", "engineering", _supervised_luna_host(), repo_root=tmp_path,
     )
-    assert refused["status"] == "denied"
-    assert refused["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
+    assert refused["status"] == ("available" if drift == "custom-role" else "denied")
+    if drift != "custom-role":
+        assert refused["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
     assert refused["fallback"] == "none"
     assert {name: (tmp_path / name).read_bytes() for name in paths} == before
+
+
+
+@pytest.mark.parametrize("model,effort,legacy", [
+    ("gpt-6-astra", "high", False), ("gpt-6-astra", "max", True),
+    ("gpt-6.1-terra", "max", True), ("gpt-6-luna", "max", True),
+    ("gpt-6.1-sol", "max", True),
+])
+def test_individual_launch_projection_uses_one_effective_tuple_guard(model, effort, legacy):
+    description = RESOLVER.describe_ordinary_native_role_options(
+        "scientific-software-engineer", "engineering", _unknown_astra_host(), repo_root=ROOT)
+    inputs = dict(requested_model=model, requested_effort=effort,
+                  caller_rationale="Synthetic exact-launch receiving projection, not a genuine user grant.",
+                  approved_execution_scope=_scientific_scope())
+    assert RESOLVER.resolve_ordinary_native_dispatch(description, **inputs)["status"] == "denied"
+    selected = RESOLVER.resolve_ordinary_native_dispatch(description, user_approved_launch=True, **inputs)
+    assert selected["status"] == "resolved", selected
+    assert (selected["invocation"]["model"], selected["invocation"]["reasoningEffort"]) == (model, effort)
+    compat = RESOLVER.resolve_ordinary_native_dispatch(description, user_approved_max=True, **inputs)
+    assert (compat["status"] == "resolved") is legacy
+
+
+def test_terra_medium_default_and_explicit_legacy_identity():
+    host = {"explicitModelControl": True, "explicitReasoningEffortControl": True,
+            "reportedModels": ["gpt-6.1-terra", "gpt-6.1-sol", "gpt-5.6-terra"],
+            "reportedEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"]}
+    description = RESOLVER.describe_ordinary_native_role_options("backend-engineer", "engineering", host, repo_root=ROOT)
+    assert description["defaultModel"] == "gpt-6.1-terra"
+    assert all(option["effort"] != "low" for option in description["options"])
+    decision = RESOLVER.resolve_ordinary_native_dispatch(description,
+        requested_model="gpt-6.1-terra", requested_effort="medium",
+        caller_rationale="Actual task fit and whole verified-result economics, not the host default.",
+        approved_execution_scope=_scientific_scope())
+    assert decision["status"] == "resolved", decision
+    assert decision["resolvedProfile"] == "terra-6.1-medium"
+    assert decision["invocation"]["model"] == "gpt-6.1-terra"
+    assert decision["invocation"]["reasoningEffort"] == "medium"
+    old = next(option for option in description["options"] if option["profile"] == "balanced-medium")
+    assert old["model"] == "gpt-5.6-terra"
+
+
+@pytest.mark.parametrize("model,effort", [("gpt-6.1-terra", "low"), ("gpt-6-luna", "medium"), ("gpt-6-astra", "low")])
+def test_raw_description_and_explicit_low_cannot_use_approval_to_lower_minimum(model, effort):
+    original = RESOLVER.describe_ordinary_native_role_options("backend-engineer", "engineering", _unknown_astra_host(), repo_root=ROOT)
+    # JSON/plain description compatibility is not runtime/authority attestation.
+    raw = json.loads(json.dumps(original))
+    raw.update(defaultModel=model, defaultEffort=effort)
+    denied = RESOLVER.resolve_ordinary_native_dispatch(raw,
+        caller_rationale="Synthetic raw-description floor falsifier.",
+        approved_execution_scope=_scientific_scope(), user_approved_launch=True)
+    assert denied["status"] == "denied", denied
+    explicit = RESOLVER.resolve_ordinary_native_dispatch(original,
+        requested_model=model, requested_effort=effort,
+        caller_rationale="An approval projection cannot lower the admitted minimum.",
+        approved_execution_scope=_scientific_scope(), user_approved_launch=True)
+    assert explicit["status"] == "denied", explicit
+
+
+@pytest.mark.parametrize("role,task", [("backend-engineer", "engineering"), ("planner", "planning"), ("qa-engineer", "review")])
+def test_public_role_option_order_is_advisory_and_retains_scientific_choice(role, task):
+    description = RESOLVER.describe_ordinary_native_role_options(role, task, _unknown_astra_host(), repo_root=ROOT)
+    assert description["status"] == "available"
+    options = description["options"]
+    positions = {option["profile"]: index for index, option in enumerate(options)}
+    for current in ("terra-6.1-high", "terra-6.1-xhigh"):
+        assert positions[current] < positions["balanced-high"]
+        assert all(positions[current] < index for index, option in enumerate(options) if option["model"] == "gpt-6-astra")
+    agreement = [index for index, option in enumerate(options) if option["model"] == "gpt-6-astra" or option["effort"] == "max"]
+    ordinary = [index for index, option in enumerate(options) if option["model"] != "gpt-6-astra" and option["effort"] != "max"]
+    assert max(ordinary) < min(agreement)
+    science = RESOLVER.resolve_ordinary_native_dispatch(description,
+        requested_model="gpt-6.1-sol", requested_effort="high",
+        caller_rationale="The actual scientific/complex-code commission fits primary Sol despite advisory presentation order.",
+        approved_execution_scope=_scientific_scope())
+    assert science["status"] == "resolved", science
+    assert science["resolvedModel"] == "gpt-6.1-sol"

@@ -29,7 +29,7 @@ PRE_SDK_TRANSPORT_FILES = (
     "external-prompt-governance.md",
     "external-role-taxonomy.v1.json",
 )
-TRANSPORT_FILES = PRE_SDK_TRANSPORT_FILES + (
+PRE_POLICY_SDK_TRANSPORT_FILES = PRE_SDK_TRANSPORT_FILES + (
     "process_supervision/sdk_worker.py",
     "sdk_execution/__init__.py",
     "sdk_execution/_async.py",
@@ -52,6 +52,9 @@ TRANSPORT_FILES = PRE_SDK_TRANSPORT_FILES + (
     "sdk_execution/runtime.py",
     "sdk_execution/worker.py",
 )
+POLICY_TRANSPORT_FILES = ("model_routing/launch_policy.py",) + PRE_SDK_TRANSPORT_FILES
+TRANSPORT_FILES = ("model_routing/launch_policy.py",) + PRE_POLICY_SDK_TRANSPORT_FILES
+PREDECESSOR_TRANSPORT_SETS = (PRE_SDK_TRANSPORT_FILES, POLICY_TRANSPORT_FILES, PRE_POLICY_SDK_TRANSPORT_FILES)
 EXTERNAL_GOVERNANCE_BEGIN = "<!-- BEGIN ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->"
 EXTERNAL_GOVERNANCE_END = "<!-- END ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->"
 _TOP_KEYS = frozenset({"schemaVersion", "packRevision", "files"})
@@ -189,7 +192,7 @@ def _load_manifest(path: Path, *, predecessor_only: bool = False) -> dict[str, A
     if not isinstance(revision, str) or not revision.strip():
         raise _fail("manifest pack revision")
     files = manifest.get("files")
-    admitted_sets = (TRANSPORT_FILES, PRE_SDK_TRANSPORT_FILES) if predecessor_only else (TRANSPORT_FILES,)
+    admitted_sets = (TRANSPORT_FILES, *PREDECESSOR_TRANSPORT_SETS) if predecessor_only else (TRANSPORT_FILES,)
     if not isinstance(files, dict) or tuple(files) not in admitted_sets:
         raise _fail("manifest must bind the complete ordered transport set")
     return manifest

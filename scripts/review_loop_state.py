@@ -520,6 +520,68 @@ def qualify_completed_verdict_result_v2(
     return dict(result)
 
 
+def _unstarted_round_errors(data: dict[str, Any], rnd: dict[str, Any], operations: list[dict[str, Any]]) -> list[str]:
+    """Qualify recorded non-execution without erasing admission or retry history."""
+    errors: list[str] = []
+    if rnd is not data["rounds"][-1] or rnd["phase"] != "admitted":
+        errors.append("unstarted close requires the latest admitted round")
+    attempts = {lane: rnd[lane]["attempt_id"] for lane in LANES if rnd[lane]["state"] != "retained"}
+    if not attempts or any(rnd[lane]["state"] != "admitted" for lane in attempts) or rnd["lane_failures"]:
+        errors.append("unstarted close requires admitted attempts without failures or retries")
+    admissions = []
+    for operation in operations:
+        receipt = operation["receipt"]
+        if receipt.get("round") == rnd["round"]:
+            if receipt.get("command") not in {"begin", "next-round"}:
+                errors.append("unstarted close has recorded round execution")
+            else:
+                admissions.append(receipt)
+        elif receipt.get("attempt_id") in attempts.values():
+            errors.append("unstarted close has recorded attempt execution")
+    if len(admissions) != 1 or admissions[0].get("command") != ("begin" if rnd["round"] == 1 else "next-round") or any(
+        admissions[0].get(key) != value for key, value in {
+            "loop_id": data["loop_id"], "artifact_revision": rnd["artifact"]["revision"], "attempts": attempts,
+        }.items()
+    ):
+        errors.append("unstarted close lacks the matching original admission")
+    return errors
+
+
+def _unstarted_close_errors(data: dict[str, Any]) -> list[str]:
+    """Validate explicit new stop evidence without imposing it on legacy records."""
+    operations = data["operations"]
+    selected = [index for index, operation in enumerate(operations) if "unstarted" in operation["receipt"]]
+    latest = data["rounds"][-1]
+    if not selected:
+        return []
+    if selected != [len(operations) - 1]:
+        return ["unstarted close must be the final operation"]
+    operation = operations[-1]
+    receipt = operation["receipt"]
+    stop = receipt.get("unstarted")
+    if not isinstance(stop, dict) or set(stop) != {"reason", "attempts"} or not _nonempty(stop.get("reason")):
+        return ["unstarted close requires a reason and exact admitted attempts"]
+    attempts = {lane: latest[lane]["attempt_id"] for lane in LANES if latest[lane]["state"] != "retained"}
+    if (
+        data["status"] not in {"drift", "deadlock"}
+        or receipt.get("event") not in {RECEIPT_EVENT, MANUAL_RECEIPT_EVENT}
+        or receipt.get("command") != "close"
+        or receipt.get("outcome") != data["status"]
+        or type(receipt.get("round")) is not int
+        or receipt.get("round") != latest["round"]
+        or receipt.get("artifact_revision") != latest["artifact"]["revision"]
+        or receipt.get("loop_id") != data["loop_id"]
+        or stop["attempts"] != attempts
+    ):
+        return ["unstarted close receipt differs from the terminal round"]
+    payload = {"outcome": receipt["outcome"], "round": receipt["round"],
+               "artifact_revision": receipt["artifact_revision"], "reason": stop["reason"]}
+    errors = _unstarted_round_errors(data, latest, operations[:-1])
+    if operation["fingerprint"] != _fingerprint("close", payload):
+        errors.append("unstarted close fingerprint differs from its inputs")
+    return errors
+
+
 def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: bool = False) -> list[str]:
     errors: list[str] = []
     if not isinstance(data, dict):
@@ -734,6 +796,8 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
         effective = [_effective_lane(rounds, index - 1, lane) for lane in LANES]
         if phase == "complete" and any(not isinstance(block, dict) or block.get("state") != "complete" for block in effective):
             errors.append(f"{label}: complete round has incomplete lane")
+    if not errors:
+        errors.extend(_unstarted_close_errors(data))
     return errors
 
 
@@ -1560,8 +1624,26 @@ def command_next_round(args: argparse.Namespace) -> dict[str, Any]:
 
 def command_close(args: argparse.Namespace) -> dict[str, Any]:
     payload = {"outcome": args.outcome}
+    selected_stop = {key: getattr(args, key, None) for key in ("round", "artifact_revision", "reason")}
+    if any(value is not None for value in selected_stop.values()):
+        if type(selected_stop["round"]) is not int or not _nonempty(selected_stop["artifact_revision"]) or not _nonempty(selected_stop["reason"]):
+            raise StateError("RLSTATE_INVALID", "unstarted close requires round, artifact revision, and reason")
+        payload.update(selected_stop)
     def transition(data: dict[str, Any], root: Path, _reviews: Path, state: Path) -> dict[str, Any]:
         rnd = data["rounds"][-1]
+        if "round" in payload:
+            if args.outcome not in {"drift", "deadlock"}:
+                raise StateError("RLSTATE_INVALID", "unstarted close cannot converge")
+            if selected_stop["round"] != rnd["round"] or selected_stop["artifact_revision"] != rnd["artifact"]["revision"]:
+                raise StateError("RLSTATE_REVISION_MISMATCH", "unstarted close target differs from the latest round")
+            errors = _unstarted_round_errors(data, rnd, data["operations"])
+            if errors:
+                raise StateError("RLSTATE_INVALID", errors[0])
+            data["status"] = args.outcome
+            return _receipt("close", root, state, data, rnd, outcome=args.outcome, unstarted={
+                "reason": selected_stop["reason"],
+                "attempts": {lane: rnd[lane]["attempt_id"] for lane in LANES if rnd[lane]["state"] != "retained"},
+            })
         if rnd["phase"] != "complete":
             raise StateError("RLSTATE_INVALID", "terminal outcome requires a complete round")
         if args.outcome == "converged":
@@ -1574,7 +1656,18 @@ def command_close(args: argparse.Namespace) -> dict[str, Any]:
             raise StateError("RLSTATE_INVALID", f"{args.outcome} requires a complete REVISE round")
         data["status"] = args.outcome
         return _receipt("close", root, state, data, rnd, outcome=args.outcome)
-    return _mutate(args, "close", payload, transition)
+    receipt = _mutate(args, "close", payload, transition)
+    if "round" in payload:
+        stop = receipt.get("unstarted")
+        if (
+            not isinstance(stop, dict)
+            or stop.get("reason") != selected_stop["reason"]
+            or receipt.get("round") != selected_stop["round"]
+            or receipt.get("artifact_revision") != selected_stop["artifact_revision"]
+            or receipt.get("outcome") != args.outcome
+        ):
+            raise StateError("RLSTATE_INVALID", "unstarted close replay lacks its bound receipt")
+    return receipt
 
 
 def command_amend_scout_reconciliation(args: argparse.Namespace) -> dict[str, Any]:
@@ -1848,6 +1941,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     close = state_parser("close", operation=True)
     close.add_argument("--outcome", choices=OUTCOMES, required=True)
+    close.add_argument("--round", type=int, help="Expected latest round for a stop before execution")
+    close.add_argument("--artifact-revision", help="Expected frozen revision for a stop before execution")
+    close.add_argument("--reason", help="Factual reason for stopping an unstarted admitted round")
 
     validate = state_parser("validate")
     validate.add_argument("--cap", type=int, default=REVIEW_LOOP_ROUND_CAP)

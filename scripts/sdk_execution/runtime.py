@@ -74,8 +74,15 @@ class CodexRuntimeSelection:
     expected_launch_sha256: str | None = None
     config_overrides: tuple[str, ...] = CODEX_MCP_ISOLATION_OVERRIDES
     mcp_scope: CodexMcpScope = CodexMcpScope(())
+    installed_hook_root: str | None = None
 
     def __post_init__(self) -> None:
+        if self.installed_hook_root is not None and (
+            type(self.installed_hook_root) is not str or not self.installed_hook_root
+            or not Path(self.installed_hook_root).is_absolute()
+            or any(ord(char) < 32 or ord(char) == 127 for char in self.installed_hook_root)
+        ):
+            raise RuntimeBindingError("invalid_installed_hook_root")
         for name in ("executable", "codex_home", "work_item"):
             value = getattr(self, name)
             if type(value) is not str or not value or not Path(value).is_absolute():
@@ -565,6 +572,7 @@ def run_admitted_review(
                 command.extend(("--config", override))
             if _owner().require_codex_hook_trust(
                 owner, command, Path(selection.codex_home), Path(request.cwd),
+                installed_root=Path(selection.installed_hook_root) if selection.installed_hook_root is not None else None,
                 deadline_monotonic=deadline_monotonic, cancellation_probe=cancellation_probe,
             ) != 0:
                 raise RuntimeBindingError("selected_codex_hook_trust_unavailable")

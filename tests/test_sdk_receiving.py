@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -147,7 +148,7 @@ def test_settled_failure_is_nonauthorizing_blocked_evidence(monkeypatch, tmp_pat
 
 def test_exact_auth_secret_is_scanned_without_recognizable_label(monkeypatch, tmp_path):
     request = fixture_request(prepare_valid_work_item(tmp_path))
-    secret = "ordinary-looking-fixture-value"
+    secret = secrets.token_urlsafe(24)  # Unregistered per-test scan needle.
     review = ReviewResult(request.external_evidence_run_id, request.artifact_id, request.role, "REVISE",
                           (Finding("low", "source.py", 1, "Review evidence", secret),))
     observation = synthetic_observation(monkeypatch, request, review=review)
@@ -305,7 +306,7 @@ def test_observed_version_secret_is_scanned_before_artifact_creation(monkeypatch
     from sdk_execution.receiving import receive_runtime_run
     request, selection = fixture(tmp_path)
     selection = claim(request, selection)
-    secret = "ordinary-looking-sensitive-version"
+    secret = secrets.token_urlsafe(24)  # Unregistered per-test scan needle.
     reported = {**SDK_CONFIG, "model": request.model, "accountBinding": request.account_binding,
                 "runtimeVersion": secret}
     observed = synthetic_observation(monkeypatch, request, runtime_selection=selection.to_dict(), sdk_config=reported)

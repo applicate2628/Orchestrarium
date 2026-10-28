@@ -749,6 +749,15 @@ class Validator:
                 f"(expected {expected}, actual {actual})"
             )
 
+    def check_common_skill_live_body(
+        self, name: str, expected: str, codex_file: str, claude_file: str
+    ) -> None:
+        """Bind combined-source canon without changing standalone validity checks."""
+        if self.layout.standalone:
+            self.check_common_skill_body_parity(name, codex_file, claude_file)
+        else:
+            self.check_common_skill_body_pin(name, expected, f"@SKILLS/{name}/SKILL.md")
+
     def check_common_skill_body_parity(
         self, name: str, codex_file: str, claude_file: str
     ) -> None:
@@ -1704,6 +1713,7 @@ def validate_pack(
             and action[0] in {
                 "check_common_skill_body_pin",
                 "check_common_skill_body_parity",
+                "check_common_skill_live_body",
             }
         )
         for action in applicable_actions:

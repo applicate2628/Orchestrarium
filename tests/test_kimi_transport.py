@@ -569,20 +569,21 @@ def test_kimi_wrapper_entry_freezes_policy_bound_max_provenance(
     monkeypatch.setattr(owner, "_launch_with_runner", stop_before_provider)
     receipt = tmp_path / "kimi-effort.receipt"
 
-    assert owner.launch(
-        "kimi",
-        [
-            "fixture",
-            "--terminal-receipt",
-            str(receipt),
-            "--task-class",
-            "review",
-            "--role",
-            "qa-engineer",
-            "--kimi-effort",
-            "max",
-        ],
-    ) == 0
+    arguments = [
+        "fixture",
+        "--terminal-receipt",
+        str(receipt),
+        "--task-class",
+        "review",
+        "--role",
+        "qa-engineer",
+        "--kimi-effort",
+        "max",
+    ]
+    assert owner.launch("kimi", arguments) == 1
+    assert captured == []
+    # Synthetic caller agreement exercises this policy branch only; it is not a real grant.
+    assert owner.launch("kimi", [*arguments, "--user-approved-launch"]) == 0
 
     prevalidated, _reserved_run = captured[0]
     assert prevalidated.effort == "max"
@@ -1771,11 +1772,9 @@ def test_generic_capture_metadata_requires_matching_observation(
         observed.overflow, observed.observed_bytes, observed.persisted_bytes,
         "a" * 64, observed.issues,
     )
-    output_context = owner.resolve_provider_output_context(
-        owner.resolve_provider_auth_configuration(
-            "claude", environment={"ANTHROPIC_API_KEY": "synthetic-generic-fixture"}
-        )
-    )
+    # This test checks capture correspondence, not authentication. No known
+    # credential bytes are present in either synthetic observed stream.
+    output_context = owner.ProviderOutputContext(())
 
     receipt_path = (tmp_path / "generic-terminal.receipt").resolve()
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:

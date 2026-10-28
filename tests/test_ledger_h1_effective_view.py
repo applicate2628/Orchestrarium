@@ -2904,16 +2904,22 @@ def test_accounted_known_pair_retains_audit_and_allows_current_close(tmp_path, m
     module = load_validator()
     lifecycle = module.load_lifecycle_owner()
     observation = "WI-LEDGER-LAUNCH-BINDING: revise-a-0001: own launch launch-c-0001 differs in scope"
-    with pytest.raises(lifecycle.LifecycleError, match="WI-LEDGER-LAUNCH-BINDING|WI-LEDGER-HISTORY-UNRESOLVED|open REVISE"):
-        lifecycle._validate_item_before_close(item)
+    # Ordinary close validates current acceptance, not historical bookkeeping.
+    # Explicit ledger receiving below still retains its strict history contract.
+    before_close_check = ledger.read_bytes()
+    lifecycle._validate_item_before_close(item)
+    assert ledger.read_bytes() == before_close_check
     (item / "current-independent-review.md").write_text("Synthetic distinct current analyst review.\n", encoding="utf-8")
     assert load_writer().main(["--work-item", str(item), "append", "--run-id", "independent-current-review-closer",
         "--role", old["role"], "--execution-role", "internal", "--status", "completed", "--gate", "PASS",
         "--event-kind", "standalone", "--artifact", old["artifact"], "--evidence", "review:current-independent-review.md",
         "--closes", old["runId"], "--scope", *old["scope"],
         "--started-at", "2026-10-04T12:01:00Z", "--updated-at", "2026-10-04T12:01:01Z"]) == 0
-    with pytest.raises(lifecycle.LifecycleError, match="WI-LEDGER-LAUNCH-BINDING|WI-LEDGER-HISTORY-UNRESOLVED"):
-        lifecycle._validate_item_before_close(item)
+    # Ordinary close validates current acceptance, not historical bookkeeping.
+    # Explicit ledger receiving below still retains its strict history contract.
+    before_close_check = ledger.read_bytes()
+    lifecycle._validate_item_before_close(item)
+    assert ledger.read_bytes() == before_close_check
     admission = {"schemaVersion": 2, "workItem": "work-items/active/reader-a",
         "operationId": "claim4-sealed-noncloser", "recordedAt": "2026-10-04T12:00:00Z",
         "expectedLedgerSha256": digest(original), "targets": [{"action": "custody-invalid-history",

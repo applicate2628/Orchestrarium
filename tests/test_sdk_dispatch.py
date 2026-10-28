@@ -310,3 +310,19 @@ def test_prepare_preserves_omitted_ledger_caps(tmp_path, monkeypatch):
     assert operation.prevalidated.control.resolved_ledger_budget is None
     assert runtime.CodexRuntimeSelection.from_dict(operation.selection.to_dict()) == operation.selection
     assert not (Path(operation.selection.work_item) / "agent-runs.jsonl").exists()
+
+
+def test_direct_dispatch_obeys_shared_model_policy_before_binding(tmp_path, monkeypatch):
+    selected, path, environment = fixture(tmp_path, monkeypatch,
+        provider_flags=["--model", "gpt-6-astra", "-c", "model_reasoning_effort=high"])
+    monkeypatch.setattr(dispatch, "read_binding", lambda *a: pytest.fail("unapproved binding reached"))
+    with pytest.raises(dispatch.DispatchError):
+        dispatch.prepare_dispatch(selected, path, source_environment=environment, cancellation_probe=lambda: False)
+
+
+def test_dispatch_rejects_change_of_launch_agreement_projection(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch, user_approved_launch=True)
+    operation._consumed = True
+    operation.prevalidated.control.user_approved_launch = False
+    with pytest.raises(dispatch.DispatchError, match="INVOCATION_NOT_CURRENT"):
+        operation.assert_current(operation.request, "sdk_prepare")

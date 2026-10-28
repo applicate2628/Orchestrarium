@@ -201,8 +201,10 @@ def test_real_factory_builds_explicit_config_without_launch(tmp_path, monkeypatc
         adapter._verify_account(request, {"account": {"type": "chatgpt", "email": "other@example.invalid"}})
 
 
-def test_parent_calls_owned_worker_with_admitted_envelope(tmp_path, monkeypatch):
+@pytest.mark.parametrize("explicit_package", [False, True])
+def test_parent_calls_owned_worker_with_admitted_envelope(tmp_path, monkeypatch, explicit_package):
     request, selection = fixture(tmp_path)
+    selection = replace(selection, installed_hook_root=str(tmp_path / "selected package") if explicit_package else None)
     selection = replace(selection, config_overrides=("agents.enabled=false", "features.multi_agent_v2=false", *CODEX_MCP_ISOLATION_OVERRIDES))
     import provider_prompt
     from process_supervision.process_runner import ProcessRunnerV1
@@ -222,7 +224,8 @@ def test_parent_calls_owned_worker_with_admitted_envelope(tmp_path, monkeypatch)
     assert trust_calls[0][0][1:] == (
         [selection.executable, *(token for setting in selection.config_overrides for token in ("--config", setting))],
         Path(selection.codex_home), Path(request.cwd))
-    assert trust_calls[0][1] == {"deadline_monotonic": deadline, "cancellation_probe": cancellation_probe}
+    assert trust_calls[0][1] == {"deadline_monotonic": deadline, "cancellation_probe": cancellation_probe,
+                                  "installed_root": Path(selection.installed_hook_root) if explicit_package else None}
     assert calls[0][1]["cancellation_probe"] is cancellation_probe
     assert effects == ["sdk_prepare", "sdk_launch_admission", "sdk_launch_commit", "sdk_hook_trust", "sdk_worker_start"]
 

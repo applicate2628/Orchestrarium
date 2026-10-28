@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR_PATH = ROOT / "scripts" / "validate-provider-prompt-projections.py"
 INSTALLER_PATH = ROOT / "scripts" / "production_installer.py"
 TRANSPORT_FILES = (
+    "model_routing/launch_policy.py",
     "provider_prompt.py",
     "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
@@ -196,6 +197,7 @@ def _stock_8521_blob(name: str) -> bytes:
 def _seed_stock_8521_transport(projection: Path) -> dict[str, Path]:
     projection.mkdir(parents=True, exist_ok=True)
     for current_only in (
+        projection / "model_routing/launch_policy.py",
         projection / "external-role-taxonomy.v1.json",
         projection / "process_supervision" / "process_runner.py",
         *(projection / name for name in SDK_TRANSPORT_FILES),
@@ -217,6 +219,7 @@ def _seed_stock_8521_transport(projection: Path) -> dict[str, Path]:
 def _seed_stock_7872_transport(projection: Path) -> dict[str, Path]:
     projection.mkdir(parents=True, exist_ok=True)
     for current_only in (
+        projection / "model_routing/launch_policy.py",
         projection / "external-role-taxonomy.v1.json",
         projection / "process_supervision" / "process_runner.py",
         *(projection / name for name in SDK_TRANSPORT_FILES),
@@ -268,6 +271,7 @@ def _stock_8f92_blob(name: str) -> bytes:
 def _seed_stock_8f92_transport(projection: Path) -> dict[str, Path]:
     projection.mkdir(parents=True, exist_ok=True)
     for current_only in (
+        projection / "model_routing/launch_policy.py",
         projection / "process_supervision" / "process_runner.py",
         *(projection / name for name in SDK_TRANSPORT_FILES),
     ):
@@ -392,6 +396,22 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: P
     assert (canonical / 'scripts/linked_runtime_subroots.py').read_bytes() == (ROOT / 'scripts/linked_runtime_subroots.py').read_bytes()
     assert (peer / 'scripts/provider_prompt.py').read_bytes() == (ROOT / 'scripts/provider_prompt.py').read_bytes()
     source_owner = _load_owner(canonical / 'scripts/provider_prompt.py', 'canonical_ledger_seed_owner')
+    def qualify_local_helper(module):
+        if os.name == "nt":
+            return  # Preserve real ProcessRunner/Windows qualification there.
+        # This test owns installed helper selection and ledger compatibility,
+        # not unavailable POSIX ProcessRunner containment. Execute the actual
+        # installed helper while retaining its caller-owned before-start check.
+        from types import SimpleNamespace
+        def execute_helper(_runner, command, *, cwd, environment, timeout_secs, before_start):
+            before_start()
+            result = subprocess.run(command, cwd=cwd, env=environment,
+                                    capture_output=True, timeout=timeout_secs)
+            return (SimpleNamespace(outcome="success", target_exit_code=result.returncode),
+                    result.stdout, result.stderr)
+        monkeypatch.setattr(module, "run_support_command", execute_helper)
+
+    qualify_local_helper(source_owner)
     item, before = ledger_fixture(tmp_path / 'work', 4100)
     launch = ['--work-item', str(item), 'append', '--run-id', 'canonical-owner-launch',
         '--role', 'external-reviewer', '--execution-role', 'external-reviewer', '--assigned-role', 'qa-engineer',
@@ -410,6 +430,7 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: P
     after = (item / 'agent-runs.jsonl').read_bytes()
     assert after.startswith(before) and len(after.splitlines()) == 4102
     owner = _load_owner(peer / 'scripts/provider_prompt.py', 'updated_peer_ledger_owner')
+    qualify_local_helper(owner)
     received = owner.read_back_external_terminal(owner.Control(ledger=str(item)), 'codex', 'canonical-owner-launch')
     assert received is not None and received['runId'] == 'canonical-owner-terminal'
     writer = owner._ledger_owner()
@@ -997,6 +1018,7 @@ def test_project_scope_uses_its_paired_projections_without_reading_home(
     home = tmp_path / "poisoned-home"
     poisoned = home / ".agents" / "skills" / "lead" / "scripts"
     poisoned.mkdir(parents=True)
+    (poisoned / TRANSPORT_FILES[0]).parent.mkdir(parents=True, exist_ok=True)
     (poisoned / TRANSPORT_FILES[0]).write_text("global drift\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("USERPROFILE", raising=False)
@@ -1179,7 +1201,7 @@ def test_global_scope_rejects_linked_leaf_below_authorized_canonical_agents_root
     assert result.stdout == ""
     assert result.stderr.startswith(
         "E_TRANSPORT_PROJECTION_PARITY: "
-        "canonical/provider_prompt.py linked runtime authority"
+        f"canonical/{TRANSPORT_FILES[0]} linked runtime authority"
     )
 
 
@@ -1420,18 +1442,19 @@ def test_every_projection_violation_uses_one_stable_id(
     assert result.stderr.startswith("E_TRANSPORT_PROJECTION_PARITY:")
 
 
+@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES"))
 @pytest.mark.parametrize("inventory", ("exact-old", "missing-old", "partial-sdk", "reordered-old"))
 def test_pre_sdk_manifest_compatibility_is_predecessor_only_and_exact(
-    tmp_path: Path, inventory: str,
+    tmp_path: Path, inventory: str, generation: str,
 ) -> None:
     validator = _load_validator()
     _source, _canonical, _peer, path = _fixture(tmp_path)
     manifest = json.loads(path.read_bytes())
-    names = list(validator.PRE_SDK_TRANSPORT_FILES)
+    names = list(getattr(validator, generation))
     if inventory == "missing-old":
         names.pop()
     elif inventory == "partial-sdk":
-        names.append("sdk_execution/contracts.py")
+        names.append(next(name for name in validator.TRANSPORT_FILES if name not in names))
     elif inventory == "reordered-old":
         names.reverse()
     manifest["files"] = {name: manifest["files"][name] for name in names}
@@ -1445,17 +1468,16 @@ def test_pre_sdk_manifest_compatibility_is_predecessor_only_and_exact(
             validator._load_manifest(path, predecessor_only=True)
 
 
+@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES"))
 @pytest.mark.parametrize("peer_change", (None, "unexpected-sdk", "customized-old"))
 def test_sdk_projection_upgrade_preserves_receipted_pre_sdk_generation(
-    tmp_path: Path, peer_change: str | None,
+    tmp_path: Path, peer_change: str | None, generation: str,
 ) -> None:
     installer = _load_installer()
     source, canonical_stage, peer, manifest_path = _fixture(tmp_path)
     canonical = tmp_path / "installed/skills"
     lead = canonical / "lead"
-    old_names = tuple(name for name in TRANSPORT_FILES
-                      if not name.startswith("sdk_execution/")
-                      and name != "process_supervision/sdk_worker.py")
+    old_names = getattr(_load_validator(), generation)
     manifest = json.loads(manifest_path.read_bytes())
     manifest["files"] = {name: manifest["files"][name] for name in old_names}
     payload = (json.dumps(manifest, indent=2) + "\n").encode()
@@ -1463,14 +1485,17 @@ def test_sdk_projection_upgrade_preserves_receipted_pre_sdk_generation(
         _write_transport(lead / "scripts", name, (canonical_stage / name).read_bytes())
     for name in set(TRANSPORT_FILES) - set(old_names):
         (peer / name).unlink()
-    (peer / "sdk_execution").rmdir()  # Real pre-SDK generations have no package directory.
+    if not any(name.startswith("sdk_execution/") for name in old_names):
+        (peer / "sdk_execution").rmdir()
+    if "model_routing/launch_policy.py" not in old_names:
+        (peer / "model_routing").rmdir()
     for base in (lead, peer.parent):
         (base / "shared").mkdir(parents=True, exist_ok=True)
         (base / "shared" / installer.TRANSPORT_PROJECTION_MANIFEST).write_bytes(payload)
     (canonical / installer._LEAD_RECEIPT_NAME).write_bytes(installer._lead_receipt_bytes(
         installer._tree_sha256(lead, ignore_runtime_cache=True)))
     if peer_change == "unexpected-sdk":
-        _write_transport(peer, "sdk_execution/contracts.py", b"unowned SDK member")
+        _write_transport(peer, next(name for name in TRANSPORT_FILES if name not in old_names), b"unowned introduced member")
     elif peer_change == "customized-old":
         (peer / "provider_prompt.py").write_bytes(b"operator customization")
     predecessor = installer._transport_predecessor(source, canonical, peer)
@@ -1655,14 +1680,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
     assert staged.accepted_prior_set == "8f92dc73"
-    assert tuple(name for name, _payload in staged.pending_files) == (
-        "provider_prompt.py",
-        "process_supervision/process_runner.py",
-        "invoke-codex-prompt.py",
-        "invoke-kimi-prompt.py",
-        "external-prompt-governance.md",
-        "external-role-taxonomy.v1.json",
-    ) + SDK_TRANSPORT_FILES
+    assert tuple(name for name, _payload in staged.pending_files) == TRANSPORT_FILES
     assert all(payload == _authored_transport_path(ROOT, name).read_bytes()
                for name, payload in staged.pending_files)
     assert staged.manifest_pending is True
@@ -1768,7 +1786,14 @@ def test_exact_published_transport_set_is_one_atomic_prior_plan(
     )
 
     assert staged.accepted_prior_set == commit
-    assert tuple(name for name, _payload in staged.pending_files) == pending + SDK_TRANSPORT_FILES
+    # The routing update changes every public launcher and adds the policy
+    # companion; preserve the exact historical pending members as well.
+    updated = set(pending + SDK_TRANSPORT_FILES) | {
+        "model_routing/launch_policy.py", "invoke-codex-prompt.py",
+        "invoke-claude-prompt.py", "invoke-kimi-prompt.py", "invoke-grok-prompt.py",
+    }
+    assert tuple(name for name, _payload in staged.pending_files) == tuple(
+        name for name in TRANSPORT_FILES if name in updated)
     assert all(payload == _authored_transport_path(source, name).read_bytes()
                for name, payload in staged.pending_files)
     assert staged.manifest_pending is True
@@ -1983,6 +2008,8 @@ def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifes
             "scripts/invoke-codex-prompt.py",
             STOCK_448E_PROJECTION_SHA256["invoke-codex-prompt.py"],
         ),
+        *[(f"scripts/{name}", STOCK_448E_PROJECTION_SHA256[name]) for name in (
+            "invoke-claude-prompt.py", "invoke-kimi-prompt.py", "invoke-grok-prompt.py")],
         (
             "scripts/external-prompt-governance.md",
             STOCK_448E_PROJECTION_SHA256["external-prompt-governance.md"],
@@ -1999,10 +2026,11 @@ def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifes
 
     assert owner.created == [
         (f"scripts/{name}", _authored_transport_path(source, name).read_bytes())
-        for name in SDK_TRANSPORT_FILES
+        for name in ("model_routing/launch_policy.py", *SDK_TRANSPORT_FILES)
     ]
     assert owner.operations == (
-        [("migrate", path) for path, _digest in owner.calls[:-1]]
+        [("create", "scripts/model_routing/launch_policy.py")]
+        + [("migrate", path) for path, _digest in owner.calls[:-1]]
         + [("create", f"scripts/{name}") for name in SDK_TRANSPORT_FILES]
         + [("migrate", "shared/provider-prompt-projections.v1.json")]
     )
@@ -2034,14 +2062,7 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
     assert staged.accepted_prior_set == "8521b638"
-    assert tuple(name for name, _payload in staged.pending_files) == (
-        "provider_prompt.py",
-        "process_supervision/process_runner.py",
-        "invoke-codex-prompt.py",
-        "invoke-kimi-prompt.py",
-        "external-prompt-governance.md",
-        "external-role-taxonomy.v1.json",
-    ) + SDK_TRANSPORT_FILES
+    assert tuple(name for name, _payload in staged.pending_files) == TRANSPORT_FILES
     assert all(payload == _authored_transport_path(ROOT, name).read_bytes()
                for name, payload in staged.pending_files)
     assert staged.manifest_pending is True
@@ -2066,14 +2087,7 @@ def test_exact_7872_six_member_transport_is_one_atomic_complete_plan(
     staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
     assert staged.accepted_prior_set == "7872d36d"
-    assert tuple(name for name, _payload in staged.pending_files) == (
-        "provider_prompt.py",
-        "process_supervision/process_runner.py",
-        "invoke-codex-prompt.py",
-        "invoke-kimi-prompt.py",
-        "external-prompt-governance.md",
-        "external-role-taxonomy.v1.json",
-    ) + SDK_TRANSPORT_FILES
+    assert tuple(name for name, _payload in staged.pending_files) == TRANSPORT_FILES
     assert all(payload == _authored_transport_path(ROOT, name).read_bytes()
                for name, payload in staged.pending_files)
     assert staged.manifest_pending is True
@@ -2379,16 +2393,10 @@ def test_8521_transport_real_install_replaces_seven_members_then_is_noop(
         "invoke-kimi-prompt.py"
     ]
     assert after_first[current_manifest.name][1] != before_identities[current_manifest.name]
-    for name in set(paths) - {
-        "provider_prompt.py",
-        "process_supervision/process_runner.py",
-        "invoke-codex-prompt.py",
-        "invoke-kimi-prompt.py",
-        "external-prompt-governance.md",
-        "external-role-taxonomy.v1.json",
-        current_manifest.name,
-    }:
-        assert after_first[name][1] == before_identities[name]
+    # Every member in this exact old generation has changed in the SDK/policy
+    # composition; the second install below must preserve all new identities.
+    for name in paths:
+        assert after_first[name][1] != before_identities[name]
     assert not tuple(projection.parent.rglob("*.prior"))
 
     assert installer.install("claude", args) == 0
@@ -2419,8 +2427,9 @@ def test_8521_transport_dry_run_reports_complete_plan_without_mutation(
 
     assert installer.install("claude", [*args, "--dry-run"]) == 0
     output = capsys.readouterr().out
-    assert f"transport prior 8521b638: {7 + len(SDK_TRANSPORT_FILES)} replacements" in output
-    assert all(not (_projection / name).exists() for name in SDK_TRANSPORT_FILES)
+    assert f"transport prior 8521b638: {len(TRANSPORT_FILES) + 1} replacements" in output
+    assert all(not (_projection / name).exists()
+               for name in ("model_routing/launch_policy.py", *SDK_TRANSPORT_FILES))
     assert {
         name: (
             path.read_bytes(),
@@ -2524,11 +2533,14 @@ def test_e7_six_tree_upgrade_rolls_back_after_middle_replacement(
         for path in canonical.rglob("*") if path.is_file()
     }
     e7_current_skill_priors = {
-        skill.name: installer._tree_sha256(skill, ignore_runtime_cache=True)
+        skill.name: installer._legacy_tree_sha256(skill, ignore_runtime_cache=True)
         for skill in canonical.iterdir()
         if skill.is_dir() and (ROOT / "src.codex" / "skills" / skill.name).is_dir()
     }
     assert installer.E7_CANONICAL_SKILL_TREE_SHA256 == e7_current_skill_priors
+    for name, legacy in e7_current_skill_priors.items():
+        assert installer._legacy_factory_identity_v2(name, legacy) == installer._tree_sha256(
+            canonical / name, ignore_runtime_cache=True)
     # This test owns skill-tree rollback, not admission of unrelated e7 native
     # roles. Keep the e7 skill trees intact and align only role files whose e7
     # bytes have no current accepted-prior route.

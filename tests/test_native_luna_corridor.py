@@ -121,6 +121,14 @@ def _stock_fast_policy_manifest_pair() -> tuple[bytes, bytes]:
 
 
 def _stock_native_contract_prior_pair(kind: str) -> tuple[bytes, bytes]:
+    if kind == "ordinary-escalation":
+        fixture = ROOT / "tests/fixtures/native-luna-policy-priors/ordinary-escalation-previous"
+        return ((fixture / "role-routing-policy.v1.json").read_bytes(),
+                (fixture / "orchestrarium-role-manifest.json").read_bytes())
+    if kind == "terra-ranking":
+        fixture = ROOT / "tests/fixtures/native-luna-policy-priors/terra-ranking-previous"
+        return ((fixture / "role-routing-policy.v1.json").read_bytes(),
+                (fixture / "orchestrarium-role-manifest.json").read_bytes())
     if kind == "configured-ownership":
         fixture = ROOT / "tests/fixtures/native-luna-policy-priors/pre-configurable-roles"
         return ((fixture / "role-routing-policy.v1.json").read_bytes(),
@@ -194,7 +202,7 @@ def test_native_prior_clone_lifetime_cleans_readonly_and_preserves_primary(tmp_p
     assert (installed / "readonly/value").read_bytes() == b"public owned readonly clone fixture"
 
 
-def _seed_native_contract_prior(project: Path, kind: str) -> tuple[Path, Path]:
+def _seed_native_contract_prior(project: Path, kind: str, *, unreceipted_pair: bool = False) -> tuple[Path, Path]:
     lead = project / ".agents/skills/lead"
     policy = lead / "shared/role-routing-policy.v1.json"
     manifest = lead / "shared/orchestrarium-role-manifest.json"
@@ -209,9 +217,24 @@ def _seed_native_contract_prior(project: Path, kind: str) -> tuple[Path, Path]:
     # Bind the complete synthetic predecessor before callers inject drift/faults.
     fixture_digest = installer._tree_sha256(lead, ignore_runtime_cache=True)
     assert fixture_digest is not None
-    (lead.parent / installer._LEAD_RECEIPT_NAME).write_bytes(
-        installer._lead_receipt_bytes(fixture_digest)
-    )
+    receipt = lead.parent / installer._LEAD_RECEIPT_NAME
+    receipt.write_bytes(installer._lead_receipt_bytes(fixture_digest))
+    if unreceipted_pair:
+        receipt.unlink()
+        assert not receipt.exists()
+        plan = installer._preflight_canonical_skills(
+            ROOT / "src.codex/skills", lead.parent, root=ROOT
+        )
+        try:
+            lead_plan = next(item for item in plan.skills if item.name == "lead")
+            expected = (
+                (Path("shared/role-routing-policy.v1.json"), hashlib.sha256(old_policy).hexdigest()),
+                (Path("shared/orchestrarium-role-manifest.json"), hashlib.sha256(old_manifest).hexdigest()),
+            )
+            assert lead_plan.accepted_prior_files == expected
+        finally:
+            installer._discard_canonical_skills_plan(plan)
+        assert not plan.stage.path.exists()
     return policy, manifest
 
 
@@ -256,6 +279,135 @@ def _nrc_configured_role_bytes(factory: bytes) -> bytes:
     return b'# user tuning preserves factory feature reductions\nmodel_verbosity = "low"\n' + factory
 
 
+def test_factory_task_defaults_and_configured_tuple_are_explicit(tmp_path: Path) -> None:
+    root = _nrc_source_layout(tmp_path)
+    resolver = _resolver_module()
+    controls = {"explicitModelControl": True, "explicitReasoningEffortControl": True}
+    args = {"caller_rationale": "synthetic routing check", "approved_execution_scope": {"read": True}}
+    for role, task, model, effort in (
+        ("worker", "engineering", "gpt-6.1-terra", "medium"),
+        ("worker", "recovery", "gpt-6.1-sol", "high"),
+        ("platform-engineer", "recovery", "gpt-6.1-sol", "high"),
+        ("analyst", "exploration", "gpt-6.1-terra", "medium"),
+        ("scientific-software-engineer", "engineering", "gpt-6.1-sol", "high"),
+        ("architect", "critical-design", "gpt-6.1-sol", "xhigh"),
+    ):
+        desc = resolver.describe_ordinary_native_role_options(role, task, controls, repo_root=root)
+        result = resolver.resolve_ordinary_native_dispatch(desc, **args)
+        assert result["status"] == "resolved", result
+        assert (result["resolvedModel"], result["resolvedEffort"]) == (model, effort)
+        assert result["invocation"]["omitAgentType"] is True
+        assert result["invocation"]["forkTurns"] == "none"
+        assert result["runtimeIdentity"] == "unspecified by runtime"
+    path = root / "src.codex/agents/worker.toml"
+    factory = path.read_text()
+    previous = factory.replace('model = "gpt-6.1-terra"', 'model = "gpt-6.1-sol"').replace('model_reasoning_effort = "medium"', 'model_reasoning_effort = "high"')
+    path.write_text('# non-model user setting\nmodel_verbosity = "low"\n' + previous)
+    saved = path.read_bytes()
+    desc = resolver.describe_ordinary_native_role_options("worker", "engineering", controls, repo_root=root)
+    configured_old_tuple = resolver.resolve_ordinary_native_dispatch(desc, **args)
+    assert (configured_old_tuple["resolvedModel"], configured_old_tuple["resolvedEffort"]) == ("gpt-6.1-sol", "high")
+    assert configured_old_tuple["invocation"]["omitAgentType"] is True
+    assert path.read_bytes() == saved
+    path.write_text(factory.replace('model_reasoning_effort = "medium"', 'model_reasoning_effort = "high"'))
+    desc = resolver.describe_ordinary_native_role_options("worker", "engineering", controls, repo_root=root)
+    configured = resolver.resolve_ordinary_native_dispatch(desc, **args)
+    assert (configured["resolvedModel"], configured["resolvedEffort"]) == ("gpt-6.1-terra", "high")
+    no_controls = resolver.describe_ordinary_native_role_options("worker", "engineering", {"explicitModelControl": False, "explicitReasoningEffortControl": False}, repo_root=root)
+    assert resolver.resolve_ordinary_native_dispatch(no_controls, **args)["stableId"] == "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE"
+
+
+def test_prior_factory_tuned_controls_preserve_noncontrol_bytes(tmp_path: Path) -> None:
+    root = _nrc_source_layout(tmp_path)
+    policy = _policy()
+    role_root = root / "src.codex/agents"
+    target = tmp_path / "agents"
+    target.mkdir()
+    for source in role_root.glob("*.toml"):
+        shutil.copy2(source, target / source.name)
+    expected = {}
+    for name, entry in policy["roles"].items():
+        if "previousFactoryProfile" not in entry:
+            continue
+        path = target / (name + ".toml")
+        current = path.read_bytes()
+        old = policy["profiles"][entry["previousFactoryProfile"]]
+        new = policy["profiles"][entry["defaultProfile"]]
+        current = current.replace(b'model = ', b'"model" = ', 1).replace(b'\n', b'\r\n')
+        current = b'# retained user comment\r\n' + current
+        old_bytes = current.replace(new["codexModel"].encode(), old["codexModel"].encode(), 1).replace(
+            ('model_reasoning_effort = "' + new["effort"] + '"').encode(),
+            ('model_reasoning_effort = "' + old["effort"] + '"').encode(), 1)
+        path.write_bytes(old_bytes)
+        expected[name] = current
+    pair = installer._STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS[-1]
+    plan = installer._preflight_codex_native_roles(ROOT, AGENTS_SOURCE, target, tmp_path / "config.toml", prior_factory_pair=pair)
+    for item in plan.role_files:
+        name = item.relative_path.stem
+        if name in expected:
+            assert item.payload == expected[name]
+            assert item.accepted_prior == item.installed_digest
+    unproven = installer._preflight_codex_native_roles(ROOT, AGENTS_SOURCE, target, tmp_path / "config.toml")
+    for item in unproven.role_files:
+        if item.relative_path.stem in expected:
+            assert item.payload == (target / item.relative_path).read_bytes()
+            assert item.accepted_prior is None
+    exact = target / "worker.toml"
+    old_worker = (role_root / "worker.toml").read_bytes().replace(b'gpt-6.1-terra', b'gpt-6.1-sol', 1).replace(b'model_reasoning_effort = "medium"', b'model_reasoning_effort = "high"', 1)
+    assert hashlib.sha256(old_worker).hexdigest() in installer._TERRA_RANKING_PRIOR_ROLE_SHA256
+    exact.write_bytes(old_worker)
+    current_generation = installer._preflight_codex_native_roles(ROOT, AGENTS_SOURCE, target, tmp_path / "config.toml")
+    worker = next(item for item in current_generation.role_files if item.relative_path == Path("worker.toml"))
+    assert worker.payload == old_worker and worker.accepted_prior is None
+    unusual = old_worker.replace(b'model = "gpt-6.1-sol"', b'"model" = """gpt-6.1-sol""" # keep comment', 1)
+    unusual = b'# model = "not a control"\r\n' + unusual.replace(b'\n', b'\r\n')
+    result = installer._migrate_native_role_controls(unusual, tomllib.loads(unusual.decode()), policy["profiles"]["terra-6.1-medium"])
+    assert result == unusual.replace(b'"""gpt-6.1-sol"""', b'"gpt-6.1-terra"', 1).replace(b'model_reasoning_effort = "high"', b'model_reasoning_effort = "medium"', 1)
+
+
+def test_legacy_serialized_descriptions_never_authorize_bare_dispatch() -> None:
+    resolver = _resolver_module()
+    fixture = ROOT / "tests/fixtures/native-luna-policy-priors/terra-ranking-previous"
+    args = {"caller_rationale": "legacy synthetic selection", "approved_execution_scope": {"read": True}}
+    for name, reason in (("legacy-worker-description.json", "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE"),
+                         ("legacy-worker-description-controls.json", "E_ORDINARY_NATIVE_SELECTION_INVALID")):
+        legacy = json.loads((fixture / name).read_text(encoding="utf-8"))
+        assert legacy["defaultInvocation"]["mode"] == "named-role-default"
+        result = resolver.resolve_ordinary_native_dispatch(legacy, **args)
+        assert result["status"] == "denied" and result["stableId"] == reason
+        assert "invocation" not in result
+
+
+@pytest.mark.parametrize("mode", ("project", "global"))
+def test_public_installer_migrates_tuned_previous_generation(tmp_path: Path, monkeypatch, mode: str) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    args = ["--force", "--no-hypothesis-hook"]
+    if mode == "global":
+        monkeypatch.setenv("USERPROFILE", str(project))
+        monkeypatch.setenv("HOME", str(project))
+        args.append("--global")
+    else:
+        args.extend(["--target", str(project), "--allow-unsafe-target"])
+    assert installer.install("codex", args) == 0
+    _seed_native_contract_prior(project, "terra-ranking")
+    policy = _policy()
+    expected = {}
+    for name, entry in policy["roles"].items():
+        if "previousFactoryProfile" not in entry:
+            continue
+        path = project / ".codex/agents" / (name + ".toml")
+        old, new = (policy["profiles"][entry[key]] for key in ("previousFactoryProfile", "defaultProfile"))
+        current = b"# user comment\n" + path.read_bytes()
+        previous = current.replace(new["codexModel"].encode(), old["codexModel"].encode(), 1).replace(
+            ('model_reasoning_effort = "' + new["effort"] + '"').encode(),
+            ('model_reasoning_effort = "' + old["effort"] + '"').encode(), 1)
+        path.write_bytes(previous)
+        expected[path] = current
+    assert installer.install("codex", args) == 0
+    assert {path: path.read_bytes() for path in expected} == expected
+
+
 def test_nrc_configured_all_roles_keep_owned_profession_and_factory_identity(tmp_path: Path) -> None:
     root = _nrc_source_layout(tmp_path)
     resolver = _resolver_module()
@@ -292,8 +444,8 @@ def test_nrc_configured_controls_core_and_snapshot_are_independent(tmp_path: Pat
     path = root / "src.codex/agents/platform-engineer.toml"
     original = path.read_text()
     policy = _policy()
-    alternate = policy["profiles"]["astra-high"]
-    configured = original.replace('model = "gpt-6.1-sol"', 'model = "' + alternate["codexModel"] + '"')
+    alternate = policy["profiles"]["frontier-xhigh"]
+    configured = original.replace('model = "gpt-6.1-terra"', 'model = "' + alternate["codexModel"] + '"').replace('model_reasoning_effort = "medium"', 'model_reasoning_effort = "xhigh"')
     path.write_text(configured)
     description = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
     assert description["status"] == "available", description
@@ -302,7 +454,7 @@ def test_nrc_configured_controls_core_and_snapshot_are_independent(tmp_path: Pat
     path.write_text(configured + "# same profession, new snapshot\n")
     stale = resolver.resolve_ordinary_native_dispatch(description, caller_rationale="stale", approved_execution_scope={"write": True})
     assert stale["status"] == "denied" and stale["configurationDiagnostic"]["stage"] == "snapshot-drift"
-    path.write_text(original.replace('model_reasoning_effort = "high"\n', ''))
+    path.write_text(original.replace('model_reasoning_effort = "medium"\n', ''))
     partial = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
     assert partial["status"] == "available"
     unresolved = resolver.resolve_ordinary_native_dispatch(partial, caller_rationale="partial", approved_execution_scope={"read": True})
@@ -331,13 +483,18 @@ def test_nrc_general_encoding_v1_max_and_carrier_controls(tmp_path: Path) -> Non
     role.write_bytes(original)
     manifest_path = root / "src.codex/agents/orchestrarium-role-manifest.json"
     v2 = manifest_path.read_bytes()
-    manifest_path.write_bytes((ROOT / "tests/fixtures/native-luna-policy-priors/pre-configurable-roles/orchestrarium-role-manifest.json").read_bytes())
+    policy_path = root / "shared/role-routing-policy.v1.json"
+    current_policy = policy_path.read_bytes()
+    prior_policy, prior_manifest = _stock_native_contract_prior_pair("configured-ownership")
+    policy_path.write_bytes(prior_policy)
+    manifest_path.write_bytes(prior_manifest)
     for old in (ROOT / "tests/fixtures/native-luna-policy-priors/pre-configurable-roles").glob("*.toml"):
         (root / "src.codex/agents" / old.name).write_bytes(old.read_bytes())
     assert resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)["status"] == "available"
     role.write_bytes(original + b'# changed v1 lacks independent ownership\n')
     denied = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
     assert denied["configurationDiagnostic"] == {"stage": "manifest/version", "reason": "owned-contract-version-required"}
+    policy_path.write_bytes(current_policy)
     manifest_path.write_bytes(v2)
     for current in AGENTS_SOURCE.glob("*.toml"):
         (root / "src.codex/agents" / current.name).write_bytes(current.read_bytes())
@@ -345,18 +502,18 @@ def test_nrc_general_encoding_v1_max_and_carrier_controls(tmp_path: Path) -> Non
     review.write_text(review.read_text().replace('model_reasoning_effort = "xhigh"', 'model_reasoning_effort = "max"'))
     description = resolver.describe_ordinary_native_role_options("architecture-reviewer", "review", controls, repo_root=root)
     kwargs = dict(caller_rationale="synthetic max", approved_execution_scope={"read": True})
-    assert resolver.resolve_ordinary_native_dispatch(description, **kwargs)["configurationDiagnostic"]["reason"] == "maximum-approval-required"
+    assert resolver.resolve_ordinary_native_dispatch(description, **kwargs)["configurationDiagnostic"]["reason"] == "individual-launch-approval-required"
     assert resolver.resolve_ordinary_native_dispatch(description, user_approved_max=True, **kwargs)["resolvedEffort"] == "max"
     carrier = root / "src.codex/agents/default.toml"
     carrier.write_bytes(b'model = "gpt-6-astra"\nmodel_reasoning_effort = "high"\n' + carrier.read_bytes())
     description = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
-    assert resolver.resolve_ordinary_native_dispatch(description, **kwargs)["status"] == "resolved"
+    assert resolver.resolve_ordinary_native_dispatch(description, **kwargs)["configurationDiagnostic"]["stage"] == "configured-carrier-conflict"
     explicit = resolver.resolve_ordinary_native_dispatch(description, requested_model="gpt-6.1-sol", requested_effort="high", **kwargs)
     assert explicit["configurationDiagnostic"]["stage"] == "configured-carrier-conflict"
     assert explicit["fallback"] == "none"
     serialized = json.loads(json.dumps(description))
     assert resolver.resolve_ordinary_native_dispatch(serialized, requested_model="gpt-6.1-sol", requested_effort="high", **kwargs)["configurationDiagnostic"]["stage"] == "configured-carrier-conflict"
-    role.write_text(original.decode().replace('model = "gpt-6.1-sol"', 'model = "PRIVATE-NRC-CANARY"'))
+    role.write_text(original.decode().replace('model = "gpt-6.1-terra"', 'model = "PRIVATE-NRC-CANARY"'))
     description = resolver.describe_ordinary_native_role_options("platform-engineer", "engineering", controls, repo_root=root)
     result = resolver.resolve_ordinary_native_dispatch(description, **kwargs)
     assert result["configurationDiagnostic"]["stage"] == "configured-profile-policy"
@@ -403,11 +560,19 @@ def test_nrc_public_installer_upgrades_v1_and_preserves_all_configured_roles(tmp
                "--home", str(tmp_path / "clean-home" if mode == "project" else project), "--repo-root", str(tmp_path / "not-source"),
                "--ordinary-native-action", "describe", "--task-class", "engineering", "--role", "platform-engineer",
                "--host-controls", "explicit", "--json"]
-    actual = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    actual = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=30)
     assert actual.returncode == 0 and actual.stderr == "", actual.stderr
     description = json.loads(actual.stdout)
     assert description["status"] == "available", description
     assert description["configurationProvenance"]["classification"] == "configured"
+    command[command.index("describe")] = "resolve"
+    command.extend(["--caller-rationale", "synthetic installed routing", "--approved-scope-json", '{"write":true}'])
+    resolved = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=30)
+    assert resolved.returncode == 0 and resolved.stderr == "", resolved.stderr
+    decision = json.loads(resolved.stdout)
+    assert (decision["resolvedModel"], decision["resolvedEffort"]) == ("gpt-6.1-terra", "medium")
+    assert decision["invocation"]["omitAgentType"] is True
+    assert decision["invocation"]["forkTurns"] == "none"
 
 
 def _resolve(tmp_path: Path) -> dict:
@@ -1678,7 +1843,21 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
         for name, profile in policy["profiles"].items()
         if profile["codexModel"] == "gpt-6-luna"
     }
-    assert luna_profiles == {"luna-high", "luna-xhigh"}
+    assert luna_profiles == {"luna-high", "luna-xhigh", "luna-max"}
+    assert policy["profiles"]["luna-max"]["effort"] == "max"
+    resolver = _resolver_module()
+    description = resolver.describe_ordinary_native_role_options(
+        "explorer", "exploration",
+        {"explicitModelControl": True, "explicitReasoningEffortControl": True},
+        repo_root=ROOT,
+    )
+    selection = dict(requested_model="gpt-6-luna", requested_effort="max",
+                     caller_rationale="synthetic max", approved_execution_scope={"read": True})
+    denied = resolver.resolve_ordinary_native_dispatch(description, **selection)
+    assert denied["status"] == "denied" and denied["fallback"] == "none"
+    assert denied["configurationDiagnostic"]["reason"] == "individual-launch-approval-required"
+    assert resolver.resolve_ordinary_native_dispatch(
+        description, user_approved_launch=True, **selection)["resolvedProfile"] == "luna-max"
     assert policy["profiles"]["luna-xhigh"] == {
         "modelTier": "mechanical",
         "effort": "xhigh",
@@ -1709,10 +1888,10 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
         "backend-engineer", "platform-engineer", "knowledge-archivist",
         "scientific-software-engineer",
     }
-    assert policy["roles"]["explorer"]["defaultProfile"] == "frontier-high"
+    assert policy["roles"]["explorer"]["defaultProfile"] == "terra-6.1-medium"
     assert luna_profiles.intersection(
         policy["roles"]["explorer"]["allowedProfiles"]
-    ) == {"luna-high", "luna-xhigh"}
+    ) == {"luna-high", "luna-xhigh", "luna-max"}
     assert "mechanical-scout" not in policy["taskRoleEligibility"]["review"]
     assert "mechanical-worker" not in policy["taskRoleEligibility"]["engineering"]
 
@@ -1947,9 +2126,8 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
     assert "mechanical-worker" not in installer._READ_ONLY_ROLES
     assert "mechanical-worker" in installer._BOUNDED_WRITE_ROLES
     for role_name, expected_digest in PROTECTED_EXISTING_ROLE_DIGESTS.items():
-        # Preserve the frozen Sol 6 baseline: only the approved model-token
-        # migration may differ; effort, authority, sandbox and all other bytes
-        # must still match. Current model identity is asserted independently.
+        # Preserve the frozen authority and noncontrol contract independently
+        # from the current factory model and effort pair.
         role_bytes = (AGENTS_SOURCE / f"{role_name}.toml").read_bytes()
         role = tomllib.loads(role_bytes.decode("utf-8"))
         assert manifest["roles"][role_name] == {
@@ -1972,11 +2150,18 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
             assert description["defaultAgentTypeCapability"] == "not-applicable"
             assert "model_reasoning_effort" not in role
         else:
-            assert role["model"] == "gpt-6.1-sol"
-            assert role_bytes.count(b'model = "gpt-6.1-sol"') == 1
+            expected_pair = (
+                ("gpt-6.1-terra", "medium")
+                if role_name in {"platform-engineer", "worker"}
+                else ("gpt-6.1-sol", "xhigh")
+            )
+            assert (role["model"], role["model_reasoning_effort"]) == expected_pair
+            assert role_bytes.count(('model = "' + expected_pair[0] + '"').encode()) == 1
             historical = (ROOT / "tests/fixtures/native-luna-policy-priors/pre-configurable-roles" / f"{role_name}.toml").read_bytes()
             prior = tomllib.loads(historical.decode())
-            assert {key: value for key, value in role.items() if key != "features"} == prior
+            assert {key: value for key, value in role.items() if key not in {"features", "model", "model_reasoning_effort"}} == {
+                key: value for key, value in prior.items() if key not in {"model", "model_reasoning_effort"}
+            }
             assert role["features"] == {"apps": False, "plugins": False}
             prior_bytes = historical.replace(
                 b'model = "gpt-6.1-sol"', b'model = "gpt-6-sol"', 1
@@ -2002,7 +2187,7 @@ def test_sol_migrated_roles_keep_independent_nonmodel_contract() -> None:
         )
 
 
-@pytest.mark.parametrize("prior_kind", ("fast", "default-unbinding"))
+@pytest.mark.parametrize("prior_kind", ("fast", "default-unbinding", "ordinary-escalation"))
 def test_installer_migrates_only_the_exact_stock_native_policy_manifest_pair(
     tmp_path: Path, prior_kind: str,
 ) -> None:
@@ -2048,7 +2233,7 @@ def test_installer_migrates_only_the_exact_stock_native_policy_manifest_pair(
     assert not list((project / ".agents").glob(".orchestrarium-migration-retention-*"))
 
 
-@pytest.mark.parametrize("drift", ("fast-manifest", "default-policy", "default-manifest", "mixed"))
+@pytest.mark.parametrize("drift", ("fast-manifest", "default-policy", "default-manifest", "mixed", "ordinary-policy", "ordinary-manifest", "ordinary-mixed"))
 def test_installer_rejects_drifted_or_mixed_stock_native_pair_before_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: str,
 ) -> None:
@@ -2063,11 +2248,11 @@ def test_installer_rejects_drifted_or_mixed_stock_native_pair_before_mutation(
     policy = lead / "shared" / "role-routing-policy.v1.json"
     manifest = lead / "shared" / "orchestrarium-role-manifest.json"
     policy, manifest = _seed_native_contract_prior(
-        project, "fast" if drift == "fast-manifest" else "default-unbinding"
+        project, "ordinary-escalation" if drift.startswith("ordinary-") else "fast" if drift == "fast-manifest" else "default-unbinding"
     )
-    if drift == "default-policy":
+    if drift in ("default-policy", "ordinary-policy"):
         policy.write_bytes(policy.read_bytes() + b" ")
-    elif drift == "mixed":
+    elif drift in ("mixed", "ordinary-mixed"):
         policy.write_bytes(_stock_fast_policy_manifest_pair()[0])
     else:
         manifest.write_bytes(manifest.read_bytes() + b" ")
@@ -2101,7 +2286,7 @@ def test_installer_rolls_back_stock_native_pair_and_leaf_after_migration_fault(
     lead = project / ".agents" / "skills" / "lead"
     policy = lead / "shared" / "role-routing-policy.v1.json"
     manifest = lead / "shared" / "orchestrarium-role-manifest.json"
-    _seed_native_contract_prior(project, prior_kind)
+    _seed_native_contract_prior(project, prior_kind, unreceipted_pair=True)
     focal = (policy, manifest, project / ".codex/config.toml",
              project / ".codex/agents/default.toml", lead / "scripts/resolve-agents-mode.py")
     before = {path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path)) for path in focal}
@@ -2167,7 +2352,7 @@ def test_stock_pair_retention_foreign_member_refuses_cleanup_and_preserves_prior
     project.mkdir()
     arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
     assert installer.install("codex", arguments) == 0
-    _seed_native_contract_prior(project, "default-unbinding")
+    _seed_native_contract_prior(project, "default-unbinding", unreceipted_pair=True)
     original = installer._finalize_canonical_lead_receipt
     retained = {}
     private = None
@@ -2195,7 +2380,7 @@ def test_stock_pair_retention_settlement_refuses_changed_storage_or_cleanup_deni
     project.mkdir()
     arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
     assert installer.install("codex", arguments) == 0
-    _seed_native_contract_prior(project, "default-unbinding")
+    _seed_native_contract_prior(project, "default-unbinding", unreceipted_pair=True)
     finalize = installer._finalize_canonical_lead_receipt
     dispose_node = installer._InstallTransaction._dispose_node
     private = None
@@ -2257,15 +2442,17 @@ def test_stock_pair_retention_different_device_refuses_before_prior_rename(
     project.mkdir()
     arguments = ["--force", "--no-hypothesis-hook", "--target", str(project), "--allow-unsafe-target"]
     assert installer.install("codex", arguments) == 0
-    policy, manifest = _seed_native_contract_prior(project, "default-unbinding")
+    policy, manifest = _seed_native_contract_prior(project, "default-unbinding", unreceipted_pair=True)
     before = {
         path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path))
         for path in (policy, manifest)
     }
     source_stat = Path.stat
     publish = installer._InstallTransaction._publish_retained
+    reserve = installer._InstallTransaction.reserve_migration_retention
     volume_hits = 0
     renamed_prior = False
+    owner_failures = []
 
     def different_device(path, *args, **kwargs):
         nonlocal volume_hits
@@ -2288,12 +2475,25 @@ def test_stock_pair_retention_different_device_refuses_before_prior_rename(
             renamed_prior = True
         return publish(transaction, source, target, **kwargs)
 
+    def record_reservation(transaction, *args, **kwargs):
+        try:
+            return reserve(transaction, *args, **kwargs)
+        except ValueError as error:
+            owner_failures.append(error)
+            raise
+
     monkeypatch.setattr(Path, "stat", different_device)
     monkeypatch.setattr(installer._InstallTransaction, "_publish_retained", record_publication)
+    monkeypatch.setattr(installer._InstallTransaction, "reserve_migration_retention", record_reservation)
     result = installer.install("codex", arguments)
     assert volume_hits >= 1
     assert result == 1
-    assert "migration retention volume" in capsys.readouterr().err
+    assert len(owner_failures) == 1
+    assert "E_MUTABLE_PATH_ESCAPE" in str(owner_failures[0])
+    assert "volume" in str(owner_failures[0])
+    error_output = capsys.readouterr().err
+    assert "cause=validation-failed" in error_output
+    assert str(project) not in error_output
     assert not renamed_prior
     assert {
         path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path))
@@ -2430,7 +2630,6 @@ def test_installed_role_dispatch_matches_source_from_foreign_cwd(
         "drifted-role",
         "reparse-roles",
         "missing-layout",
-        "ambiguous-layout",
     ),
 )
 def test_installed_role_dispatch_fails_closed_on_layout_or_input_drift(
@@ -2491,9 +2690,6 @@ def test_installed_role_dispatch_fails_closed_on_layout_or_input_drift(
     elif mutation == "missing-layout":
         project_root = foreign / "missing-project"
         home = foreign / "missing-home"
-    elif mutation == "ambiguous-layout":
-        home = project_root
-
     result = _installed_dispatch(
         resolver, project_root=project_root, home=home, cwd=foreign
     )

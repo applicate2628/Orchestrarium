@@ -33,11 +33,36 @@ install dependencies or authorize their execution. Existing login/account owners
 remain in control; this opt-in does not require or create a separate API billing
 lane, copy credentials, switch accounts, or pin an SDK/runtime release.
 
-The strict UTF-8 JSON binding is bounded to 65,536 bytes and contains exactly:
+The CLI and independently callable `prepare_dispatch` use the same managed
+model-launch policy before binding or runtime effects. The selected logical
+`runtime_namespace` follows the public launcher into SDK preparation; direct
+Python callers default to their actual provider module's namespace. The local
+`--user-approved-launch` projection never enters provider flags or the binding
+file and is not itself human consent. The dispatch guard retains that projection
+and rechecks the selected rule before each admitted native effect; changed
+controls refuse rather than upgrading an existing operation's authority.
+
+Lower-level `run_admitted_review` and coordinator APIs still require the Host's
+explicit current policy owner. Such callers must enforce the shared
+`model_routing/launch_policy.py` requirements, including genuine per-attempt
+Astra/Max agreement, for outer and inner requests separately. These APIs do not
+infer that agreement from a model name, ledger, binding file or earlier run.
+The retained historical example remains limited to its exact Luna/high pair;
+its historical qualification is not a new qualification of arbitrary profiles.
+
+The public launcher imports the provider participant adjacent to its selected
+logical namespace, including a linked launcher. Hook trust forwards the absolute
+logical `hooks.json` spelling to the existing health owner; only that owner
+resolves and rechecks the witnessed alias chain. Resolving it in the caller
+would erase the alias evidence that the inventory needs. This preserves the
+same policy and trust owners rather than introducing a second SDK-specific one.
+
+The strict UTF-8 JSON binding is bounded to 65,536 bytes. Version 1 contains
+exactly the following fields; version 2 additionally requires `installedHookRoot`:
 
 | Field | Meaning |
 |---|---|
-| `schemaVersion` | Integer `1`; repository-local binding schema, not SDK version. |
+| `schemaVersion` | Integer `1` or `2`; repository-local binding schema, not SDK version. |
 | `accountBinding` | Nonsecret identifier for the selected existing account. |
 | `expectedAccountEmail` | Existing account email for auth-file verification, or null where the selected auth mode permits it; not a credential. |
 | `coordinatorBinding` | Existing Host/session binding label; does not start a coordinator. |
@@ -45,6 +70,14 @@ The strict UTF-8 JSON binding is bounded to 65,536 bytes and contains exactly:
 | `artifactIdentity` | Identity of the artifact being reviewed, distinct from the output locator. |
 | `maxEvents` | Positive bounded adapter-observation/query count budget. |
 | `jobMemoryLimitBytes` | Positive Windows Job committed-memory budget. |
+
+Version 2 `installedHookRoot` is an absolute path to the selected installed hook
+package. For custom CODEX_HOME layouts, the operator must select this version
+and supply the package explicitly; version 1 still parses without that selection.
+No package is inferred from hook commands. The immutable runtime selection and request hash include it,
+and the existing hook-health owner validates it via `--installed-root`. This is
+selection, not consent or native hook qualification. Version 1 remains closed and
+does not accept this additional field.
 
 The binding cannot select extra tools, arbitrary launch flags or endpoints. This
 bridge selects an empty Model Context Protocol (MCP) tool scope and fixed startup
@@ -111,6 +144,31 @@ its 20 manifest-listed payload hashes were independently checked during evidence
 reconciliation. Raw operational logs and local account/configuration data are not
 part of the published source. Offline fixtures alone still do not establish
 native execution; the claims above rely on the separately retained native results.
+
+### October 28 selected Windows qualification
+
+The candidate based on upstream `8ba06110df4ed7f6a4ac76b950c803a2848b494c`,
+with patch SHA-256
+`0d57d2f0fa00701233f65b02f41ecb26732077775d19aa4c137e1e925f3b11a3`,
+passed two separately scoped synthetic Windows runs:
+
+- 15 tests, no skips: explicit hook-package binding, owned projection rollback
+  after target removal, foreign-link replacement refusal, and the two ledger
+  symlink cases. A disposable elevated tester used its own token; its existing
+  symbolic-link privilege was disabled before, enabled during the tests, and
+  restored to disabled afterward. Both adjustment calls and tester/launcher exits
+  succeeded. This qualifies that prerequisite, not raw reparse creation with a
+  disabled privilege; no persistent permission or active installation changed.
+- Four selected runtime, process-owner, source-dispatch and installed-dispatch
+  cases, no skips, under the ordinary account outside the command sandbox. A
+  concurrent pytest cache-creation warning did not fail those cases. Earlier
+  sandbox ancestor-access refusals remain distinct from this execution context.
+
+These were synthetic workers, not model calls or evidence of native hook firing.
+The actual hook callback's `tool_name` remains unverified. Later test-only fixture
+corrections need their own review; these runs are not a complete-current-tree or
+whole-repository pass. The earlier interrupted broad Windows run retains an
+unresolved descendant-settlement observation and is not acceptance evidence.
 
 ### Bounded Codex CLI startup qualification
 
@@ -252,15 +310,18 @@ combined crash recovery.
 
 ## Per-run controls are not native-role customizations
 
-`CodexRuntimeSelection.config_overrides` defaults to an empty tuple and is passed
-to the public Codex configuration for that invocation. It must not rewrite native
-role TOMLs, global configuration or the stock role manifest. In particular,
-`features.plugins=false` and `features.apps=false` in a no-tools synthetic probe
-are test-specific controls, not defaults for `architect` or
-`architecture-reviewer`. Adding them to a stock role changes its identity; the
-ordinary role router must continue rejecting that mismatch. SDK execution must
-not bless modified hashes or bypass the role owner. Regression coverage preserves
-real temporary config/role/manifest bytes and both stock-accepted and drift-denied
+`CodexRuntimeSelection.config_overrides` defaults to the four invocation-scoped
+controls in `CODEX_MCP_ISOLATION_OVERRIDES`: `features.plugins=false`,
+`features.apps=false`, `agents.enabled=false`, and `features.multi_agent_v2=false`.
+They are passed to the public Codex configuration for that invocation. The
+admitted review route retains these required controls; a lower-level explicit
+configuration remains subject to its own caller and runtime checks.
+
+Per-run settings must not rewrite native-role TOMLs, global configuration or the
+stock role manifest. Native-role defaults and compatible user tuning remain owned
+by the role contract, independently of the SDK invocation controls. SDK execution
+must not bless modified hashes or bypass that owner. Regression coverage preserves
+real temporary config/role/manifest bytes and both accepted and drift-denied
 routing outcomes through runtime composition; it does not claim the external
 runtime can never write its own state.
 
@@ -481,6 +542,17 @@ Official references: [Agents MCP filtering](https://openai.github.io/openai-agen
    Claude selection currently requires a concrete model ID: existing short-alias
    parity is not established and no guessed alias mapping is used. Grok remains
    unavailable under the existing execution policy.
+
+## Transport update compatibility
+
+The combined installed transport contains the SDK helpers and the model-launch
+policy companion. Normal validation requires the full ordered 30-member set.
+Only predecessor acquisition accepts the exact historical 8-member transport,
+the policy-enabled 9-member transport or the pre-policy 29-member SDK transport.
+Their receipts, member hashes and both selected homes remain mandatory; partial
+or reordered manifests are not compatibility modes. Newly introduced leaves
+must be absent, and drift refuses before overwrite. Current strong tree
+identities and qualified legacy receipt migration retain the installer owner.
 
 ## Explicit runtime composition
 

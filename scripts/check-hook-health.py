@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import ntpath
+import posixpath
 import os
 import queue
 import re
@@ -743,7 +745,8 @@ def _reconcile_codex_trust(
 
 
 def owned_canonical_identities(
-    *, target: Path, platform: str, host_os: str, repo_root: Path
+    *, target: Path, platform: str, host_os: str, repo_root: Path,
+    managed_targets: dict[str, set[str]] | None = None,
 ) -> set[str]:
     """Return the current owned registration identities without host interaction."""
     data = _load(target)
@@ -756,20 +759,21 @@ def owned_canonical_identities(
             matcher=matcher,
             source_path=target,
         )
-        for event, _stem, argv, matcher in _iter_owned_hooks(data, expected, platform, host_os)
+        for event, _stem, argv, matcher in _iter_owned_hooks(data, expected, platform, host_os, managed_targets)
     }
 
 
 def owned_definition_snapshots(
     *, target: Path, platform: str, host_os: str, repo_root: Path,
     stems: set[str] | None = None,
+    managed_targets: dict[str, set[str]] | None = None,
 ) -> dict[str, tuple[tuple[int, int, str, str], ...]]:
     """Observe complete owned definitions/positions, including literal legacy forms."""
     data = _load(target)
     expected = _manifest_stems(repo_root, platform) if stems is None else stems
     snapshots: dict[str, list[tuple[int, int, str, str]]] = {}
     for event, group_index, handler_index, group, handler, invocation in _owned_records(
-        data, expected, platform, host_os
+        data, expected, platform, host_os, managed_targets
     ):
         identity = canonical_identity(
             event, list(invocation.argv), host_os,
@@ -822,7 +826,8 @@ def plan_codex_inventory(
         if len(stems) != len(spec_rows):
             raise ValueError("duplicate Codex hook marker in installer specifications")
         data = _load(authority.target)
-        rows = list(_iter_owned_hooks(data, stems, "codex", host_os))
+        targets = {marker: {str(script)} for marker, script, _event, _matcher in spec_rows}
+        rows = list(_iter_owned_hooks(data, stems, "codex", host_os, targets))
         by_stem: dict[str, list[tuple[str, str, list[str], str | None]]] = {
             stem: [] for stem in stems
         }
@@ -926,10 +931,42 @@ def _load_codex_inventory(
         data = _load(authority.inventory)
         if data.get("schemaVersion") != 1:
             raise ValueError("Codex hook inventory schema is unsupported")
-        if data.get("sourcePath") != _source_identity(authority.target, host_os):
-            raise ValueError(
-                "Codex hook inventory sourcePath does not match the selected config"
+        def spelling(path: Path | str) -> str:
+            value = str(path).replace("\\", "/")
+            return value.casefold() if host_os == "windows" else value
+
+        witnessed = {spelling(authority.target), spelling(authority.resolved_target)}
+        current = authority.target
+        for candidate, _identity, raw_target, _kind in authority.link_chain:
+            link = Path(candidate)
+            suffix = current.relative_to(link)
+            destination = Path(raw_target)
+            current = _lexical_absolute(
+                (destination if destination.is_absolute() else link.parent / destination) / suffix
             )
+            witnessed.add(spelling(current))
+
+        def bind_source(value: Any) -> str:
+            if (
+                not isinstance(value, str)
+                or not Path(value).is_absolute()
+                or spelling(_lexical_absolute(Path(value))) not in witnessed
+            ):
+                raise ValueError(
+                    "Codex hook inventory sourcePath is not a witnessed spelling; "
+                    "regenerate inventory from the selected config"
+                )
+            return _source_identity(authority.target, host_os)
+
+        def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("Codex hook inventory identity contains duplicate keys")
+                result[key] = value
+            return result
+
+        bind_source(data.get("sourcePath"))
         hooks = data.get("hooks")
         if not isinstance(hooks, list) or not hooks:
             raise ValueError("Codex hook inventory is empty or malformed")
@@ -942,9 +979,7 @@ def _load_codex_inventory(
             identity = hook.get("identity")
             if not isinstance(stem, str) or not stem or not isinstance(identity, str):
                 raise ValueError("Codex hook inventory entry lacks stem or identity")
-            if stem in stems or identity in identities:
-                raise ValueError("Codex hook inventory contains duplicate entries")
-            payload = json.loads(identity)
+            payload = json.loads(identity, object_pairs_hook=unique_pairs)
             if not isinstance(payload, dict) or set(payload) != {
                 "command",
                 "event",
@@ -953,6 +988,18 @@ def _load_codex_inventory(
                 "sourcePath",
             }:
                 raise ValueError("Codex hook inventory identity is incomplete")
+            if identity != json.dumps(payload, separators=(",", ":"), sort_keys=True):
+                raise ValueError("Codex hook inventory identity is not canonical")
+            payload["sourcePath"] = bind_source(payload["sourcePath"])
+            identity = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+            if stem in stems or identity in identities:
+                raise ValueError("Codex hook inventory contains duplicate entries")
+            command = payload.get("command")
+            if not isinstance(command, str):
+                raise ValueError("Codex hook inventory command is malformed")
+            invoked, _ = _invoked_script(command.split("\0"))
+            if invoked is None:
+                raise ValueError("Codex hook inventory target is malformed")
             stems.add(stem)
             identities.add(identity)
         _recheck_inventory_authority(authority, for_write=False)
@@ -965,7 +1012,7 @@ def _load_codex_inventory(
         ) from exc
 
 
-def _manifest_stems(repo_root: Path, platform: str) -> set[str]:
+def _hook_manifest(repo_root: Path):
     manifest_path = repo_root / "scripts" / "universal_hooks_manifest.py"
     if manifest_path.is_file():
         spec = importlib.util.spec_from_file_location("universal_hooks_manifest", manifest_path)
@@ -977,7 +1024,32 @@ def _manifest_stems(repo_root: Path, platform: str) -> set[str]:
     else:
         raise ValueError(f"hook manifest is unavailable: {manifest_path}")
 
-    return set(manifest.registered_hook_stems(platform))
+    return manifest
+
+
+def _manifest_stems(repo_root: Path, platform: str) -> set[str]:
+    return set(_hook_manifest(repo_root).registered_hook_stems(platform))
+
+
+def _selected_hook_targets(specs):
+    """Bind only caller-selected package paths, never paths from registrations."""
+    targets = {}
+    witnesses = {}
+    for stem, script, _event, _matcher in specs:
+        script = Path(script)
+        targets[stem] = {str(script)}
+        if script.exists():
+            witness = _resolve_hooks_target(script, allow_missing_ordinary=False)
+            targets[stem].add(str(witness[0]))
+            witnesses[stem] = (script, witness)
+    return targets, witnesses
+
+
+def _recheck_selected_hook_targets(witnesses, stem=None):
+    selected = witnesses.values() if stem is None else (witnesses[stem],) if stem in witnesses else ()
+    for script, witness in selected:
+        if _resolve_hooks_target(script, allow_missing_ordinary=False) != witness:
+            raise ValueError("selected managed hook target changed")
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -1073,6 +1145,7 @@ def _invoked_script(argv: list[str]) -> tuple[str | None, bool]:
 
 def classify_hook_invocation(
     hook: dict[str, Any], stems: set[str], platform: str, host_os: str,
+    managed_targets: dict[str, set[str]] | None = None,
 ) -> HookInvocation:
     """Pure ownership selection from the actual invocation's script operand."""
     malformed = False
@@ -1106,10 +1179,19 @@ def classify_hook_invocation(
     target, direct_python = _invoked_script(argv)
     if target is None:
         return HookInvocation("foreign")
-    basename = target.replace("\\", "/").rsplit("/", 1)[-1]
-    matches = sorted(stem for stem in stems if stem in basename)
-    if not matches:
+    path_module = ntpath if host_os == "windows" or ntpath.splitdrive(target)[0] else posixpath
+    if not path_module.isabs(target):
         return HookInvocation("foreign")
+    key = path_module.normcase(path_module.normpath(target))
+    basename = target.replace("\\", "/").rsplit("/", 1)[-1]
+    candidate_name = basename.casefold() if host_os == "windows" else basename
+    matches = sorted(
+        stem for stem in stems
+        if (stem.casefold() if host_os == "windows" else stem) in candidate_name and any(path_module.isabs(expected) and path_module.normcase(path_module.normpath(expected)) == key
+               for expected in (managed_targets or {}).get(stem, ()))
+    )
+    if not matches:
+        return HookInvocation("unproven" if any((stem.casefold() if host_os == "windows" else stem) in candidate_name for stem in stems) else "foreign")
     if len(matches) > 1:
         raise ValueError("ambiguous owned hook markers: " + ", ".join(matches))
     literal_legacy_shell = malformed and not direct_python and "args" not in hook
@@ -1117,7 +1199,7 @@ def classify_hook_invocation(
     return HookInvocation(kind, matches[0], tuple(argv), target)
 
 
-def _owned_records(data: dict, stems: set[str], platform: str, host_os: str):
+def _owned_records(data: dict, stems: set[str], platform: str, host_os: str, managed_targets=None):
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
         raise ValueError("'hooks' key is not an object")
@@ -1130,8 +1212,8 @@ def _owned_records(data: dict, stems: set[str], platform: str, host_os: str):
             for handler_index, handler in enumerate(group["hooks"]):
                 if not isinstance(handler, dict):
                     continue
-                invocation = classify_hook_invocation(handler, stems, platform, host_os)
-                if invocation.kind == "foreign":
+                invocation = classify_hook_invocation(handler, stems, platform, host_os, managed_targets)
+                if invocation.kind in {"foreign", "unproven"}:
                     continue
                 if invocation.kind == "malformed-owned":
                     raise ValueError("owned hook could not be parsed as this pack's exec shape: " + str(invocation.marker))
@@ -1146,10 +1228,11 @@ def _iter_owned_hooks(
     stems: set[str] | None,
     platform: str,
     host_os: str,
+    managed_targets=None,
 ) -> Iterable[tuple[str, str, list[str], str | None]]:
     """Select owned stems, or every registered command with None (read-only)."""
     if stems is not None:
-        for event, _group_index, _handler_index, group, _handler, invocation in _owned_records(data, stems, platform, host_os):
+        for event, _group_index, _handler_index, group, _handler, invocation in _owned_records(data, stems, platform, host_os, managed_targets):
             if invocation.kind != "current-owned":
                 raise ValueError("owned hook uses a legacy invocation: " + str(invocation.marker))
             yield event, str(invocation.marker), list(invocation.argv), group.get("matcher")
@@ -1260,6 +1343,8 @@ def verify_config(
     codex_command: list[str] | None = None,
     codex_home: Path | None = None,
     query_cwd: Path | None = None,
+    installed_root: Path | None = None,
+    selected_stems: set[str] | None = None,
 ) -> list[str]:
     data = _load(target)
     inventory_identities: set[str] | None = None
@@ -1267,13 +1352,32 @@ def verify_config(
         if platform != "codex":
             raise ValueError("generated hook inventory is Codex-only")
         expected, inventory_identities = _load_codex_inventory(
-            inventory_path,
-            target=target,
-            host_os=host_os,
+            inventory_path, target=target, host_os=host_os,
         )
     else:
         expected = _manifest_stems(repo_root, platform)
-    rows = list(_iter_owned_hooks(data, expected, platform, host_os))
+    if installed_root is None:
+        installed_root = _installed_root_for_target(target, platform)
+    if installed_root is None:
+        raise ValueError("managed hook package is not bound to this target; provide --installed-root")
+    manifest = _hook_manifest(repo_root)
+    specs = manifest.registered_hook_specs(platform, installed_root)
+    available = {stem for stem, _script, _event, _matcher in specs}
+    if selected_stems is not None:
+        if not isinstance(selected_stems, set) or not selected_stems or not selected_stems <= available:
+            raise ValueError("selected hook scope is invalid for the managed package")
+        if inventory_identities is not None and expected != selected_stems:
+            raise _HookHealthFailure(
+                "E_HOOK_INVENTORY_TARGET_INVALID", "inventory",
+                "Codex hook inventory does not match the selected hook scope",
+            )
+        expected = selected_stems
+    if not expected <= available:
+        raise ValueError("hook scope contains entries outside the managed package")
+    managed_targets, selected_witnesses = _selected_hook_targets(
+        [row for row in specs if row[0] in expected]
+    )
+    rows = list(_iter_owned_hooks(data, expected, platform, host_os, managed_targets))
     if inventory_identities is not None:
         actual_identities = {
             canonical_identity(
@@ -1292,12 +1396,14 @@ def verify_config(
                 "Codex hook registration drifted from generated inventory",
             )
     counts: dict[str, int] = {stem: 0 for stem in expected}
-    messages: list[str] = []
+    messages: list[str] = (["SCOPE inventory-declared registrations only"]
+                           if inventory_identities is not None and selected_stems is None else [])
     with tempfile.TemporaryDirectory(prefix="orchestrarium-hook-health-") as scratch:
         scratch_root = Path(scratch)
         foreign_cwd = scratch_root / "foreign-cwd"
         foreign_cwd.mkdir()
         for event, stem, argv, _matcher in rows:
+            _recheck_selected_hook_targets(selected_witnesses, stem)
             counts[stem] += 1
             executable = _resolve_executable(argv[0], host_os)
             target_path = _target_path(argv)
@@ -1377,6 +1483,7 @@ def verify_config(
         raise ValueError("missing registered hooks: " + ", ".join(missing))
     if duplicates:
         raise ValueError("duplicate registered hooks: " + ", ".join(duplicates))
+    _recheck_selected_hook_targets(selected_witnesses)
     if codex_trust_mode is not None:
         if platform != "codex":
             raise ValueError("Codex trust reconciliation is only valid for platform=codex")
@@ -1400,8 +1507,27 @@ def _default_checks(repo_root: Path) -> list[tuple[Path, str, Path]]:
     home = Path.home()
     return [
         (home / ".claude" / "settings.json", "claude", home / ".claude" / "agents"),
-        (home / ".codex" / "hooks.json", "codex", home / ".codex" / "skills" / "lead"),
+        (home / ".codex" / "hooks.json", "codex", home / ".agents" / "skills" / "lead"),
     ]
+
+
+def _installed_root_for_target(target: Path, platform: str) -> Path | None:
+    """Resolve only the documented logical settings-to-package relationship."""
+    selected = Path(os.path.abspath(target.expanduser()))
+    home = Path(os.path.abspath(Path.home()))
+    if platform == "codex":
+        directory, filename = ".codex", "hooks.json"
+        relative = Path(".agents/skills/lead")
+    elif platform == "claude":
+        directory, filename = ".claude", "settings.json"
+        relative = Path(".claude/agents")
+    else:
+        return None
+    if os.path.normcase(str(selected)) == os.path.normcase(str(home / directory / filename)):
+        return home / relative
+    if os.path.normcase(selected.name) == os.path.normcase(filename) and os.path.normcase(selected.parent.name) == os.path.normcase(directory):
+        return selected.parent.parent / relative
+    return None
 
 
 def _codex_inventory_sidecar(target: Path) -> Path:
@@ -1442,6 +1568,7 @@ def main() -> int:
     parser.add_argument("--platform", choices=("claude", "codex"))
     parser.add_argument("--host-os", choices=("posix", "windows"))
     parser.add_argument("--installed-root", help="Provider root containing scripts/ and hooks/")
+    parser.add_argument("--selected-hook", action="append", help="Caller-selected managed hook marker")
     parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parent.parent))
     parser.add_argument("--verify-fires", action="store_true")
     parser.add_argument("--codex-trust-mode", choices=sorted(CODEX_TRUST_MODES))
@@ -1460,6 +1587,8 @@ def main() -> int:
     repo_root = Path(args.repo_root).expanduser().resolve()
     host_os = args.host_os or ("windows" if os.name == "nt" else "posix")
     try:
+        if args.selected_hook is not None and len(args.selected_hook) != len(set(args.selected_hook)):
+            raise ValueError("selected hook scope contains duplicates")
         codex_command: list[str] | None = None
         if args.codex_command_json:
             decoded_command = json.loads(args.codex_command_json)
@@ -1505,6 +1634,8 @@ def main() -> int:
                 codex_command=codex_command,
                 codex_home=Path(args.codex_home).expanduser() if args.codex_home else None,
                 query_cwd=Path(args.query_cwd).expanduser() if args.query_cwd else None,
+                installed_root=installed_root,
+                selected_stems=set(args.selected_hook) if args.selected_hook is not None else None,
             ):
                 print(message)
             if installed_root is not None:

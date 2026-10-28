@@ -1,7 +1,7 @@
 name = "platform-engineer"
 description = "Runtime platform, installer, deployment, and infrastructure specialist."
-model = "gpt-6.1-sol"
-model_reasoning_effort = "high"
+model = "gpt-6.1-terra"
+model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Treat AGENTS.md as the base contract and activate $platform-engineer.

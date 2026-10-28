@@ -2,9 +2,14 @@
   "schemaVersion": 1,
   "packRevision": "1.x-slice-b",
   "files": {
+    "model_routing/launch_policy.py": {
+      "source": "scripts/model_routing/launch_policy.py",
+      "sha256": "f2868f23f559c792a7cf00137fe80f636b9afc6ab104f4648a3a9de9b1906027",
+      "destination": "scripts/model_routing/launch_policy.py"
+    },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "01d2c35949a9075ad2e6ef27d8ede49c2b01b6a5e9de1ce7d8e94b527a09c10e",
+      "sha256": "dfa9ae82c0d1469b6f1dde7a03ae38a73bdab227d31eff40e0e2f03b359d43ec",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
@@ -14,22 +19,22 @@
     },
     "invoke-codex-prompt.py": {
       "source": "scripts/invoke-codex-prompt.py",
-      "sha256": "b845dfda9e6cdb0737200b8b647909ced13265daddb96720d70ea1d979f6abec",
+      "sha256": "e2112d404eddcbfefd4c3a013680242b33affb3203b57c60f01553b90551d664",
       "destination": "scripts/invoke-codex-prompt.py"
     },
     "invoke-claude-prompt.py": {
       "source": "scripts/invoke-claude-prompt.py",
-      "sha256": "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3",
+      "sha256": "dc42adf9dcbe486c3e84509ef1d9810ba9a6d2fef3c3b55ea36fce3c7d5b67f3",
       "destination": "scripts/invoke-claude-prompt.py"
     },
     "invoke-kimi-prompt.py": {
       "source": "scripts/invoke-kimi-prompt.py",
-      "sha256": "480af94ce089d5a6340e92d00239a5762c9c1374375a8c12c921afdcfcaa6e47",
+      "sha256": "87eaaa96b648d3b5475db6b42f595d4a636a1a71b36c584c1ca8a387768d6444",
       "destination": "scripts/invoke-kimi-prompt.py"
     },
     "invoke-grok-prompt.py": {
       "source": "scripts/invoke-grok-prompt.py",
-      "sha256": "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559",
+      "sha256": "1f112927d0fd38e735ef0c98c60d8095d65d5d9ded3f45aa2a9ae3071af9a0c3",
       "destination": "scripts/invoke-grok-prompt.py"
     },
     "external-prompt-governance.md": {
@@ -80,7 +85,7 @@
     "sdk_execution/dispatch.py": {
       "source": "scripts/sdk_execution/dispatch.py",
       "destination": "scripts/sdk_execution/dispatch.py",
-      "sha256": "6cd7d8d711c159cfae5638957617f482dc3c92bc8d2afd7c95973d7faffb017d"
+      "sha256": "aa8e57fe0065be457294917530c471acfe99d647154cb8044d153b39e6d38539"
     },
     "sdk_execution/contracts.py": {
       "source": "scripts/sdk_execution/contracts.py",
@@ -139,7 +144,7 @@
     },
     "sdk_execution/runtime.py": {
       "source": "scripts/sdk_execution/runtime.py",
-      "sha256": "fa4c87651a584a7443cc577bb737e4f4e188526789ff3256ef757738a5a41a41",
+      "sha256": "c22c2825e16645aae70a873ab076c4e927b5486f6f4e7a7befb9bae4eca4f326",
       "destination": "scripts/sdk_execution/runtime.py"
     },
     "sdk_execution/worker.py": {

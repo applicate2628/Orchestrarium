@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import io
+from contextlib import redirect_stdout, redirect_stderr
 from collections import Counter
 from dataclasses import replace
 import importlib.util
@@ -103,6 +105,7 @@ def test_replacement_restore_boundary_retains_unknown_state(
     tree = tmp_path / "parent/child"
     tree.mkdir(parents=True)
     (tree / "body").write_bytes(b"old\n")
+    old_inode = tree.stat().st_ino
     source = tmp_path / "source"
     source.mkdir()
     (source / "body").write_bytes(b"new\n")
@@ -110,37 +113,64 @@ def test_replacement_restore_boundary_retains_unknown_state(
     publish = installer._InstallTransaction._publish_retained
     armed = False
     injected = False
+    retained_before = []
+    detached = []
+    publication_faults = []
     def injected_native_move(old, new):
+        if Path(old) == tree and not armed:
+            retained_before.append(Path(new))
         if armed and boundary == "detach" and Path(old) == tree:
-            (tree / "foreign").write_bytes(b"foreign at detach\n")
+            foreign = tree / "foreign"
+            foreign.write_bytes(b"foreign at detach\n")
+            detached.append((Path(new), tree.stat().st_ino, foreign.stat().st_ino))
         return native_move(old, new)
     def injected_publish(transaction, old, new, **keywords):
         nonlocal injected
         if Path(new) == tree:
             if boundary == "inside-writer" and not armed and not injected:
                 injected = True
+                publication_faults.append("inside-writer")
                 raise RuntimeError("inside writer failure")
             if boundary == "publish" and armed:
+                publication_faults.append("publish")
                 tree.mkdir()
                 (tree / "foreign").write_bytes(b"foreign at publication\n")
         return publish(transaction, old, new, **keywords)
     monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(injected_native_move))
     monkeypatch.setattr(installer._InstallTransaction, "_publish_retained", injected_publish)
+    primary = RuntimeError("post writer failure")
     with pytest.raises((RuntimeError, installer._InstallFailure)) as caught:
         with installer._InstallTransaction([tree.parent], enabled=True) as transaction:
             owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
             owner.replace_exact_tree(tree.relative_to(tmp_path), installer._tree_sha256(tree), source)
             armed = True
-            raise RuntimeError("post writer failure")
+            raise primary
     if boundary == "inside-writer":
+        assert publication_faults == ["inside-writer"]
         assert type(caught.value) is RuntimeError
         assert str(caught.value) == "inside writer failure"
         assert (tree / "body").read_bytes() == b"old\n"
     else:
         assert isinstance(caught.value, installer._InstallFailure)
-        assert str(caught.value.cause) == "post writer failure"
-        assert (tree / "foreign").is_file()
+        assert caught.value.cause is primary
         assert caught.value.recovery_path.is_dir()
+        if boundary == "detach":
+            assert len(detached) == 1
+            quarantine, replacement_inode, foreign_inode = detached[0]
+            assert quarantine.name.endswith(".after")
+            assert quarantine.stat().st_ino == replacement_inode
+            assert (quarantine / "foreign").stat().st_ino == foreign_inode
+            assert (quarantine / "foreign").read_bytes() == b"foreign at detach\n"
+            assert (quarantine / "body").read_bytes() == b"new\n"
+            assert len(retained_before) == 1
+            assert retained_before[0].stat().st_ino == old_inode
+            assert (retained_before[0] / "body").read_bytes() == b"old\n"
+            assert tree in caught.value.unresolved_paths
+            assert any(member.path == str(tree) and "publication beforeimage drift" in member.cause
+                       for member in caught.value.members)
+        else:
+            assert publication_faults == ["publish"]
+            assert (tree / "foreign").read_bytes() == b"foreign at publication\n"
 
 
 @pytest.mark.parametrize("foreign_kind", ("file", "empty-directory", "nonempty-directory"))
@@ -983,7 +1013,7 @@ def test_migration_stage_settlement_preserves_a_later_occupant(
         with pytest.raises(installer._InstallFailure) as failure:
             owner.migrate_exact_file(Path("role"), hashlib.sha256(b"old stock bytes\n").hexdigest(), b"desired\n")
         assert failure.value.cause is primary
-        assert "migration beforeimage drift" in str(primary)
+        assert str(primary) == "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: publication beforeimage drift"
         assert relocated.read_bytes() == b"desired\n"
     assert hits == 1
     assert transaction._observe(foreign) == foreign_state
@@ -1340,6 +1370,7 @@ def test_resolver_exposes_componentwise_role_policy_without_changing_agents_mode
             "astra-high",
             "astra-xhigh",
             "astra-max",
+            "sol-5.6-xhigh",
         ],
     }
     assert policy["roles"]["architect"]["defaultProfile"] == "frontier-xhigh"
@@ -1402,6 +1433,48 @@ def test_source_native_roles_match_policy_profiles_and_supported_toml_fields() -
             "sha256": hashlib.sha256(role_bytes).hexdigest(),
             "developerInstructionsSha256": hashlib.sha256(parsed["developer_instructions"].encode()).hexdigest(),
         }
+
+
+def _observe_codex_install(arguments, *, home=None):
+    """Observe the actual installer error without changing its public sanitizer."""
+    errors = []
+    render = installer._installer_failure_text
+    def observe(error):
+        errors.append(error)
+        return render(error)
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with pytest.MonkeyPatch.context() as scoped:
+        scoped.chdir(ROOT)
+        scoped.setattr(installer, "_installer_failure_text", observe)
+        scoped.setenv("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", "1")
+        scoped.setenv("CODEX_BIN", codex_hook_host_env({}, ROOT)["CODEX_BIN"])
+        if home is not None:
+            scoped.setenv("HOME", str(home))
+            scoped.setenv("USERPROFILE", str(home))
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            status = installer.install("codex", arguments)
+    return SimpleNamespace(returncode=status, stdout=stdout.getvalue(),
+                           stderr=stderr.getvalue(), errors=tuple(errors))
+
+
+def _assert_observed_validation(result, expected):
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "cause=validation-failed" in result.stderr
+    assert len(result.errors) == 1
+    assert type(result.errors[0]) is ValueError
+    assert str(result.errors[0]) == expected
+
+
+def test_validation_oracle_rejects_an_unrelated_earlier_failure(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    def unrelated(*_args, **_kwargs):
+        raise ValueError("unrelated earlier validation failure")
+    monkeypatch.setattr(installer, "_preflight_canonical_skills", unrelated)
+    result = _observe_codex_install(["--target", str(project), "--force", "--allow-unsafe-target"])
+    _assert_observed_validation(result, "unrelated earlier validation failure")
+    with pytest.raises(AssertionError):
+        _assert_observed_validation(result, "E_CREATE_ONLY_CONFIG_INLINE_AGENTS")
 
 
 def _run_codex_installer(
@@ -2292,7 +2365,9 @@ def test_inline_agents_table_fails_before_transaction_without_mutation(
     def transaction_entered(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("transaction entered")
 
-    monkeypatch.setattr(installer, "_InstallTransaction", transaction_entered)
+    # Read-only preflight may construct a disabled owner; a mutation context
+    # must still never be entered for the refused inline table.
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", transaction_entered)
     arguments = [
         "--target",
         str(project),
@@ -2303,11 +2378,8 @@ def test_inline_agents_table_fails_before_transaction_without_mutation(
     if dry_run:
         arguments.append("--dry-run")
 
-    result = installer.install("codex", arguments)
-    captured = capsys.readouterr()
-
-    assert result == 1
-    assert "E_CREATE_ONLY_CONFIG_INLINE_AGENTS" in captured.err
+    result = _observe_codex_install(arguments)
+    _assert_observed_validation(result, "E_CREATE_ONLY_CONFIG_INLINE_AGENTS")
     assert _no_follow_inventory(project) == before
     assert config.read_bytes() == payload
     assert installer._CreateOnlyMutablePath._identity(config) == config_identity
@@ -2457,10 +2529,11 @@ def test_mismatched_legacy_luna_state_fails_closed_and_is_preserved(
     )
     legacy.write_bytes(legacy_payload)
 
-    result = _run_codex_installer(project, install_hooks=False)
+    result = _observe_codex_install(["--target", str(project), "--force", "--allow-unsafe-target"])
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "E_CREATE_ONLY_COLLISION" in result.stderr
+    assert "cause=validation-failed" in result.stderr
+    _assert_observed_validation(result, ("E_CREATE_ONLY_COLLISION: agents.luna_mechanical" if mismatch == "mapping" else f"E_CREATE_ONLY_COLLISION: {Path('agents') / 'luna-mechanical.toml'}"))
     assert config.read_bytes() == config_payload
     assert legacy.read_bytes() == legacy_payload
     assert not (project / ".codex" / "agents" / "analyst.toml").exists()
@@ -2911,10 +2984,13 @@ def test_project_local_codex_agents_link_remains_denied(tmp_path: Path) -> None:
     except OSError as exc:
         pytest.skip(f"directory symlink unavailable: {exc}")
 
-    result = _run_codex_installer(project, install_hooks=False)
+    before = _no_follow_inventory(project)
+    result = _observe_codex_install(["--target", str(project), "--force", "--allow-unsafe-target"])
 
     assert result.returncode == 1
-    assert "E_RUNTIME_SUBROOT_SCOPE_DENIED" in result.stderr
+    assert "cause=validation-failed" in result.stderr
+    _assert_observed_validation(result, "E_RUNTIME_SUBROOT_SCOPE_DENIED")
+    assert _no_follow_inventory(project) == before
     assert not (project / ".codex" / "config.toml").exists()
     assert _no_follow_inventory(backing) == {}
 
@@ -3056,8 +3132,12 @@ def test_installer_and_resolver_deny_linked_codex_ancestor(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
 
-    assert installer.install("codex", ["--global", "--force", "--no-hypothesis-hook"]) == 1
-    assert "E_RUNTIME_SUBROOT_SCOPE_DENIED" in capsys.readouterr().err
+    home_before = _no_follow_inventory(home)
+    backing_before = _no_follow_inventory(backing)
+    result = _observe_codex_install(["--global", "--force", "--no-hypothesis-hook"], home=home)
+    _assert_observed_validation(result, "E_RUNTIME_SUBROOT_SCOPE_DENIED")
+    assert _no_follow_inventory(home) == home_before
+    assert _no_follow_inventory(backing) == backing_before
 
     scripts = home / ".agents" / "skills" / "lead" / "scripts"
     shared = scripts.parent / "shared"
@@ -3101,10 +3181,15 @@ def test_global_codex_linked_role_leaf_is_not_overwritten(tmp_path: Path) -> Non
     except OSError as exc:
         pytest.skip(f"file or directory symlink unavailable: {exc}")
 
-    result = _run_codex_global_installer(home)
+    home_before = _no_follow_inventory(home)
+    backing_before = _no_follow_inventory(backing)
+    result = _observe_codex_install(["--global", "--force"], home=home)
 
     assert result.returncode == 1
-    assert "E_CREATE_ONLY_TYPE_COLLISION" in result.stderr
+    assert "cause=validation-failed" in result.stderr
+    _assert_observed_validation(result, f"E_CREATE_ONLY_TYPE_COLLISION: {Path('agents') / 'analyst.toml'}")
+    assert _no_follow_inventory(home) == home_before
+    assert _no_follow_inventory(backing) == backing_before
     assert (backing / "analyst.toml").is_symlink()
 
 
@@ -3168,7 +3253,15 @@ def test_global_codex_linked_agents_retarget_before_rollback_is_unsafe(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
 
+    authority = LinkedRuntimeSubrootAuthority.bind(
+        logical, scope="global", trusted_global_roots=(logical,),
+    )
+    assert authority is not None
+    original_at_retarget = []
+    replacement_before = _no_follow_inventory(replacement)
+
     def retarget_then_fail(*_args: object, **_kwargs: object) -> None:
+        original_at_retarget.append(_no_follow_inventory(original))
         logical.unlink()
         _make_runtime_directory_link(logical, replacement, "symlink")
         raise RuntimeError("forced retarget before rollback")
@@ -3179,7 +3272,12 @@ def test_global_codex_linked_agents_retarget_before_rollback_is_unsafe(
     captured = capsys.readouterr()
 
     assert result == 1
-    assert "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE" in captured.err
+    assert "E_ROLLBACK_SETTLEMENT_FAILED" in captured.err
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_IDENTITY_CHANGED$"):
+        authority.assert_current()
+    assert len(original_at_retarget) == 1
+    assert _no_follow_inventory(original) == original_at_retarget[0]
+    assert _no_follow_inventory(replacement) == replacement_before
     assert os.path.samefile(logical, replacement)
     assert replacement_sentinel.read_bytes() == b"replacement remains untouched\n"
     assert any(original.glob("*.toml"))
@@ -3354,10 +3452,10 @@ def test_codex_install_has_zero_post_tree_writes_below_canonical_lead(
     original_copy = installer._copy_file
     descendant_writes: list[Path] = []
 
-    def record_copy(source: Path, target: Path, dry_run: bool) -> None:
+    def record_copy(source: Path, target: Path, dry_run: bool, **kwargs) -> None:
         if canonical_lead in target.parents:
             descendant_writes.append(target)
-        original_copy(source, target, dry_run)
+        original_copy(source, target, dry_run, **kwargs)
 
     monkeypatch.setattr(installer, "_copy_file", record_copy)
     result = installer.install(
@@ -3474,6 +3572,8 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 ) -> None:
     """The actual two-provider writer calls must echo every declared destination."""
 
+    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env({}, ROOT)["CODEX_BIN"])
+
     artifact_class = {
         "lead-receipt": "lead-receipt",
         "claude-skill-projection": "claude-skill-projection",
@@ -3536,14 +3636,14 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_runtime = installer._install_runtime_files
 
-    def runtime(root, helper_target, dry_run, *, destinations=None):
+    def runtime(root, helper_target, dry_run, *, destinations=None, **kwargs):
         selected = (
             installer._runtime_file_destinations(root, helper_target)
             if destinations is None
             else destinations
         )
         original_runtime(
-            root, helper_target, dry_run, destinations=destinations
+            root, helper_target, dry_run, destinations=destinations, **kwargs
         )
         for _source, destination in selected:
             if published or helper_target.parent.parent.name == ".claude":
@@ -3559,8 +3659,8 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_ui = installer._install_ui_continuity_contract
 
-    def ui(root, pack_root, dry_run):
-        original_ui(root, pack_root, dry_run)
+    def ui(root, pack_root, dry_run, **kwargs):
+        original_ui(root, pack_root, dry_run, **kwargs)
         emit("ui-continuity", pack_root / installer.UI_CONTINUITY_CONTRACT_TARGET)
 
     monkeypatch.setattr(installer, "_install_ui_continuity_contract", ui)
@@ -3574,6 +3674,7 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
         installed_hook_root,
         mode,
         inventory_path=None,
+        **kwargs,
     ):
         original_hooks(
             root,
@@ -3582,6 +3683,7 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
             installed_hook_root,
             mode,
             inventory_path,
+            **kwargs,
         )
         emit("hook-registration", registration)
         if provider == "codex":
@@ -3622,16 +3724,16 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_codex_docs = installer._merge_codex_agents
 
-    def codex_docs(root, source, target, dry_run):
-        original_codex_docs(root, source, target, dry_run)
+    def codex_docs(root, source, target, dry_run, **kwargs):
+        original_codex_docs(root, source, target, dry_run, **kwargs)
         emit("provider-doc", target)
 
     monkeypatch.setattr(installer, "_merge_codex_agents", codex_docs)
 
     original_claude_docs = installer._merge_claude_docs
 
-    def claude_docs(root, source, target, dry_run):
-        original_claude_docs(root, source, target, dry_run)
+    def claude_docs(root, source, target, dry_run, **kwargs):
+        original_claude_docs(root, source, target, dry_run, **kwargs)
         emit("provider-doc", target)
         emit("provider-doc", target.parent / "AGENTS.md")
 
@@ -3639,16 +3741,16 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_mode = installer._normalize_agents_mode
 
-    def agents_mode(root, template, target, provider, dry_run):
-        original_mode(root, template, target, provider, dry_run)
+    def agents_mode(root, template, target, provider, dry_run, **kwargs):
+        original_mode(root, template, target, provider, dry_run, **kwargs)
         emit("agents-mode", target)
 
     monkeypatch.setattr(installer, "_normalize_agents_mode", agents_mode)
 
     original_settings = installer._merge_claude_main_agent_settings
 
-    def settings(root, target, delegation_mode, dry_run):
-        original_settings(root, target, delegation_mode, dry_run)
+    def settings(root, target, delegation_mode, dry_run, **kwargs):
+        original_settings(root, target, delegation_mode, dry_run, **kwargs)
         emit("claude-main-settings", target)
 
     monkeypatch.setattr(installer, "_merge_claude_main_agent_settings", settings)
@@ -3666,8 +3768,9 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
     original_receipt = installer._finalize_canonical_lead_receipt
 
     def receipt(plan, target, owner, reclaimed=()):
-        original_receipt(plan, target, owner, reclaimed)
+        result = original_receipt(plan, target, owner, reclaimed)
         emit("lead-receipt", target / installer._LEAD_RECEIPT_NAME)
+        return result
 
     monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", receipt)
 
@@ -3835,57 +3938,38 @@ def test_codex_health_requires_target_derived_inventory_sidecar(tmp_path: Path) 
 def test_codex_health_rejects_drifted_inventory_sidecar_before_host_query(
     tmp_path: Path,
 ) -> None:
-    """A generated sidecar remains authoritative for its own config target."""
+    """The CLI rejects real registration drift against producer-bound inventory."""
+    from tests.test_hook_health import CHECKER, _host_trust_fixture
 
     config = tmp_path / ".codex" / "hooks.json"
     config.parent.mkdir()
-    config.write_text('{"hooks": {}}\n', encoding="utf-8")
-    host_os = "windows" if os.name == "nt" else "posix"
-    source_path = str(config.resolve()).replace("\\", "/")
-    if host_os == "windows":
-        source_path = source_path.casefold()
-    identity = json.dumps(
-        {
-            "command": "synthetic",
-            "event": "pretooluse",
-            "handlerType": "command",
-            "matcher": None,
-            "sourcePath": source_path,
-        },
-        separators=(",", ":"),
-        sort_keys=True,
+    rows, _records = _host_trust_fixture(config)
+    inventory = config.with_name("codex-hook-inventory.json")
+    CHECKER.write_codex_inventory(
+        target=config, specs=[(stem, Path(argv[-1]), event, matcher)
+                              for event, stem, argv, matcher in rows],
+        inventory_path=inventory, host_os="posix",
     )
-    config.with_name("codex-hook-inventory.json").write_text(
-        json.dumps(
-            {
-                "schemaVersion": 1,
-                "sourcePath": source_path,
-                "hooks": [{"stem": "synthetic", "identity": identity}],
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
+    before = inventory.read_bytes()
+    changed = json.loads(config.read_text(encoding="utf-8"))
+    changed["hooks"]["PreToolUse"][0]["matcher"] = "synthetic drift"
+    config.write_text(json.dumps(changed), encoding="utf-8")
+    queried = tmp_path / "host-query"
+    host = tmp_path / "unexpected_codex.py"
+    host.write_text("from pathlib import Path\nPath(" + repr(str(queried))
+                    + ").write_text('unexpected')\nraise SystemExit(123)\n", encoding="utf-8")
+    environment = dict(os.environ, CODEX_BIN=str(host))
     result = subprocess.run(
-        [
-            sys.executable,
-            str(CHECK_HOOK_HEALTH),
-            "--target",
-            str(config),
-            "--platform",
-            "codex",
-            "--codex-trust-mode",
-            "report",
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
+        [sys.executable, str(CHECK_HOOK_HEALTH), "--target", str(config),
+         "--platform", "codex", "--host-os", "posix",
+         "--installed-root", str(ROOT / "src.codex/skills/lead"),
+         "--codex-trust-mode", "report"],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env=environment,
     )
-
     assert result.returncode == 1
     assert "Codex hook registration drifted from generated inventory" in result.stderr
+    assert inventory.read_bytes() == before
+    assert not queried.exists()
 
 
 def test_codex_hooks_inventory_is_outside_lead_and_rolls_back_with_registration(
@@ -4017,7 +4101,7 @@ def test_role_profile_floor_migration_admits_only_stock_prior_role_bytes(
 
 
 @pytest.mark.parametrize("fixture", ("customized", "unknown"))
-def test_role_profile_floor_migration_refuses_customized_and_unknown_roles(
+def test_role_profile_floor_migration_preserves_customized_and_unknown_roles(
     tmp_path: Path, fixture: str
 ) -> None:
     """The exception is not a general native-role update or adoption mechanism."""
@@ -4035,7 +4119,7 @@ def test_role_profile_floor_migration_refuses_customized_and_unknown_roles(
 
     result = _run_codex_installer(project, install_hooks=False)
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert path.read_bytes() == payload
 
 
@@ -4162,12 +4246,17 @@ def test_customized_disabled_luna_role_remains_a_collision(
     role = agents / f"{name}.toml"
     customized = DISABLED_LUNA_MIGRATABLE_ROLE_BYTES[name] + b"# operator change\n"
     role.write_bytes(customized)
+    before = _no_follow_inventory(project)
+    role_identity = installer._CreateOnlyMutablePath._identity(role)
 
-    result = _run_codex_installer(project, install_hooks=False)
+    result = _observe_codex_install(["--target", str(project), "--force", "--allow-unsafe-target"])
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "E_CREATE_ONLY_COLLISION" in result.stderr
+    assert "cause=validation-failed" in result.stderr
+    _assert_observed_validation(result, "E_CREATE_ONLY_ROLE_CONTRACT: owned-profession-contract/instructions-mismatch")
     assert role.read_bytes() == customized
+    assert installer._CreateOnlyMutablePath._identity(role) == role_identity
+    assert _no_follow_inventory(project) == before
 
 
 def test_disabled_luna_migration_rolls_back_bytes_and_identities(
@@ -4229,30 +4318,48 @@ def test_exact_intermediate_role_prior_is_admitted(name: str, tmp_path: Path) ->
 
 
 @pytest.mark.parametrize("name", tuple(INTERMEDIATE_MIGRATABLE_ROLE_BYTES))
-def test_intermediate_role_byte_drift_fails_before_transaction(
-    name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_intermediate_role_with_operator_comment_is_preserved(
+    name: str, tmp_path: Path,
 ) -> None:
-    """The intermediate admission remains hash-pinned rather than an adoption path."""
-
+    """A non-stock hash does not authorize migration over compatible user text."""
     project = tmp_path / name
     agents = project / ".codex" / "agents"
     agents.mkdir(parents=True)
     role = agents / f"{name}.toml"
-    role.write_bytes(INTERMEDIATE_MIGRATABLE_ROLE_BYTES[name] + b"# operator mutation\n")
+    payload = INTERMEDIATE_MIGRATABLE_ROLE_BYTES[name] + b"# operator mutation\n"
+    role.write_bytes(payload)
+    identity = installer._CreateOnlyMutablePath._identity(role)
+
+    result = _run_codex_installer(project, install_hooks=False)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert role.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(role) == identity
+    assert (agents / "analyst.toml").is_file()
+    registrations = tomllib.loads((project / ".codex/config.toml").read_text())["agents"]
+    assert registrations[name] == _expected_native_role_mappings()[name]
+    assert project / ".codex" / registrations[name]["config_file"] == role
+
+
+def test_owned_profession_instruction_mutation_is_rejected_before_native_role_plan(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    agents = project / ".codex" / "agents"
+    agents.mkdir(parents=True)
+    role = agents / "platform-engineer.toml"
+    original = (ROOT / "src.codex/agents/platform-engineer.toml").read_bytes()
+    payload = original.replace(b"activate $platform-engineer", b"activate $worker")
+    assert payload != original
+    role.write_bytes(payload)
+    identity = installer._CreateOnlyMutablePath._identity(role)
     before = _no_follow_inventory(project)
-
-    def transaction_entered(*_args: object, **_kwargs: object) -> str:
-        raise AssertionError("transaction entered")
-
-    monkeypatch.setattr(installer._InstallTransaction, "__enter__", transaction_entered)
-    result = installer.install(
-        "codex",
-        ["--target", str(project), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"],
-    )
-    captured = capsys.readouterr()
-
-    assert result == 1
-    assert "E_CREATE_ONLY_COLLISION" in captured.err
+    with pytest.raises(ValueError, match="^E_CREATE_ONLY_ROLE_CONTRACT: owned-profession-contract/instructions-mismatch$"):
+        installer._preflight_codex_native_roles(
+            ROOT, ROOT / "src.codex/agents", agents, project / ".codex/config.toml",
+        )
+    assert role.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(role) == identity
     assert _no_follow_inventory(project) == before
 
 
@@ -4320,48 +4427,84 @@ def test_global_stock_role_and_registration_priors_migrate_together(
     assert parsed["unrelated"]["value"] == "preserve-byte-exact"
 
 
-@pytest.mark.parametrize("mutation", ("role-byte", "description", "config-file", "shape"))
-def test_stock_role_or_registration_mutation_fails_before_transaction(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], mutation: str
+@pytest.mark.parametrize("mutation", ("role-byte", "description", "shape"))
+def test_stock_role_or_registration_compatible_customization_is_preserved(
+    tmp_path: Path, mutation: str,
 ) -> None:
-    """Only exact stock prior bytes/shapes are admissible before snapshots exist."""
-
+    """Compatible user controls are not stock-migration authority."""
     project = tmp_path / "project"
     project.mkdir()
     agents, config = _seed_stock_native_role_priors(project)
+    role = agents / "worker.toml"
+    seed = config.read_bytes()
+    stock_description = tomllib.loads(seed.decode())["agents"]["mechanical-scout"]["description"]
     if mutation == "role-byte":
-        role = agents / "worker.toml"
         role.write_bytes(role.read_bytes() + b"# operator mutation\n")
     elif mutation == "description":
-        config.write_bytes(
-            config.read_bytes().replace(
-                b"Read-only deterministic mechanical scout for bounded inventories and checks.",
-                b"Read-only deterministic mechanical scout for bounded inventories and checks!",
-            )
-        )
-    elif mutation == "config-file":
-        config.write_bytes(
-            config.read_bytes().replace(
-                b"agents/mechanical-worker.toml", b"agents/operator-worker.toml"
-            )
-        )
+        old = b"Read-only deterministic mechanical scout for bounded inventories and checks."
+        new = b"Read-only deterministic mechanical scout for bounded inventories and checks!"
+        assert seed.count(old) == 1 and old != new
+        changed = seed.replace(old, new)
+        assert changed != seed and new in changed
+        config.write_bytes(changed)
     else:
-        config.write_bytes(config.read_bytes() + b"extra = true\n")
+        config.write_bytes(config.read_bytes() + b"extra   = true   # operator spacing\n")
+    role_before = role.read_bytes()
+    role_identity = installer._CreateOnlyMutablePath._identity(role)
+    selected = "mechanical-scout" if mutation == "description" else "mechanical-worker"
+    selected_bytes = None
+    if mutation in ("description", "shape"):
+        header = f"[agents.{selected}]\n".encode()
+        marker = f"# operator formatting {mutation}\n".encode()
+        payload = config.read_bytes()
+        assert payload.count(header) == 1
+        payload = payload.replace(header, header + marker, 1)
+        config.write_bytes(payload)
+        start = payload.index(header)
+        end = payload.find(b"\n[", start + len(header))
+        selected_bytes = payload[start:end if end >= 0 else len(payload)]
+        assert marker in selected_bytes
+    parsed = tomllib.loads(config.read_text())["agents"]
+    selected_before = parsed[selected]
+    if mutation == "description":
+        assert selected_before["description"] != stock_description
+    if mutation == "shape":
+        assert selected_before["extra"] is True
+        assert selected_before["config_file"] == "agents/mechanical-worker.toml"
+
+    result = _run_codex_installer(project, install_hooks=False)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    registered = tomllib.loads(config.read_text())["agents"][selected]
+    if mutation in ("description", "shape"):
+        assert registered == selected_before
+        assert selected_bytes is not None and config.read_bytes().count(selected_bytes) == 1
+    if mutation == "role-byte":
+        assert role.read_bytes() == role_before
+        assert installer._CreateOnlyMutablePath._identity(role) == role_identity
+        assert tomllib.loads(config.read_text())["agents"]["worker"] == _expected_native_role_mappings()["worker"]
+    assert (agents / "analyst.toml").is_file()
+
+
+def test_stock_registration_wrong_config_file_is_rejected_without_mutation(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    agents, config = _seed_stock_native_role_priors(project)
+    payload = config.read_bytes().replace(
+        b"agents/mechanical-worker.toml", b"agents/operator-worker.toml")
+    config.write_bytes(payload)
+    parsed = tomllib.loads(payload.decode())["agents"]["mechanical-worker"]
+    assert parsed["config_file"] == "agents/operator-worker.toml"
     before = _no_follow_inventory(project)
-
-    def transaction_entered(*_args: object, **_kwargs: object) -> str:
-        raise AssertionError("transaction entered")
-
-    monkeypatch.setattr(installer._InstallTransaction, "__enter__", transaction_entered)
-    result = installer.install(
-        "codex",
-        ["--target", str(project), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"],
-    )
-    captured = capsys.readouterr()
-
-    assert result == 1
-    assert "E_CREATE_ONLY_COLLISION" in captured.err
+    config_identity = installer._CreateOnlyMutablePath._identity(config)
+    result = _observe_codex_install(["--target", str(project), "--force", "--allow-unsafe-target"])
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "cause=validation-failed" in result.stderr
+    _assert_observed_validation(result, "E_CREATE_ONLY_COLLISION: agents.mechanical-worker")
+    assert config.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(config) == config_identity
     assert _no_follow_inventory(project) == before
+    assert not (agents / "operator-worker.toml").exists()
 
 
 def test_stock_role_and_registration_migration_rolls_back_bytes_and_identities(
@@ -4875,7 +5018,10 @@ def test_tree_sha256_rejects_cache_symlink_before_ignoring_bytecode(
     except OSError as exc:
         pytest.skip(f"symlink unavailable: {exc}")
 
-    assert installer._tree_sha256(tree, ignore_runtime_cache=True) is None
+    with pytest.raises(ValueError, match="^E_CANONICAL_LEAD_STAGE_INVALID: reparse"):
+        installer._tree_sha256(tree, ignore_runtime_cache=True)
+    assert (cache / "validator.pyc").is_symlink()
+    assert target.read_bytes() == b"bytecode"
 
 
 def test_create_tree_omits_runtime_cache_from_fresh_materialization(
@@ -5119,6 +5265,7 @@ def test_interrupted_role_creation_rolls_back_only_created_roles(tmp_path: Path)
 
     target = tmp_path / "agents"
     target.mkdir()
+    (target / "user-note.txt").write_bytes(b"preserved unrelated user bytes")
     before = {
         path.relative_to(target).as_posix(): path.read_bytes()
         for path in target.rglob("*")
@@ -5128,7 +5275,7 @@ def test_interrupted_role_creation_rolls_back_only_created_roles(tmp_path: Path)
     try:
         transaction = installer._InstallTransaction([target], enabled=True)
         with transaction:
-            owner = installer._CreateOnlyMutablePath(target, transaction, dry_run=False)
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
             installer._install_codex_native_roles(
                 ROOT,
                 ROOT / "src.codex" / "agents",
@@ -5251,35 +5398,40 @@ def test_global_home_reparse_is_rejected_with_global_stable_error(
         linked.symlink_to(actual, target_is_directory=True)
     except OSError as exc:
         pytest.skip(f"directory symlink unavailable: {exc}")
-    monkeypatch.setenv("USERPROFILE", str(linked))
-    monkeypatch.delenv("HOME", raising=False)
+    selected = "USERPROFILE" if os.name == "nt" else "HOME"
+    monkeypatch.setenv(selected, str(linked))
+    monkeypatch.delenv("HOME" if os.name == "nt" else "USERPROFILE", raising=False)
 
     with pytest.raises(ValueError, match="E_GLOBAL_HOME_REPARSE"):
         installer._resolve_global_home()
 
 
+@pytest.mark.parametrize("platform", ("nt", "posix"))
 def test_global_home_missing_matching_and_mismatch_rules(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
 ) -> None:
-    """Windows global mode has one explicit USERPROFILE route and no HOME fallback."""
-
+    """Exercise each environment-selection policy using real current-host paths."""
     primary = tmp_path / "primary"
     alternate = tmp_path / "alternate"
     primary.mkdir()
     alternate.mkdir()
-    monkeypatch.delenv("USERPROFILE", raising=False)
-    monkeypatch.setenv("HOME", str(primary))
-    with pytest.raises(ValueError, match="E_GLOBAL_HOME_AMBIGUOUS"):
-        installer._select_global_home_environment(
-            None, str(primary), platform="nt"
-        )
-
-    monkeypatch.setenv("USERPROFILE", str(primary))
-    assert installer._resolve_global_home() == primary
-
-    monkeypatch.setenv("HOME", str(alternate))
+    select = installer._select_global_home_environment
+    monkeypatch.setattr(installer, "_select_global_home_environment",
+                        lambda userprofile, home: select(userprofile, home, platform=platform))
+    primary_key = "USERPROFILE" if platform == "nt" else "HOME"
+    other_key = "HOME" if platform == "nt" else "USERPROFILE"
+    monkeypatch.delenv(primary_key, raising=False)
+    monkeypatch.setenv(other_key, str(primary))
     with pytest.raises(ValueError, match="E_GLOBAL_HOME_AMBIGUOUS"):
         installer._resolve_global_home()
+    monkeypatch.setenv(primary_key, str(primary))
+    assert installer._resolve_global_home() == primary
+    monkeypatch.setenv(other_key, str(alternate))
+    if platform == "nt":
+        with pytest.raises(ValueError, match="E_GLOBAL_HOME_AMBIGUOUS"):
+            installer._resolve_global_home()
+    else:
+        assert installer._resolve_global_home() == primary
 
 
 def test_canonical_skill_and_projection_matrix_is_create_only(tmp_path: Path) -> None:
@@ -5468,7 +5620,7 @@ def test_global_codex_install_uses_shared_agents_skills_root(tmp_path: Path) -> 
     home.mkdir()
     import os
 
-    env = os.environ.copy()
+    env = codex_hook_host_env(os.environ, ROOT)
     env["USERPROFILE"] = str(home)
     env["HOME"] = str(home)
     result = subprocess.run(
@@ -6014,11 +6166,11 @@ def test_scalar_opened_foreign_origin_is_closed_before_read_or_write(
             redirected.append(descriptor)
             return descriptor
         return real_open(path, flags, *args, **kwargs)
-    def read(descriptor):
+    def read(descriptor, **kwargs):
         metadata = os.fstat(descriptor)
         if (metadata.st_dev, metadata.st_ino) == foreign[other].python_identity[:2]:
             foreign_reads.append(True)
-        return real_read(descriptor)
+        return real_read(descriptor, **kwargs)
     monkeypatch.setattr(installer.os, "open", open_file)
     monkeypatch.setattr(installer._InstallTransaction, "_descriptor_bytes", staticmethod(read))
     primary = RuntimeError("forced scalar inverse foreign descriptor")

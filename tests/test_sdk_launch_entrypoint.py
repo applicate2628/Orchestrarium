@@ -170,3 +170,30 @@ def test_sdk_incomplete_diagnostic_write_reports_retained_directory(tmp_path, mo
     assert str(reserved.lifecycle.run_dir) in error
     assert "sha256=" not in error
     assert list(reserved.lifecycle.run_dir.glob("sdk-recovery.json"))
+
+
+@pytest.mark.parametrize("model,effort,approved,allowed", [
+    ("gpt-6-astra", "high", False, False),
+    ("gpt-6-astra", "high", True, True),
+    ("gpt-6.1-terra", "max", False, False),
+    ("gpt-6.1-terra", "high", False, True),
+    ("gpt-6.1-terra", "low", True, False),
+])
+def test_sdk_launch_policy_precedes_binding_receipt_and_worker(monkeypatch, model, effort, approved, allowed):
+    from sdk_execution import dispatch
+    class ReachedBinding(Exception):
+        pass
+    def prepare(*args, **kwargs):
+        raise ReachedBinding()
+    monkeypatch.setattr(dispatch, "prepare_dispatch", prepare)
+    monkeypatch.setattr(owner.TerminalReceiptV1, "reserve", lambda *a: pytest.fail("receipt before admission"))
+    argv = ["fixture", "--terminal-receipt", "fixture-receipt", "--ledger-role", "qa-engineer",
+            "--sdk-review-binding", "fixture-binding"]
+    if approved:
+        argv.append("--user-approved-launch")
+    argv += ["--", "--model", model, "-c", "model_reasoning_effort=" + effort]
+    if allowed:
+        with pytest.raises(ReachedBinding):
+            owner.launch("codex", argv)
+    else:
+        assert owner.launch("codex", argv) == 1

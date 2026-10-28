@@ -59,6 +59,7 @@ def runtime_selection(**changes):
         ledger_max_events=100, ledger_max_bytes=10000,
         job_memory_limit_bytes=256 * 1024 * 1024, expected_launch_sha256="b" * 64,
         config_overrides=list(CODEX_MCP_ISOLATION_OVERRIDES), mcp_scope={"servers": []},
+        installed_hook_root=None,
     )
     value.update(changes)
     return value

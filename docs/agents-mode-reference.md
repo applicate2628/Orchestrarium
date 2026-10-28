@@ -312,7 +312,7 @@ Notes:
 
 | Value | Meaning | Effective provider behavior |
 |---|---|---|
-| `runtime-default` | Let the resolved provider choose its default model or profile | Do not inject a stronger pinned model path just because the provider resolved externally. Transport keys still apply, and narrower provider-specific overrides may still win where they exist. |
+| `runtime-default` | The caller obtains the installed runtime's observed supported model and effort and passes them explicitly at launch; if not observed, the route is unavailable | Do not inject a stronger pinned model path just because the provider resolved externally. Transport keys still apply, and narrower provider-specific overrides may still win where they exist. |
 | `pinned-top-pro` | Use the strongest documented model/profile path for the resolved provider | Start on the strongest documented provider-native model/profile and allow only the bounded same-provider fallback used for usage-limit or quota exhaustion while staying inside the approved version floor and lane policy for that provider. |
 
 Notes:
@@ -385,7 +385,7 @@ Guardrails:
 
 | Situation | Rule |
 |---|---|
-| `externalCodexProfile: default` and Codex is the chosen provider | Inherit `externalModelMode`; under `runtime-default`, do not pin a model, and under `pinned-top-pro`, use the documented top Codex path. |
+| `externalCodexProfile: default` and Codex is the chosen provider | Inherit `externalModelMode`; under `runtime-default`, pass the runtime-observed model and effort explicitly, and under `pinned-top-pro`, use the documented top Codex path. |
 | `externalCodexProfile: gpt-6.1-sol-high` and Codex is the chosen provider | Request model `gpt-6.1-sol` with `model_reasoning_effort = "high"`. If unsupported or ambiguous, disclose the shortfall instead of silently falling back. |
 | `externalCodexProfile: gpt-6.1-sol-xhigh` and Codex is the chosen provider | Request model `gpt-6.1-sol` with `model_reasoning_effort = "xhigh"`. If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
 | `externalCodexProfile: gpt-6.1-sol-max` and Codex is the chosen provider | Request model `gpt-6.1-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes; max remains approval-gated. If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
@@ -477,7 +477,7 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 | Direct external launch | Provider-backed consultant execution in `external` mode and both external adapter roles must launch the selected external transport directly. If the host runtime cannot do that, the route is disabled rather than proxied through an internal helper. |
 | External CLI prompt delivery | Substantive task prompts are file-based by default: create a temporary prompt file and feed it through stdin or a provider-supported file-input mechanism instead of putting the full prompt in argv. |
 | External workdir mode | `externalCodexWorkdirMode` and `externalClaudeWorkdirMode` choose whether each production external provider runs in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`. |
-| Shared external model policy | `externalModelMode: runtime-default` keeps provider runtime model selection; `pinned-top-pro` pins the strongest documented model/profile for the resolved provider and allows one named same-provider fallback on retryable provider exhaustion. |
+| Shared external model policy | for `externalModelMode: runtime-default`, the caller obtains the installed runtime's observed supported model and effort and passes them explicitly; if not observed, the route is unavailable; `pinned-top-pro` pins the strongest documented model/profile for the resolved provider and allows one named same-provider fallback on retryable provider exhaustion. |
 | Codex external profile | `externalCodexProfile: default` inherits the shared model policy when Codex is the resolved provider. The shipped omitted-key/first-write value is `gpt-6.1-sol-xhigh`; `gpt-6.1-sol-xhigh` and `gpt-6.1-sol-max` request model `gpt-6.1-sol` with the named reasoning effort. The retained `gpt-5.6-sol-xhigh` and `gpt-5.6-sol-max` tokens continue to request their literal GPT-5.6 model/effort for 1.x, and unchanged `gpt-5.6-terra` selects the balanced Codex tier with `model_reasoning_effort = "high"`. |
 | Reserve candidate | `reserve` is the advisory/review-only supplemental candidate after primary `claude` and `codex`. It is symbolic, bound by `reserveResolver`, independent of primary providers, and must not be used for worker or mutating work. |
 | Active priority profile | `externalPriorityProfile` selects the named provider-order map used only when `externalProvider: auto`. Unknown profile names fail closed. |

@@ -87,7 +87,8 @@ class DomainPlanTests(unittest.TestCase):
         self.assertFalse(H.install(data, self.entry, "PreToolUse", self.marker,
                                    platform="codex", host_os="posix"))
         self.assertTrue(H.remove(data, "PreToolUse", self.marker,
-                                 platform="codex", host_os="posix"))
+                                 platform="codex", host_os="posix",
+                                 managed_targets={self.marker: {str(self.script)}}))
         self.assertEqual([foreign], data["hooks"]["PreToolUse"][0]["hooks"])
         exact = {"hooks": {"PreToolUse": [copy.deepcopy(self.entry)]}}
         self.assertTrue(H.remove(exact, "PreToolUse", self.marker,
@@ -108,7 +109,7 @@ class DomainPlanTests(unittest.TestCase):
 
     def test_cli_bad_json_empty_remove_and_dry_run_keep_existing_exits(self):
         self.target.write_bytes(b"{")
-        argv = ["helper", "--target", str(self.target), "--platform", "claude", "--remove"]
+        argv = ["helper", "--target", str(self.target), "--platform", "claude", "--remove", "--script-path", str(self.script)]
         with patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as failure:
                 H.main()

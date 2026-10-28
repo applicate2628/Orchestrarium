@@ -73,10 +73,16 @@ def read_binding(path: Path) -> dict[str, Any]:
             or len({handle_identity(v) for v in (opened, after, reopened)}) != 1):
             raise ValueError()
         value = strict_json(raw.decode("utf-8"), max_bytes=_BINDING_LIMIT)
-        if type(value) is not dict or set(value) != _BINDING_KEYS:
+        if type(value) is not dict or type(value.get("schemaVersion")) is not int:
             raise ValueError()
-        if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1:
+        version = value["schemaVersion"]
+        if version not in (1, 2) or set(value) != (_BINDING_KEYS if version == 1 else _BINDING_KEYS | {"installedHookRoot"}):
             raise ValueError()
+        if version == 2:
+            selected_root = value["installedHookRoot"]
+            if (type(selected_root) is not str or not selected_root or not Path(selected_root).is_absolute()
+                    or any(ord(char) < 32 or ord(char) == 127 for char in selected_root)):
+                raise ValueError()
         if any(not _text(value[key]) for key in ("accountBinding", "coordinatorBinding", "artifactIdentity")):
             raise ValueError()
         email = value["expectedAccountEmail"]
@@ -104,8 +110,9 @@ class CodexReviewDispatch:
     """One launch's constraint guard and retained evidence, not a policy store."""
 
     def __init__(self, prevalidated, request, selection, environment, cancellation_probe,
-                 started_at, deadline):
+                 started_at, deadline, runtime_namespace=None):
         self.prevalidated = prevalidated
+        self._runtime_namespace = runtime_namespace
         self.request = request
         self.selection = selection
         self._environment = dict(environment)
@@ -129,7 +136,7 @@ class CodexReviewDispatch:
         return (str(c.ledger), c.ledger_role, c.ledger_role_explicit, c.ledger_lane,
                 c.ledger_artifact, tuple(c.ledger_closes), c.ledger_max_events,
                 c.ledger_max_bytes, c.timeout_secs, c.result_max_bytes, c.capture_max_bytes,
-                tuple(c.provider_flags), str(c.terminal_receipt))
+                tuple(c.provider_flags), str(c.terminal_receipt), c.user_approved_launch)
 
     def assert_current(self, request, effect):
         with self._lock:
@@ -145,6 +152,8 @@ class CodexReviewDispatch:
             if (role != self.prevalidated.role_provenance
                 or (tuple(flags), model, effort) != (self.prevalidated.flags, request.model, request.effort)):
                 raise DispatchError("E_CODEX_SDK_SELECTION_CHANGED")
+            owner._qualify_managed_model_launch(
+                "codex", self.prevalidated, runtime_namespace=self._runtime_namespace)
             owner.ledger_resource_options(self.prevalidated.control)
             if effect == "query":
                 # Configuration/catalog reads only before the one admitted turn.
@@ -302,7 +311,8 @@ def _utc_now():
 
 
 def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: dict[str, str],
-                      cancellation_probe: Callable[[], bool]) -> CodexReviewDispatch:
+                      cancellation_probe: Callable[[], bool],
+                      runtime_namespace: Path | None = None) -> CodexReviewDispatch:
     """Read-only preparation; canonical runtime alone claims and settles a launch."""
     prepared_at = time.monotonic()
     _require_supported_platform()
@@ -317,6 +327,8 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         or not c.ledger or not c.ledger_artifact or c.terminal_receipt is None
         or c.ledger_lane or c.ledger_closes or prevalidated.provenance is not None):
         raise DispatchError("E_CODEX_SDK_REVIEW_ONLY")
+    # Direct callers must retain the same rule as the public CLI entrypoint.
+    owner._qualify_managed_model_launch("codex", prevalidated, runtime_namespace=runtime_namespace)
     for index, flag in enumerate(flags):
         if flag == "--sandbox" and flags[index + 1] != "read-only":
             raise DispatchError("E_CODEX_SDK_REVIEW_ONLY")
@@ -352,6 +364,7 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         ledger_max_bytes=int(options[3]) if options else None,
         job_memory_limit_bytes=binding["jobMemoryLimitBytes"],
         config_overrides=runtime.CODEX_BOUNDED_REVIEW_OVERRIDES,
+        installed_hook_root=binding.get("installedHookRoot"),
     )
     raw = owner.prompt_bytes(c, external=True)
     request = runtime.prepare_codex_request(ExecutionRequest(
@@ -366,7 +379,7 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     owner.prepare_ledger_admission(c, runtime.build_launch_arguments(request, selection, started_at=started))
     runtime._verify_runtime(selection)
     return CodexReviewDispatch(prevalidated, request, selection, source_environment,
-                               cancellation_probe, started, prepared_at + c.timeout_secs)
+                               cancellation_probe, started, prepared_at + c.timeout_secs, runtime_namespace)
 
 
 def _require_supported_platform():
@@ -376,10 +389,11 @@ def _require_supported_platform():
 
 
 def prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: dict[str, str],
-                     cancellation_probe: Callable[[], bool]) -> CodexReviewDispatch:
+                     cancellation_probe: Callable[[], bool],
+                      runtime_namespace: Path | None = None) -> CodexReviewDispatch:
     try:
         return _prepare_dispatch(prevalidated, binding_path, source_environment=source_environment,
-                                 cancellation_probe=cancellation_probe)
+                                 cancellation_probe=cancellation_probe, runtime_namespace=runtime_namespace)
     except DispatchError:
         raise
     except (OSError, ValueError, TypeError, UnicodeError):

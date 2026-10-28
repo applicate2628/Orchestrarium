@@ -938,6 +938,16 @@ def load_role_policy(repo_root: Path, *, source_bytes: bytes | None = None) -> t
             raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} corridor")
         if any(profile not in profiles for profile in allowed):
             raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} profile")
+        previous = role.get("previousFactoryProfile")
+        if previous is not None and previous not in profiles:
+            raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} previous factory profile")
+        overrides = role.get("taskDefaultProfiles", {})
+        if not isinstance(overrides, dict) or any(
+            task not in task_classes or role_name not in eligibility.get(task, ())
+            or profile not in allowed or profile not in task_classes[task].get("admissibleProfiles", ())
+            for task, profile in overrides.items()
+        ):
+            raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} task default")
     if any(role_name not in role_catalog for role_name in final_authorizing_roles):
         raise ValueError("E_ROLE_POLICY_INVALID: finalAuthorizingRoles role")
 
@@ -967,7 +977,7 @@ def load_role_policy(repo_root: Path, *, source_bytes: bytes | None = None) -> t
                 raise ValueError(
                     f"E_ROLE_POLICY_INVALID: task {task_name} unknown role {role_name}"
                 )
-            default_profile = role_catalog[role_name]["defaultProfile"]
+            default_profile = role_catalog[role_name].get("taskDefaultProfiles", {}).get(task_name, role_catalog[role_name]["defaultProfile"])
             profile = profiles[default_profile]
             if task_name in _MECHANICAL_TASK_CLASSES and (
                 model_index[profile["modelTier"]] < model_index[required_model]
@@ -1150,15 +1160,48 @@ def _native_snapshot(path: Path) -> tuple[bytes, tuple[Path, tuple[int, ...], st
     return payload, (path, before, hashlib.sha256(payload).hexdigest())
 
 
+def _package_association(path: Path):
+    value = path.lstat()
+    linked = stat.S_ISLNK(value.st_mode) or bool(getattr(value, "st_file_attributes", 0) & 0x400)
+    if linked and not (stat.S_ISLNK(value.st_mode) or getattr(value, "st_reparse_tag", None) in {
+        getattr(stat, "IO_REPARSE_TAG_SYMLINK", 0xA000000C),
+        getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003),
+    }):
+        raise ValueError("unsupported selected companion link")
+    return (value.st_dev, value.st_ino, value.st_mode,
+            getattr(value, "st_file_attributes", 0), os.readlink(path) if linked else None)
+
+
+class _SelectedCodePackage:
+    """Retain the selected script namespace and its physical package once."""
+
+    def __init__(self, script: Path):
+        self.script = script
+        self.physical = script.resolve(strict=True)
+        paths = (script, *reversed(script.parents), self.physical, *reversed(self.physical.parents))
+        self.associations = tuple((path, _package_association(path)) for path in paths)
+        self.snapshot = _native_snapshot(self.physical)[1]
+        self.assert_current()
+
+    def assert_current(self):
+        if (any(_package_association(path) != identity for path, identity in self.associations)
+            or self.script.resolve(strict=True) != self.physical
+            or _native_snapshot(self.physical)[1] != self.snapshot):
+            raise ValueError("selected code package changed")
+
+
 class _NativeRoleSelection(dict):
     """One transient selection owns its last-check binding, never a global store."""
 
-    def __init__(self, values, snapshots=(), authority=None, carrier=None):
+    def __init__(self, values, snapshots=(), authority=None, carrier=None, launch_package=None):
         super().__init__(values)
         self.snapshots, self.authority, self.carrier = tuple(snapshots), authority, carrier
+        self.launch_package = launch_package
 
     def assert_current(self):
         try:
+            if self.launch_package is not None:
+                self.launch_package.assert_current()
             if self.authority is not None:
                 self.authority.assert_current()
             for path, identity, digest in self.snapshots:
@@ -1219,7 +1262,7 @@ def _load_role_dispatch_contract(
                 requested_effort=None,
                 sandbox=None,
             )
-        profile_name = roles[role_name]["defaultProfile"]
+        profile_name = roles[role_name].get("taskDefaultProfiles", {}).get(task_class, roles[role_name]["defaultProfile"])
         profile = policy["profiles"][profile_name]
         model_index = {
             value: index for index, value in enumerate(policy["modelTierOrder"])
@@ -1399,6 +1442,7 @@ def _describe_ordinary_native_role_options_in_layout(
     manifest_path: Path | None = None,
     role_root: Path | None = None,
     linked_authority: Any | None = None,
+    launch_package: _SelectedCodePackage | None = None,
 ) -> dict[str, Any]:
     if not _valid_role_dispatch_request(task_class, role):
         return _ordinary_native_denied(
@@ -1484,6 +1528,12 @@ def _describe_ordinary_native_role_options_in_layout(
     option_names = [
         name for name in contract["roleConfig"]["allowedProfiles"] if name in admissible
     ]
+    try:
+        launch_package = launch_package or _SelectedCodePackage(Path(os.path.abspath(__file__)))
+        launch_policy = _load_model_launch_policy(launch_package)
+    except (OSError, ValueError):
+        return _ordinary_native_denied(task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID",
+            diagnostic={"stage": "model-launch-policy", "reason": "selected-companion-unavailable"})
     options = []
     explicit_controls = (
         host_observation["explicitModelControl"]
@@ -1491,6 +1541,9 @@ def _describe_ordinary_native_role_options_in_layout(
     )
     for name in option_names:
         profile = policy["profiles"][name]
+        forbidden, _needs_agreement = launch_policy.launch_requirements("codex", profile["codexModel"], profile["effort"])
+        if forbidden is not None:
+            continue
         if reported_models is not None and profile["codexModel"] not in reported_models:
             continue
         if reported_efforts is not None and profile["effort"] not in reported_efforts:
@@ -1521,16 +1574,19 @@ def _describe_ordinary_native_role_options_in_layout(
     control_source = "policy-explicit-default"
     if contract["roleKind"] == "native":
         model, effort = contract["configuredModel"], contract["configuredEffort"]
-        if model is not None and effort is not None:
+        factory = policy["profiles"][contract["roleConfig"]["defaultProfile"]]
+        factory_tuples = {(factory["codexModel"], factory["effort"])}
+        if model is not None and effort is not None and (model, effort) not in factory_tuples:
             effective = next((option for option in options if option["model"] == model and option["effort"] == effort), None)
             if effective is None:
                 default_error = {"stage": "configured-profile-policy", "reason": "configured-tuple-not-admitted"}
             else:
                 contract = {**contract, "profile": effective["profile"], "model": model, "effort": effort}
                 control_source = "role-configuration"
-        elif role != "default" or model is not None or effort is not None:
+        elif (model is None) != (effort is None):
             default_error = {"stage": "inherited-control-unresolved", "reason": "effective-tuple-unacquired"}
     snapshots = list(contract["snapshots"])
+    snapshots.append(launch_package.snapshot)
     carrier = None
     carrier_error = None
     try:
@@ -1560,6 +1616,8 @@ def _describe_ordinary_native_role_options_in_layout(
                 carrier_error = {"stage": "configured-carrier-conflict", "reason": "carrier-contract-invalid"}
     except (OSError, ValueError):
         carrier_error = {"stage": "configured-carrier-conflict", "reason": "carrier-contract-invalid"}
+    if carrier is not None and (carrier[0] is None) != (carrier[1] is None):
+        carrier_error = {"stage": "configured-carrier-conflict", "reason": "incomplete-configured-tuple"}
     profession = _profession_skill_metadata(
         repo_root, contract["role"], contract["developerInstructions"]
     )
@@ -1568,12 +1626,8 @@ def _describe_ordinary_native_role_options_in_layout(
             task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
         )
     default_invocation = {
-        "mode": "named-role-default",
-        "agentType": contract["role"],
-    }
-    if contract["roleKind"] == "skill-only" or contract["role"] == "default":
-        default_invocation = {
             "mode": "generic-explicit-profile",
+            "omitAgentType": True,
             "forkTurns": "none",
             "model": contract["model"],
             "reasoningEffort": contract["effort"],
@@ -1632,7 +1686,7 @@ def _describe_ordinary_native_role_options_in_layout(
     if default_error is not None:
         values.update(defaultProfile=None, defaultModel=None, defaultEffort=None)
     values["carrierConfigurationError"] = carrier_error
-    return _NativeRoleSelection(values, snapshots, linked_authority, carrier)
+    return _NativeRoleSelection(values, snapshots, linked_authority, carrier, launch_package)
 
 
 def describe_ordinary_native_role_options(
@@ -1648,6 +1702,37 @@ def describe_ordinary_native_role_options(
     )
 
 
+def _load_model_launch_policy(package: _SelectedCodePackage | None = None):
+    """Load captured policy bytes beside the selected logical module namespace."""
+    try:
+        package = package or _SelectedCodePackage(Path(os.path.abspath(__file__)))
+        package.assert_current()
+        selected = package.physical.parent / "model_routing" / "launch_policy.py"
+        paths = (*reversed(selected.parents), selected)
+        witnessed = tuple((path, _package_association(path)) for path in paths)
+        resolved = selected.resolve(strict=True)
+        payload, snapshot = _native_snapshot(resolved)
+        def assert_current():
+            package.assert_current()
+            if any(_package_association(path) != identity for path, identity in witnessed):
+                raise ValueError("selected companion association changed")
+            if selected.resolve(strict=True) != resolved:
+                raise ValueError("selected companion target changed")
+            if _native_snapshot(resolved)[1] != snapshot:
+                raise ValueError("selected companion bytes changed")
+
+        assert_current()
+        spec = importlib.util.spec_from_file_location("_orchestrarium_model_launch_policy", selected)
+        if spec is None or spec.loader is None:
+            raise ValueError("selected companion cannot be loaded")
+        module = importlib.util.module_from_spec(spec)
+        exec(compile(payload, str(selected), "exec"), module.__dict__)
+        assert_current()
+        return module
+    except (OSError, ValueError, ImportError, SyntaxError) as exc:
+        raise ValueError("E_MODEL_LAUNCH_POLICY_UNAVAILABLE: complete the selected logical runtime package") from exc
+
+
 def resolve_ordinary_native_dispatch(
     description: Any,
     *,
@@ -1656,6 +1741,7 @@ def resolve_ordinary_native_dispatch(
     caller_rationale: Any,
     approved_execution_scope: Any,
     user_approved_max: bool = False,
+    user_approved_launch: bool = False,
 ) -> dict[str, Any]:
     if (
         not isinstance(description, dict)
@@ -1664,113 +1750,85 @@ def resolve_ordinary_native_dispatch(
         or not caller_rationale.strip()
         or not isinstance(approved_execution_scope, dict)
         or not approved_execution_scope
-        or (requested_model is None) != (requested_effort is None)
     ):
         return _ordinary_native_denied("", "", "E_ORDINARY_NATIVE_SELECTION_INVALID")
-    explicit = requested_model is not None
+    if (requested_model is None) != (requested_effort is None):
+        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID")
     if isinstance(description, _NativeRoleSelection):
         try:
             description.assert_current()
         except NativeRoleContractError as error:
             return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
                 "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": error.stage, "reason": error.reason})
-    if not explicit and description.get("defaultConfigurationError"):
+    if description.get("defaultConfigurationError"):
         return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
             "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic=description["defaultConfigurationError"])
-    if not explicit and description.get("defaultEffort") == "max" and user_approved_max is not True:
-        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
-            "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": "configured-profile-policy", "reason": "maximum-approval-required"})
-    selected = None
-    default_mode = description["defaultInvocation"]["mode"]
-    if not explicit and default_mode == "named-role-default" and (
-        description.get("defaultAgentTypeCapability") == "reported-absent"
+    if not (
+        description["hostObservation"].get("explicitModelControl")
+        and description["hostObservation"].get("explicitReasoningEffortControl")
     ):
         return _ordinary_native_denied(
             description.get("taskClass"),
             description.get("role"),
-            "E_ORDINARY_NATIVE_AGENT_TYPE_UNAVAILABLE",
+            "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE",
         )
-    if not explicit and default_mode == "generic-explicit-profile":
-        if not (
-            description["hostObservation"].get("explicitModelControl")
-            and description["hostObservation"].get("explicitReasoningEffortControl")
-        ):
-            return _ordinary_native_denied(
-                description.get("taskClass"),
-                description.get("role"),
-                "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE",
-            )
-        selected = next(
-            (
-                option
-                for option in description.get("options", ())
-                if option.get("profile") == description.get("defaultProfile")
-            ),
-            None,
-        )
-        if selected is None:
-            return _ordinary_native_denied(
-                description.get("taskClass"),
-                description.get("role"),
-                "E_ORDINARY_NATIVE_SELECTION_INVALID",
-            )
-    if explicit:
-        if not (
-            description["hostObservation"].get("explicitModelControl")
-            and description["hostObservation"].get("explicitReasoningEffortControl")
-        ):
-            return _ordinary_native_denied(
-                description.get("taskClass"),
-                description.get("role"),
-                "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE",
-            )
-        selected = next(
-            (
-                option
-                for option in description.get("options", ())
-                if option.get("model") == requested_model
-                and option.get("effort") == requested_effort
-            ),
-            None,
-        )
-        if selected is None or (requested_effort == "max" and user_approved_max is not True):
-            return _ordinary_native_denied(
-                description.get("taskClass"),
-                description.get("role"),
-                "E_ORDINARY_NATIVE_SELECTION_INVALID",
-            )
-    invocation = copy.deepcopy(description["defaultInvocation"])
-    resolved_profile = description["defaultProfile"]
-    resolved_model_tier = description["defaultModelTier"]
-    resolved_model = description["defaultModel"]
-    resolved_effort = description["defaultEffort"]
-    host_capability = description.get(
-        "defaultAgentTypeCapability", "capability-unknown"
+    selected = next(
+        (
+            option
+            for option in description.get("options", ())
+            if (option.get("profile") == description.get("defaultProfile")
+                if requested_model is None else
+                option.get("model") == requested_model and option.get("effort") == requested_effort)
+        ),
+        None,
     )
-    if selected is not None:
-        resolved_profile = selected["profile"]
-        resolved_model_tier = selected["modelTier"]
-        resolved_model = selected["model"]
-        resolved_effort = selected["effort"]
-        host_capability = selected["hostCapability"]
-        invocation = {
-            "mode": "generic-explicit-profile",
-            "forkTurns": "none",
-            "model": resolved_model,
-            "reasoningEffort": resolved_effort,
-            "professionSkill": description["profession"]["skill"],
-            "promptPreamble": description["profession"]["instructions"],
-        }
-    if invocation["mode"] == "generic-explicit-profile":
-        carrier = getattr(description, "carrier", None)
-        conflict = description.get("carrierConfigurationError")
-        if description.get("configurationProvenance", {}).get("genericProfileCompatibility", {}).get(resolved_profile) == "conflict":
-            conflict = {"stage": "configured-carrier-conflict", "reason": "requested-tuple-overridden"}
-        if carrier is not None and any(pin is not None and pin != value for pin, value in zip(carrier, (resolved_model, resolved_effort))):
-            conflict = {"stage": "configured-carrier-conflict", "reason": "requested-tuple-overridden"}
-        if conflict:
-            return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
-                "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic=conflict)
+    if selected is None:
+        return _ordinary_native_denied(
+            description.get("taskClass"),
+            description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID",
+        )
+    resolved_profile = selected["profile"]
+    resolved_model_tier = selected["modelTier"]
+    resolved_model = selected["model"]
+    resolved_effort = selected["effort"]
+    host_capability = selected["hostCapability"]
+    if (
+        description.get("configurationProvenance", {}).get("selectedControlSource") == "role-configuration"
+        and (resolved_model, resolved_effort) != (description["defaultModel"], description["defaultEffort"])
+    ):
+        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": "configured-profile-policy", "reason": "requested-tuple-overridden"})
+    invocation = {
+        "mode": "generic-explicit-profile",
+        "omitAgentType": True,
+        "forkTurns": "none",
+        "model": resolved_model,
+        "reasoningEffort": resolved_effort,
+        "professionSkill": description["profession"]["skill"],
+        "promptPreamble": description["profession"]["instructions"],
+    }
+    carrier = getattr(description, "carrier", None)
+    conflict = description.get("carrierConfigurationError")
+    if carrier is None:
+        conflict = {"stage": "configured-carrier-conflict", "reason": "carrier-unacquired"}
+    if not conflict and description.get("configurationProvenance", {}).get("genericProfileCompatibility", {}).get(resolved_profile) == "conflict":
+        conflict = {"stage": "configured-carrier-conflict", "reason": "requested-tuple-overridden"}
+    if not conflict and carrier is not None and any(pin is not None and pin != value for pin, value in zip(carrier, (resolved_model, resolved_effort))):
+        conflict = {"stage": "configured-carrier-conflict", "reason": "requested-tuple-overridden"}
+    if conflict:
+        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic=conflict)
+    try:
+        reason = _load_model_launch_policy(getattr(description, "launch_package", None)).qualify_launch(
+            "codex", resolved_model, resolved_effort,
+            user_approved_launch=user_approved_launch, user_approved_max=user_approved_max)
+    except ValueError:
+        reason = "selected-companion-unavailable"
+    if reason is not None:
+        return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
+            "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": "model-launch-policy", "reason": reason})
     return {
         "schemaVersion": 1,
         "status": "resolved",
@@ -2111,8 +2169,19 @@ def _same_path(left: Path, right: Path) -> bool:
     )
 
 
-def _linked_runtime_subroots_module(resolver: Path):
-    path = resolver.parent / "linked_runtime_subroots.py"
+def _same_selected_file(left: Path, right: Path) -> bool:
+    if _same_path(left, right):
+        return True
+    try:
+        return _same_path(left.resolve(strict=True), right.resolve(strict=True))
+    except OSError:
+        return False
+
+
+def _linked_runtime_subroots_module(package: _SelectedCodePackage):
+    package.assert_current()
+    path = package.physical.parent / "linked_runtime_subroots.py"
+    payload, snapshot = _native_snapshot(path)
     spec = importlib.util.spec_from_file_location(
         "orchestrarium_linked_runtime_subroots", path
     )
@@ -2120,7 +2189,13 @@ def _linked_runtime_subroots_module(resolver: Path):
         raise ValueError("installed linked runtime authority is unavailable")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    package.assert_current()
+    if _native_snapshot(path)[1] != snapshot:
+        raise ValueError("linked runtime companion changed")
+    exec(compile(payload, str(path), "exec"), module.__dict__)
+    package.assert_current()
+    if _native_snapshot(path)[1] != snapshot:
+        raise ValueError("linked runtime companion changed")
     return module
 
 
@@ -2138,7 +2213,7 @@ def _installed_role_dispatch_layout(
     resolver: Path,
     project_root: Path,
     home: Path,
-) -> tuple[Path, Path, Path, Any | None]:
+) -> tuple[Path, Path, Path, Any | None, _SelectedCodePackage]:
     project_resolver = (
         project_root
         / ".agents"
@@ -2156,24 +2231,37 @@ def _installed_role_dispatch_layout(
         / "resolve-agents-mode.py"
     )
     matches = [
-        (project_resolver, project_root / ".codex" / "agents"),
-        (global_resolver, home / ".codex" / "agents"),
+        ("project", project_resolver, project_root / ".codex" / "agents"),
+        ("global", global_resolver, home / ".codex" / "agents"),
     ]
     selected = [
-        ("project" if candidate == project_resolver else "global", role_root)
-        for candidate, role_root in matches
-        if _same_path(resolver, candidate)
+        (scope, candidate, role_root)
+        for scope, candidate, role_root in matches
+        if _same_selected_file(resolver, candidate)
     ]
+    if (
+        len(selected) == 2
+        and _same_selected_file(project_root, home)
+        and _same_selected_file(project_resolver, global_resolver)
+        and _same_selected_file(selected[0][2], selected[1][2])
+    ):
+        # The single global authority retains its linked-root permissions.
+        selected = [selected[1]]
     if len(selected) != 1:
         raise ValueError("installed resolver layout is missing or ambiguous")
-    scope, selected_root = selected[0]
-    authority = _linked_runtime_subroots_module(resolver).LinkedRuntimeSubrootAuthority.bind(
+    scope, selected_resolver, selected_root = selected[0]
+    if not _ordinary_file(resolver) or not _ordinary_file(selected_resolver):
+        raise ValueError("installed resolver layout contains a reparse or missing resolver")
+    package = _SelectedCodePackage(selected_resolver)
+    if not _same_path(resolver.resolve(strict=True), package.physical):
+        raise ValueError("installed resolver package changed")
+    authority = _linked_runtime_subroots_module(package).LinkedRuntimeSubrootAuthority.bind(
         selected_root,
         scope=scope,
         trusted_global_roots=(home / ".codex" / "agents",),
     )
     role_root = authority.resolved_root if authority is not None else selected_root
-    lead_root = resolver.parent.parent
+    lead_root = selected_resolver.parent.parent
     shared_root = lead_root / "shared"
     if (
         not _ordinary_file(resolver)
@@ -2187,6 +2275,7 @@ def _installed_role_dispatch_layout(
         shared_root / "orchestrarium-role-manifest.json",
         role_root,
         authority,
+        package,
     )
 
 
@@ -2220,20 +2309,32 @@ def _installed_external_policy_root(
     selected = [
         (base, directories, scope)
         for base, directories, scope in candidates
-        if _same_path(
+        if _same_selected_file(
             resolver,
             base.joinpath(*directories, "resolve-agents-mode.py"),
         )
     ]
+    if (
+        len(selected) == 2
+        and selected[0][1] == selected[1][1]
+        and _same_selected_file(selected[0][0], selected[1][0])
+    ):
+        selected = [selected[1]]
     if len(selected) != 1:
         raise ValueError("installed external resolver layout is missing or ambiguous")
 
     base, directories, scope = selected[0]
+    selected_resolver = base.joinpath(*directories, "resolve-agents-mode.py")
+    if not _ordinary_file(resolver) or not _ordinary_file(selected_resolver):
+        raise ValueError("installed external resolver layout contains a reparse or missing resolver")
+    package = _SelectedCodePackage(selected_resolver)
+    if not _same_path(resolver.resolve(strict=True), package.physical):
+        raise ValueError("installed external resolver package changed")
     logical_policy_root = base.joinpath(*directories[:-1])
     authority = None
     if scope == "global":
         authority = _linked_runtime_subroots_module(
-            resolver
+            package
         ).LinkedRuntimeSubrootAuthority.bind(
             logical_policy_root,
             scope=scope,
@@ -2262,6 +2363,7 @@ def _installed_external_policy_root(
         or not _ordinary_file(policy_path)
     ):
         raise ValueError("installed external resolver layout contains a reparse or missing root")
+    package.assert_current()
     return policy_root
 
 
@@ -2350,6 +2452,7 @@ def main() -> int:
     parser.add_argument("--caller-rationale")
     parser.add_argument("--approved-scope-json")
     parser.add_argument("--user-approved-max", action="store_true")
+    parser.add_argument("--user-approved-launch", action="store_true")
     parser.add_argument("--json", action="store_true", help="emit JSON output")
     args = parser.parse_args()
 
@@ -2411,7 +2514,7 @@ def main() -> int:
             )
         else:
             try:
-                installed_root, manifest_path, role_root, authority = (
+                installed_root, manifest_path, role_root, authority, package = (
                     _installed_role_dispatch_layout(resolver_path, project_root, home)
                 )
             except (OSError, ValueError):
@@ -2427,6 +2530,7 @@ def main() -> int:
                     manifest_path=manifest_path,
                     role_root=role_root,
                     linked_authority=authority,
+                    launch_package=package,
                 )
         decision = description
         if args.ordinary_native_action == "resolve":
@@ -2445,6 +2549,7 @@ def main() -> int:
                 caller_rationale=args.caller_rationale,
                 approved_execution_scope=approved_scope,
                 user_approved_max=args.user_approved_max,
+                user_approved_launch=args.user_approved_launch,
             )
         json.dump(decision, sys.stdout, sort_keys=True, separators=(",", ":"))
         sys.stdout.write("\n")
@@ -2471,7 +2576,7 @@ def main() -> int:
             )
         else:
             try:
-                installed_root, manifest_path, role_root, authority = (
+                installed_root, manifest_path, role_root, authority, package = (
                     _installed_role_dispatch_layout(
                         resolver_path,
                         project_root,

@@ -207,9 +207,12 @@ def _run_observed_profile_transport(
     raw = _codex_turn(_codex_agent()) if provider == "codex" else b"GATE: PASS\n"
     observation = _kimi_process_result(raw, b"", target_exit_code=0, dialogue_complete=True)
     observation.cancelled = observation.timed_out = False
-    auth = provider_prompt.resolve_provider_auth_configuration(
-        provider,
-        {"OPENAI_API_KEY" if provider == "codex" else "ANTHROPIC_API_KEY": "fixture-key"},
+    # This scenario checks model/effort forwarding with a mocked process and
+    # auth boundary. No credential is required or injected into the fixture.
+    auth = provider_prompt.ProviderAuthConfiguration(
+        mode="codex-api-key" if provider == "codex" else "claude-direct",
+        child_environment={}, needles=(),
+        output_scan_disposition=provider_prompt.AUTH_OUTPUT_SCAN_CREDENTIAL_FILE_UNSCANNABLE,
     )
     observed_calls: list[str] = []
 
@@ -553,7 +556,9 @@ def test_launch_and_terminal_ledger_events_record_resolved_profile(
         ]
     )
     result, _, item = _run_observed_profile_transport(
-        tmp_path, monkeypatch, provider, ["--", *override]
+        tmp_path, monkeypatch, provider,
+        # Synthetic settled observation, not a live provider grant.
+        [*(["--user-approved-launch"] if provider == "codex" else []), "--", *override]
     )
     assert result.returncode == 0, result.stderr
     assert item is not None
@@ -609,7 +614,7 @@ def test_equal_model_effort_with_different_sandbox_flags_remain_distinguishable(
             case_root,
             monkeypatch,
             "codex",
-            ["--", *common, sandbox],
+            ["--user-approved-launch", "--", *common, sandbox],
         )
         assert result.returncode == 0, result.stderr
         assert item is not None

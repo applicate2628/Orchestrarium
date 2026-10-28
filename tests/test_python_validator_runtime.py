@@ -1299,8 +1299,8 @@ def test_common_pin_completeness_uses_exact_applicable_action_names(
             parity_actions = ((
                 "check_common_skill_body_parity",
                 "manual-repo-transfer",
-                "src.codex/skills/manual-repo-transfer/SKILL.md",
-                "src.claude/skills/manual-repo-transfer/SKILL.md",
+                str(candidate),
+                str(candidate),
             ),)
     elif mutation == "extra":
         applicable_names = (*names, "synthetic-common")
@@ -1354,6 +1354,9 @@ def test_manual_transfer_current_body_parity_in_monorepo(
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / relative, target)
+    # Generic equality fixture, not a requirement that historical Source is live.
+    shutil.copy2(root / "src.codex/skills/manual-repo-transfer/SKILL.md",
+                 root / "src.claude/skills/manual-repo-transfer/SKILL.md")
     (root / "src.codex/skills/lead/scripts").mkdir(parents=True)
     (root / "src.claude/agents/scripts").mkdir(parents=True)
     if changed_pack in ("src.codex", "src.claude"):
@@ -1404,12 +1407,10 @@ def test_manual_transfer_standalone_checks_local_skill_only(
         local.unlink()
     elif mutation == "invalid-frontmatter":
         local.write_bytes(b"---\nname: wrong\ndescription: fixture\n---\nbody\n")
-    action = (
-        "check_common_skill_body_parity",
-        "manual-repo-transfer",
-        "src.codex/skills/manual-repo-transfer/SKILL.md",
-        "src.claude/skills/manual-repo-transfer/SKILL.md",
-    )
+    pack = _load(VALIDATORS[0 if provider == "codex" else 1], f"standalone_live_pack_{provider}_{mutation}")
+    action, = [a for a in pack._DECLARED_ACTIONS
+               if len(a) > 1 and a[1] == "manual-repo-transfer"
+               and a[0] == "check_common_skill_live_body"]
     result = runtime.validate_pack(
         script=script,
         provider=provider,
@@ -2526,3 +2527,61 @@ def test_current_owner_reuse_actions_cover_current_source_and_installed_scopes(
         assert {scope for scope, _ in selected} == (
             {"all"} if module.PROVIDER == "codex" else {"dev_repo_nonstandalone", "installed"}
         )
+
+@pytest.mark.parametrize('provider,index', [('codex', 0), ('claude', 1)])
+@pytest.mark.parametrize('mutation', ['current', 'drift', 'missing', 'frontmatter'])
+def test_manual_transfer_live_action_uses_canonical_source(tmp_path, provider, index, mutation):
+    runtime = _load(RUNTIME, f'live_transfer_{provider}_{mutation}')
+    pack = _load(VALIDATORS[index], f'live_transfer_pack_{provider}_{mutation}')
+    action, = [a for a in pack._DECLARED_ACTIONS
+               if len(a) > 1 and a[1] == 'manual-repo-transfer'
+               and a[0] in ('check_common_skill_body_parity', 'check_common_skill_live_body')]
+    assert action[0] == 'check_common_skill_live_body'
+    root = tmp_path / 'repo'
+    for relative in ('shared/AGENTS.shared.md', 'src.codex/AGENTS.codex.md',
+                     'src.codex/skills/manual-repo-transfer/SKILL.md',
+                     'src.claude/skills/manual-repo-transfer/SKILL.md'):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, target)
+    historical = root / 'src.claude/skills/manual-repo-transfer/SKILL.md'
+    before = historical.read_bytes()
+    for directory in ('src.codex/skills/lead/scripts', 'src.claude/agents/scripts'):
+        (root / directory).mkdir(parents=True)
+    live = root / 'src.codex/skills/manual-repo-transfer/SKILL.md'
+    if mutation == 'drift':
+        live.write_bytes(live.read_bytes() + b'\nchanged live body\n')
+    elif mutation == 'missing':
+        live.unlink()
+    elif mutation == 'frontmatter':
+        live.write_text(live.read_text().replace('description:', 'description: fixture ', 1))
+    script = root / VALIDATORS[index].relative_to(ROOT)
+    result = runtime.validate_pack(script=script, provider=provider, actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(), utility_skills=frozenset(),
+        curated_role_skills=frozenset(), root=root)
+    assert result.errors == (1 if mutation in ('drift', 'missing') else 0)
+    assert historical.read_bytes() == before
+
+@pytest.mark.parametrize('provider,index', [('codex', 0), ('claude', 1)])
+def test_manual_transfer_standalone_source_preserves_local_body_contract(tmp_path, provider, index):
+    runtime = _load(RUNTIME, f'transfer_source_{provider}')
+    pack = _load(VALIDATORS[index], f'transfer_source_pack_{provider}')
+    action, = [a for a in pack._DECLARED_ACTIONS
+               if len(a) > 1 and a[0] == 'check_common_skill_live_body'
+               and a[1] == 'manual-repo-transfer']
+    root = tmp_path / 'source'
+    paths = ['shared/AGENTS.shared.md', f'src.{provider}/skills/manual-repo-transfer/SKILL.md']
+    if provider == 'codex':
+        paths.append('src.codex/AGENTS.codex.md')
+    for relative in paths:
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, target)
+    script = root / VALIDATORS[index].relative_to(ROOT)
+    script.parent.mkdir(parents=True, exist_ok=True)
+    local = root / f'src.{provider}/skills/manual-repo-transfer/SKILL.md'
+    local.write_bytes(local.read_bytes() + b'\nStandalone local customization.\n')
+    result = runtime.validate_pack(script=script, provider=provider, actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(), utility_skills=frozenset(),
+        curated_role_skills=frozenset(), root=root)
+    assert result.errors == 0

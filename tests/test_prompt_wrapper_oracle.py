@@ -5378,3 +5378,35 @@ def test_capture_transfer_one_owner_preserves_phase_and_primary(monkeypatch, sta
     count = len(closes)
     assert reserved.cleanup_once() is result and len(closes) == count
     assert all(kind != "native" or value != 37 for kind, value in closes)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink integration; Windows qualification is separate")
+def test_parent_preserves_hook_alias_for_inventory(tmp_path, monkeypatch):
+    from tests.test_hook_health import CHECKER, _host_trust_fixture
+
+    home = tmp_path / "home"
+    home.mkdir()
+    physical = home / "physical-hooks.json"
+    rows, _ = _host_trust_fixture(physical)
+    selected = home / "hooks.json"
+    selected.symlink_to(physical)
+    inventory = home / CHECKER.INVENTORY_NAME
+    specs = [(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows]
+    CHECKER.write_codex_inventory(
+        target=selected, specs=specs, inventory_path=inventory, host_os="posix")
+    value = json.loads(inventory.read_text())
+    value["sourcePath"] = str(selected)
+    inventory.write_text(json.dumps(value))
+    CHECKER._load_codex_inventory(inventory, target=selected, host_os="posix")
+
+    def support(_runner, argv, **_kwargs):
+        target = Path(argv[argv.index("--target") + 1])
+        try:
+            CHECKER._load_codex_inventory(inventory, target=target, host_os="posix")
+        except ValueError as error:
+            return (SimpleNamespace(outcome="error", target_exit_code=1),
+                    b"", str(error).encode())
+        return SimpleNamespace(outcome="success", target_exit_code=0), b"", b""
+
+    monkeypatch.setattr(owner, "run_support_command", support)
+    assert owner.require_codex_hook_trust(object(), ["fixture-codex"], home, tmp_path) == 0

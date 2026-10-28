@@ -2050,7 +2050,7 @@ def test_nonconverged_close_requires_a_complete_revise_round(
     outcome: str,
 ) -> None:
     repo = _repo(tmp_path)
-    state, _receipt = _begin(repo)
+    state, receipt = _begin(repo)
     before = state.read_bytes()
     result = _run(
         repo,
@@ -2065,6 +2065,215 @@ def test_nonconverged_close_requires_a_complete_revise_round(
     assert result.returncode != 0
     assert "RLSTATE_INVALID" in result.stderr
     assert state.read_bytes() == before
+
+    _complete_initial_revise(repo, state, receipt)
+    closed = _run(repo, "close", "--state", state, "--operation-id", f"complete-{outcome}", "--outcome", outcome)
+    assert closed.returncode == 0, closed.stderr
+    assert "unstarted" not in json.loads(closed.stdout)
+
+
+def _unstarted_close_arguments(state: Path, receipt: dict, outcome: str = "drift") -> list[object]:
+    return ["close", "--state", state, "--operation-id", "stop-unstarted", "--outcome", outcome,
+            "--round", receipt["round"], "--artifact-revision", receipt["artifact_revision"],
+            "--reason", "The selected scope no longer covers the required correction."]
+
+
+@pytest.mark.parametrize("outcome", ("drift", "deadlock"))
+@pytest.mark.parametrize("shape", ("first", "next", "delta"))
+def test_unstarted_close_preserves_admission_history_and_bound_replay(tmp_path: Path, outcome: str, shape: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    if shape != "first":
+        _complete_initial_revise(repo, state, receipt)
+        created = _run(repo, *_next_round_arguments(repo, state, "round-two", affected_lanes=("surgical",) if shape == "delta" else ()))
+        assert created.returncode == 0, created.stderr
+        receipt = json.loads(created.stdout)
+    before = json.loads(state.read_text(encoding="utf-8"))
+    snapshots = {p: p.read_bytes() for p in (state.parent / "artifacts").glob("*.snapshot")}
+    args = _unstarted_close_arguments(state, receipt, outcome)
+    closed = _run(repo, *args)
+    assert closed.returncode == 0, closed.stderr
+    stop = json.loads(closed.stdout)
+    assert stop["unstarted"]["attempts"] == receipt["attempts"]
+    after = json.loads(state.read_text(encoding="utf-8"))
+    assert after["status"] == outcome
+    assert after["rounds"] == before["rounds"]
+    assert after["operations"][:-1] == before["operations"]
+    assert after["operations"][-1]["receipt"] == stop
+    assert {p: p.read_bytes() for p in snapshots} == snapshots
+    assert _run(repo, "validate", "--state", state, "--require-v2", "--require-terminal").returncode == 0
+    persisted = state.read_bytes()
+    assert _run(repo, *args).stdout == closed.stdout
+    changed = [*args[:-1], "A different reason."]
+    assert "RLSTATE_OPERATION_CONFLICT" in _run(repo, *changed).stderr
+    for command in (
+        ["mark-running", "--state", state, "--operation-id", "late-start", "--round", receipt["round"],
+         "--lane", "surgical", "--attempt-id", receipt["attempts"]["surgical"]],
+        _next_round_arguments(repo, state, "late-round"),
+        ["admit-retry", "--state", state, "--operation-id", "late-retry", "--round", receipt["round"],
+         "--lane", "surgical", "--failed-attempt-id", receipt["attempts"]["surgical"]],
+    ):
+        assert "terminal review-loop state is immutable" in _run(repo, *command).stderr
+    assert state.read_bytes() == persisted
+
+
+@pytest.mark.parametrize("fault", ("round", "revision", "empty-reason", "missing-reason", "converged", "snapshot"))
+def test_unstarted_close_rejects_unbound_or_changed_inputs(tmp_path: Path, fault: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    args = _unstarted_close_arguments(state, receipt)
+    if fault == "round":
+        args[args.index("--round") + 1] = 2
+    elif fault == "revision":
+        args[args.index("--artifact-revision") + 1] = "sha256:" + "0" * 64
+    elif fault == "empty-reason":
+        args[-1] = " "
+    elif fault == "missing-reason":
+        args = args[:-2]
+    elif fault == "converged":
+        args[args.index("--outcome") + 1] = "converged"
+    else:
+        data = json.loads(state.read_text(encoding="utf-8"))
+        (repo / data["rounds"][0]["artifact"]["snapshot"]).write_text("changed", encoding="utf-8")
+    before = state.read_bytes()
+    result = _run(repo, *args)
+    assert result.returncode != 0 and not result.stdout
+    assert state.read_bytes() == before
+
+
+@pytest.mark.parametrize("activity", ("start", "result", "failure", "retry", "reset-start-fields"))
+def test_unstarted_close_rejects_actual_activity_even_after_state_reset(tmp_path: Path, activity: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    base = ["--state", state, "--round", 1, "--lane", "surgical", "--attempt-id", receipt["attempts"]["surgical"]]
+    if activity == "result":
+        result = _record(repo, state, receipt, "surgical", "REVISE")
+    elif activity in {"failure", "retry"}:
+        result = _run(repo, "record-failure", *base, "--operation-id", "failed", "--artifact-revision", receipt["artifact_revision"], "--failure", "error")
+        assert result.returncode == 0, result.stderr
+        if activity == "retry":
+            result = _run(repo, "admit-retry", "--state", state, "--operation-id", "retry", "--round", 1,
+                          "--lane", "surgical", "--failed-attempt-id", receipt["attempts"]["surgical"])
+    else:
+        result = _run(repo, "mark-running", *base, "--operation-id", "started")
+    assert result.returncode == 0, result.stderr
+    if activity == "reset-start-fields":
+        data = json.loads(state.read_text(encoding="utf-8"))
+        data["rounds"][0]["phase"] = "admitted"
+        data["rounds"][0]["surgical"]["state"] = "admitted"
+        state.write_text(json.dumps(data), encoding="utf-8")
+    before = state.read_bytes()
+    result = _run(repo, *_unstarted_close_arguments(state, receipt))
+    assert result.returncode != 0 and not result.stdout
+    assert state.read_bytes() == before
+
+
+def test_unstarted_close_validator_rejects_forged_explicit_stop_provenance(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    assert _run(repo, *_unstarted_close_arguments(state, receipt)).returncode == 0
+    original = json.loads(state.read_text(encoding="utf-8"))
+    module = _engine_module()
+    for fault in ("reason", "attempts", "fingerprint", "revision", "converged", "later-operation", "admission"):
+        data = json.loads(json.dumps(original))
+        stop = data["operations"][-1]
+        if fault == "reason":
+            stop["receipt"]["unstarted"]["reason"] = "changed"
+        elif fault == "attempts":
+            stop["receipt"]["unstarted"]["attempts"]["surgical"] = "another-attempt"
+        elif fault == "fingerprint":
+            stop["fingerprint"] = "different"
+        elif fault == "revision":
+            stop["receipt"]["artifact_revision"] = "sha256:" + "0" * 64
+        elif fault == "converged":
+            data["status"] = stop["receipt"]["outcome"] = "converged"
+        elif fault == "later-operation":
+            data["operations"].append({"id": "late", "fingerprint": "x", "receipt": {}})
+        else:
+            data["operations"][0]["receipt"]["attempts"]["surgical"] = "different-admission"
+        assert module.validate_v2(data), fault
+
+
+@pytest.mark.parametrize("outcome", ("drift", "deadlock"))
+def test_legacy_terminal_admission_without_new_receipt_remains_readable(tmp_path: Path, outcome: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    data = json.loads(state.read_text(encoding="utf-8"))
+    data["status"] = outcome  # A historical shape admitted by the pre-extension validator.
+    state.write_text(json.dumps(data), encoding="utf-8")
+    before = state.read_bytes()
+    assert _engine_module().validate_v2(data, require_terminal=True) == []
+    assert _run(repo, "validate", "--state", state, "--require-v2", "--require-terminal").returncode == 0
+    result = _run(repo, *_unstarted_close_arguments(state, receipt, outcome))
+    assert result.returncode != 0 and not result.stdout
+    assert "terminal review-loop state is immutable" in result.stderr
+    assert state.read_bytes() == before
+
+
+def test_legacy_readability_cannot_authorize_a_new_stop_replay(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    args = _unstarted_close_arguments(state, receipt)
+    assert _run(repo, *args).returncode == 0
+    data = json.loads(state.read_text(encoding="utf-8"))
+    del data["operations"][-1]["receipt"]["unstarted"]
+    state.write_text(json.dumps(data), encoding="utf-8")
+    before = state.read_bytes()
+    assert _engine_module().validate_v2(data) == []  # Absence is legacy-compatible, never execution proof.
+    result = _run(repo, *args)
+    assert result.returncode != 0 and not result.stdout
+    assert "unstarted close replay lacks its bound receipt" in result.stderr
+    assert state.read_bytes() == before
+
+
+def test_unstarted_close_serializes_with_start_and_preserves_fault_outcomes(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    args = _unstarted_close_arguments(state, receipt)
+    barrier = repo / ".scratch" / "stop-held"
+    process = _barrier_process(repo, barrier, *args, mode="amendment-race")
+    try:
+        _wait_for_barrier(barrier, process)
+        started = _run(repo, "mark-running", "--state", state, "--operation-id", "concurrent-start", "--round", 1,
+                       "--lane", "surgical", "--attempt-id", receipt["attempts"]["surgical"])
+        assert "RLSTATE_LOCKED" in started.stderr
+        barrier.with_suffix(".release").write_text("release", encoding="utf-8")
+        stdout, stderr = process.communicate(timeout=10)
+        assert "RETURN=0" in stdout, stderr
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+    data = json.loads(state.read_text(encoding="utf-8"))
+    assert data["status"] == "drift" and data["rounds"][0]["surgical"]["state"] == "admitted"
+    assert all(op["id"] != "concurrent-start" for op in data["operations"])
+
+
+@pytest.mark.parametrize("mode", ("keyboard-interrupt", "different-valid-state", "after-replace-error"))
+def test_unstarted_close_uses_existing_atomic_recovery(tmp_path: Path, mode: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    args = _unstarted_close_arguments(state, receipt)
+    before = state.read_bytes()
+    process = _barrier_process(repo, repo / ".scratch" / "stop-fault", *args, mode=mode)
+    try:
+        stdout, stderr = process.communicate(timeout=10)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+    if mode == "keyboard-interrupt":
+        assert "RETURN=130" in stdout and "RLSTATE_CANCELLED" in stderr
+        assert state.read_bytes() == before
+    else:
+        assert "RETURN=1" in stdout and "RLSTATE_COMMIT_UNCERTAIN" in stderr
+        assert '"event"' not in stdout
+    replay = _run(repo, *args)
+    assert replay.returncode == 0, replay.stderr
+    data = json.loads(state.read_text(encoding="utf-8"))
+    assert sum(op["id"] == "stop-unstarted" for op in data["operations"]) == 1
+    assert data["rounds"] == json.loads(before)["rounds"]
+    assert not list(state.parent.glob(".*.tmp"))
 
 
 def test_runtime_engine_is_projected_and_observability_record_is_current() -> None:
