@@ -73,3 +73,33 @@ The push hook does not acquire transcript data or read/write old consent sidecar
 ### Terminal line breaks in literal push commands
 
 A parser-proven terminal CR/LF suffix on one otherwise canonical absolute-root push command is formatting, not another command. Literal-token serialization must still match the command without that suffix. Additional commands, redirections, lexical transformations, executable and repository qualification, native callback scanning, and human publication authorization retain their existing checks.
+
+### Scan resource budgets
+
+The canonical scanner admits at most **2 GiB of unique selected blob content**.
+This is a bounded work-volume policy, not a reservation or guarantee of process
+memory. The former 512 MiB value originated with complete-history scanning in
+commit `8f92dc73`; that change did not record a measurement justifying the number.
+The 2 GiB capacity was explicitly selected after an existing baseline exceeded the former 512 MiB cap:
+commit `d288cf7845cf0dabd2ebf80d1605e2793bbe629c` has 9,511 unique blobs totaling
+604,769,249 bytes in its reachable history. These figures come from Git object
+inventory (`rev-list --objects --no-object-names`, then `cat-file --batch-check`),
+not compressed repository size. The new capacity provides roughly 3.55 times that
+reference volume; it is not a claim of a universally optimal setting.
+
+The scanner retains blob sizes and content digests, then reacquires one body at a
+time through its existing bounded reader. Reacquired object identity, type, size
+and digest must agree before scanning. Every selected commit/path/blob subject
+remains covered. The 64 MiB individual-blob limit, 64 MiB raw-tree-cache limit,
+object/subject bounds, 240-second scan deadline and 300-second captured invocation
+bound remain separate limits. Metadata, decoded text and process overhead still
+consume RAM. Deadline checks also surround each blob's detector pass; a refusal
+or unfinished scan never becomes publication credit.
+
+ASCII-only keyword prefiltering skips a value regex only when its mandatory
+keyword is absent. Non-ASCII text takes the original regex path, preserving
+Unicode case-insensitive matches, overlapping observations and review coordinates.
+The differential and budget-boundary checks live in
+`tests/test_publication_safety_scanner.py`. Resource tuning does not exempt tags,
+existing history, binary content or any finding, and does not weaken the native
+Version 3/Version 4 publication contract.

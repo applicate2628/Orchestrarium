@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-30
 
+- Publication scanning now admits up to 2 GiB of unique selected blob content while retaining only blob identities between acquisition and scanning. Each body is reacquired and verified before inspection, so memory no longer scales with the entire raw history. Per-file and time bounds remain; detector passes check deadlines and preserve full coverage. An ASCII-only mandatory-keyword prefilter avoids unnecessary value-regex work without changing Unicode matching or review coordinates. The publication reference records the measured baseline and budget rationale.
+
 - The common installer now distinguishes completed previews from completed operations and names clients not attempted after a stop. It preserves partial-uninstall exit status and its detailed report, recognizes the legacy dry-run spelling without asking to apply, and shows scope/help guidance. Shared-layout refusals and receipt validation use the existing typed diagnostic owner so their safe error identifiers are not lost.
 
 - Legacy per-skill conversion now carries authenticated old installation receipts without interpreting whole-tree hashes as file manifests. The published design-panel factory identity from the 815e9df baseline is admitted only through its exact strong tree witness; modified installations still refuse automatic replacement.
